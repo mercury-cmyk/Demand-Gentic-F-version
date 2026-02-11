@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -107,6 +108,13 @@ export default function AdminProjectRequests() {
     requestedLeadCount: '',
     landingPageUrl: '',
     status: '' as string,
+    enabledFeatures: {
+      emailCampaignTest: false,
+      campaignQueueView: false,
+      previewStudio: false,
+      campaignCallTest: false,
+      voiceSelection: false,
+    },
   });
 
   // Fetch project requests
@@ -236,6 +244,7 @@ export default function AdminProjectRequests() {
     if (editForm.requestedLeadCount.trim()) updates.requestedLeadCount = parseInt(editForm.requestedLeadCount);
     if (editForm.landingPageUrl !== undefined) updates.landingPageUrl = editForm.landingPageUrl;
     if (editForm.status) updates.status = editForm.status;
+    updates.enabledFeatures = editForm.enabledFeatures;
 
     editMutation.mutate({
       projectId: selectedProject.id,
@@ -244,6 +253,7 @@ export default function AdminProjectRequests() {
   };
 
   const openEditDialog = (project: ProjectRequest) => {
+    const features = (project as any).enabledFeatures || {};
     setEditForm({
       name: project.name,
       description: project.description || '',
@@ -251,6 +261,13 @@ export default function AdminProjectRequests() {
       requestedLeadCount: project.requestedLeadCount?.toString() || '',
       landingPageUrl: project.landingPageUrl || '',
       status: project.status,
+      enabledFeatures: {
+        emailCampaignTest: features.emailCampaignTest ?? false,
+        campaignQueueView: features.campaignQueueView ?? false,
+        previewStudio: features.previewStudio ?? false,
+        campaignCallTest: features.campaignCallTest ?? false,
+        voiceSelection: features.voiceSelection ?? false,
+      },
     });
     setShowEditDialog(true);
   };
@@ -599,14 +616,23 @@ export default function AdminProjectRequests() {
                 )}
 
                 {selectedProject.status === 'active' && (
-                  <Button
-                    className="w-full"
-                    variant="outline"
-                    onClick={() => setLocation(`/campaigns?projectId=${selectedProject.id}`)}
-                  >
-                    <Eye className="h-4 w-4 mr-2" />
-                    View Campaigns
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      className="w-full"
+                      variant="outline"
+                      onClick={() => setLocation(`/campaigns?projectId=${selectedProject.id}`)}
+                    >
+                      <Eye className="h-4 w-4 mr-2" />
+                      View Campaigns
+                    </Button>
+                    <Button
+                      className="w-full"
+                      onClick={() => setLocation(`/campaigns/create?clientId=${selectedProject.clientAccountId}&projectId=${selectedProject.id}`)}
+                    >
+                      <Rocket className="h-4 w-4 mr-2" />
+                      Create Campaign
+                    </Button>
+                  </div>
                 )}
 
                 {/* Edit and Delete buttons - always visible */}
@@ -934,6 +960,33 @@ export default function AdminProjectRequests() {
                   <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Client-Facing Features</Label>
+              <p className="text-xs text-muted-foreground">Toggle which features are available to the client for this project's campaigns.</p>
+              {[
+                { key: 'emailCampaignTest' as const, label: 'Email Campaign Test' },
+                { key: 'campaignQueueView' as const, label: 'Campaign Queue View' },
+                { key: 'previewStudio' as const, label: 'Preview Studio' },
+                { key: 'campaignCallTest' as const, label: 'Campaign Call Test' },
+                { key: 'voiceSelection' as const, label: 'Voice Selection' },
+              ].map(({ key, label }) => (
+                <div key={key} className="flex items-center justify-between">
+                  <Label className="text-sm">{label}</Label>
+                  <Switch
+                    checked={editForm.enabledFeatures[key]}
+                    onCheckedChange={(checked) =>
+                      setEditForm({
+                        ...editForm,
+                        enabledFeatures: { ...editForm.enabledFeatures, [key]: checked },
+                      })
+                    }
+                  />
+                </div>
+              ))}
             </div>
           </div>
 

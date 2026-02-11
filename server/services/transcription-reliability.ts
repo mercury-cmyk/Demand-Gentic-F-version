@@ -178,7 +178,9 @@ export async function attemptFallbackTranscription(
     const isPermanentError = errorMessage.includes('422') || 
                              errorMessage.includes('not found') || 
                              errorMessage.includes('expired') ||
-                             errorMessage.includes('Invalid');
+                             errorMessage.includes('Invalid') ||
+                             errorMessage.includes('403') ||
+                             errorMessage.includes('Forbidden');
 
     if (isPermanentError) {
       await db.update(dialerCallAttempts)

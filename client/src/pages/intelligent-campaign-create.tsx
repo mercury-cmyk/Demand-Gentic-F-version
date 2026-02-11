@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { useLocation, Link } from 'wouter';
+import { useLocation, useSearch, Link } from 'wouter';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
@@ -67,11 +67,17 @@ interface ClientProject {
 export default function IntelligentCampaignCreatePage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  
+
+  // Read client/project from URL query params (e.g. from project approval flow)
+  const search = useSearch();
+  const searchParams = new URLSearchParams(search);
+  const urlClientId = searchParams.get('clientId') || '';
+  const urlProjectId = searchParams.get('projectId') || '';
+
   // State
   const [campaignType, setCampaignType] = useState<'telemarketing' | 'email'>('telemarketing');
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [selectedClientId, setSelectedClientId] = useState<string>(urlClientId);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(urlProjectId);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [showWizard, setShowWizard] = useState(false);
   const [preloadedContext, setPreloadedContext] = useState<Partial<StructuredCampaignContext> | null>(null);
@@ -150,22 +156,37 @@ export default function IntelligentCampaignCreatePage() {
     }
   }, [fetchOrgContextMutation]);
 
+
+  // Effect to manage selectedClientId based on loaded clientAccounts and URL params
   useEffect(() => {
+    if (clientsLoading) return; // Wait for clients to load
+
+    if (urlClientId && clientAccounts.some(client => client.id === urlClientId)) {
+      setSelectedClientId(urlClientId);
+    } else if (clientAccounts.length > 0) {
+      setSelectedClientId(clientAccounts[0].id);
+    } else {
+      setSelectedClientId('');
+    }
+  }, [clientAccounts, urlClientId, clientsLoading]);
+
+  // Effect to manage selectedProjectId based on selectedClientId, loaded clientProjects, and URL params
+  useEffect(() => {
+    if (projectsLoading) return; // Wait for projects to load
+
     if (!selectedClientId) {
       setSelectedProjectId('');
       return;
     }
 
-    if (selectedProjectId && clientProjects.some((project) => project.id === selectedProjectId)) {
-      return;
-    }
-
-    if (clientProjects.length > 0) {
+    if (urlProjectId && clientProjects.some(project => project.id === urlProjectId)) {
+      setSelectedProjectId(urlProjectId);
+    } else if (clientProjects.length > 0) {
       setSelectedProjectId(clientProjects[0].id);
     } else {
       setSelectedProjectId('');
     }
-  }, [selectedClientId, selectedProjectId, clientProjects]);
+  }, [selectedClientId, clientProjects, urlProjectId, projectsLoading]);
 
   // Create campaign mutation
   const createCampaignMutation = useMutation({

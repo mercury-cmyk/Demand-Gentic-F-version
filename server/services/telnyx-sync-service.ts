@@ -8,8 +8,8 @@
  */
 
 import { db } from '../db';
-import { callSessions, campaigns } from '@shared/schema';
-import { eq, sql, and, isNull, desc, gte, lte } from 'drizzle-orm';
+import { callSessions, campaigns, contacts, dialerCallAttempts } from '@shared/schema';
+import { eq, sql, and, or, isNull, desc, gte, lte } from 'drizzle-orm';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
@@ -74,6 +74,93 @@ export interface ListRecordingsOptions {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Resolve contactId and campaignId from a phone number.
+ * Strategy:
+ * 1. Try matching against dialerCallAttempts.phoneDialed (most reliable — has both contactId and campaignId)
+ * 2. Fallback: match against contacts.directPhoneE164 or contacts.mobilePhoneE164
+ */
+async function resolveContactAndCampaignByPhone(
+  phoneNumber: string,
+  callTime?: Date
+): Promise<{ contactId: string | null; campaignId: string | null; accountId: string | null }> {
+  if (!phoneNumber || phoneNumber === 'unknown') {
+    return { contactId: null, campaignId: null, accountId: null };
+  }
+
+  try {
+    // Strategy 1: Match against dialerCallAttempts (has both contactId and campaignId)
+    // Look for the most recent attempt to this phone number
+    const conditions: any[] = [eq(dialerCallAttempts.phoneDialed, phoneNumber)];
+    if (callTime) {
+      // Look within a reasonable window (24 hours before the recording)
+      const windowStart = new Date(callTime.getTime() - 24 * 60 * 60 * 1000);
+      conditions.push(gte(dialerCallAttempts.createdAt, windowStart));
+    }
+
+    const [attempt] = await db
+      .select({
+        contactId: dialerCallAttempts.contactId,
+        campaignId: dialerCallAttempts.campaignId,
+      })
+      .from(dialerCallAttempts)
+      .where(and(...conditions))
+      .orderBy(desc(dialerCallAttempts.createdAt))
+      .limit(1);
+
+    if (attempt) {
+      // Get accountId from contact
+      const [contact] = await db
+        .select({ accountId: contacts.accountId })
+        .from(contacts)
+        .where(eq(contacts.id, attempt.contactId))
+        .limit(1);
+
+      return {
+        contactId: attempt.contactId,
+        campaignId: attempt.campaignId,
+        accountId: contact?.accountId || null,
+      };
+    }
+
+    // Strategy 2: Match against contacts phone fields
+    const [contact] = await db
+      .select({
+        id: contacts.id,
+        accountId: contacts.accountId,
+      })
+      .from(contacts)
+      .where(
+        or(
+          eq(contacts.directPhoneE164, phoneNumber),
+          eq(contacts.mobilePhoneE164, phoneNumber)
+        )
+      )
+      .limit(1);
+
+    if (contact) {
+      // Try to find a campaign this contact was in
+      const [recentAttempt] = await db
+        .select({ campaignId: dialerCallAttempts.campaignId })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.contactId, contact.id))
+        .orderBy(desc(dialerCallAttempts.createdAt))
+        .limit(1);
+
+      return {
+        contactId: contact.id,
+        campaignId: recentAttempt?.campaignId || null,
+        accountId: contact.accountId || null,
+      };
+    }
+
+    return { contactId: null, campaignId: null, accountId: null };
+  } catch (error) {
+    console.error('[TelnyxSync] Error resolving contact/campaign by phone:', error);
+    return { contactId: null, campaignId: null, accountId: null };
+  }
 }
 
 async function fetchWithRetry(
@@ -345,6 +432,12 @@ export async function syncTelnyxRecordingsToDatabase(options: ListRecordingsOpti
             }
           }
 
+          // Resolve contact and campaign from phone number
+          const resolved = await resolveContactAndCampaignByPhone(toNumber, recordingStartedAt);
+          if (resolved.contactId) {
+            console.log(`[TelnyxSync] Resolved contact ${resolved.contactId} and campaign ${resolved.campaignId || 'none'} for phone ${toNumber}`);
+          }
+
           await db.insert(callSessions).values({
             telnyxCallId: recording.call_control_id || null,
             fromNumber: fromNumber,
@@ -357,7 +450,9 @@ export async function syncTelnyxRecordingsToDatabase(options: ListRecordingsOpti
             recordingStatus: recording.status === 'completed' ? 'stored' : 'pending',
             recordingFormat: downloadUrl?.includes('.wav') ? 'wav' : 'mp3',
             status: 'completed',
-            agentType: 'ai', // Default to AI agent
+            agentType: 'ai',
+            contactId: resolved.contactId,
+            campaignId: resolved.campaignId,
           });
 
           result.newRecordings++;

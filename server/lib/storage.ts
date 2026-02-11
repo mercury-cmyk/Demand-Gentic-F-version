@@ -52,11 +52,10 @@ export async function getPresignedUploadUrl(
 
     return url;
   } catch (error: any) {
-    // In local development without service account, fallback to public URL
-    if (error?.name === 'SigningError' || error?.message?.includes('client_email')) {
-      console.warn(`[GCS] Cannot generate signed URL (no service account): ${error.message}`);
+    // Cloud Run default service account or local dev without signing capability
+    if (error?.name === 'SigningError' || error?.message?.includes('client_email') || error?.message?.includes('signBlob')) {
+      console.warn(`[GCS] Cannot generate signed upload URL: ${error.message?.substring(0, 100)}`);
       console.warn('[GCS] Falling back to public URL (not recommended for production)');
-      // Return direct GCS URL (works if bucket is public or if using ADC with proper permissions)
       return `https://storage.googleapis.com/${GCS_BUCKET}/${key}`;
     }
     throw error;
@@ -86,11 +85,20 @@ export async function getPresignedDownloadUrl(
 
     return url;
   } catch (error: any) {
-    // In local development without service account, fallback to public URL
-    if (error?.name === 'SigningError' || error?.message?.includes('client_email')) {
-      console.warn(`[GCS] Cannot generate signed URL (no service account): ${error.message}`);
-      console.warn('[GCS] Falling back to public URL (not recommended for production)');
-      // Return direct GCS URL (works if bucket is public or if using ADC with proper permissions)
+    // Cloud Run default service account or local dev without signing capability
+    if (error?.name === 'SigningError' || error?.message?.includes('client_email') || error?.message?.includes('signBlob')) {
+      // Use self-signed URL approach via the storage client's makeAuthenticatedRequest
+      // Since we can't sign, generate a URL that uses the Cloud Run identity token instead
+      console.warn(`[GCS] Cannot generate signed URL: ${error.message?.substring(0, 100)}`);
+
+      // Try using the bucket's public URL if CDN is configured
+      const publicBase = process.env.GCS_PUBLIC_BASE || process.env.S3_PUBLIC_BASE;
+      if (publicBase) {
+        return `${publicBase}/${key}`;
+      }
+
+      // Fallback: direct GCS URL (only works if bucket allows public access or allUsers read)
+      console.warn('[GCS] No CDN configured, using direct GCS URL (requires bucket public access)');
       return `https://storage.googleapis.com/${GCS_BUCKET}/${key}`;
     }
     throw error;

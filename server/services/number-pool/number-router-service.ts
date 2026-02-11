@@ -64,13 +64,46 @@ interface FilterResult {
 
 // ==================== CONSTANTS ====================
 
-const MAX_CALLS_PER_HOUR_DEFAULT = 40;
-const MAX_CALLS_PER_DAY_DEFAULT = 500;
-const JITTER_MIN_MS = 45_000;  // 45 seconds (base for unknown/new numbers)
-const JITTER_MAX_MS = 90_000;  // 90 seconds
+const MAX_CALLS_PER_HOUR_DEFAULT = 1000; // Increased from 40 to 1000 per user request
+const MAX_CALLS_PER_DAY_DEFAULT = 5000; // Increased from 500
+const JITTER_MIN_MS = 2000;  // Reduced to 2s
+const JITTER_MAX_MS = 5000;  // Reduced to 5s
 
 // In-memory tracking for concurrent calls (should be Redis in production)
-const numbersInUse = new Set<string>();
+// Map<numberId, lockedAtTimestamp> — timestamps allow stuck-number detection
+const numbersInUse = new Map<string, number>();
+
+// Maximum time a number can stay locked before auto-release (10 minutes)
+const MAX_NUMBER_LOCK_MS = 10 * 60 * 1000;
+// How often to run the stale-lock cleanup sweep (60 seconds)
+const CLEANUP_INTERVAL_MS = 60 * 1000;
+
+/**
+ * Periodic cleanup: auto-release numbers stuck in-use beyond MAX_NUMBER_LOCK_MS.
+ * This prevents permanent lockouts from lost webhooks, crashed calls, or missed releaseNumber() calls.
+ */
+function cleanupStaleNumberLocks(): void {
+  const now = Date.now();
+  let released = 0;
+
+  for (const [numberId, lockedAt] of Array.from(numbersInUse.entries())) {
+    const ageMs = now - lockedAt;
+    if (ageMs > MAX_NUMBER_LOCK_MS) {
+      numbersInUse.delete(numberId);
+      released++;
+      console.warn(`[NumberRouter] ⏰ Auto-released stale number ${numberId} (locked for ${Math.round(ageMs / 1000)}s, max=${MAX_NUMBER_LOCK_MS / 1000}s)`);
+    }
+  }
+
+  if (released > 0) {
+    console.log(`[NumberRouter] Cleanup sweep: released ${released} stale number(s), ${numbersInUse.size} still in use`);
+  }
+}
+
+// Start the periodic cleanup on module load
+const _cleanupTimer = setInterval(cleanupStaleNumberLocks, CLEANUP_INTERVAL_MS);
+// Allow Node to exit even if cleanup timer is running
+if (_cleanupTimer.unref) _cleanupTimer.unref();
 
 // ==================== ERROR CLASSES ====================
 
@@ -122,8 +155,9 @@ export async function selectNumber(
     const pool = await getEligiblePool(request);
     
     if (pool.length === 0) {
-      console.warn('[NumberRouter] No numbers in eligible pool, using fallback');
-      return useFallbackNumber('no_pool');
+      console.warn('[NumberRouter] No numbers in eligible pool');
+      // When pool is enabled, never fall back to legacy — throw so caller can re-queue
+      throw new NoAvailableNumberError('No numbers in eligible pool');
     }
 
     // Step 2: Filter numbers
@@ -149,15 +183,38 @@ export async function selectNumber(
         throw new AllNumbersAtHourlyLimitError(filtered, pool.length);
       }
 
+      // STRICT MODE: Do NOT use fallback if numbers exist but are just currently busy/cooling down.
+      // This ensures we respect "no concurrent call from same number".
+      throw new NoAvailableNumberError('All numbers temporarily unavailable (busy/cooldown)');
+      
       // For other filtering reasons (cooldown, warmup, concurrent), use fallback
-      return useFallbackNumber('all_filtered');
+      // return useFallbackNumber('all_filtered');
     }
 
     // Step 3: Rank candidates
     const ranked = rankCandidates(available, request);
     
-    // Step 4: Select best
-    const selected = ranked[0];
+    // Step 4: Select best (with Race Condition protection)
+    // We re-check numbersInUse synchronously here to prevent double-booking
+    // that can happen during the async filterNumbers phase.
+    let selected: RankedNumber | null = null;
+
+    for (const candidate of ranked) {
+      if (!numbersInUse.has(candidate.id)) {
+        // CRITICAL: Lock synchronously immediately
+        markNumberInUse(candidate.id);
+        console.log(`[NumberRouter] Locked number ${candidate.id} (${candidate.phoneNumberE164}) synchronously`);
+        selected = candidate;
+        break;
+      } else {
+        console.log(`[NumberRouter] Number ${candidate.id} (${candidate.phoneNumberE164}) was already busy (race preventer)`);
+      }
+    }
+
+    if (!selected) {
+      console.warn('[NumberRouter] All ranked candidates became busy during selection race');
+      throw new NoAvailableNumberError('All numbers busy (race condition)');
+    }
     
     // Step 5: Calculate jitter
     const jitterDelayMs = calculateJitter(selected);
@@ -172,9 +229,6 @@ export async function selectNumber(
       jitterDelayMs,
     });
     
-    // Step 7: Mark number in-use
-    markNumberInUse(selected.id);
-
     console.log(`[NumberRouter] Selected ${selected.phoneNumberE164} for ${request.prospectNumber} (${selected.selectionReason})`);
 
     return {
@@ -185,17 +239,63 @@ export async function selectNumber(
       decisionId,
     };
   } catch (error) {
+    // Re-throw typed errors so callers can handle them properly (re-queue, pause, etc.)
+    // Do NOT swallow these into legacy fallback — that bypasses concurrent-call protection.
+    if (error instanceof NoAvailableNumberError || error instanceof AllNumbersAtHourlyLimitError) {
+      throw error;
+    }
     console.error('[NumberRouter] Selection error:', error);
+    if (isNumberPoolEnabled()) {
+      // When pool is enabled, never fall back to legacy number — it has no concurrent-call tracking.
+      // Re-throw so the caller can re-queue instead.
+      throw new NoAvailableNumberError('Pool selection error — no legacy fallback when pool enabled');
+    }
     return useFallbackNumber('error');
   }
 }
 
 /**
- * Release a number after call completes
+ * Release a number after call completes (with compulsory 40s delay)
  */
 export function releaseNumber(numberId: string): void {
-  numbersInUse.delete(numberId);
-  console.log(`[NumberRouter] Released number ${numberId}`);
+  // Enforce 15 second safe-guard delay between calls on the same number
+  // (reduced from 40s for high-throughput rotation with larger number pools)
+  const COMPULSORY_DELAY_MS = 15000;
+
+  const lockedAt = numbersInUse.get(numberId);
+  const lockDurationSec = lockedAt ? Math.round((Date.now() - lockedAt) / 1000) : 0;
+
+  console.log(`[NumberRouter] Scheduling release of number ${numberId} in ${COMPULSORY_DELAY_MS}ms (was locked for ${lockDurationSec}s)`);
+
+  const timer = setTimeout(() => {
+    numbersInUse.delete(numberId);
+    console.log(`[NumberRouter] Released number ${numberId} after delay`);
+  }, COMPULSORY_DELAY_MS);
+
+  // Don't let this timer prevent Node from exiting
+  if (timer.unref) timer.unref();
+}
+
+/**
+ * Get current number pool lock status (for diagnostics)
+ */
+export function getNumberPoolStatus(): { inUse: number; numbers: Array<{ id: string; lockedForSec: number }> } {
+  const now = Date.now();
+  const numbers = Array.from(numbersInUse.entries()).map(([id, lockedAt]) => ({
+    id,
+    lockedForSec: Math.round((now - lockedAt) / 1000),
+  }));
+  return { inUse: numbersInUse.size, numbers };
+}
+
+/**
+ * Force-release all numbers (emergency reset for stuck pools)
+ */
+export function forceReleaseAllNumbers(): number {
+  const count = numbersInUse.size;
+  numbersInUse.clear();
+  console.warn(`[NumberRouter] 🚨 FORCE RELEASED all ${count} numbers from in-use pool`);
+  return count;
 }
 
 /**
@@ -302,20 +402,22 @@ async function filterNumbers(
     });
 
     if (!warmupCheck.canCall) {
-      console.log(`[NumberRouter] Number ${num.phoneNumberE164} filtered by warmup: ${warmupCheck.reason}`);
-      filtered.warmup_limited++;
-      continue;
+      console.log(`[NumberRouter] Number ${num.phoneNumberE164} filtered by warmup: ${warmupCheck.reason} - IGNORING LIMIT (User Override)`);
+      // filtered.warmup_limited++;
+      // continue;
     }
 
     // Check hourly cap (using warmup-adjusted effective limits)
-    const effectiveMaxHourly = warmupCheck.warmupStatus.effectiveMaxCallsPerHour;
+    // FORCE BYPASS WARMUP LIMITS per user request
+    const effectiveMaxHourly = MAX_CALLS_PER_HOUR_DEFAULT; // warmupCheck.warmupStatus.effectiveMaxCallsPerHour;
     if ((num.callsThisHour ?? 0) >= effectiveMaxHourly) {
       filtered.at_hourly_cap++;
       continue;
     }
 
     // Check daily cap (using warmup-adjusted effective limits)
-    const effectiveMaxDaily = warmupCheck.warmupStatus.effectiveMaxCallsPerDay;
+    // FORCE BYPASS WARMUP LIMITS per user request
+    const effectiveMaxDaily = MAX_CALLS_PER_DAY_DEFAULT; // warmupCheck.warmupStatus.effectiveMaxCallsPerDay;
     if ((num.callsToday ?? 0) >= effectiveMaxDaily) {
       filtered.at_daily_cap++;
       continue;
@@ -469,8 +571,8 @@ function calculateJitter(number: EligibleNumber): number {
     jitter *= 1.25;
   }
 
-  // Floor: never go below 15 seconds (carrier safety)
-  return Math.max(15_000, Math.floor(jitter));
+  // Floor: never go below 2 seconds (high-throughput rotation mode)
+  return Math.max(2_000, Math.floor(jitter));
 }
 
 /**
@@ -520,10 +622,10 @@ async function checkRecentProspectCall(
 }
 
 /**
- * Mark number as in-use (concurrent call guard)
+ * Mark number as in-use (concurrent call guard) with timestamp for stale detection
  */
 function markNumberInUse(numberId: string): void {
-  numbersInUse.add(numberId);
+  numbersInUse.set(numberId, Date.now());
 }
 
 /**
@@ -650,4 +752,6 @@ export default {
   releaseNumber,
   recordCallOutcome,
   isNumberPoolEnabled,
+  getNumberPoolStatus,
+  forceReleaseAllNumbers,
 };

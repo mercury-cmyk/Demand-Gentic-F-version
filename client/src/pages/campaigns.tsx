@@ -72,7 +72,7 @@ export default function CampaignsPage() {
 
   const [activeTab, setActiveTab] = useState(typeFromUrl === 'phone' ? 'call' : typeFromUrl === 'email' ? 'email' : 'all');
   const [, setLocation] = useLocation();
-  const { getToken, token } = useAuth();
+  const { getToken, token, user } = useAuth();
   const { toast } = useToast();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [campaignToDelete, setCampaignToDelete] = useState<any>(null);
@@ -83,6 +83,15 @@ export default function CampaignsPage() {
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
   const [selectedCampaignForVoice, setSelectedCampaignForVoice] = useState<any>(null);
   const [editCampaignId, setEditCampaignId] = useState<string | null>(null);
+  const rawRoles = (user as any)?.roles ?? user?.role;
+  const roleList = Array.isArray(rawRoles) ? rawRoles : rawRoles ? [rawRoles] : [];
+  const normalizedRoles = roleList
+    .flatMap((role) => (typeof role === 'string' ? role.split(/[,\s]+/) : []))
+    .map((role) => role.trim().toLowerCase())
+    .filter(Boolean);
+  const isClientUser = normalizedRoles.includes('client_user');
+  const canManageCampaigns = normalizedRoles.some((role) => role === 'admin' || role === 'campaign_manager');
+  const canSelectVoice = canManageCampaigns || isClientUser;
 
   // Sync tab with URL parameter
   useEffect(() => {
@@ -414,10 +423,12 @@ export default function CampaignsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button className="gap-2 shadow-sm" onClick={() => setLocation("/campaigns/create")}>
-            <Plus className="w-4 h-4" />
-            New Campaign
-          </Button>
+          {canManageCampaigns && (
+            <Button className="gap-2 shadow-sm" onClick={() => setLocation("/campaigns/create")}>
+              <Plus className="w-4 h-4" />
+              New Campaign
+            </Button>
+          )}
         </div>
       </div>
 
@@ -627,7 +638,7 @@ export default function CampaignsPage() {
                             )}
 
                             {/* Quick Status Toggle */}
-                            {(campaign.status === 'active' || campaign.status === 'paused') && (
+                            {canManageCampaigns && (campaign.status === 'active' || campaign.status === 'paused') && (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -668,14 +679,16 @@ export default function CampaignsPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
-                                  <Edit className="mr-2 h-4 w-4" />
-                                  Edit
-                                </DropdownMenuItem>
+                                {canManageCampaigns && (
+                                  <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
+                                    <Edit className="mr-2 h-4 w-4" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                )}
                                 {isPhone && (
                                   <>
                                     {/* Start AI Calls - only for active AI agent campaigns */}
-                                    {(campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql') && campaign.status === 'active' && (
+                                    {canManageCampaigns && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql') && campaign.status === 'active' && (
                                       <DropdownMenuItem
                                         onClick={() => handleStartAiCallsClick(campaign)}
                                         disabled={startAiCallsMutation.isPending}
@@ -685,21 +698,29 @@ export default function CampaignsPage() {
                                         {startAiCallsMutation.isPending ? 'Starting...' : 'Start AI Calls'}
                                       </DropdownMenuItem>
                                     )}
-                                    <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
-                                      <Mic className="mr-2 h-4 w-4" />
-                                      Select AI Voice
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
-                                      <Users className="mr-2 h-4 w-4" />
-                                      Assign Agents
+                                    {canSelectVoice && (
+                                      <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
+                                        <Mic className="mr-2 h-4 w-4" />
+                                        Select AI Voice
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canManageCampaigns && (
+                                      <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
+                                        <Users className="mr-2 h-4 w-4" />
+                                        Assign Agents
+                                      </DropdownMenuItem>
+                                    )}
+                                  </>
+                                )}
+                                {canManageCampaigns && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(campaign)}>
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Delete
                                     </DropdownMenuItem>
                                   </>
                                 )}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(campaign)}>
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Delete
-                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
@@ -732,12 +753,12 @@ export default function CampaignsPage() {
                                 dialMode: campaign.dialMode,
                               }}
                               queueStats={campaignQueueStats}
-                              onAssignAgents={() => handleAssignAgentsClick(campaign)}
-                              onToggleStatus={() => toggleStatusMutation.mutate({
+                              onAssignAgents={canManageCampaigns ? () => handleAssignAgentsClick(campaign) : undefined}
+                              onToggleStatus={canManageCampaigns ? () => toggleStatusMutation.mutate({
                                 id: campaign.id.toString(),
                                 status: campaign.status
-                              })}
-                              isToggling={toggleStatusMutation.isPending}
+                              }) : undefined}
+                              isToggling={canManageCampaigns ? toggleStatusMutation.isPending : false}
                             />
                           )}
                           {isEmail && (

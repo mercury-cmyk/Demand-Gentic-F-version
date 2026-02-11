@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { db } from "../db";
 import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking, campaignOrganizations, agentDefaults } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { processDisposition, updateContactSuppression } from "./disposition-engine";
+import { processDisposition, updateContactSuppression, createFallbackLead } from "./disposition-engine";
 import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
 import { handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome } from "./number-pool-integration";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -130,7 +130,7 @@ const LOG_PREFIX = "[Voice-Dialer]";
 // For 8kHz μ-law: 20ms == 160 bytes.
 const TELNYX_G711_FRAME_BYTES = 160;
 const TELNYX_G711_FRAME_MS = 20;
-const TELNYX_MAX_FRAMES_PER_TICK = 10;
+const TELNYX_MAX_FRAMES_PER_TICK = 5; // Reduced from 10 to prevent "catch-up" bursts causing chipmunk effect
 // Cap buffer to avoid runaway memory if Telnyx isn't ready.
 const TELNYX_MAX_BUFFER_BYTES = TELNYX_G711_FRAME_BYTES * 2000; // ~40s of audio
 const REALTIME_QUALITY_DEBOUNCE_MS = 15000;
@@ -388,7 +388,7 @@ const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
   "needs_review",
 ]);
 
-export type RealtimeSession = (OpenAIRealtimeSession | ElevenLabsRealtimeSession | GeminiRealtimeSession) & { bookingTypeId?: number };
+export type RealtimeSession = OpenAIRealtimeSession & { bookingTypeId?: number };
 
 const activeSessions = new Map<string, RealtimeSession>();
 const streamIdToCallId = new Map<string, string>();
@@ -1688,7 +1688,33 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
       }
 
       if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) return;
-      if (!session.telnyxOutboundBuffer || session.telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) return;
+
+      // JITTER BUFFER LOGIC (Feb 2026)
+      // We need a small pre-roll buffer (Detect-Start-Of-Talk) to prevent "chipmunk" starts
+      // and ensure we have enough data to play smoothly through network jitter.
+      const MIN_START_FRAMES = 5; // 100ms pre-buffer
+      const MIN_START_BYTES = TELNYX_G711_FRAME_BYTES * MIN_START_FRAMES;
+
+      if (!session.telnyxOutboundBuffer || session.telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) {
+        // Buffer is empty. We are not streaming.
+        (session as any).isStreaming = false;
+        
+        // Prevent debt accumulation during silence
+        session.telnyxOutboundLastSendAt = Date.now() - TELNYX_G711_FRAME_MS;
+        return;
+      }
+
+      // If we are starting a new talk spurt, ensure we have enough pre-buffered data
+      if (!(session as any).isStreaming) {
+         if (session.telnyxOutboundBuffer.length < MIN_START_BYTES) {
+            // Collecting buffer...
+            return;
+         }
+         // Buffer full enough to start
+         (session as any).isStreaming = true;
+         // Reset pacing timer to start playback NOW
+         session.telnyxOutboundLastSendAt = Date.now() - TELNYX_G711_FRAME_MS;
+      }
 
       // Backpressure: skip sending if Telnyx WS write buffer is congested
       const bufferedAmount = (session.telnyxWs as any).bufferedAmount || 0;
@@ -2546,6 +2572,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       turnDetection: { type: 'server_vad', threshold: 0.4, silenceDurationMs: geminiSilenceMs }, // Faster end-of-turn detection for responsive replies
       temperature: 0.7,
       maxResponseTokens: costSettings.maxResponseTokens || 512,
+      // Use slightly slower speaking rate (0.95) if not configured to sound more natural/thoughtful
+      speakingRate: (agentSettings.advanced as any)?.voice?.speakingRate ?? 0.95,
       transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,
     });
     console.log(`${LOG_PREFIX} ✅ Gemini configured (+${Date.now() - initStartTime}ms)`);
@@ -2763,7 +2791,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     let openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
     if (!openingScript || !openingScript.trim()) {
       const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
-      openingScript = `Hello, this is ${resolvedAgentNameForTemplate || "your representative"} from Harver. May I speak with ${fallbackName}, please?`;
+      openingScript = `Hello, this is ${resolvedAgentNameGemini || "your representative"} from Harver. May I speak with ${fallbackName}, please?`;
       console.warn(`${LOG_PREFIX} Gemini opening empty after interpolation; using fallback greeting`);
     }
 
@@ -2797,6 +2825,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // aggressive, causing the agent to interrupt the prospect's initial "Hello?".
     // This interruption broke the identity confirmation flow. 4.5s provides a
     // safe buffer for the prospect to finish their initial greeting.
+    // UPDATE: Now we rely on Gemini to auto-respond to speech. This is strictly for SILENCE.
     const fallbackGreetingTimer = setTimeout(() => {
       if (session.isActive && !session.audioDetection.hasGreetingSent) {
         console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4.5s - sending greeting (fallback)`);
@@ -3261,7 +3290,7 @@ Only AFTER completing these steps can you submit the disposition.`
         // Check if the very last transcript entry is the agent's farewell (prospect hasn't spoken since)
         const allTranscripts = session.transcripts;
         const lastTranscript = allTranscripts.length > 0 ? allTranscripts[allTranscripts.length - 1] : null;
-        const lastTurnIsAgent = lastTranscript && (lastTranscript.role === 'agent' || lastTranscript.role === 'assistant');
+        const lastTurnIsAgent = lastTranscript && lastTranscript.role === 'assistant';
         if (lastTurnIsAgent) {
           console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Agent said farewell but prospect hasn't responded yet. Waiting for prospect-led disconnect.`);
           console.warn(`${LOG_PREFIX} [Gemini] Last agent: "${lastAgentText.substring(0, 80)}" | Last user: "${lastUserText.substring(0, 80)}"`);
@@ -5476,6 +5505,9 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
       }
 
       // Send audio to Gemini provider (transcoding handled internally)
+      // FIX (Feb 2026): Audio is sent immediately to allow the LLM to hear initial greetings ("Hello?")
+      // The previous protection window of 2.5s was causing the agent to be "deaf" to early greetings,
+      // leading to awkward silence and collisions where the agent would start speaking just as the user finished.
       const audioBuffer = Buffer.from(message.media.payload, 'base64');
       geminiProvider.sendAudio(audioBuffer);
 
@@ -5511,6 +5543,13 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
               // the first audio chunk, so total delay was 1.3s+ after "Hello?".
               // 400ms is enough for a typical greeting utterance to complete,
               // and Gemini's VAD will handle barge-in if the prospect keeps talking.
+              //
+              // UPDATE (Feb 11 2026): DISABLED explicit greeting trigger on speech.
+              // Since we are streaming audio to Gemini immediately, it will hear the "Hello?"
+              // and respond naturally based on its system prompt.
+              // Forcing `sendOpeningMessage` here causes a race condition where the agent
+              // interrupts the user or restarts its greeting mid-sentence.
+              /*
               setTimeout(() => {
                 if (session.isActive && !session.audioDetection.hasGreetingSent) {
                   session.audioDetection.hasGreetingSent = true;
@@ -5522,6 +5561,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                   }
                 }
               }, 400);
+              */
             }
           },
           onTranscript: (segment) => {
@@ -5802,7 +5842,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // Build transcript - prefer Deepgram (more reliable) over Gemini transcripts
   const geminiTranscript = session.transcripts.length > 0
     ? session.transcripts
-        .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+        .map((t: { role: string; text: string; timestamp: Date }) => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
         .join('\n')
     : '';
 
@@ -5950,7 +5990,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           }));
           console.log(`${LOG_PREFIX} 📝 Test call using ${deepgramSegments.length} Deepgram segments for transcript turns`);
         } else {
-          transcriptTurns = session.transcripts.map(t => ({
+          transcriptTurns = session.transcripts.map((t: { role: string; text: string; timestamp: Date }) => ({
             role: t.role === 'assistant' ? 'agent' : 'contact',
             text: t.text,
             timestamp: t.timestamp.toISOString(),
@@ -5960,7 +6000,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         // Use the Deepgram-based fullTranscript from outer scope (includes both agent + contact)
         // Do NOT shadow with session.transcripts-only version (misses agent in native-audio mode)
         const testCallFullTranscript = fullTranscript || session.transcripts
-          .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+          .map((t: { role: string; text: string; timestamp: Date }) => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
           .join('\n');
 
         const conversationQuality = await analyzeConversationQuality({
@@ -6091,7 +6131,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         }
 
           // Build transcript turns for structured analysis
-          const transcriptTurns = session.transcripts.map(t => ({
+          const transcriptTurns = session.transcripts.map((t: { role: string; text: string; timestamp: Date }) => ({
             role: t.role === 'assistant' ? 'agent' : 'contact',
             text: t.text,
             timestamp: t.timestamp.toISOString(),
@@ -6200,6 +6240,22 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           // Process disposition through the engine (this handles lock release)
           dispositionResult = await processDisposition(session.callAttemptId, disposition, 'openai_realtime_agent');
           dispositionProcessed = true;
+
+          // Fallback: If processDisposition didn't create a lead for a qualified call, create one directly
+          if (disposition === 'qualified_lead' && !dispositionResult?.leadId && session.contactId && session.campaignId) {
+            console.warn(`${LOG_PREFIX} ⚠️ processDisposition did not create lead for qualified call ${session.callAttemptId} - attempting fallback`);
+            await createFallbackLead({
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              callDuration,
+              dialedNumber: session.calledNumber || undefined,
+              recordingUrl: (session as any).recordingUrl || undefined,
+              transcript: fullTranscript || undefined,
+              telnyxCallId: (session as any).telnyxCallControlId || null,
+              callAttemptId: session.callAttemptId,
+              source: `ai_agent (fallback after processDisposition) | Virtual Agent: ${session.virtualAgentId || 'unknown'}`,
+            });
+          }
         } else {
           // For fallback sessions without a call attempt record:
           // Release the queue lock directly since processDisposition won't be called
@@ -6215,6 +6271,24 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               console.log(`${LOG_PREFIX} ✅ Updated contact suppression for fallback session: ${disposition}`);
             } catch (suppErr) {
               console.error(`${LOG_PREFIX} Failed to update contact suppression:`, suppErr);
+            }
+          }
+
+          // For qualified fallback sessions, create lead directly since processDisposition won't run
+          if (disposition === 'qualified_lead' && session.contactId && session.campaignId) {
+            const fallbackLeadId = await createFallbackLead({
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              callDuration,
+              dialedNumber: session.calledNumber || undefined,
+              recordingUrl: (session as any).recordingUrl || undefined,
+              transcript: fullTranscript || undefined,
+              telnyxCallId: (session as any).telnyxCallControlId || null,
+              callAttemptId: null,
+              source: `ai_agent (fallback session) | Virtual Agent: ${session.virtualAgentId || 'unknown'}`,
+            });
+            if (fallbackLeadId) {
+              console.log(`${LOG_PREFIX} ✅ Fallback lead ${fallbackLeadId} created for qualified session without callAttemptId`);
             }
           }
 

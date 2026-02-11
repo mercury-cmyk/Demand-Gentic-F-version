@@ -601,8 +601,8 @@ class CampaignRunnerService {
   }
 
   private async loadCampaignTasks(campaignId: string): Promise<void> {
-    // Guard: calls blocked by default — must be enabled in Telephony settings
-    if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
+    // Guard: in dev, calls blocked by default — must be enabled in Telephony settings. Production always allows calls.
+    if (process.env.NODE_ENV !== 'production' && process.env.CALL_EXECUTION_ENABLED !== 'true') {
       console.log(`${LOG_PREFIX} Skipping task load - call execution not enabled. Enable call execution in Telephony settings.`);
       this.broadcastStallReason(campaignId, 'Call execution is disabled. Go to Settings > Telephony and enable call execution.');
       return;

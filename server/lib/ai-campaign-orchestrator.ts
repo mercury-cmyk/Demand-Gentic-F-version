@@ -34,6 +34,7 @@ import {
   sleep as numberPoolSleep,
   type CallerIdResult
 } from '../services/number-pool-integration';
+import { isNumberPoolEnabled } from '../services/number-pool';
 import {
   acquireProspectLock,
   releaseProspectLock,
@@ -723,8 +724,8 @@ async function setOrchestratorStallReason(campaignId: string, reason: string | n
  * Process a single campaign - initiate calls to maintain concurrency
  */
 async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
-  // Guard: calls blocked by default — must be enabled in Telephony settings
-  if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
+  // Guard: in dev, calls blocked by default — must be enabled in Telephony settings. Production always allows calls.
+  if (process.env.NODE_ENV !== 'production' && process.env.CALL_EXECUTION_ENABLED !== 'true') {
     await setOrchestratorStallReason(campaignId, 'Call execution disabled. Go to Settings > Telephony and enable call execution.');
     return { initiated: 0, skipped: 0 };
   }
@@ -1307,6 +1308,44 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             throw new Error('HOURLY_LIMIT_REACHED');
           }
 
+          // STRICT MODE: If number pool is exhausted (all busy/cooling), DO NOT use legacy fallback.
+          // Retry later instead to ensure no concurrent usage violates the rule.
+          if (err?.name === 'NoAvailableNumberError') {
+             console.log(`[AI Orchestrator] No numbers available (all busy/cooling) - re-queuing item ${item.id}`);
+             try {
+               await db.execute(sql`
+                UPDATE campaign_queue
+                SET status = 'queued',
+                    updated_at = NOW(),
+                    next_attempt_at = NOW() + INTERVAL '60 seconds',
+                    enqueued_reason = COALESCE(enqueued_reason, '') || '|pool_busy'
+                WHERE id = ${item.id}
+              `);
+             } catch (requeueErr) {
+               console.error(`[AI Orchestrator] Failed to requeue item ${item.id}:`, requeueErr);
+             }
+             return { success: false, itemId: item.id, error: err, skipped: true };
+          }
+
+          // When number pool is enabled, NEVER fall back to legacy number —
+          // it has no concurrent-call tracking and causes duplicate call issues.
+          if (isNumberPoolEnabled()) {
+            console.warn(`[AI Orchestrator] Number pool error — re-queuing item ${item.id} (no legacy fallback when pool enabled):`, err?.message || err);
+            try {
+              await db.execute(sql`
+                UPDATE campaign_queue
+                SET status = 'queued',
+                    updated_at = NOW(),
+                    next_attempt_at = NOW() + INTERVAL '60 seconds',
+                    enqueued_reason = COALESCE(enqueued_reason, '') || '|pool_error_requeue'
+                WHERE id = ${item.id}
+              `);
+            } catch (requeueErr) {
+              console.error(`[AI Orchestrator] Failed to requeue item ${item.id}:`, requeueErr);
+            }
+            return { success: false, itemId: item.id, error: err, skipped: true };
+          }
+
           console.error(`[AI Orchestrator] Number pool selection failed, using legacy:`, err);
           callerIdResult = {
             callerId: legacyFromNumber || '',
@@ -1594,6 +1633,15 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       }
       await setOrchestratorStallReason(campaignId, 'Hourly call limit reached on all numbers. Calls will resume next hour.');
       return { initiated, skipped, hourlyLimitPaused: true };
+    }
+
+    // Check if ALL items in batch were skipped due to pool busy — stop processing to avoid tight loop
+    const allSkipped = results.every((r: any) => r && !r.success);
+    const poolBusyCount = results.filter((r: any) => r && r.skipped).length;
+    if (allSkipped && poolBusyCount > 0 && batchSuccess === 0) {
+      console.warn(`[AI Orchestrator] 🚫 ALL ${batch.length} items in batch skipped (${poolBusyCount} pool-busy) — stopping campaign ${campaignId} to avoid spin loop`);
+      await setOrchestratorStallReason(campaignId, 'All phone numbers busy. Calls will resume when numbers become available.');
+      return { initiated, skipped: skipped + poolBusyCount };
     }
 
     // Check if any result has a fatal error - if so, stop processing this campaign

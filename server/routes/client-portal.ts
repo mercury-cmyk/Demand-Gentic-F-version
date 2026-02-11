@@ -18,6 +18,7 @@ import {
   insertClientUserSchema,
   insertClientCampaignAccessSchema,
   insertClientPortalOrderSchema,
+  workOrders,
   // QA-approved leads system
   leads,
   leadComments,
@@ -27,6 +28,7 @@ import {
   accounts,
   lists,
   users,
+  clientProjectCampaigns,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
@@ -456,10 +458,21 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
             )
           );
 
+        // Look up project enabledFeatures via junction table
+        let enabledFeatures = null;
+        const [projectLink] = await db
+          .select({ enabledFeatures: clientProjects.enabledFeatures })
+          .from(clientProjectCampaigns)
+          .innerJoin(clientProjects, eq(clientProjectCampaigns.projectId, clientProjects.id))
+          .where(eq(clientProjectCampaigns.campaignId, campaign.id))
+          .limit(1);
+        if (projectLink) enabledFeatures = projectLink.enabledFeatures;
+
         return {
           ...campaign,
           type: 'verification',
           eligibleCount: eligibleCount[0]?.count || 0,
+          enabledFeatures,
         };
       })
     );
@@ -471,6 +484,7 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
         name: campaigns.name,
         status: campaigns.status,
         type: campaigns.type,
+        projectId: campaigns.projectId,
       })
       .from(clientCampaignAccess)
       .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
@@ -481,19 +495,35 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
         )
       );
 
-    const enrichedRegularCampaigns = regularAccessList.map((campaign) => ({
-      ...campaign,
-      campaignType: campaign.type || 'campaign',
-      landingPageUrl: null, // Column missing in DB
-      projectFileUrl: null, // Column missing in DB
-      type: 'regular',
-      eligibleCount: 0,
-       stats: {
-        totalLeads: 0,
-        verifiedLeads: 0,
-        leadsPurchased: 0,
-      },
-    }));
+    const enrichedRegularCampaigns = await Promise.all(
+      regularAccessList.map(async (campaign) => {
+        // Look up project enabledFeatures directly via projectId
+        let enabledFeatures = null;
+        if (campaign.projectId) {
+          const [project] = await db
+            .select({ enabledFeatures: clientProjects.enabledFeatures })
+            .from(clientProjects)
+            .where(eq(clientProjects.id, campaign.projectId))
+            .limit(1);
+          if (project) enabledFeatures = project.enabledFeatures;
+        }
+
+        return {
+          ...campaign,
+          campaignType: campaign.type || 'campaign',
+          landingPageUrl: null,
+          projectFileUrl: null,
+          type: 'regular',
+          eligibleCount: 0,
+          stats: {
+            totalLeads: 0,
+            verifiedLeads: 0,
+            leadsPurchased: 0,
+          },
+          enabledFeatures,
+        };
+      })
+    );
 
     res.json([...enrichedVerificationCampaigns, ...enrichedRegularCampaigns]);
   } catch (error) {
@@ -1944,6 +1974,18 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .where(eq(clientProjects.clientAccountId, client.id))
       .orderBy(desc(clientProjects.createdAt));
 
+    // Also fetch ALL work orders without filter to debug
+    const allWorkOrders = await db.select({ id: workOrders.id, title: workOrders.title, clientAccountId: workOrders.clientAccountId, status: workOrders.status }).from(workOrders);
+    console.log('[CLIENT PORTAL] Debug: client.id =', client.id, '| Total work orders in DB:', allWorkOrders.length, '| Work orders:', JSON.stringify(allWorkOrders.map(w => ({ id: w.id, title: w.title, clientAccountId: w.clientAccountId, status: w.status }))));
+
+    const clientWorkOrders = await db
+      .select()
+      .from(workOrders)
+      .where(eq(workOrders.clientAccountId, client.id))
+      .orderBy(desc(workOrders.createdAt));
+
+    console.log('[CLIENT PORTAL] Work orders for client', client.id, ':', clientWorkOrders.length);
+
     // Get lead counts for each regular campaign (all approved + published leads for admin view)
     const regularCampaignIds = mappedRegularAccess.map(a => a.campaign.id);
     let leadCounts: Record<string, number> = {};
@@ -1972,13 +2014,14 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       ...client,
       users,
       projects,
-      campaigns: verificationAccess.map(a => ({ 
-        ...a.access, 
+      workOrders: clientWorkOrders,
+      campaigns: verificationAccess.map(a => ({
+        ...a.access,
         campaign: a.campaign,
         type: 'verification'
       })),
-      regularCampaigns: mappedRegularAccess.map(a => ({ 
-        ...a.access, 
+      regularCampaigns: mappedRegularAccess.map(a => ({
+        ...a.access,
         campaign: a.campaign,
         type: 'regular',
         approvedLeadCount: leadCounts[a.campaign.id] || 0

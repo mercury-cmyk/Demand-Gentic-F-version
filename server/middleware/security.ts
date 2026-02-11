@@ -7,12 +7,25 @@ import { ZodSchema, ZodError } from 'zod';
  * Protects against brute force attacks and API abuse
  */
 
-// General API rate limiter: 10000 requests per 15 minutes per IP (very high for development/testing)
+// Paths exempt from global rate limiting (webhooks, call control, dialer - high volume during concurrent calls)
+const RATE_LIMIT_EXEMPT_PREFIXES = [
+  '/api/webhooks/',           // Telnyx/external webhooks - must never be rate limited
+  '/api/campaign-test-calls/webhook', // Test call webhooks
+  '/api/ai-calls/webhook',    // AI call webhooks
+  '/api/ai-calls/audio/',     // Audio clip serving
+  '/api/dialer-runs/',        // Dialer run status, call attempts, dispositions
+  '/api/calls/',              // Agent call control (status polling, hangup)
+  '/api/health',              // Health checks
+  '/api/recordings/',         // Recording access during/after calls
+];
+
+// General API rate limiter: 50000 requests per 15 minutes per IP (scaled for 50+ concurrent calls)
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10000, // limit each IP to 10000 requests per windowMs
+  max: 50000, // limit each IP to 50000 requests per windowMs
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  skip: (req) => RATE_LIMIT_EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix)),
   handler: (_req, res) => {
     res.status(429).json({
       message: 'Too many requests from this IP, please try again later.',

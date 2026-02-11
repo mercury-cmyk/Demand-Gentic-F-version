@@ -2,8 +2,6 @@ import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
 import { type Server } from "http";
-import { nanoid } from "nanoid";
-
 // Vite is only needed in development; import dynamically inside setupVite
 
 export function log(message: string, source = "express") {
@@ -21,10 +19,10 @@ export async function setupVite(app: Express, server: Server) {
   const { createServer: createViteServer, createLogger } = await import("vite");
   const viteLogger = createLogger();
   const viteConfig = (await import("../vite.config")).default;
+  const enableHmr = process.env.VITE_HMR !== "false";
   const serverOptions = {
     middlewareMode: true,
-    hmr: false, // Disable HMR to prevent WebSocket conflicts and reload loops
-    ws: false, // Disable Vite websocket server entirely
+    hmr: enableHmr ? { server } : false,
     allowedHosts: true as const,
   };
 
@@ -57,26 +55,7 @@ export async function setupVite(app: Express, server: Server) {
 
       // always reload the index.html file from disk incase it changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
-      template = template.replace(
-        `src="/src/main.tsx"`,
-        `src="/src/main.tsx?v=${nanoid()}"`,
-      );
       let page = await vite.transformIndexHtml(url, template);
-      // Strip Vite client script to prevent ws:// connection attempts (relative or absolute URLs).
-      page = page
-        .replace(
-          /<script\b[^>]*src=(["'])[^"']*\/\@vite\/client\1[^>]*>\s*<\/script>/gi,
-          "",
-        )
-        .replace(
-          /<script\b[^>]*>\s*import\s+(["'])[^"']*\/\@vite\/client\1;?\s*<\/script>/gi,
-          "",
-        )
-        .replace(
-          /<script\b[^>]*>\s*import\(\s*(["'])[^"']*\/\@vite\/client\1\s*\)\s*;?\s*<\/script>/gi,
-          "",
-        )
-        .replace(/\/\@vite\/client\b/gi, "/__vite_client_disabled__");
       res
         .status(200)
         .set({ "Content-Type": "text/html", "Cache-Control": "no-store" })

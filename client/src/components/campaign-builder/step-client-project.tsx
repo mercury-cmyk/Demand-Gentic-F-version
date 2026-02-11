@@ -29,11 +29,13 @@ interface WorkOrder {
 interface StepClientProjectProps {
   data: any;
   onNext: (data: any) => void;
+  initialClientId?: string;
+  initialProjectId?: string;
 }
 
-export function StepClientProject({ data, onNext }: StepClientProjectProps) {
-  const [selectedClientId, setSelectedClientId] = useState<string>(data?.clientAccountId || "");
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(data?.projectId || "");
+export function StepClientProject({ data, onNext, initialClientId, initialProjectId }: StepClientProjectProps) {
+  const [selectedClientId, setSelectedClientId] = useState<string>(data?.clientAccountId || initialClientId || "");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(data?.projectId || initialProjectId || "");
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState<string>(data?.workOrderId || "");
 
   const { data: clients = [], isLoading: clientsLoading } = useQuery<ClientAccount[]>({

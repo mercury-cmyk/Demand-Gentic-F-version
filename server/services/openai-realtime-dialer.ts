@@ -2040,6 +2040,13 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
     return;
   }
 
+  // FIX: Ignore initial audio to prevent "ghost" interruptions of the opening greeting
+  // This protects against line noise or early "hello?" from user disrupting the agent's intro
+  const timeSinceStart = Date.now() - session.startTime.getTime();
+  if (timeSinceStart < 2500) {
+    return;
+  }
+
   if (message.media?.payload) {
     session.telnyxInboundFrames += 1;
     session.telnyxInboundLastTime = new Date();

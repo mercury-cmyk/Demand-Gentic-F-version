@@ -45,6 +45,8 @@ export {
   releaseNumber,
   recordCallOutcome,
   isNumberPoolEnabled,
+  getNumberPoolStatus,
+  forceReleaseAllNumbers,
   NoAvailableNumberError,
   CallRoutingError,
   AllNumbersAtHourlyLimitError,

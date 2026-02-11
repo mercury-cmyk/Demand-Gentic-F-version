@@ -40,6 +40,7 @@ interface TranscriptionResult {
 export interface TranscriptionAudioSourceOptions {
   telnyxCallId?: string | null;
   recordingS3Key?: string | null;
+  throwOnError?: boolean;
 }
 
 function redactUrlForLogs(rawUrl: string): string {
@@ -121,9 +122,13 @@ async function downloadAudio(
     if (!response.ok) {
       const safeUrl = redactUrlForLogs(audioUrl);
       const errorBody = await response.text().then(t => t.slice(0, 300)).catch(() => '');
-      console.error(
-        `[Transcription] Failed to download audio: ${response.status} ${response.statusText} | url=${safeUrl}${errorBody ? ` | body=${JSON.stringify(errorBody)}` : ''}`
-      );
+      const errorMessage = `[Transcription] Failed to download audio: ${response.status} ${response.statusText} | url=${safeUrl}${errorBody ? ` | body=${JSON.stringify(errorBody)}` : ''}`;
+      
+      console.error(errorMessage);
+      
+      if (options?.throwOnError) {
+        throw new Error(errorMessage);
+      }
       return null;
     }
 
@@ -150,6 +155,9 @@ async function downloadAudio(
 
     return { base64, mimeType };
   } catch (error) {
+    if (options?.throwOnError) {
+      throw error;
+    }
     console.error('[Transcription] Error downloading audio:', error);
     return null;
   }
@@ -321,6 +329,9 @@ export async function submitTranscription(
     return transcriptText;
 
   } catch (error) {
+    if (options?.throwOnError) {
+      throw error;
+    }
     console.error('[Transcription] Error with Google Speech-to-Text:', error);
     return null;
   }
@@ -334,7 +345,8 @@ export async function transcribeFromRecording(
   recordingUrl: string,
   options?: TranscriptionAudioSourceOptions
 ): Promise<{ transcript: string; wordCount: number } | null> {
-  const transcript = await submitTranscription(recordingUrl, options);
+  // Use throwOnError to ensure reliability service can detect permanent errors (like 403)
+  const transcript = await submitTranscription(recordingUrl, { ...options, throwOnError: true });
   if (!transcript) return null;
   return {
     transcript,

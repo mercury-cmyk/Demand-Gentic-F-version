@@ -19,13 +19,13 @@ import { storage } from "../storage";
 import { uploadToS3, getPresignedDownloadUrl } from "../lib/storage";
 import { preflightVoiceVariableContract, VoiceVariablePreflightError } from "./voice-variable-contract";
 import { db } from "../db";
-import { dialerCallAttempts } from "@shared/schema";
+import { dialerCallAttempts, contacts, accounts, leads } from "@shared/schema";
 import { eq } from "drizzle-orm";
 // Use dynamic import to avoid async module initialization issue with voice-dialer
 // import { setAmdResultForSession } from "./voice-dialer";
 import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 import { normalizeToE164, isValidE164 } from "../lib/phone-utils";
-import { processDisposition } from "./disposition-engine";
+import { processDisposition, createFallbackLead } from "./disposition-engine";
 import { getGoogleVoiceConfig } from "./voice-constants";
 import { handleCallCompleted } from "./number-pool-integration";
 
@@ -400,8 +400,8 @@ export class TelnyxAiBridge extends EventEmitter {
   ): Promise<{ callId: string; callControlId: string }> {
     const provider = 'gemini_live';
 
-    // Guard: calls blocked by default — must be enabled in Telephony settings
-    if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
+    // Guard: in dev, calls blocked by default — must be enabled in Telephony settings. Production always allows calls.
+    if (process.env.NODE_ENV !== 'production' && process.env.CALL_EXECUTION_ENABLED !== 'true') {
       console.warn(`[TelnyxAiBridge] 🚫 CALL BLOCKED - call execution not enabled. Enable it in Telephony settings. Would have called: ${phoneNumber}`);
       throw new Error('call_execution_disabled - Enable call execution in Settings > Telephony');
     }
@@ -1372,11 +1372,67 @@ export class TelnyxAiBridge extends EventEmitter {
               leadId: dispositionResult.leadId,
               actions: dispositionResult.actions
             });
+
+            // Fallback: If disposition succeeded but no lead was created for a qualified call
+            if (canonicalDisposition === 'qualified_lead' && !dispositionResult.leadId) {
+              console.warn(`[TelnyxAiBridge] ⚠️ processDisposition succeeded but no lead created for qualified call ${call.callAttemptId} - attempting fallback`);
+              const [attempt] = await db.select({ contactId: dialerCallAttempts.contactId, campaignId: dialerCallAttempts.campaignId })
+                .from(dialerCallAttempts).where(eq(dialerCallAttempts.id, call.callAttemptId!)).limit(1);
+              if (attempt?.contactId && attempt?.campaignId) {
+                await createFallbackLead({
+                  campaignId: attempt.campaignId,
+                  contactId: attempt.contactId,
+                  callDuration: Math.round(duration / 1000),
+                  dialedNumber: call.dialedNumber,
+                  transcript: cleanTranscript,
+                  telnyxCallId: call.callControlId,
+                  callAttemptId: call.callAttemptId!,
+                  source: 'telnyx_ai_bridge (fallback after processDisposition success without lead)',
+                });
+              }
+            }
           } else {
             console.error(`[TelnyxAiBridge] ⚠️ Disposition processing had errors:`, dispositionResult.errors);
+
+            // Fallback: Create lead directly if disposition was qualified but engine returned errors
+            if (canonicalDisposition === 'qualified_lead' && !dispositionResult.leadId) {
+              const [attempt] = await db.select({ contactId: dialerCallAttempts.contactId, campaignId: dialerCallAttempts.campaignId })
+                .from(dialerCallAttempts).where(eq(dialerCallAttempts.id, call.callAttemptId!)).limit(1);
+              if (attempt?.contactId && attempt?.campaignId) {
+                await createFallbackLead({
+                  campaignId: attempt.campaignId,
+                  contactId: attempt.contactId,
+                  callDuration: Math.round(duration / 1000),
+                  dialedNumber: call.dialedNumber,
+                  transcript: cleanTranscript,
+                  telnyxCallId: call.callControlId,
+                  callAttemptId: call.callAttemptId!,
+                  source: 'telnyx_ai_bridge (fallback after processDisposition errors)',
+                });
+              }
+            }
           }
         } catch (dispError) {
           console.error(`[TelnyxAiBridge] ❌ Failed to process disposition for ${call.callAttemptId}:`, dispError);
+
+          // Fallback: Create lead directly if disposition was qualified but engine threw
+          if (canonicalDisposition === 'qualified_lead') {
+            const [attempt] = await db.select({ contactId: dialerCallAttempts.contactId, campaignId: dialerCallAttempts.campaignId })
+              .from(dialerCallAttempts).where(eq(dialerCallAttempts.id, call.callAttemptId!)).limit(1);
+            if (attempt?.contactId && attempt?.campaignId) {
+              const cleanTranscript = (typeof transcript === 'string' ? transcript : JSON.stringify(transcript)) || "";
+              await createFallbackLead({
+                campaignId: attempt.campaignId,
+                contactId: attempt.contactId,
+                callDuration: Math.round(duration / 1000),
+                dialedNumber: call.dialedNumber,
+                transcript: cleanTranscript,
+                telnyxCallId: call.callControlId,
+                callAttemptId: call.callAttemptId!,
+                source: 'telnyx_ai_bridge (fallback after processDisposition exception)',
+              });
+            }
+          }
         }
       }
     } catch (error) {

@@ -14,6 +14,7 @@ const DATA_ROLES = [USER_ROLES.ADMIN, USER_ROLES.DATA_OPS];
 const QA_ROLES = [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER, USER_ROLES.QUALITY_ANALYST];
 const AGENT_ROLES = [...MANAGEMENT_ROLES, USER_ROLES.AGENT];
 const ANALYTICS_ROLES = [...QA_ROLES, USER_ROLES.CLIENT_USER];
+const CLIENT_ACCESS_ROLES = [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER];
 
 export interface RoutePermission {
   pattern: string | RegExp;
@@ -37,13 +38,21 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // ============================================
   { pattern: '/ai-studio', roles: MANAGEMENT_ROLES, description: 'AI Studio Dashboard' },
   { pattern: /^\/ai-studio\//, roles: MANAGEMENT_ROLES, description: 'AI Studio pages' },
-  { pattern: '/preview-studio', roles: MANAGEMENT_ROLES, description: 'Preview Studio' },
-  { pattern: '/voice-simulation', roles: MANAGEMENT_ROLES, description: 'Voice Simulation' },
-  { pattern: '/email-simulation', roles: MANAGEMENT_ROLES, description: 'Email Simulation' },
+  { pattern: '/preview-studio', roles: CLIENT_ACCESS_ROLES, description: 'Preview Studio' },
+  { pattern: '/voice-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Voice Simulation' },
+  { pattern: '/email-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Email Simulation' },
   { pattern: '/virtual-agents', roles: MANAGEMENT_ROLES, description: 'Virtual Agents' },
   { pattern: /^\/virtual-agents\//, roles: MANAGEMENT_ROLES, description: 'Virtual Agent pages' },
   { pattern: '/create-ai-agent', roles: MANAGEMENT_ROLES, description: 'Create AI Agent' },
   { pattern: '/ai-project-creator', roles: MANAGEMENT_ROLES, description: 'AI Project Creator' },
+
+  // ============================================
+  // CLIENT CAMPAIGN TOOLS - Test/Queue
+  // ============================================
+  { pattern: /^\/campaigns\/[^/]+\/test$/, roles: CLIENT_ACCESS_ROLES, description: 'Campaign Test Calls' },
+  { pattern: /^\/campaigns\/phone\/[^/]+\/queue$/, roles: CLIENT_ACCESS_ROLES, description: 'Campaign Queue (Phone)' },
+  { pattern: /^\/campaigns\/[^/]+\/queue$/, roles: CLIENT_ACCESS_ROLES, description: 'Campaign Queue' },
+  { pattern: '/campaign-test', roles: CLIENT_ACCESS_ROLES, description: 'Campaign Test (Legacy)' },
 
   // ============================================
   // ACCOUNTS & CONTACTS - Management + Data Ops
@@ -70,7 +79,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // ============================================
   // CAMPAIGNS - Management roles
   // ============================================
-  { pattern: '/campaigns', roles: MANAGEMENT_ROLES, description: 'Campaigns' },
+  { pattern: '/campaigns', roles: CLIENT_ACCESS_ROLES, description: 'Campaigns' },
   { pattern: /^\/campaigns\//, roles: MANAGEMENT_ROLES, description: 'Campaign pages' },
   { pattern: '/email-campaigns', roles: MANAGEMENT_ROLES, description: 'Email Campaigns' },
   { pattern: /^\/email-campaigns\//, roles: MANAGEMENT_ROLES, description: 'Email Campaign pages' },

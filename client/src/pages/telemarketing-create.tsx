@@ -1,4 +1,4 @@
-import { useLocation, useParams } from "wouter";
+import { useLocation, useParams, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { CampaignWizard, type CampaignWizardStep } from "@/components/campaign-builder/campaign-wizard";
@@ -33,6 +33,12 @@ export default function TelemarketingCreatePage() {
   const { toast } = useToast();
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
+
+  // Read client/project from URL query params (e.g. from project approval flow)
+  const search = useSearch();
+  const searchParams = new URLSearchParams(search);
+  const urlClientId = searchParams.get('clientId') || '';
+  const urlProjectId = searchParams.get('projectId') || '';
   const [isStartingCalls, setIsStartingCalls] = useState(false);
 
   // Fetch existing campaign data when in edit mode
@@ -317,7 +323,10 @@ export default function TelemarketingCreatePage() {
         steps={steps}
         onComplete={handleComplete}
         onCancel={handleCancel}
-        initialData={isEditMode ? getInitialData() : undefined}
+        initialData={isEditMode ? getInitialData() : {
+          ...(urlClientId && { clientAccountId: urlClientId }),
+          ...(urlProjectId && { projectId: urlProjectId }),
+        }}
         title={isEditMode ? "Edit Campaign" : undefined}
       />
 

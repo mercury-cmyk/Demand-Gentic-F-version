@@ -273,6 +273,10 @@ app.use((req, res, next) => {
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
   server.on('upgrade', (req, socket, head) => {
     const pathname = new URL(req.url || '', `ws://${req.headers.host}`).pathname;
+    const protocol = req.headers['sec-websocket-protocol'];
+    if (protocol === 'vite-hmr') {
+      return;
+    }
     // Only log non-trivial upgrade requests (skip /log-stream to reduce noise)
     if (pathname !== '/log-stream') {
       console.log(`[WebSocket Upgrade] ${pathname}`);
@@ -400,14 +404,6 @@ app.use((req, res, next) => {
     } else if (pathname === '/log-stream') {
       logStreamingService.handleUpgrade(req, socket, head);
     } else {
-      // Block ALL vite-hmr WebSocket connections - they cause frame corruption
-      const protocol = req.headers['sec-websocket-protocol'];
-
-      if (protocol === 'vite-hmr') {
-        // Silently block HMR to prevent log spam and frame corruption
-        socket.destroy();
-        return;
-      }
       console.log('[WebSocket Upgrade] Unknown path, destroying socket:', pathname);
       socket.destroy();
     }

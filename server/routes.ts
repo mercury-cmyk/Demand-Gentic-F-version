@@ -121,7 +121,8 @@ import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
 import * as schema from "@shared/schema";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, callQualityRecords, type InsertMailboxAccount, type Account } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, callQualityRecords, passwordResetTokens, clientUsers, type InsertMailboxAccount, type Account } from "@shared/schema";
+import { transactionalEmailService } from "./services/transactional-email-service";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -774,7 +775,7 @@ async function resolveAudienceContactsForQueue(
 }
 
 export function registerRoutes(app: Express) {
-  // Apply general rate limiting to all API routes (100 req/15min)
+  // Apply general rate limiting to all API routes
   app.use('/api/', apiLimiter);
 
   // Health Check Endpoint
@@ -1230,6 +1231,127 @@ export function registerRoutes(app: Express) {
       res.json({ message: "Password changed successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  // ==================== PASSWORD RESET ====================
+
+  app.post("/api/auth/forgot-password", authLimiter, async (req, res) => {
+    try {
+      const { email, userType } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+
+      const type = userType === 'client' ? 'client' : 'internal';
+
+      // Always respond with success to prevent email enumeration
+      const successResponse = {
+        message: "If an account exists with that email, you will receive a password reset link shortly."
+      };
+
+      let userId: string | null = null;
+      let clientUsrId: string | null = null;
+
+      if (type === 'client') {
+        const [clientUser] = await db
+          .select()
+          .from(clientUsers)
+          .where(eq(clientUsers.email, email.toLowerCase()))
+          .limit(1);
+        if (!clientUser) return res.json(successResponse);
+        clientUsrId = clientUser.id;
+      } else {
+        const user = await storage.getUserByEmail(email);
+        if (!user) return res.json(successResponse);
+        userId = user.id;
+      }
+
+      // Generate secure token
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      // Store token
+      await db.insert(passwordResetTokens).values({
+        token,
+        userId,
+        clientUserId: clientUsrId,
+        email: email.toLowerCase(),
+        userType: type,
+        expiresAt,
+      });
+
+      // Build reset link
+      const baseUrl = process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000';
+      const resetLink = `${baseUrl}/reset-password?token=${token}&type=${type}`;
+
+      // Send email via transactional email service
+      await transactionalEmailService.triggerPasswordResetEmail(email.toLowerCase(), resetLink, "1 hour");
+
+      res.json(successResponse);
+    } catch (error) {
+      console.error('[PASSWORD RESET] Forgot password error:', error);
+      res.status(500).json({ message: "Failed to process request" });
+    }
+  });
+
+  app.post("/api/auth/reset-password", authLimiter, async (req, res) => {
+    try {
+      const { token, newPassword } = req.body;
+
+      if (!token || !newPassword) {
+        return res.status(400).json({ message: "Token and new password are required" });
+      }
+
+      if (newPassword.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters" });
+      }
+
+      // Look up token
+      const [resetToken] = await db
+        .select()
+        .from(passwordResetTokens)
+        .where(eq(passwordResetTokens.token, token))
+        .limit(1);
+
+      if (!resetToken) {
+        return res.status(400).json({ message: "Invalid or expired reset link" });
+      }
+
+      if (resetToken.usedAt) {
+        return res.status(400).json({ message: "This reset link has already been used" });
+      }
+
+      if (new Date() > resetToken.expiresAt) {
+        return res.status(400).json({ message: "This reset link has expired. Please request a new one." });
+      }
+
+      // Hash new password
+      const hashedPassword = await hashPassword(newPassword);
+
+      // Update the correct user's password
+      if (resetToken.userType === 'client' && resetToken.clientUserId) {
+        await db
+          .update(clientUsers)
+          .set({ password: hashedPassword, updatedAt: new Date() })
+          .where(eq(clientUsers.id, resetToken.clientUserId));
+      } else if (resetToken.userId) {
+        await storage.updateUser(resetToken.userId, { password: hashedPassword });
+      } else {
+        return res.status(400).json({ message: "Invalid reset token" });
+      }
+
+      // Mark token as used
+      await db
+        .update(passwordResetTokens)
+        .set({ usedAt: new Date() })
+        .where(eq(passwordResetTokens.id, resetToken.id));
+
+      res.json({ message: "Password has been reset successfully" });
+    } catch (error) {
+      console.error('[PASSWORD RESET] Reset password error:', error);
+      res.status(500).json({ message: "Failed to reset password" });
     }
   });
 
@@ -4690,12 +4812,22 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.get("/api/campaigns/:id", requireAuth, async (req, res) => {
+  app.get("/api/campaigns/:id", requireDualAuth, async (req, res) => {
     try {
       const campaign = await storage.getCampaign(req.params.id);
       if (!campaign) {
         return res.status(404).json({ message: "Campaign not found" });
       }
+
+      // Client users can only view campaigns assigned to their account
+      const isClient = req.user?.role === 'client';
+      if (isClient) {
+        const clientAccountId = (req.user as any).clientAccountId || (req.user as any).tenantId;
+        if (campaign.clientAccountId !== clientAccountId) {
+          return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
+        }
+      }
+
       res.json(campaign);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch campaign" });
@@ -4795,28 +4927,22 @@ export function registerRoutes(app: Express) {
       // Explicitly includes: Qualified, Not Interested, DNC, Wrong Number (often means answered).
       // Explicitly excludes: No Answer, Voicemail, Busy, Failed.
       
+      // Canonical dispositions that indicate the call connected (Right Party Contact)
       const aiConnectedDispositions = [
-        'connected', 
-        'qualified', 
-        'callback_requested', 
-        'callback-requested', 
-        'not_interested', 
-        'not-interested',
-        'dnc_request', 
-        'dnc-request', 
+        'qualified_lead',
+        'callback_requested',
+        'not_interested',
         'do_not_call',
-        'meeting_booked', 
-        'interested',
-        'wrong_number',
         'invalid_data',
-        'completed' // 'completed' is sometimes used as a generic success status
+        'needs_review',
       ];
 
-      const aiQualifiedDispositions = ['qualified', 'meeting_booked', 'interested'];
-      const aiDncDispositions = ['dnc_request', 'dnc-request', 'do_not_call'];
-      const aiNotInterestedDispositions = ['not_interested', 'not-interested', 'rejected'];
-      const aiNoAnswerDispositions = ['no_answer', 'no-answer', 'unanswered', 'busy', 'failed', 'hung_up'];
-      const aiVoicemailDispositions = ['voicemail', 'left_voicemail', 'machine'];
+      // Canonical dispositions from disposition-normalizer.ts
+      const aiQualifiedDispositions = ['qualified_lead'];
+      const aiDncDispositions = ['do_not_call'];
+      const aiNotInterestedDispositions = ['not_interested'];
+      const aiNoAnswerDispositions = ['no_answer'];
+      const aiVoicemailDispositions = ['voicemail'];
 
       const [aiCallStats] = await db
         .select({
@@ -5147,7 +5273,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/campaigns/:id", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  app.patch("/api/campaigns/:id", requireDualAuth, requireRole('admin', 'campaign_manager', 'client', 'client_user'), async (req, res) => {
     try {
       const updateData = { ...req.body };
       // Approval fields are managed via the dedicated approval endpoint
@@ -5159,6 +5285,23 @@ export function registerRoutes(app: Express) {
       const existingCampaign = await storage.getCampaign(req.params.id);
       if (!existingCampaign) {
         return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      // Client users can only update campaigns assigned to their account
+      // and are limited to certain fields (voice settings, AI agent settings)
+      const isClient = req.user?.role === 'client';
+      if (isClient) {
+        const clientAccountId = (req.user as any).clientAccountId || (req.user as any).tenantId;
+        if (existingCampaign.clientAccountId !== clientAccountId) {
+          return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
+        }
+        // Restrict client updates to safe fields only
+        const allowedClientFields = ['aiAgentSettings', 'selectedVoice', 'openingScript', 'callScript', 'campaignObjective', 'productServiceInfo', 'talkingPoints', 'targetAudienceDescription', 'campaignObjections', 'successCriteria', 'qualificationQuestions'];
+        const requestedFields = Object.keys(updateData);
+        const disallowedFields = requestedFields.filter(f => !allowedClientFields.includes(f));
+        if (disallowedFields.length > 0) {
+          return res.status(403).json({ message: `Clients cannot update these fields: ${disallowedFields.join(', ')}` });
+        }
       }
 
       const hasClientUpdate = "clientAccountId" in updateData || "projectId" in updateData;

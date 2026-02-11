@@ -11,7 +11,7 @@
  */
 
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { Mail, Phone, ArrowRight, Sparkles, Target, MessageSquare, Users } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,10 @@ const CHANNEL_OPTIONS: ChannelOption[] = [
 
 export default function CampaignCreatePage() {
   const [, setLocation] = useLocation();
+  const search = useSearch();
+  const searchParams = new URLSearchParams(search);
+  const urlClientId = searchParams.get('clientId') || '';
+  const urlProjectId = searchParams.get('projectId') || '';
   const [selectedChannel, setSelectedChannel] = useState<'email' | 'voice' | null>(null);
   const [selectedType, setSelectedType] = useState<string | null>(null);
 
@@ -74,11 +78,16 @@ export default function CampaignCreatePage() {
   const handleContinue = () => {
     if (!selectedChannel || !selectedType) return;
 
+    // Build query params, forwarding clientId/projectId if present
+    const params = new URLSearchParams({ type: selectedType });
+    if (urlClientId) params.set('clientId', urlClientId);
+    if (urlProjectId) params.set('projectId', urlProjectId);
+
     // Navigate to the appropriate creation flow with the selected type
     if (selectedChannel === 'email') {
-      setLocation(`/campaigns/email/create?type=${selectedType}`);
+      setLocation(`/campaigns/email/create?${params.toString()}`);
     } else {
-      setLocation(`/phone-campaigns/create?type=${selectedType}`);
+      setLocation(`/phone-campaigns/create?${params.toString()}`);
     }
   };
 

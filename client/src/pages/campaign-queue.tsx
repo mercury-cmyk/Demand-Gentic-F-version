@@ -70,15 +70,27 @@ export default function CampaignQueuePage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
+  const rawRoles = (user as any)?.roles ?? user?.role;
+  const roleList = Array.isArray(rawRoles) ? rawRoles : rawRoles ? [rawRoles] : [];
+  const normalizedRoles = roleList
+    .flatMap((role) => (typeof role === 'string' ? role.split(/[,\s]+/) : []))
+    .map((role) => role.trim().toLowerCase())
+    .filter(Boolean);
+  const isClientUser = normalizedRoles.includes('client_user');
+  const queueQueryKey = isClientUser
+    ? ["/api/campaigns", campaignId, "queue"]
+    : ["/api/agents/me/queue", campaignId];
 
   const { data: campaign } = useQuery<Campaign>({
     queryKey: ["/api/campaigns", campaignId],
   });
 
   const { data: queueItems = [], isLoading: queueLoading } = useQuery<QueueItem[]>({
-    queryKey: ["/api/agents/me/queue", campaignId],
+    queryKey: queueQueryKey,
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/agents/me/queue?campaignId=${campaignId}`);
+      const response = isClientUser
+        ? await apiRequest('GET', `/api/campaigns/${campaignId}/queue`)
+        : await apiRequest('GET', `/api/agents/me/queue?campaignId=${campaignId}`);
       return response.json();
     },
     enabled: !!campaignId && !!user?.id,
@@ -129,7 +141,7 @@ export default function CampaignQueuePage() {
         variant: data.assigned === 0 ? "destructive" : "default",
         duration: 8000,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/agents/me/queue", campaignId] });
+      queryClient.invalidateQueries({ queryKey: queueQueryKey });
       queryClient.invalidateQueries({ queryKey: ["/api/campaigns", campaignId, "account-stats"] });
     },
     onError: (error: any) => {
@@ -144,7 +156,7 @@ export default function CampaignQueuePage() {
   const handleRemoveFromQueue = async (queueItemId: string) => {
     try {
       await apiRequest("DELETE", `/api/campaigns/${campaignId}/queue/${queueItemId}`);
-      queryClient.invalidateQueries({ queryKey: ["/api/agents/me/queue", campaignId] });
+      queryClient.invalidateQueries({ queryKey: queueQueryKey });
       queryClient.invalidateQueries({ queryKey: ["/api/campaigns", campaignId, "account-stats"] });
       toast({
         title: "Contact Removed",
@@ -187,25 +199,27 @@ export default function CampaignQueuePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refillQueueMutation.mutate()}
-            disabled={refillQueueMutation.isPending}
-            data-testid="button-refill-queue"
-          >
-            {refillQueueMutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Adding Contacts...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Refill Queue
-              </>
-            )}
-          </Button>
+          {!isClientUser && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refillQueueMutation.mutate()}
+              disabled={refillQueueMutation.isPending}
+              data-testid="button-refill-queue"
+            >
+              {refillQueueMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Adding Contacts...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Refill Queue
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -344,7 +358,7 @@ export default function CampaignQueuePage() {
                         {new Date(item.queuedAt).toLocaleString()}
                       </TableCell>
                       <TableCell>
-                        {item.status === "queued" && (
+                        {!isClientUser && item.status === "queued" && (
                           <Button
                             variant="ghost"
                             size="sm"

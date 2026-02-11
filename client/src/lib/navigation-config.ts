@@ -90,14 +90,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     id: 'ai-intelligence',
     label: 'AI & Intelligence',
     domain: NAVIGATION_DOMAINS.AI_INTELLIGENCE,
-    roles: MANAGEMENT_ROLES,
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
     description: 'AI agents, organization intelligence, and prompt configuration',
     items: [
       {
         id: 'ai-studio',
         title: 'AI Studio',
         icon: 'Sparkles',
-        roles: MANAGEMENT_ROLES,
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
         items: [
           {
             id: 'ai-dashboard',
@@ -125,7 +125,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             id: 'preview-studio',
             title: 'Preview Studio',
             url: '/preview-studio',
-            roles: MANAGEMENT_ROLES,
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
             description: 'Test and preview AI agent behavior',
           },
           {
@@ -288,7 +288,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     id: 'campaigns',
     label: 'Campaigns & Execution',
     domain: NAVIGATION_DOMAINS.CAMPAIGNS,
-    roles: [...MANAGEMENT_ROLES, USER_ROLES.AGENT],
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.AGENT, USER_ROLES.CLIENT_USER],
     description: 'Campaign management, agent console, and lead review',
     items: [
       {
@@ -296,7 +296,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         title: 'Campaigns',
         url: '/campaigns',
         icon: 'Megaphone',
-        roles: MANAGEMENT_ROLES,
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
         description: 'Unified campaign management for email and phone',
       },
       {

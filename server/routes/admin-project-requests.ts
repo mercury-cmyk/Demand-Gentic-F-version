@@ -281,7 +281,6 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
             dialMode: (mappedType === 'email' || project.projectType === 'email_campaign') ? undefined : 'ai_agent',
             aiAgentSettings: aiAgentSettings, // Required for AI orchestrator to initiate calls
             ownerId: userId,
-            createdBy: userId,
             approvalStatus: 'published',
             // Attach contexts from intake
             intakeRequestId: intakeRequestData?.id || null,
@@ -551,6 +550,14 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 
 // ==================== EDIT PROJECT ====================
 
+const enabledFeaturesSchema = z.object({
+  emailCampaignTest: z.boolean(),
+  campaignQueueView: z.boolean(),
+  previewStudio: z.boolean(),
+  campaignCallTest: z.boolean(),
+  voiceSelection: z.boolean(),
+}).optional();
+
 const editSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
@@ -559,6 +566,7 @@ const editSchema = z.object({
   landingPageUrl: z.string().url().optional().or(z.literal('')),
   projectFileUrl: z.string().url().optional().or(z.literal('')),
   status: z.enum(['draft', 'pending', 'active', 'paused', 'completed', 'archived', 'rejected']).optional(),
+  enabledFeatures: enabledFeaturesSchema,
 });
 
 /**
@@ -592,6 +600,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     if (parsed.landingPageUrl !== undefined) updateData.landingPageUrl = parsed.landingPageUrl || null;
     if (parsed.projectFileUrl !== undefined) updateData.projectFileUrl = parsed.projectFileUrl || null;
     if (parsed.status !== undefined) updateData.status = parsed.status;
+    if (parsed.enabledFeatures !== undefined) updateData.enabledFeatures = parsed.enabledFeatures;
 
     // Update the project
     const [updatedProject] = await db
@@ -671,7 +680,7 @@ Generate a JSON configuration with:
   "successCriteria": "What defines success for this campaign"
 }`;
 
-    const config = await generateJSON(prompt, { temperature: 0.4 });
+    const config = await generateJSON(prompt, { temperature: 0.4 }) as { objective?: string; targetAudience?: string; talkingPoints?: string[] | null; successCriteria?: string };
     return {
       objective: config.objective || project.description || 'Lead generation campaign',
       targetAudience: config.targetAudience || '',

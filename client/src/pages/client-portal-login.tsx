@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation } from 'wouter';
+import { useLocation, Link } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -92,6 +92,11 @@ export default function ClientPortalLogin() {
                   data-testid="input-password"
                 />
               </div>
+            </div>
+            <div className="flex justify-end">
+              <Link href="/forgot-password?type=client" className="text-sm text-primary hover:underline">
+                Forgot password?
+              </Link>
             </div>
           </CardContent>
           <CardFooter>

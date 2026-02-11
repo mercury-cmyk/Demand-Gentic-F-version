@@ -32,6 +32,8 @@ import {
   // Router service
   selectNumber,
   isNumberPoolEnabled,
+  getNumberPoolStatus,
+  forceReleaseAllNumbers,
   // Reputation engine
   calculateReputation,
   recalculateAllReputations,
@@ -277,12 +279,27 @@ router.get('/stats', asyncHandler(async (req, res) => {
  * Get feature flag status
  */
 router.get('/status', asyncHandler(async (req, res) => {
+  const poolLockStatus = getNumberPoolStatus();
   res.json({
     success: true,
     data: {
       enabled: isNumberPoolEnabled(),
       fallbackNumber: process.env.TELNYX_FROM_NUMBER ? '(configured)' : '(not configured)',
+      locks: poolLockStatus,
     },
+  });
+}));
+
+/**
+ * POST /api/number-pool/force-release
+ * Emergency: force-release all stuck number locks
+ */
+router.post('/force-release', asyncHandler(async (req, res) => {
+  const released = forceReleaseAllNumbers();
+  res.json({
+    success: true,
+    data: { released },
+    message: `Force-released ${released} number(s) from in-use pool`,
   });
 }));
 

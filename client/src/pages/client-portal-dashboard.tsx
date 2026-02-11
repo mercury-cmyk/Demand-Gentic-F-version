@@ -84,6 +84,14 @@ interface ClientUser {
   isOwner?: boolean;
 }
 
+interface CampaignEnabledFeatures {
+  emailCampaignTest?: boolean;
+  campaignQueueView?: boolean;
+  previewStudio?: boolean;
+  campaignCallTest?: boolean;
+  voiceSelection?: boolean;
+}
+
 interface Campaign {
   id: string;
   name: string;
@@ -99,6 +107,7 @@ interface Campaign {
   startDate?: string;
   endDate?: string;
   targetQualifiedLeads?: number;
+  enabledFeatures?: CampaignEnabledFeatures | null;
   costPerLead?: string;
   orderNumber?: string;
   estimatedBudget?: string;
@@ -2428,17 +2437,19 @@ export default function ClientPortalDashboard() {
                 <p className="text-muted-foreground w-full md:w-auto">View and manage your AI-powered campaigns</p>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setPreviewCampaignId('');
-                    setShowPreviewStudio(true);
-                  }}
-                  className="gap-2 w-full sm:w-auto"
-                >
-                  <Play className="h-4 w-4" />
-                  Preview Studio
-                </Button>
+                {campaigns.some(c => c.enabledFeatures?.previewStudio) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setPreviewCampaignId('');
+                      setShowPreviewStudio(true);
+                    }}
+                    className="gap-2 w-full sm:w-auto"
+                  >
+                    <Play className="h-4 w-4" />
+                    Preview Studio
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -2630,25 +2641,28 @@ export default function ClientPortalDashboard() {
                  </Card>
               ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredCampaigns.map((campaign) => (
-                  <CampaignCard
-                    key={campaign.id}
-                    campaign={campaign}
-                    onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
-                    onTestAgent={(campaignId) => {
-                      setClientTestCampaignId(campaignId);
-                      setShowClientTestAgent(true);
-                    }}
-                    onSelectVoice={(campaignId) => {
-                      setClientVoiceCampaignId(campaignId);
-                      setShowClientVoiceSelect(true);
-                    }}
-                    onViewQueue={(campaignId) => {
-                      setQueueCampaignId(campaignId);
-                      setShowQueueDialog(true);
-                    }}
-                  />
-                ))}
+                {filteredCampaigns.map((campaign) => {
+                  const ef = campaign.enabledFeatures;
+                  return (
+                    <CampaignCard
+                      key={campaign.id}
+                      campaign={campaign}
+                      onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
+                      onTestAgent={ef?.campaignCallTest ? (campaignId) => {
+                        setClientTestCampaignId(campaignId);
+                        setShowClientTestAgent(true);
+                      } : undefined}
+                      onSelectVoice={ef?.voiceSelection ? (campaignId) => {
+                        setClientVoiceCampaignId(campaignId);
+                        setShowClientVoiceSelect(true);
+                      } : undefined}
+                      onViewQueue={ef?.campaignQueueView ? (campaignId) => {
+                        setQueueCampaignId(campaignId);
+                        setShowQueueDialog(true);
+                      } : undefined}
+                    />
+                  );
+                })}
               </div>
               )}
             </div>
@@ -3770,50 +3784,7 @@ export default function ClientPortalDashboard() {
               </div>
             </div>
 
-            {clientOrgData?.organization && (
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-5 w-5 text-muted-foreground" />
-                  <span className="text-sm font-medium text-muted-foreground">Organization:</span>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md">
-                  <span className="font-medium">{clientOrgData.organization.name}</span>
-                  {clientOrgData.organization.domain && (
-                    <Badge variant="secondary" className="text-[10px]">{clientOrgData.organization.domain}</Badge>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <Tabs defaultValue="settings" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-5 lg:w-auto">
-                <TabsTrigger value="settings">Settings</TabsTrigger>
-                <TabsTrigger value="service-catalog">Service Catalog</TabsTrigger>
-                <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
-                <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
-                <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="settings" className="space-y-4">
-                <AccountIntelligenceView />
-              </TabsContent>
-
-              <TabsContent value="service-catalog" className="space-y-4">
-                <ServiceCatalogTab organizationId={selectedOrgId} />
-              </TabsContent>
-
-              <TabsContent value="problem-framework" className="space-y-4">
-                <ProblemFrameworkTab organizationId={selectedOrgId} />
-              </TabsContent>
-
-              <TabsContent value="icp-positioning" className="space-y-4">
-                <ICPPositioningTab />
-              </TabsContent>
-
-              <TabsContent value="messaging-proof" className="space-y-4">
-                <MessagingProofTab />
-              </TabsContent>
-            </Tabs>
+            <AccountIntelligenceView />
           </div>
         )}
 

@@ -1170,6 +1170,138 @@ export async function updateContactSuppression(
   );
 }
 /**
+ * Fallback Lead Creator - Creates a lead record when processDisposition() is unavailable or fails.
+ *
+ * Used when:
+ * 1. Fallback sessions without a valid callAttemptId (voice-dialer.ts)
+ * 2. processDisposition() throws an error or returns success=false (voice-dialer.ts, telnyx-ai-bridge.ts)
+ *
+ * Includes duplicate prevention via telnyxCallId check.
+ */
+export async function createFallbackLead(params: {
+  campaignId: string;
+  contactId: string;
+  callDuration: number;
+  dialedNumber?: string;
+  recordingUrl?: string;
+  transcript?: string;
+  telnyxCallId?: string | null;
+  callAttemptId?: string | null;
+  source: string;
+}): Promise<string | null> {
+  const LOG = '[DispositionEngine:FallbackLead]';
+
+  try {
+    // Duplicate check by telnyxCallId
+    if (params.telnyxCallId) {
+      const [existing] = await db
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.telnyxCallId, params.telnyxCallId))
+        .limit(1);
+
+      if (existing) {
+        console.log(`${LOG} ⏭️ Lead already exists for telnyxCallId ${params.telnyxCallId} (lead: ${existing.id}), skipping`);
+        return existing.id;
+      }
+    }
+
+    // Duplicate check by callAttemptId
+    if (params.callAttemptId) {
+      const [existing] = await db
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.callAttemptId, params.callAttemptId))
+        .limit(1);
+
+      if (existing) {
+        console.log(`${LOG} ⏭️ Lead already exists for callAttemptId ${params.callAttemptId} (lead: ${existing.id}), skipping`);
+        return existing.id;
+      }
+    }
+
+    // Fetch contact info
+    const [contact] = await db
+      .select({
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        companyName: accounts.name,
+      })
+      .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(eq(contacts.id, params.contactId))
+      .limit(1);
+
+    const contactName = contact?.fullName ||
+      (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` :
+       contact?.firstName || contact?.lastName || 'Unknown');
+
+    const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 20;
+    const isShortDuration = params.callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
+    const qaStatus = isShortDuration ? 'under_review' : 'new';
+    const qaDecision = isShortDuration
+      ? `⚠️ SHORT DURATION ALERT: Call was only ${params.callDuration}s (minimum: ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Requires manual verification.`
+      : null;
+
+    const [newLead] = await db
+      .insert(leads)
+      .values({
+        campaignId: params.campaignId,
+        contactId: params.contactId,
+        callAttemptId: params.callAttemptId || undefined,
+        contactName,
+        contactEmail: contact?.email || undefined,
+        accountName: contact?.companyName || undefined,
+        qaStatus: qaStatus as 'new' | 'under_review',
+        qaDecision,
+        dialedNumber: params.dialedNumber,
+        recordingUrl: params.recordingUrl,
+        callDuration: params.callDuration,
+        transcript: params.transcript,
+        telnyxCallId: params.telnyxCallId || undefined,
+        notes: `Source: ${params.source}`,
+      })
+      .returning({ id: leads.id });
+
+    if (newLead) {
+      console.log(`${LOG} ✅ FALLBACK LEAD CREATED: ${newLead.id} | Contact: ${contactName} | Duration: ${params.callDuration}s | QA: ${qaStatus} | Source: ${params.source}`);
+
+      // Log activity
+      try {
+        await db.insert(activityLog).values({
+          entityType: 'lead',
+          entityId: newLead.id,
+          eventType: 'lead_created',
+          payload: {
+            contactId: params.contactId,
+            campaignId: params.campaignId,
+            callAttemptId: params.callAttemptId,
+            contactName,
+            callDuration: params.callDuration,
+            qaStatus,
+            isShortDuration,
+            source: params.source,
+            fallback: true,
+          },
+        });
+      } catch (logErr) {
+        console.error(`${LOG} Failed to log activity:`, logErr);
+      }
+
+      return newLead.id;
+    }
+
+    console.error(`${LOG} ❌ Insert did not return a lead ID`);
+    return null;
+  } catch (err) {
+    console.error(`${LOG} ❌ Failed to create fallback lead:`, err);
+    return null;
+  }
+}
+
+/**
  * Map disposition to disconnect reason for call quality tracking
  */
 function mapDispositionToDisconnectReason(disposition: string): 'completed' | 'hangup' | 'no_answer' | 'busy' | 'failed' | 'voicemail' {

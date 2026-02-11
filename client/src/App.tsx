@@ -20,6 +20,8 @@ import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
+import ForgotPasswordPage from "@/pages/forgot-password";
+import ResetPasswordPage from "@/pages/reset-password";
 import LandingPage from "@/pages/landing";
 import AboutPage from "@/pages/about";
 import PrivacyPolicyPage from "@/pages/privacy-policy";
@@ -598,6 +600,8 @@ function Router() {
 
       {/* Authentication */}
       <Route path="/login" component={LoginPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
 
       {/* Public lead forms and booking */}
       <Route path="/forms/:id" component={LeadFormPublicPage} />

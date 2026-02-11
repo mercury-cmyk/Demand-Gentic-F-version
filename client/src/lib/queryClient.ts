@@ -24,13 +24,18 @@ async function throwIfResNotOk(res: Response, url?: string) {
 
 export function getAuthHeaders(url?: string): HeadersInit {
   const headers: HeadersInit = {};
-  
+
   // Choose token based on current page context first, then URL
   // Admin pages calling /api/client-portal/admin/* should use admin token
   const isOnClientPortalPage = window.location.pathname.startsWith('/client-portal/');
-  const isClientPortal = isOnClientPortalPage ||
-                         (url?.includes('/api/client-portal/') && !url?.includes('/api/client-portal/admin/'));
-  
+  const isAdminClientPortalRoute = url?.includes('/api/client-portal/admin/');
+
+  // When on client portal pages, use client token for ALL API calls
+  // (including non-/api/client-portal/ routes like /api/campaigns/:id/test-calls)
+  // Exception: admin-specific client portal routes should use admin token
+  const isClientPortal = (isOnClientPortalPage && !isAdminClientPortalRoute) ||
+                         (url?.includes('/api/client-portal/') && !isAdminClientPortalRoute);
+
   if (isClientPortal) {
     const token = localStorage.getItem('clientPortalToken');
     if (token) {
@@ -42,7 +47,7 @@ export function getAuthHeaders(url?: string): HeadersInit {
       headers['Authorization'] = `Bearer ${token}`;
     }
   }
-  
+
   return headers;
 }
 

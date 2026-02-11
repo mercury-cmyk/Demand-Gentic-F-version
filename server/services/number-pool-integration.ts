@@ -227,8 +227,18 @@ export async function getCallerIdForCall(
       selectionReason: selection.selectionReason,
       isPoolNumber: false,
     });
-  } catch (error) {
+  } catch (error: any) {
+    // Propagate typed errors so the orchestrator can re-queue / pause properly.
+    // Never swallow these into a legacy fallback — it bypasses concurrent-call protection.
+    if (error?.name === 'NoAvailableNumberError' || error?.name === 'AllNumbersAtHourlyLimitError') {
+      console.warn(`[NumberPoolIntegration] Propagating ${error.name} to caller for re-queue/pause`);
+      throw error;
+    }
     console.error('[NumberPoolIntegration] Selection error:', error);
+    if (isNumberPoolEnabled()) {
+      // Pool is enabled — don't fall back to untracked legacy number
+      throw error;
+    }
     return recordAndReturn(useLegacyCallerId('selection_error'));
   }
 }

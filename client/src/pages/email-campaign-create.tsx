@@ -1,4 +1,4 @@
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { CampaignWizard, type CampaignWizardStep } from "@/components/campaign-builder/campaign-wizard";
 import { StepClientProject } from "@/components/campaign-builder/step-client-project";
 import { Step1AudienceSelection } from "@/components/campaign-builder/step1-audience-selection";
@@ -12,6 +12,12 @@ import { apiRequest } from "@/lib/queryClient";
 export default function EmailCampaignCreatePage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  // Read client/project from URL query params (e.g. from project approval flow)
+  const search = useSearch();
+  const searchParams = new URLSearchParams(search);
+  const urlClientId = searchParams.get('clientId') || '';
+  const urlProjectId = searchParams.get('projectId') || '';
 
   const steps: CampaignWizardStep[] = [
     {
@@ -142,6 +148,10 @@ export default function EmailCampaignCreatePage() {
         steps={steps}
         onComplete={handleComplete}
         onCancel={handleCancel}
+        initialData={{
+          ...(urlClientId && { clientAccountId: urlClientId }),
+          ...(urlProjectId && { projectId: urlProjectId }),
+        }}
       />
     </div>
   );

@@ -83,7 +83,7 @@ const initiateTestCallSchema = z.object({
  * Initiate a test call for a specific campaign
  * This uses the campaign's actual AI agent and queue system to validate real behavior
  */
-router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "campaign_manager", "client"), async (req, res) => {
+router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId } = req.params;
     const userId = req.user?.userId;
@@ -93,8 +93,8 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
 
     console.log("[Campaign Test Call] Request received:", { campaignId, userId, isClient, isWorkOrderSource, body: req.body });
 
-    // Guard: calls blocked by default — must be enabled in Telephony settings
-    if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
+    // Guard: in dev, calls blocked by default — must be enabled in Telephony settings. Production always allows calls.
+    if (process.env.NODE_ENV !== 'production' && process.env.CALL_EXECUTION_ENABLED !== 'true') {
       return res.status(403).json({
         message: "Call execution is not enabled. Go to Settings > Telephony and enable call execution."
       });
@@ -509,9 +509,20 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
  * GET /api/campaigns/:campaignId/test-calls
  * Get all test calls for a campaign
  */
-router.get("/:campaignId/test-calls", requireAuth, async (req, res) => {
+router.get("/:campaignId/test-calls", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId } = req.params;
+    const isClient = req.user?.role === 'client';
+    const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
+
+    // Client ownership check: verify client has access to this campaign
+    if (isClient) {
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign || campaign.clientAccountId !== clientAccountId) {
+        return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
+      }
+    }
+
     const { limit = '20', offset = '0' } = req.query;
 
     const testCalls = await db
@@ -566,9 +577,19 @@ router.get("/:campaignId/test-calls", requireAuth, async (req, res) => {
  * GET /api/campaigns/:campaignId/test-calls/:testCallId
  * Get a specific test call with full details
  */
-router.get("/:campaignId/test-calls/:testCallId", requireAuth, async (req, res) => {
+router.get("/:campaignId/test-calls/:testCallId", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
+    const isClient = req.user?.role === 'client';
+    const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
+
+    // Client ownership check
+    if (isClient) {
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign || campaign.clientAccountId !== clientAccountId) {
+        return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
+      }
+    }
 
     const [testCall] = await db
       .select()
@@ -610,9 +631,19 @@ router.get("/:campaignId/test-calls/:testCallId", requireAuth, async (req, res) 
  * POST /api/campaigns/:campaignId/test-calls/:testCallId/analyze
  * Analyze a completed test call and generate improvement suggestions
  */
-router.post("/:campaignId/test-calls/:testCallId/analyze", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
+router.post("/:campaignId/test-calls/:testCallId/analyze", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
+    const isClient = req.user?.role === 'client';
+    const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
+
+    // Client ownership check
+    if (isClient) {
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign || campaign.clientAccountId !== clientAccountId) {
+        return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
+      }
+    }
 
     // Get the test call
     const [testCall] = await db
@@ -817,9 +848,20 @@ Return ONLY valid JSON, no other text.`;
  * PATCH /api/campaigns/:campaignId/test-calls/:testCallId
  * Update a test call (e.g., add notes, mark result)
  */
-router.patch("/:campaignId/test-calls/:testCallId", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
+router.patch("/:campaignId/test-calls/:testCallId", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
+    const isClient = req.user?.role === 'client';
+    const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
+
+    // Client ownership check
+    if (isClient) {
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign || campaign.clientAccountId !== clientAccountId) {
+        return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
+      }
+    }
+
     const { testResult, testNotes } = req.body;
 
     const [updated] = await db.update(campaignTestCalls)
@@ -942,7 +984,7 @@ router.post("/webhook", async (req, res) => {
             durationSeconds,
             testNotes: failureNote || undefined,
             disposition: durationSeconds === 0 && !testCall?.answeredAt
-              ? (endedCallInfo.isInternational ? 'routing_failure' : 'no_answer')
+              ? (endedCallInfo.isInternational ? 'invalid_data' : 'no_answer')
               : undefined,
             updatedAt: new Date(),
           })
@@ -1017,9 +1059,19 @@ router.post("/webhook", async (req, res) => {
  * GET /api/campaigns/:campaignId/test-calls/summary
  * Get summary statistics for test calls in a campaign
  */
-router.get("/:campaignId/test-calls-summary", requireAuth, async (req, res) => {
+router.get("/:campaignId/test-calls-summary", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId } = req.params;
+    const isClient = req.user?.role === 'client';
+    const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
+
+    // Client ownership check
+    if (isClient) {
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign || campaign.clientAccountId !== clientAccountId) {
+        return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
+      }
+    }
 
     const stats = await db
       .select({

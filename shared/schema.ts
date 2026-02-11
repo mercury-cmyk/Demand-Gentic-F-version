@@ -787,6 +787,26 @@ export const users = pgTable("users", {
   usernameIdx: index("users_username_idx").on(table.username),
 }));
 
+// ==================== PASSWORD RESET TOKENS ====================
+
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  userId: varchar("user_id", { length: 36 }),
+  clientUserId: varchar("client_user_id", { length: 36 }),
+  email: text("email").notNull(),
+  userType: text("user_type").notNull().default('internal'),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  tokenIdx: index("password_reset_tokens_token_idx").on(table.token),
+  emailIdx: index("password_reset_tokens_email_idx").on(table.email),
+}));
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+
 // ==================== PROMPT REGISTRY ====================
 
 // Prompt Type Enum
@@ -7116,6 +7136,21 @@ export const clientProjects = pgTable("client_projects", {
     enabled: true,
     autoApproveThreshold: 85,
     requireManualReview: false
+  }),
+
+  // Client-facing feature toggles per project
+  enabledFeatures: jsonb("enabled_features").$type<{
+    emailCampaignTest: boolean;
+    campaignQueueView: boolean;
+    previewStudio: boolean;
+    campaignCallTest: boolean;
+    voiceSelection: boolean;
+  }>().default({
+    emailCampaignTest: false,
+    campaignQueueView: false,
+    previewStudio: false,
+    campaignCallTest: false,
+    voiceSelection: false,
   }),
 
   // Approval workflow

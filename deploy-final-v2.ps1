@@ -18,8 +18,6 @@ $old_secret_vars = @(
     "BASE_URL",
     "TELNYX_WEBHOOK_URL",
     "TELNYX_TEXML_APP_ID",
-    "ELEVENLABS_API_KEY",
-    "ELEVENLABS_WEBHOOK_SECRET",
     "GOOGLE_CLOUD_PROJECT",
     "GCP_PROJECT_ID",
     "GCS_PROJECT_ID",
@@ -183,5 +181,7 @@ gcloud run deploy demandgentic-api `
   --allow-unauthenticated `
   --vpc-connector pivotal-connector `
   --vpc-egress private-ranges-only `
+  --max-instances 1 `
+  --concurrency 500 `
   --set-secrets=$secrets `
   --set-env-vars=$env_vars
