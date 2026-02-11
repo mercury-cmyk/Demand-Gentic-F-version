@@ -37,14 +37,14 @@ async function requireAccountsContactsFeature(req: Request, res: Response, next:
     .where(
       and(
         eq(clientFeatureAccess.clientAccountId, clientAccountId),
-        eq(clientFeatureAccess.feature, 'accounts_contacts'),
-        eq(clientFeatureAccess.isEnabled, true)
+        eq(clientFeatureAccess.feature, 'accounts_contacts')
       )
     )
     .limit(1);
 
-  if (!feature) {
-    return res.status(403).json({ 
+  // Default to enabled when no explicit record exists (no restrictions)
+  if (feature && !feature.isEnabled) {
+    return res.status(403).json({
       message: 'Accounts & Contacts feature is not enabled for your account',
       featureRequired: 'accounts_contacts'
     });
@@ -68,14 +68,14 @@ async function requireBulkUploadFeature(req: Request, res: Response, next: Funct
     .where(
       and(
         eq(clientFeatureAccess.clientAccountId, clientAccountId),
-        eq(clientFeatureAccess.feature, 'bulk_upload'),
-        eq(clientFeatureAccess.isEnabled, true)
+        eq(clientFeatureAccess.feature, 'bulk_upload')
       )
     )
     .limit(1);
 
-  if (!feature) {
-    return res.status(403).json({ 
+  // Default to enabled when no explicit record exists (no restrictions)
+  if (feature && !feature.isEnabled) {
+    return res.status(403).json({
       message: 'Bulk upload feature is not enabled for your account',
       featureRequired: 'bulk_upload'
     });

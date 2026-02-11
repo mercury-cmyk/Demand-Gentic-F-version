@@ -59,6 +59,10 @@ import {
   AlertTriangle,
   Crosshair,
   MessageSquareText,
+  Mail,
+  Users,
+  BarChart3,
+  Mic,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -118,6 +122,7 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
+      { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
     ],
   },
   {
@@ -129,6 +134,16 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
       { name: 'Generative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
+    ],
+  },
+  {
+    id: 'analytics',
+    label: 'Analytics & Insights',
+    items: [
+      { name: 'Call Reports', href: '/client-portal/call-reports', icon: Phone },
+      { name: 'Call Recordings', href: '/client-portal/call-recordings', icon: Mic },
+      { name: 'Analytics', href: '/client-portal/analytics', icon: BarChart3 },
+      { name: 'Conversation Quality', href: '/client-portal/conversation-quality', icon: MessageSquareText },
     ],
   },
   {

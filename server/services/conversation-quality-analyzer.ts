@@ -257,6 +257,329 @@ function ensurePromptUpdates(value: unknown): ConversationQualityPromptUpdate[] 
     .filter(Boolean) as ConversationQualityPromptUpdate[];
 }
 
+type ParsedTranscript = {
+  agentLines: string[];
+  contactLines: string[];
+  allLines: string[];
+  hasRoleLabels: boolean;
+};
+
+function parseTranscriptRoles(transcript: string): ParsedTranscript {
+  const lines = transcript
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const agentLines: string[] = [];
+  const contactLines: string[] = [];
+  let hasRoleLabels = false;
+
+  for (const line of lines) {
+    const agentMatch = line.match(/^(agent|assistant|ai|bot)\s*:\s*(.*)$/i);
+    if (agentMatch) {
+      agentLines.push(agentMatch[2].trim());
+      hasRoleLabels = true;
+      continue;
+    }
+    const contactMatch = line.match(/^(contact|prospect|user|caller|lead)\s*:\s*(.*)$/i);
+    if (contactMatch) {
+      contactLines.push(contactMatch[2].trim());
+      hasRoleLabels = true;
+      continue;
+    }
+  }
+
+  return { agentLines, contactLines, allLines: lines, hasRoleLabels };
+}
+
+function normalizeLine(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function countWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function containsAny(haystack: string, phrases: string[]): boolean {
+  return phrases.some((phrase) => haystack.includes(phrase));
+}
+
+function detectRepeatedAgentPhrase(agentLines: string[], transcriptLower: string): string | null {
+  const repeatedLiteral = transcriptLower.match(/let me check that/gi);
+  if (repeatedLiteral && repeatedLiteral.length >= 2) {
+    return "let me check that";
+  }
+
+  const seen = new Set<string>();
+  for (const line of agentLines) {
+    const normalized = normalizeLine(line);
+    if (!normalized) continue;
+    const wordCount = normalized.split(" ").filter(Boolean).length;
+    if (wordCount < 3) continue;
+    if (seen.has(normalized)) {
+      return line.trim();
+    }
+    seen.add(normalized);
+  }
+  return null;
+}
+
+function detectTopChallengeIssues(
+  input: ConversationQualityInput,
+  transcript: string
+): ConversationQualityIssue[] {
+  const trimmed = transcript.trim();
+  if (!trimmed) return [];
+
+  const transcriptLower = trimmed.toLowerCase();
+  const parsed = parseTranscriptRoles(trimmed);
+  const agentText = parsed.agentLines.join(" ").toLowerCase();
+  const contactText = parsed.contactLines.join(" ").toLowerCase();
+
+  const agentSpoke = parsed.agentLines.length > 0 || transcriptLower.includes("agent:");
+  const contactSpoke = parsed.contactLines.length > 0 || transcriptLower.includes("contact:") || transcriptLower.includes("user:");
+
+  const wordCount = countWords(trimmed);
+  const duration = input.callDurationSeconds;
+
+  const hasVoicemailIndicators = containsAny(transcriptLower, [
+    "voicemail",
+    "leave a message",
+    "leave your message",
+    "after the beep",
+    "after the tone",
+    "mailbox is full",
+    "not available",
+    "record your message",
+  ]);
+
+  const hasIdentityQuestion = containsAny(transcriptLower, [
+    "am i speaking with",
+    "may i speak with",
+    "is this",
+    "speaking with",
+  ]);
+
+  const hasIntro = containsAny(transcriptLower, [
+    "calling on behalf of",
+    "my name is",
+    "this is",
+    "i'm calling from",
+    "i am calling from",
+  ]);
+
+  const hasPurpose = containsAny(transcriptLower, [
+    "calling to",
+    "calling about",
+    "reason for the call",
+    "i'm calling to",
+    "i am calling to",
+    "to offer",
+    "to share",
+    "white paper",
+    "free white paper",
+    "can i send",
+    "send it to your email",
+  ]);
+
+  const hasOffer = containsAny(transcriptLower, [
+    "white paper",
+    "free white paper",
+    "offer",
+    "send it",
+    "send this",
+  ]);
+
+  const hasAudioComplaint = containsAny(transcriptLower, [
+    "can't hear",
+    "cannot hear",
+    "bad line",
+    "terrible line",
+    "breaking up",
+    "cutting out",
+    "static",
+    "crackly",
+    "distorted",
+    "poor connection",
+    "audio is bad",
+  ]);
+
+  const bookingObjective = (input.campaignObjective || "").toLowerCase();
+  const requiresBooking = /working session|book|schedule|appointment|meeting|demo/.test(bookingObjective);
+  const hasBookingLanguage = containsAny(transcriptLower, [
+    "schedule",
+    "calendar",
+    "meeting",
+    "book",
+    "time works",
+    "availability",
+    "send a calendar",
+    "send an invite",
+  ]);
+
+  const issues: ConversationQualityIssue[] = [];
+  const issueMap = new Map<string, ConversationQualityIssue>();
+
+  const pushIssue = (issue: ConversationQualityIssue) => {
+    const existing = issueMap.get(issue.type);
+    if (!existing) {
+      issueMap.set(issue.type, issue);
+      return;
+    }
+    const severityRank = { low: 1, medium: 2, high: 3 } as const;
+    const chosenSeverity =
+      severityRank[issue.severity] > severityRank[existing.severity] ? issue.severity : existing.severity;
+    issueMap.set(issue.type, {
+      ...existing,
+      ...issue,
+      severity: chosenSeverity,
+      description: existing.description || issue.description,
+      recommendation: existing.recommendation || issue.recommendation,
+    });
+  };
+
+  if (contactSpoke && !agentSpoke && (duration === undefined || duration >= 5)) {
+    pushIssue({
+      type: "agent_non_response",
+      severity: "high",
+      description:
+        "The agent failed to deliver any speech, leaving the contact hanging. This is a critical failure that prevents any campaign objective from being pursued.",
+      recommendation:
+        "Review system logs for this call to diagnose root cause (STT failure, audio channel issue, agent crash). Implement a fail-safe greeting that plays if the primary agent response times out. Immediate technical review of the agent deployment, voice settings, and call initiation process.",
+    });
+  }
+
+  const shortCall = duration !== undefined && duration < 20;
+  const minimalConversation = wordCount < 40 || parsed.agentLines.length + parsed.contactLines.length < 2;
+
+  if (!hasVoicemailIndicators && shortCall && minimalConversation && !issueMap.has("agent_non_response")) {
+    pushIssue({
+      type: "premature_termination",
+      severity: "high",
+      description:
+        "The call ended before any meaningful conversation could occur, preventing campaign execution.",
+      recommendation:
+        "Review call connection quality and initial audio. Ensure the agent's opening is clear and complete before the contact responds. Review call timing strategies and dialing patterns to improve contact rates. Consider time-of-day optimization for target personas.",
+    });
+  }
+
+  if (agentSpoke && hasIntro && !hasPurpose && (duration === undefined || duration < 30)) {
+    pushIssue({
+      type: "flow_execution",
+      severity: "high",
+      description:
+        "The agent's opening was incomplete and ineffective. After the incorrect name confirmation, the agent began the company introduction but was cut off before stating the purpose.",
+      recommendation:
+        "The agent must complete the full introductory sequence crisply. After identity confirmation (correct or corrected), immediately state the purpose to capture attention: \"This is Laomedeia calling on behalf of UK Export Finance. I'm calling to offer our free 'Leading with Finance' white paper...\" Ensure the agent's opening script executes reliably. The first critical step is a clear, grammatically correct request to speak with the contact (e.g., \"May I speak with [Contact Name]?\"). If an audio issue is detected, use a standard recovery phrase before attempting to restart the opening.",
+    });
+  }
+
+  if (agentSpoke && hasIdentityQuestion && !hasPurpose && (duration === undefined || duration < 25)) {
+    pushIssue({
+      type: "failed_engagement",
+      severity: "high",
+      description:
+        "Agent failed to establish a reason for the call or create engagement before the contact ended the interaction.",
+      recommendation:
+        "Train the agent to pivot more quickly to the core value statement immediately after confirming identity. The gap between \"Hello, is that [Contact]?\" and delivering the purpose was too long, allowing disengagement. Consider list quality or contact pre-qualification.",
+    });
+  }
+
+  const repeatedPhrase = detectRepeatedAgentPhrase(parsed.agentLines, transcriptLower);
+  if (repeatedPhrase && normalizeLine(repeatedPhrase) === "let me check that") {
+    pushIssue({
+      type: "flow_disruption",
+      severity: "high",
+      description:
+        "Agent repeated \"Let me check that\" twice, creating an unnatural conversational pattern that may have contributed to the contact's AI detection.",
+      recommendation:
+        "Review system logic to prevent repetitive phrases during verification pauses. Ensure the agent persists through initial objections to deliver at least the core value proposition, even when not speaking to the primary contact.",
+    });
+  }
+
+  if (hasAudioComplaint) {
+    pushIssue({
+      type: "technical_quality",
+      severity: "high",
+      description:
+        "Audio transmission quality was insufficient for conversation, causing immediate call failure.",
+      recommendation:
+        "Review STT/audio pipeline quality and implement quality monitoring to prevent wasted calls. Improve audio latency handling and implement better interruption detection.",
+    });
+  }
+
+  if (hasVoicemailIndicators && (hasOffer || agentSpoke)) {
+    pushIssue({
+      type: "flow_deviation",
+      severity: "high",
+      description:
+        "Agent delivered the full opening pitch to an automated voicemail message, wasting time and creating a nonsensical recording.",
+      recommendation:
+        "Enhance the system's real-time audio analysis to detect voicemail cues within the first 2-3 seconds of a response and abort the conversational script immediately.",
+    });
+  }
+
+  if (duration !== undefined && duration < 10 && minimalConversation && !hasVoicemailIndicators && !agentSpoke && !contactSpoke) {
+    pushIssue({
+      type: "technical_failure",
+      severity: "high",
+      description:
+        "Call terminated prematurely due to technical issues, preventing any campaign objectives from being addressed.",
+      recommendation:
+        "Investigate root cause of technical failure (STT, TTS, or connectivity) and implement preventive measures. Review audio connection protocols and implement faster detection of one-way audio situations.",
+    });
+  }
+
+  if (requiresBooking && agentSpoke && !hasBookingLanguage) {
+    pushIssue({
+      type: "campaign_objective_failure",
+      severity: "high",
+      description:
+        "Zero progress was made toward the campaign objective of booking a working session.",
+      recommendation:
+        "Ensure agent is correctly triggered to begin its script upon call connection. Add a pre-call audio check. Monitor for early disconnects and flag calls that end before the 30-second mark without a clear reason (e.g., gatekeeper refusal).",
+    });
+  }
+
+  issues.push(...issueMap.values());
+  return issues;
+}
+
+function mergeIssues(
+  primary: ConversationQualityIssue[],
+  secondary: ConversationQualityIssue[]
+): ConversationQualityIssue[] {
+  const severityRank: Record<ConversationIssueSeverity, number> = { low: 1, medium: 2, high: 3 };
+  const merged = new Map<string, ConversationQualityIssue>();
+
+  for (const issue of primary) {
+    merged.set(issue.type, issue);
+  }
+
+  for (const issue of secondary) {
+    const existing = merged.get(issue.type);
+    if (!existing) {
+      merged.set(issue.type, issue);
+      continue;
+    }
+    const severity =
+      severityRank[issue.severity] > severityRank[existing.severity] ? issue.severity : existing.severity;
+    merged.set(issue.type, {
+      ...existing,
+      ...issue,
+      severity,
+      description: existing.description || issue.description,
+      recommendation: existing.recommendation || issue.recommendation,
+    });
+  }
+
+  return Array.from(merged.values());
+}
+
 function truncateTranscript(transcript: string): { text: string; truncated: boolean } {
   if (transcript.length <= MAX_TRANSCRIPT_CHARS) {
     return { text: transcript, truncated: false };
@@ -529,6 +852,10 @@ Return JSON with this exact shape and no extra keys:
     const dispositionReview = raw.dispositionReview || {};
     const qualificationAssessment = raw.qualificationAssessment || {};
 
+    const modelIssues = ensureIssues(raw.issues);
+    const ruleIssues = input.analysisStage === "realtime" ? [] : detectTopChallengeIssues(input, transcriptText);
+    const mergedIssues = mergeIssues(modelIssues, ruleIssues);
+
     return {
       status: "ok",
       overallScore: clampScore(raw.overallScore, 0),
@@ -566,7 +893,7 @@ Return JSON with this exact shape and no extra keys:
         deviations: ensureStringArray(qualificationAssessment.deviations),
       },
       breakdowns: ensureBreakdowns(raw.breakdowns),
-      issues: ensureIssues(raw.issues),
+      issues: mergedIssues,
       performanceGaps: ensureStringArray(raw.performanceGaps),
       recommendations: ensureRecommendations(raw.recommendations),
       promptUpdates: ensurePromptUpdates(raw.promptUpdates),

@@ -117,6 +117,12 @@ import { ClientPortalLayout } from "@/components/client-portal/layout/client-por
 import AgentCatalogPage from "@/pages/client-portal/agent-catalog";
 import ClientPortalIntelligence from "@/pages/client-portal-intelligence";
 import ClientPortalGenerativeStudio from "@/pages/client-portal-generative-studio";
+import ClientPortalCampaignQueue from "@/pages/client-portal-campaign-queue";
+import ClientPortalCallReports from "@/pages/client-portal-call-reports";
+import ClientPortalCallRecordings from "@/pages/client-portal-call-recordings";
+import ClientPortalAnalytics from "@/pages/client-portal-analytics";
+import ClientPortalConversationQuality from "@/pages/client-portal-conversation-quality";
+import ClientPortalEmailCampaigns from "@/pages/client-portal-email-campaigns";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
 import QAReviewCenter from "@/pages/qa-review-center";
@@ -660,6 +666,36 @@ function Router() {
       <Route path="/client-portal/argyle-events">
         <ClientPortalProtectedRoute>
           <ArgyleEventsPage />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/campaign-queue/:id">
+        <ClientPortalProtectedRoute>
+          <ClientPortalCampaignQueue />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/call-reports">
+        <ClientPortalProtectedRoute>
+          <ClientPortalCallReports />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/call-recordings">
+        <ClientPortalProtectedRoute>
+          <ClientPortalCallRecordings />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/analytics">
+        <ClientPortalProtectedRoute>
+          <ClientPortalAnalytics />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/conversation-quality">
+        <ClientPortalProtectedRoute>
+          <ClientPortalConversationQuality />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/email-campaigns">
+        <ClientPortalProtectedRoute>
+          <ClientPortalEmailCampaigns />
         </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/services">

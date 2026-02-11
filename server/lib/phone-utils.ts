@@ -68,14 +68,15 @@ export function getBestPhoneForContact(contact: {
   mobilePhoneE164?: string | null;
   hqPhone?: string | null;
   hqPhoneE164?: string | null;
+  hqCountry?: string | null;
   country?: string | null;
 }): { phone: string | null; type: 'direct' | 'mobile' | 'hq' | null } {
   const country = contact.country || undefined;
 
   // Helper: normalize using country-aware formatter, then fallback to heuristic
-  function normalize(phone: string): string | null {
+  function normalize(phone: string, overrideCountry?: string): string | null {
     // Try country-aware normalization first (handles local numbers correctly)
-    const countryAware = formatPhoneWithCountryCode(phone, country);
+    const countryAware = formatPhoneWithCountryCode(phone, overrideCountry || country);
     if (countryAware && isValidE164(countryAware)) return countryAware;
     // Fallback to heuristic normalization
     const heuristic = normalizeToE164(phone);
@@ -100,12 +101,13 @@ export function getBestPhoneForContact(contact: {
     if (normalized) return { phone: normalized, type: 'mobile' };
   }
 
-  // Last resort: HQ phone
+  // Last resort: HQ phone (use account's country, not contact's country)
   if (contact.hqPhoneE164 && isValidE164(contact.hqPhoneE164)) {
     return { phone: contact.hqPhoneE164, type: 'hq' };
   }
   if (contact.hqPhone) {
-    const normalized = normalize(contact.hqPhone);
+    const hqCountry = contact.hqCountry || undefined;
+    const normalized = normalize(contact.hqPhone, hqCountry);
     if (normalized) return { phone: normalized, type: 'hq' };
   }
 

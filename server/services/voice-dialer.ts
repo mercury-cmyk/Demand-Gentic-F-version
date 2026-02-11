@@ -120,6 +120,8 @@ import {
   getCurrentTranscript,
   type TranscriptSegment,
 } from "./deepgram-realtime-transcription";
+// POST-CALL ANALYSIS: Comprehensive transcription + analysis after call ends
+import { schedulePostCallAnalysis } from "./post-call-analyzer";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -2246,6 +2248,18 @@ openaiWs.on("open", async () => {
         console.log(`${LOG_PREFIX} Sending greeting: "${openingScript.substring(0, 50)}..."`);
         session.audioDetection.hasGreetingSent = true;
         sendOpeningMessage(openaiWs, openingScript);
+
+        // SAFETY NET: If greeting was sent but no agent audio within 5s, retry once
+        if ((session as any).greetingRetryTimer) {
+          clearTimeout((session as any).greetingRetryTimer);
+        }
+        const greetingRetryTimer = setTimeout(() => {
+          if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
+            console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 5s — retrying opening message`);
+            sendOpeningMessage(openaiWs, openingScript);
+          }
+        }, 5000);
+        (session as any).greetingRetryTimer = greetingRetryTimer;
       };
 
       greetingCheckInterval = setInterval(() => {
@@ -2574,6 +2588,11 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           session.audioDetection.hasGreetingSent = true;
           console.log(`${LOG_PREFIX} ✅ Gemini responded naturally to prospect audio — greeting marked as sent`);
         }
+        // Clear the greeting retry timer — audio is flowing
+        if ((session as any).greetingRetryTimer) {
+          clearTimeout((session as any).greetingRetryTimer);
+          (session as any).greetingRetryTimer = null;
+        }
       } else if (audioOutChunks % 200 === 0) {
         console.log(`${LOG_PREFIX} 🎤 Audio:delta stats: ${audioOutChunks} chunks queued, buffer=${session.telnyxOutboundBuffer.length}B, frames_sent=${session.telnyxOutboundFramesSent}`);
       }
@@ -2782,14 +2801,26 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Fallback: If caller doesn't speak, send greeting.
     // This handles: silent pickups, voicemail that doesn't announce, etc.
+    // 3s is fast enough to avoid dead air but allows Deepgram to fire first if speech exists.
     const fallbackGreetingTimer = setTimeout(() => {
       if (session.isActive && !session.audioDetection.hasGreetingSent) {
-        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4.5s - sending greeting (fallback)`);
+        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 3s - sending greeting (fallback)`);
         session.audioDetection.hasGreetingSent = true;
         provider.sendOpeningMessage(openingScript);
       }
-    }, 4500);
+    }, 3000);
     (session as any).fallbackGreetingTimer = fallbackGreetingTimer; // Store to clear it later
+
+    // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 5s,
+    // force-retry the opening. This catches edge cases where the greeting was dropped
+    // (WebSocket reset, setup race condition, Gemini ignoring the trigger).
+    const greetingRetryTimer = setTimeout(() => {
+      if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
+        console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 5s — retrying opening message`);
+        provider.sendOpeningMessage(openingScript);
+      }
+    }, 5000);
+    (session as any).greetingRetryTimer = greetingRetryTimer;
 
     console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);
   } catch (error: any) {
@@ -3186,6 +3217,28 @@ Only AFTER completing these steps can you submit the disposition.`
         return {
           success: false,
           error: 'AUDIO ISSUE DETECTED: The prospect IS responding (saying hello). This indicates they cannot hear you clearly. DO NOT end the call. Instead: (1) Say "I apologize, can you hear me?" (2) Wait for their response (3) If they confirm, restart your greeting. Only end after 60+ seconds of COMPLETE silence with zero response.'
+        };
+      }
+
+      // MINIMUM TALKING POINT COMPLETION CHECK
+      // If the contact confirmed identity but the agent hasn't mentioned the white paper yet,
+      // block termination and force the agent to deliver the offer.
+      const identityConfirmed = session.conversationState?.identityConfirmed === true;
+      const whitePaperMentioned = agentTranscriptText.includes('white paper') ||
+        agentTranscriptText.includes('whitepaper') ||
+        agentTranscriptText.includes('free paper') ||
+        agentTranscriptText.includes('government support') ||
+        agentTranscriptText.includes('government programs') ||
+        agentTranscriptText.includes('send it across');
+      const isNotInterested = reason.includes('not interested') || reason.includes('declined') || reason.includes('refused');
+      const isExplicitStop = reason.includes('do not call') || reason.includes('stop calling') || reason.includes('remove');
+
+      if (identityConfirmed && !whitePaperMentioned && !isNotInterested && !isExplicitStop &&
+          session.detectedDisposition !== 'voicemail' && session.detectedDisposition !== 'invalid_data') {
+        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - White paper offer NOT delivered yet! Identity confirmed but key talking point missed.`);
+        return {
+          success: false,
+          error: 'STOP — you have NOT delivered the white paper offer yet. The purpose of this call is to offer the free white paper. Before ending, you MUST say: "Before I let you go, I just wanted to mention we have a free white paper on government programs for UK businesses — can I send it to your email?" Only AFTER they respond to this can you end the call.'
         };
       }
 
@@ -3626,6 +3679,18 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         session.audioFrameCount++;
         session.audioBytesSent += audioBuffer.length;
         session.lastAudioFrameTime = new Date();
+
+        if (session.audioFrameCount === 1) {
+          session.timingMetrics.firstAgentAudioAt = new Date();
+          if (!session.audioDetection.hasGreetingSent) {
+            session.audioDetection.hasGreetingSent = true;
+            console.log(`${LOG_PREFIX} ✅ OpenAI responded naturally — greeting marked as sent`);
+          }
+          if ((session as any).greetingRetryTimer) {
+            clearTimeout((session as any).greetingRetryTimer);
+            (session as any).greetingRetryTimer = null;
+          }
+        }
 
         // Cost tracking: record outgoing audio
         recordAudioOutput(session.callId, audioBuffer.length);
@@ -4711,41 +4776,36 @@ async function injectGeminiIdentityLockReminder(
       // Prospect asked a question immediately after confirming identity
       promptMessage = `[SYSTEM UPDATE: Identity CONFIRMED. The prospect just said: "${prospectTranscript}"
 
-They asked a direct question while confirming their identity. You MUST respond IMMEDIATELY.
+They asked a question. Respond IMMEDIATELY — value first, under 7 seconds:
 
-CRITICAL INSTRUCTIONS:
-1. Acknowledge their question briefly: "Great question — let me give you the quick version."
-2. Deliver a condensed introduction (20-30 seconds):
-   - Who you are and your company
-   - What you do in ONE sentence
-   - Why you're reaching out to THEM specifically
-3. Re-engage with a question: "Is that something you're focused on right now?"
+"I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
+
+Then STOP and WAIT for their response.
 
 RULES:
-- NEVER ask who you're speaking with (already confirmed)
-- NEVER wait for them to speak first
-- NEVER pause or hesitate
-- Respond NOW with your introduction that answers their question]`;
+- Lead with the VALUE — answer their curiosity with the offer immediately
+- Do NOT waste time on pleasantries — get to the white paper in the first sentence
+- NEVER ask discovery or qualification questions — just offer the white paper
+- Do NOT ask "would you be interested?" — just ask to send it
+- Your entire response MUST be under 7 seconds]`;
 
       console.log(`${LOG_PREFIX} [Gemini] EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript?.substring(0, 80) ?? ''}..."`);
     } else {
-      // Standard identity confirmation - proceed with introduction
-      promptMessage = `[SYSTEM UPDATE: Identity has been CONFIRMED. The person on the line is the intended contact.
+      // Standard identity confirmation - proceed with value-lead intro (5-7 seconds max)
+      promptMessage = `[SYSTEM UPDATE: Identity CONFIRMED. Speak IMMEDIATELY — value first, no pleasantries.
 
-You MUST speak IMMEDIATELY - do not wait for them to say anything else.
+Say this in ONE breath (under 7 seconds):
+"Hi [first name], I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
 
-Proceed directly to:
-1. Thank them: "Thanks for confirming! I really appreciate you taking a moment."
-2. Introduce yourself: "I'm calling from [Company]."
-3. Set expectations: "This isn't a sales call."
-4. State purpose briefly: Why you're calling them specifically.
-5. Ask an open-ended question to start the conversation.
+Then STOP and WAIT for their response.
 
-CRITICAL RULES:
-- NEVER ask "Am I speaking with..." or any identity question again
-- NEVER wait for them to speak first
-- NEVER pause or leave silence
-- Respond NOW with your introduction]`;
+RULES:
+- Lead with the VALUE (free white paper) — not with "thanks for confirming" or pleasantries
+- Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
+- NEVER ask "do you have a moment?" or "would you be interested?"
+- NEVER ask discovery or qualification questions
+- Your entire intro MUST be under 7 seconds — cut every unnecessary word
+- You MUST mention the white paper — this is the entire purpose of the call]`;
     }
 
     // Send as a text message that will prompt Gemini to respond
@@ -4849,54 +4909,42 @@ async function injectIdentityLockReminder(session: OpenAIRealtimeSession, prospe
     
     if (hasEarlyQuestion) {
       // Prospect asked a question immediately after confirming identity
-      // Agent must acknowledge and bridge to introduction
       responseInstructions = `The contact just confirmed their identity AND asked a direct question: "${prospectTranscript}"
 
 CRITICAL: You MUST respond IMMEDIATELY. Do NOT go silent. Do NOT pause.
 
-FOLLOW THIS EXACT PATTERN:
-1. Acknowledge their question briefly: "Great question — let me give you the quick version."
-2. Deliver a condensed introduction (20-30 seconds):
-   - Who you are and your company
-   - What you do in ONE sentence
-   - Why you're reaching out to THEM specifically
-3. Re-engage with a question: "Is that something you're focused on right now?" or "Does that make sense?"
+Lead with value first, under 7 seconds. Use this exact pattern:
+"Great question — quick version: I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
 
-EXAMPLE RESPONSE:
-"Absolutely — thanks for asking. I'm calling from [Company]. We help [target audience] with [key value proposition]. The reason I'm reaching out is [brief relevance to their role]. Is that something you're focused on right now?"
+Then STOP and WAIT for their response.
 
-DO NOT:
-- Ask who you're speaking with (already confirmed)
-- Wait for them to speak first
-- Pause or hesitate
-- Say only "um" or "let me think"
-- Go silent for more than 1 second
-
-Speak NOW and deliver your response to their question while introducing yourself.`;
+RULES:
+- Lead with the VALUE — answer their curiosity with the offer immediately
+- Do NOT waste time on pleasantries — get to the white paper in the first sentence
+- NEVER ask discovery or qualification questions — just offer the white paper
+- Do NOT ask "would you be interested?" — just ask to send it
+- Your entire response MUST be under 7 seconds
+- You MUST mention the white paper — this is the entire purpose of the call`;
       
       console.log(`${LOG_PREFIX} EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript?.substring(0, 80) ?? ''}..."`);
     } else {
-      // Standard identity confirmation - proceed with introduction
+      // Standard identity confirmation - proceed with value-first intro
       responseInstructions = `The contact just confirmed their identity. You MUST speak immediately - do not wait for them to say anything else.
 
 CRITICAL: Within 2 SECONDS of this message, you MUST be speaking. Silence = FAILURE.
-        
-Proceed directly to acknowledge their time and explain the purpose of your call:
-1. Thank them: "Thanks for confirming! I really appreciate you taking a moment."
-2. Introduce yourself: "I'm calling from [Company]."
-3. Set expectations: "This isn't a sales call."
-4. State purpose briefly: Why you're calling them specifically.
-5. Ask an open-ended question to start the conversation.
 
-EXAMPLE: "Thanks for confirming! I really appreciate you taking a moment. I'm calling from [Company]. This isn't a sales call — I'm reaching out because we're doing some research in your industry and I'd love to get your perspective on [topic]. Is that something you have a few minutes to discuss?"
+Say this in ONE breath (under 7 seconds):
+"Hi [first name], I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
 
-Do NOT:
-- Ask who you're speaking with (already confirmed)
-- Wait for them to speak first
-- Pause or hesitate
-- Leave any silence after this message
+Then STOP and WAIT for their response.
 
-Speak NOW and deliver your introduction.`;
+RULES:
+- Lead with the VALUE (free white paper) — not with "thanks for confirming" or pleasantries
+- Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
+- NEVER ask "do you have a moment?" or "would you be interested?"
+- NEVER ask discovery or qualification questions
+- Your entire intro MUST be under 7 seconds — cut every unnecessary word
+- You MUST mention the white paper — this is the entire purpose of the call`;
     }
 
     // Add a system message to reinforce identity lock
@@ -5491,20 +5539,22 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                 console.log(`${LOG_PREFIX}  clearTimeout for fallback greeting timer`);
               }
 
-              // Send greeting after a short delay to allow prospect to finish "Hello?"
-              // 400ms is enough for a typical greeting utterance to complete,
-              // and Gemini's VAD will handle barge-in if the prospect keeps talking.
-              setTimeout(() => {
+              // Send greeting immediately when speech is detected.
+              // Deepgram already introduces latency (startup + detection), so by the
+              // time onSpeechStarted fires, the prospect has already finished "Hello?".
+              // Adding extra delay here makes the agent feel sluggish. Gemini's VAD
+              // handles barge-in if the prospect keeps talking.
+              setImmediate(() => {
                 if (session.isActive && !session.audioDetection.hasGreetingSent) {
                   session.audioDetection.hasGreetingSent = true;
                   const provider = (session as any).geminiProvider;
                   const script = (session as any).geminiOpeningScript;
                   if (provider && script) {
-                    console.log(`${LOG_PREFIX} 🎙️ Sending greeting after caller speech`);
+                    console.log(`${LOG_PREFIX} 🎙️ Sending greeting immediately after caller speech detected`);
                     provider.sendOpeningMessage(script);
                   }
                 }
-              }, 400);
+              });
             }
           },
           onTranscript: (segment) => {
@@ -5741,16 +5791,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     });
   }
 
-  // Stop Deepgram transcription and collect final transcript
-  let deepgramTranscript: string | null = null;
-  let deepgramSegments: Array<{ speaker: string; text: string; timestamp: number; confidence: number }> = [];
+  // POST-CALL TRANSCRIPTION: Stop any running Deepgram session but don't use its output.
+  // Full transcription + analysis runs post-call from the recording for higher accuracy.
   if ((session as any).deepgramSession) {
-    const deepgramResult = stopTranscriptionSession(callId);
-    if (deepgramResult && deepgramResult.transcript) {
-      deepgramTranscript = deepgramResult.transcript;
-      deepgramSegments = deepgramResult.segments || [];
-      console.log(`${LOG_PREFIX} ✅ Deepgram transcript collected: ${deepgramResult.segments.length} segments (${deepgramSegments.filter(s => s.speaker === 'agent').length} agent, ${deepgramSegments.filter(s => s.speaker === 'contact').length} contact), ${deepgramResult.transcript.length} chars`);
-    }
+    try { stopTranscriptionSession(callId); } catch (_) { /* cleanup only */ }
   }
 
   // Finalize cost tracking and log detailed breakdown
@@ -5782,24 +5826,20 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     session.telnyxWs.close();
   }
 
-  // Build transcript - prefer Deepgram (more reliable) over Gemini transcripts
+  // Build transcript — use Gemini in-session transcripts as a lightweight fallback
+  // Full precision transcript comes from post-call analysis (from recording)
   const geminiTranscript = session.transcripts.length > 0
     ? session.transcripts
         .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
         .join('\n')
     : '';
 
-  // Use Deepgram transcript if available and has content, otherwise fall back to Gemini
-  const fullTranscript = deepgramTranscript && deepgramTranscript.length > 10
-    ? deepgramTranscript
-    : geminiTranscript;
+  const fullTranscript = geminiTranscript;
 
-  if (deepgramTranscript && deepgramTranscript.length > 10) {
-    console.log(`${LOG_PREFIX} 🎙️ Using Deepgram transcript (${deepgramTranscript.length} chars)`);
-  } else if (geminiTranscript.length > 0) {
-    console.log(`${LOG_PREFIX} 📝 Using Gemini transcript fallback (${geminiTranscript.length} chars)`);
+  if (geminiTranscript.length > 0) {
+    console.log(`${LOG_PREFIX} 📝 Gemini in-session transcript available: ${geminiTranscript.length} chars (full analysis runs post-call)`);
   } else {
-    console.warn(`${LOG_PREFIX} ⚠️ No transcript available from either Deepgram or Gemini`);
+    console.log(`${LOG_PREFIX} 📝 No in-session transcript — post-call analysis will transcribe from recording`);
   }
 
   let disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome, session);
@@ -5946,41 +5986,14 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
           .join('\n');
 
-        const conversationQuality = await analyzeConversationQuality({
-          transcript: testCallFullTranscript,
-          interactionType: "test_call",
-          analysisStage: "post_call",
-          callDurationSeconds: callDuration,
-          disposition,
-          campaignId: session.campaignId,
-          agentName: session.virtualAgentId,
-        });
+        // POST-CALL ANALYSIS: Quality analysis deferred to post-call pipeline
+        // Real analysis with precision turns runs from the recording after upload
+        const detectedIssues: any[] = [];
+        const promptImprovementSuggestions: any[] = [];
+        const derivedTestResult = 'pending_analysis';
 
-        const detectedIssues = conversationQuality.issues.map((issue) => ({
-          type: issue.type,
-          severity: issue.severity,
-          description: issue.description,
-          suggestion: issue.recommendation,
-        }));
-
-        const promptImprovementSuggestions = conversationQuality.recommendations.map((rec) => ({
-          category: rec.category,
-          currentBehavior: rec.currentBehavior,
-          suggestedChange: rec.suggestedChange,
-          expectedImprovement: rec.expectedImpact,
-        }));
-
-        const derivedTestResult =
-          conversationQuality.overallScore >= 80
-            ? "success"
-            : conversationQuality.overallScore >= 60
-              ? "needs_improvement"
-              : "failed";
-
-        // FIXED: Don't use `notes` as fallback - it contains the full transcript!
-        // Use AI-generated summary from conversation quality analysis instead.
         const callSummaryText =
-          session.callSummary?.summary || conversationQuality.summary || 'No summary generated';
+          session.callSummary?.summary || 'Post-call analysis pending — full results available after recording upload';
 
         // Update the test call record with post-call data
         await db.update(campaignTestCalls).set({
@@ -6022,21 +6035,17 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             queueItemId: isTestCall ? `test-queue-${testCallId}` : session.queueItemId,
           }).returning();
 
-          // Log comprehensive call intelligence for test calls
-          const intelligenceResult = await logCallIntelligence({
+          // Schedule post-call analysis with precision turns from recording
+          schedulePostCallAnalysis({
             callSessionId: testCallSession.id,
-            dialerCallAttemptId: isTestCall ? undefined : session.callAttemptId,
+            callAttemptId: isTestCall ? undefined : session.callAttemptId,
             campaignId: session.campaignId,
-            contactId: contactIdForSession || undefined, // undefined for test calls to avoid FK issues
-            qualityAnalysis: conversationQuality,
-            fullTranscript: testCallFullTranscript,
+            contactId: contactIdForSession || undefined,
+            disposition: disposition || 'completed',
+            callDurationSec: callDuration,
+            geminiTranscript: testCallFullTranscript || undefined,
           });
-
-          if (intelligenceResult.success) {
-            console.log(`${LOG_PREFIX} ✅ Test call intelligence logged: ${intelligenceResult.recordId}`);
-          } else {
-            console.warn(`${LOG_PREFIX} ⚠️ Failed to log test call intelligence: ${intelligenceResult.error}`);
-          }
+          console.log(`${LOG_PREFIX} ✅ Post-call analysis scheduled for test call ${testCallSession.id}`);
         } catch (testSessionError) {
           console.error(`${LOG_PREFIX} Error creating test call session/intelligence:`, testSessionError);
         }
@@ -6309,53 +6318,17 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         });
 
         if (callSessionId) {
-          try {
-            const conversationQuality = await analyzeConversationQuality({
-              transcript: fullTranscript,
-              interactionType: "live_call",
-              analysisStage: "post_call",
-              callDurationSeconds: callDuration,
-              disposition,
-              campaignId: session.campaignId,
-              agentName: session.virtualAgentId,
-            });
-
-            const mergedAnalysis = {
-              ...(aiAnalysis || {}),
-              conversationQuality,
-            };
-
-            await db.update(callSessions)
-              .set({
-                aiAnalysis: mergedAnalysis as any,
-              })
-              .where(eq(callSessions.id, callSessionId));
-
-            await db.update(callProducerTracking)
-              .set({
-                transcriptAnalysis: mergedAnalysis as any,
-                qualityScore: String(conversationQuality.overallScore),
-              })
-              .where(eq(callProducerTracking.callSessionId, callSessionId));
-
-            // ✅ CRITICAL: Log comprehensive call intelligence to ensure all calls are tracked
-            const intelligenceResult = await logCallIntelligence({
-              callSessionId,
-              dialerCallAttemptId: session.callAttemptId,
-              campaignId: session.campaignId,
-              contactId: session.contactId,
-              qualityAnalysis: conversationQuality,
-              fullTranscript,
-            });
-
-            if (intelligenceResult.success) {
-              console.log(`${LOG_PREFIX} ✅ Call intelligence logged: ${intelligenceResult.recordId}`);
-            } else {
-              console.warn(`${LOG_PREFIX} ⚠️ Failed to log call intelligence: ${intelligenceResult.error}`);
-            }
-          } catch (analysisError) {
-            console.error(`${LOG_PREFIX} Failed to persist conversation quality for ${callSessionId}:`, analysisError);
-          }
+          // POST-CALL ANALYSIS: Schedule precision turn analysis from recording
+          schedulePostCallAnalysis({
+            callSessionId,
+            callAttemptId: session.callAttemptId,
+            campaignId: session.campaignId,
+            contactId: session.contactId,
+            disposition: disposition || 'completed',
+            callDurationSec: callDuration,
+            geminiTranscript: fullTranscript || undefined,
+          });
+          console.log(`${LOG_PREFIX} ✅ Post-call analysis scheduled for ${callSessionId}`);
         }
       }
     } catch (error) {
@@ -6475,50 +6448,13 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   }
 
   async function runRealtimeQualityAnalysis(session: OpenAIRealtimeSession): Promise<void> {
-    if (session.realtimeQualityInFlight || session.isEnding) return;
-    if (session.transcripts.length < REALTIME_QUALITY_MIN_TURNS) return;
-
-    session.realtimeQualityInFlight = true;
-    session.realtimeQualityTimer = null;
-
-    try {
-      const transcriptSnapshot = buildRealtimeTranscriptSnapshot(session);
-      if (!transcriptSnapshot.trim()) return;
-
-      const callDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
-      const conversationQuality = await analyzeConversationQuality({
-        transcript: transcriptSnapshot,
-        interactionType: session.isTestSession ? "test_call" : "live_call",
-        analysisStage: "realtime",
-        callDurationSeconds: callDuration,
-        disposition: session.detectedDisposition || undefined,
-        campaignId: session.campaignId,
-        agentName: session.virtualAgentId,
-      });
-
-      await updateCallSessionStatus(session.callId, "active", {
-        conversationQuality: conversationQuality as unknown as Record<string, unknown>,
-      });
-
-      session.lastRealtimeQualityAt = new Date();
-    } catch (error) {
-      console.error(`${LOG_PREFIX} Real-time quality analysis failed for ${session.callId}:`, error);
-    } finally {
-      session.realtimeQualityInFlight = false;
-    }
+    // DISABLED: Real-time quality analysis removed — all analysis runs post-call
+    return;
   }
 
   function scheduleRealtimeQualityAnalysis(session: OpenAIRealtimeSession): void {
-    if (session.isEnding) return;
-    if (session.agentSettings?.advanced?.privacy?.noPiiLogging) return;
-    if (session.transcripts.length < REALTIME_QUALITY_MIN_TURNS) return;
-    if (session.realtimeQualityTimer) return;
-
-    session.realtimeQualityTimer = setTimeout(() => {
-      runRealtimeQualityAnalysis(session).catch((error) => {
-        console.error(`${LOG_PREFIX} Real-time analysis error:`, error);
-      });
-    }, REALTIME_QUALITY_DEBOUNCE_MS);
+    // DISABLED: Real-time quality analysis removed — all analysis runs post-call
+    return;
   }
 
   function isMinimalHumanInteraction(transcripts: OpenAIRealtimeSession["transcripts"]): boolean {
@@ -7563,13 +7499,13 @@ If someone else answers (receptionist, assistant, automated system):
 
 If transferred to a new voice, re-verify identity: "Hi, just to confirm — am I speaking with [Contact Name]?"
 
-### Phase 3: Introduction & Permission
+### Phase 3: Introduction & Value Hook
 Once identity is confirmed, pause 1 second, then:
-1. "Hi [First Name], this is [Agent Name] calling from [Organization Name]."
-2. Pause 1 second.
-3. "I know your time is valuable — do you have a moment for a quick conversation?"
-4. STOP and wait for their response. Any answer other than "no" or "I'm busy" is permission.
-5. Be warm, kind, and respectful throughout. Show genuine appreciation for their time.
+1. "Hi [First Name], my name is [Agent Name], calling on behalf of [Organization Name]."
+2. Immediately deliver the value hook aligned with the campaign objective.
+3. Follow with the ask — do NOT ask "do you have a moment?" first.
+4. STOP and wait for their response.
+5. Be warm, kind, and respectful throughout.
 
 Keep the organization name confidential until identity is confirmed.
 
@@ -7649,15 +7585,15 @@ If the prospect says "you keep repeating" or "you already said that", immediatel
 <examples>
 ## Correct Behavior Examples
 
-### Example 1: Standard pickup → Identity check (correct)
+### Example 1: Standard pickup → Identity check → Value-lead offer (correct)
 Prospect: "Hello?"
 You: "Hi, am I speaking with Sarah Johnson?"
 Prospect: "Yes, this is Sarah."
-You: [1-second pause] "Hi Sarah, this is Alex calling from Acme Solutions. I know your time is valuable — do you have a moment for a quick conversation?"
+You: "Hi Sarah, I'm Alex from Acme Solutions — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
 
-### Example 1b: Right party self-identifies (correct)
+### Example 1b: Right party self-identifies → Value-lead offer (correct)
 Prospect: "This is Sarah Johnson."
-You: "Hi Sarah, this is Alex calling from Acme Solutions. I know your time is valuable — do you have a moment for a quick conversation?"
+You: "Hi Sarah, I'm Alex from Acme Solutions — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
 
 ### Example 1c: What NOT to do (INCORRECT — NEVER DO THIS)
 Prospect: "Hello?"
@@ -8114,9 +8050,14 @@ async function buildSystemPrompt(
   const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ''} ${contactInfo?.lastName || ''}`.trim() || 'the contact';
   const contactEmail = contactInfo?.email || '';
 
+  // Build pronunciation guide for agent name if it's unusual
+  const agentNamePronunciation = agentName.toLowerCase() === 'laomedeia'
+    ? `\n\n**YOUR NAME PRONUNCIATION:** Your name "${agentName}" is pronounced "Lao-meh-DAY-ah" (4 syllables). Say it smoothly and confidently as a single word. Do NOT pause or stammer between syllables.\n`
+    : '';
+
   const basePrompt = `# Personality
 
-You are ${agentName}, a professional outbound caller representing **${orgName}**.
+You are ${agentName}, a professional outbound caller representing **${orgName}**.${agentNamePronunciation}
 
 You sound like a senior B2B professional who understands the domain.
 You are thoughtful, confident, and forward-looking.
@@ -8194,8 +8135,8 @@ Identity is CONFIRMED only when they explicitly say:
 - "Hello?" / "Hi" / "Yeah?" / "Who is this?" / "What's this about?" — these are NOT confirmations
 
 If they say "who is this?" or "who's calling?":
-- Respond naturally: "Oh hi, this is ${agentName} calling from ${orgName}. Am I speaking with ${firstName}?"
-- Be confident and clear about your identity
+- Respond naturally: "Oh hi, my name is ${agentName}, calling on behalf of ${orgName}. Am I speaking with ${firstName}?"
+- Be confident and clear about your identity — say your name smoothly without hesitation
 
 If they say "what's this about?":
 - Keep it vague: "Just wanted to connect briefly. Is this ${firstName}?"
@@ -8205,14 +8146,25 @@ Ambiguity, hesitation, or deflection = NOT confirmed. Ask one clarifying questio
 
 ---
 
-### 2. Right Party Detected — Permission-Based Opening
+### 2. Right Party Detected — Value-Lead Opening (5-7 seconds max)
 If the person confirms they are ${fullName}:
 
-1. Brief introduction: "Hi ${firstName}, this is ${agentName} calling from **${orgName}**."
-2. Respectful time check: "I know your time is valuable — do you have a moment for a quick conversation?"
-3. WAIT for permission. If they say no, respect it and end politely.
+1. Lead IMMEDIATELY with the value — your name and org are secondary:
+   "Hi ${firstName}, I'm ${agentName} from ${orgName} — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
+2. WAIT for their response. If they say no, respect it and end politely.
+3. If they agree, confirm their email address (${contactEmail}).
+4. Close warmly — thank them for their time, say goodbye.
 
-If permission is given:
+**TIMING RULE: Your entire post-confirmation intro MUST be under 7 seconds. No filler. No pleasantries. Value first.**
+
+**CRITICAL RULES:**
+- Lead with what's in it for THEM — the free white paper — not with who you are
+- Do NOT say "Great, thanks for confirming" or any other pleasantry before the value hook
+- Do NOT ask "do you have a moment?" or "would you be interested?"
+- Keep the entire intro to ONE short sentence — name + org + value + ask
+- You MUST deliver the white paper offer — this is the entire purpose of the call
+
+If permission is given for other campaign types:
 - Clearly and briefly state the call purpose aligned with the campaign objective
 - Deliver it concisely, naturally, and in a human-sounding tone — NOT scripted
 - For content/white paper campaigns: simply ask if they'd like to receive it — no discovery questions
@@ -8237,7 +8189,7 @@ Classify as gatekeeper and respond with a clear, concise request:
 - "Could you please connect me with ${firstName}?"
 
 **When Asked "Who is calling?" or "Where are you calling from?":**
-- Respond confidently: "This is ${agentName} calling from ${orgName}."
+- Respond confidently: "My name is ${agentName}, calling on behalf of ${orgName}."
 
 **When Asked "What is this regarding?":**
 - Keep it VAGUE: "It's regarding some of the services we offer."
@@ -8302,6 +8254,25 @@ At the end of the call:
 - NEVER hang up immediately after delivering a closing statement
 - Call termination must always be PROSPECT-LED, not agent-triggered
 - Be genuinely warm and respectful in your farewell — leave them with a positive impression
+
+---
+
+### 8. MANDATORY PROGRESSION — Value FIRST, Under 7 Seconds
+**The MOMENT identity is confirmed, deliver the value hook IMMEDIATELY — no filler, no pleasantries.**
+
+Your post-confirmation response must contain ALL of these in ONE sentence (under 7 seconds):
+1. Your name and organization (brief — "I'm ${agentName} from ${orgName}")
+2. The core value: "free white paper on export finance that helps UK businesses access government support programs"
+3. The ask: "Can I send it to your email?"
+
+**You are NOT allowed to end the call or submit a disposition until you have delivered the white paper offer.**
+If the prospect tries to end the call before you've offered the white paper, quickly say: "Just one thing before you go — we have a free white paper on export finance for UK businesses, can I send it to your email?"
+
+**Do NOT waste time before the value hook:**
+- Do NOT say "Thanks for confirming", "Great", "I appreciate your time" — go straight to the offer
+- Do NOT ask any discovery or qualification questions before the offer
+- Do NOT ask "Are you focused on exporting?" / "Are you looking at government programs?" / "What challenges are you facing?"
+- The white paper is FREE — there's no need to qualify. Just offer it.
 
 ---
 

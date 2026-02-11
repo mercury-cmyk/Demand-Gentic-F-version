@@ -1,19 +1,22 @@
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { campaigns } from "@shared/schema";
-import { 
-  ArrowLeft, 
-  Users, 
-  Phone, 
-  CheckCircle, 
-  XCircle, 
+import {
+  ArrowLeft,
+  Users,
+  Phone,
+  CheckCircle,
+  XCircle,
   Clock,
   Trash2,
   RefreshCw,
-  Loader2
+  Loader2,
+  Brain
 } from "lucide-react";
 import {
   Table,
@@ -26,6 +29,7 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { QueueIntelligenceView } from "@/components/queue-intelligence";
 
 type Campaign = typeof campaigns.$inferSelect;
 type QueueStatus = "queued" | "in_progress" | "done" | "skipped" | "removed";
@@ -70,6 +74,7 @@ export default function CampaignQueuePage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
+  const [pageTab, setPageTab] = useState<"queue" | "intelligence">("queue");
   const rawRoles = (user as any)?.roles ?? user?.role;
   const roleList = Array.isArray(rawRoles) ? rawRoles : rawRoles ? [rawRoles] : [];
   const normalizedRoles = roleList
@@ -199,7 +204,7 @@ export default function CampaignQueuePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!isClientUser && (
+          {!isClientUser && pageTab === "queue" && (
             <Button
               variant="outline"
               size="sm"
@@ -222,6 +227,28 @@ export default function CampaignQueuePage() {
           )}
         </div>
       </div>
+
+      {/* Page-Level Tabs */}
+      <Tabs value={pageTab} onValueChange={(v) => setPageTab(v as "queue" | "intelligence")}>
+        <TabsList>
+          <TabsTrigger value="queue" className="gap-1.5">
+            <Phone className="h-3.5 w-3.5" />
+            Queue
+          </TabsTrigger>
+          <TabsTrigger value="intelligence" className="gap-1.5">
+            <Brain className="h-3.5 w-3.5" />
+            Intelligence
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {/* Intelligence Tab */}
+      {pageTab === "intelligence" && campaignId && (
+        <QueueIntelligenceView campaignId={campaignId} />
+      )}
+
+      {/* Queue Tab Content */}
+      {pageTab === "queue" && <>
 
       {/* Account Cap Settings */}
       {campaign?.accountCapEnabled && (
@@ -402,7 +429,7 @@ export default function CampaignQueuePage() {
               <TableBody>
                 {accountStats.map((stat) => {
                   const capValue = campaign.accountCapValue || 0;
-                  const relevantCount = 
+                  const relevantCount =
                     campaign.accountCapMode === 'queue_size' ? stat.queuedCount :
                     campaign.accountCapMode === 'connected_calls' ? stat.connectedCount :
                     stat.positiveDispCount;
@@ -415,8 +442,8 @@ export default function CampaignQueuePage() {
                       <TableCell>{stat.connectedCount}</TableCell>
                       <TableCell>{stat.positiveDispCount}</TableCell>
                       <TableCell>
-                        <Badge 
-                          variant="outline" 
+                        <Badge
+                          variant="outline"
                           className={isAtCap ? "bg-red-500/10 text-red-600 border-red-500/20" : "bg-green-500/10 text-green-600 border-green-500/20"}
                         >
                           {isAtCap ? `At Cap (${relevantCount}/${capValue})` : `Under Cap (${relevantCount}/${capValue})`}
@@ -430,6 +457,8 @@ export default function CampaignQueuePage() {
           </CardContent>
         </Card>
       )}
+
+      </>}
     </div>
   );
 }

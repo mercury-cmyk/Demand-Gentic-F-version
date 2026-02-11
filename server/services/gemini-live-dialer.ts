@@ -34,14 +34,8 @@ import {
 } from "./call-recording-manager";
 import { ensureTranscript, checkTranscriptStatus, markForBackgroundTranscription } from "./transcription-reliability";
 import { recordTranscriptionResult } from "./transcription-monitor";
-import {
-  isDeepgramEnabled,
-  startTranscriptionSession,
-  sendInboundAudio,
-  sendOutboundAudio,
-  stopTranscriptionSession,
-  type TranscriptSegment,
-} from "./deepgram-realtime-transcription";
+// POST-CALL ANALYSIS: Real-time Deepgram is disabled — transcription runs after call ends
+import { schedulePostCallAnalysis } from "./post-call-analyzer";
 import { releaseProspectLock } from "./active-call-tracker";
 import { handleCallCompleted } from "./number-pool-integration";
 
@@ -1242,42 +1236,10 @@ Instructions:
               );
               console.log(`[Gemini Live] 🎙️ Call recording started for ${callId}`);
 
-              // 🎤 START DEEPGRAM TRANSCRIPTION: Real-time transcription for both sides
-              // Deepgram is more reliable than Gemini's built-in transcription
-              if (isDeepgramEnabled()) {
-                // Pass format (ulaw vs alaw) to ensure Deepgram decodes correctly
-                const deepgramEncoding = g711Format === 'alaw' ? 'alaw' : 'mulaw';
-                
-                const transcriptionSession = startTranscriptionSession(callId, {
-                  callAttemptId: callContext.callAttemptId,
-                  campaignId: callContext.campaignId,
-                  contactId: callContext.contactId,
-                  encoding: deepgramEncoding,
-                  onTranscript: (segment: TranscriptSegment) => {
-                    // Real-time transcript callback - detect when contact speaks
-                    if (segment.isFinal && segment.speaker === 'contact') {
-                      // Contact spoke - this can trigger AI response if waiting
-                      if (!humanHasSpoken && waitingForHumanSpeech) {
-                        humanHasSpoken = true;
-                        if (humanSpeechWaitTimer) {
-                          clearTimeout(humanSpeechWaitTimer);
-                          humanSpeechWaitTimer = null;
-                        }
-                        console.log(`[Gemini Live] 👤 Deepgram detected contact speech: "${segment.text.substring(0, 50)}..."`);
-                        trySendOpeningMessage();
-                      }
-                    }
-                  },
-                  onError: (error, channel) => {
-                    console.error(`[Gemini Live] Deepgram ${channel} error:`, error.message);
-                  },
-                });
-                if (transcriptionSession) {
-                  console.log(`[Gemini Live] 🎤 Deepgram real-time transcription started for ${callId} (format: ${deepgramEncoding})`);
-                }
-              } else {
-                console.log(`[Gemini Live] ⚠️ Deepgram not configured - using Gemini transcription only`);
-              }
+              // POST-CALL TRANSCRIPTION: No real-time Deepgram during calls.
+              // Audio flows cleanly: Telnyx <-> Gemini with zero transcription overhead.
+              // Full structured transcription runs AFTER the call from the recording.
+              console.log(`[Gemini Live] 📝 Real-time transcription DISABLED — post-call analysis will run after call ends`);
             }
 
             // CRITICAL: Wait for AMD (Answering Machine Detection) result before speaking
@@ -1465,10 +1427,9 @@ Instructions:
             }
 
             // 🎙️ RECORD INBOUND: Capture contact audio for call recording
+            // (No real-time transcription — post-call analysis uses the recording)
             if (callId) {
               recordInboundAudio(callId, g711Buffer);
-              // 🎤 DEEPGRAM: Send inbound audio for real-time transcription
-              sendInboundAudio(callId, g711Buffer);
             }
 
             const pcm16kBuffer = g711ToPcm16k(g711Buffer, g711Format);
@@ -1516,68 +1477,24 @@ Instructions:
             backpressureEvents: metrics.bufferBackpressureEvents,
           });
 
-          // SAVE TRANSCRIPT: Prefer Deepgram transcript, fallback to Gemini transcription
-          // Deepgram provides more reliable dual-channel transcription
-          let fullTranscript = '';
-          let aiOnlyTranscript = '';
-          let transcriptSource = 'none';
+          // ═══════════════════════════════════════════════════════════════════════
+          // POST-CALL ANALYSIS: Transcription + quality analysis from recording
+          // No real-time transcription was running — everything happens now.
+          // ═══════════════════════════════════════════════════════════════════════
 
-          // Log transcript sources for debugging missing transcripts
-          const deepgramEnabled = isDeepgramEnabled();
-          console.log(`[Gemini Live] 📊 Transcript sources check: Deepgram enabled=${deepgramEnabled}, Gemini turns=${transcriptTurns.length}, callId=${callId || 'none'}`);
-
-          // Try Deepgram first (more reliable)
-          if (callId && deepgramEnabled) {
-            const deepgramResult = stopTranscriptionSession(callId);
-            console.log(`[Gemini Live] 📊 Deepgram result: ${deepgramResult ? `${deepgramResult.segments.length} segments, ${deepgramResult.transcript.length} chars` : 'null/undefined'}`);
-            if (deepgramResult && deepgramResult.transcript.length > 20) {
-              fullTranscript = deepgramResult.transcript;
-              aiOnlyTranscript = deepgramResult.segments
-                .filter(s => s.speaker === 'agent')
-                .map(s => s.text)
-                .join(' ');
-              transcriptSource = 'deepgram';
-              console.log(`[Gemini Live] 🎤 Using Deepgram transcript: ${deepgramResult.segments.length} segments, ${fullTranscript.length} chars`);
-            }
-          }
-
-          // Fallback to Gemini transcription if Deepgram failed
-          if (!fullTranscript && transcriptTurns.length > 0) {
-            fullTranscript = transcriptTurns
+          // Collect any Gemini in-session transcripts as a fallback
+          let geminiTranscript = '';
+          if (transcriptTurns.length > 0) {
+            geminiTranscript = transcriptTurns
               .sort((a, b) => a.timestamp - b.timestamp)
               .map(t => `${t.role === 'agent' ? 'Agent' : 'Contact'}: ${t.text}`)
               .join('\n');
-            aiOnlyTranscript = transcriptTurns
-              .filter(t => t.role === 'agent')
-              .map(t => t.text)
-              .join(' ');
-            transcriptSource = 'gemini';
-            console.log(`[Gemini Live] 📝 Using Gemini transcript: ${transcriptTurns.length} turns, ${fullTranscript.length} chars`);
+            console.log(`[Gemini Live] 📝 Gemini in-session transcript available as fallback: ${transcriptTurns.length} turns, ${geminiTranscript.length} chars`);
           }
 
-          // Log warning if no transcript was captured from either source
-          if (!fullTranscript) {
-            console.warn(`[Gemini Live] ⚠️ NO TRANSCRIPT CAPTURED - Deepgram: ${deepgramEnabled ? 'enabled but empty' : 'disabled'}, Gemini turns: ${transcriptTurns.length}`);
-          }
-
-          if (callContext.callAttemptId && fullTranscript.length > 0) {
+          if (callContext.callAttemptId) {
             try {
-              console.log(`[Gemini Live] 📝 Saving transcript (source: ${transcriptSource}): ${fullTranscript.length} chars`);
-              
-              // Save directly to dialerCallAttempts (has fullTranscript and aiTranscript fields)
-              await db.update(dialerCallAttempts)
-                .set({
-                  fullTranscript: fullTranscript,
-                  aiTranscript: aiOnlyTranscript || undefined,
-                })
-                .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
-              
-              console.log(`[Gemini Live] ✅ Transcript saved to call attempt ${callContext.callAttemptId}`);
-
-              // Record transcription success in monitor (real-time transcription worked)
-              recordTranscriptionResult(callId || 'unknown', 'realtime', callContext.callAttemptId);
-              
-              // Get additional call attempt info for creating call session
+              // Get call attempt info for creating/linking call session
               const [attemptDetails] = await db.select({
                 callSessionId: dialerCallAttempts.callSessionId,
                 phoneDialed: dialerCallAttempts.phoneDialed,
@@ -1590,14 +1507,13 @@ Instructions:
                 .from(dialerCallAttempts)
                 .where(eq(dialerCallAttempts.id, callContext.callAttemptId))
                 .limit(1);
-              
+
               let callSessionId: string | null = attemptDetails?.callSessionId || null;
-              
+              const callDurationSec = Math.round((Date.now() - metrics.startTime) / 1000);
+
               // ✅ CRITICAL: If no call session exists, CREATE one now
-              // This ensures all Gemini Live campaign calls are tracked in call_sessions
               if (!callSessionId && attemptDetails) {
                 try {
-                  const callDurationSec = Math.round((Date.now() - metrics.startTime) / 1000);
                   const [newSession] = await db.insert(callSessions).values({
                     telnyxCallId: callControlId || undefined,
                     toNumberE164: attemptDetails.phoneDialed || callContext.phoneNumber || 'unknown',
@@ -1607,150 +1523,39 @@ Instructions:
                     status: 'completed' as const,
                     agentType: 'ai' as const,
                     aiAgentId: attemptDetails.virtualAgentId || 'gemini-live',
-                    aiTranscript: fullTranscript,
                     aiDisposition: (callContext.disposition || 'completed') as CanonicalDisposition,
                     campaignId: attemptDetails.campaignId || callContext.campaignId,
                     contactId: attemptDetails.contactId || callContext.contactId || null,
                     queueItemId: attemptDetails.queueItemId || callContext.queueItemId || null,
                   }).returning();
-                  
+
                   callSessionId = newSession.id;
-                  
-                  // Link the new call session back to the call attempt
+
                   await db.update(dialerCallAttempts)
                     .set({ callSessionId: newSession.id })
                     .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
-                  
-                  console.log(`[Gemini Live] ✅ Created new call session ${callSessionId} for campaign call visibility`);
+
+                  console.log(`[Gemini Live] ✅ Created new call session ${callSessionId}`);
                 } catch (createError) {
                   console.error(`[Gemini Live] ❌ Failed to create call session:`, createError);
                 }
-              } else if (callSessionId) {
-                // Update existing call session with transcript
-                await db.update(callSessions)
-                  .set({
-                    aiTranscript: fullTranscript,
-                  })
-                  .where(eq(callSessions.id, callSessionId));
-                console.log(`[Gemini Live] ✅ Transcript saved to existing call session ${callSessionId}`);
               }
-              
-              // Run post-call analysis if we have a valid call session
-              // LOWERED THRESHOLD: Allow shorter interactions (e.g. immediate rejections) to be analyzed
-              // 15 chars covers "Not interested", "Wrong number", "Stop calling"
-              if (callSessionId && fullTranscript && fullTranscript.length > 15) {
-                // AUTO-TRIGGER: Post-call quality analysis (non-blocking)
-                // Run in background to not delay call cleanup
-                setImmediate(async () => {
-                  try {
-                    console.log(`[Gemini Live] 📊 Auto-triggering post-call analysis for session ${callSessionId}`);
-                    const analysisResult = await analyzeConversationQuality({
-                      transcript: fullTranscript,
-                      interactionType: 'live_call',
-                      analysisStage: 'post_call',
-                      callDurationSeconds: Math.round((Date.now() - metrics.startTime) / 1000),
-                      disposition: callContext.disposition || undefined,
-                      campaignId: callContext.campaignId || undefined,
-                    });
 
-                    if (analysisResult.status === 'ok') {
-                      // Store analysis results in call session
-                      await db.update(callSessions)
-                        .set({
-                          aiAnalysis: {
-                            conversationQuality: {
-                              overallScore: analysisResult.overallScore,
-                              summary: analysisResult.summary,
-                              qualityDimensions: analysisResult.qualityDimensions,
-                              campaignAlignment: analysisResult.campaignAlignment,
-                              dispositionReview: analysisResult.dispositionReview,
-                              issues: analysisResult.issues,
-                              recommendations: analysisResult.recommendations,
-                              breakdowns: analysisResult.breakdowns,
-                              performanceGaps: analysisResult.performanceGaps,
-                              flowCompliance: analysisResult.flowCompliance,
-                              learningSignals: analysisResult.learningSignals,
-                              nextBestActions: analysisResult.nextBestActions,
-                              promptUpdates: analysisResult.promptUpdates,
-                              metadata: analysisResult.metadata,
-                            },
-                          } as any,
-                        })
-                        .where(eq(callSessions.id, callSessionId!));
-                      console.log(`[Gemini Live] ✅ Post-call analysis saved for session ${callSessionId}, score: ${analysisResult.overallScore}`);
-                      
-                      // ✅ CRITICAL: Log comprehensive call intelligence for centralized dashboard visibility
-                      // This ensures Gemini Live campaign calls appear in Conversation Intelligence
-                      const intelligenceResult = await logCallIntelligence({
-                        callSessionId: callSessionId!,
-                        dialerCallAttemptId: callContext.callAttemptId,
-                        campaignId: callContext.campaignId,
-                        contactId: callContext.contactId,
-                        qualityAnalysis: analysisResult,
-                        fullTranscript,
-                      });
-                      
-                      if (intelligenceResult.success) {
-                        console.log(`[Gemini Live] ✅ Call intelligence logged: ${intelligenceResult.recordId}`);
-                      } else {
-                        console.warn(`[Gemini Live] ⚠️ Failed to log call intelligence: ${intelligenceResult.error}`);
-                      }
-                    } else {
-                      console.warn(`[Gemini Live] ⚠️ Post-call analysis returned status: ${analysisResult.status}`);
-                    }
-                  } catch (analysisError) {
-                    console.error(`[Gemini Live] ❌ Post-call analysis failed:`, analysisError);
-                    // Non-critical, don't throw
-                  }
+              // 🔬 SCHEDULE COMPREHENSIVE POST-CALL ANALYSIS
+              // Runs with graduated retries (recording may still be uploading)
+              if (callSessionId) {
+                console.log(`[Gemini Live] 📊 Scheduling post-call analysis for session ${callSessionId} (precision turns + campaign outcome evaluation)`);
+                schedulePostCallAnalysis(callSessionId, {
+                  callAttemptId: callContext.callAttemptId,
+                  campaignId: callContext.campaignId || attemptDetails?.campaignId || undefined,
+                  contactId: callContext.contactId || attemptDetails?.contactId || undefined,
+                  callDurationSec,
+                  disposition: callContext.disposition || undefined,
+                  geminiTranscript: geminiTranscript || undefined,
                 });
               }
-            } catch (transcriptError) {
-              console.error('[Gemini Live] ❌ Failed to save transcript:', transcriptError);
-            }
-          } else if (!fullTranscript && callContext.callAttemptId) {
-            // FALLBACK: No real-time transcript captured (neither Deepgram nor Gemini)
-            // Stop any running Deepgram session
-            if (callId && isDeepgramEnabled()) {
-              stopTranscriptionSession(callId);
-            }
-
-            console.log('[Gemini Live] ⚠️ No transcript from Deepgram or Gemini - scheduling fallback transcription');
-            console.log(`[Gemini Live] 📊 Transcription stats: audioChunksWithoutTranscription=${audioChunksWithoutTranscription}, lastTranscriptionReceivedAt=${lastTranscriptionReceivedAt}`);
-
-            // Graduated retry delays: 15s, 45s, 2min (allows recording to upload)
-            const retryDelays = [15000, 45000, 120000];
-            const attemptId = callContext.callAttemptId;
-
-            for (let i = 0; i < retryDelays.length; i++) {
-              setTimeout(async () => {
-                try {
-                  // Check if transcript already exists (from earlier retry)
-                  const status = await checkTranscriptStatus(attemptId);
-                  if (status.hasTranscript) {
-                    console.log(`[Gemini Live] ✅ Transcript already exists - skipping retry ${i + 1}`);
-                    return;
-                  }
-
-                  console.log(`[Gemini Live] 🔄 Fallback transcription attempt ${i + 1}/${retryDelays.length} (delay: ${retryDelays[i] / 1000}s)`);
-                  const result = await ensureTranscript(attemptId);
-
-                  if (result.success) {
-                    console.log(`[Gemini Live] ✅ Fallback transcription succeeded on attempt ${i + 1}: ${result.wordCount || 0} words`);
-                    // Record fallback success in monitor
-                    recordTranscriptionResult(callId || 'unknown', 'fallback', attemptId);
-                  } else if (i === retryDelays.length - 1) {
-                    // Last retry failed - mark for background processing
-                    console.warn(`[Gemini Live] ⚠️ All fallback retries exhausted for ${attemptId}: ${result.error}`);
-                    await markForBackgroundTranscription(attemptId);
-                    // Record failure in monitor
-                    recordTranscriptionResult(callId || 'unknown', 'none', attemptId);
-                  } else {
-                    console.log(`[Gemini Live] ⏳ Fallback attempt ${i + 1} failed, will retry: ${result.error}`);
-                  }
-                } catch (fallbackError) {
-                  console.error(`[Gemini Live] ❌ Fallback transcription attempt ${i + 1} error:`, fallbackError);
-                }
-              }, retryDelays[i]);
+            } catch (postCallError) {
+              console.error('[Gemini Live] ❌ Failed to set up post-call analysis:', postCallError);
             }
           }
 
@@ -2399,10 +2204,9 @@ Instructions:
                 const g711Base64 = g711Buffer.toString('base64');
                 
                 // 🎙️ RECORD OUTBOUND: Capture AI audio for call recording
+                // (No real-time transcription — post-call analysis uses the recording)
                 if (callId) {
                   recordOutboundAudio(callId, g711Buffer);
-                  // 🎤 DEEPGRAM: Send outbound audio for real-time transcription
-                  sendOutboundAudio(callId, g711Buffer);
                 }
 
                 // 🔊 TELNYX AUDIO DEBUG: Log audio quality metrics
