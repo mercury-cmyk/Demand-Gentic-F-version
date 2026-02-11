@@ -1093,6 +1093,28 @@ export async function streamRecording(req: Request, res: Response) {
       return res.status(404).send('Recording audio not available');
     }
 
+    // ── Handle GCS internal stream (when signBlob is unavailable) ────
+    if (result.url.startsWith('gcs-internal://')) {
+      const gcsKey = result.url.replace(/^gcs-internal:\/\/[^/]+\//, '');
+      try {
+        const { readFromGCS } = await import('../lib/storage');
+        const { stream, contentType, size } = await readFromGCS(gcsKey);
+
+        res.setHeader('Content-Type', contentType);
+        if (size > 0) {
+          res.setHeader('Content-Length', size.toString());
+        }
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+
+        (stream as any).pipe(res);
+        return;
+      } catch (gcsErr: any) {
+        console.error(`[Recordings API] GCS direct stream failed for ${id}:`, gcsErr.message);
+        // Fall through to try Telnyx fallback
+      }
+    }
+
     // ── Fetch audio bytes ────────────────────────────────────────────
     let audioResponse = await fetch(result.url);
 

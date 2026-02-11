@@ -87,8 +87,6 @@ export async function getPresignedDownloadUrl(
   } catch (error: any) {
     // Cloud Run default service account or local dev without signing capability
     if (error?.name === 'SigningError' || error?.message?.includes('client_email') || error?.message?.includes('signBlob')) {
-      // Use self-signed URL approach via the storage client's makeAuthenticatedRequest
-      // Since we can't sign, generate a URL that uses the Cloud Run identity token instead
       console.warn(`[GCS] Cannot generate signed URL: ${error.message?.substring(0, 100)}`);
 
       // Try using the bucket's public URL if CDN is configured
@@ -97,12 +95,31 @@ export async function getPresignedDownloadUrl(
         return `${publicBase}/${key}`;
       }
 
-      // Fallback: direct GCS URL (only works if bucket allows public access or allUsers read)
-      console.warn('[GCS] No CDN configured, using direct GCS URL (requires bucket public access)');
-      return `https://storage.googleapis.com/${GCS_BUCKET}/${key}`;
+      // Fallback: use the internal stream proxy URL.
+      // The service account CAN read GCS objects directly (just can't sign URLs),
+      // so the /api/recordings/:id/stream endpoint will use streamFromGCS() instead.
+      // Return a marker URL that recording-storage/recording-link-resolver can detect.
+      console.warn('[GCS] Using internal GCS stream fallback (signBlob unavailable)');
+      return `gcs-internal://${GCS_BUCKET}/${key}`;
     }
     throw error;
   }
+}
+
+/**
+ * Read a GCS object directly using the service account's authenticated access.
+ * Use this when signBlob is unavailable and signed URLs can't be generated.
+ * Returns a readable stream of the file contents.
+ */
+export async function readFromGCS(key: string): Promise<{ stream: NodeJS.ReadableStream; contentType: string; size: number }> {
+  const file = bucket.file(key);
+  const [metadata] = await file.getMetadata();
+  const stream = file.createReadStream();
+  return {
+    stream,
+    contentType: (metadata.contentType as string) || 'audio/mpeg',
+    size: parseInt(metadata.size as string, 10) || 0,
+  };
 }
 
 /**
