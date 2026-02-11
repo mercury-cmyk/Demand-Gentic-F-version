@@ -41,6 +41,8 @@ import {
   Award,
   Palette,
   Shield,
+  Image,
+  Paintbrush,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -59,6 +61,8 @@ interface OrganizationIntelligence {
     keywords?: string[];
     communicationStyle?: string;
     forbiddenTerms?: string[];
+    primaryColor?: string;
+    secondaryColor?: string;
   };
   compliance?: {
     certifications?: string[];
@@ -144,30 +148,75 @@ async function createOrganization(data: { name: string; domain?: string; industr
   return res.json();
 }
 
+/**
+ * Extract the display string from a value that may be:
+ * - a plain string
+ * - an array of strings
+ * - an object like { value: "...", locked, source, status, confidence }
+ * - an array of such objects
+ * - deeply nested objects
+ */
+function resolveFieldValue(val: any): string {
+  if (val == null) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (Array.isArray(val)) {
+    return val.map(item => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object' && 'value' in item) {
+        // Handle nested: { value: { value: "...", ... } }
+        const inner = item.value;
+        if (inner && typeof inner === 'object' && 'value' in inner) return String(inner.value ?? '');
+        return String(inner ?? '');
+      }
+      return String(item ?? '');
+    }).filter(Boolean).join(', ');
+  }
+  if (typeof val === 'object' && 'value' in val) {
+    const inner = val.value;
+    // Handle nested: { value: { value: "...", ... } }
+    if (inner && typeof inner === 'object' && 'value' in inner) return String(inner.value ?? '');
+    // Handle: { value: [...] } — recurse for arrays
+    if (Array.isArray(inner)) return resolveFieldValue(inner);
+    return String(inner ?? '');
+  }
+  // Fallback: try JSON or empty
+  try { return JSON.stringify(val); } catch { return ''; }
+}
+
 function IntelligenceField({
   label,
   value,
   multiline = false,
   onSave,
   icon: Icon,
+  placeholder: _placeholder,
 }: {
   label: string;
-  value?: string | string[];
+  value?: any;
   multiline?: boolean;
   onSave?: (value: string) => void;
   icon?: React.ComponentType<{ className?: string }>;
+  placeholder?: string;
 }) {
+  const resolved = resolveFieldValue(value);
   const [isEditing, setIsEditing] = useState(false);
-  const [tempValue, setTempValue] = useState(
-    Array.isArray(value) ? value.join(', ') : value || ''
-  );
+  const [tempValue, setTempValue] = useState(resolved);
+
+  // Sync tempValue when the resolved value changes (e.g. after API refetch)
+  React.useEffect(() => {
+    if (!isEditing) {
+      setTempValue(resolved);
+    }
+  }, [resolved, isEditing]);
 
   const handleSave = () => {
     if (onSave) onSave(tempValue);
     setIsEditing(false);
   };
 
-  const displayValue = Array.isArray(value) ? value.join(', ') : value;
+  const displayValue = resolved;
+  const placeholderText = _placeholder || 'Not set';
 
   return (
     <div className="group">
@@ -213,12 +262,12 @@ function IntelligenceField({
           </div>
         </div>
       ) : (
-        <p className={cn(
+        <div className={cn(
           "text-sm p-2 rounded-md bg-muted/50 min-h-[36px]",
           !displayValue && "text-muted-foreground italic"
         )}>
-          {displayValue || 'Not set'}
-        </p>
+          {String(displayValue || placeholderText)}
+        </div>
       )}
     </div>
   );
@@ -476,57 +525,35 @@ export default function ClientPortalIntelligence() {
             {/* Intelligence Tabs */}
             <Tabs defaultValue="overview" className="space-y-6">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <TabsList className="grid w-full grid-cols-6 lg:w-[900px] h-12 p-1 bg-muted/50 rounded-lg">
+                <TabsList className="grid w-full grid-cols-7 lg:w-[1050px] h-12 p-1 bg-muted/50 rounded-lg">
                   <TabsTrigger value="overview" className="rounded-md data-[state=active]:shadow-sm">Identity</TabsTrigger>
                   <TabsTrigger value="branding" className="rounded-md data-[state=active]:shadow-sm">Branding</TabsTrigger>
                   <TabsTrigger value="offerings" className="rounded-md data-[state=active]:shadow-sm">Offerings</TabsTrigger>
                   <TabsTrigger value="icp" className="rounded-md data-[state=active]:shadow-sm">ICP & Market</TabsTrigger>
                   <TabsTrigger value="positioning" className="rounded-md data-[state=active]:shadow-sm">Positioning</TabsTrigger>
+                  <TabsTrigger value="outreach" className="rounded-md data-[state=active]:shadow-sm">Outreach</TabsTrigger>
                   <TabsTrigger value="compliance" className="rounded-md data-[state=active]:shadow-sm">Compliance</TabsTrigger>
                 </TabsList>
 
-                {/* Settings / Deep Analysis Button */}
-                <Tabs value="settings" className="w-auto"> 
-                   <TabsList className="bg-transparent p-0">
-                      <TabsTrigger value="settings" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none p-0">
-                         <Button variant="outline" size="sm" className="gap-2">
-                            <Settings className="h-4 w-4" />
-                            Settings & Analysis
-                         </Button>
-                      </TabsTrigger>
-                   </TabsList>
-                   
-                   <TabsContent value="settings" className="absolute right-0 top-12 z-50 w-[400px] bg-card border rounded-xl shadow-xl p-4 mt-2">
-                       <div className="space-y-4">
-                          <h3 className="font-semibold flex items-center gap-2">
-                             <Sparkles className="h-4 w-4 text-primary" />
-                             Analyze Your Organization
-                          </h3>
-                          <div className="space-y-3">
-                              <p className="text-xs text-muted-foreground">
-                                Run multi-model AI analysis to gather comprehensive intelligence.
-                              </p>
-                              <div className="flex gap-2">
-                                <Input 
-                                  placeholder={org.domain || "example.com"} 
-                                  value={domain}
-                                  onChange={(e) => setDomain(e.target.value)}
-                                  className="h-9 text-sm"
-                                />
-                                <Button 
-                                  size="sm" 
-                                  onClick={runDeepAnalysis}
-                                  disabled={isAnalyzing}
-                                >
-                                  {isAnalyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Analyze"}
-                                </Button>
-                              </div>
-                          </div>
-                          
-                          {analysisProgress && <AnalysisProgressPanel progress={analysisProgress} />}
-                       </div>
-                   </TabsContent>
-                </Tabs>
+                {/* Deep Analysis Section */}
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder={org.domain || "example.com"}
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    className="h-9 text-sm w-48"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={runDeepAnalysis}
+                    disabled={isAnalyzing}
+                    className="gap-2"
+                  >
+                    {isAnalyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                  </Button>
+                </div>
               </div>
 
               {/* Overview Tab (Renamed Identity) */}
@@ -582,53 +609,146 @@ export default function ClientPortalIntelligence() {
 
               {/* Branding Tab */}
               <TabsContent value="branding" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Palette className="h-5 w-5 text-primary" />
-                      Branding & Voice
-                    </CardTitle>
-                    <CardDescription>
-                      Define how your AI agents should speak and represent your brand
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-6 md:grid-cols-2">
-                    <IntelligenceField
-                      label="Tone of Voice"
-                      value={org.branding?.tone}
-                      placeholder="e.g. Professional, Friendly, Authoritative"
-                      icon={MessageSquare}
-                      onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, tone: value } })}
-                    />
-                    <IntelligenceField
-                      label="Communication Style"
-                      value={org.branding?.communicationStyle}
-                      placeholder="e.g. Concise, Detailed, Storytelling"
-                      icon={MessageSquare}
-                      onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, communicationStyle: value } })}
-                    />
-                    <div className="md:col-span-2">
+                <div className="grid lg:grid-cols-3 gap-6">
+                  {/* Brand Identity Card - Left column */}
+                  <Card className="lg:col-span-1 border-primary/10 bg-gradient-to-b from-primary/[0.02] to-transparent">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Image className="h-5 w-5 text-primary" />
+                        Brand Identity
+                      </CardTitle>
+                      <CardDescription>
+                        Visual identity and brand colors
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Logo Preview */}
+                      <div className="space-y-3">
+                        <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                          <Image className="h-3 w-3" />
+                          Brand Logo
+                        </Label>
+                        <div className="flex flex-col items-center gap-3 p-6 rounded-xl border-2 border-dashed border-muted-foreground/20 bg-muted/30 min-h-[120px] justify-center">
+                          {org.logoUrl ? (
+                            <img
+                              src={org.logoUrl}
+                              alt={`${org.name} logo`}
+                              className="max-h-20 max-w-full object-contain rounded-md"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="text-center">
+                              <Image className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                              <p className="text-xs text-muted-foreground italic">No logo uploaded</p>
+                            </div>
+                          )}
+                        </div>
+                        <IntelligenceField
+                          label="Logo URL"
+                          value={org.logoUrl}
+                          placeholder="https://example.com/logo.png"
+                          icon={Globe}
+                          onSave={(value) => updateMutation.mutate({ logoUrl: value } as any)}
+                        />
+                      </div>
+
+                      {/* Color Swatches */}
+                      <div className="space-y-3">
+                        <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                          <Paintbrush className="h-3 w-3" />
+                          Brand Colors
+                        </Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <div
+                              className="h-16 rounded-lg border shadow-inner flex items-end justify-center pb-1"
+                              style={{ backgroundColor: resolveFieldValue(org.branding?.primaryColor) || '#3B82F6' }}
+                            >
+                              <span className="text-[10px] font-mono text-white/80 bg-black/30 px-1.5 rounded">
+                                {resolveFieldValue(org.branding?.primaryColor) || '#3B82F6'}
+                              </span>
+                            </div>
+                            <IntelligenceField
+                              label="Primary Color"
+                              value={org.branding?.primaryColor}
+                              placeholder="#3B82F6"
+                              icon={Paintbrush}
+                              onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, primaryColor: value } })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <div
+                              className="h-16 rounded-lg border shadow-inner flex items-end justify-center pb-1"
+                              style={{ backgroundColor: resolveFieldValue(org.branding?.secondaryColor) || '#8B5CF6' }}
+                            >
+                              <span className="text-[10px] font-mono text-white/80 bg-black/30 px-1.5 rounded">
+                                {resolveFieldValue(org.branding?.secondaryColor) || '#8B5CF6'}
+                              </span>
+                            </div>
+                            <IntelligenceField
+                              label="Secondary Color"
+                              value={org.branding?.secondaryColor}
+                              placeholder="#8B5CF6"
+                              icon={Paintbrush}
+                              onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, secondaryColor: value } })}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Voice & Communication Card - Right 2 columns */}
+                  <Card className="lg:col-span-2">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Palette className="h-5 w-5 text-primary" />
+                        Voice & Communication
+                      </CardTitle>
+                      <CardDescription>
+                        Define how your AI agents should speak and represent your brand
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-6 md:grid-cols-2">
                       <IntelligenceField
-                        label="Brand Keywords"
-                        value={org.branding?.keywords}
-                        multiline
-                        placeholder="Comma-separated keywords to emphasize (e.g. innovative, reliable, fast)"
-                        icon={Brain}
-                        onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, keywords: value.split(',').map(s => s.trim()) } })}
+                        label="Tone of Voice"
+                        value={org.branding?.tone}
+                        placeholder="e.g. Professional, Friendly, Authoritative"
+                        icon={MessageSquare}
+                        onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, tone: value } })}
                       />
-                    </div>
-                     <div className="md:col-span-2">
                       <IntelligenceField
-                        label="Forbidden Terms"
-                        value={org.branding?.forbiddenTerms}
-                        multiline
-                        placeholder="Comma-separated terms to avoid"
-                        icon={AlertCircle}
-                        onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, forbiddenTerms: value.split(',').map(s => s.trim()) } })}
+                        label="Communication Style"
+                        value={org.branding?.communicationStyle}
+                        placeholder="e.g. Concise, Detailed, Storytelling"
+                        icon={MessageSquare}
+                        onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, communicationStyle: value } })}
                       />
-                    </div>
-                  </CardContent>
-                </Card>
+                      <div className="md:col-span-2">
+                        <IntelligenceField
+                          label="Brand Keywords"
+                          value={org.branding?.keywords}
+                          multiline
+                          placeholder="Comma-separated keywords to emphasize (e.g. innovative, reliable, fast)"
+                          icon={Brain}
+                          onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, keywords: value.split(',').map(s => s.trim()) } })}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <IntelligenceField
+                          label="Forbidden Terms"
+                          value={org.branding?.forbiddenTerms}
+                          multiline
+                          placeholder="Comma-separated terms to avoid"
+                          icon={AlertCircle}
+                          onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, forbiddenTerms: value.split(',').map(s => s.trim()) } })}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
               </TabsContent>
 
               {/* Compliance Tab */}
@@ -758,21 +878,25 @@ export default function ClientPortalIntelligence() {
                         Target Personas
                       </Label>
                       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {org.icp?.personas?.map((persona, idx) => (
-                          <div key={idx} className="p-4 rounded-lg bg-muted/30 border shadow-sm">
-                            <p className="font-semibold text-sm flex items-center gap-2">
-                                <Users className="w-3 h-3 text-primary"/> {persona.title}
-                            </p>
-                            {persona.painPoints && persona.painPoints.length > 0 && (
-                              <div className="mt-3 text-xs text-muted-foreground">
-                                <span className="font-medium text-foreground">Pain Points:</span>
-                                <ul className="list-disc pl-4 mt-1 space-y-0.5">
-                                 {persona.painPoints.map((pp, i) => <li key={i}>{pp}</li>)}
-                                </ul>
-                              </div>
-                            )}
-                          </div>
-                        )) || (
+                        {(Array.isArray(org.icp?.personas) ? org.icp.personas : []).map((persona: any, idx: number) => {
+                          const personaTitle = resolveFieldValue(persona?.title) || resolveFieldValue(persona);
+                          const painPoints = Array.isArray(persona?.painPoints) ? persona.painPoints : [];
+                          return (
+                            <div key={idx} className="p-4 rounded-lg bg-muted/30 border shadow-sm">
+                              <p className="font-semibold text-sm flex items-center gap-2">
+                                  <Users className="w-3 h-3 text-primary"/> {String(personaTitle || 'Untitled Persona')}
+                              </p>
+                              {painPoints.length > 0 && (
+                                <div className="mt-3 text-xs text-muted-foreground">
+                                  <span className="font-medium text-foreground">Pain Points:</span>
+                                  <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                                   {painPoints.map((pp: any, i: number) => <li key={i}>{String(resolveFieldValue(pp))}</li>)}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })} || (
                           <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md col-span-full">
                             No personas defined
                           </p>
@@ -861,11 +985,12 @@ export default function ClientPortalIntelligence() {
                             Email Angles
                           </Label>
                           <div className="space-y-3">
-                            {org.outreach?.emailAngles?.map((angle, idx) => (
+                            {(Array.isArray(org.outreach?.emailAngles) ? org.outreach.emailAngles : []).map((angle: any, idx: number) => (
                               <div key={idx} className="p-3 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 text-sm">
-                                {angle}
+                                {String(resolveFieldValue(angle) || '')}
                               </div>
-                            )) || (
+                            ))}
+                            {(!org.outreach?.emailAngles || (Array.isArray(org.outreach.emailAngles) && org.outreach.emailAngles.length === 0)) && (
                               <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md">
                                 Run deep analysis to generate email angles
                               </p>
@@ -879,11 +1004,12 @@ export default function ClientPortalIntelligence() {
                             Call Openers
                           </Label>
                           <div className="space-y-3">
-                            {org.outreach?.callOpeners?.map((opener, idx) => (
+                            {(Array.isArray(org.outreach?.callOpeners) ? org.outreach.callOpeners : []).map((opener: any, idx: number) => (
                               <div key={idx} className="p-3 rounded-lg bg-green-50/50 dark:bg-green-950/20 border border-green-100 dark:border-green-900/50 text-sm">
-                                {opener}
+                                {String(resolveFieldValue(opener) || '')}
                               </div>
-                            )) || (
+                            ))}
+                            {(!org.outreach?.callOpeners || (Array.isArray(org.outreach.callOpeners) && org.outreach.callOpeners.length === 0)) && (
                               <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md">
                                 Run deep analysis to generate call openers
                               </p>
@@ -906,9 +1032,9 @@ export default function ClientPortalIntelligence() {
                                     {org.outreach.objectionHandlers.map((handler, idx) => (
                                       <div key={idx} className="p-4 rounded-lg bg-amber-50/50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-900/50">
                                         <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 mb-2">
-                                          "{handler.objection}"
+                                          "{String(resolveFieldValue(handler.objection))}"
                                         </p>
-                                        <p className="text-sm text-muted-foreground leading-relaxed">{handler.response}</p>
+                                        <p className="text-sm text-muted-foreground leading-relaxed">{String(resolveFieldValue(handler.response))}</p>
                                       </div>
                                     ))}
                                 </div>

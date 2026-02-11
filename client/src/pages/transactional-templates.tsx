@@ -402,13 +402,13 @@ export default function TransactionalTemplatesPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Select value={filterEventType || ""} onValueChange={(v) => setFilterEventType(v || null)}>
+            <Select value={filterEventType || "all"} onValueChange={(v) => setFilterEventType(v === "all" ? null : v)}>
               <SelectTrigger className="w-48">
                 <Filter className="w-4 h-4 mr-2" />
                 <SelectValue placeholder="All Event Types" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Event Types</SelectItem>
+                <SelectItem value="all">All Event Types</SelectItem>
                 {EVENT_TYPES.map((et) => (
                   <SelectItem key={et.value} value={et.value}>
                     {et.label}
@@ -642,18 +642,19 @@ export default function TransactionalTemplatesPage() {
               <div className="space-y-2">
                 <Label>SMTP Provider (Optional)</Label>
                 <Select
-                  value={editingTemplate?.smtpProviderId || newTemplate.smtpProviderId || ""}
-                  onValueChange={(value) =>
+                  value={editingTemplate?.smtpProviderId || newTemplate.smtpProviderId || "default"}
+                  onValueChange={(value) => {
+                    const resolved = value === "default" ? "" : value;
                     editingTemplate
-                      ? setEditingTemplate({ ...editingTemplate, smtpProviderId: value || undefined })
-                      : setNewTemplate({ ...newTemplate, smtpProviderId: value })
-                  }
+                      ? setEditingTemplate({ ...editingTemplate, smtpProviderId: resolved || undefined })
+                      : setNewTemplate({ ...newTemplate, smtpProviderId: resolved });
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Use default provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Use default provider</SelectItem>
+                    <SelectItem value="default">Use default provider</SelectItem>
                     {smtpProviders
                       .filter((p) => p.verificationStatus === "verified")
                       .map((provider) => (

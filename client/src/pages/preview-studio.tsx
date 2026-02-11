@@ -81,13 +81,37 @@ interface Campaign {
   name: string;
 }
 
-// Voice options with personalities
+// Voice options - All 24 Gemini voices
 const GEMINI_VOICES: VoiceOption[] = [
-  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', personality: 'Natural, Soft, Storytelling', provider: 'gemini' },
-  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', personality: 'Deep, Resonant, Authoritative', provider: 'gemini' },
-  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', personality: 'Balanced, Clear, Professional', provider: 'gemini' },
-  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', personality: 'Deep, Intense, Cinematic', provider: 'gemini' },
-  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', personality: 'Bright, Expressive, Engaging', provider: 'gemini' },
+  // Primary B2B Sales voices
+  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', personality: 'Firm, Professional, Confident', provider: 'gemini' },
+  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', personality: 'Excitable, Energetic, Persuasive', provider: 'gemini' },
+  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', personality: 'Informative, Authoritative, Knowledgeable', provider: 'gemini' },
+  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', personality: 'Breezy, Friendly, Light', provider: 'gemini' },
+  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', personality: 'Upbeat, Lively, Engaging', provider: 'gemini' },
+  // Professional voices
+  { id: 'Zephyr', name: 'Zephyr', displayName: 'Zephyr', gender: 'male', personality: 'Bright, Clear, Articulate', provider: 'gemini' },
+  { id: 'Leda', name: 'Leda', displayName: 'Leda', gender: 'female', personality: 'Youthful, Fresh, Modern', provider: 'gemini' },
+  { id: 'Orus', name: 'Orus', displayName: 'Orus', gender: 'male', personality: 'Firm, Steady, Reliable', provider: 'gemini' },
+  { id: 'Sulafat', name: 'Sulafat', displayName: 'Sulafat', gender: 'female', personality: 'Warm, Caring, Empathetic', provider: 'gemini' },
+  { id: 'Gacrux', name: 'Gacrux', displayName: 'Gacrux', gender: 'male', personality: 'Mature, Experienced, Credible', provider: 'gemini' },
+  { id: 'Schedar', name: 'Schedar', displayName: 'Schedar', gender: 'male', personality: 'Even, Balanced, Composed', provider: 'gemini' },
+  { id: 'Achird', name: 'Achird', displayName: 'Achird', gender: 'female', personality: 'Friendly, Welcoming, Warm', provider: 'gemini' },
+  // Specialized voices
+  { id: 'Sadaltager', name: 'Sadaltager', displayName: 'Sadaltager', gender: 'male', personality: 'Knowledgeable, Expert, Authoritative', provider: 'gemini' },
+  { id: 'Pulcherrima', name: 'Pulcherrima', displayName: 'Pulcherrima', gender: 'female', personality: 'Forward, Confident, Assertive', provider: 'gemini' },
+  { id: 'Iapetus', name: 'Iapetus', displayName: 'Iapetus', gender: 'male', personality: 'Clear, Precise, Technical', provider: 'gemini' },
+  { id: 'Erinome', name: 'Erinome', displayName: 'Erinome', gender: 'female', personality: 'Clear, Articulate, Professional', provider: 'gemini' },
+  { id: 'Vindemiatrix', name: 'Vindemiatrix', displayName: 'Vindemiatrix', gender: 'female', personality: 'Gentle, Soft, Calming', provider: 'gemini' },
+  { id: 'Achernar', name: 'Achernar', displayName: 'Achernar', gender: 'female', personality: 'Soft, Reassuring, Kind', provider: 'gemini' },
+  // Dynamic voices
+  { id: 'Sadachbia', name: 'Sadachbia', displayName: 'Sadachbia', gender: 'female', personality: 'Lively, Dynamic, Exciting', provider: 'gemini' },
+  { id: 'Laomedeia', name: 'Laomedeia', displayName: 'Laomedeia', gender: 'female', personality: 'Upbeat, Positive, Motivating', provider: 'gemini' },
+  // Character voices
+  { id: 'Enceladus', name: 'Enceladus', displayName: 'Enceladus', gender: 'male', personality: 'Breathy, Intimate, Thoughtful', provider: 'gemini' },
+  { id: 'Algenib', name: 'Algenib', displayName: 'Algenib', gender: 'male', personality: 'Gravelly, Deep, Distinctive', provider: 'gemini' },
+  { id: 'Rasalgethi', name: 'Rasalgethi', displayName: 'Rasalgethi', gender: 'male', personality: 'Informative, Educational, Clear', provider: 'gemini' },
+  { id: 'Alnilam', name: 'Alnilam', displayName: 'Alnilam', gender: 'male', personality: 'Firm, Decisive, Commanding', provider: 'gemini' },
 ];
 
 const VOICE_TONES = [
@@ -527,14 +551,18 @@ function VoicePreviewSection({
   return (
     <div className="h-full flex">
       {/* Voice Configuration Panel */}
-      <div className="w-80 border-r border-white/5 bg-black/10 p-6 overflow-y-auto">
-        <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-xl bg-purple-500/20 flex items-center justify-center">
-            <Volume2 className="h-4 w-4 text-purple-400" />
-          </div>
-          Voice Configuration
-        </h3>
+      <div className="w-80 border-r border-white/5 bg-black/10 flex flex-col">
+        <div className="p-6 pb-4 shrink-0">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-purple-500/20 flex items-center justify-center">
+              <Volume2 className="h-4 w-4 text-purple-400" />
+            </div>
+            Voice Configuration
+          </h3>
+          <p className="text-xs text-white/40 mt-1 ml-10">24 Gemini voices available</p>
+        </div>
 
+        <ScrollArea className="flex-1 px-6 pb-6">
         {/* Gender Selection with Voice Cards */}
         <div className="space-y-6 mb-6">
           {/* MALE VOICES */}
@@ -699,6 +727,7 @@ function VoicePreviewSection({
             ))}
           </div>
         </div>
+        </ScrollArea>
       </div>
 
       {/* Voice Simulation Area */}

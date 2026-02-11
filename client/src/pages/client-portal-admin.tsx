@@ -270,7 +270,9 @@ const ClientCampaignPricingEditor = ({ clientId }: { clientId: string }) => {
   const { data: pricingData, isLoading, refetch } = useQuery({
     queryKey: ['client-campaign-pricing', clientId],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/billing/clients/${clientId}/campaign-pricing`);
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/campaign-pricing`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
       if (!res.ok) throw new Error('Failed to fetch pricing');
       return res.json();
     },
@@ -280,9 +282,9 @@ const ClientCampaignPricingEditor = ({ clientId }: { clientId: string }) => {
   // Update pricing mutation
   const updatePricingMutation = useMutation({
     mutationFn: async ({ campaignType, data }: { campaignType: string; data: any }) => {
-      const res = await fetch(`/api/admin/billing/clients/${clientId}/campaign-pricing/${campaignType}`, {
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/campaign-pricing/${campaignType}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('Failed to update pricing');
@@ -462,7 +464,9 @@ const ClientPricingDocumentsManager = ({ clientId }: { clientId: string }) => {
   const { data: docsData, isLoading, refetch } = useQuery({
     queryKey: ['client-pricing-documents', clientId],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents`);
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/pricing-documents`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
       if (!res.ok) throw new Error('Failed to fetch pricing documents');
       return res.json();
     },
@@ -471,8 +475,9 @@ const ClientPricingDocumentsManager = ({ clientId }: { clientId: string }) => {
 
   const deleteMutation = useMutation({
     mutationFn: async (docId: string) => {
-      const res = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents/${docId}`, {
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/pricing-documents/${docId}`, {
         method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
       });
       if (!res.ok) throw new Error('Failed to delete document');
       return res.json();
@@ -521,9 +526,9 @@ const ClientPricingDocumentsManager = ({ clientId }: { clientId: string }) => {
       });
 
       // Save document metadata
-      const saveRes = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents`, {
+      const saveRes = await fetch(`/api/client-portal/admin/clients/${clientId}/pricing-documents`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
         body: JSON.stringify({
           name: docName.trim(),
           description: docDescription.trim() || null,
@@ -551,7 +556,9 @@ const ClientPricingDocumentsManager = ({ clientId }: { clientId: string }) => {
 
   const handleDownload = async (docId: string) => {
     try {
-      const res = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents/${docId}/download`);
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/pricing-documents/${docId}/download`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
       if (!res.ok) throw new Error('Failed to get download URL');
       const { downloadUrl, fileName } = await res.json();
       const link = document.createElement('a');

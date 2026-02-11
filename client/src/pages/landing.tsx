@@ -815,7 +815,7 @@ export default function LandingPage() {
               {
                 icon: Wand2,
                 title: "Content Agent",
-                subtitle: "Generative Studio",
+                subtitle: "Creative Studio",
                 description: "Creates complete campaign assets — landing pages, email templates, blog posts, eBooks, solution briefs, and images — all in your brand voice.",
                 capabilities: ["7 content engines", "One-click publish", "AI-powered refinement"],
                 color: "violet",

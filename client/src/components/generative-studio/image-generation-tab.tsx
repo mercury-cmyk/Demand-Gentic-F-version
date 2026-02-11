@@ -14,7 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Sparkles, Download, Image, AlertTriangle, Brain } from "lucide-react";
+import { Loader2, Sparkles, Download, Image, AlertTriangle, Brain, AlertCircle, ZoomIn } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const IMAGE_STYLES = [
   { value: "photorealistic", label: "Photorealistic" },
@@ -48,7 +49,6 @@ interface ImageGenerationTabProps {
 }
 
 export default function ImageGenerationTab({
-  brandKits,
   orgIntelligence,
   organizationId,
   clientProjectId,
@@ -62,6 +62,7 @@ export default function ImageGenerationTab({
   const [generatedImages, setGeneratedImages] = useState<any[]>([]);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [brokenImages, setBrokenImages] = useState<Set<number>>(new Set());
+  const [expandedImage, setExpandedImage] = useState<number | null>(null);
   const isDisabled = !organizationId;
 
   const generateMutation = useMutation({
@@ -129,88 +130,92 @@ export default function ImageGenerationTab({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
       {/* Left panel - Form */}
-      <div className="border-r p-6 overflow-auto space-y-4">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="border-r bg-muted/10 p-5 overflow-auto space-y-5">
+        <div className="flex items-center gap-2.5">
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-100 text-violet-600">
             <Image className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold">Image Generation</h2>
-            <p className="text-xs text-muted-foreground">Powered by Vertex AI Imagen 3</p>
+            <h2 className="text-base font-semibold leading-none">Image Generation</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Powered by Vertex AI Imagen 3</p>
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label>Prompt</Label>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Prompt</Label>
           <Textarea
             placeholder="Describe the image you want to generate..."
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
             disabled={isDisabled}
+            className="resize-none"
           />
         </div>
 
-        <div className="space-y-2">
-          <Label>Negative Prompt (optional)</Label>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Negative Prompt <span className="text-muted-foreground font-normal">(optional)</span></Label>
           <Textarea
             placeholder="Describe what to avoid..."
             value={negativePrompt}
             onChange={(e) => setNegativePrompt(e.target.value)}
             rows={2}
             disabled={isDisabled}
+            className="resize-none"
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label>Style</Label>
-            <Select value={style} onValueChange={setStyle} disabled={isDisabled}>
-              <SelectTrigger>
+        <div className="space-y-3 pt-1">
+          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Settings</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Style</Label>
+              <Select value={style} onValueChange={setStyle} disabled={isDisabled}>
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {IMAGE_STYLES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Aspect Ratio</Label>
+              <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={isDisabled}>
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ASPECT_RATIOS.map((ar) => (
+                    <SelectItem key={ar.value} value={ar.value}>{ar.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Number of Images</Label>
+            <Select value={numberOfImages} onValueChange={setNumberOfImages} disabled={isDisabled}>
+              <SelectTrigger className="h-9">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {IMAGE_STYLES.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                ))}
+                <SelectItem value="1">1 Image</SelectItem>
+                <SelectItem value="2">2 Images</SelectItem>
+                <SelectItem value="3">3 Images</SelectItem>
+                <SelectItem value="4">4 Images</SelectItem>
               </SelectContent>
             </Select>
           </div>
-
-          <div className="space-y-2">
-            <Label>Aspect Ratio</Label>
-            <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={isDisabled}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ASPECT_RATIOS.map((ar) => (
-                  <SelectItem key={ar.value} value={ar.value}>{ar.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Number of Images</Label>
-          <Select value={numberOfImages} onValueChange={setNumberOfImages} disabled={isDisabled}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="1">1 Image</SelectItem>
-              <SelectItem value="2">2 Images</SelectItem>
-              <SelectItem value="3">3 Images</SelectItem>
-              <SelectItem value="4">4 Images</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
 
         <Button
-          className="w-full"
+          className="w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-sm"
           onClick={handleGenerate}
           disabled={generateMutation.isPending || !prompt || isDisabled}
           size="lg"
@@ -227,13 +232,14 @@ export default function ImageGenerationTab({
         </Button>
 
         {generateMutation.isPending && (
-          <p className="text-xs text-center text-muted-foreground">Image generation can take up to 60 seconds</p>
+          <p className="text-[11px] text-center text-muted-foreground">Image generation can take up to 60 seconds</p>
         )}
 
         {isDisabled && (
-          <p className="text-xs text-center text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
             Select an organization to generate images.
-          </p>
+          </div>
         )}
 
         {orgIntelligence?.identity?.legalName?.value && (
@@ -241,27 +247,29 @@ export default function ImageGenerationTab({
             <Brain className="w-4 h-4 text-emerald-600 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-emerald-700">
-                Org Intelligence: {orgIntelligence.identity.legalName.value}
+                {orgIntelligence.identity.legalName.value}
               </p>
-              <p className="text-[10px] text-emerald-600">
-                Brand context available for image prompts
-              </p>
+              <p className="text-[10px] text-emerald-600">Brand context for image prompts</p>
             </div>
             <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-600 shrink-0">
-              Active
+              OI
             </Badge>
           </div>
         )}
       </div>
 
       {/* Right panel - Results */}
-      <div className="p-6 overflow-auto">
+      <div className="p-5 overflow-auto bg-muted/5">
         {generatedImages.length === 0 && !generateMutation.isPending && !generationError && (
           <div className="h-full flex items-center justify-center text-muted-foreground">
-            <div className="text-center space-y-2">
-              <Image className="w-16 h-16 mx-auto opacity-20" />
-              <p className="text-lg font-medium">No images generated yet</p>
-              <p className="text-sm">Enter a prompt and click Generate to create AI images</p>
+            <div className="text-center space-y-4 max-w-xs">
+              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-muted/50 mx-auto">
+                <Image className="w-7 h-7 opacity-25" />
+              </div>
+              <div>
+                <p className="text-base font-medium text-foreground/60">No images generated yet</p>
+                <p className="text-sm text-muted-foreground mt-1">Enter a prompt and click Generate to create AI images</p>
+              </div>
             </div>
           </div>
         )}
@@ -269,10 +277,12 @@ export default function ImageGenerationTab({
         {generationError && !generateMutation.isPending && (
           <div className="h-full flex items-center justify-center">
             <div className="text-center space-y-3 max-w-md">
-              <AlertTriangle className="w-12 h-12 mx-auto text-amber-500" />
-              <p className="text-lg font-medium">Generation Failed</p>
+              <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-amber-50 mx-auto">
+                <AlertTriangle className="w-7 h-7 text-amber-500" />
+              </div>
+              <p className="text-base font-medium">Generation Failed</p>
               <p className="text-sm text-muted-foreground">{generationError}</p>
-              <Button variant="outline" size="sm" onClick={() => { setGenerationError(null); }}>
+              <Button variant="outline" size="sm" onClick={() => setGenerationError(null)}>
                 Dismiss
               </Button>
             </div>
@@ -281,53 +291,86 @@ export default function ImageGenerationTab({
 
         {generateMutation.isPending && (
           <div className="h-full flex items-center justify-center">
-            <div className="text-center space-y-3">
-              <Loader2 className="w-12 h-12 mx-auto animate-spin text-violet-500" />
-              <p className="text-lg font-medium">Generating images...</p>
-              <p className="text-sm text-muted-foreground">This may take up to 60 seconds</p>
+            <div className="text-center space-y-4">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
+                  <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
+                </div>
+              </div>
+              <div>
+                <p className="text-base font-medium">Generating images...</p>
+                <p className="text-sm text-muted-foreground mt-1">This may take up to 60 seconds</p>
+              </div>
             </div>
           </div>
         )}
 
         {generatedImages.length > 0 && !generationError && !generateMutation.isPending && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {generatedImages.map((img: any, i: number) => (
-              <Card key={i} className="overflow-hidden">
-                <div className="relative aspect-square bg-muted">
-                  {brokenImages.has(i) ? (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <div className="text-center space-y-2">
-                        <AlertTriangle className="w-8 h-8 mx-auto text-amber-500" />
-                        <p className="text-xs text-muted-foreground">Image failed to load</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <img
-                      src={img.url || img.thumbnailUrl}
-                      alt={img.altText || `Generated image ${i + 1}`}
-                      className="w-full h-full object-cover"
-                      onError={() => handleImageError(i)}
-                    />
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">
+                {generatedImages.length} image{generatedImages.length !== 1 ? "s" : ""} generated
+              </p>
+            </div>
+            <div className={cn(
+              "grid gap-4",
+              generatedImages.length === 1 ? "grid-cols-1 max-w-lg" : "grid-cols-1 md:grid-cols-2"
+            )}>
+              {generatedImages.map((img: any, i: number) => (
+                <Card
+                  key={i}
+                  className={cn(
+                    "overflow-hidden group cursor-pointer transition-shadow hover:shadow-lg",
+                    expandedImage === i && "ring-2 ring-violet-500"
                   )}
-                </div>
-                <CardContent className="p-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-muted-foreground truncate flex-1">
-                      {img.altText || prompt.slice(0, 50)}
-                    </p>
-                    {!brokenImages.has(i) && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDownload(img.url, i)}
-                      >
-                        <Download className="w-3 h-3" />
-                      </Button>
+                  onClick={() => setExpandedImage(expandedImage === i ? null : i)}
+                >
+                  <div className="relative aspect-square bg-muted">
+                    {brokenImages.has(i) ? (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <div className="text-center space-y-2">
+                          <AlertTriangle className="w-8 h-8 mx-auto text-amber-500" />
+                          <p className="text-xs text-muted-foreground">Image failed to load</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <img
+                          src={img.url || img.thumbnailUrl}
+                          alt={img.altText || `Generated image ${i + 1}`}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                          onError={() => handleImageError(i)}
+                        />
+                        {/* Hover overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                          <ZoomIn className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
+                        </div>
+                      </>
                     )}
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                  <CardContent className="p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground truncate flex-1">
+                        {img.altText || prompt.slice(0, 50)}
+                      </p>
+                      {!brokenImages.has(i) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownload(img.url, i);
+                          }}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
         )}
       </div>

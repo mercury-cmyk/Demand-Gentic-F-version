@@ -129,10 +129,10 @@ const baseNavigationGroups: NavGroup[] = [
     id: 'ai-intelligence',
     label: 'AI & Intelligence',
     items: [
-      { name: 'Agent Catalog', href: '/client-portal/agents', icon: Bot },
+      { name: 'The Agentic Council', href: '/client-portal/agents', icon: Bot, highlighted: true },
       { name: 'Organization Intelligence', href: '/client-portal/dashboard?tab=intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
-      { name: 'Generative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
+      { name: 'Creative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
     ],
   },
@@ -261,7 +261,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       const token = getToken();
       if (!token) return { enabledFeatures: [] };
       try {
-        const res = await fetch('/api/client-portal/features', {
+        const res = await fetch('/api/client-portal/settings/features', {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return { enabledFeatures: [] };
@@ -495,8 +495,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                 <CollapsibleContent className="space-y-0.5 pb-2">
                   {group.items.map((item) => {
                     const isActive = isItemActive(item, location, searchString);
-                    // Removed individual item highlight for Org Intelligence
-                    const isHighlighted = false;
+                    const isHighlighted = !!(item as any).highlighted;
 
                     return (
                       <Link key={item.name} href={item.href}>

@@ -146,7 +146,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
       },
       {
         id: 'generative-studio',
-        title: 'Generative Studio',
+        title: 'Creative Studio',
         url: '/generative-studio',
         icon: 'Wand2',
         roles: MANAGEMENT_ROLES,

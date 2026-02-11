@@ -68,7 +68,6 @@ import { UkefTranscriptQaContent } from '@/pages/client-portal/ukef-transcript-q
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
-import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
 import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/icp-positioning';
 import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
 import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/service-catalog-tab';
@@ -3784,7 +3783,22 @@ export default function ClientPortalDashboard() {
               </div>
             </div>
 
-            <AccountIntelligenceView />
+            <Card className="border-dashed border-2">
+              <CardContent className="flex flex-col items-center justify-center p-12 text-center">
+                <Building2 className="h-12 w-12 text-primary/50 mb-4" />
+                <h3 className="text-lg font-semibold">Organization Intelligence Hub</h3>
+                <p className="text-muted-foreground mt-2 max-w-md">
+                  Analyze your organization's profile, ICP, messaging, and competitive positioning with advanced multi-model AI research.
+                </p>
+                <Button
+                  className="mt-6"
+                  onClick={() => setLocation('/client-portal/intelligence')}
+                >
+                  <Brain className="h-4 w-4 mr-2" />
+                  Open Intelligence Hub
+                </Button>
+              </CardContent>
+            </Card>
           </div>
         )}
 

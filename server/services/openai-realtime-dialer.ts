@@ -116,7 +116,7 @@ const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
     eagerness: 'high',  // OPTIMIZED: 'high' for faster turn-taking, reduces latency
     takeTurnAfterSilenceSeconds: 2,  // OPTIMIZED: reduced from 4s for faster responses
     endConversationAfterSilenceSeconds: 60,
-    maxConversationDurationSeconds: 240,  // 4 minutes max call duration
+    maxConversationDurationSeconds: 360,  // 6 minutes max call duration
   },
   softTimeout: {
     responseTimeoutSeconds: -1,

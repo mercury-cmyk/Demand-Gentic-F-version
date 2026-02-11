@@ -9,10 +9,14 @@ import {
   Code,
   Copy,
   Check,
-  Edit3,
-  ExternalLink,
+  Sparkles,
+  FileText,
+  Monitor,
+  Smartphone,
+  Tablet,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 interface ContentPreviewProps {
   content?: string;
@@ -43,6 +47,7 @@ export default function ContentPreview({
 }: ContentPreviewProps) {
   const [viewMode, setViewMode] = useState<"preview" | "html">("preview");
   const [copied, setCopied] = useState(false);
+  const [deviceView, setDeviceView] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const { toast } = useToast();
 
@@ -70,13 +75,26 @@ export default function ContentPreview({
     }
   };
 
+  const iframeWidthClass =
+    deviceView === "mobile"
+      ? "max-w-[375px]"
+      : deviceView === "tablet"
+      ? "max-w-[768px]"
+      : "max-w-full";
+
   if (!htmlContent) {
     return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">
-        <div className="text-center space-y-2">
-          <Eye className="w-12 h-12 mx-auto opacity-30" />
-          <p className="text-lg font-medium">No content yet</p>
-          <p className="text-sm">Fill out the form and click Generate to see a preview</p>
+      <div className="h-full flex items-center justify-center text-muted-foreground bg-muted/10">
+        <div className="text-center space-y-4 max-w-xs">
+          <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-muted/50 mx-auto">
+            <Sparkles className="w-7 h-7 opacity-30" />
+          </div>
+          <div>
+            <p className="text-base font-medium text-foreground/60">No content yet</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Fill out the form and click Generate to see a live preview here
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -84,27 +102,64 @@ export default function ContentPreview({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header with actions */}
-      <div className="flex items-center justify-between p-3 border-b bg-muted/30">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/20">
         <div className="flex items-center gap-2">
-          <div className="flex rounded-md border">
+          {/* View Mode Toggle */}
+          <div className="flex rounded-lg border bg-background p-0.5">
             <Button
               variant={viewMode === "preview" ? "secondary" : "ghost"}
               size="sm"
+              className="h-7 px-2.5 text-xs rounded-md"
               onClick={() => setViewMode("preview")}
             >
-              <Eye className="w-3 h-3 mr-1" /> Preview
+              <Eye className="w-3.5 h-3.5 mr-1" /> Preview
             </Button>
             <Button
               variant={viewMode === "html" ? "secondary" : "ghost"}
               size="sm"
+              className="h-7 px-2.5 text-xs rounded-md"
               onClick={() => setViewMode("html")}
             >
-              <Code className="w-3 h-3 mr-1" /> HTML
+              <Code className="w-3.5 h-3.5 mr-1" /> HTML
             </Button>
           </div>
+
+          {/* Device Preview Toggle (only in preview mode) */}
+          {viewMode === "preview" && (
+            <div className="flex rounded-lg border bg-background p-0.5 ml-1">
+              <Button
+                variant={deviceView === "desktop" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 w-7 p-0 rounded-md"
+                onClick={() => setDeviceView("desktop")}
+              >
+                <Monitor className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant={deviceView === "tablet" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 w-7 p-0 rounded-md"
+                onClick={() => setDeviceView("tablet")}
+              >
+                <Tablet className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant={deviceView === "mobile" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 w-7 p-0 rounded-md"
+                onClick={() => setDeviceView("mobile")}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          )}
+
           {status && (
-            <Badge variant={status === "published" ? "default" : "secondary"}>
+            <Badge
+              variant={status === "published" ? "default" : "secondary"}
+              className="text-[10px] h-5"
+            >
               {status}
             </Badge>
           )}
@@ -116,36 +171,40 @@ export default function ContentPreview({
         </div>
 
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={handleCopy}>
-            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleCopy}>
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
           </Button>
           {onSaveAsAsset && (
-            <Button variant="ghost" size="sm" onClick={onSaveAsAsset}>
-              <Save className="w-3 h-3 mr-1" /> Save
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onSaveAsAsset}>
+              <Save className="w-3.5 h-3.5 mr-1" /> Save
             </Button>
           )}
           {onPublish && (contentType === "landing_page" || contentType === "blog_post") && (
             <Button
-              variant="default"
               size="sm"
+              className="h-7 px-2.5 text-xs bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
               onClick={onPublish}
               disabled={isPublishing}
             >
-              <Globe className="w-3 h-3 mr-1" /> Publish
+              <Globe className="w-3.5 h-3.5 mr-1" /> Publish
             </Button>
           )}
           {onExport && (contentType === "ebook" || contentType === "solution_brief" || contentType === "blog_post") && (
-            <Button variant="outline" size="sm" onClick={onExport}>
-              <Download className="w-3 h-3 mr-1" /> Export
+            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={onExport}>
+              <Download className="w-3.5 h-3.5 mr-1" /> Export
             </Button>
           )}
         </div>
       </div>
 
       {/* Metadata bar */}
-      {metadata && (
-        <div className="flex items-center gap-3 px-3 py-2 border-b text-xs text-muted-foreground bg-muted/10">
-          {metadata.seoTitle && <span>SEO: {metadata.seoTitle}</span>}
+      {metadata && (metadata.seoTitle || metadata.estimatedReadTime || metadata.estimatedPageCount || metadata.chapters?.length || metadata.sections?.length) && (
+        <div className="flex items-center gap-3 px-3 py-1.5 border-b text-[11px] text-muted-foreground bg-muted/10">
+          {metadata.seoTitle && (
+            <span className="flex items-center gap-1">
+              <FileText className="w-3 h-3" /> {metadata.seoTitle}
+            </span>
+          )}
           {metadata.estimatedReadTime && <span>{metadata.estimatedReadTime}</span>}
           {metadata.estimatedPageCount && <span>{metadata.estimatedPageCount} pages</span>}
           {metadata.chapters?.length && <span>{metadata.chapters.length} chapters</span>}
@@ -154,16 +213,21 @@ export default function ContentPreview({
       )}
 
       {/* Content area */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto bg-muted/5">
         {viewMode === "preview" ? (
-          <iframe
-            ref={iframeRef}
-            className="w-full h-full border-0"
-            title="Content Preview"
-            sandbox="allow-same-origin"
-          />
+          <div className={cn("mx-auto h-full transition-all duration-200", iframeWidthClass)}>
+            <iframe
+              ref={iframeRef}
+              className={cn(
+                "w-full h-full border-0",
+                deviceView !== "desktop" && "border-x shadow-lg"
+              )}
+              title="Content Preview"
+              sandbox="allow-same-origin"
+            />
+          </div>
         ) : (
-          <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-all bg-slate-950 text-slate-200 h-full overflow-auto">
+          <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-all bg-slate-950 text-slate-200 h-full overflow-auto leading-relaxed">
             {htmlContent}
           </pre>
         )}

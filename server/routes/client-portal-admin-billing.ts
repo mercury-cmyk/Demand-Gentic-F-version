@@ -24,57 +24,8 @@ router.use(requireAuth);
 router.use(requireRole('admin', 'campaign_manager'));
 
 // List all client accounts
-router.get('/clients', async (req: Request, res: Response) => {
-  try {
-    const clients = await db
-      .select()
-      .from(clientAccounts)
-      .orderBy(desc(clientAccounts.createdAt));
-
-    res.json(clients);
-  } catch (error) {
-    console.error('[ADMIN] List clients error:', error);
-    res.status(500).json({ message: 'Failed to list clients' });
-  }
-});
-
-// Get client details with projects
-router.get('/clients/:clientId', async (req: Request, res: Response) => {
-  try {
-    const { clientId } = req.params;
-
-    const [client] = await db
-      .select()
-      .from(clientAccounts)
-      .where(eq(clientAccounts.id, clientId))
-      .limit(1);
-
-    if (!client) {
-      return res.status(404).json({ message: 'Client not found' });
-    }
-
-    const projects = await db
-      .select()
-      .from(clientProjects)
-      .where(eq(clientProjects.clientAccountId, clientId))
-      .orderBy(desc(clientProjects.createdAt));
-
-    const orders = await db
-      .select()
-      .from(workOrders)
-      .where(eq(workOrders.clientAccountId, clientId))
-      .orderBy(desc(workOrders.createdAt));
-
-    res.json({
-      ...client,
-      projects,
-      workOrders: orders,
-    });
-  } catch (error) {
-    console.error('[ADMIN] Get client details error:', error);
-    res.status(500).json({ message: 'Failed to get client details' });
-  }
-});
+// Note: GET /clients and GET /clients/:clientId are handled by main client-portal.ts admin routes
+// (which include richer data: users, campaigns, regularCampaigns). Do NOT duplicate them here.
 
 // ==================== BILLING CONFIGURATION ====================
 
