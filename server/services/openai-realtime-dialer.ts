@@ -2040,13 +2040,6 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
     return;
   }
 
-  // FIX: Ignore initial audio to prevent "ghost" interruptions of the opening greeting
-  // This protects against line noise or early "hello?" from user disrupting the agent's intro
-  const timeSinceStart = Date.now() - session.startTime.getTime();
-  if (timeSinceStart < 2500) {
-    return;
-  }
-
   if (message.media?.payload) {
     session.telnyxInboundFrames += 1;
     session.telnyxInboundLastTime = new Date();
@@ -2391,9 +2384,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     if (!campaign) return null;
 
     const aiSettings = campaign.aiAgentSettings as any || {};
-    // Spread aiSettings FIRST so our explicit DB column values always win
     return {
-      ...aiSettings,
       script: campaign.callScript,
       voice: aiSettings?.persona?.voice || 'alloy',
       openingScript: aiSettings?.scripts?.opening,
@@ -2408,8 +2399,9 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       campaignContextBrief: campaign.campaignContextBrief,
       // Agent name: resolve from persona fields
       agentName: (aiSettings?.persona?.name || aiSettings?.persona?.agentName || aiSettings?.agentName || '').trim() || null,
-      // Include assignedVoices from DB column (not from aiSettings)
+      // Include assignedVoices so voice name can be used as agentName fallback
       assignedVoices: (campaign as any).assignedVoices || null,
+      ...aiSettings,
     };
   } catch (error) {
     console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
@@ -2544,7 +2536,6 @@ async function buildSystemPrompt(
   if (assignedVoicesList && Array.isArray(assignedVoicesList) && assignedVoicesList.length > 0) {
     const randomVoice = assignedVoicesList[Math.floor(Math.random() * assignedVoicesList.length)];
     resolvedVoiceName = randomVoice?.name || randomVoice?.id || null;
-    console.log(`[OpenAI-Dialer] [buildSystemPrompt] 🎲 Voice rotation for agent name: picked "${resolvedVoiceName}" from ${assignedVoicesList.length} voices: [${assignedVoicesList.map(v => v.name || v.id).join(', ')}]`);
   }
   if (!resolvedVoiceName) {
     resolvedVoiceName = campaignConfig?.voice || null;

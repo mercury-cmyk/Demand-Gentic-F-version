@@ -360,7 +360,6 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             voiceConfig: {
               prebuiltVoiceConfig: {
                 voiceName: voice,
-                ...(config.speakingRate ? { speakingRate: config.speakingRate } : {}),
               },
             },
           },
@@ -397,7 +396,6 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             voice_config: {
               prebuilt_voice_config: {
                 voice_name: voice,
-                ...(config.speakingRate ? { speaking_rate: config.speakingRate } : {}),
               },
             },
           },
@@ -856,8 +854,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // IMPORTANT: The trigger text must be minimal. Long instructions in client_content
     // confuse the turn state and cause Gemini to monologue (generate multiple
     // consecutive responses without waiting for audio input).
-    // LOOP PREVENTION: We explicitly tell it to say the greeting EXACTLY and then STOP.
-    const triggerText = `[CALL CONNECTED] The phone line is now live. Speak this opening line EXACTLY as written, do not add anything else, do not repeat yourself: "${text}"`;
+    const triggerText = `[CALL CONNECTED] The phone line is now live. Say your greeting: "${text}" — then STOP and LISTEN.`;
 
     // Vertex AI uses camelCase, Google AI Studio uses snake_case
     const message = this.useVertexAI

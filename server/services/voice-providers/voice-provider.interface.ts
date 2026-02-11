@@ -54,11 +54,6 @@ export interface VoiceProviderConfig {
   // Generation settings
   maxResponseTokens?: number;
   temperature?: number;
-  
-  /**
-   * Talking speed (0.5 - 2.0). Default: 1.0
-   */
-  speakingRate?: number;
 
   // Transcription settings
   transcriptionEnabled?: boolean;
