@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, desc, sql, inArray, isNull, asc } from 'drizzle-orm';
 import {
   workOrders,
   clientAccounts,
@@ -18,6 +18,9 @@ import {
   campaignQueue,
   callAttempts,
   leads,
+  clientCampaignAccess,
+  contacts,
+  accounts,
 } from '@shared/schema';
 import { z } from 'zod';
 import { isFeatureEnabled } from '../feature-flags';
@@ -279,29 +282,130 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * GET /:id/queue - Get a sample of the queue for a campaign
+ * 
+ * FIXED: Now verifies campaign ownership and returns total count
  */
 router.get('/:id/queue', async (req: Request, res: Response) => {
   try {
     const clientAccountId = req.clientUser?.clientAccountId;
     if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const { id } = req.params;
+    const { id: campaignId } = req.params;
+    console.log(`[CLIENT QUEUE] Fetching queue for campaign ${campaignId}, client ${clientAccountId}`);
 
+    // SECURITY: Verify campaign belongs to this client
+    // Check if campaign exists in the campaigns table with this clientAccountId
+    const [campaign] = await db
+      .select({ id: campaigns.id, name: campaigns.name, clientAccountId: campaigns.clientAccountId })
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+
+    if (!campaign) {
+      console.warn(`[CLIENT QUEUE] Campaign ${campaignId} not found`);
+      return res.status(404).json({ message: 'Campaign not found' });
+    }
+
+    // Also check verification campaigns for client access
+    let hasAccess = false;
+    if (campaign.clientAccountId === clientAccountId) {
+      hasAccess = true;
+      console.log(`[CLIENT QUEUE] Access granted via direct clientAccountId match`);
+    } else {
+      // Check if this campaign is linked via clientCampaignAccess
+      const [access] = await db
+        .select({ id: clientCampaignAccess.id })
+        .from(clientCampaignAccess)
+        .where(
+          and(
+            eq(clientCampaignAccess.clientAccountId, clientAccountId),
+            or(
+              eq(clientCampaignAccess.campaignId, campaignId),
+              eq(clientCampaignAccess.regularCampaignId, campaignId)
+            )
+          )
+        )
+        .limit(1);
+      hasAccess = !!access;
+      if (hasAccess) {
+        console.log(`[CLIENT QUEUE] Access granted via clientCampaignAccess table`);
+      }
+    }
+
+    if (!hasAccess) {
+      console.warn(`[CLIENT QUEUE] Access denied: client ${clientAccountId} tried to access campaign ${campaignId}`);
+      return res.status(403).json({ message: 'Access denied: campaign does not belong to your account' });
+    }
+
+    // Valid queue_status values: 'queued', 'in_progress', 'done', 'removed'
+    // For queue preview, show only items waiting in queue ('queued')
+    const QUEUE_WAITING_STATUS = 'queued' as const;
+    
+    // Get total count of queued items only
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaignQueue)
+      .where(
+        and(
+          eq(campaignQueue.campaignId, campaignId),
+          eq(campaignQueue.status, QUEUE_WAITING_STATUS)
+        )
+      );
+
+    const totalCount = countResult?.count || 0;
+
+    // Get next 50 contacts in queue with contact/account details via LEFT JOIN
     const queue = await db
       .select({
         id: campaignQueue.id,
+        contactId: campaignQueue.contactId,
         phoneNumber: campaignQueue.dialedNumber,
+        contactName: contacts.fullName,
+        companyName: accounts.name,
         status: campaignQueue.status,
-        nextAttemptAt: campaignQueue.nextAttemptAt
+        nextAttemptAt: campaignQueue.nextAttemptAt,
+        priority: campaignQueue.priority,
+        createdAt: campaignQueue.createdAt
       })
       .from(campaignQueue)
-      .where(eq(campaignQueue.campaignId, id))
+      .leftJoin(contacts, eq(campaignQueue.contactId, contacts.id))
+      .leftJoin(accounts, eq(campaignQueue.accountId, accounts.id))
+      .where(
+        and(
+          eq(campaignQueue.campaignId, campaignId),
+          // Only show items waiting in queue (valid enum: queued, in_progress, done, removed)
+          eq(campaignQueue.status, QUEUE_WAITING_STATUS)
+        )
+      )
+      .orderBy(desc(campaignQueue.priority), asc(campaignQueue.nextAttemptAt))
       .limit(50);
 
-    res.json(queue);
-  } catch (error) {
-    console.error('Queue fetch error:', error);
-    res.status(500).json({ message: 'Failed to fetch queue' });
+    // Map to consistent response shape (matches frontend expectations)
+    const items = queue.map(q => ({
+      id: q.id,
+      contactId: q.contactId,
+      contactName: q.contactName || 'Unknown Contact',
+      companyName: q.companyName || 'Unknown Company',
+      phoneNumber: q.phoneNumber || null,
+      status: q.status,
+      queuedAt: q.createdAt?.toISOString() || null
+    }));
+
+    console.log(`[CLIENT QUEUE] Returning ${items.length} of ${totalCount} queue items for campaign ${campaignId}`);
+
+    res.json({
+      total: totalCount,
+      items
+    });
+  } catch (error: any) {
+    console.error('[CLIENT QUEUE] Queue fetch error:', error?.message || error);
+    console.error('[CLIENT QUEUE] Stack:', error?.stack);
+    // Return stable error response, never raw 500
+    res.status(500).json({ 
+      message: error?.message || 'Failed to fetch queue',
+      total: 0,
+      items: []
+    });
   }
 });
 

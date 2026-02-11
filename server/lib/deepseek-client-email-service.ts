@@ -14,7 +14,27 @@ export interface ClientEmailGenerationRequest {
   emailType: string;
   tone: string;
   variants?: number;
+  variantSpec?: VariantSpec;
 }
+
+// Variant specifications for distinct email styles
+export type VariantStyle = 'plain' | 'branded' | 'newsletter';
+export type VariantTone = 'direct' | 'consultative' | 'formal';
+export type VariantLength = 'short' | 'standard' | 'detailed';
+
+export interface VariantSpec {
+  style: VariantStyle;
+  tone: VariantTone;
+  length: VariantLength;
+  label: string;
+}
+
+// Predefined variant configurations for maximum differentiation
+export const VARIANT_SPECS: VariantSpec[] = [
+  { style: 'plain', tone: 'direct', length: 'short', label: 'Direct & Minimal' },
+  { style: 'branded', tone: 'consultative', length: 'standard', label: 'Branded & Consultative' },
+  { style: 'newsletter', tone: 'formal', length: 'detailed', label: 'Newsletter Style' },
+];
 
 export interface GeneratedEmailContent {
   subject: string;
@@ -25,6 +45,9 @@ export interface GeneratedEmailContent {
   valueBullets: string[];
   ctaLabel: string;
   closingLine: string;
+  // Variant metadata
+  variantStyle?: VariantStyle;
+  variantLabel?: string;
 }
 
 export interface ClientEmailSequenceRequest {
@@ -126,6 +149,86 @@ async function getCampaignContext(campaignId: string, clientAccountId: string): 
 }
 
 /**
+ * Get variant-specific instructions for email generation
+ */
+function getVariantInstructions(variantSpec?: VariantSpec): string {
+  if (!variantSpec) {
+    return `You will generate content for a structured email template. Keep each section appropriately sized:
+- Subject: 40-60 characters, problem/insight-led
+- Preheader: 40-100 characters, complements subject with context
+- Hero Title: 5-10 words, bold, challenge- or insight-focused
+- Hero Subtitle: 15-25 words, expands on the challenge or insight
+- Intro: 2-3 sentences, demonstrates understanding and frames the problem
+- Value Bullets: 3 points, each a relevant, account-aware insight or consideration
+- CTA Label: 2-4 words, action-oriented but NOT salesy (e.g., 'See Analysis', 'Explore Insight')
+- Closing Line: 1 sentence, professional, thoughtful sign-off`;
+  }
+
+  const styleInstructions: Record<VariantStyle, string> = {
+    plain: `STYLE: Plain Text Format
+- Write as if composing a simple personal email
+- NO hero sections, NO fancy headings, NO banners
+- Keep it conversational and minimalist
+- Subject: Short, casual, question-based (30-50 chars)
+- Preheader: Brief teaser (20-40 chars)
+- Hero Title: Skip or use as email opening line
+- Hero Subtitle: Skip - incorporate into intro
+- Intro: 1-2 conversational sentences, get straight to the point
+- Value Bullets: 2-3 simple points without fancy formatting
+- CTA Label: Simple text link (2-3 words like "See here" or "Quick look")
+- Closing Line: Casual, brief sign-off`,
+
+    branded: `STYLE: Professional Branded Format  
+- Polished corporate email with clear structure
+- Include hero section with impactful headline
+- Subject: Clear value proposition (50-70 chars)
+- Preheader: Expands on subject promise (60-90 chars)
+- Hero Title: Bold headline, 5-8 words, action/insight focused
+- Hero Subtitle: Supporting context, 15-25 words
+- Intro: 2-3 professional sentences setting up the value
+- Value Bullets: 3 well-crafted benefit statements
+- CTA Label: Professional button text ("Schedule Demo", "Get Started")
+- Closing Line: Professional, positive sign-off`,
+
+    newsletter: `STYLE: Newsletter/Digest Format
+- Structured with clear sections and agenda feel
+- Multiple content blocks, numbered or sectioned
+- Subject: Newsletter-style with topic preview (50-80 chars)
+- Preheader: Agenda teaser ("3 insights on..." format)
+- Hero Title: Section header introducing main topic
+- Hero Subtitle: Brief context setter
+- Intro: Sets up the newsletter format ("In this update...")
+- Value Bullets: 3 distinct mini-sections with headers
+- CTA Label: Action text for main topic ("Read Full Analysis")
+- Closing Line: Newsletter-style closing with preview of next`
+  };
+
+  const toneInstructions: Record<VariantTone, string> = {
+    direct: `TONE: Direct & Punchy
+- Get to the point immediately
+- Use short sentences
+- No fluff or pleasantries
+- Challenge assumptions directly`,
+    
+    consultative: `TONE: Consultative & Thoughtful
+- Ask rhetorical questions
+- Demonstrate empathy and understanding
+- Position as a trusted advisor
+- Use collaborative language ("we", "together")`,
+    
+    formal: `TONE: Formal & Authoritative
+- Use professional, sophisticated language
+- Reference data, research, or industry trends
+- Maintain respectful distance
+- Include proper salutations and closings`
+  };
+
+  return `${styleInstructions[variantSpec.style]}
+
+${toneInstructions[variantSpec.tone]}`;
+}
+
+/**
  * Generate email content for client portal campaigns
  */
 export async function generateClientEmailContent(
@@ -137,6 +240,10 @@ export async function generateClientEmailContent(
     throw new Error('Campaign not found or access denied');
   }
 
+  // Get variant-specific instructions
+  const variantSpec = request.variantSpec;
+  const variantInstructions = getVariantInstructions(variantSpec);
+
   const systemPrompt = `You are an expert B2B demand generation strategist and copywriter.
 Your task is to generate email content that is:
 - Problem-led: Start with a real, account-relevant challenge or friction point.
@@ -146,21 +253,20 @@ Your task is to generate email content that is:
 - Never promotional or pitch-oriented: Do NOT mention product features, company superiority, or calls to buy.
 - Written as if by someone who deeply understands the target's world.
 
-You will generate content for a structured email template. Keep each section appropriately sized:
-- Subject: 40-60 characters, problem/insight-led
-- Preheader: 40-100 characters, complements subject with context
-- Hero Title: 5-10 words, bold, challenge- or insight-focused
-- Hero Subtitle: 15-25 words, expands on the challenge or insight
-- Intro: 2-3 sentences, demonstrates understanding and frames the problem
-- Value Bullets: 3 points, each a relevant, account-aware insight or consideration
-- CTA Label: 2-4 words, action-oriented but NOT salesy (e.g., 'See Analysis', 'Explore Insight')
-- Closing Line: 1 sentence, professional, thoughtful sign-off
+${variantInstructions}
 
 ${campaignData.context}
 
 Respond ONLY with valid JSON.`;
 
-  const userPrompt = `Generate a ${request.emailType.replace(/_/g, ' ')} email with ${request.tone} tone.
+  const lengthGuidance = variantSpec?.length === 'short' 
+    ? 'Keep all content VERY concise. Subject under 50 chars, intro 1-2 sentences max.'
+    : variantSpec?.length === 'detailed'
+    ? 'Provide more depth. Subject can be longer (up to 70 chars), intro 3-4 sentences with context.'
+    : 'Keep each section appropriately sized with standard length.';
+
+  const userPrompt = `Generate a ${request.emailType.replace(/_/g, ' ')} email with ${variantSpec?.tone || request.tone} tone.
+${lengthGuidance}
 
 Return JSON:
 {
@@ -182,7 +288,7 @@ Return JSON:
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    temperature: 0.7,
+    temperature: 0.85, // Higher temperature for more variation
     max_tokens: 1500,
     response_format: { type: 'json_object' },
   });
@@ -201,6 +307,8 @@ Return JSON:
       valueBullets: parsed.valueBullets || ['Benefit 1', 'Benefit 2', 'Benefit 3'],
       ctaLabel: parsed.ctaLabel || 'Learn More',
       closingLine: parsed.closingLine || 'Best regards',
+      variantStyle: variantSpec?.style,
+      variantLabel: variantSpec?.label,
     };
   } catch (error) {
     console.error('[DEEPSEEK-CLIENT] Failed to parse response:', content);

@@ -51,9 +51,9 @@ interface CampaignCardProps {
   onRequestMoreLeads: (campaignId: string) => void;
   onViewDetails?: (campaignId: string) => void;
   onTestAgent?: (campaignId: string) => void;
+  onTestEmail?: (campaignId: string) => void;
   onSelectVoice?: (campaignId: string) => void;
   onViewQueue?: (campaignId: string) => void;
-  onTestEmail?: (campaignId: string) => void;
 }
 
 const statusConfig: Record<string, {
@@ -129,7 +129,7 @@ const statusSteps = [
   { key: 'completed', label: 'Completed' },
 ];
 
-export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onSelectVoice, onViewQueue, onTestEmail }: CampaignCardProps) {
+export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onTestEmail, onSelectVoice, onViewQueue }: CampaignCardProps) {
   const status = campaign.status || 'active';
   const config = statusConfig[status] || statusConfig.active;
   const StatusIcon = config.icon;
@@ -300,7 +300,7 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
             </Button>
           )}
         </div>
-        {(onTestAgent || onSelectVoice || onTestEmail) && (
+        {(onTestAgent || onTestEmail || onSelectVoice) && (
           <div className="flex gap-2 w-full">
             {onTestAgent && (
               <Button
@@ -317,11 +317,11 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
               <Button
                 variant="outline"
                 size="sm"
-                className="flex-1 gap-1 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/30"
+                className="flex-1 gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
                 onClick={() => onTestEmail(campaign.id)}
               >
                 <Mail className="h-3.5 w-3.5" />
-                Test Email
+                AI Email Test
               </Button>
             )}
             {onSelectVoice && (

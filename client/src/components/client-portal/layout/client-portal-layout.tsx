@@ -91,6 +91,7 @@ interface NavItem {
   name: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
+  highlighted?: boolean;
 }
 
 interface NavGroup {
