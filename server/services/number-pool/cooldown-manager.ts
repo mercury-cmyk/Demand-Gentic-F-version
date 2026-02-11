@@ -63,46 +63,41 @@ export interface CooldownStatus {
 export const COOLDOWN_TRIGGERS: CooldownTrigger[] = [
   {
     reason: 'repeated_failures',
-    threshold: 5,
+    threshold: 20, // Relaxed: 20 consecutive failures (was 5)
     windowMinutes: 60,
-    cooldownHours: 4,
-    description: '5+ consecutive call failures in 1 hour',
+    cooldownHours: 1, // Reduced from 4h to 1h
+    description: '20+ consecutive call failures in 1 hour',
   },
   {
     reason: 'consecutive_short_calls',
-    threshold: 10,
+    threshold: 30, // Relaxed: 30 hangups (was 10) — cold calling has high hangup rates
     windowMinutes: 60,
-    cooldownHours: 2,
-    description: '10+ consecutive immediate hangups (<3s) in 1 hour',
+    cooldownHours: 1, // Reduced from 2h to 1h
+    description: '30+ consecutive immediate hangups (<3s) in 1 hour',
   },
   {
     reason: 'zero_answer_rate',
-    threshold: 10, // 10 calls with 0 answers
+    threshold: 50, // Relaxed: 50 calls with 0 answers (was 10)
     windowMinutes: 120,
-    cooldownHours: 6,
-    description: '0% answer rate over 10+ calls in 2 hour window',
+    cooldownHours: 2, // Reduced from 6h to 2h
+    description: '0% answer rate over 50+ calls in 2 hour window',
   },
   {
     reason: 'audio_quality_issues',
     threshold: 1,
     windowMinutes: 0, // Immediate
-    cooldownHours: 48,
+    cooldownHours: 4, // Reduced from 48h to 4h
     description: 'Audio quality issues detected',
   },
   {
     reason: 'carrier_block_suspected',
     threshold: 1,
-    windowMinutes: 0, // Immediate
-    cooldownHours: 72,
+    windowMinutes: 0, // Immediate — keep strict for carrier blocks
+    cooldownHours: 24, // Reduced from 72h to 24h
     description: 'Carrier block detected (SIP 603, 607)',
   },
-  {
-    reason: 'reputation_threshold',
-    threshold: 40, // Score below 40
-    windowMinutes: 0, // Score-based
-    cooldownHours: 24,
-    description: 'Reputation score dropped below 40 (burned)',
-  },
+  // reputation_threshold DISABLED — cold calling naturally produces low scores
+  // Reputation is tracked for monitoring but should not trigger automatic cooldowns
 ];
 
 // ==================== MAIN FUNCTIONS ====================

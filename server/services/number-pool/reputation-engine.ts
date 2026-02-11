@@ -513,10 +513,10 @@ async function handleBandChange(
 ): Promise<void> {
   console.log(`[ReputationEngine] Band change for ${numberId}: ${oldBand} → ${newBand}`);
 
-  // If dropped to burned, trigger immediate cooldown
+  // If dropped to burned, log alert only (no automatic cooldown — too aggressive for cold calling)
   if (newBand === 'burned') {
-    await triggerCooldown(numberId, 'reputation_drop', 24); // 24 hour cooldown
-    await createAlert(numberId, 'number_burned', 'critical', 
+    console.log(`[ReputationEngine] Number ${numberId} dropped to BURNED — skipping auto-cooldown (cold calling pattern)`);
+    await createAlert(numberId, 'number_burned', 'critical',
       `Number dropped to BURNED status from ${oldBand}`);
   }
   
