@@ -2758,6 +2758,8 @@ export const leads = pgTable("leads", {
   callAttemptId: varchar("call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'set null' }),
   recordingUrl: text("recording_url"), // Original Telnyx URL (may expire after 10 min)
   recordingS3Key: text("recording_s3_key"), // Permanent S3 storage key for recordings
+  telnyxRecordingId: text("telnyx_recording_id"), // Stable Telnyx recording ID for on-demand URL generation
+  recordingProvider: text("recording_provider").default('telnyx'), // Provider: telnyx | elevenlabs
   callDuration: integer("call_duration"), // Duration in seconds
   dialedNumber: text("dialed_number"), // Phone number that was dialed
   telnyxCallId: text("telnyx_call_id"), // CRITICAL: Telnyx call control ID for finding recordings
@@ -3096,6 +3098,8 @@ export const callSessions = pgTable("call_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   callJobId: varchar("call_job_id").references(() => callJobs.id, { onDelete: 'cascade' }),
   telnyxCallId: text("telnyx_call_id"),
+  telnyxRecordingId: text("telnyx_recording_id"), // Stable Telnyx recording ID for on-demand URL generation
+  recordingProvider: text("recording_provider").default('telnyx'), // Provider: telnyx | elevenlabs
   fromNumber: text("from_number"),
   toNumberE164: text("to_number_e164").notNull(),
   startedAt: timestamp("started_at").notNull().defaultNow(),
@@ -9697,6 +9701,7 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
   // Additional data
   notes: text("notes"),
   recordingUrl: text("recording_url"),
+  telnyxRecordingId: text("telnyx_recording_id"), // Stable Telnyx recording ID for on-demand URL generation
   telnyxCallId: text("telnyx_call_id"), // CRITICAL: Link to Telnyx call control ID for recordings/webhooks
   // Transcript fields (for Gemini Live calls)
   fullTranscript: text("full_transcript"), // Full conversation with speaker labels (Agent/Contact)

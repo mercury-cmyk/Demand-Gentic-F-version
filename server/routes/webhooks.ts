@@ -637,7 +637,12 @@ router.post("/telnyx", async (req, res) => {
       return res.status(400).json({ error: "No recording URL" });
     }
 
-    console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}`);
+    // Extract stable Telnyx recording ID from the event payload
+    const eventData = (req.body as any)?.data;
+    const telnyxRecordingId: string | undefined =
+      payload.recording_id || payload.id || eventData?.id || undefined;
+
+    console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}, recording_id: ${telnyxRecordingId || 'none'}`);
 
     // Import recording storage service for permanent S3 storage
     const { storeRecordingFromWebhook, isRecordingStorageEnabled } = await import('../services/recording-storage');
@@ -661,7 +666,8 @@ router.post("/telnyx", async (req, res) => {
       .update(leads)
       .set({
         recordingUrl,
-        recordingStatus: 'pending'
+        recordingStatus: 'pending',
+        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
       })
       .where(eq(leads.telnyxCallId, call_control_id))
       .returning({ id: leads.id });
@@ -684,7 +690,8 @@ router.post("/telnyx", async (req, res) => {
       .update(callSessions)
       .set({
         recordingUrl,
-        recordingStatus: 'pending'
+        recordingStatus: 'pending',
+        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
       })
       .where(eq(callSessions.telnyxCallId, call_control_id))
       .returning({ id: callSessions.id, campaignId: callSessions.campaignId });
@@ -695,7 +702,8 @@ router.post("/telnyx", async (req, res) => {
       .update(dialerCallAttempts)
       .set({
         recordingUrl,
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
       })
       .where(eq(dialerCallAttempts.telnyxCallId, call_control_id))
       .returning({ id: dialerCallAttempts.id });

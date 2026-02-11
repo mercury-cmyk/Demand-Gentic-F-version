@@ -1,14 +1,14 @@
 /**
  * Unified Recording Player Component
  *
- * Enhanced audio player with robust error handling, URL refresh capability,
- * and telemetry logging for playback failures.
+ * Enhanced audio player that ALWAYS streams through the backend proxy.
  *
- * Fixes for "recordings not playable" issues:
- * - Expired signed URLs → automatic refresh via retry
- * - CORS issues → streams through backend proxy
- * - Content-Type issues → backend sets correct MIME type
- * - Auth issues → uses authenticated session
+ * Design invariants:
+ *   - Audio src is ALWAYS /api/recordings/:id/stream (+ cache-bust param)
+ *   - "Refresh link" calls the recording-link endpoint to warm a fresh URL
+ *     on the server, then bumps the cache-bust param to force reload.
+ *   - "Open in new tab" opens the stream endpoint URL (audio bytes, not JSON).
+ *   - "Resync" calls POST /api/recordings/:id/resync for missing recording IDs.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -26,6 +26,8 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  ExternalLink,
+  LinkIcon,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -34,6 +36,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { apiRequest } from '@/lib/queryClient';
+import { useToast } from '@/hooks/use-toast';
 import { formatDuration, type UnifiedRecording } from './types';
 
 interface UnifiedRecordingPlayerProps {
@@ -62,6 +66,7 @@ export function UnifiedRecordingPlayer({
   onError,
 }: UnifiedRecordingPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const { toast } = useToast();
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -72,27 +77,41 @@ export function UnifiedRecordingPlayer({
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
+  const [cacheBust, setCacheBust] = useState(0);
 
-  // Always use the stream endpoint which handles URL refresh and CORS
-  const streamUrl = `/api/recordings/${recordingId}/stream`;
+  // ALWAYS stream through the backend proxy — never expose raw Telnyx URLs
+  const streamUrl = `/api/recordings/${recordingId}/stream${cacheBust ? `?t=${cacheBust}` : ''}`;
+
+  /**
+   * Ask the server to warm/validate a fresh recording link, then force the
+   * audio element to reload from the stream endpoint.
+   */
+  const warmAndReload = useCallback(async (): Promise<boolean> => {
+    try {
+      const resp = await apiRequest('POST', `/api/recordings/${recordingId}/recording-link`);
+      const data = await resp.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Server could not resolve recording');
+      }
+      // Bump cache-bust to force <audio> to reload from the stream endpoint
+      setCacheBust(Date.now());
+      return true;
+    } catch (err: any) {
+      console.warn('[RecordingPlayer] warmAndReload failed:', err.message);
+      return false;
+    }
+  }, [recordingId]);
 
   // Classify error for telemetry
   const classifyError = useCallback((audioError: MediaError | null, response?: Response): RecordingPlaybackError => {
-    const baseError = {
-      recordingId,
-      timestamp: new Date().toISOString(),
-    };
+    const baseError = { recordingId, timestamp: new Date().toISOString() };
 
     if (response) {
-      if (response.status === 403) {
-        return { ...baseError, category: 'auth', message: 'Authentication failed' };
-      }
-      if (response.status === 404) {
-        return { ...baseError, category: 'not_found', message: 'Recording not found' };
-      }
-      if (response.status === 410) {
-        return { ...baseError, category: 'expired_url', message: 'Recording URL expired' };
-      }
+      if (response.status === 403) return { ...baseError, category: 'auth', message: 'Authentication failed' };
+      if (response.status === 404) return { ...baseError, category: 'not_found', message: 'Recording not found' };
+      if (response.status === 410) return { ...baseError, category: 'expired_url', message: 'Recording URL expired' };
     }
 
     if (audioError) {
@@ -102,7 +121,7 @@ export function UnifiedRecordingPlayer({
         case MediaError.MEDIA_ERR_NETWORK:
           return { ...baseError, category: 'network', message: 'Network error during playback' };
         case MediaError.MEDIA_ERR_DECODE:
-          return { ...baseError, category: 'mime_type', message: 'Audio decode error - invalid format' };
+          return { ...baseError, category: 'mime_type', message: 'Audio decode error — invalid format' };
         case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
           return { ...baseError, category: 'mime_type', message: 'Audio format not supported' };
         default:
@@ -131,34 +150,27 @@ export function UnifiedRecordingPlayer({
       setCurrentTime(audio.currentTime);
       onTimeUpdate?.(audio.currentTime);
     };
+    const handleDurationChange = () => setDuration(audio.duration);
+    const handleCanPlay = () => { setIsLoading(false); setError(null); };
+    const handleEnded = () => setIsPlaying(false);
 
-    const handleDurationChange = () => {
-      setDuration(audio.duration);
-    };
-
-    const handleCanPlay = () => {
-      setIsLoading(false);
-      setError(null);
-    };
-
-    const handleEnded = () => {
-      setIsPlaying(false);
-    };
-
-    const handleError = () => {
+    const handleError = async () => {
       setIsLoading(false);
       const playbackError = classifyError(audio.error);
+
+      // Auto-retry once via warm + cache-bust (silent)
+      if (retryCount === 0) {
+        setRetryCount(1);
+        const ok = await warmAndReload();
+        if (ok) return; // retry silently
+      }
+
       setError(playbackError.message);
       logPlaybackError(playbackError);
     };
 
-    const handleWaiting = () => {
-      setIsLoading(true);
-    };
-
-    const handlePlaying = () => {
-      setIsLoading(false);
-    };
+    const handleWaiting = () => setIsLoading(true);
+    const handlePlaying = () => setIsLoading(false);
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
@@ -177,26 +189,21 @@ export function UnifiedRecordingPlayer({
       audio.removeEventListener('waiting', handleWaiting);
       audio.removeEventListener('playing', handlePlaying);
     };
-  }, [onTimeUpdate, classifyError, logPlaybackError]);
+  }, [onTimeUpdate, classifyError, logPlaybackError, warmAndReload, retryCount]);
 
   // Update playback speed
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackSpeed;
-    }
+    if (audioRef.current) audioRef.current.playbackRate = playbackSpeed;
   }, [playbackSpeed]);
 
   // Update volume
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = isMuted ? 0 : volume;
-    }
+    if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume;
   }, [volume, isMuted]);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio) return;
-
     try {
       if (isPlaying) {
         audio.pause();
@@ -205,8 +212,7 @@ export function UnifiedRecordingPlayer({
         await audio.play();
         setIsPlaying(true);
       }
-    } catch (err) {
-      console.error('Playback error:', err);
+    } catch {
       setError('Playback failed');
     }
   }, [isPlaying]);
@@ -224,49 +230,86 @@ export function UnifiedRecordingPlayer({
     setIsMuted(values[0] === 0);
   }, []);
 
-  const toggleMute = useCallback(() => {
-    setIsMuted((prev) => !prev);
-  }, []);
+  const toggleMute = useCallback(() => setIsMuted((prev) => !prev), []);
 
   const skipBack = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.max(0, audio.currentTime - SKIP_SECONDS);
+    if (audio) audio.currentTime = Math.max(0, audio.currentTime - SKIP_SECONDS);
   }, []);
 
   const skipForward = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.min(audio.duration, audio.currentTime + SKIP_SECONDS);
+    if (audio) audio.currentTime = Math.min(audio.duration, audio.currentTime + SKIP_SECONDS);
   }, []);
 
   const handleRetry = useCallback(async () => {
     if (retryCount >= 3) return;
-    
     setIsRetrying(true);
     setError(null);
     setRetryCount((prev) => prev + 1);
 
     try {
-      // Force reload the audio element with cache busting
-      const audio = audioRef.current;
-      if (audio) {
-        audio.src = `${streamUrl}?retry=${Date.now()}`;
-        audio.load();
+      const ok = await warmAndReload();
+      if (!ok) {
+        // Direct cache-bust fallback
+        setCacheBust(Date.now());
       }
     } finally {
       setIsRetrying(false);
     }
-  }, [retryCount, streamUrl]);
+  }, [retryCount, warmAndReload]);
+
+  /**
+   * Manual "Refresh link" — warms a fresh URL on server, then reloads audio.
+   * Shows toast feedback on both success and failure.
+   */
+  const handleRefreshLink = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      const ok = await warmAndReload();
+      if (ok) {
+        setError(null);
+        toast({ title: 'Link refreshed', description: 'Audio source updated.' });
+      } else {
+        toast({ title: 'Refresh failed', description: 'Could not resolve a fresh recording link.', variant: 'destructive' });
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [warmAndReload, toast]);
+
+  /**
+   * "Resync" — for recordings missing a telnyxRecordingId. Calls the server
+   * to look up the recording by call_control_id and back-fill the ID.
+   */
+  const handleResync = useCallback(async () => {
+    setIsResyncing(true);
+    try {
+      const resp = await apiRequest('POST', `/api/recordings/${recordingId}/resync`);
+      const data = await resp.json();
+      if (data.success) {
+        toast({ title: 'Resync complete', description: `Recording ID linked (${data.telnyxRecordingId?.slice(0, 12)}…).` });
+        // Now try to play
+        setCacheBust(Date.now());
+        setError(null);
+      } else {
+        toast({ title: 'Resync failed', description: data.error || 'Unknown error', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Resync failed', description: 'Network error', variant: 'destructive' });
+    } finally {
+      setIsResyncing(false);
+    }
+  }, [recordingId, toast]);
 
   const handleDownload = useCallback(() => {
     const link = document.createElement('a');
-    link.href = streamUrl;
+    link.href = `/api/recordings/${recordingId}/stream`;
     link.download = `recording-${recordingId}.mp3`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [streamUrl, recordingId]);
+  }, [recordingId]);
 
   // Recording not available
   if (!recording.available) {
@@ -285,7 +328,7 @@ export function UnifiedRecordingPlayer({
     );
   }
 
-  // Error state with retry
+  // Error state with retry + refresh + resync + fallback
   if (error) {
     return (
       <div className={cn('p-3 bg-destructive/10 rounded-lg', className)}>
@@ -293,22 +336,33 @@ export function UnifiedRecordingPlayer({
           <AlertCircle className="h-4 w-4" />
           <span className="text-sm">{error}</span>
         </div>
-        {retryCount < 3 && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            onClick={handleRetry}
-            disabled={isRetrying}
-          >
-            {isRetrying ? (
-              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3 w-3 mr-1" />
-            )}
-            Retry ({3 - retryCount} attempts left)
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          {retryCount < 3 && (
+            <Button size="sm" variant="outline" onClick={handleRetry} disabled={isRetrying}>
+              {isRetrying ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+              Retry ({3 - retryCount} left)
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={handleRefreshLink} disabled={isRefreshing}>
+            {isRefreshing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+            Refresh link
           </Button>
-        )}
+          {!recording.telnyxRecordingId && (
+            <Button size="sm" variant="outline" onClick={handleResync} disabled={isResyncing}>
+              {isResyncing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <LinkIcon className="h-3 w-3 mr-1" />}
+              Resync
+            </Button>
+          )}
+          <a
+            href={`/api/recordings/${recordingId}/stream`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Open in new tab
+          </a>
+        </div>
       </div>
     );
   }
@@ -425,17 +479,39 @@ export function UnifiedRecordingPlayer({
         </Button>
       </div>
 
-      {/* Recording Info */}
-      {recording.durationSec && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      {/* Recording Info + Player State */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        {isRefreshing && (
+          <span className="flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Refreshing link…
+          </span>
+        )}
+        {isResyncing && (
+          <span className="flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Resyncing…
+          </span>
+        )}
+        {recording.durationSec && (
           <Badge variant="outline" className="text-xs">
             {recording.status}
           </Badge>
-          {recording.mimeType && (
-            <span>{recording.mimeType}</span>
-          )}
-        </div>
-      )}
+        )}
+        {recording.mimeType && (
+          <span>{recording.mimeType}</span>
+        )}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6 ml-auto"
+          onClick={handleRefreshLink}
+          disabled={isRefreshing}
+          title="Refresh recording link"
+        >
+          {isRefreshing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+        </Button>
+      </div>
     </div>
   );
 }

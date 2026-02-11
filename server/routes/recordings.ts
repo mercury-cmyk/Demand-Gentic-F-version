@@ -1066,216 +1066,61 @@ router.get('/:id/url', async (req: Request, res: Response) => {
 
 /**
  * GET /api/recordings/:id/stream
- * Stream the audio file through our server (proxy to bypass CORS)
- * This allows the browser to play audio from Telnyx without CORS issues
+ * Stream the audio file through our server (proxy to bypass CORS).
  *
- * Tries sources in order:
- * 1. GCS storage (if recordingS3Key exists)
- * 2. Fresh Telnyx API URL (if telnyxCallId exists)
- * 3. Cached recordingUrl from database
- * 4. Direct Telnyx recording ID lookup
+ * Uses the centralized recording-link resolver as the **single** resolution
+ * path, which tries: GCS → telnyxRecordingId → telnyxCallId → cached URL.
+ *
+ * KEY INVARIANT:
+ *   - If a valid audio URL is resolved, this endpoint ALWAYS returns audio
+ *     bytes with an audio/* Content-Type. It NEVER returns JSON on success.
+ *   - If the first resolved URL fails to fetch (e.g. expired cached URL),
+ *     we re-resolve skipping the cached source and retry once.
+ *   - Errors are returned as HTTP status codes with plain-text bodies so
+ *     browsers opening this URL never see raw JSON.
  */
 export async function streamRecording(req: Request, res: Response) {
   try {
     const { id } = req.params;
+    const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
 
-    let audioUrl: string | null = null;
-    let urlSource: string = 'unknown';
-    const triedSources: string[] = [];
+    // ── Resolve a playable URL ───────────────────────────────────────
+    let result = await getPlayableRecordingLink(id);
 
-    // First try to get URL from call_sessions
-    const [callSession] = await db
-      .select({
-        recordingUrl: callSessions.recordingUrl,
-        recordingS3Key: callSessions.recordingS3Key,
-        recordingStatus: callSessions.recordingStatus,
-        telnyxCallId: callSessions.telnyxCallId,
-      })
-      .from(callSessions)
-      .where(eq(callSessions.id, id));
-
-    if (callSession) {
-      // Priority 1: GCS storage (permanent, reliable)
-      if (callSession.recordingS3Key) {
-        triedSources.push('gcs');
-        try {
-          const urlResult = await getCallSessionRecordingUrl(id);
-          if (urlResult.url) {
-            audioUrl = urlResult.url;
-            urlSource = 'gcs';
-          }
-        } catch (err: any) {
-          console.warn(`[Recordings API] GCS URL failed for ${id}:`, err.message);
-        }
-      }
-
-      // Priority 2: Fresh Telnyx URL (fetches new presigned URL from API)
-      if (!audioUrl && callSession.telnyxCallId) {
-        triedSources.push('telnyx_fresh');
-        try {
-          const { fetchTelnyxRecording } = await import('../services/telnyx-recordings');
-          const freshUrl = await fetchTelnyxRecording(callSession.telnyxCallId);
-          if (freshUrl) {
-            audioUrl = freshUrl;
-            urlSource = 'telnyx_fresh';
-          }
-        } catch (err: any) {
-          console.warn(`[Recordings API] Fresh Telnyx URL failed for ${id}:`, err.message);
-        }
-      }
-
-      // Priority 3: Cached URL (may be expired but worth trying)
-      if (!audioUrl && callSession.recordingUrl) {
-        triedSources.push('cached');
-        audioUrl = callSession.recordingUrl;
-        urlSource = 'cached';
-      }
+    if (!result) {
+      console.error(`[Recordings API] No audio URL found for ${id}`);
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(404).send('Recording audio not available');
     }
 
-    // Fallback: try leads table
-    if (!audioUrl) {
-      const [lead] = await db
-        .select({
-          recordingUrl: leads.recordingUrl,
-          recordingS3Key: leads.recordingS3Key,
-          telnyxCallId: leads.telnyxCallId,
-        })
-        .from(leads)
-        .where(eq(leads.id, id));
+    // ── Fetch audio bytes ────────────────────────────────────────────
+    let audioResponse = await fetch(result.url);
 
-      if (lead) {
-        if (lead.recordingS3Key) {
-          triedSources.push('leads_gcs');
-          try {
-            const urlResult = await getRecordingUrl(id);
-            if (urlResult.url) {
-              audioUrl = urlResult.url;
-              urlSource = 'leads_gcs';
-            }
-          } catch (err: any) {
-            console.warn(`[Recordings API] Leads GCS URL failed for ${id}:`, err.message);
-          }
-        }
-
-        // Try fresh Telnyx URL for lead
-        if (!audioUrl && lead.telnyxCallId) {
-          triedSources.push('leads_telnyx_fresh');
-          try {
-            const { fetchTelnyxRecording } = await import('../services/telnyx-recordings');
-            const freshUrl = await fetchTelnyxRecording(lead.telnyxCallId);
-            if (freshUrl) {
-              audioUrl = freshUrl;
-              urlSource = 'leads_telnyx_fresh';
-            }
-          } catch (err: any) {
-            console.warn(`[Recordings API] Leads fresh Telnyx URL failed for ${id}:`, err.message);
-          }
-        }
-
-        if (!audioUrl && lead.recordingUrl) {
-          triedSources.push('leads_cached');
-          audioUrl = lead.recordingUrl;
-          urlSource = 'leads_cached';
-        }
+    // If the fetch fails AND the source was a cached (potentially expired)
+    // URL, re-resolve excluding the cached path by forcing a fresh Telnyx
+    // lookup. This avoids the stale URL dead-end.
+    if (!audioResponse.ok && result.source === 'cached') {
+      console.warn(
+        `[Recordings API] Cached URL failed for ${id} (${audioResponse.status}). Re-resolving fresh…`,
+      );
+      result = await getPlayableRecordingLink(id);
+      if (result && result.source !== 'cached') {
+        audioResponse = await fetch(result.url);
       }
     }
-
-    // Fallback: try dialer_call_attempts table
-    if (!audioUrl) {
-      const [dialerAttempt] = await db
-        .select({
-          recordingUrl: dialerCallAttempts.recordingUrl,
-          telnyxCallId: dialerCallAttempts.telnyxCallId,
-        })
-        .from(dialerCallAttempts)
-        .where(eq(dialerCallAttempts.id, id));
-
-      if (dialerAttempt) {
-        // Try fresh Telnyx URL for dialer attempt
-        if (!audioUrl && dialerAttempt.telnyxCallId) {
-          triedSources.push('dialer_telnyx_fresh');
-          try {
-            const { fetchTelnyxRecording } = await import('../services/telnyx-recordings');
-            const freshUrl = await fetchTelnyxRecording(dialerAttempt.telnyxCallId);
-            if (freshUrl) {
-              audioUrl = freshUrl;
-              urlSource = 'dialer_telnyx_fresh';
-            }
-          } catch (err: any) {
-            console.warn(`[Recordings API] Dialer fresh Telnyx URL failed for ${id}:`, err.message);
-          }
-        }
-
-        if (!audioUrl && dialerAttempt.recordingUrl) {
-          triedSources.push('dialer_cached');
-          audioUrl = dialerAttempt.recordingUrl;
-          urlSource = 'dialer_cached';
-        }
-      }
-    }
-
-    // Final fallback: try as Telnyx recording ID directly
-    if (!audioUrl) {
-      triedSources.push('telnyx_direct');
-      try {
-        const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-        if (TELNYX_API_KEY) {
-          const response = await fetch(`https://api.telnyx.com/v2/recordings/${id}`, {
-            headers: {
-              'Authorization': `Bearer ${TELNYX_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            const directUrl = data.data?.download_urls?.mp3 || data.data?.download_urls?.wav;
-            if (directUrl) {
-              audioUrl = directUrl;
-              urlSource = 'telnyx_direct';
-            }
-          }
-        }
-      } catch (e) {
-        console.log('[Recordings API] Not a direct Telnyx recording ID:', id);
-      }
-    }
-
-    if (!audioUrl) {
-      console.error(`[Recordings API] No audio URL found for ${id}. Tried sources: ${triedSources.join(', ')}`);
-      return res.status(404).json({
-        success: false,
-        error: 'Recording audio not available',
-        details: `Tried sources: ${triedSources.join(', ')}. Recording may have expired or storage failed.`,
-      });
-    }
-
-    // Fetch and stream the audio
-    console.log(`[Recordings API] Streaming ${id} from ${urlSource}: ${audioUrl.substring(0, 80)}...`);
-
-    const audioResponse = await fetch(audioUrl);
 
     if (!audioResponse.ok) {
-      console.error(`[Recordings API] Failed to fetch audio from ${urlSource}:`, audioResponse.status, audioResponse.statusText);
-
-      // If cached URL failed (likely expired), return helpful message
-      if (urlSource === 'cached' || urlSource === 'leads_cached') {
-        return res.status(410).json({
-          success: false,
-          error: 'Recording URL has expired',
-          details: 'The Telnyx recording URL has expired (10-min lifetime). Recording may need to be re-synced.',
-        });
-      }
-
-      return res.status(502).json({
-        success: false,
-        error: 'Failed to fetch audio from source',
-        details: `Source: ${urlSource}, Status: ${audioResponse.status}`,
-      });
+      console.error(
+        `[Recordings API] Failed to fetch audio for ${id} from ${result.source}: ${audioResponse.status}`,
+      );
+      res.setHeader('Content-Type', 'text/plain');
+      return res
+        .status(audioResponse.status === 404 ? 404 : 502)
+        .send('Failed to fetch recording audio');
     }
 
-    // Set appropriate headers for audio streaming
-    const contentType = audioResponse.headers.get('content-type') || 'audio/mpeg';
+    // ── Stream audio bytes to the browser ────────────────────────────
+    const contentType = audioResponse.headers.get('content-type') || result.mimeType || 'audio/mpeg';
     const contentLength = audioResponse.headers.get('content-length');
 
     res.setHeader('Content-Type', contentType);
@@ -1283,15 +1128,16 @@ export async function streamRecording(req: Request, res: Response) {
       res.setHeader('Content-Length', contentLength);
     }
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    // Short cache — the underlying Telnyx URL expires in ~10 min
+    res.setHeader('Cache-Control', 'private, max-age=300');
 
-    // Stream the response
     const reader = audioResponse.body?.getReader();
     if (!reader) {
-      return res.status(500).json({ success: false, error: 'Failed to read audio stream' });
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(500).send('Failed to read audio stream');
     }
 
-    const stream = async () => {
+    const pipeStream = async () => {
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -1302,19 +1148,21 @@ export async function streamRecording(req: Request, res: Response) {
       } catch (err) {
         console.error('[Recordings API] Stream error:', err);
         if (!res.headersSent) {
-          res.status(500).json({ success: false, error: 'Stream interrupted' });
+          res.setHeader('Content-Type', 'text/plain');
+          res.status(500).send('Stream interrupted');
+        } else {
+          res.end();
         }
       }
     };
 
-    stream();
+    pipeStream();
   } catch (error: any) {
     console.error('[Recordings API] Error streaming recording:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to stream recording',
-      message: error.message,
-    });
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'text/plain');
+      res.status(500).send('Failed to stream recording');
+    }
   }
 }
 
@@ -1516,7 +1364,142 @@ router.post('/telnyx/sync', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/recordings/:id/transcribe
+ * POST /api/recordings/:id/recording-link
+ * Validate & warm a fresh recording URL on the server side.
+ *
+ * IMPORTANT: Does NOT return the raw download URL to the browser.
+ * The browser should ALWAYS play audio via GET /api/recordings/:id/stream
+ * which proxies the audio bytes and avoids CORS / URL-expiry issues.
+ *
+ * Returns { success, source, expiresInSeconds, mimeType, streamUrl }
+ */
+router.post('/:id/recording-link', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
+
+    const result = await getPlayableRecordingLink(id);
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        error: 'Recording not found or no audio available',
+      });
+    }
+
+    // Audit: log only IDs, never raw URLs
+    console.log(`[Recordings API] Fresh link validated for ${id} (source: ${result.source})`);
+
+    res.json({
+      success: true,
+      // Never expose the raw Telnyx URL to the browser — always use the stream proxy
+      streamUrl: `/api/recordings/${id}/stream`,
+      source: result.source,
+      expiresInSeconds: result.expiresInSeconds,
+      mimeType: result.mimeType,
+    });
+  } catch (error: any) {
+    console.error('[Recordings API] Error generating recording link:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate recording link',
+    });
+  }
+});
+
+/**
+ * POST /api/recordings/:id/resync
+ * Admin-only: look up the Telnyx recording by call_control_id and backfill
+ * the telnyxRecordingId column so future playback works instantly.
+ */
+router.post('/:id/resync', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+    if (!TELNYX_API_KEY) {
+      return res.status(500).json({ success: false, error: 'Telnyx API key not configured' });
+    }
+
+    // Find the row and its call_control_id
+    let telnyxCallId: string | null = null;
+    let table: 'call_sessions' | 'leads' | 'dialer_call_attempts' | null = null;
+
+    const [session] = await db
+      .select({ telnyxCallId: callSessions.telnyxCallId, telnyxRecordingId: callSessions.telnyxRecordingId })
+      .from(callSessions)
+      .where(eq(callSessions.id, id));
+    if (session) {
+      if (session.telnyxRecordingId) {
+        return res.json({ success: true, message: 'Already synced', telnyxRecordingId: session.telnyxRecordingId });
+      }
+      telnyxCallId = session.telnyxCallId;
+      table = 'call_sessions';
+    }
+
+    if (!telnyxCallId) {
+      const [lead] = await db
+        .select({ telnyxCallId: leads.telnyxCallId, telnyxRecordingId: leads.telnyxRecordingId })
+        .from(leads)
+        .where(eq(leads.id, id));
+      if (lead) {
+        if (lead.telnyxRecordingId) {
+          return res.json({ success: true, message: 'Already synced', telnyxRecordingId: lead.telnyxRecordingId });
+        }
+        telnyxCallId = lead.telnyxCallId;
+        table = 'leads';
+      }
+    }
+
+    if (!telnyxCallId) {
+      const [attempt] = await db
+        .select({ telnyxCallId: dialerCallAttempts.telnyxCallId, telnyxRecordingId: dialerCallAttempts.telnyxRecordingId })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, id));
+      if (attempt) {
+        if (attempt.telnyxRecordingId) {
+          return res.json({ success: true, message: 'Already synced', telnyxRecordingId: attempt.telnyxRecordingId });
+        }
+        telnyxCallId = attempt.telnyxCallId;
+        table = 'dialer_call_attempts';
+      }
+    }
+
+    if (!telnyxCallId || !table) {
+      return res.status(404).json({ success: false, error: 'No call_control_id found for this recording' });
+    }
+
+    // Search Telnyx for recordings by call_control_id
+    const resp = await fetch(
+      `https://api.telnyx.com/v2/recordings?filter[call_control_id]=${telnyxCallId}`,
+      { headers: { Authorization: `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } },
+    );
+
+    if (!resp.ok) {
+      return res.status(502).json({ success: false, error: `Telnyx API returned ${resp.status}` });
+    }
+
+    const json = await resp.json();
+    const recordings = json?.data;
+    if (!Array.isArray(recordings) || recordings.length === 0) {
+      return res.status(404).json({ success: false, error: 'No recording found on Telnyx for this call' });
+    }
+
+    const telnyxRecordingId = recordings[0].id as string;
+
+    // Backfill
+    const target = table === 'call_sessions' ? callSessions : table === 'leads' ? leads : dialerCallAttempts;
+    await db.update(target).set({ telnyxRecordingId } as any).where(eq(target.id, id));
+
+    console.log(`[Recordings API] Resync: backfilled telnyxRecordingId=${telnyxRecordingId} on ${table}/${id}`);
+
+    res.json({ success: true, telnyxRecordingId, table });
+  } catch (error: any) {
+    console.error('[Recordings API] Resync error:', error.message);
+    res.status(500).json({ success: false, error: 'Resync failed' });
+  }
+});
+
+/**
  * Trigger transcription for a recording
  * 
  * Works for both:
@@ -1534,78 +1517,12 @@ router.post('/:id/transcribe', async (req: Request, res: Response) => {
     let recordingUrl: string | null = null;
     let recordSource: string = source || 'call_sessions';
 
-    // Try to find the recording URL based on source
-    if (source === 'telnyx' || !source) {
-      // First check if it's a Telnyx recording ID
-      try {
-        const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-        if (TELNYX_API_KEY) {
-          const response = await fetch(`https://api.telnyx.com/v2/recordings/${id}`, {
-            headers: {
-              'Authorization': `Bearer ${TELNYX_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            recordingUrl = data.data?.download_urls?.mp3 || data.data?.download_urls?.wav;
-            recordSource = 'telnyx';
-          }
-        }
-      } catch (e) {
-        console.log('[Recordings API] Not a direct Telnyx recording ID:', id);
-      }
-    }
-
-    // Try call_sessions table
-    if (!recordingUrl && (!source || source === 'call_sessions')) {
-      const [session] = await db
-        .select({
-          recordingUrl: callSessions.recordingUrl,
-          recordingS3Key: callSessions.recordingS3Key,
-        })
-        .from(callSessions)
-        .where(eq(callSessions.id, id));
-
-      if (session) {
-        recordSource = 'call_sessions';
-        if (session.recordingS3Key) {
-          try {
-            const urlResult = await getCallSessionRecordingUrl(id);
-            recordingUrl = urlResult.url;
-          } catch (e) {
-            console.error('[Recordings API] Error getting presigned URL:', e);
-          }
-        } else if (session.recordingUrl) {
-          recordingUrl = session.recordingUrl;
-        }
-      }
-    }
-
-    // Try leads table
-    if (!recordingUrl && (!source || source === 'leads')) {
-      const [lead] = await db
-        .select({
-          recordingUrl: leads.recordingUrl,
-          recordingS3Key: leads.recordingS3Key,
-        })
-        .from(leads)
-        .where(eq(leads.id, id));
-
-      if (lead) {
-        recordSource = 'leads';
-        if (lead.recordingS3Key) {
-          try {
-            const urlResult = await getRecordingUrl(id);
-            recordingUrl = urlResult.url;
-          } catch (e) {
-            console.error('[Recordings API] Error getting presigned URL:', e);
-          }
-        } else if (lead.recordingUrl) {
-          recordingUrl = lead.recordingUrl;
-        }
-      }
+    // Use centralized resolver for a fresh, playable URL (handles GCS, Telnyx recording ID, call ID)
+    const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
+    const freshLink = await getPlayableRecordingLink(id);
+    if (freshLink) {
+      recordingUrl = freshLink.url;
+      recordSource = freshLink.source;
     }
 
     if (!recordingUrl) {
