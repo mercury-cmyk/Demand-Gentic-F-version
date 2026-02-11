@@ -40,7 +40,7 @@ import {
   FileText, Phone, Mail, Target, Users, Building2,
   Calendar, Loader2, CheckCircle2,
   Sparkles, X, ChevronRight, ArrowLeft,
-  Box, Lightbulb, Brain, AlertCircle, Info
+  Box, Lightbulb, Brain, AlertCircle, Info, Upload, File, Trash2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,6 +67,19 @@ interface WorkOrderFormProps {
   } | null;
 }
 
+/** File attachment interface */
+export interface FileAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  storageKey?: string;
+  uploadUrl?: string;
+  uploadStatus: 'pending' | 'uploading' | 'uploaded' | 'error';
+  uploadProgress?: number;
+  file?: File;
+}
+
 /** Exported for external consumers (e.g. launcher hook) */
 export interface WorkOrderFormData {
   title: string;
@@ -88,6 +101,8 @@ export interface WorkOrderFormData {
   deliveryMethod: string;
   organizationContext: string | null;
   useOrgIntelligence: boolean;
+  // File attachments
+  attachments: FileAttachment[];
   // Event linkage
   eventSource?: string | null;
   externalEventId?: string | null;
@@ -224,6 +239,8 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
       // Agentic specific fields
       targetUrls: [] as string[],
       deliveryMethod: 'email',
+      // File attachments
+      attachments: [] as FileAttachment[],
       // Organization context (attached automatically)
       organizationContext: null as string | null,
       useOrgIntelligence: true,
@@ -293,15 +310,126 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
   const [titleInput, setTitleInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
 
+  // File upload mutations and state
+  const uploadMutation = useMutation({
+    mutationFn: async ({ file, attachmentId }: { file: File; attachmentId: string }) => {
+      // Step 1: Get presigned URL
+      const presignRes = await fetch('/api/s3/upload-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+          folder: 'campaign-orders',
+        }),
+      });
+
+      if (!presignRes.ok) {
+        const error = await presignRes.json();
+        if (presignRes.status === 503) {
+          throw new Error('File upload service is not configured. Please contact support.');
+        }
+        throw new Error(error.message || 'Failed to get upload URL');
+      }
+
+      const { uploadUrl, key } = await presignRes.json();
+
+      // Step 2: Upload file directly to storage
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed with status ${uploadResponse.status}`);
+      }
+
+      return { key, uploadUrl };
+    },
+    onMutate: ({ attachmentId }) => {
+      // Update attachment status to uploading
+      setFormData(prev => ({
+        ...prev,
+        attachments: prev.attachments.map(att =>
+          att.id === attachmentId
+            ? { ...att, uploadStatus: 'uploading' as const, uploadProgress: 0 }
+            : att
+        ),
+      }));
+    },
+    onSuccess: ({ key }, { attachmentId }) => {
+      // Update attachment with storage key
+      setFormData(prev => ({
+        ...prev,
+        attachments: prev.attachments.map(att =>
+          att.id === attachmentId
+            ? { ...att, uploadStatus: 'uploaded' as const, storageKey: key, uploadProgress: 100 }
+            : att
+        ),
+      }));
+      toast({
+        title: 'File uploaded successfully',
+        variant: 'default',
+      });
+    },
+    onError: (error: Error, { attachmentId }) => {
+      // Update attachment status to error
+      setFormData(prev => ({
+        ...prev,
+        attachments: prev.attachments.map(att =>
+          att.id === attachmentId
+            ? { ...att, uploadStatus: 'error' as const, uploadProgress: 0 }
+            : att
+        ),
+      }));
+      toast({
+        title: 'Upload failed',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   const getToken = () => localStorage.getItem('clientPortalToken');
 
   // Create work order mutation
   const createMutation = useMutation({
     mutationFn: async (submitNow: boolean) => {
+      // Ensure all uploads are complete
+      const pendingUploads = formData.attachments.filter(att => 
+        att.uploadStatus === 'uploading' || att.uploadStatus === 'pending'
+      );
+      
+      if (pendingUploads.length > 0) {
+        throw new Error('Please wait for file uploads to complete before submitting');
+      }
+
+      const failedUploads = formData.attachments.filter(att => att.uploadStatus === 'error');
+      if (failedUploads.length > 0) {
+        throw new Error(`Some files failed to upload: ${failedUploads.map(f => f.name).join(', ')}`);
+      }
+
+      // Prepare attachment metadata
+      const attachmentMetadata = formData.attachments
+        .filter(att => att.uploadStatus === 'uploaded' && att.storageKey)
+        .map(att => ({
+          name: att.name,
+          size: att.size,
+          type: att.type,
+          storageKey: att.storageKey!,
+        }));
+
       // Auto-generate title if missing
       const submissionData = {
         ...formData,
         title: formData.title || `Agentic Order - ${new Date().toLocaleDateString()}`,
+        attachments: attachmentMetadata,
         submitNow,
       };
 
@@ -325,15 +453,20 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
       if (formData.eventSource === 'argyle_event') {
         queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
       }
+      
+      const toastTitle = data.alreadyExists
+        ? 'Order Already Exists'
+        : submitNow ? 'Work Order Submitted!' : 'Draft Saved';
+      
+      const toastDescription = data.alreadyExists
+        ? `Order ${data.workOrder.orderNumber} was already created for this event.`
+        : submitNow
+          ? `Order ${data.workOrder.orderNumber} has been submitted and will appear in Admin Project Requests. Request ID: ${data.workOrder.id.substring(0, 8)}`
+          : 'Your work order has been saved as a draft';
+
       toast({
-        title: data.alreadyExists
-          ? 'Order Already Exists'
-          : submitNow ? 'Agentic Order Submitted!' : 'Draft Saved',
-        description: data.alreadyExists
-          ? `Order ${data.workOrder.orderNumber} was already created for this event.`
-          : submitNow
-            ? `Order ${data.workOrder.orderNumber} has been received. Agents are reviewing your instructions.`
-            : 'Your Agentic Order has been saved as a draft',
+        title: toastTitle,
+        description: toastDescription,
         variant: "default", 
         className: "bg-emerald-600 text-white border-none"
       });
@@ -349,6 +482,156 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
       });
     },
   });
+
+  // File upload mutation - get presigned URL
+  const getUploadUrlMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const res = await fetch('/api/s3/upload-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+          folder: 'campaign-orders',
+        }),
+      });
+      if (!res.ok) {
+        throw new Error('Failed to get upload URL');
+      }
+      return res.json();
+    },
+  });
+
+  // File upload to storage
+  const uploadToStorageMutation = useMutation({
+    mutationFn: async ({ file, uploadUrl }: { file: File; uploadUrl: string }) => {
+      const res = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file,
+      });
+      if (!res.ok) {
+        throw new Error('Failed to upload file');
+      }
+      return res;
+    },
+  });
+
+  // Handle file selection and upload
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const newFiles: FileAttachment[] = [];
+    
+    for (const file of Array.from(files)) {
+      // Size limit: 10MB
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+          title: 'File too large',
+          description: `File "${file.name}" exceeds 10MB limit`,
+          variant: 'destructive',
+        });
+        continue;
+      }
+
+      const fileId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const attachment: FileAttachment = {
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        uploadStatus: 'pending',
+        file,
+      };
+      
+      newFiles.push(attachment);
+    }
+
+    if (newFiles.length === 0) return;
+
+    // Add files to form data
+    setFormData(prev => ({
+      ...prev,
+      attachments: [...prev.attachments, ...newFiles],
+    }));
+
+    // Upload files
+    for (const attachment of newFiles) {
+      try {
+        // Update status to uploading
+        setFormData(prev => ({
+          ...prev,
+          attachments: prev.attachments.map(a => 
+            a.id === attachment.id 
+              ? { ...a, uploadStatus: 'uploading' as const }
+              : a
+          ),
+        }));
+
+        // Get presigned URL
+        const urlResponse = await getUploadUrlMutation.mutateAsync(attachment.file!);
+        
+        // Upload file
+        await uploadToStorageMutation.mutateAsync({
+          file: attachment.file!,
+          uploadUrl: urlResponse.uploadUrl,
+        });
+
+        // Update status to uploaded
+        setFormData(prev => ({
+          ...prev,
+          attachments: prev.attachments.map(a => 
+            a.id === attachment.id 
+              ? { 
+                  ...a, 
+                  uploadStatus: 'uploaded' as const, 
+                  storageKey: urlResponse.key,
+                  uploadUrl: urlResponse.uploadUrl 
+                }
+              : a
+          ),
+        }));
+
+        toast({
+          title: 'File uploaded',
+          description: `"${attachment.name}" uploaded successfully`,
+        });
+      } catch (error) {
+        // Update status to error
+        setFormData(prev => ({
+          ...prev,
+          attachments: prev.attachments.map(a => 
+            a.id === attachment.id 
+              ? { ...a, uploadStatus: 'error' as const }
+              : a
+          ),
+        }));
+
+        toast({
+          title: 'Upload failed',
+          description: `Failed to upload "${attachment.name}"`,
+          variant: 'destructive',
+        });
+      }
+    }
+
+    // Clear file input
+    event.target.value = '';
+  };
+
+  // Remove file attachment
+  const handleRemoveFile = (attachmentId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      attachments: prev.attachments.filter(a => a.id !== attachmentId),
+    }));
+  };
 
   const resetForm = () => {
     setFormData(buildDefaultFormData());
@@ -374,6 +657,21 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
     }));
   };
 
+  const handleRemoveAttachment = (attachmentId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      attachments: prev.attachments.filter(att => att.id !== attachmentId),
+    }));
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   const handleQuickExample = (example: { title: string; description: string; icon: any }) => {
     setFormData(prev => ({
       ...prev,
@@ -390,6 +688,13 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
 
   const isStepValid = (stepNum: number) => {
     if (stepNum === 1) return formData.description.trim().length > 0;
+    if (stepNum === 2) {
+      // Check if any uploads are still in progress or failed
+      const hasUploadIssues = formData.attachments.some(att => 
+        att.uploadStatus === 'uploading' || att.uploadStatus === 'pending' || att.uploadStatus === 'error'
+      );
+      return !hasUploadIssues;
+    }
     return true;
   };
 
@@ -629,6 +934,39 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
                                   : 'Based on your description, we\'ve pre-configured the following targeting parameters. Please refine if needed.'
                                 }
                             </p>
+                            {/* AI Assist Button for Argyle Events */}
+                            {eventContext && (
+                              <div className="mt-3">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    // AI Assist for event-based orders
+                                    const aiSuggestions = {
+                                      description: `Generate qualified leads for ${eventContext.eventTitle}. Target attendees and interested professionals in ${eventContext.eventLocation || 'the local area'} who would benefit from networking and business opportunities at this ${eventContext.eventType || 'event'}.`,
+                                      targetIndustries: eventContext.eventCommunity ? [eventContext.eventCommunity] : [],
+                                      targetTitles: ['Business Owner', 'Director', 'Manager', 'Executive'],
+                                      targetRegions: eventContext.eventLocation ? [eventContext.eventLocation] : [],
+                                    };
+                                    
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      ...aiSuggestions,
+                                    }));
+                                    
+                                    toast({
+                                      title: 'AI suggestions applied',
+                                      description: 'Event-specific targeting suggestions have been added. Please review and adjust as needed.',
+                                    });
+                                  }}
+                                  className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                                >
+                                  <Sparkles className="w-4 h-4 mr-2" />
+                                  AI Assist for Event
+                                </Button>
+                              </div>
+                            )}
                             {orgContext?.hasIntelligence && formData.targetIndustries.length > 0 && (
                               <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3" /> 
@@ -745,6 +1083,89 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
                             </div>
                          )}
                     </div>
+                    
+                    {/* File Attachments Section */}
+                    <div className="space-y-3">
+                        <Label className="flex items-center gap-2">
+                            <Upload className="w-4 h-4" />
+                            File Attachments (Optional)
+                        </Label>
+                        <p className="text-sm text-slate-600">
+                            Upload relevant documents like target account lists, templates, or reference materials.
+                            Supported formats: PDF, DOCX, CSV, XLSX, PNG, JPG (max 10MB each)
+                        </p>
+
+                        {/* File Upload Area */}
+                        <div className="border-2 border-dashed border-slate-200 bg-slate-50 rounded-lg p-6">
+                            <div className="text-center">
+                                <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                                <label className="cursor-pointer">
+                                    <span className="text-sm font-medium text-slate-600 hover:text-slate-800">
+                                        Choose files or drag and drop
+                                    </span>
+                                    <input
+                                        type="file"
+                                        multiple
+                                        className="hidden"
+                                        accept=".pdf,.docx,.doc,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
+                                        onChange={handleFileSelect}
+                                        disabled={uploadMutation.isPending}
+                                    />
+                                </label>
+                                <p className="text-xs text-slate-400 mt-1">
+                                    PDF, DOCX, CSV, XLSX, Images • Max 10MB per file
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Attachment List */}
+                        {formData.attachments.length > 0 && (
+                            <div className="space-y-2">
+                                {formData.attachments.map((attachment) => (
+                                    <div
+                                        key={attachment.id}
+                                        className="flex items-center gap-3 p-3 bg-white border rounded-lg"
+                                    >
+                                        <File className="w-4 h-4 text-slate-400" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-medium text-slate-900 truncate">
+                                                {attachment.name}
+                                            </p>
+                                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                <span>{formatFileSize(attachment.size)}</span>
+                                                {attachment.uploadStatus === 'uploading' && (
+                                                    <span className="flex items-center gap-1">
+                                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                                        Uploading...
+                                                    </span>
+                                                )}
+                                                {attachment.uploadStatus === 'uploaded' && (
+                                                    <span className="flex items-center gap-1 text-green-600">
+                                                        <CheckCircle2 className="w-3 h-3" />
+                                                        Uploaded
+                                                    </span>
+                                                )}
+                                                {attachment.uploadStatus === 'error' && (
+                                                    <span className="flex items-center gap-1 text-red-600">
+                                                        <AlertCircle className="w-3 h-3" />
+                                                        Upload failed
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRemoveAttachment(attachment.id)}
+                                            className="text-slate-400 hover:text-red-500 p-1"
+                                            disabled={attachment.uploadStatus === 'uploading'}
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
 
@@ -800,6 +1221,28 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, ev
                                     </ul>
                                 </div>
                             </div>
+
+                            {/* Attachments Summary */}
+                            {formData.attachments.length > 0 && (
+                                <>
+                                    <Separator />
+                                    <div>
+                                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Attachments</h4>
+                                        <div className="space-y-2">
+                                            {formData.attachments.map((attachment, idx) => (
+                                                <div key={attachment.id} className="flex items-center gap-2 text-sm">
+                                                    <File className="w-4 h-4 text-slate-400" />
+                                                    <span className="flex-1 truncate">{attachment.name}</span>
+                                                    <span className="text-slate-500 text-xs">{formatFileSize(attachment.size)}</span>
+                                                    {attachment.uploadStatus === 'uploaded' && (
+                                                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </CardContent>
                     </Card>
                 </div>

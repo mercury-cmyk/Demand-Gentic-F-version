@@ -16,27 +16,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
   Calendar,
   MapPin,
   ExternalLink,
   FileEdit,
-  Send,
-  Plus,
-  Clock,
-  Users,
   Target,
   RefreshCw,
   CheckCircle2,
   AlertCircle,
   Loader2,
   Tag,
+  Users,
 } from 'lucide-react';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 import { WorkOrderForm } from '@/components/client-portal/work-orders/work-order-form';
@@ -64,32 +56,7 @@ interface EventWithDraft {
   draftUpdatedAt: string | null;
 }
 
-interface DraftDetail {
-  draft: {
-    id: string;
-    status: string;
-    sourceFields: Record<string, any>;
-    draftFields: Record<string, any>;
-    editedFields: string[];
-    leadCount: number | null;
-    workOrderId: string | null;
-    submittedAt: string | null;
-    createdAt: string;
-    updatedAt: string;
-  };
-  event: {
-    id: string;
-    externalId: string;
-    sourceUrl: string;
-    title: string;
-    community: string | null;
-    eventType: string | null;
-    location: string | null;
-    startAtIso: string | null;
-    startAtHuman: string | null;
-    lastSyncedAt: string;
-  } | null;
-}
+
 
 function StatusBadge({ status }: { status: string }) {
   switch (status) {
@@ -138,8 +105,6 @@ export default function ArgyleEventsPage() {
 export function ArgyleEventsContent() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
-  const [showDraftDialog, setShowDraftDialog] = useState(false);
   const [hasSynced, setHasSynced] = useState(false);
 
   // Shared Direct Agentic Order modal (same form as Work Orders tab)
@@ -214,98 +179,40 @@ export function ArgyleEventsContent() {
     }
   }, [featureStatus, eventsFetched, eventsLoading, eventsData, hasSynced]);
 
-  // Fetch draft detail
-  const { data: draftData, isLoading: draftLoading } = useQuery<DraftDetail>({
-    queryKey: ['argyle-draft', selectedDraftId],
-    queryFn: async () => {
-      const res = await fetch(`/api/client-portal/argyle-events/drafts/${selectedDraftId}`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (!res.ok) throw new Error('Failed to fetch draft');
-      return res.json();
-    },
-    enabled: !!selectedDraftId && showDraftDialog,
-  });
 
-  // Create draft mutation
-  const createDraftMutation = useMutation({
-    mutationFn: async (eventId: string) => {
-      const res = await fetch(`/api/client-portal/argyle-events/events/${eventId}/create-draft`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      if (!res.ok) throw new Error('Failed to create draft');
-      return res.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
-      setSelectedDraftId(data.draftId);
-      setShowDraftDialog(true);
-      toast({
-        title: data.alreadyExists ? 'Draft already exists' : 'Draft created',
-        description: data.alreadyExists
-          ? 'Opening your existing draft.'
-          : 'Campaign draft created from event. Set your lead count to submit.',
-      });
-    },
-    onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    },
-  });
 
-  // Update draft mutation
-  const updateDraftMutation = useMutation({
-    mutationFn: async ({ id, draftFields, leadCount }: { id: string; draftFields?: Record<string, any>; leadCount?: number }) => {
-      const res = await fetch(`/api/client-portal/argyle-events/drafts/${id}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ draftFields, leadCount }),
-      });
-      if (!res.ok) throw new Error('Failed to update draft');
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['argyle-draft', selectedDraftId] });
-      queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
-      toast({ title: 'Draft saved', description: 'Your changes have been saved.' });
-    },
-  });
 
-  // Submit draft mutation
-  const submitDraftMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/client-portal/argyle-events/drafts/${id}/submit`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to submit');
-      }
-      return res.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
-      queryClient.invalidateQueries({ queryKey: ['argyle-draft', selectedDraftId] });
-      setShowDraftDialog(false);
-      toast({
-        title: 'Order submitted!',
-        description: `Work order ${data.orderNumber} has been created. Our team will review and begin work.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({ title: 'Submission failed', description: error.message, variant: 'destructive' });
-    },
-  });
+
+
+
+  // Use unified work order form for all event interactions
+  const handleEventAction = (event: any, mode: 'create' | 'edit' = 'create') => {
+    const eventContext = {
+      externalEventId: event.id,
+      eventTitle: event.title,
+      eventDate: event.startAtHuman || event.startAtIso || '',
+      eventType: event.eventType || 'event',
+      eventLocation: event.location || '',
+      eventCommunity: event.community || '',
+      eventSourceUrl: event.sourceUrl || '',
+      leadCount: event.draftLeadCount || undefined,
+    };
+
+    const initialValues = mode === 'edit' && event.draftId ? {
+      title: event.title,
+      description: `Generate qualified leads for ${event.title}`,
+      targetLeadCount: event.draftLeadCount || undefined,
+      targetRegions: event.location ? [event.location] : [],
+      eventSource: 'argyle_event',
+      externalEventId: event.id,
+      eventSourceUrl: event.sourceUrl,
+    } : undefined;
+
+    openModal({
+      eventContext,
+      initialValues,
+    });
+  };
 
   if (featureStatus && !featureStatus.enabled) {
     return (
@@ -435,74 +342,36 @@ export function ArgyleEventsContent() {
                         </span>
                       )}
                       {event.draftStatus === 'not_created' ? (
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => createDraftMutation.mutate(event.id)}
-                            disabled={createDraftMutation.isPending}
-                          >
-                            {createDraftMutation.isPending ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Plus className="h-4 w-4 mr-1" />
-                            )}
-                            Draft
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              openModal({
-                                mode: 'event',
-                                eventContext: {
-                                  externalEventId: event.id,
-                                  eventTitle: event.title,
-                                  eventDate: event.startAtHuman || event.startAtIso || '',
-                                  eventType: event.eventType || 'event',
-                                  eventLocation: event.location || '',
-                                  eventCommunity: event.community || '',
-                                  eventSourceUrl: event.sourceUrl || '',
-                                },
-                              });
-                            }}
-                          >
-                            <Target className="h-4 w-4 mr-1" />
-                            Request Leads
-                          </Button>
-                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => handleEventAction(event, 'create')}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          <Target className="h-4 w-4 mr-1" />
+                          Request Leads
+                        </Button>
                       ) : event.draftStatus === 'submitted' ? (
                         <Button size="sm" variant="outline" disabled>
                           <CheckCircle2 className="h-4 w-4 mr-1" />
-                          Ordered
+                          Work Order Created
                         </Button>
                       ) : (
                         <div className="flex items-center gap-2">
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              setSelectedDraftId(event.draftId);
-                              setShowDraftDialog(true);
-                            }}
+                            onClick={() => handleEventAction(event, 'edit')}
                           >
                             <FileEdit className="h-4 w-4 mr-1" />
                             Edit Draft
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => {
-                              if (event.draftId) {
-                                submitDraftMutation.mutate(event.draftId);
-                              }
-                            }}
-                            disabled={submitDraftMutation.isPending}
+                            onClick={() => handleEventAction(event, 'create')}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
                           >
-                            {submitDraftMutation.isPending ? (
-                              <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                            ) : (
-                              <Send className="h-4 w-4 mr-1" />
-                            )}
-                            Submit Order
+                            <Target className="h-4 w-4 mr-1" />
+                            Submit Work Order
                           </Button>
                         </div>
                       )}
@@ -515,282 +384,8 @@ export function ArgyleEventsContent() {
         )}
       </div>
 
-      {/* Draft Editor Dialog */}
-      <DraftEditorDialog
-        open={showDraftDialog}
-        onOpenChange={(open) => {
-          setShowDraftDialog(open);
-          if (!open) setSelectedDraftId(null);
-        }}
-        draftData={draftData || null}
-        isLoading={draftLoading}
-        onSave={(fields, leadCount) => {
-          if (selectedDraftId) {
-            updateDraftMutation.mutate({ id: selectedDraftId, draftFields: fields, leadCount });
-          }
-        }}
-        onSubmit={() => {
-          if (selectedDraftId) {
-            submitDraftMutation.mutate(selectedDraftId);
-          }
-        }}
-        isSaving={updateDraftMutation.isPending}
-        isSubmitting={submitDraftMutation.isPending}
-      />
-
-      {/* Shared Direct Agentic Order Modal (same form as Work Orders) */}
+      {/* Unified Work Order Form (same as Work Orders tab) */}
       <WorkOrderForm {...modalProps} />
     </>
-  );
-}
-
-// ==================== Draft Editor Dialog ====================
-
-interface DraftEditorDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  draftData: DraftDetail | null;
-  isLoading: boolean;
-  onSave: (fields: Record<string, any>, leadCount: number) => void;
-  onSubmit: () => void;
-  isSaving: boolean;
-  isSubmitting: boolean;
-}
-
-function DraftEditorDialog({
-  open,
-  onOpenChange,
-  draftData,
-  isLoading,
-  onSave,
-  onSubmit,
-  isSaving,
-  isSubmitting,
-}: DraftEditorDialogProps) {
-  const [localFields, setLocalFields] = useState<Record<string, any>>({});
-  const [localLeadCount, setLocalLeadCount] = useState<string>('');
-  const [dirty, setDirty] = useState(false);
-
-  // Initialize local state when draft data loads
-  useEffect(() => {
-    if (draftData?.draft) {
-      setLocalFields(draftData.draft.draftFields || {});
-      setLocalLeadCount(draftData.draft.leadCount?.toString() || '');
-      setDirty(false);
-    }
-  }, [draftData]);
-
-  const updateField = (key: string, value: any) => {
-    setLocalFields(prev => ({ ...prev, [key]: value }));
-    setDirty(true);
-  };
-
-  const handleSave = () => {
-    const leadCount = parseInt(localLeadCount, 10);
-    onSave(localFields, isNaN(leadCount) ? 0 : leadCount);
-    setDirty(false);
-  };
-
-  const isSubmitted = draftData?.draft?.status === 'submitted';
-  const editedFields = draftData?.draft?.editedFields || [];
-  const canSubmit = !isSubmitted && localLeadCount && parseInt(localLeadCount, 10) > 0;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileEdit className="h-5 w-5" />
-            Campaign Draft
-            {isSubmitted && <Badge className="bg-green-100 text-green-800">Submitted</Badge>}
-          </DialogTitle>
-          <DialogDescription>
-            {draftData?.event ? (
-              <span className="flex items-center gap-2 mt-1">
-                <a
-                  href={draftData.event.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline flex items-center gap-1"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  View source event
-                </a>
-                {draftData.event.lastSyncedAt && (
-                  <span className="text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3 inline mr-1" />
-                    Last synced: {new Date(draftData.event.lastSyncedAt).toLocaleString()}
-                  </span>
-                )}
-                {editedFields.length > 0 && (
-                  <Badge variant="outline" className="text-xs">
-                    {editedFields.length} field(s) edited
-                  </Badge>
-                )}
-              </span>
-            ) : null}
-          </DialogDescription>
-        </DialogHeader>
-
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="space-y-5 py-2">
-            {/* LEAD COUNT — Primary required field */}
-            <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
-              <Label htmlFor="leadCount" className="text-base font-semibold flex items-center gap-2">
-                <Target className="h-4 w-4 text-primary" />
-                Number of Leads *
-              </Label>
-              <p className="text-sm text-muted-foreground mb-2">
-                This is the only required field to submit your order.
-              </p>
-              <Input
-                id="leadCount"
-                type="number"
-                min="1"
-                placeholder="e.g., 500"
-                value={localLeadCount}
-                onChange={(e) => { setLocalLeadCount(e.target.value); setDirty(true); }}
-                disabled={isSubmitted}
-                className="max-w-xs text-lg font-medium"
-              />
-            </div>
-
-            <Separator />
-
-            {/* Campaign Title */}
-            <div className="space-y-2">
-              <Label htmlFor="title" className="flex items-center gap-2">
-                Campaign Title
-                {editedFields.includes('title') && <Badge variant="outline" className="text-xs">Edited</Badge>}
-              </Label>
-              <Input
-                id="title"
-                value={localFields.title || ''}
-                onChange={(e) => updateField('title', e.target.value)}
-                disabled={isSubmitted}
-              />
-            </div>
-
-            {/* Context */}
-            <div className="space-y-2">
-              <Label htmlFor="context" className="flex items-center gap-2">
-                Context / Overview
-                {editedFields.includes('context') && <Badge variant="outline" className="text-xs">Edited</Badge>}
-              </Label>
-              <Textarea
-                id="context"
-                rows={5}
-                value={localFields.context || ''}
-                onChange={(e) => updateField('context', e.target.value)}
-                disabled={isSubmitted}
-              />
-            </div>
-
-            {/* Objective */}
-            <div className="space-y-2">
-              <Label htmlFor="objective" className="flex items-center gap-2">
-                Objective
-                {editedFields.includes('objective') && <Badge variant="outline" className="text-xs">Edited</Badge>}
-              </Label>
-              <Textarea
-                id="objective"
-                rows={2}
-                value={localFields.objective || ''}
-                onChange={(e) => updateField('objective', e.target.value)}
-                disabled={isSubmitted}
-              />
-            </div>
-
-            {/* Targeting Notes */}
-            <div className="space-y-2">
-              <Label htmlFor="targetingNotes" className="flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Targeting Notes
-                {editedFields.includes('targetingNotes') && <Badge variant="outline" className="text-xs">Edited</Badge>}
-              </Label>
-              <Textarea
-                id="targetingNotes"
-                rows={3}
-                value={localFields.targetingNotes || ''}
-                onChange={(e) => updateField('targetingNotes', e.target.value)}
-                disabled={isSubmitted}
-              />
-            </div>
-
-            {/* Timing Notes */}
-            <div className="space-y-2">
-              <Label htmlFor="timingNotes" className="flex items-center gap-2">
-                <Clock className="h-4 w-4" />
-                Timing / Outreach Window
-                {editedFields.includes('timingNotes') && <Badge variant="outline" className="text-xs">Edited</Badge>}
-              </Label>
-              <Textarea
-                id="timingNotes"
-                rows={2}
-                value={localFields.timingNotes || ''}
-                onChange={(e) => updateField('timingNotes', e.target.value)}
-                disabled={isSubmitted}
-              />
-            </div>
-
-            {/* Event Details (read-only from source) */}
-            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-              <h4 className="font-medium text-sm">Event Details (from source)</h4>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Date:</span>{' '}
-                  {localFields.eventDate || 'TBD'}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Type:</span>{' '}
-                  {localFields.eventType || 'N/A'}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Community:</span>{' '}
-                  {localFields.eventCommunity || 'N/A'}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Location:</span>{' '}
-                  {localFields.eventLocation || 'N/A'}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <DialogFooter className="flex gap-2 sm:gap-0">
-          {!isSubmitted && (
-            <>
-              <Button
-                variant="outline"
-                onClick={handleSave}
-                disabled={!dirty || isSaving}
-              >
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                Save Draft
-              </Button>
-              <Button
-                onClick={() => {
-                  if (dirty) handleSave();
-                  onSubmit();
-                }}
-                disabled={!canSubmit || isSubmitting}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                ) : (
-                  <Send className="h-4 w-4 mr-1" />
-                )}
-                Submit Order
-              </Button>
-            </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

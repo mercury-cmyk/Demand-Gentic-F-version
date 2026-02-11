@@ -1914,11 +1914,15 @@ router.post('/admin/clients', requireAuth, requireRole('admin', 'campaign_manage
 
 router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
+    console.log('[CLIENT PORTAL ADMIN] GET /admin/clients/:id called with id:', req.params.id);
+    
     const [client] = await db
       .select()
       .from(clientAccounts)
       .where(eq(clientAccounts.id, req.params.id))
       .limit(1);
+
+    console.log('[CLIENT PORTAL ADMIN] Client found:', client ? client.companyName : 'NOT FOUND');
 
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
@@ -1984,7 +1988,8 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .where(eq(workOrders.clientAccountId, client.id))
       .orderBy(desc(workOrders.createdAt));
 
-    console.log('[CLIENT PORTAL] Work orders for client', client.id, ':', clientWorkOrders.length);
+    console.log('[CLIENT PORTAL ADMIN] Work orders for client', client.id, ':', clientWorkOrders.length, '| Projects:', projects.length);
+    console.log('[CLIENT PORTAL ADMIN] Response will include workOrders:', clientWorkOrders.map(w => ({ id: w.id, title: w.title })));
 
     // Get lead counts for each regular campaign (all approved + published leads for admin view)
     const regularCampaignIds = mappedRegularAccess.map(a => a.campaign.id);

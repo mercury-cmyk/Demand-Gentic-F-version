@@ -189,7 +189,7 @@ router.post('/api/s3/download-url', async (req, res) => {
 
 /**
  * GET /api/s3/status
- * Check if S3 is configured and operational
+ * Check if S3 is configured and operational (No auth required)
  */
 router.get('/api/s3/status', (req, res) => {
   const configured = isS3Configured();
@@ -197,7 +197,7 @@ router.get('/api/s3/status', (req, res) => {
   res.json({
     configured,
     provider: process.env.S3_ENDPOINT ? 'custom' : 'aws',
-    bucket: process.env.S3_BUCKET || null,
+    bucket: configured ? (process.env.S3_BUCKET || 'default') : null,
   });
 });
 
