@@ -5,8 +5,8 @@ async function throwIfResNotOk(res: Response, url?: string) {
     // Handle 401 Unauthorized - automatically logout and redirect to login
     if (res.status === 401) {
       // Check if it's a client portal route, BUT exclude admin routes starting with /api/client-portal/admin/
-      const isAdminClientPortalRoute = url?.includes('/api/client-portal/admin/');
-      const isClientPortalRoute = url?.includes('/api/client-portal/') && !isAdminClientPortalRoute;
+      const isAdminClientPortalRoute = !!url?.includes('/api/client-portal/admin/');
+      const isClientPortalRoute = !!url?.includes('/api/client-portal/') && !isAdminClientPortalRoute;
       
       if (isClientPortalRoute || window.location.pathname.startsWith('/client-portal/')) {
         // Use centralized session cleanup to clear cache + localStorage
