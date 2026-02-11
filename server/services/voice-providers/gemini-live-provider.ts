@@ -91,6 +91,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private sttLastRestartTime: number = 0;
   private sttErrorLoggedAt: number = 0; // Rate-limit error logging
 
+  // Queued opening message: if sendOpeningMessage is called before setup completes,
+  // queue it and auto-send when setupComplete fires. Prevents silent agent on race conditions.
+  private pendingOpeningMessage: string | null = null;
+
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
@@ -283,6 +287,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     this.setupComplete = false;
+    this.pendingOpeningMessage = null;
     this.setConnected(false);
   }
 
@@ -531,24 +536,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         this.audioBytesSent += audioBuffer.length;
         this.audioInboundChunks++;
 
-        // Track when audio was received for STT idle detection
-        this.lastAudioReceivedTime = Date.now();
-
-        // Also stream to Speech-to-Text for user transcription
-        if (this.sttEnabled) {
-          if (!this.sttActive) {
-            this.sttActive = true;
-            this.startRecognizeStream().catch(() => {});
-          }
-
-          if (this.recognizeStream && !this.recognizeStream.destroyed && this.recognizeStream.writable) {
-            try {
-              this.recognizeStream.write(pcmBuffer);
-            } catch (sttErr) {
-              // Stream may be closing - ignore silently
-            }
-          }
-        }
+        // POST-CALL TRANSCRIPTION: STT disabled during calls for zero latency.
+        // Full transcription runs after the call from the recording.
     } catch (e) {
         console.error(`${LOG_PREFIX} Error sending audio to Gemini`, e);
     }
@@ -556,24 +545,13 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
   /**
    * Initialize Google Cloud Speech-to-Text for user speech transcription.
-   * This only initializes the client - actual streaming starts on demand when audio arrives.
+   * DISABLED: Post-call transcription eliminates the need for real-time STT.
+   * This reduces latency, CPU overhead, and network usage during live calls.
    */
   private async initializeSpeechToText(): Promise<void> {
-    // Skip if STT is explicitly disabled
-    if (process.env.GEMINI_STT_ENABLED === 'false') {
-      console.log(`${LOG_PREFIX} Speech-to-Text disabled via GEMINI_STT_ENABLED=false`);
-      return;
-    }
-
-    try {
-      this.speechClient = new SpeechClient();
-      this.sttEnabled = true;
-      // Don't start stream yet - it will start on demand when audio arrives
-      console.log(`${LOG_PREFIX} Speech-to-Text client initialized (stream starts on audio)`);
-    } catch (error: any) {
-      console.warn(`${LOG_PREFIX} Speech-to-Text initialization failed (user transcripts will be unavailable):`, error.message);
-      this.sttEnabled = false;
-    }
+    console.log(`${LOG_PREFIX} Speech-to-Text DISABLED — post-call transcription enabled`);
+    this.sttEnabled = false;
+    return;
   }
 
   /**
@@ -889,7 +867,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   sendOpeningMessage(text: string): void {
     console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
-      console.warn(`${LOG_PREFIX} ❌ Cannot send opening message - not ready (ws=${!!this.ws}, state=${this.ws?.readyState}, setup=${this.setupComplete})`);
+      // Instead of silently dropping, queue the message for when setup completes
+      console.warn(`${LOG_PREFIX} ⏳ Opening message queued - not ready yet (ws=${!!this.ws}, state=${this.ws?.readyState}, setup=${this.setupComplete})`);
+      this.pendingOpeningMessage = text;
       return;
     }
 
@@ -1021,6 +1001,13 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
       this.initializeSpeechToText().catch(err => {
         console.warn(`${LOG_PREFIX} STT init failed:`, err.message);
       });
+      // Flush any queued opening message that arrived before setup completed
+      if (this.pendingOpeningMessage) {
+        const queuedText = this.pendingOpeningMessage;
+        this.pendingOpeningMessage = null;
+        console.log(`${LOG_PREFIX} 📤 Flushing queued opening message after setup_complete`);
+        this.sendOpeningMessage(queuedText);
+      }
       return;
     }
 

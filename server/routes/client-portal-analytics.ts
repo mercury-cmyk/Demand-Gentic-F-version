@@ -1,0 +1,517 @@
+/**
+ * Client Portal Analytics Routes
+ *
+ * Provides analytics, call reports, recordings, conversation quality,
+ * and email campaign data for client portal users, scoped to their
+ * assigned campaigns via clientCampaignAccess.
+ */
+
+import { Router, Request, Response } from 'express';
+import { db } from '../db';
+import { eq, and, desc, sql, or, isNotNull, inArray, gte, lte, ilike } from 'drizzle-orm';
+import {
+  clientCampaignAccess,
+  clientAccounts,
+  campaigns,
+  callSessions,
+  callQualityRecords,
+  contacts,
+  accounts,
+  leads,
+  emailSends,
+  emailEvents,
+  emailTemplates,
+} from '@shared/schema';
+
+const router = Router();
+
+/**
+ * Helper: Get all campaign IDs the client has access to
+ */
+async function getClientCampaignIds(clientAccountId: string): Promise<string[]> {
+  const regularAccess = await db
+    .select({ campaignId: clientCampaignAccess.regularCampaignId })
+    .from(clientCampaignAccess)
+    .where(
+      and(
+        eq(clientCampaignAccess.clientAccountId, clientAccountId),
+        isNotNull(clientCampaignAccess.regularCampaignId)
+      )
+    );
+
+  return regularAccess
+    .map(a => a.campaignId)
+    .filter((id): id is string => id !== null);
+}
+
+/**
+ * GET /call-reports
+ *
+ * Call report data with disposition breakdowns and campaign performance
+ * for the client's assigned campaigns.
+ */
+router.get('/call-reports', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { campaignId } = req.query;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) {
+      return res.json({
+        summary: { totalCalls: 0, totalDuration: 0, avgDuration: 0 },
+        dispositions: [],
+        campaignBreakdown: [],
+      });
+    }
+
+    const targetIds = campaignId && campaignId !== 'all'
+      ? [campaignId as string].filter(id => campaignIds.includes(id))
+      : campaignIds;
+
+    if (targetIds.length === 0) {
+      return res.json({
+        summary: { totalCalls: 0, totalDuration: 0, avgDuration: 0 },
+        dispositions: [],
+        campaignBreakdown: [],
+      });
+    }
+
+    // Summary stats
+    const [summary] = await db
+      .select({
+        totalCalls: sql<number>`COUNT(*)::int`,
+        totalDuration: sql<number>`COALESCE(SUM(${callSessions.durationSec}), 0)::int`,
+        avgDuration: sql<number>`COALESCE(AVG(${callSessions.durationSec}), 0)::int`,
+      })
+      .from(callSessions)
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed')
+        )
+      );
+
+    // Disposition breakdown
+    const dispositions = await db
+      .select({
+        disposition: sql<string>`COALESCE(${callSessions.aiDisposition}, 'unknown')`,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(callSessions)
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed')
+        )
+      )
+      .groupBy(sql`COALESCE(${callSessions.aiDisposition}, 'unknown')`)
+      .orderBy(desc(sql`COUNT(*)`));
+
+    // Campaign breakdown
+    const campaignBreakdown = await db
+      .select({
+        campaignId: campaigns.id,
+        campaignName: campaigns.name,
+        totalCalls: sql<number>`COUNT(*)::int`,
+        qualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN ('qualified', 'qualified_lead', 'converted_qualified') THEN 1 END)::int`,
+        notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
+        voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
+        noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' THEN 1 END)::int`,
+        dncRequest: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN ('dnc_request', 'do_not_call', 'dnc_added') THEN 1 END)::int`,
+      })
+      .from(callSessions)
+      .innerJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed')
+        )
+      )
+      .groupBy(campaigns.id, campaigns.name);
+
+    res.json({
+      summary: summary || { totalCalls: 0, totalDuration: 0, avgDuration: 0 },
+      dispositions,
+      campaignBreakdown,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Call reports error:', error);
+    res.status(500).json({ message: 'Failed to fetch call reports' });
+  }
+});
+
+/**
+ * GET /recordings
+ *
+ * Call recordings for the client's assigned campaigns.
+ * Respects visibility settings for recordings.
+ */
+router.get('/recordings', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    // Check recording visibility
+    const [clientAccount] = await db
+      .select({ visibilitySettings: clientAccounts.visibilitySettings })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientAccountId))
+      .limit(1);
+
+    const visibility = (clientAccount?.visibilitySettings || {}) as Record<string, boolean>;
+    if (visibility.showRecordings === false) {
+      return res.json([]);
+    }
+
+    const { campaignId, search } = req.query;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) return res.json([]);
+
+    const targetIds = campaignId && campaignId !== 'all'
+      ? [campaignId as string].filter(id => campaignIds.includes(id))
+      : campaignIds;
+
+    if (targetIds.length === 0) return res.json([]);
+
+    const conditions = [
+      inArray(callSessions.campaignId, targetIds),
+      eq(callSessions.status, 'completed'),
+    ];
+
+    const recordings = await db
+      .select({
+        id: callSessions.id,
+        campaignId: callSessions.campaignId,
+        campaignName: campaigns.name,
+        contactName: sql<string>`COALESCE(CONCAT(${contacts.firstName}, ' ', ${contacts.lastName}), 'Unknown')`,
+        accountName: sql<string>`COALESCE(${accounts.name}, 'Unknown')`,
+        phoneNumber: callSessions.toNumberE164,
+        disposition: callSessions.aiDisposition,
+        duration: callSessions.durationSec,
+        recordingUrl: callSessions.recordingUrl,
+        transcript: callSessions.aiTranscript,
+        createdAt: callSessions.createdAt,
+      })
+      .from(callSessions)
+      .innerJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+      .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(and(...conditions))
+      .orderBy(desc(callSessions.createdAt))
+      .limit(200);
+
+    // Apply search filter in-memory if provided (simpler than complex SQL for contact/account names)
+    let filtered = recordings;
+    if (search && typeof search === 'string' && search.trim()) {
+      const term = search.toLowerCase();
+      filtered = recordings.filter(r =>
+        r.contactName.toLowerCase().includes(term) ||
+        r.accountName.toLowerCase().includes(term) ||
+        (r.phoneNumber && r.phoneNumber.includes(term))
+      );
+    }
+
+    res.json(filtered);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Recordings error:', error);
+    res.status(500).json({ message: 'Failed to fetch recordings' });
+  }
+});
+
+/**
+ * GET /analytics/engagement
+ *
+ * Engagement analytics across the client's assigned campaigns.
+ */
+router.get('/analytics/engagement', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { campaignId } = req.query;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) {
+      return res.json({
+        totalCampaigns: 0,
+        calls: { total: 0 },
+        email: { total: 0 },
+        leads: { qualified: 0 },
+        timeline: [],
+        channelBreakdown: [],
+        dispositions: [],
+      });
+    }
+
+    const targetIds = campaignId && campaignId !== 'all'
+      ? [campaignId as string].filter(id => campaignIds.includes(id))
+      : campaignIds;
+
+    // Total campaigns
+    const totalCampaigns = targetIds.length;
+
+    // Call stats
+    const [callStats] = await db
+      .select({
+        total: sql<number>`COUNT(*)::int`,
+        qualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN ('qualified', 'qualified_lead', 'converted_qualified') THEN 1 END)::int`,
+      })
+      .from(callSessions)
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed')
+        )
+      );
+
+    // Email stats
+    const [emailStats] = await db
+      .select({
+        total: sql<number>`COUNT(*)::int`,
+      })
+      .from(emailSends)
+      .where(inArray(emailSends.campaignId, targetIds));
+
+    // Lead stats
+    const [leadStats] = await db
+      .select({
+        qualified: sql<number>`COUNT(CASE WHEN ${leads.qaStatus} = 'approved' THEN 1 END)::int`,
+      })
+      .from(leads)
+      .where(inArray(leads.campaignId, targetIds));
+
+    // Timeline (last 30 days) - calls per day
+    const timeline = await db
+      .select({
+        date: sql<string>`TO_CHAR(${callSessions.createdAt}, 'YYYY-MM-DD')`,
+        calls: sql<number>`COUNT(*)::int`,
+        qualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN ('qualified', 'qualified_lead', 'converted_qualified') THEN 1 END)::int`,
+      })
+      .from(callSessions)
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed'),
+          gte(callSessions.createdAt, sql`NOW() - INTERVAL '30 days'`)
+        )
+      )
+      .groupBy(sql`TO_CHAR(${callSessions.createdAt}, 'YYYY-MM-DD')`)
+      .orderBy(sql`TO_CHAR(${callSessions.createdAt}, 'YYYY-MM-DD')`);
+
+    // Add email count to timeline (approximate)
+    const emailTimeline = await db
+      .select({
+        date: sql<string>`TO_CHAR(${emailSends.sentAt}, 'YYYY-MM-DD')`,
+        emails: sql<number>`COUNT(*)::int`,
+      })
+      .from(emailSends)
+      .where(
+        and(
+          inArray(emailSends.campaignId, targetIds),
+          isNotNull(emailSends.sentAt),
+          gte(emailSends.sentAt, sql`NOW() - INTERVAL '30 days'`)
+        )
+      )
+      .groupBy(sql`TO_CHAR(${emailSends.sentAt}, 'YYYY-MM-DD')`)
+      .orderBy(sql`TO_CHAR(${emailSends.sentAt}, 'YYYY-MM-DD')`);
+
+    // Merge email data into timeline
+    const emailMap = new Map(emailTimeline.map(e => [e.date, e.emails]));
+    const mergedTimeline = timeline.map(t => ({
+      ...t,
+      emails: emailMap.get(t.date) || 0,
+    }));
+
+    // Channel breakdown
+    const channelBreakdown = [
+      { name: 'Phone Calls', value: callStats?.total || 0 },
+      { name: 'Emails', value: emailStats?.total || 0 },
+    ].filter(c => c.value > 0);
+
+    // Dispositions
+    const dispositions = await db
+      .select({
+        disposition: sql<string>`COALESCE(${callSessions.aiDisposition}, 'unknown')`,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(callSessions)
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed')
+        )
+      )
+      .groupBy(sql`COALESCE(${callSessions.aiDisposition}, 'unknown')`)
+      .orderBy(desc(sql`COUNT(*)`));
+
+    res.json({
+      totalCampaigns,
+      calls: { total: callStats?.total || 0 },
+      email: { total: emailStats?.total || 0 },
+      leads: { qualified: leadStats?.qualified || 0 },
+      timeline: mergedTimeline,
+      channelBreakdown,
+      dispositions,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Analytics error:', error);
+    res.status(500).json({ message: 'Failed to fetch analytics' });
+  }
+});
+
+/**
+ * GET /conversations
+ *
+ * Conversation quality data for the client's assigned campaigns.
+ */
+router.get('/conversations', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { campaignId } = req.query;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) return res.json([]);
+
+    const targetIds = campaignId && campaignId !== 'all'
+      ? [campaignId as string].filter(id => campaignIds.includes(id))
+      : campaignIds;
+
+    if (targetIds.length === 0) return res.json([]);
+
+    const conversations = await db
+      .select({
+        id: callSessions.id,
+        campaignId: callSessions.campaignId,
+        campaignName: campaigns.name,
+        contactName: sql<string>`COALESCE(CONCAT(${contacts.firstName}, ' ', ${contacts.lastName}), 'Unknown')`,
+        accountName: sql<string>`COALESCE(${accounts.name}, 'Unknown')`,
+        disposition: callSessions.aiDisposition,
+        duration: callSessions.durationSec,
+        qualityScore: callQualityRecords.overallQualityScore,
+        qaStatus: leads.qaStatus,
+        transcript: callSessions.aiTranscript,
+        analysis: callSessions.aiAnalysis,
+        createdAt: callSessions.createdAt,
+      })
+      .from(callSessions)
+      .innerJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+      .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .leftJoin(callQualityRecords, eq(callQualityRecords.callSessionId, callSessions.id))
+      .leftJoin(leads, and(
+        eq(leads.campaignId, callSessions.campaignId),
+        eq(leads.contactId, callSessions.contactId)
+      ))
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed'),
+          isNotNull(callSessions.aiTranscript)
+        )
+      )
+      .orderBy(desc(callSessions.createdAt))
+      .limit(100);
+
+    res.json(conversations);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Conversations error:', error);
+    res.status(500).json({ message: 'Failed to fetch conversations' });
+  }
+});
+
+/**
+ * GET /email-campaigns
+ *
+ * Email campaign data for the client's assigned campaigns.
+ */
+router.get('/email-campaigns', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) return res.json([]);
+
+    // Get email-type campaigns and their send stats
+    const emailCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        createdAt: campaigns.createdAt,
+      })
+      .from(campaigns)
+      .where(
+        and(
+          inArray(campaigns.id, campaignIds),
+          or(
+            eq(campaigns.type, 'email'),
+            eq(campaigns.type, 'combo')
+          )
+        )
+      )
+      .orderBy(desc(campaigns.createdAt));
+
+    // For each email campaign, get send stats
+    const enriched = await Promise.all(
+      emailCampaigns.map(async (campaign) => {
+        // Send counts from emailSends
+        const [sendStats] = await db
+          .select({
+            totalRecipients: sql<number>`COUNT(DISTINCT ${emailSends.contactId})::int`,
+            sent: sql<number>`COUNT(*)::int`,
+            delivered: sql<number>`COUNT(CASE WHEN ${emailSends.status} = 'delivered' THEN 1 END)::int`,
+            bounced: sql<number>`COUNT(CASE WHEN ${emailSends.status} = 'bounced' THEN 1 END)::int`,
+          })
+          .from(emailSends)
+          .where(eq(emailSends.campaignId, campaign.id));
+
+        // Event counts from emailEvents (opened, clicked, unsubscribed)
+        const [eventStats] = await db
+          .select({
+            opened: sql<number>`COUNT(CASE WHEN ${emailEvents.type} = 'opened' THEN 1 END)::int`,
+            clicked: sql<number>`COUNT(CASE WHEN ${emailEvents.type} = 'clicked' THEN 1 END)::int`,
+            unsubscribed: sql<number>`COUNT(CASE WHEN ${emailEvents.type} = 'unsubscribed' THEN 1 END)::int`,
+          })
+          .from(emailEvents)
+          .where(eq(emailEvents.campaignId, campaign.id));
+
+        // Get subject from first email template used in this campaign
+        const [tmpl] = await db
+          .select({ subject: emailTemplates.subject })
+          .from(emailSends)
+          .innerJoin(emailTemplates, eq(emailSends.templateId, emailTemplates.id))
+          .where(eq(emailSends.campaignId, campaign.id))
+          .limit(1);
+
+        return {
+          ...campaign,
+          subject: tmpl?.subject || campaign.name,
+          totalRecipients: sendStats?.totalRecipients || 0,
+          sent: sendStats?.sent || 0,
+          delivered: sendStats?.delivered || 0,
+          opened: eventStats?.opened || 0,
+          clicked: eventStats?.clicked || 0,
+          bounced: sendStats?.bounced || 0,
+          unsubscribed: eventStats?.unsubscribed || 0,
+          scheduledAt: null,
+          sentAt: null,
+        };
+      })
+    );
+
+    res.json(enriched);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Email campaigns error:', error);
+    res.status(500).json({ message: 'Failed to fetch email campaigns' });
+  }
+});
+
+export default router;

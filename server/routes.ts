@@ -39,6 +39,8 @@ import leadFormsRouter from './routes/lead-forms-routes';
 import pipelineRouter from './routes/pipeline-routes';
 import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
 import generativeStudioRouter from './routes/generative-studio-routes';
+import dispositionIntelligenceRouter from './routes/disposition-intelligence-routes';
+import queueIntelligenceRouter from './routes/queue-intelligence-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
 import inboxRouter from './routes/inbox-routes';
@@ -746,6 +748,7 @@ async function resolveAudienceContactsForQueue(
       country: contact.country,
       hqPhone: account?.mainPhone,
       hqPhoneE164: account?.mainPhoneE164,
+      hqCountry: account?.hqCountry,
     }).phone !== null;
   });
 
@@ -5899,6 +5902,7 @@ export function registerRoutes(app: Express) {
                 country: contact.country,
                 hqPhone: account?.mainPhone,
                 hqPhoneE164: account?.mainPhoneE164,
+                hqCountry: account?.hqCountry,
               });
 
               if (bestPhone.phone !== null) {
@@ -5998,6 +6002,7 @@ export function registerRoutes(app: Express) {
                 country: contact.country,
                 hqPhone: account?.mainPhone,
                 hqPhoneE164: account?.mainPhoneE164,
+                hqCountry: account?.hqCountry,
               });
 
               return bestPhone.phone !== null;
@@ -6570,6 +6575,7 @@ export function registerRoutes(app: Express) {
               country: item.contactCountry,
               hqPhone: item.accountHqPhone,
               hqPhoneE164: item.accountHqPhoneE164,
+              hqCountry: item.accountHqCountry,
             });
 
             return {
@@ -6641,6 +6647,7 @@ export function registerRoutes(app: Express) {
               country: item.contactCountry,
               hqPhone: item.accountHqPhone,
               hqPhoneE164: item.accountHqPhoneE164,
+              hqCountry: item.accountHqCountry,
             });
 
             return {
@@ -14123,6 +14130,8 @@ Provide JSON response with:
   app.use(pipelineAccountsRouter);
   app.use(pipelineIntelligenceRouter);
   app.use('/api/generative-studio', generativeStudioRouter);
+  app.use('/api/disposition-intelligence', dispositionIntelligenceRouter);
+  app.use(queueIntelligenceRouter);
 
   // AI Project Creation
   app.use('/api/ai', aiProjectRouter);

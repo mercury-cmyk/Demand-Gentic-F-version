@@ -2437,7 +2437,7 @@ export default function ClientPortalDashboard() {
                 <p className="text-muted-foreground w-full md:w-auto">View and manage your AI-powered campaigns</p>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                {campaigns.some(c => c.enabledFeatures?.previewStudio) && (
+                {campaigns.length > 0 && (
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -2648,18 +2648,18 @@ export default function ClientPortalDashboard() {
                       key={campaign.id}
                       campaign={campaign}
                       onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
-                      onTestAgent={ef?.campaignCallTest ? (campaignId) => {
+                      onTestAgent={(campaignId) => {
                         setClientTestCampaignId(campaignId);
                         setShowClientTestAgent(true);
-                      } : undefined}
-                      onSelectVoice={ef?.voiceSelection ? (campaignId) => {
+                      }}
+                      onSelectVoice={(campaignId) => {
                         setClientVoiceCampaignId(campaignId);
                         setShowClientVoiceSelect(true);
-                      } : undefined}
-                      onViewQueue={ef?.campaignQueueView ? (campaignId) => {
+                      }}
+                      onViewQueue={(campaignId) => {
                         setQueueCampaignId(campaignId);
                         setShowQueueDialog(true);
-                      } : undefined}
+                      }}
                     />
                   );
                 })}

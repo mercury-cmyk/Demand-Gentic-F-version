@@ -50,6 +50,7 @@ import argyleEventsRouter from '../integrations/argyle_events/routes';
 import { ukefReportsRouter } from '../integrations/ukef_reports';
 import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
+import clientPortalAnalyticsRouter from './client-portal-analytics';
 
 const router = Router();
 
@@ -203,6 +204,9 @@ router.use('/ukef-reports', requireClientAuth, ukefReportsRouter);
 
 // UKEF transcript quality + disposition validation (feature-flagged, client-gated)
 router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
+
+// Analytics, reports, recordings, conversations, email campaigns
+router.use('/', requireClientAuth, clientPortalAnalyticsRouter);
 
 // Campaigns (Client wizard and management)
 router.use('/campaigns', requireClientAuth, clientPortalCampaignsRouter);

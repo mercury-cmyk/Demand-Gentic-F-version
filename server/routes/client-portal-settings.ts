@@ -226,10 +226,10 @@ router.get('/features', async (req: Request, res: Response) => {
       'api_access',
     ];
 
-    // Build complete feature status
+    // Build complete feature status - default to enabled when no explicit record exists
     const featureStatus = allFeatures.map((feature) => ({
       feature,
-      enabled: featureMap[feature]?.enabled || false,
+      enabled: featureMap[feature] !== undefined ? featureMap[feature].enabled : true,
       config: featureMap[feature]?.config || null,
     }));
 
@@ -267,9 +267,10 @@ router.get('/features/:feature', async (req: Request, res: Response) => {
       )
       .limit(1);
 
+    // Default to enabled when no explicit record exists (no restrictions)
     res.json({
       feature,
-      enabled: featureAccess?.isEnabled || false,
+      enabled: featureAccess ? featureAccess.isEnabled : true,
       config: featureAccess?.config || null,
     });
   } catch (error) {

@@ -17,8 +17,9 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, Brain } from 'lucide-react';
+import { RefreshCw, Brain, MessageSquare, BarChart3 } from 'lucide-react';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -35,6 +36,7 @@ import {
   defaultUnifiedFilters,
   buildUnifiedQueryParams,
 } from '@/components/unified-intelligence';
+import { DispositionIntelligenceView } from '@/components/disposition-intelligence';
 
 interface Campaign {
   id: string;
@@ -188,6 +190,7 @@ function normalizeSpeaker(role: string): 'agent' | 'prospect' | 'system' {
 export default function UnifiedIntelligencePage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [pageTab, setPageTab] = useState<'conversations' | 'disposition-intelligence'>('conversations');
   const [filters, setFilters] = useState<UnifiedIntelligenceFilters>(defaultUnifiedFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
@@ -379,21 +382,44 @@ export default function UnifiedIntelligencePage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {isPolling && (
+            {isPolling && pageTab === 'conversations' && (
               <span className="text-xs text-muted-foreground flex items-center gap-1">
                 <RefreshCw className="h-3 w-3 animate-spin" />
                 Live updating
               </span>
             )}
-            <Button variant="outline" size="sm" onClick={handleRefresh}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
+            {pageTab === 'conversations' && (
+              <Button variant="outline" size="sm" onClick={handleRefresh}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            )}
           </div>
+        </div>
+
+        {/* Page-Level Tabs */}
+        <div className="px-4 pb-2">
+          <Tabs value={pageTab} onValueChange={(v) => setPageTab(v as any)}>
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="conversations" className="gap-1.5">
+                <MessageSquare className="h-4 w-4" />
+                Conversations
+              </TabsTrigger>
+              <TabsTrigger value="disposition-intelligence" className="gap-1.5">
+                <BarChart3 className="h-4 w-4" />
+                Disposition Intelligence
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
       </div>
 
-      {/* Main Content - Resizable Panels */}
+      {/* Main Content */}
+      {pageTab === 'disposition-intelligence' ? (
+        <div className="flex-1 overflow-hidden">
+          <DispositionIntelligenceView campaigns={campaigns} />
+        </div>
+      ) : (
       <div className="flex-1 overflow-hidden p-4 pt-3">
         <ResizablePanelGroup direction="horizontal" className="h-full rounded-xl border bg-background shadow-sm">
           {/* Left Panel - List + Challenges */}
@@ -437,6 +463,7 @@ export default function UnifiedIntelligencePage() {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+      )}
     </div>
   );
 }

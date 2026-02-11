@@ -2622,6 +2622,10 @@ export const campaignQueue = pgTable("campaign_queue", {
   // Provenance tracking
   enqueuedBy: text("enqueued_by"), // system|userId|dv_project_id
   enqueuedReason: text("enqueued_reason"), // campaign_audience|retry|callback|dv_enrollment|manual_add
+  // AI Queue Intelligence scoring
+  aiPriorityScore: integer("ai_priority_score"), // 0-1000 composite score
+  aiScoredAt: timestamp("ai_scored_at"), // when last scored
+  aiScoreBreakdown: jsonb("ai_score_breakdown"), // { industry, topic, accountFit, roleFit, historical }
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({

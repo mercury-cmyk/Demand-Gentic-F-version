@@ -741,7 +741,7 @@ const globalBackupState: TranscoderState = createTranscoderState();
  * Smoothes the transition from the last output sample of the previous chunk
  * to the start of the new chunk.
  */
-function smoothChunkBoundary(pcmBuffer: Buffer, state: TranscoderState, fadeInSamples: number = 4): Buffer {
+function smoothChunkBoundary(pcmBuffer: Buffer, state: TranscoderState, fadeInSamples: number = 8): Buffer {
   if (pcmBuffer.length < fadeInSamples * 2) return pcmBuffer;
 
   const output = Buffer.from(pcmBuffer); // Clone
