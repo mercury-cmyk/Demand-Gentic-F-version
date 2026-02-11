@@ -120,7 +120,7 @@ const aiCallHandler = async (req: any, res: any) => {
   // Use PUBLIC_WEBSOCKET_URL if set, otherwise fall back to production constant
   // This ensures production calls always route to the correct WebSocket host
   // even if env vars were overwritten by dev scripts
-  const rawWsUrl = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] || '';
+  const rawWsUrl = process.env.PUBLIC_WEBSOCKET_URL?.trim().split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] || '';
   const host = rawWsUrl || PRODUCTION_WS_HOST;
 
   // CRITICAL FIX: Store full client_state in memory and only pass call_id in URL
