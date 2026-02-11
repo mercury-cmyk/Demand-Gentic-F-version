@@ -9738,6 +9738,9 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
   recordingUrl: text("recording_url"),
   telnyxRecordingId: text("telnyx_recording_id"), // Stable Telnyx recording ID for on-demand URL generation
   telnyxCallId: text("telnyx_call_id"), // CRITICAL: Link to Telnyx call control ID for recordings/webhooks
+  // Number pool tracking (added via 0099 migration)
+  callerNumberId: varchar("caller_number_id"), // References telnyx_numbers.id
+  fromDid: text("from_did"), // The actual DID used for the call
   // Transcript fields (for Gemini Live calls)
   fullTranscript: text("full_transcript"), // Full conversation with speaker labels (Agent/Contact)
   aiTranscript: text("ai_transcript"), // AI agent speech only

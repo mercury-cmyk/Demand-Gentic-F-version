@@ -37,6 +37,7 @@ import { transcribeLeadCall } from "./telnyx-transcription";
 import { analyzeCall } from "./call-quality-analyzer";
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recording-storage";
 import callQualityTracker from "./call-quality-tracker";
+import { telnyxNumbers } from "@shared/number-pool-schema";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -202,20 +203,31 @@ export async function processDisposition(
     // Track call quality metrics for number reputation (anti-spam)
     try {
       if (callAttempt.phoneDialed) {
-        const durationSeconds = callAttempt.callDurationSeconds || 0;
-        const answered = !['no_answer', 'voicemail'].includes(disposition);
+        // Look up the telnyx_numbers UUID by E.164 phone number
+        const [telnyxNumber] = await db
+          .select({ id: telnyxNumbers.id })
+          .from(telnyxNumbers)
+          .where(eq(telnyxNumbers.phoneNumberE164, callAttempt.phoneDialed))
+          .limit(1);
 
-        await callQualityTracker.recordCallQuality({
-          callId: callAttempt.id,
-          numberId: callAttempt.phoneDialed, // This is the phone number used
-          phoneNumberE164: callAttempt.phoneDialed,
-          durationSeconds,
-          answered,
-          disconnectReason: mapDispositionToDisconnectReason(disposition),
-          disconnectedBy: durationSeconds < 20 ? 'prospect' : 'unknown',
-          prospectSpokeFirst: true, // We don't track this yet
-        });
-        result.actions.push('Call quality metrics recorded');
+        if (telnyxNumber) {
+          const durationSeconds = callAttempt.callDurationSeconds || 0;
+          const answered = !['no_answer', 'voicemail'].includes(disposition);
+
+          await callQualityTracker.recordCallQuality({
+            callId: callAttempt.id,
+            numberId: telnyxNumber.id,
+            phoneNumberE164: callAttempt.phoneDialed,
+            durationSeconds,
+            answered,
+            disconnectReason: mapDispositionToDisconnectReason(disposition),
+            disconnectedBy: durationSeconds < 20 ? 'prospect' : 'unknown',
+            prospectSpokeFirst: true, // We don't track this yet
+          });
+          result.actions.push('Call quality metrics recorded');
+        } else {
+          console.warn(`[DispositionEngine] No telnyx number found for ${callAttempt.phoneDialed}, skipping quality tracking`);
+        }
       }
     } catch (qualityError) {
       // Don't fail the disposition processing if quality tracking fails

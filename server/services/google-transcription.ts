@@ -82,6 +82,32 @@ async function downloadAudio(
   options?: TranscriptionAudioSourceOptions
 ): Promise<{ base64: string; mimeType: string } | null> {
   try {
+    // Handle gcs-internal:// URLs by reading directly from GCS
+    if (audioUrl.startsWith('gcs-internal://')) {
+      const gcsKey = audioUrl.replace(/^gcs-internal:\/\/[^/]+\//, '');
+      console.log(`[Transcription] Reading audio directly from GCS | key=${gcsKey}`);
+      try {
+        const { readFromGCS } = await import('../lib/storage');
+        const { stream, contentType } = await readFromGCS(gcsKey);
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream as AsyncIterable<Buffer>) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const buffer = Buffer.concat(chunks);
+        const base64 = buffer.toString('base64');
+        const mimeType = contentType.includes('wav') ? 'audio/wav'
+          : contentType.includes('ogg') ? 'audio/ogg'
+          : contentType.includes('flac') ? 'audio/flac'
+          : 'audio/mpeg';
+        console.log(`[Transcription] GCS direct read complete | size=${buffer.length} bytes | type=${mimeType}`);
+        return { base64, mimeType };
+      } catch (gcsErr: any) {
+        console.error(`[Transcription] Failed to read from GCS: ${gcsErr.message}`);
+        if (options?.throwOnError) throw gcsErr;
+        return null;
+      }
+    }
+
     let response = await fetchAudio(audioUrl);
 
     // If this is an expired/signed URL, try to refresh via storage (preferred) or Telnyx call id.
@@ -93,9 +119,15 @@ async function downloadAudio(
       if (options?.recordingS3Key && isS3Configured()) {
         try {
           const presigned = await getPresignedDownloadUrl(options.recordingS3Key, 3600);
-          response = await fetchAudio(presigned);
-          if (response.ok) {
-            console.log(`[Transcription] Using refreshed GCS URL | key=${options.recordingS3Key}`);
+          // If signBlob is unavailable, presigned will be gcs-internal:// — read directly from GCS
+          if (presigned.startsWith('gcs-internal://')) {
+            const gcsResult = await downloadAudio(presigned, { throwOnError: true });
+            if (gcsResult) return gcsResult;
+          } else {
+            response = await fetchAudio(presigned);
+            if (response.ok) {
+              console.log(`[Transcription] Using refreshed GCS URL | key=${options.recordingS3Key}`);
+            }
           }
         } catch (e) {
           console.warn('[Transcription] Failed to refresh audio via GCS presigned URL:', e);
