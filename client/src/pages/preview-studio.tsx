@@ -46,6 +46,7 @@ import {
   Radio,
   Zap,
   MessageSquare,
+  Loader2,
 } from "lucide-react";
 import { PageLayout, PageHeader, PageContent } from "@/components/layout/page-layout";
 import { cn } from "@/lib/utils";
@@ -81,13 +82,37 @@ interface Campaign {
   name: string;
 }
 
-// Voice options with personalities
+// Voice options - All 24 Gemini voices
 const GEMINI_VOICES: VoiceOption[] = [
-  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', personality: 'Natural, Soft, Storytelling', provider: 'gemini' },
-  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', personality: 'Deep, Resonant, Authoritative', provider: 'gemini' },
-  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', personality: 'Balanced, Clear, Professional', provider: 'gemini' },
-  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', personality: 'Deep, Intense, Cinematic', provider: 'gemini' },
-  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', personality: 'Bright, Expressive, Engaging', provider: 'gemini' },
+  // Primary B2B Sales voices
+  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', personality: 'Firm, Professional, Confident', provider: 'gemini' },
+  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', personality: 'Excitable, Energetic, Persuasive', provider: 'gemini' },
+  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', personality: 'Informative, Authoritative, Knowledgeable', provider: 'gemini' },
+  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', personality: 'Breezy, Friendly, Light', provider: 'gemini' },
+  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', personality: 'Upbeat, Lively, Engaging', provider: 'gemini' },
+  // Professional voices
+  { id: 'Zephyr', name: 'Zephyr', displayName: 'Zephyr', gender: 'male', personality: 'Bright, Clear, Articulate', provider: 'gemini' },
+  { id: 'Leda', name: 'Leda', displayName: 'Leda', gender: 'female', personality: 'Youthful, Fresh, Modern', provider: 'gemini' },
+  { id: 'Orus', name: 'Orus', displayName: 'Orus', gender: 'male', personality: 'Firm, Steady, Reliable', provider: 'gemini' },
+  { id: 'Sulafat', name: 'Sulafat', displayName: 'Sulafat', gender: 'female', personality: 'Warm, Caring, Empathetic', provider: 'gemini' },
+  { id: 'Gacrux', name: 'Gacrux', displayName: 'Gacrux', gender: 'male', personality: 'Mature, Experienced, Credible', provider: 'gemini' },
+  { id: 'Schedar', name: 'Schedar', displayName: 'Schedar', gender: 'male', personality: 'Even, Balanced, Composed', provider: 'gemini' },
+  { id: 'Achird', name: 'Achird', displayName: 'Achird', gender: 'female', personality: 'Friendly, Welcoming, Warm', provider: 'gemini' },
+  // Specialized voices
+  { id: 'Sadaltager', name: 'Sadaltager', displayName: 'Sadaltager', gender: 'male', personality: 'Knowledgeable, Expert, Authoritative', provider: 'gemini' },
+  { id: 'Pulcherrima', name: 'Pulcherrima', displayName: 'Pulcherrima', gender: 'female', personality: 'Forward, Confident, Assertive', provider: 'gemini' },
+  { id: 'Iapetus', name: 'Iapetus', displayName: 'Iapetus', gender: 'male', personality: 'Clear, Precise, Technical', provider: 'gemini' },
+  { id: 'Erinome', name: 'Erinome', displayName: 'Erinome', gender: 'female', personality: 'Clear, Articulate, Professional', provider: 'gemini' },
+  { id: 'Vindemiatrix', name: 'Vindemiatrix', displayName: 'Vindemiatrix', gender: 'female', personality: 'Gentle, Soft, Calming', provider: 'gemini' },
+  { id: 'Achernar', name: 'Achernar', displayName: 'Achernar', gender: 'female', personality: 'Soft, Reassuring, Kind', provider: 'gemini' },
+  // Dynamic voices
+  { id: 'Sadachbia', name: 'Sadachbia', displayName: 'Sadachbia', gender: 'female', personality: 'Lively, Dynamic, Exciting', provider: 'gemini' },
+  { id: 'Laomedeia', name: 'Laomedeia', displayName: 'Laomedeia', gender: 'female', personality: 'Upbeat, Positive, Motivating', provider: 'gemini' },
+  // Character voices
+  { id: 'Enceladus', name: 'Enceladus', displayName: 'Enceladus', gender: 'male', personality: 'Breathy, Intimate, Thoughtful', provider: 'gemini' },
+  { id: 'Algenib', name: 'Algenib', displayName: 'Algenib', gender: 'male', personality: 'Gravelly, Deep, Distinctive', provider: 'gemini' },
+  { id: 'Rasalgethi', name: 'Rasalgethi', displayName: 'Rasalgethi', gender: 'male', personality: 'Informative, Educational, Clear', provider: 'gemini' },
+  { id: 'Alnilam', name: 'Alnilam', displayName: 'Alnilam', gender: 'male', personality: 'Firm, Decisive, Commanding', provider: 'gemini' },
 ];
 
 const VOICE_TONES = [
@@ -134,6 +159,9 @@ export default function PreviewStudioPage() {
   const [generatedEmail, setGeneratedEmail] = useState<any>(null);
   const [emailPreviewMode, setEmailPreviewMode] = useState<'preview' | 'html'>('preview');
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Voice preview state
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
 
   // Refs
   const playPreviewRef = useRef<HTMLAudioElement | null>(null);
@@ -190,25 +218,31 @@ export default function PreviewStudioPage() {
   const selectedContact = contacts.find(c => c.id === selectedContactId);
   const selectedVoiceInfo = GEMINI_VOICES.find(v => v.id === selectedVoice);
 
-  // Handle voice preview
-  const handlePreviewVoice = async () => {
+  // Handle voice preview - accepts optional voiceId to preview a specific voice
+  const handlePreviewVoice = async (voiceId?: string) => {
+    const targetVoiceId = voiceId || selectedVoice;
     try {
       if (playPreviewRef.current) {
         playPreviewRef.current.pause();
         playPreviewRef.current = null;
       }
+      setPreviewingVoiceId(targetVoiceId);
       const response = await apiRequest('POST', '/api/voice-providers/preview', {
-        voiceId: selectedVoice,
+        voiceId: targetVoiceId,
         provider: 'gemini',
       });
       if (!response.ok) throw new Error('Failed to generate preview');
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
-      audio.onended = () => URL.revokeObjectURL(audioUrl);
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setPreviewingVoiceId(null);
+      };
       playPreviewRef.current = audio;
       await audio.play();
     } catch (error) {
+      setPreviewingVoiceId(null);
       toast({ variant: 'destructive', title: 'Preview Failed', description: 'Could not play voice preview' });
     }
   };
@@ -347,9 +381,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue placeholder={campaignsLoading ? "Loading..." : "Select campaign"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {campaigns.map(c => (
-                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                       {c.name}
                     </SelectItem>
                   ))}
@@ -368,9 +402,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue placeholder={accountsLoading ? "Loading..." : "Select account"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {accounts.map(a => (
-                    <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10 focus:text-white">
                       <div className="flex items-center gap-2">
                         <Building2 className="h-3 w-3 text-white/40" />
                         {a.name}
@@ -394,9 +428,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue placeholder={contactsLoading ? "Loading..." : "Select contact"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {contacts.map(c => (
-                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                       <div className="flex flex-col">
                         <span>{c.fullName || c.email}</span>
                         {c.jobTitle && <span className="text-xs text-white/40">{c.jobTitle}</span>}
@@ -414,9 +448,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {SCENARIOS.map(s => (
-                    <SelectItem key={s.value} value={s.value} className="text-white focus:bg-white/10">
+                    <SelectItem key={s.value} value={s.value} className="text-white focus:bg-white/10 focus:text-white">
                       {s.label}
                     </SelectItem>
                   ))}
@@ -450,6 +484,7 @@ export default function PreviewStudioPage() {
               setVoiceTone={setVoiceTone}
               selectedVoiceInfo={selectedVoiceInfo}
               onPreviewVoice={handlePreviewVoice}
+              previewingVoiceId={previewingVoiceId}
               voiceSimStatus={voiceSimStatus}
               setVoiceSimStatus={setVoiceSimStatus}
               isMuted={isMuted}
@@ -491,7 +526,8 @@ interface VoicePreviewSectionProps {
   voiceTone: string;
   setVoiceTone: (v: string) => void;
   selectedVoiceInfo: VoiceOption | undefined;
-  onPreviewVoice: () => void;
+  onPreviewVoice: (voiceId?: string) => void;
+  previewingVoiceId: string | null;
   voiceSimStatus: 'idle' | 'connecting' | 'active' | 'completed';
   setVoiceSimStatus: (s: 'idle' | 'connecting' | 'active' | 'completed') => void;
   isMuted: boolean;
@@ -511,6 +547,7 @@ function VoicePreviewSection({
   setVoiceTone,
   selectedVoiceInfo,
   onPreviewVoice,
+  previewingVoiceId,
   voiceSimStatus,
   setVoiceSimStatus,
   isMuted,
@@ -527,14 +564,18 @@ function VoicePreviewSection({
   return (
     <div className="h-full flex">
       {/* Voice Configuration Panel */}
-      <div className="w-80 border-r border-white/5 bg-black/10 p-6 overflow-y-auto">
-        <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-xl bg-purple-500/20 flex items-center justify-center">
-            <Volume2 className="h-4 w-4 text-purple-400" />
-          </div>
-          Voice Configuration
-        </h3>
+      <div className="w-80 border-r border-white/5 bg-black/10 flex flex-col">
+        <div className="p-6 pb-4 shrink-0">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-purple-500/20 flex items-center justify-center">
+              <Volume2 className="h-4 w-4 text-purple-400" />
+            </div>
+            Voice Configuration
+          </h3>
+          <p className="text-xs text-white/40 mt-1 ml-10">24 Gemini voices available</p>
+        </div>
 
+        <ScrollArea className="flex-1 px-6 pb-6">
         {/* Gender Selection with Voice Cards */}
         <div className="space-y-6 mb-6">
           {/* MALE VOICES */}
@@ -545,11 +586,11 @@ function VoicePreviewSection({
             </Label>
             <div className="grid grid-cols-1 gap-2">
               {maleVoices.map(voice => (
-                <button
+                <div
                   key={voice.id}
                   onClick={() => setSelectedVoice(voice.id)}
                   className={cn(
-                    "group relative p-3 rounded-xl border text-left transition-all duration-300",
+                    "group relative p-3 rounded-xl border text-left transition-all duration-300 cursor-pointer",
                     selectedVoice === voice.id
                       ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/10 border-blue-500/50 shadow-lg shadow-blue-500/10 transform scale-[1.02]"
                       : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 hover:shadow-md"
@@ -559,8 +600,8 @@ function VoicePreviewSection({
                      <div className="flex items-center gap-3">
                         <div className={cn(
                           "h-8 w-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-inner",
-                          selectedVoice === voice.id 
-                            ? "bg-gradient-to-br from-blue-500 to-cyan-600 text-white" 
+                          selectedVoice === voice.id
+                            ? "bg-gradient-to-br from-blue-500 to-cyan-600 text-white"
                             : "bg-white/10 text-white/40 group-hover:bg-white/20 group-hover:text-white/70"
                         )}>
                           {voice.displayName.charAt(0)}
@@ -576,11 +617,31 @@ function VoicePreviewSection({
                            )}>{voice.gender}</span>
                         </div>
                      </div>
-                     {selectedVoice === voice.id && (
-                        <div className="h-6 w-6 rounded-full bg-blue-500/20 flex items-center justify-center animate-in fade-in zoom-in duration-300">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-blue-400" />
-                        </div>
-                     )}
+                     <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onPreviewVoice(voice.id); }}
+                          disabled={previewingVoiceId === voice.id}
+                          className={cn(
+                            "h-7 w-7 rounded-full flex items-center justify-center transition-all duration-200",
+                            previewingVoiceId === voice.id
+                              ? "bg-blue-500/30 border border-blue-400/50"
+                              : "bg-white/10 hover:bg-blue-500/30 border border-transparent hover:border-blue-400/50 opacity-0 group-hover:opacity-100",
+                            selectedVoice === voice.id && "opacity-100"
+                          )}
+                          title={`Preview ${voice.displayName}`}
+                        >
+                          {previewingVoiceId === voice.id ? (
+                            <Loader2 className="h-3.5 w-3.5 text-blue-400 animate-spin" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 text-blue-400 ml-0.5" />
+                          )}
+                        </button>
+                        {selectedVoice === voice.id && (
+                          <div className="h-6 w-6 rounded-full bg-blue-500/20 flex items-center justify-center animate-in fade-in zoom-in duration-300">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-blue-400" />
+                          </div>
+                        )}
+                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {voice.personality.split(',').map((tag, i) => (
@@ -594,7 +655,7 @@ function VoicePreviewSection({
                       </span>
                     ))}
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -607,11 +668,11 @@ function VoicePreviewSection({
             </Label>
             <div className="grid grid-cols-1 gap-2">
               {femaleVoices.map(voice => (
-                <button
+                <div
                   key={voice.id}
                   onClick={() => setSelectedVoice(voice.id)}
                   className={cn(
-                    "group relative p-3 rounded-xl border text-left transition-all duration-300",
+                    "group relative p-3 rounded-xl border text-left transition-all duration-300 cursor-pointer",
                     selectedVoice === voice.id
                       ? "bg-gradient-to-r from-pink-500/20 to-purple-500/10 border-pink-500/50 shadow-lg shadow-pink-500/10 transform scale-[1.02]"
                       : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 hover:shadow-md"
@@ -621,8 +682,8 @@ function VoicePreviewSection({
                      <div className="flex items-center gap-3">
                         <div className={cn(
                           "h-8 w-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-inner",
-                          selectedVoice === voice.id 
-                            ? "bg-gradient-to-br from-pink-500 to-purple-600 text-white" 
+                          selectedVoice === voice.id
+                            ? "bg-gradient-to-br from-pink-500 to-purple-600 text-white"
                             : "bg-white/10 text-white/40 group-hover:bg-white/20 group-hover:text-white/70"
                         )}>
                           {voice.displayName.charAt(0)}
@@ -638,11 +699,31 @@ function VoicePreviewSection({
                            )}>{voice.gender}</span>
                         </div>
                      </div>
-                     {selectedVoice === voice.id && (
-                        <div className="h-6 w-6 rounded-full bg-pink-500/20 flex items-center justify-center animate-in fade-in zoom-in duration-300">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-pink-400" />
-                        </div>
-                     )}
+                     <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onPreviewVoice(voice.id); }}
+                          disabled={previewingVoiceId === voice.id}
+                          className={cn(
+                            "h-7 w-7 rounded-full flex items-center justify-center transition-all duration-200",
+                            previewingVoiceId === voice.id
+                              ? "bg-pink-500/30 border border-pink-400/50"
+                              : "bg-white/10 hover:bg-pink-500/30 border border-transparent hover:border-pink-400/50 opacity-0 group-hover:opacity-100",
+                            selectedVoice === voice.id && "opacity-100"
+                          )}
+                          title={`Preview ${voice.displayName}`}
+                        >
+                          {previewingVoiceId === voice.id ? (
+                            <Loader2 className="h-3.5 w-3.5 text-pink-400 animate-spin" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 text-pink-400 ml-0.5" />
+                          )}
+                        </button>
+                        {selectedVoice === voice.id && (
+                          <div className="h-6 w-6 rounded-full bg-pink-500/20 flex items-center justify-center animate-in fade-in zoom-in duration-300">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-pink-400" />
+                          </div>
+                        )}
+                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {voice.personality.split(',').map((tag, i) => (
@@ -656,22 +737,11 @@ function VoicePreviewSection({
                       </span>
                     ))}
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </div>
         </div>
-
-        {/* Preview Voice Button */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onPreviewVoice}
-          className="w-full mb-6 bg-white/5 border-white/10 text-white hover:bg-white/10"
-        >
-          <Play className="h-4 w-4 mr-2" />
-          Preview {selectedVoiceInfo?.displayName || 'Voice'}
-        </Button>
 
         <Separator className="bg-white/10 mb-6" />
 
@@ -699,6 +769,7 @@ function VoicePreviewSection({
             ))}
           </div>
         </div>
+        </ScrollArea>
       </div>
 
       {/* Voice Simulation Area */}

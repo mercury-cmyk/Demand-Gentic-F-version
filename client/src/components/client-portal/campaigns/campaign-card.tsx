@@ -310,7 +310,7 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
                 onClick={() => onTestAgent(campaign.id)}
               >
                 <Bot className="h-3.5 w-3.5" />
-                Test AI Agent
+                Test Call
               </Button>
             )}
             {onTestEmail && (

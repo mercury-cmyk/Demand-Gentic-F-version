@@ -335,6 +335,157 @@ export class BulkInvitationService {
       usedAt: new Date(),
     }).where(eq(mercuryInvitationTokens.token, token));
   }
+
+  /**
+   * Send a single invitation email to a specific client user.
+   * Reuses the same logic as bulk invitations but for one recipient.
+   */
+  async sendSingleInvitation(params: {
+    clientUserId: string;
+    adminUserId: string;
+    portalBaseUrl: string;
+  }): Promise<{ success: boolean; token?: string; error?: string }> {
+    if (!isFeatureEnabled('smtp_email_enabled')) {
+      return { success: false, error: 'SMTP email sending is disabled (smtp_email_enabled flag is OFF)' };
+    }
+
+    // Look up client user and account
+    const [user] = await db
+      .select({
+        id: clientUsers.id,
+        email: clientUsers.email,
+        firstName: clientUsers.firstName,
+        lastName: clientUsers.lastName,
+        isActive: clientUsers.isActive,
+        clientAccountId: clientUsers.clientAccountId,
+        accountName: clientAccounts.name,
+      })
+      .from(clientUsers)
+      .leftJoin(clientAccounts, eq(clientUsers.clientAccountId, clientAccounts.id))
+      .where(eq(clientUsers.id, params.clientUserId))
+      .limit(1);
+
+    if (!user) return { success: false, error: 'Client user not found' };
+    if (!user.email) return { success: false, error: 'Client user has no email address' };
+    if (!user.isActive) return { success: false, error: 'Client user is inactive' };
+
+    try {
+      // Generate invitation token
+      const token = mercuryEmailService.generateInviteToken();
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + MERCURY_DEFAULTS.inviteExpiryDays);
+
+      // Build invitation link
+      const inviteLink = `${params.portalBaseUrl}/client-portal/accept-invite?token=${token}`;
+
+      // Render template
+      const rendered = await mercuryEmailService.renderTemplate(this.INVITE_TEMPLATE_KEY, {
+        firstName: user.firstName || 'there',
+        lastName: user.lastName || '',
+        email: user.email,
+        companyName: user.accountName || 'Unknown',
+        inviteLink,
+        expiryDays: MERCURY_DEFAULTS.inviteExpiryDays.toString(),
+        portalUrl: params.portalBaseUrl,
+      });
+
+      if (!rendered) {
+        return { success: false, error: `Template "${this.INVITE_TEMPLATE_KEY}" not found. Run template seeding first.` };
+      }
+
+      const jobId = `single_invite_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const idempotencyKey = `invite_${jobId}_${user.id}`;
+
+      // Queue email
+      const { outboxId, skipped } = await mercuryEmailService.queueEmail({
+        templateKey: this.INVITE_TEMPLATE_KEY,
+        recipientEmail: user.email,
+        recipientName: [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
+        recipientUserId: user.id,
+        recipientUserType: 'client',
+        tenantId: user.clientAccountId,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        idempotencyKey,
+        metadata: {
+          jobId,
+          inviteToken: token,
+          singleInvite: true,
+        },
+      });
+
+      if (skipped) {
+        return { success: false, error: 'Email was skipped (duplicate idempotency key)' };
+      }
+
+      // Save invitation token
+      await db.insert(mercuryInvitationTokens).values({
+        clientUserId: user.id,
+        clientAccountId: user.clientAccountId,
+        token,
+        expiresAt,
+        emailOutboxId: outboxId,
+      });
+
+      // Trigger outbox processing
+      mercuryEmailService.processOutbox().catch(err => {
+        console.error('[Mercury/Invite] Outbox processing error:', err.message);
+      });
+
+      console.log(`[Mercury/Invite] Single invite queued for ${user.email} (token: ${token.slice(0, 8)}...)`);
+      return { success: true, token };
+    } catch (err: any) {
+      console.error(`[Mercury/Invite] Single invite error for ${user.email}: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Preview what an invitation email would look like for a specific client user.
+   * Does not send anything or generate real tokens.
+   */
+  async previewInvitationEmail(params: {
+    clientUserId: string;
+    portalBaseUrl: string;
+  }): Promise<{ subject: string; html: string; text?: string } | null> {
+    // Look up client user and account
+    const [user] = await db
+      .select({
+        id: clientUsers.id,
+        email: clientUsers.email,
+        firstName: clientUsers.firstName,
+        lastName: clientUsers.lastName,
+        clientAccountId: clientUsers.clientAccountId,
+        accountName: clientAccounts.name,
+      })
+      .from(clientUsers)
+      .leftJoin(clientAccounts, eq(clientUsers.clientAccountId, clientAccounts.id))
+      .where(eq(clientUsers.id, params.clientUserId))
+      .limit(1);
+
+    if (!user) return null;
+
+    const sampleLink = `${params.portalBaseUrl}/client-portal/accept-invite?token=PREVIEW_TOKEN`;
+
+    const rendered = await mercuryEmailService.renderTemplate(this.INVITE_TEMPLATE_KEY, {
+      firstName: user.firstName || 'there',
+      lastName: user.lastName || '',
+      email: user.email,
+      companyName: user.accountName || 'Unknown',
+      inviteLink: sampleLink,
+      expiryDays: MERCURY_DEFAULTS.inviteExpiryDays.toString(),
+      portalUrl: params.portalBaseUrl,
+    });
+
+    if (!rendered) return null;
+
+    return {
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+    };
+  }
 }
 
 // Singleton

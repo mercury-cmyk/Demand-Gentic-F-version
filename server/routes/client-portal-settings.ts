@@ -235,7 +235,7 @@ router.get('/features', async (req: Request, res: Response) => {
 
     res.json({
       features: featureStatus,
-      enabledFeatures: features.map((f) => f.feature),
+      enabledFeatures: featureStatus.filter((f) => f.enabled).map((f) => f.feature),
     });
   } catch (error) {
     console.error('[CLIENT SETTINGS] Get features error:', error);
@@ -350,6 +350,7 @@ router.get('/organization-intelligence', async (req: Request, res: Response) => 
         icp: organization.icp,
         positioning: organization.positioning,
         outreach: organization.outreach,
+        branding: (organization as any).branding || {},
         compiledOrgContext: organization.compiledOrgContext,
         updatedAt: organization.updatedAt,
       },
@@ -413,6 +414,23 @@ router.put('/organization-intelligence', async (req: Request, res: Response) => 
           response: z.string(),
         })).optional(),
       }).optional(),
+      branding: z.object({
+        tone: z.string().optional(),
+        communicationStyle: z.string().optional(),
+        keywords: z.array(z.string()).optional(),
+        forbiddenTerms: z.array(z.string()).optional(),
+        primaryColor: z.string().optional(),
+        secondaryColor: z.string().optional(),
+      }).optional(),
+      events: z.object({
+        upcoming: z.string().optional(),
+        strategy: z.string().optional(),
+      }).optional(),
+      forums: z.object({
+        list: z.string().optional(),
+        engagement_strategy: z.string().optional(),
+      }).optional(),
+      logoUrl: z.string().optional(),
     });
 
     const validatedData = updateSchema.parse(req.body);
@@ -437,6 +455,10 @@ router.put('/organization-intelligence', async (req: Request, res: Response) => 
         ...(validatedData.icp && { icp: validatedData.icp }),
         ...(validatedData.positioning && { positioning: validatedData.positioning }),
         ...(validatedData.outreach && { outreach: validatedData.outreach }),
+        ...(validatedData.branding && { branding: validatedData.branding }),
+        ...(validatedData.events && { events: validatedData.events }),
+        ...(validatedData.forums && { forums: validatedData.forums }),
+        ...(validatedData.logoUrl !== undefined && { logoUrl: validatedData.logoUrl }),
         updatedAt: new Date(),
       })
       .where(eq(campaignOrganizations.id, orgLink.organizationId))

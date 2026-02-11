@@ -15,6 +15,12 @@ import {
   clientBulkImports,
   insertClientCrmAccountSchema,
   insertClientCrmContactSchema,
+  accounts,
+  contacts,
+  campaignQueue,
+  workOrders,
+  campaignIntakeRequests,
+  clientCampaignAccess,
 } from '@shared/schema';
 import { z } from 'zod';
 
@@ -798,6 +804,274 @@ router.get('/bulk-imports', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[CLIENT CRM] List imports error:', error);
     res.status(500).json({ message: 'Failed to fetch import history' });
+  }
+});
+
+// ==================== CAMPAIGN-ASSIGNED DATA ====================
+
+/**
+ * Helper: Get all campaign IDs linked to a client account
+ */
+async function getClientCampaignIds(clientAccountId: string): Promise<string[]> {
+  // Get campaigns from direct access (regularCampaignId links to campaigns table used by campaignQueue)
+  const directCampaigns = await db
+    .select({ campaignId: clientCampaignAccess.regularCampaignId })
+    .from(clientCampaignAccess)
+    .where(eq(clientCampaignAccess.clientAccountId, clientAccountId));
+
+  // Get campaigns from work orders
+  const woCampaigns = await db
+    .select({ campaignId: workOrders.campaignId })
+    .from(workOrders)
+    .where(
+      and(
+        eq(workOrders.clientAccountId, clientAccountId),
+        sql`${workOrders.campaignId} IS NOT NULL`
+      )
+    );
+
+  // Get campaigns from intake requests
+  const intakeCampaigns = await db
+    .select({ campaignId: campaignIntakeRequests.campaignId })
+    .from(campaignIntakeRequests)
+    .where(
+      and(
+        eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+        sql`${campaignIntakeRequests.campaignId} IS NOT NULL`
+      )
+    );
+
+  const allIds = [
+    ...directCampaigns.map(c => c.campaignId),
+    ...woCampaigns.map(c => c.campaignId),
+    ...intakeCampaigns.map(c => c.campaignId),
+  ].filter((id): id is string => !!id);
+
+  return [...new Set(allIds)];
+}
+
+/**
+ * GET /campaign-accounts
+ * List all accounts assigned to the client's campaigns (from system accounts table via campaignQueue)
+ */
+router.get('/campaign-accounts', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const { search, limit = '50', offset = '0' } = req.query;
+
+    // Get all campaign IDs for this client
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) {
+      return res.json({ accounts: [], total: 0, limit: parseInt(limit as string), offset: parseInt(offset as string) });
+    }
+
+    // Get distinct account IDs from campaignQueue for these campaigns
+    const queueAccountRows = await db
+      .selectDistinct({ accountId: campaignQueue.accountId })
+      .from(campaignQueue)
+      .where(inArray(campaignQueue.campaignId, campaignIds));
+
+    const accountIds = queueAccountRows.map(r => r.accountId).filter((id): id is string => !!id);
+
+    if (accountIds.length === 0) {
+      return res.json({ accounts: [], total: 0, limit: parseInt(limit as string), offset: parseInt(offset as string) });
+    }
+
+    // Build conditions for accounts query
+    const conditions: any[] = [inArray(accounts.id, accountIds)];
+
+    if (search) {
+      conditions.push(
+        or(
+          like(accounts.name, `%${search}%`),
+          like(accounts.domain, `%${search}%`),
+          like(accounts.industryStandardized, `%${search}%`)
+        )!
+      );
+    }
+
+    // Get accounts with contact count
+    const accountRows = await db
+      .select({
+        id: accounts.id,
+        name: accounts.name,
+        domain: accounts.domain,
+        industry: accounts.industryStandardized,
+        website: accounts.domain,
+        phone: sql<string>`null`,
+        annualRevenue: accounts.annualRevenue,
+        employees: accounts.staffCount,
+        accountType: sql<string>`'campaign'`,
+        status: sql<string>`'active'`,
+      })
+      .from(accounts)
+      .where(and(...conditions))
+      .orderBy(asc(accounts.name))
+      .limit(parseInt(limit as string))
+      .offset(parseInt(offset as string));
+
+    // Get contact counts per account
+    const contactCountRows = await db
+      .select({
+        accountId: contacts.accountId,
+        count: sql<number>`count(*)`,
+      })
+      .from(contacts)
+      .where(inArray(contacts.accountId, accountIds))
+      .groupBy(contacts.accountId);
+
+    const contactCountMap = new Map(contactCountRows.map(r => [r.accountId, Number(r.count)]));
+
+    // Merge contact counts
+    const accountsWithCounts = accountRows.map(a => ({
+      ...a,
+      contactCount: contactCountMap.get(a.id) || 0,
+    }));
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(accounts)
+      .where(and(...conditions));
+
+    res.json({
+      accounts: accountsWithCounts,
+      total: Number(count),
+      limit: parseInt(limit as string),
+      offset: parseInt(offset as string),
+    });
+  } catch (error) {
+    console.error('[CLIENT CRM] Campaign accounts error:', error);
+    res.status(500).json({ message: 'Failed to fetch campaign accounts' });
+  }
+});
+
+/**
+ * GET /campaign-contacts
+ * List all contacts assigned to the client's campaigns (from system contacts table via campaignQueue)
+ */
+router.get('/campaign-contacts', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const { search, limit = '50', offset = '0' } = req.query;
+
+    // Get all campaign IDs for this client
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) {
+      return res.json({ contacts: [], total: 0, limit: parseInt(limit as string), offset: parseInt(offset as string) });
+    }
+
+    // Get distinct contact IDs from campaignQueue for these campaigns
+    const queueContactRows = await db
+      .selectDistinct({ contactId: campaignQueue.contactId })
+      .from(campaignQueue)
+      .where(inArray(campaignQueue.campaignId, campaignIds));
+
+    const contactIds = queueContactRows.map(r => r.contactId).filter((id): id is string => !!id);
+
+    if (contactIds.length === 0) {
+      return res.json({ contacts: [], total: 0, limit: parseInt(limit as string), offset: parseInt(offset as string) });
+    }
+
+    // Build conditions for contacts query
+    const conditions: any[] = [inArray(contacts.id, contactIds)];
+
+    if (search) {
+      conditions.push(
+        or(
+          like(contacts.fullName, `%${search}%`),
+          like(contacts.email, `%${search}%`),
+          like(contacts.jobTitle, `%${search}%`)
+        )!
+      );
+    }
+
+    // Get contacts with account info
+    const contactRows = await db
+      .select({
+        id: contacts.id,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        phone: contacts.directPhone,
+        title: contacts.jobTitle,
+        company: accounts.name,
+        industry: accounts.industryStandardized,
+        accountId: contacts.accountId,
+        status: sql<string>`'active'`,
+      })
+      .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(and(...conditions))
+      .orderBy(asc(contacts.lastName))
+      .limit(parseInt(limit as string))
+      .offset(parseInt(offset as string));
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(contacts)
+      .where(and(...conditions));
+
+    res.json({
+      contacts: contactRows,
+      total: Number(count),
+      limit: parseInt(limit as string),
+      offset: parseInt(offset as string),
+    });
+  } catch (error) {
+    console.error('[CLIENT CRM] Campaign contacts error:', error);
+    res.status(500).json({ message: 'Failed to fetch campaign contacts' });
+  }
+});
+
+/**
+ * GET /campaign-stats
+ * Get stats for campaign-assigned accounts and contacts
+ */
+router.get('/campaign-stats', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    if (campaignIds.length === 0) {
+      return res.json({ totalAccounts: 0, totalContacts: 0, optedOutContacts: 0 });
+    }
+
+    // Count distinct accounts in campaign queues
+    const [accountStats] = await db
+      .select({ count: sql<number>`count(distinct ${campaignQueue.accountId})` })
+      .from(campaignQueue)
+      .where(inArray(campaignQueue.campaignId, campaignIds));
+
+    // Count distinct contacts in campaign queues
+    const [contactStats] = await db
+      .select({ count: sql<number>`count(distinct ${campaignQueue.contactId})` })
+      .from(campaignQueue)
+      .where(inArray(campaignQueue.campaignId, campaignIds));
+
+    res.json({
+      totalAccounts: Number(accountStats.count),
+      totalContacts: Number(contactStats.count),
+      optedOutContacts: 0,
+    });
+  } catch (error) {
+    console.error('[CLIENT CRM] Campaign stats error:', error);
+    res.status(500).json({ message: 'Failed to fetch campaign stats' });
   }
 });
 

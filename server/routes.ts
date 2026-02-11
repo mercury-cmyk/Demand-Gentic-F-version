@@ -52,12 +52,12 @@ import emailTrackingRouter from './routes/email-tracking-routes';
 import campaignEmailRouter from './routes/campaign-email-routes';
 import { mergeTagsRouter } from './routes/merge-tags-routes';
 import campaignSendRouter from './routes/campaign-send-routes';
-import smtpProvidersRouter from './routes/smtp-providers';
 import transactionalTemplatesRouter from './routes/transactional-templates';
-import mercuryBridgeRouter from './routes/mercury-bridge';
+import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } from './routes/mercury-bridge';
 import domainManagementRouter from './routes/domain-management';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
+import unifiedEmailSystemRouter from './routes/unified-email-system';
 import emailBuilderRouter from './routes/email-builder';
 import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
@@ -14157,19 +14157,27 @@ Provide JSON response with:
   // ==================== MERGE TAGS ====================
   app.use('/api/merge-tags', requireAuth, mergeTagsRouter);
 
-  // ==================== SMTP TRANSACTIONAL EMAIL SYSTEM ====================
+  // ==================== UNIFIED COMMUNICATIONS SYSTEM ====================
+  // Primary mount — SMTP providers, Mercury notifications, transactional templates,
+  // and client invitation routes under a single /api/communications prefix.
+  app.use('/api/communications', unifiedEmailSystemRouter);
+
+  // ==================== BACKWARD COMPATIBILITY (DEPRECATED) ====================
+  // These legacy routes remain for backward compatibility and OAuth callbacks.
+  // Frontend uses /api/communications/* paths instead.
+  app.use('/api/smtp-providers', smtpOAuthCallbackRouter); // OAuth callbacks (public — Google/Microsoft redirect here)
   app.use('/api/smtp-providers', requireAuth, smtpProvidersRouter);
   app.use('/api/transactional-templates', requireAuth, transactionalTemplatesRouter);
   app.use('/api/transactional', requireAuth, transactionalTemplatesRouter);
+  app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
+
+  // ==================== EMAIL & DELIVERABILITY ====================
   app.use('/api/domains', requireAuth, domainManagementRouter);
   app.use('/api/deliverability', requireAuth, deliverabilityRouter);
   app.use('/api/email', requireAuth, unifiedEmailRoutes);
 
-  // ==================== MERCURY BRIDGE NOTIFICATIONS ====================
-  app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
-
   // ==================== EMAIL BUILDER (DRAG & DROP) ====================
-  app.use('/api/email-builder', requireDualAuth, emailBuilderRouter);
+  app.use('/api/email-builder', emailBuilderRouter);
 
   // ==================== ADMIN DATA MANAGEMENT ====================
 

@@ -768,7 +768,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     setStep(1);
   };
 
-  // Voice preview functionality - uses client portal voice TTS API for authentic voice previews
+  // Voice preview functionality - uses TTS API for authentic voice previews
+  // Supports both client portal and admin modes with appropriate auth
   const playVoicePreview = async (voiceId: string) => {
     if (isPlaying && playingVoice === voiceId) {
       stopVoicePreview();
@@ -787,9 +788,11 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     const sampleText = `Hello! I'm ${voice.name}. I'll be representing your company in conversations with prospects. ${voice.description} How can I help you today?`;
 
     try {
-      // Use client portal voice TTS API which correctly routes to Google Cloud TTS
-      // with unique voice mappings for each voice ID
-      const token = getToken();
+      // Determine the correct TTS endpoint and auth based on mode
+      const isAdmin = mode === 'admin';
+      const ttsEndpoint = isAdmin ? '/api/voice-providers/tts' : '/api/client-portal/voice/tts';
+      const token = isAdmin ? localStorage.getItem('authToken') : getToken();
+
       if (!token) {
         // No auth token - use browser speech synthesis fallback
         console.warn('[VoicePreview] No auth token, using browser TTS fallback');
@@ -815,12 +818,13 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         }
         return;
       }
-      const response = await fetch('/api/client-portal/voice/tts', {
+      const response = await fetch(ttsEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        credentials: 'include',
         body: JSON.stringify({
           text: sampleText,
           voiceId: voiceId,

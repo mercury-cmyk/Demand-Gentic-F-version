@@ -109,16 +109,16 @@ export default function BlogPostTab({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
       {/* Left panel - Form */}
-      <div className="border-r p-6 overflow-auto">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="border-r bg-muted/10 p-5 overflow-auto">
+        <div className="flex items-center gap-2.5 mb-5">
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-orange-100 text-orange-600">
             <FileText className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold">Blog Post</h2>
-            <p className="text-xs text-muted-foreground">Generate SEO-optimized blog posts</p>
+            <h2 className="text-base font-semibold leading-none">Blog Post</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">SEO-optimized blog posts</p>
           </div>
         </div>
 

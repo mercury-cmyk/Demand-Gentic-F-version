@@ -200,6 +200,191 @@ router.get("/event-types", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// ==================== SEND ROUTES ====================
+// NOTE: These named routes must be defined BEFORE /:id to prevent
+// Express from matching "send", "logs", "stats" as :id params.
+
+/**
+ * POST /api/transactional/send
+ * Send a transactional email
+ */
+router.post("/send", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const body = sendEmailSchema.parse(req.body);
+
+    const result = body.immediate
+      ? await transactionalEmailService.sendImmediate(body)
+      : await transactionalEmailService.sendTransactionalEmail(body);
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json(result);
+  } catch (error: any) {
+    console.error("[Transactional Templates] Send error:", error);
+    if (error.name === "ZodError") {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== LOG ROUTES ====================
+
+/**
+ * GET /api/transactional/logs
+ * Get transactional email logs
+ */
+router.get("/logs", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const {
+      eventType,
+      status,
+      recipientEmail,
+      limit = "50",
+      offset = "0",
+    } = req.query;
+
+    let query = db
+      .select({
+        id: transactionalEmailLogs.id,
+        templateId: transactionalEmailLogs.templateId,
+        smtpProviderId: transactionalEmailLogs.smtpProviderId,
+        eventType: transactionalEmailLogs.eventType,
+        triggerSource: transactionalEmailLogs.triggerSource,
+        recipientEmail: transactionalEmailLogs.recipientEmail,
+        recipientName: transactionalEmailLogs.recipientName,
+        subject: transactionalEmailLogs.subject,
+        status: transactionalEmailLogs.status,
+        messageId: transactionalEmailLogs.messageId,
+        errorMessage: transactionalEmailLogs.errorMessage,
+        retryCount: transactionalEmailLogs.retryCount,
+        queuedAt: transactionalEmailLogs.queuedAt,
+        sentAt: transactionalEmailLogs.sentAt,
+        failedAt: transactionalEmailLogs.failedAt,
+        createdAt: transactionalEmailLogs.createdAt,
+      })
+      .from(transactionalEmailLogs);
+
+    const conditions: any[] = [];
+
+    if (eventType) {
+      conditions.push(
+        eq(transactionalEmailLogs.eventType, eventType as TransactionalEventType)
+      );
+    }
+
+    if (status) {
+      conditions.push(eq(transactionalEmailLogs.status, status as string));
+    }
+
+    if (recipientEmail) {
+      conditions.push(
+        eq(transactionalEmailLogs.recipientEmail, recipientEmail as string)
+      );
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+
+    const logs = await query
+      .orderBy(desc(transactionalEmailLogs.createdAt))
+      .limit(parseInt(limit as string))
+      .offset(parseInt(offset as string));
+
+    res.json(logs);
+  } catch (error: any) {
+    console.error("[Transactional Templates] Logs error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/transactional/logs/:id
+ * Get a single log entry with full details
+ */
+router.get("/logs/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [log] = await db
+      .select()
+      .from(transactionalEmailLogs)
+      .where(eq(transactionalEmailLogs.id, id));
+
+    if (!log) {
+      return res.status(404).json({ error: "Log not found" });
+    }
+
+    res.json(log);
+  } catch (error: any) {
+    console.error("[Transactional Templates] Get log error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/transactional/stats
+ * Get transactional email statistics
+ */
+router.get("/stats", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { eventType, days = "30" } = req.query;
+
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - parseInt(days as string));
+
+    let baseConditions = [
+      sql`${transactionalEmailLogs.createdAt} >= ${daysAgo}`,
+    ];
+
+    if (eventType) {
+      baseConditions.push(
+        eq(transactionalEmailLogs.eventType, eventType as TransactionalEventType)
+      );
+    }
+
+    // Get total counts by status
+    const stats = await db
+      .select({
+        status: transactionalEmailLogs.status,
+        count: count(),
+      })
+      .from(transactionalEmailLogs)
+      .where(and(...baseConditions))
+      .groupBy(transactionalEmailLogs.status);
+
+    // Get counts by event type
+    const byEventType = await db
+      .select({
+        eventType: transactionalEmailLogs.eventType,
+        count: count(),
+      })
+      .from(transactionalEmailLogs)
+      .where(and(...baseConditions))
+      .groupBy(transactionalEmailLogs.eventType);
+
+    const summary = {
+      total: stats.reduce((sum, s) => sum + Number(s.count), 0),
+      sent: Number(stats.find((s) => s.status === "sent")?.count || 0),
+      delivered: Number(stats.find((s) => s.status === "delivered")?.count || 0),
+      failed: Number(stats.find((s) => s.status === "failed")?.count || 0),
+      pending: Number(stats.find((s) => s.status === "pending")?.count || 0) +
+        Number(stats.find((s) => s.status === "queued")?.count || 0),
+      byEventType: Object.fromEntries(
+        byEventType.map((et) => [et.eventType, Number(et.count)])
+      ),
+    };
+
+    res.json(summary);
+  } catch (error: any) {
+    console.error("[Transactional Templates] Stats error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /**
  * GET /api/transactional-templates/:id
  * Get a single template with full content
@@ -442,188 +627,5 @@ router.post(
     }
   }
 );
-
-// ==================== SEND ROUTES ====================
-
-/**
- * POST /api/transactional/send
- * Send a transactional email
- */
-router.post("/send", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const body = sendEmailSchema.parse(req.body);
-
-    const result = body.immediate
-      ? await transactionalEmailService.sendImmediate(body)
-      : await transactionalEmailService.sendTransactionalEmail(body);
-
-    if (!result.success) {
-      return res.status(400).json({ error: result.error });
-    }
-
-    res.json(result);
-  } catch (error: any) {
-    console.error("[Transactional Templates] Send error:", error);
-    if (error.name === "ZodError") {
-      return res.status(400).json({ error: error.errors });
-    }
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ==================== LOG ROUTES ====================
-
-/**
- * GET /api/transactional/logs
- * Get transactional email logs
- */
-router.get("/logs", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const {
-      eventType,
-      status,
-      recipientEmail,
-      limit = "50",
-      offset = "0",
-    } = req.query;
-
-    let query = db
-      .select({
-        id: transactionalEmailLogs.id,
-        templateId: transactionalEmailLogs.templateId,
-        smtpProviderId: transactionalEmailLogs.smtpProviderId,
-        eventType: transactionalEmailLogs.eventType,
-        triggerSource: transactionalEmailLogs.triggerSource,
-        recipientEmail: transactionalEmailLogs.recipientEmail,
-        recipientName: transactionalEmailLogs.recipientName,
-        subject: transactionalEmailLogs.subject,
-        status: transactionalEmailLogs.status,
-        messageId: transactionalEmailLogs.messageId,
-        errorMessage: transactionalEmailLogs.errorMessage,
-        retryCount: transactionalEmailLogs.retryCount,
-        queuedAt: transactionalEmailLogs.queuedAt,
-        sentAt: transactionalEmailLogs.sentAt,
-        failedAt: transactionalEmailLogs.failedAt,
-        createdAt: transactionalEmailLogs.createdAt,
-      })
-      .from(transactionalEmailLogs);
-
-    const conditions: any[] = [];
-
-    if (eventType) {
-      conditions.push(
-        eq(transactionalEmailLogs.eventType, eventType as TransactionalEventType)
-      );
-    }
-
-    if (status) {
-      conditions.push(eq(transactionalEmailLogs.status, status as string));
-    }
-
-    if (recipientEmail) {
-      conditions.push(
-        eq(transactionalEmailLogs.recipientEmail, recipientEmail as string)
-      );
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as any;
-    }
-
-    const logs = await query
-      .orderBy(desc(transactionalEmailLogs.createdAt))
-      .limit(parseInt(limit as string))
-      .offset(parseInt(offset as string));
-
-    res.json(logs);
-  } catch (error: any) {
-    console.error("[Transactional Templates] Logs error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/transactional/logs/:id
- * Get a single log entry with full details
- */
-router.get("/logs/:id", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-
-    const [log] = await db
-      .select()
-      .from(transactionalEmailLogs)
-      .where(eq(transactionalEmailLogs.id, id));
-
-    if (!log) {
-      return res.status(404).json({ error: "Log not found" });
-    }
-
-    res.json(log);
-  } catch (error: any) {
-    console.error("[Transactional Templates] Get log error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/transactional/stats
- * Get transactional email statistics
- */
-router.get("/stats", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const { eventType, days = "30" } = req.query;
-
-    const daysAgo = new Date();
-    daysAgo.setDate(daysAgo.getDate() - parseInt(days as string));
-
-    let baseConditions = [
-      sql`${transactionalEmailLogs.createdAt} >= ${daysAgo}`,
-    ];
-
-    if (eventType) {
-      baseConditions.push(
-        eq(transactionalEmailLogs.eventType, eventType as TransactionalEventType)
-      );
-    }
-
-    // Get total counts by status
-    const stats = await db
-      .select({
-        status: transactionalEmailLogs.status,
-        count: count(),
-      })
-      .from(transactionalEmailLogs)
-      .where(and(...baseConditions))
-      .groupBy(transactionalEmailLogs.status);
-
-    // Get counts by event type
-    const byEventType = await db
-      .select({
-        eventType: transactionalEmailLogs.eventType,
-        count: count(),
-      })
-      .from(transactionalEmailLogs)
-      .where(and(...baseConditions))
-      .groupBy(transactionalEmailLogs.eventType);
-
-    const summary = {
-      total: stats.reduce((sum, s) => sum + Number(s.count), 0),
-      sent: Number(stats.find((s) => s.status === "sent")?.count || 0),
-      delivered: Number(stats.find((s) => s.status === "delivered")?.count || 0),
-      failed: Number(stats.find((s) => s.status === "failed")?.count || 0),
-      pending: Number(stats.find((s) => s.status === "pending")?.count || 0) +
-        Number(stats.find((s) => s.status === "queued")?.count || 0),
-      byEventType: Object.fromEntries(
-        byEventType.map((et) => [et.eventType, Number(et.count)])
-      ),
-    };
-
-    res.json(summary);
-  } catch (error: any) {
-    console.error("[Transactional Templates] Stats error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 export default router;

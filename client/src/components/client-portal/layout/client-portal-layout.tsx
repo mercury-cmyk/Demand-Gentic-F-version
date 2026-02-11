@@ -63,6 +63,8 @@ import {
   Users,
   BarChart3,
   Mic,
+  TestTube,
+  Building2,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -89,6 +91,7 @@ interface NavItem {
   name: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
+  highlighted?: boolean;
 }
 
 interface NavGroup {
@@ -122,17 +125,19 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
-      // Email Campaigns tab removed - email testing now available directly on campaign cards
+      { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
+      { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
+      { name: 'Bookings', href: '/client-portal/dashboard?tab=bookings', icon: CalendarDays },
     ],
   },
   {
     id: 'ai-intelligence',
     label: 'AI & Intelligence',
     items: [
-      { name: 'Agent Catalog', href: '/client-portal/agents', icon: Bot },
-      { name: 'Organization Intelligence', href: '/client-portal/dashboard?tab=intelligence', icon: Brain },
+      { name: 'The Agentic Council', href: '/client-portal/agents', icon: Bot, highlighted: true },
+      { name: 'Organization Intelligence', href: '/client-portal/intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
-      { name: 'Generative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
+      { name: 'Creative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
     ],
   },
@@ -140,26 +145,15 @@ const baseNavigationGroups: NavGroup[] = [
     id: 'analytics',
     label: 'Analytics & Insights',
     items: [
-      { name: 'Call Reports', href: '/client-portal/call-reports', icon: Phone },
-      { name: 'Call Recordings', href: '/client-portal/call-recordings', icon: Mic },
       { name: 'Analytics', href: '/client-portal/analytics', icon: BarChart3 },
       { name: 'Conversation Quality', href: '/client-portal/conversation-quality', icon: MessageSquareText },
     ],
   },
   {
     id: 'resources',
-    label: 'Resources',
+    label: 'How it Works',
     items: [
-      { name: 'Our Services', href: '/client-portal/services', icon: Package },
-    ],
-  },
-  {
-    id: 'account',
-    label: 'Account',
-    items: [
-      { name: 'Billing', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
-      { name: 'Support', href: '/client-portal/dashboard?tab=support', icon: Headphones },
-      { name: 'Settings', href: '/client-portal/dashboard?tab=settings', icon: Settings },
+      { name: 'Client Guide', href: '/client-portal/services', icon: Package },
     ],
   },
 ];
@@ -261,7 +255,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       const token = getToken();
       if (!token) return { enabledFeatures: [] };
       try {
-        const res = await fetch('/api/client-portal/features', {
+        const res = await fetch('/api/client-portal/settings/features', {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return { enabledFeatures: [] };
@@ -292,15 +286,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     // Add conditional items to Campaigns group
     const campaignsGroup = groups.find(g => g.id === 'campaigns');
     if (campaignsGroup) {
-      // Add Bookings if calendar_booking feature enabled
-      if (enabledFeatures.includes('calendar_booking')) {
-        campaignsGroup.items.push({
-          name: 'Bookings',
-          href: '/client-portal/dashboard?tab=bookings',
-          icon: CalendarDays,
-        });
-      }
-      // Add Upcoming Events if Argyle enabled
+      // Add Upcoming Events if Argyle enabled (client-specific integration)
       if (argyleFeatureStatus?.enabled) {
         campaignsGroup.items.push({
           name: 'Upcoming Events',
@@ -311,7 +297,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     }
 
     return groups;
-  }, [argyleFeatureStatus?.enabled, enabledFeatures]);
+  }, [argyleFeatureStatus?.enabled, user?.clientAccountName]);
 
   // Show suggestions bubble after a delay if user hasn't interacted
   useEffect(() => {
@@ -495,8 +481,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                 <CollapsibleContent className="space-y-0.5 pb-2">
                   {group.items.map((item) => {
                     const isActive = isItemActive(item, location, searchString);
-                    // Removed individual item highlight for Org Intelligence
-                    const isHighlighted = false;
+                    const isHighlighted = !!(item as any).highlighted;
 
                     return (
                       <Link key={item.name} href={item.href}>
@@ -574,6 +559,22 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           <ClientPortalAgentToggleButton />
           */}
 
+          {/* Settings Icon - Clearly Added */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link href="/client-portal/dashboard?tab=settings">
+                   <Button variant="ghost" size="icon" className="mr-1 text-muted-foreground hover:text-foreground">
+                    <Settings className="h-5 w-5" />
+                  </Button>
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Account Settings</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -595,6 +596,18 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                 </div>
               </div>
               <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/client-portal/dashboard?tab=billing">
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Billing
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/client-portal/dashboard?tab=support">
+                  <Headphones className="mr-2 h-4 w-4" />
+                  Support
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/client-portal/dashboard?tab=settings">
                   <Settings className="mr-2 h-4 w-4" />

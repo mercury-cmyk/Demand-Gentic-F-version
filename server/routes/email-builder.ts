@@ -28,6 +28,7 @@ import {
   getPromptSuggestions,
 } from '../services/ai-image-generator';
 import { getPresignedUploadUrl, getPublicUrl, deleteFromS3, getFromS3, generateStorageKey } from '../lib/storage';
+import { requireDualAuth } from '../auth';
 import multer from 'multer';
 import crypto from 'crypto';
 
@@ -48,6 +49,81 @@ const upload = multer({
     }
   },
 });
+
+/**
+ * GET /api/email-builder/images/serve/:id
+ * Serve an image by proxying from GCS (permanent, no-expiry URL)
+ * NOTE: This route is public so images can be loaded in emails/browsers
+ */
+router.get('/images/serve/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    console.log(`[ImageServe] Serving image: ${id}`);
+
+    const [image] = await db
+      .select()
+      .from(emailBuilderImages)
+      .where(eq(emailBuilderImages.id, id))
+      .limit(1);
+
+    if (!image) {
+      console.warn(`[ImageServe] Image not found: ${id}`);
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    // If storedUrl is a GCS URL, extract the key and stream from GCS
+    if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
+      // More robust key extraction that doesn't depend on strict environment variable matching
+      let key = image.storedUrl;
+      const gcsMatch = image.storedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
+      if (gcsMatch && gcsMatch[1]) {
+        key = gcsMatch[1];
+      } else {
+        // Fallback to legacy replacement
+        const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
+        key = image.storedUrl.replace(`https://storage.googleapis.com/${bucketName}/`, '');
+      }
+
+      console.log(`[ImageServe] Streaming from GCS: url=${image.storedUrl}, key=${key}, mimeType=${image.mimeType}`);
+
+      res.setHeader('Content-Type', image.mimeType || 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+      try {
+        const stream = await getFromS3(key);
+        stream.on('error', (err: any) => {
+          console.error(`[ImageServe] Stream error for key ${key}:`, err.message);
+          if (!res.headersSent) {
+            // If GCS returns 404, the stream emits an error with code 404 usually
+            if (err.code === 404 || err.message?.includes('No such object')) {
+              res.status(404).json({ error: 'Image not found in storage' });
+            } else {
+              res.status(500).json({ error: 'Storage stream error' });
+            }
+          }
+        });
+        stream.pipe(res);
+      } catch (err: any) {
+        console.error('[ImageServe] Failed to create stream:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to access image storage' });
+        }
+      }
+    } else if (image.storedUrl) {
+      console.log(`[ImageServe] Redirecting to: ${image.storedUrl}`);
+      res.redirect(image.storedUrl);
+    } else {
+      console.warn(`[ImageServe] No storedUrl for image: ${id}`);
+      res.status(404).json({ error: 'Image file not found' });
+    }
+  } catch (error: any) {
+    console.error('[ImageServe] Error serving image:', error.message || error);
+    res.status(500).json({ error: 'Failed to serve image' });
+  }
+});
+
+// Protect all subsequent routes with authentication
+router.use(requireDualAuth);
 
 // =============================================================================
 // Email Builder Templates
@@ -855,49 +931,6 @@ router.delete('/images/:id', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/email-builder/images/serve/:id
- * Serve an image by proxying from GCS (permanent, no-expiry URL)
- */
-router.get('/images/serve/:id', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    console.log(`[ImageServe] Serving image: ${id}`);
-
-    const [image] = await db
-      .select()
-      .from(emailBuilderImages)
-      .where(eq(emailBuilderImages.id, id))
-      .limit(1);
-
-    if (!image) {
-      console.warn(`[ImageServe] Image not found: ${id}`);
-      return res.status(404).json({ error: 'Image not found' });
-    }
-
-    // If storedUrl is a GCS URL, extract the key and stream from GCS
-    if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
-      const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
-      const key = image.storedUrl.replace(`https://storage.googleapis.com/${bucketName}/`, '');
-      console.log(`[ImageServe] Streaming from GCS: key=${key}, mimeType=${image.mimeType}`);
-
-      res.setHeader('Content-Type', image.mimeType || 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-
-      const stream = await getFromS3(key);
-      stream.pipe(res);
-    } else if (image.storedUrl) {
-      console.log(`[ImageServe] Redirecting to: ${image.storedUrl}`);
-      res.redirect(image.storedUrl);
-    } else {
-      console.warn(`[ImageServe] No storedUrl for image: ${id}`);
-      res.status(404).json({ error: 'Image file not found' });
-    }
-  } catch (error: any) {
-    console.error('[ImageServe] Error serving image:', error.message || error);
-    res.status(500).json({ error: 'Failed to serve image' });
-  }
-});
 
 // =============================================================================
 // Brand Kit Management

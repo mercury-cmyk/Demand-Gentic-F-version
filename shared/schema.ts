@@ -1957,7 +1957,7 @@ export const campaigns = pgTable("campaigns", {
   voiceProviderFallback: boolean("voice_provider_fallback").default(true), // Enable automatic fallback to alternate provider
 
   // Max Call Duration - strictly enforces call time limits per campaign
-  maxCallDurationSeconds: integer("max_call_duration_seconds").default(240), // Default 4 minutes, range: 60-1800 seconds
+  maxCallDurationSeconds: integer("max_call_duration_seconds").default(360), // Default 6 minutes, range: 60-1800 seconds
 
   // Concurrent Worker Settings (AI Deployment Capacity)
   maxConcurrentWorkers: integer("max_concurrent_workers").default(1),
@@ -10209,6 +10209,16 @@ export const campaignOrganizations = pgTable('campaign_organizations', {
 
   outreach: jsonb('outreach').notNull().default('{}'),
   // Structure: { emailAngles, callOpeners, objectionHandlers }
+
+  branding: jsonb('branding').notNull().default('{}'),
+  // Structure: { tone, communicationStyle, keywords, forbiddenTerms, primaryColor, secondaryColor }
+
+  // Events & Forums (Agent Context)
+  events: jsonb('events').notNull().default('{}'),
+  // Structure: { upcoming: string, strategy: string }
+
+  forums: jsonb('forums').notNull().default('{}'),
+  // Structure: { list: string, engagement_strategy: string }
 
   // Compiled prompt-ready context
   compiledOrgContext: text('compiled_org_context'),

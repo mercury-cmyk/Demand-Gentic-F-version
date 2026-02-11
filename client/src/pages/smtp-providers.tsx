@@ -143,9 +143,9 @@ export default function SmtpProvidersPage() {
 
   // Fetch providers
   const { data: providers = [], isLoading } = useQuery<SmtpProvider[]>({
-    queryKey: ["/api/smtp-providers"],
+    queryKey: ["/api/communications/smtp-providers"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/smtp-providers");
+      const res = await apiRequest("GET", "/api/communications/smtp-providers");
       return res.json();
     },
   });
@@ -153,11 +153,11 @@ export default function SmtpProvidersPage() {
   // Create provider mutation
   const createMutation = useMutation({
     mutationFn: async (data: typeof newProvider) => {
-      const res = await apiRequest("POST", "/api/smtp-providers", data);
+      const res = await apiRequest("POST", "/api/communications/smtp-providers", data);
       return res.json();
     },
     onSuccess: (provider) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/smtp-providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/smtp-providers"] });
       toast({ title: "Provider created", description: "SMTP provider has been created successfully." });
       setShowCreateDialog(false);
       resetNewProvider();
@@ -175,11 +175,11 @@ export default function SmtpProvidersPage() {
   // Delete provider mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("DELETE", `/api/smtp-providers/${id}`);
+      const res = await apiRequest("DELETE", `/api/communications/smtp-providers/${id}`);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/smtp-providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/smtp-providers"] });
       toast({ title: "Provider deleted", description: "SMTP provider has been deleted." });
       setShowDeleteDialog(null);
     },
@@ -191,11 +191,11 @@ export default function SmtpProvidersPage() {
   // Verify connection mutation
   const verifyMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("POST", `/api/smtp-providers/${id}/verify`);
+      const res = await apiRequest("POST", `/api/communications/smtp-providers/${id}/verify`);
       return res.json();
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/smtp-providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/smtp-providers"] });
       if (result.success) {
         toast({ title: "Connection verified", description: "SMTP connection is working correctly." });
       } else {
@@ -210,7 +210,7 @@ export default function SmtpProvidersPage() {
   // Send test email mutation
   const sendTestMutation = useMutation({
     mutationFn: async ({ id, toEmail }: { id: string; toEmail: string }) => {
-      const res = await apiRequest("POST", `/api/smtp-providers/${id}/send-test`, { toEmail });
+      const res = await apiRequest("POST", `/api/communications/smtp-providers/${id}/send-test`, { toEmail });
       return res.json();
     },
     onSuccess: (result) => {
@@ -230,11 +230,11 @@ export default function SmtpProvidersPage() {
   // Toggle active mutation
   const toggleActiveMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("POST", `/api/smtp-providers/${id}/toggle-active`);
+      const res = await apiRequest("POST", `/api/communications/smtp-providers/${id}/toggle-active`);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/smtp-providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/smtp-providers"] });
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -244,11 +244,11 @@ export default function SmtpProvidersPage() {
   // Set default mutation
   const setDefaultMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("POST", `/api/smtp-providers/${id}/set-default`);
+      const res = await apiRequest("POST", `/api/communications/smtp-providers/${id}/set-default`);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/smtp-providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/smtp-providers"] });
       toast({ title: "Default updated", description: "Default SMTP provider has been updated." });
     },
     onError: (error: any) => {
@@ -276,8 +276,8 @@ export default function SmtpProvidersPage() {
   const initiateOAuth = async (provider: SmtpProvider) => {
     const endpoint =
       provider.providerType === "gmail"
-        ? `/api/smtp-providers/${provider.id}/oauth/google/initiate`
-        : `/api/smtp-providers/${provider.id}/oauth/microsoft/initiate`;
+        ? `/api/communications/smtp-providers/${provider.id}/oauth/google/initiate`
+        : `/api/communications/smtp-providers/${provider.id}/oauth/microsoft/initiate`;
 
     try {
       const res = await apiRequest("GET", endpoint);

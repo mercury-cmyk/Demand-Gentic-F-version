@@ -1,13 +1,16 @@
 /**
- * Mercury Bridge — API Routes
- * 
- * Admin endpoints for the Mercury notification system:
+ * Mercury Bridge — Unified Email & Notification Routes
+ *
+ * Combines SMTP Provider management and Mercury notification system:
+ *   - SMTP provider CRUD + OAuth2 authentication (mounted at /api/smtp-providers)
  *   - SMTP status + verification
  *   - Template management (CRUD + preview + test send)
+ *   - AI template generation & refinement
  *   - Bulk client invitations (dry run + execute)
  *   - Notification dispatch + logs
+ *   - Notification rules
  *   - Outbox management
- * 
+ *
  * All routes require admin authentication.
  * Sending features gated behind smtp_email_enabled and bulk_invites_enabled flags.
  */
@@ -17,6 +20,10 @@ import { z } from 'zod';
 import { db } from '../db';
 import { eq, desc, and } from 'drizzle-orm';
 import {
+  smtpProviders,
+  insertSmtpProviderSchema,
+  type SmtpProviderType,
+  type SmtpAuthType,
   mercuryTemplates,
   mercuryEmailOutbox,
   mercuryNotificationEvents,
@@ -32,18 +39,672 @@ import {
   seedDefaultTemplates,
 } from '../services/mercury';
 import { generateJSON } from '../services/vertex-ai';
+import { smtpOAuthService } from '../services/smtp-oauth-service';
 
-const router = Router();
+// ═══════════════════════════════════════════════════════════════════════════════
+// SMTP OAUTH CALLBACK ROUTER (public — no auth, Google/Microsoft redirect here)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const smtpOAuthCallbackRouter = Router();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SMTP PROVIDERS ROUTER (mounted at /api/smtp-providers)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const smtpProvidersRouter = Router();
+
+// ── SMTP Provider Schemas ────────────────────────────────────────────────────
+
+const createSmtpProviderSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  providerType: z.enum(["gmail", "outlook", "custom"]),
+  authType: z.enum(["oauth2", "basic", "app_password"]),
+  emailAddress: z.string().email("Valid email address required"),
+  displayName: z.string().optional(),
+  replyToAddress: z.string().email().optional(),
+  dailySendLimit: z.number().int().positive().optional(),
+  hourlySendLimit: z.number().int().positive().optional(),
+  isDefault: z.boolean().optional(),
+  // Custom SMTP fields
+  smtpHost: z.string().optional(),
+  smtpPort: z.number().int().positive().optional(),
+  smtpSecure: z.boolean().optional(),
+  smtpUsername: z.string().optional(),
+  smtpPassword: z.string().optional(),
+});
+
+const updateSmtpProviderSchema = createSmtpProviderSchema.partial();
+
+// ── SMTP Provider CRUD ───────────────────────────────────────────────────────
+
+/**
+ * GET /api/smtp-providers
+ * List all SMTP providers
+ */
+smtpProvidersRouter.get("/", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const providers = await db
+      .select({
+        id: smtpProviders.id,
+        name: smtpProviders.name,
+        providerType: smtpProviders.providerType,
+        authType: smtpProviders.authType,
+        emailAddress: smtpProviders.emailAddress,
+        displayName: smtpProviders.displayName,
+        replyToAddress: smtpProviders.replyToAddress,
+        dailySendLimit: smtpProviders.dailySendLimit,
+        hourlySendLimit: smtpProviders.hourlySendLimit,
+        sentToday: smtpProviders.sentToday,
+        sentThisHour: smtpProviders.sentThisHour,
+        isActive: smtpProviders.isActive,
+        isDefault: smtpProviders.isDefault,
+        verificationStatus: smtpProviders.verificationStatus,
+        lastVerifiedAt: smtpProviders.lastVerifiedAt,
+        lastVerificationError: smtpProviders.lastVerificationError,
+        lastUsedAt: smtpProviders.lastUsedAt,
+        createdAt: smtpProviders.createdAt,
+        updatedAt: smtpProviders.updatedAt,
+      })
+      .from(smtpProviders)
+      .orderBy(desc(smtpProviders.createdAt));
+
+    res.json(providers);
+  } catch (error: any) {
+    console.error("[SMTP Providers] List error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/smtp-providers/:id
+ * Get a single SMTP provider
+ */
+smtpProvidersRouter.get("/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [provider] = await db
+      .select({
+        id: smtpProviders.id,
+        name: smtpProviders.name,
+        providerType: smtpProviders.providerType,
+        authType: smtpProviders.authType,
+        emailAddress: smtpProviders.emailAddress,
+        displayName: smtpProviders.displayName,
+        replyToAddress: smtpProviders.replyToAddress,
+        smtpHost: smtpProviders.smtpHost,
+        smtpPort: smtpProviders.smtpPort,
+        smtpSecure: smtpProviders.smtpSecure,
+        smtpUsername: smtpProviders.smtpUsername,
+        dailySendLimit: smtpProviders.dailySendLimit,
+        hourlySendLimit: smtpProviders.hourlySendLimit,
+        sentToday: smtpProviders.sentToday,
+        sentThisHour: smtpProviders.sentThisHour,
+        isActive: smtpProviders.isActive,
+        isDefault: smtpProviders.isDefault,
+        verificationStatus: smtpProviders.verificationStatus,
+        lastVerifiedAt: smtpProviders.lastVerifiedAt,
+        lastVerificationError: smtpProviders.lastVerificationError,
+        lastUsedAt: smtpProviders.lastUsedAt,
+        tokenExpiresAt: smtpProviders.tokenExpiresAt,
+        tokenScopes: smtpProviders.tokenScopes,
+        createdAt: smtpProviders.createdAt,
+        updatedAt: smtpProviders.updatedAt,
+      })
+      .from(smtpProviders)
+      .where(eq(smtpProviders.id, id));
+
+    if (!provider) {
+      return res.status(404).json({ error: "SMTP provider not found" });
+    }
+
+    res.json(provider);
+  } catch (error: any) {
+    console.error("[SMTP Providers] Get error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/smtp-providers
+ * Create a new SMTP provider
+ */
+smtpProvidersRouter.post("/", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const body = createSmtpProviderSchema.parse(req.body);
+    const userId = req.user?.userId;
+
+    // If this is being set as default, unset other defaults
+    if (body.isDefault) {
+      await db
+        .update(smtpProviders)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(eq(smtpProviders.isDefault, true));
+    }
+
+    // Encrypt password if provided
+    let smtpPasswordEncrypted: string | undefined;
+    if (body.smtpPassword) {
+      smtpPasswordEncrypted = smtpOAuthService.encryptToken(body.smtpPassword);
+    }
+
+    const [provider] = await db
+      .insert(smtpProviders)
+      .values({
+        name: body.name,
+        providerType: body.providerType as SmtpProviderType,
+        authType: body.authType as SmtpAuthType,
+        emailAddress: body.emailAddress,
+        displayName: body.displayName,
+        replyToAddress: body.replyToAddress,
+        dailySendLimit: body.dailySendLimit || 500,
+        hourlySendLimit: body.hourlySendLimit || 100,
+        isDefault: body.isDefault || false,
+        smtpHost: body.smtpHost,
+        smtpPort: body.smtpPort,
+        smtpSecure: body.smtpSecure,
+        smtpUsername: body.smtpUsername,
+        smtpPasswordEncrypted,
+        verificationStatus: "pending",
+        createdBy: userId,
+      })
+      .returning();
+
+    res.status(201).json(provider);
+  } catch (error: any) {
+    console.error("[SMTP Providers] Create error:", error);
+    if (error.name === "ZodError") {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/smtp-providers/:id
+ * Update an SMTP provider
+ */
+smtpProvidersRouter.put("/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = updateSmtpProviderSchema.parse(req.body);
+
+    // Check if provider exists
+    const [existing] = await db
+      .select()
+      .from(smtpProviders)
+      .where(eq(smtpProviders.id, id));
+
+    if (!existing) {
+      return res.status(404).json({ error: "SMTP provider not found" });
+    }
+
+    // If setting as default, unset other defaults
+    if (body.isDefault) {
+      await db
+        .update(smtpProviders)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(and(eq(smtpProviders.isDefault, true), eq(smtpProviders.id, id)));
+    }
+
+    // Build update object
+    const updateData: Record<string, any> = {
+      ...body,
+      updatedAt: new Date(),
+    };
+
+    // Encrypt password if provided
+    if (body.smtpPassword) {
+      updateData.smtpPasswordEncrypted = smtpOAuthService.encryptToken(
+        body.smtpPassword
+      );
+      delete updateData.smtpPassword;
+    }
+
+    const [updated] = await db
+      .update(smtpProviders)
+      .set(updateData)
+      .where(eq(smtpProviders.id, id))
+      .returning();
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error("[SMTP Providers] Update error:", error);
+    if (error.name === "ZodError") {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/smtp-providers/:id
+ * Delete an SMTP provider
+ */
+smtpProvidersRouter.delete("/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [deleted] = await db
+      .delete(smtpProviders)
+      .where(eq(smtpProviders.id, id))
+      .returning();
+
+    if (!deleted) {
+      return res.status(404).json({ error: "SMTP provider not found" });
+    }
+
+    res.json({ success: true, deleted });
+  } catch (error: any) {
+    console.error("[SMTP Providers] Delete error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ── SMTP OAuth Routes ────────────────────────────────────────────────────────
+
+/**
+ * GET /api/smtp-providers/:id/oauth/google/initiate
+ * Start Google OAuth2 flow
+ */
+smtpProvidersRouter.get(
+  "/:id/oauth/google/initiate",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // Verify provider exists and is gmail type
+      const [provider] = await db
+        .select()
+        .from(smtpProviders)
+        .where(eq(smtpProviders.id, id));
+
+      if (!provider) {
+        return res.status(404).json({ error: "SMTP provider not found" });
+      }
+
+      if (provider.providerType !== "gmail") {
+        return res
+          .status(400)
+          .json({ error: "Provider is not a Gmail provider" });
+      }
+
+      const baseUrl =
+        process.env.APP_BASE_URL ||
+        process.env.MSFT_OAUTH_APP_URL ||
+        `${req.protocol}://${req.get("host")}`;
+      const redirectUri = `${baseUrl}/api/smtp-providers/oauth/google/callback`;
+
+      // Encode provider ID in state
+      const state = Buffer.from(JSON.stringify({ providerId: id })).toString(
+        "base64"
+      );
+
+      const authUrl = smtpOAuthService.getGoogleAuthUrl(redirectUri, state);
+
+      res.json({ authUrl });
+    } catch (error: any) {
+      console.error("[SMTP Providers] Google OAuth initiate error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * GET /api/smtp-providers/oauth/google/callback
+ * Handle Google OAuth2 callback (public — no auth required, Google redirects here)
+ */
+smtpOAuthCallbackRouter.get("/oauth/google/callback", async (req: Request, res: Response) => {
+  try {
+    const { code, state, error: oauthError } = req.query;
+
+    if (oauthError) {
+      return res.redirect(
+        `/settings/smtp-providers?error=${encodeURIComponent(String(oauthError))}`
+      );
+    }
+
+    if (!code || !state) {
+      return res.redirect(
+        "/settings/smtp-providers?error=missing_params"
+      );
+    }
+
+    // Decode state to get provider ID
+    const stateData = JSON.parse(
+      Buffer.from(String(state), "base64").toString()
+    );
+    const { providerId } = stateData;
+
+    const baseUrl =
+      process.env.APP_BASE_URL ||
+      process.env.MSFT_OAUTH_APP_URL ||
+      `${req.protocol}://${req.get("host")}`;
+    const redirectUri = `${baseUrl}/api/smtp-providers/oauth/google/callback`;
+
+    // Exchange code for tokens
+    const tokens = await smtpOAuthService.exchangeGoogleCode(
+      String(code),
+      redirectUri
+    );
+
+    // Get user email to verify it matches
+    const userEmail = await smtpOAuthService.getGoogleUserEmail(
+      tokens.accessToken
+    );
+
+    // Update provider with tokens
+    await db
+      .update(smtpProviders)
+      .set({
+        accessTokenEncrypted: smtpOAuthService.encryptToken(tokens.accessToken),
+        refreshTokenEncrypted: smtpOAuthService.encryptToken(tokens.refreshToken),
+        tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
+        tokenScopes: tokens.scope?.split(" ") || [],
+        emailAddress: userEmail,
+        verificationStatus: "verifying",
+        updatedAt: new Date(),
+      })
+      .where(eq(smtpProviders.id, providerId));
+
+    // Test connection
+    const [provider] = await db
+      .select()
+      .from(smtpProviders)
+      .where(eq(smtpProviders.id, providerId));
+
+    if (provider) {
+      await smtpOAuthService.testConnection(provider);
+    }
+
+    res.redirect(`/settings/smtp-providers?success=google_connected`);
+  } catch (error: any) {
+    console.error("[SMTP Providers] Google OAuth callback error:", error);
+    res.redirect(
+      `/settings/smtp-providers?error=${encodeURIComponent(error.message)}`
+    );
+  }
+});
+
+/**
+ * GET /api/smtp-providers/:id/oauth/microsoft/initiate
+ * Start Microsoft OAuth2 flow
+ */
+smtpProvidersRouter.get(
+  "/:id/oauth/microsoft/initiate",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // Verify provider exists and is outlook type
+      const [provider] = await db
+        .select()
+        .from(smtpProviders)
+        .where(eq(smtpProviders.id, id));
+
+      if (!provider) {
+        return res.status(404).json({ error: "SMTP provider not found" });
+      }
+
+      if (provider.providerType !== "outlook") {
+        return res
+          .status(400)
+          .json({ error: "Provider is not an Outlook provider" });
+      }
+
+      const baseUrl =
+        process.env.APP_BASE_URL ||
+        process.env.MSFT_OAUTH_APP_URL ||
+        `${req.protocol}://${req.get("host")}`;
+      const redirectUri = `${baseUrl}/api/smtp-providers/oauth/microsoft/callback`;
+
+      // Encode provider ID in state
+      const state = Buffer.from(JSON.stringify({ providerId: id })).toString(
+        "base64"
+      );
+
+      const authUrl = smtpOAuthService.getMicrosoftAuthUrl(redirectUri, state);
+
+      res.json({ authUrl });
+    } catch (error: any) {
+      console.error("[SMTP Providers] Microsoft OAuth initiate error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * GET /api/smtp-providers/oauth/microsoft/callback
+ * Handle Microsoft OAuth2 callback (public — no auth required, Microsoft redirects here)
+ */
+smtpOAuthCallbackRouter.get("/oauth/microsoft/callback", async (req: Request, res: Response) => {
+  try {
+    const { code, state, error: oauthError } = req.query;
+
+    if (oauthError) {
+      return res.redirect(
+        `/settings/smtp-providers?error=${encodeURIComponent(String(oauthError))}`
+      );
+    }
+
+    if (!code || !state) {
+      return res.redirect(
+        "/settings/smtp-providers?error=missing_params"
+      );
+    }
+
+    // Decode state to get provider ID
+    const stateData = JSON.parse(
+      Buffer.from(String(state), "base64").toString()
+    );
+    const { providerId } = stateData;
+
+    const baseUrl =
+      process.env.APP_BASE_URL ||
+      process.env.MSFT_OAUTH_APP_URL ||
+      `${req.protocol}://${req.get("host")}`;
+    const redirectUri = `${baseUrl}/api/smtp-providers/oauth/microsoft/callback`;
+
+    // Exchange code for tokens
+    const tokens = await smtpOAuthService.exchangeMicrosoftCode(
+      String(code),
+      redirectUri
+    );
+
+    // Get user email
+    const userEmail = await smtpOAuthService.getMicrosoftUserEmail(
+      tokens.accessToken
+    );
+
+    // Update provider with tokens
+    await db
+      .update(smtpProviders)
+      .set({
+        accessTokenEncrypted: smtpOAuthService.encryptToken(tokens.accessToken),
+        refreshTokenEncrypted: smtpOAuthService.encryptToken(tokens.refreshToken),
+        tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
+        tokenScopes: tokens.scope?.split(" ") || [],
+        emailAddress: userEmail,
+        verificationStatus: "verifying",
+        updatedAt: new Date(),
+      })
+      .where(eq(smtpProviders.id, providerId));
+
+    // Test connection
+    const [provider] = await db
+      .select()
+      .from(smtpProviders)
+      .where(eq(smtpProviders.id, providerId));
+
+    if (provider) {
+      await smtpOAuthService.testConnection(provider);
+    }
+
+    res.redirect(`/settings/smtp-providers?success=microsoft_connected`);
+  } catch (error: any) {
+    console.error("[SMTP Providers] Microsoft OAuth callback error:", error);
+    res.redirect(
+      `/settings/smtp-providers?error=${encodeURIComponent(error.message)}`
+    );
+  }
+});
+
+// ── SMTP Verification & Testing ──────────────────────────────────────────────
+
+/**
+ * POST /api/smtp-providers/:id/verify
+ * Verify SMTP connection
+ */
+smtpProvidersRouter.post("/:id/verify", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [provider] = await db
+      .select()
+      .from(smtpProviders)
+      .where(eq(smtpProviders.id, id));
+
+    if (!provider) {
+      return res.status(404).json({ error: "SMTP provider not found" });
+    }
+
+    const result = await smtpOAuthService.testConnection(provider);
+
+    res.json(result);
+  } catch (error: any) {
+    console.error("[SMTP Providers] Verify error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/smtp-providers/:id/send-test
+ * Send a test email
+ */
+smtpProvidersRouter.post(
+  "/:id/send-test",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { toEmail } = req.body;
+
+      if (!toEmail) {
+        return res.status(400).json({ error: "toEmail is required" });
+      }
+
+      const [provider] = await db
+        .select()
+        .from(smtpProviders)
+        .where(eq(smtpProviders.id, id));
+
+      if (!provider) {
+        return res.status(404).json({ error: "SMTP provider not found" });
+      }
+
+      const result = await smtpOAuthService.sendTestEmail(provider, toEmail);
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[SMTP Providers] Send test error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * POST /api/smtp-providers/:id/toggle-active
+ * Toggle provider active status
+ */
+smtpProvidersRouter.post(
+  "/:id/toggle-active",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [provider] = await db
+        .select()
+        .from(smtpProviders)
+        .where(eq(smtpProviders.id, id));
+
+      if (!provider) {
+        return res.status(404).json({ error: "SMTP provider not found" });
+      }
+
+      const [updated] = await db
+        .update(smtpProviders)
+        .set({
+          isActive: !provider.isActive,
+          updatedAt: new Date(),
+        })
+        .where(eq(smtpProviders.id, id))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[SMTP Providers] Toggle active error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * POST /api/smtp-providers/:id/set-default
+ * Set provider as default
+ */
+smtpProvidersRouter.post(
+  "/:id/set-default",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // Unset all other defaults
+      await db
+        .update(smtpProviders)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(eq(smtpProviders.isDefault, true));
+
+      // Set this one as default
+      const [updated] = await db
+        .update(smtpProviders)
+        .set({
+          isDefault: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(smtpProviders.id, id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ error: "SMTP provider not found" });
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[SMTP Providers] Set default error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MERCURY BRIDGE ROUTER (mounted at /api/mercury)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const mercuryRouter = Router();
 
 // All Mercury routes require admin auth
-router.use(requireAuth);
+mercuryRouter.use(requireAuth);
 
 // ─── SMTP Status & Connection ────────────────────────────────────────────────
 
 /**
  * GET /status — Get Mercury Bridge status
  */
-router.get('/status', async (req: Request, res: Response) => {
+mercuryRouter.get('/status', async (req: Request, res: Response) => {
   try {
     const smtpStatus = await mercuryEmailService.verifyConnection();
     const flags = {
@@ -68,7 +729,7 @@ router.get('/status', async (req: Request, res: Response) => {
 /**
  * POST /verify-connection — Test SMTP connection (no email sent)
  */
-router.post('/verify-connection', async (req: Request, res: Response) => {
+mercuryRouter.post('/verify-connection', async (req: Request, res: Response) => {
   try {
     const result = await mercuryEmailService.verifyConnection();
     res.json(result);
@@ -83,7 +744,7 @@ router.post('/verify-connection', async (req: Request, res: Response) => {
 /**
  * POST /templates/seed — Seed default templates (idempotent, returns created templates)
  */
-router.post('/templates/seed', async (req: Request, res: Response) => {
+mercuryRouter.post('/templates/seed', async (req: Request, res: Response) => {
   try {
     const result = await seedDefaultTemplates();
     // Return all templates after seed so UI can refresh immediately
@@ -101,7 +762,7 @@ router.post('/templates/seed', async (req: Request, res: Response) => {
 /**
  * GET /templates — List all Mercury templates
  */
-router.get('/templates', async (req: Request, res: Response) => {
+mercuryRouter.get('/templates', async (req: Request, res: Response) => {
   try {
     const templates = await db
       .select()
@@ -118,7 +779,7 @@ router.get('/templates', async (req: Request, res: Response) => {
 /**
  * GET /templates/:key — Get a specific template by key
  */
-router.get('/templates/:key', async (req: Request, res: Response) => {
+mercuryRouter.get('/templates/:key', async (req: Request, res: Response) => {
   try {
     const { key } = req.params;
     const [template] = await db
@@ -159,7 +820,7 @@ const upsertTemplateSchema = z.object({
 /**
  * POST /templates — Create a new template
  */
-router.post('/templates', async (req: Request, res: Response) => {
+mercuryRouter.post('/templates', async (req: Request, res: Response) => {
   try {
     const parsed = upsertTemplateSchema.parse(req.body);
     const [template] = await db.insert(mercuryTemplates).values({
@@ -181,7 +842,7 @@ router.post('/templates', async (req: Request, res: Response) => {
 /**
  * PUT /templates/:key — Update an existing template
  */
-router.put('/templates/:key', async (req: Request, res: Response) => {
+mercuryRouter.put('/templates/:key', async (req: Request, res: Response) => {
   try {
     const { key } = req.params;
     const parsed = upsertTemplateSchema.partial().parse(req.body);
@@ -208,7 +869,7 @@ router.put('/templates/:key', async (req: Request, res: Response) => {
 /**
  * DELETE /templates/:key — Delete a template
  */
-router.delete('/templates/:key', async (req: Request, res: Response) => {
+mercuryRouter.delete('/templates/:key', async (req: Request, res: Response) => {
   try {
     const { key } = req.params;
     const [deleted] = await db.delete(mercuryTemplates)
@@ -235,7 +896,7 @@ const previewSchema = z.object({
 /**
  * POST /templates/:key/preview — Preview rendered template (no send)
  */
-router.post('/templates/:key/preview', async (req: Request, res: Response) => {
+mercuryRouter.post('/templates/:key/preview', async (req: Request, res: Response) => {
   try {
     const { key } = req.params;
     const { variables } = previewSchema.parse(req.body);
@@ -261,7 +922,7 @@ const testSendSchema = z.object({
 /**
  * POST /templates/:key/test-send — Send a test email for a template
  */
-router.post('/templates/:key/test-send',
+mercuryRouter.post('/templates/:key/test-send',
   requireFeatureFlag('smtp_email_enabled'),
   async (req: Request, res: Response) => {
     try {
@@ -304,7 +965,7 @@ const aiGenerateSchema = z.object({
 /**
  * POST /templates/ai/generate — Generate a template using AI (Vertex AI / Gemini)
  */
-router.post('/templates/ai/generate', async (req: Request, res: Response) => {
+mercuryRouter.post('/templates/ai/generate', async (req: Request, res: Response) => {
   try {
     const parsed = aiGenerateSchema.parse(req.body);
 
@@ -383,7 +1044,7 @@ const aiRefineSchema = z.object({
 /**
  * POST /templates/ai/refine — Refine an existing template using AI
  */
-router.post('/templates/ai/refine', async (req: Request, res: Response) => {
+mercuryRouter.post('/templates/ai/refine', async (req: Request, res: Response) => {
   try {
     const parsed = aiRefineSchema.parse(req.body);
 
@@ -434,7 +1095,7 @@ Return valid JSON with:
 /**
  * POST /invitations/dry-run — Preview bulk invitation recipients (safe/read-only, no flag gate)
  */
-router.post('/invitations/dry-run',
+mercuryRouter.post('/invitations/dry-run',
   async (req: Request, res: Response) => {
     try {
       const result = await bulkInvitationService.dryRun();
@@ -449,7 +1110,7 @@ router.post('/invitations/dry-run',
 /**
  * POST /invitations/send — Execute bulk invitation send
  */
-router.post('/invitations/send',
+mercuryRouter.post('/invitations/send',
   requireFeatureFlag('bulk_invites_enabled'),
   requireFeatureFlag('smtp_email_enabled'),
   async (req: Request, res: Response) => {
@@ -475,7 +1136,7 @@ router.post('/invitations/send',
 /**
  * GET /invitations/status — Get invitation sending status (read-only, no flag gate)
  */
-router.get('/invitations/status',
+mercuryRouter.get('/invitations/status',
   async (req: Request, res: Response) => {
     try {
       const status = await bulkInvitationService.getInvitationStatus();
@@ -490,7 +1151,7 @@ router.get('/invitations/status',
 /**
  * POST /invitations/validate-token — Validate an invitation token
  */
-router.post('/invitations/validate-token', async (req: Request, res: Response) => {
+mercuryRouter.post('/invitations/validate-token', async (req: Request, res: Response) => {
   try {
     const { token } = req.body;
     if (!token) {
@@ -516,7 +1177,7 @@ const dispatchSchema = z.object({
 /**
  * POST /notifications/dispatch — Manually dispatch a notification event
  */
-router.post('/notifications/dispatch',
+mercuryRouter.post('/notifications/dispatch',
   requireFeatureFlag('smtp_email_enabled'),
   async (req: Request, res: Response) => {
     try {
@@ -539,7 +1200,7 @@ router.post('/notifications/dispatch',
 /**
  * GET /notifications/events — List notification events
  */
-router.get('/notifications/events', async (req: Request, res: Response) => {
+mercuryRouter.get('/notifications/events', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
@@ -563,7 +1224,7 @@ router.get('/notifications/events', async (req: Request, res: Response) => {
 /**
  * GET /notifications/rules — List notification rules
  */
-router.get('/notifications/rules', async (req: Request, res: Response) => {
+mercuryRouter.get('/notifications/rules', async (req: Request, res: Response) => {
   try {
     const rules = await db
       .select()
@@ -590,7 +1251,7 @@ const ruleSchema = z.object({
 /**
  * POST /notifications/rules — Create a notification rule
  */
-router.post('/notifications/rules', async (req: Request, res: Response) => {
+mercuryRouter.post('/notifications/rules', async (req: Request, res: Response) => {
   try {
     const parsed = ruleSchema.parse(req.body);
     const [rule] = await db.insert(mercuryNotificationRules).values(parsed).returning();
@@ -607,7 +1268,7 @@ router.post('/notifications/rules', async (req: Request, res: Response) => {
 /**
  * PUT /notifications/rules/:id — Update a notification rule
  */
-router.put('/notifications/rules/:id', async (req: Request, res: Response) => {
+mercuryRouter.put('/notifications/rules/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const parsed = ruleSchema.partial().parse(req.body);
@@ -631,7 +1292,7 @@ router.put('/notifications/rules/:id', async (req: Request, res: Response) => {
 /**
  * DELETE /notifications/rules/:id — Delete a notification rule
  */
-router.delete('/notifications/rules/:id', async (req: Request, res: Response) => {
+mercuryRouter.delete('/notifications/rules/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const [deleted] = await db.delete(mercuryNotificationRules)
@@ -654,7 +1315,7 @@ router.delete('/notifications/rules/:id', async (req: Request, res: Response) =>
 /**
  * GET /logs — Get Mercury email logs
  */
-router.get('/logs', async (req: Request, res: Response) => {
+mercuryRouter.get('/logs', async (req: Request, res: Response) => {
   try {
     const { status, templateKey, tenantId, limit, offset } = req.query;
     const result = await mercuryEmailService.getLogs({
@@ -674,7 +1335,7 @@ router.get('/logs', async (req: Request, res: Response) => {
 /**
  * POST /logs/:id/retry — Retry a failed outbox entry
  */
-router.post('/logs/:id/retry',
+mercuryRouter.post('/logs/:id/retry',
   requireFeatureFlag('smtp_email_enabled'),
   async (req: Request, res: Response) => {
     try {
@@ -691,7 +1352,7 @@ router.post('/logs/:id/retry',
 /**
  * POST /outbox/process — Manually trigger outbox processing
  */
-router.post('/outbox/process',
+mercuryRouter.post('/outbox/process',
   requireFeatureFlag('smtp_email_enabled'),
   async (req: Request, res: Response) => {
     try {
@@ -705,4 +1366,9 @@ router.post('/outbox/process',
   }
 );
 
-export default router;
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export { smtpProvidersRouter, smtpOAuthCallbackRouter, seedDefaultTemplates };
+export default mercuryRouter;

@@ -371,6 +371,21 @@ export class SmtpOAuthService {
           accessToken,
         },
       });
+    } else if (provider.providerType === "gmail" && provider.authType === "app_password") {
+      // Gmail with App Password (no OAuth needed)
+      const password = provider.smtpPasswordEncrypted
+        ? this.decryptToken(provider.smtpPasswordEncrypted)
+        : undefined;
+
+      return nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+        auth: {
+          user: provider.emailAddress,
+          pass: password,
+        },
+      });
     } else if (provider.providerType === "custom") {
       // Custom SMTP with basic auth
       const password = provider.smtpPasswordEncrypted

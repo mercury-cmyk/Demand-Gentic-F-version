@@ -29,6 +29,7 @@ import {
   lists,
   users,
   clientProjectCampaigns,
+  campaignIntakeRequests,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
@@ -205,9 +206,6 @@ router.use('/ukef-reports', requireClientAuth, ukefReportsRouter);
 // UKEF transcript quality + disposition validation (feature-flagged, client-gated)
 router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
 
-// Analytics, reports, recordings, conversations, email campaigns
-router.use('/', requireClientAuth, clientPortalAnalyticsRouter);
-
 // Campaigns (Client wizard and management)
 router.use('/campaigns', requireClientAuth, clientPortalCampaignsRouter);
 
@@ -333,7 +331,10 @@ router.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    console.log('[CLIENT PORTAL LOGIN] Attempt for email:', email);
+
     if (!email || !password) {
+      console.log('[CLIENT PORTAL LOGIN] Missing email or password');
       return res.status(400).json({ message: "Email and password required" });
     }
 
@@ -344,14 +345,19 @@ router.post('/auth/login', async (req, res) => {
       .limit(1);
 
     if (!clientUser) {
+      console.log('[CLIENT PORTAL LOGIN] No user found for email:', email.toLowerCase());
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    console.log('[CLIENT PORTAL LOGIN] User found:', clientUser.id, '| isActive:', clientUser.isActive, '| hasPassword:', !!clientUser.password, '| passwordLength:', clientUser.password?.length);
+
     if (!clientUser.isActive) {
+      console.log('[CLIENT PORTAL LOGIN] Account disabled for:', email);
       return res.status(401).json({ message: "Account is disabled" });
     }
 
     const isValidPassword = await bcrypt.compare(password, clientUser.password);
+    console.log('[CLIENT PORTAL LOGIN] Password valid:', isValidPassword);
     if (!isValidPassword) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -428,6 +434,10 @@ router.get('/auth/me', requireClientAuth, async (req, res) => {
     res.status(500).json({ message: "Failed to get user" });
   }
 });
+
+// Analytics, reports, recordings, conversations, email campaigns
+// IMPORTANT: Must be mounted AFTER unauthenticated /auth/* routes to avoid intercepting login
+router.use('/', requireClientAuth, clientPortalAnalyticsRouter);
 
 // ==================== CLIENT CAMPAIGNS ====================
 
@@ -551,8 +561,8 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
     const clientAccountId = req.clientUser!.clientAccountId;
 
     // Verify client has access to this campaign
-    // Check both UUID string match AND numeric ID for regularCampaignId
-    const [accessCheck] = await db
+    // Check clientCampaignAccess, work orders, AND intake requests
+    const [directAccess] = await db
       .select()
       .from(clientCampaignAccess)
       .where(
@@ -566,9 +576,42 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
       )
       .limit(1);
 
-    console.log('[CLIENT PORTAL] Access check result:', accessCheck ? 'GRANTED' : 'DENIED');
+    // Also check work orders (campaigns linked via work orders)
+    let workOrderAccess = null;
+    if (!directAccess) {
+      const [wo] = await db
+        .select({ id: workOrders.id })
+        .from(workOrders)
+        .where(
+          and(
+            eq(workOrders.clientAccountId, clientAccountId),
+            eq(workOrders.campaignId, campaignId)
+          )
+        )
+        .limit(1);
+      workOrderAccess = wo;
+    }
 
-    if (!accessCheck) {
+    // Also check intake requests
+    let intakeAccess = null;
+    if (!directAccess && !workOrderAccess) {
+      const [intake] = await db
+        .select({ id: campaignIntakeRequests.id })
+        .from(campaignIntakeRequests)
+        .where(
+          and(
+            eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+            eq(campaignIntakeRequests.campaignId, campaignId)
+          )
+        )
+        .limit(1);
+      intakeAccess = intake;
+    }
+
+    const hasAccess = directAccess || workOrderAccess || intakeAccess;
+    console.log('[CLIENT PORTAL] Access check result:', hasAccess ? 'GRANTED' : 'DENIED');
+
+    if (!hasAccess) {
       console.warn('[CLIENT PORTAL] 403 - No access to campaign', campaignId, 'for client', clientAccountId);
       return res.status(403).json({ message: "You don't have access to this campaign" });
     }
@@ -1815,6 +1858,50 @@ router.get('/admin/clients', requireAuth, requireRole('admin', 'campaign_manager
   }
 });
 
+// Get all work orders (admin view) - joins client + campaign info
+router.get('/admin/orders', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const orders = await db
+      .select({
+        order: workOrders,
+        client: clientAccounts,
+      })
+      .from(workOrders)
+      .innerJoin(clientAccounts, eq(workOrders.clientAccountId, clientAccounts.id))
+      .orderBy(desc(workOrders.createdAt));
+
+    // Enrich with campaign name if linked
+    const enriched = await Promise.all(
+      orders.map(async (row) => {
+        let campaign: any = { name: 'Unlinked', id: null };
+        if (row.order.campaignId) {
+          const [vc] = await db
+            .select({ id: verificationCampaigns.id, name: verificationCampaigns.name })
+            .from(verificationCampaigns)
+            .where(eq(verificationCampaigns.id, row.order.campaignId))
+            .limit(1);
+          if (vc) {
+            campaign = vc;
+          } else {
+            const [rc] = await db
+              .select({ id: campaigns.id, name: campaigns.name })
+              .from(campaigns)
+              .where(eq(campaigns.id, row.order.campaignId))
+              .limit(1);
+            if (rc) campaign = rc;
+          }
+        }
+        return { order: row.order, client: row.client, campaign };
+      })
+    );
+
+    res.json(enriched);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get admin orders error:', error);
+    res.status(500).json({ message: "Failed to get orders" });
+  }
+});
+
 /**
  * POST /admin/clients/:clientId/login-as
  * Admin impersonation: generate a client portal token for an admin to sign into a client's dashboard.
@@ -1982,18 +2069,11 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .where(eq(clientProjects.clientAccountId, client.id))
       .orderBy(desc(clientProjects.createdAt));
 
-    // Also fetch ALL work orders without filter to debug
-    const allWorkOrders = await db.select({ id: workOrders.id, title: workOrders.title, clientAccountId: workOrders.clientAccountId, status: workOrders.status }).from(workOrders);
-    console.log('[CLIENT PORTAL] Debug: client.id =', client.id, '| Total work orders in DB:', allWorkOrders.length, '| Work orders:', JSON.stringify(allWorkOrders.map(w => ({ id: w.id, title: w.title, clientAccountId: w.clientAccountId, status: w.status }))));
-
     const clientWorkOrders = await db
       .select()
       .from(workOrders)
       .where(eq(workOrders.clientAccountId, client.id))
       .orderBy(desc(workOrders.createdAt));
-
-    console.log('[CLIENT PORTAL ADMIN] Work orders for client', client.id, ':', clientWorkOrders.length, '| Projects:', projects.length);
-    console.log('[CLIENT PORTAL ADMIN] Response will include workOrders:', clientWorkOrders.map(w => ({ id: w.id, title: w.title })));
 
     // Get lead counts for each regular campaign (all approved + published leads for admin view)
     const regularCampaignIds = mappedRegularAccess.map(a => a.campaign.id);

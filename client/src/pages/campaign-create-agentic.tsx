@@ -59,6 +59,7 @@ export default function CampaignCreateAgenticPage() {
         open={showWizard}
         onOpenChange={handleClose}
         onSuccess={handleSuccess}
+        mode="admin"
       />
 
       {/* Fallback content when wizard is closed */}

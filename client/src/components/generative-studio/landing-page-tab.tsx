@@ -89,16 +89,16 @@ export default function LandingPageTab({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
       {/* Left panel - Form */}
-      <div className="border-r p-6 overflow-auto">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="border-r bg-muted/10 p-5 overflow-auto">
+        <div className="flex items-center gap-2.5 mb-5">
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-100 text-blue-600">
             <Globe className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold">Landing Page</h2>
-            <p className="text-xs text-muted-foreground">Generate and publish landing pages</p>
+            <h2 className="text-base font-semibold leading-none">Landing Page</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Generate and publish pages</p>
           </div>
         </div>
 

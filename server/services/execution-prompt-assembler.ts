@@ -241,7 +241,7 @@ function buildVoiceInstructions(variant: any): string {
   parts.push(`\nVOICE SETTINGS:
 - Provider: ${settings.voiceProvider || 'google'}
 - Voice: ${settings.voice || 'Kore'}
-- Max Duration: ${settings.maxCallDurationSeconds || 240} seconds`);
+- Max Duration: ${settings.maxCallDurationSeconds || 360} seconds`);
 
   parts.push(`\nBEHAVIOR GUIDELINES:
 1. Always identify yourself clearly after confirming you're speaking with the right person

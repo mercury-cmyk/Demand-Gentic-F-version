@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -17,8 +17,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import {
-  Image,
+  Image as ImageIcon,
   Globe,
   Mail,
   MessageSquare,
@@ -31,6 +33,9 @@ import {
   CheckCircle2,
   AlertCircle,
   FolderKanban,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeft,
 } from "lucide-react";
 import ImageGenerationTab from "@/components/generative-studio/image-generation-tab";
 import LandingPageTab from "@/components/generative-studio/landing-page-tab";
@@ -71,13 +76,119 @@ export interface OrgIntelligenceProfile {
     emailAngles?: { value?: string };
     callOpeners?: { value?: string };
   };
+  branding?: {
+    tone?: { value?: string };
+    keywords?: { value?: string };
+  };
+  events?: {
+    upcoming?: string | { value?: string };
+    strategy?: string | { value?: string };
+  };
+  forums?: {
+    list?: string | { value?: string };
+    engagement_strategy?: string | { value?: string };
+  };
 }
 
+function getIntelValue(field: any): string {
+  if (!field) return "";
+  if (typeof field === "string") return field;
+  return field.value || "";
+}
+
+const MODULES = [
+  {
+    id: "image",
+    label: "Images",
+    shortLabel: "Images",
+    icon: ImageIcon,
+    color: "violet",
+    description: "AI image generation",
+    bgClass: "bg-violet-500/10",
+    textClass: "text-violet-600",
+    activeClass: "bg-violet-500/10 text-violet-700 border-violet-200",
+    dotClass: "bg-violet-500",
+  },
+  {
+    id: "landing-page",
+    label: "Landing Pages",
+    shortLabel: "Pages",
+    icon: Globe,
+    color: "blue",
+    description: "Generate & publish pages",
+    bgClass: "bg-blue-500/10",
+    textClass: "text-blue-600",
+    activeClass: "bg-blue-500/10 text-blue-700 border-blue-200",
+    dotClass: "bg-blue-500",
+  },
+  {
+    id: "email",
+    label: "Email Templates",
+    shortLabel: "Emails",
+    icon: Mail,
+    color: "emerald",
+    description: "Professional email templates",
+    bgClass: "bg-emerald-500/10",
+    textClass: "text-emerald-600",
+    activeClass: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
+    dotClass: "bg-emerald-500",
+  },
+  {
+    id: "blog",
+    label: "Blog Posts",
+    shortLabel: "Blogs",
+    icon: FileText,
+    color: "orange",
+    description: "SEO-optimized blog posts",
+    bgClass: "bg-orange-500/10",
+    textClass: "text-orange-600",
+    activeClass: "bg-orange-500/10 text-orange-700 border-orange-200",
+    dotClass: "bg-orange-500",
+  },
+  {
+    id: "ebook",
+    label: "eBooks",
+    shortLabel: "eBooks",
+    icon: BookOpen,
+    color: "rose",
+    description: "Multi-chapter eBooks",
+    bgClass: "bg-rose-500/10",
+    textClass: "text-rose-600",
+    activeClass: "bg-rose-500/10 text-rose-700 border-rose-200",
+    dotClass: "bg-rose-500",
+  },
+  {
+    id: "solution-brief",
+    label: "Solution Briefs",
+    shortLabel: "Briefs",
+    icon: Briefcase,
+    color: "teal",
+    description: "Professional solution briefs",
+    bgClass: "bg-teal-500/10",
+    textClass: "text-teal-600",
+    activeClass: "bg-teal-500/10 text-teal-700 border-teal-200",
+    dotClass: "bg-teal-500",
+  },
+  {
+    id: "chat",
+    label: "Chat Assistant",
+    shortLabel: "Chat",
+    icon: MessageSquare,
+    color: "amber",
+    description: "Content strategy assistant",
+    bgClass: "bg-amber-500/10",
+    textClass: "text-amber-600",
+    activeClass: "bg-amber-500/10 text-amber-700 border-amber-200",
+    dotClass: "bg-amber-500",
+  },
+] as const;
+
 export default function GenerativeStudioPage() {
-  const [activeTab, setActiveTab] = useState("image");
+  const [activeModule, setActiveModule] = useState("image");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Client Portal Integration
   const clientPortalToken = localStorage.getItem("clientPortalToken");
@@ -95,7 +206,6 @@ export default function GenerativeStudioPage() {
     enabled: !!clientPortalToken
   });
 
-  // Force selection for client portal users
   useEffect(() => {
     if (clientPortalToken && clientOrgData?.organization?.id) {
       setSelectedOrgId(clientOrgData.organization.id);
@@ -105,8 +215,7 @@ export default function GenerativeStudioPage() {
   const { data: brandKitsData } = useQuery<{ brandKits?: any[] } | any[]>({
     queryKey: ['brandKits'],
     queryFn: async () => {
-      const res = await fetch('/api/email-builder/brand-kits');
-      if (!res.ok) throw new Error('Failed to fetch brand kits');
+      const res = await apiRequest('GET', '/api/email-builder/brand-kits');
       const data = await res.json();
       return Array.isArray(data) ? { brandKits: data } : data;
     },
@@ -158,7 +267,6 @@ export default function GenerativeStudioPage() {
     setSelectedProjectId(orgProjects[0]?.id || null);
   }, [selectedOrgId, selectedProjectId, orgProjects]);
 
-  // Fetch Organization Intelligence profile
   const { data: orgIntelData, isLoading: orgIntelLoading } = useQuery<{
     success?: boolean;
     profile: OrgIntelligenceProfile | null;
@@ -175,13 +283,14 @@ export default function GenerativeStudioPage() {
   const hasOrgIntel = !!orgProfile?.identity?.legalName?.value;
   const needsOrgSelection = !selectedOrgId;
 
-  // Build a summary string for tooltip
   const orgSummary = orgProfile
     ? [
-        orgProfile.identity?.legalName?.value && `Company: ${orgProfile.identity.legalName.value}`,
-        orgProfile.identity?.industry?.value && `Industry: ${orgProfile.identity.industry.value}`,
-        orgProfile.icp?.personas?.value && `Target Personas: ${orgProfile.icp.personas.value}`,
-        orgProfile.positioning?.oneLiner?.value && `Positioning: ${orgProfile.positioning.oneLiner.value}`,
+        getIntelValue(orgProfile.identity?.legalName) && `Company: ${getIntelValue(orgProfile.identity?.legalName)}`,
+        getIntelValue(orgProfile.identity?.industry) && `Industry: ${getIntelValue(orgProfile.identity?.industry)}`,
+        getIntelValue(orgProfile.icp?.personas) && `Target Personas: ${getIntelValue(orgProfile.icp?.personas)}`,
+        getIntelValue(orgProfile.positioning?.oneLiner) && `Positioning: ${getIntelValue(orgProfile.positioning?.oneLiner)}`,
+        getIntelValue(orgProfile.events?.upcoming) && `Events: ${getIntelValue(orgProfile.events?.upcoming)}`,
+        getIntelValue(orgProfile.forums?.list) && `Communities: ${getIntelValue(orgProfile.forums?.list)}`,
       ].filter(Boolean).join("\n")
     : "";
 
@@ -192,121 +301,44 @@ export default function GenerativeStudioPage() {
 
   const hasScope = !!selectedOrgId;
 
+  const currentModule = MODULES.find((m) => m.id === activeModule) || MODULES[0];
+
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b">
+    <div className="h-full flex flex-col bg-background">
+      {/* Compact Top Bar */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 text-white">
-            <Sparkles className="w-5 h-5" />
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-sm">
+            <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Generative Studio</h1>
-            <p className="text-sm text-muted-foreground">
-              AI-powered content creation hub for images, pages, emails, blogs, and more
-            </p>
+            <h1 className="text-lg font-semibold tracking-tight leading-none">Creative Studio</h1>
+            <p className="text-[11px] text-muted-foreground mt-0.5">AI-powered content creation</p>
           </div>
         </div>
+
         <div className="flex items-center gap-2">
-          {/* Organization Intelligence Status */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge
-                  variant={hasOrgIntel ? "default" : "secondary"}
-                  className={`gap-1.5 cursor-default ${
-                    hasOrgIntel
-                      ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
-                      : "bg-amber-50 text-amber-600 hover:bg-amber-50 border-amber-200"
-                  }`}
-                >
-                  {needsOrgSelection ? (
-                    <>
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      Select Organization
-                    </>
-                  ) : orgIntelLoading ? (
-                    <>
-                      <Brain className="w-3.5 h-3.5 animate-pulse" />
-                      Loading OI...
-                    </>
-                  ) : hasOrgIntel ? (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Org Intelligence Active
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      No Org Intelligence
-                    </>
-                  )}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-sm">
-                {needsOrgSelection ? (
-                  <p className="text-xs">
-                    Select an organization to activate organization-specific intelligence.
-                  </p>
-                ) : hasOrgIntel ? (
-                  <div className="space-y-1">
-                    <p className="font-medium text-xs">Organization Intelligence is enhancing all generations</p>
-                    <p className="text-xs whitespace-pre-line text-muted-foreground">{orgSummary}</p>
-                  </div>
-                ) : (
-                  <p className="text-xs">
-                    No organization intelligence profile found. Go to AI Studio &gt; Organization Intelligence to analyze your organization for better content generation.
-                  </p>
-                )}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
-            <SheetTrigger asChild>
-              <Button variant="outline" size="sm">
-                <History className="w-4 h-4 mr-2" />
-                History
-              </Button>
-            </SheetTrigger>
-            <SheetContent className="w-[400px]">
-              <ProjectHistoryPanel
-                organizationId={selectedOrgId || undefined}
-                clientProjectId={selectedProjectId || undefined}
-                organizationName={orgProfile?.identity?.legalName?.value}
-                projectName={selectedProject?.name}
-              />
-            </SheetContent>
-          </Sheet>
-        </div>
-      </div>
-
-      {/* Organization/Project Context */}
-      <div className="border-b px-6 py-4 bg-gradient-to-r from-slate-50 to-white">
-        <div className="flex flex-wrap items-center gap-4 justify-between">
-          <OrganizationSelector
-            selectedOrgId={selectedOrgId}
-            onOrgChange={setSelectedOrgId}
-            disabled={!!clientPortalToken}
-          />
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <FolderKanban className="h-4 w-4" />
-              Project:
-            </div>
+          {/* Org/Project Context - Compact */}
+          <div className="flex items-center gap-2 mr-1">
+            <OrganizationSelector
+              selectedOrgId={selectedOrgId}
+              onOrgChange={setSelectedOrgId}
+              disabled={!!clientPortalToken}
+            />
             <Select
               value={selectedProjectId || ""}
               onValueChange={(value) => setSelectedProjectId(value || null)}
               disabled={!selectedOrgId || orgProjectsLoading}
             >
-              <SelectTrigger className="w-[240px]">
+              <SelectTrigger className="w-[180px] h-8 text-xs">
+                <FolderKanban className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
                 <SelectValue
                   placeholder={
                     orgProjectsLoading
-                      ? "Loading projects..."
+                      ? "Loading..."
                       : selectedOrgId
                       ? "Select project"
-                      : "Select organization first"
+                      : "Org first"
                   }
                 />
               </SelectTrigger>
@@ -324,104 +356,221 @@ export default function GenerativeStudioPage() {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Org Intelligence Badge */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                    hasOrgIntel
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : needsOrgSelection
+                      ? "bg-muted text-muted-foreground border-border"
+                      : "bg-amber-50 text-amber-600 border-amber-200"
+                  )}
+                >
+                  {needsOrgSelection ? (
+                    <AlertCircle className="w-3 h-3" />
+                  ) : orgIntelLoading ? (
+                    <Brain className="w-3 h-3 animate-pulse" />
+                  ) : hasOrgIntel ? (
+                    <CheckCircle2 className="w-3 h-3" />
+                  ) : (
+                    <AlertCircle className="w-3 h-3" />
+                  )}
+                  <span className="hidden xl:inline">
+                    {needsOrgSelection
+                      ? "Select Org"
+                      : orgIntelLoading
+                      ? "Loading..."
+                      : hasOrgIntel
+                      ? "OI Active"
+                      : "No OI"}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-sm">
+                {needsOrgSelection ? (
+                  <p className="text-xs">
+                    Select an organization to activate organization-specific intelligence.
+                  </p>
+                ) : hasOrgIntel ? (
+                  <div className="space-y-1">
+                    <p className="font-medium text-xs">Organization Intelligence is enhancing all generations</p>
+                    <p className="text-xs whitespace-pre-line text-muted-foreground">{orgSummary}</p>
+                  </div>
+                ) : (
+                  <p className="text-xs">
+                    No organization intelligence profile found. Go to AI Studio &gt; Organization Intelligence to analyze.
+                  </p>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* History Button */}
+          <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 px-2.5">
+                <History className="w-4 h-4" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent className="w-[400px]">
+              <ProjectHistoryPanel
+                organizationId={selectedOrgId || undefined}
+                clientProjectId={selectedProjectId || undefined}
+                organizationName={orgProfile?.identity?.legalName?.value}
+                projectName={selectedProject?.name}
+              />
+            </SheetContent>
+          </Sheet>
         </div>
-        {!hasScope && (
-          <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-            <AlertCircle className="h-3.5 w-3.5" />
-            Select an organization to unlock Generative Studio content creation.
-          </div>
-        )}
       </div>
 
-      {/* Tabbed Content */}
-      <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        <div className="border-b px-6">
-          <TabsList className="h-11 bg-transparent gap-1">
-            <TabsTrigger value="image" className="gap-1.5 data-[state=active]:bg-violet-50 data-[state=active]:text-violet-700">
-              <Image className="w-4 h-4" /> Images
-            </TabsTrigger>
-            <TabsTrigger value="landing-page" className="gap-1.5 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-              <Globe className="w-4 h-4" /> Landing Pages
-            </TabsTrigger>
-            <TabsTrigger value="email" className="gap-1.5 data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-              <Mail className="w-4 h-4" /> Email Templates
-            </TabsTrigger>
-            <TabsTrigger value="blog" className="gap-1.5 data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-              <FileText className="w-4 h-4" /> Blog Posts
-            </TabsTrigger>
-            <TabsTrigger value="ebook" className="gap-1.5 data-[state=active]:bg-rose-50 data-[state=active]:text-rose-700">
-              <BookOpen className="w-4 h-4" /> eBooks
-            </TabsTrigger>
-            <TabsTrigger value="solution-brief" className="gap-1.5 data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700">
-              <Briefcase className="w-4 h-4" /> Solution Briefs
-            </TabsTrigger>
-            <TabsTrigger value="chat" className="gap-1.5 data-[state=active]:bg-amber-50 data-[state=active]:text-amber-700">
-              <MessageSquare className="w-4 h-4" /> Chat
-            </TabsTrigger>
-          </TabsList>
+      {/* No Org Warning */}
+      {!hasScope && (
+        <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 px-4 py-1.5">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          Select an organization above to unlock Creative Studio content creation.
+        </div>
+      )}
+
+      {/* Main Content: Sidebar + Module */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar Navigation */}
+        <div
+          className={cn(
+            "border-r bg-muted/30 flex flex-col transition-all duration-200",
+            sidebarCollapsed ? "w-14" : "w-52"
+          )}
+        >
+          <ScrollArea className="flex-1 py-2">
+            <div className="px-2 space-y-0.5">
+              {MODULES.map((mod) => {
+                const Icon = mod.icon;
+                const isActive = activeModule === mod.id;
+                return (
+                  <TooltipProvider key={mod.id} delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => setActiveModule(mod.id)}
+                          className={cn(
+                            "w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
+                            "hover:bg-accent/60",
+                            isActive
+                              ? cn(mod.activeClass, "border shadow-sm")
+                              : "text-muted-foreground border border-transparent"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "flex items-center justify-center w-7 h-7 rounded-md shrink-0 transition-colors",
+                              isActive ? mod.bgClass : "bg-transparent"
+                            )}
+                          >
+                            <Icon className={cn("w-4 h-4", isActive ? mod.textClass : "")} />
+                          </div>
+                          {!sidebarCollapsed && (
+                            <>
+                              <span className="truncate flex-1 text-left">{mod.label}</span>
+                              {isActive && (
+                                <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                              )}
+                            </>
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      {sidebarCollapsed && (
+                        <TooltipContent side="right" sideOffset={8}>
+                          <p className="font-medium">{mod.label}</p>
+                          <p className="text-xs text-muted-foreground">{mod.description}</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
+                );
+              })}
+            </div>
+          </ScrollArea>
+
+          {/* Sidebar Collapse Toggle */}
+          <div className="border-t p-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full h-7 px-2"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            >
+              {sidebarCollapsed ? (
+                <PanelLeft className="w-4 h-4" />
+              ) : (
+                <PanelLeftClose className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-auto">
-          <TabsContent value="image" className="h-full mt-0 p-0">
+        {/* Module Content Area */}
+        <div className="flex-1 overflow-hidden">
+          {activeModule === "image" && (
             <ImageGenerationTab
               brandKits={brandKits}
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
             />
-          </TabsContent>
-          <TabsContent value="landing-page" className="h-full mt-0 p-0">
+          )}
+          {activeModule === "landing-page" && (
             <LandingPageTab
               brandKits={brandKits}
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
             />
-          </TabsContent>
-          <TabsContent value="email" className="h-full mt-0 p-0">
+          )}
+          {activeModule === "email" && (
             <EmailTemplateTab
               brandKits={brandKits}
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
             />
-          </TabsContent>
-          <TabsContent value="blog" className="h-full mt-0 p-0">
+          )}
+          {activeModule === "blog" && (
             <BlogPostTab
               brandKits={brandKits}
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
             />
-          </TabsContent>
-          <TabsContent value="ebook" className="h-full mt-0 p-0">
+          )}
+          {activeModule === "ebook" && (
             <EbookTab
               brandKits={brandKits}
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
             />
-          </TabsContent>
-          <TabsContent value="solution-brief" className="h-full mt-0 p-0">
+          )}
+          {activeModule === "solution-brief" && (
             <SolutionBriefTab
               brandKits={brandKits}
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
             />
-          </TabsContent>
-          <TabsContent value="chat" className="h-full mt-0 p-0">
+          )}
+          {activeModule === "chat" && (
             <ChatTab
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
             />
-          </TabsContent>
+          )}
         </div>
-      </Tabs>
+      </div>
     </div>
   );
 }

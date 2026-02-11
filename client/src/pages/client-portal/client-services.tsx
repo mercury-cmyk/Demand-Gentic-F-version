@@ -17,13 +17,56 @@ import {
   Bot,
   Wand2,
   Layers,
-  Brain
+  Brain,
+  Rocket,
+  BarChart,
+  Settings,
+  HelpCircle,
+  Presentation,
+  Briefcase
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { getClientPortalUser } from "@/lib/client-portal-session";
 
 export default function ClientServices() {
+  const user = getClientPortalUser();
+  const clientName = user?.firstName || user?.clientAccountName || 'Partner';
+  const isArgyle = user?.clientAccountName === 'Argyle' || clientName === 'Argyle';
+
+  const steps = [
+    {
+      icon: Settings,
+      title: "1. Configure Your Intelligence",
+      description: "Start by setting up your Organization Intelligence. Define your Brand Voice, Ideal Customer Profile (ICP), and Value Proposition. This ensures all AI agents speak your language.",
+      action: "Go to Intelligence",
+      link: "/client-portal/intelligence"
+    },
+    {
+      icon: Rocket,
+      title: "2. Launch a Campaign",
+      description: "Create a new campaign targeting your specific audience. Choose from Voice, Email, or LinkedIn channels, or orchestrate them all together.",
+      action: "View Campaigns",
+      link: "/client-portal/dashboard?tab=campaigns"
+    },
+    {
+      icon: Users,
+      title: "3. Manage Leads & Opportunities",
+      description: "As leads come in, they are qualified by our AI. View them in your dashboard, listen to call recordings, and track their journey through the pipeline.",
+      action: "View Leads",
+      link: "/client-portal/dashboard?tab=leads"
+    },
+    {
+      icon: BarChart,
+      title: "4. Optimize Performance",
+      description: "Review comprehensive analytics on call quality, email open rates, and conversion metrics. Use these insights to refine your strategy.",
+      action: "View Analytics",
+      link: "/client-portal/analytics"
+    }
+  ];
+
   const services = [
     {
       icon: Target,
@@ -97,15 +140,6 @@ export default function ClientServices() {
       ideal: "GTM strategy",
       color: "cyan",
     },
-    {
-      icon: Database,
-      badge: "Data",
-      title: "B2B Data & Enrichment",
-      description: "Access our 70M+ verified contact database or enrich your existing data with our verification engine.",
-      features: ["Custom list building", "Database enrichment", "Continuous hygiene"],
-      ideal: "Campaign fuel",
-      color: "slate",
-    },
   ];
 
   const agents = [
@@ -136,7 +170,7 @@ export default function ClientServices() {
     {
       icon: Wand2,
       title: "Content Agent",
-      subtitle: "Generative Studio",
+      subtitle: "Creative Studio",
       description: "Creates complete campaign assets — landing pages, email templates, blog posts, eBooks, solution briefs, and images — all in your brand voice.",
       capabilities: ["7 content engines", "One-click publish", "AI-powered refinement"],
       color: "violet",
@@ -161,36 +195,137 @@ export default function ClientServices() {
 
   return (
     <div className="space-y-8 p-6 max-w-[1600px] mx-auto min-h-screen">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight mb-2">Our Services</h1>
-        <p className="text-muted-foreground">
-          Explore the full range of DemandGentic.ai services available to supercharge your pipeline.
-        </p>
+      
+      {/* Personalized Welcome Header */}
+      <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-xl p-8 text-white border border-slate-700 shadow-xl">
+        <div className="max-w-3xl">
+          <Badge className="mb-4 bg-indigo-500/20 text-indigo-200 border-indigo-500/30 hover:bg-indigo-500/30">Client Guide</Badge>
+          <h1 className="text-4xl font-bold tracking-tight mb-4">Welcome, {clientName}</h1>
+          <p className="text-lg text-slate-300 leading-relaxed">
+            This guide is designed to help you get the most out of DemandGentic.ai. 
+            Follow the steps below to orchestrate your campaigns, manage your intelligence, and drive pipeline growth.
+          </p>
+        </div>
       </div>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {services.map((service, i) => (
-          <Card key={i} className="border hover:shadow-md transition-all">
-            <CardContent className="p-6">
-              <div className={`h-12 w-12 rounded-xl bg-${service.color}-500/10 flex items-center justify-center mb-4`}>
-                <service.icon className={`h-6 w-6 text-${service.color}-600`} />
-              </div>
-              <Badge className={`mb-4 bg-${service.color}-50 text-${service.color}-700 border-${service.color}-100`}>
-                {service.badge}
+      {/* Argyle Custom Integrated Strategy Module */}
+      {isArgyle && (
+        <Card className="bg-gradient-to-br from-indigo-50 via-white to-blue-50 border-indigo-200 shadow-md relative overflow-hidden">
+          {/* Decorative background blob */}
+          <div className="absolute top-0 right-0 p-32 bg-indigo-500/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+          
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Badge variant="secondary" className="bg-indigo-100 text-indigo-700 border-indigo-200">
+                <Sparkles className="h-3 w-3 mr-1 fill-indigo-400" />
+                Strategic Partnership
               </Badge>
-              <h3 className="text-lg font-bold mb-2">{service.title}</h3>
-              <p className="text-sm text-muted-foreground mb-4">{service.description}</p>
-              <ul className="space-y-2 mb-6">
-                {service.features.map((feature, j) => (
-                  <li key={j} className="flex items-center gap-2 text-xs">
-                    <CheckCircle2 className={`h-3 w-3 text-${service.color}-500`} />
-                    <span className="text-muted-foreground">{feature}</span>
-                  </li>
-                ))}
-              </ul>
+            </div>
+            <CardTitle className="text-3xl font-bold text-slate-900">
+              Integrated Growth Engine
+            </CardTitle>
+            <CardDescription className="text-lg text-slate-600 max-w-2xl">
+              Unifying your inside sales capabilities with intelligent event recruitment to create a closed-loop revenue ecosystem.
+            </CardDescription>
+          </CardHeader>
+          
+          <CardContent className="grid md:grid-cols-3 gap-8 relative z-10 pt-4">
+            {/* Column 1: Inside Sales */}
+            <div className="flex flex-col gap-4 p-4 rounded-xl bg-white/60 border border-white/50 shadow-sm transition-all hover:bg-white hover:shadow-md">
+              <div className="h-12 w-12 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                <Briefcase className="h-6 w-6 text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">Inside Sales Integration</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  We empower your inside sales team to sell <span className="font-semibold text-blue-700">digital forums and programs</span> to enterprises more effectively. Our agents identify high-intent prospects and deliver qualified opportunities directly to your pipeline.
+                </p>
+              </div>
+            </div>
+
+            {/* Column 2: Event Recruitment */}
+            <div className="flex flex-col gap-4 p-4 rounded-xl bg-white/60 border border-white/50 shadow-sm transition-all hover:bg-white hover:shadow-md">
+              <div className="h-12 w-12 rounded-lg bg-pink-100 flex items-center justify-center shrink-0">
+                <Users className="h-6 w-6 text-pink-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">Event Audience Recruitment</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Our programs seamlessly align with your <span className="font-semibold text-pink-700">campaign execution</span> to recruit the exact right audience for your events. We handle the outreach, ensuring your events are filled with relevant decision-makers.
+                </p>
+              </div>
+            </div>
+
+            {/* Column 3: The Synergy */}
+            <div className="flex flex-col gap-4 p-4 rounded-xl bg-indigo-600 text-white shadow-xl transform scale-105 border-indigo-500">
+              <div className="h-12 w-12 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                <Layers className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold mb-2">The Integrated Synergy</h3>
+                <p className="text-sm text-indigo-100 leading-relaxed">
+                  Combining sales acceleration with audience acquisition creates a virtuous cycle. Enterprises buying programs become event speakers; event attendees become buyers.
+                </p>
+                <div className="mt-4 pt-4 border-t border-white/20">
+                  <p className="font-medium text-white flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    We make both ways work for you.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* How It Works - Steps */}
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {steps.map((step, i) => (
+          <Card key={i} className="border-slate-200 shadow-sm hover:shadow-md transition-all">
+            <CardContent className="p-6 flex flex-col h-full">
+              <div className="h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center mb-4">
+                <step.icon className="h-6 w-6 text-indigo-600" />
+              </div>
+              <h3 className="text-lg font-bold mb-2">{step.title}</h3>
+              <p className="text-sm text-muted-foreground mb-4 flex-grow">{step.description}</p>
+              <Button asChild variant="outline" className="w-full mt-auto">
+                <a href={step.link}>{step.action}</a>
+              </Button>
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="py-8">
+        <h2 className="text-2xl font-bold tracking-tight mb-6 flex items-center gap-2">
+          <Sparkles className="h-6 w-6 text-indigo-600" />
+          Service Catalog
+        </h2>
+        
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {services.map((service, i) => (
+            <Card key={i} className="border hover:shadow-md transition-all">
+              <CardContent className="p-6">
+                <div className={`h-12 w-12 rounded-xl bg-${service.color}-500/10 flex items-center justify-center mb-4`}>
+                  <service.icon className={`h-6 w-6 text-${service.color}-600`} />
+                </div>
+                <Badge className={`mb-4 bg-${service.color}-50 text-${service.color}-700 border-${service.color}-100`}>
+                  {service.badge}
+                </Badge>
+                <h3 className="text-lg font-bold mb-2">{service.title}</h3>
+                <p className="text-sm text-muted-foreground mb-4">{service.description}</p>
+                <ul className="space-y-2 mb-6">
+                  {service.features.map((feature, j) => (
+                    <li key={j} className="flex items-center gap-2 text-xs">
+                      <CheckCircle2 className={`h-3 w-3 text-${service.color}-500`} />
+                      <span className="text-muted-foreground">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
       <div className="pt-8 border-t">
@@ -240,6 +375,12 @@ export default function ClientServices() {
                     {["Organization Intelligence", "Problem Framework", "Compliance First", "Reasoning First", "Brand Voice"].map((item, i) => (
                       <Badge key={i} className="bg-white/10 border-white/20 text-white">{item}</Badge>
                     ))}
+                  </div>
+                  <div className="mt-6">
+                     <Button variant="secondary" className="gap-2">
+                        <HelpCircle className="h-4 w-4" />
+                        Get Support
+                     </Button>
                   </div>
                 </div>
                 <div className="space-y-4">

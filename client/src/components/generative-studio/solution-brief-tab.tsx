@@ -112,16 +112,16 @@ export default function SolutionBriefTab({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
       {/* Left panel - Form */}
-      <div className="border-r p-6 overflow-auto">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="border-r bg-muted/10 p-5 overflow-auto">
+        <div className="flex items-center gap-2.5 mb-5">
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-teal-100 text-teal-600">
             <Briefcase className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold">Solution Brief</h2>
-            <p className="text-xs text-muted-foreground">Generate professional solution briefs</p>
+            <h2 className="text-base font-semibold leading-none">Solution Brief</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Professional solution briefs</p>
           </div>
         </div>
 
