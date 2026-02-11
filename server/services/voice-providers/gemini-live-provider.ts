@@ -67,6 +67,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // Audio tracking
   private audioBytesSent: number = 0;
   private audioPlaybackMs: number = 0;
+  private backpressureDroppedFrames: number = 0;
 
   // Accumulated transcript for the current turn
   private currentTranscript: string = '';
@@ -218,7 +219,56 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     });
   }
 
+  /**
+   * Connect with retry logic. Re-authenticates on failure (for Vertex AI).
+   * Max 2 retries (3 total attempts) with exponential backoff.
+   */
+  async connectWithRetry(maxRetries: number = 2): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          const backoffMs = Math.pow(2, attempt - 1) * 1000;
+          console.log(`${LOG_PREFIX} Retry attempt ${attempt}/${maxRetries} after ${backoffMs}ms backoff...`);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+
+          // Force re-authentication by clearing cached auth
+          if (this.auth) {
+            console.log(`${LOG_PREFIX} Refreshing OAuth token for retry...`);
+            this.auth = null;
+          }
+
+          // Clean up stale WebSocket from previous attempt
+          if (this.ws) {
+            try { this.ws.close(); } catch (_) {}
+            this.ws = null;
+          }
+          this.setupComplete = false;
+        }
+
+        await this.connect();
+        return; // Success
+      } catch (error: any) {
+        lastError = error;
+        console.error(`${LOG_PREFIX} Connection attempt ${attempt + 1}/${maxRetries + 1} failed:`, error.message);
+
+        // Don't retry on definitive config errors
+        if (error.message?.includes('required') && !error.message?.includes('timeout')) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error('Gemini connection failed after retries');
+  }
+
   async disconnect(): Promise<void> {
+    // Log audio quality stats at disconnect
+    if (this.backpressureDroppedFrames > 0) {
+      console.warn(`${LOG_PREFIX} ⚠️ Audio quality: ${this.backpressureDroppedFrames} frames dropped due to backpressure during session (bytes sent: ${this.audioBytesSent})`);
+    }
+
     // Stop Speech-to-Text first
     this.stopSpeechToText();
 
@@ -455,11 +505,12 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     // Check for backpressure before sending (rate-limit the warning)
     const bufferSize = this.ws.bufferedAmount;
-    const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB
+    const MAX_BUFFER_SIZE = 2 * 1024 * 1024; // 2MB (increased from 1MB to absorb network jitter)
     if (bufferSize > MAX_BUFFER_SIZE) {
+      this.backpressureDroppedFrames++;
       const now = Date.now();
       if (now - this.lastBackpressureWarnAt > 2000) {
-        console.warn(`${LOG_PREFIX} ⚠️ Gemini WS backpressure: ${bufferSize}B buffered, dropping frame`);
+        console.warn(`${LOG_PREFIX} ⚠️ Gemini WS backpressure: ${bufferSize}B buffered, dropping frame (total dropped: ${this.backpressureDroppedFrames})`);
         this.lastBackpressureWarnAt = now;
       }
       return;
@@ -875,6 +926,52 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     console.log(`${LOG_PREFIX} Opening message sent (turnComplete=true, minimal trigger): "${text.substring(0, 50)}..."`);
   }
 
+  /**
+   * Send a contextual opening based on what was heard during the initial listening window.
+   * Instead of a generic greeting, this adapts to whether the right party answered,
+   * a gatekeeper answered, or something else was detected.
+   *
+   * @param defaultGreeting - The default opening script (used for contact name)
+   * @param callerType - 'right_party' | 'gatekeeper' — what was detected
+   * @param heardText - What the caller said during the listening window
+   */
+  sendContextualOpening(defaultGreeting: string, callerType: 'right_party' | 'gatekeeper', heardText: string): void {
+    console.log(`${LOG_PREFIX} 🎙️ sendContextualOpening called: type=${callerType}, heard="${heardText.substring(0, 80)}"`);
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
+      console.warn(`${LOG_PREFIX} ❌ Cannot send contextual opening - not ready`);
+      return;
+    }
+
+    let triggerText: string;
+    if (callerType === 'right_party') {
+      // The contact identified themselves — skip identity check, go straight to introduction
+      triggerText = `[CALL CONNECTED] The person who answered has already identified themselves as the contact. They said: "${heardText}".
+Do NOT ask "Am I speaking with..." — identity is already confirmed.
+Your response MUST be: Greet them warmly by first name, introduce yourself and your organization, then politely ask if they have a moment for a quick conversation (about a minute). Be warm, respectful, and concise. Then STOP and LISTEN for their response.`;
+    } else {
+      // Gatekeeper detected — ask for the contact
+      triggerText = `[CALL CONNECTED] A gatekeeper/receptionist answered. They said: "${heardText}".
+Respond naturally to their question. If they asked "who is calling" or similar, identify yourself briefly. Then politely ask to be connected to the contact. Keep it concise and professional.`;
+    }
+
+    const message = this.useVertexAI
+      ? {
+          clientContent: {
+            turns: [{ role: 'user', parts: [{ text: triggerText }] }],
+            turnComplete: true,
+          },
+        }
+      : {
+          client_content: {
+            turns: [{ role: 'user', parts: [{ text: triggerText }] }],
+            turn_complete: true,
+          },
+        };
+
+    this.ws.send(JSON.stringify(message));
+    console.log(`${LOG_PREFIX} Contextual opening sent (type=${callerType}): "${triggerText.substring(0, 80)}..."`);
+  }
+
   private handleMessage(data: string): void {
     try {
       const message = JSON.parse(data);
@@ -1038,11 +1135,47 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
           this.consecutiveRepetitions++;
           console.warn(`${LOG_PREFIX} ⚠️ REPETITION DETECTED (${this.consecutiveRepetitions}x) - suppressing: "${text.substring(0, 50)}..."`);
 
-          // After 2+ consecutive repetitions, interrupt Gemini to break the loop
-          if (this.consecutiveRepetitions >= 2) {
-            console.warn(`${LOG_PREFIX} 🛑 Breaking repetition loop - sending cancel to Gemini`);
+          // Escalating recovery: each level is more aggressive
+          if (this.consecutiveRepetitions === 1) {
+            // Level 1: Just suppress output (handled by not emitting below)
+            console.warn(`${LOG_PREFIX} Level 1: Suppressing repeated output`);
+          } else if (this.consecutiveRepetitions === 2) {
+            // Level 2: Cancel + gentle redirect
+            console.warn(`${LOG_PREFIX} Level 2: Cancel + redirect`);
             this.cancelResponse();
+            setTimeout(() => {
+              this.sendTextMessage(
+                "[SYSTEM UPDATE: The prospect didn't respond clearly to your last message. " +
+                "Do NOT repeat what you just said. Try a different approach - " +
+                "introduce yourself differently or ask a different opening question.]"
+              );
+            }, 200);
+          } else if (this.consecutiveRepetitions >= 3 && this.consecutiveRepetitions < 5) {
+            // Level 3: Aggressive redirect
+            console.warn(`${LOG_PREFIX} Level 3: Aggressive redirect (${this.consecutiveRepetitions}x)`);
+            this.cancelResponse();
+            setTimeout(() => {
+              this.sendTextMessage(
+                "[SYSTEM UPDATE: STOP. You are repeating yourself in a loop. " +
+                "Your previous message was NOT heard. Do NOT say it again. " +
+                "Instead, pause briefly and then say something completely different. " +
+                "Try: 'I hope I'm not catching you at a bad time' or simply wait for the prospect to speak first.]"
+              );
+            }, 200);
+          } else if (this.consecutiveRepetitions >= 5) {
+            // Level 4: Nuclear option - reset detection + strong redirect
+            console.warn(`${LOG_PREFIX} Level 4: Nuclear reset (${this.consecutiveRepetitions}x)`);
+            this.cancelResponse();
+            this.recentPhrases = [];
             this.consecutiveRepetitions = 0;
+            setTimeout(() => {
+              this.sendTextMessage(
+                "[SYSTEM UPDATE: CRITICAL - You have been stuck repeating the same greeting. " +
+                "The conversation must move forward. Stay SILENT for a moment and wait " +
+                "for the other person to speak. When they do, respond to what they actually say. " +
+                "Do NOT introduce yourself again.]"
+              );
+            }, 200);
           }
         } else {
           this.consecutiveRepetitions = 0;
@@ -1153,10 +1286,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   /**
    * Get audio statistics
    */
-  getAudioStats(): { bytesSent: number; playbackMs: number } {
+  getAudioStats(): { bytesSent: number; playbackMs: number; backpressureDroppedFrames: number } {
     return {
       bytesSent: this.audioBytesSent,
       playbackMs: this.audioPlaybackMs,
+      backpressureDroppedFrames: this.backpressureDroppedFrames,
     };
   }
 

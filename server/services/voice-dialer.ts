@@ -2365,7 +2365,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       // Gemini connection
       (async () => {
         console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
-        await provider.connect();
+        await provider.connectWithRetry(2);
         console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API (+${Date.now() - initStartTime}ms)`);
         return true;
       })(),
@@ -2512,17 +2512,27 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       ? configuredSilenceMs
       : 350; // Faster response after user stops speaking
 
-    await provider.configure({
+    const geminiConfig = {
       systemPrompt,
       voice: geminiVoice,
       inputAudioFormat: session.audioFormat,
       outputAudioFormat: session.audioFormat,
       tools: providerTools,
-      turnDetection: { type: 'server_vad', threshold: 0.4, silenceDurationMs: geminiSilenceMs }, // Faster end-of-turn detection for responsive replies
+      turnDetection: { type: 'server_vad' as const, threshold: 0.4, silenceDurationMs: geminiSilenceMs },
       temperature: 0.7,
       maxResponseTokens: costSettings.maxResponseTokens || 512,
       transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,
-    });
+    };
+
+    try {
+      await provider.configure(geminiConfig);
+    } catch (configError: any) {
+      console.warn(`${LOG_PREFIX} First configure() failed: ${configError.message} - attempting reconnect...`);
+      await provider.disconnect();
+      await provider.connectWithRetry(1);
+      await provider.configure(geminiConfig);
+      console.log(`${LOG_PREFIX} Reconnect + reconfigure succeeded`);
+    }
     console.log(`${LOG_PREFIX} ✅ Gemini configured (+${Date.now() - initStartTime}ms)`);
 
     // Track Gemini connection timing
@@ -2583,6 +2593,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         confidence: audioType.confidence,
       });
       session.audioDetection.lastTranscriptCheckTime = new Date();
+      // CRITICAL FIX: Update lastUserSpeechTime for Gemini calls
+      // Previously only set for OpenAI speech events, leaving Gemini calls with null
+      // which caused silence detection to be completely bypassed
+      session.lastUserSpeechTime = new Date();
 
       if (audioType.type !== 'human') {
         console.log(`${LOG_PREFIX} [Gemini] Ignoring non-human audio: ${audioType.type} (confidence: ${audioType.confidence.toFixed(2)})`);
@@ -2759,19 +2773,15 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // 2. AI hears it, THEN introduces itself
     //
     // We wait for Deepgram to detect inbound speech before nudging Gemini.
-    // Fallback: If no speech detected after 4s, send greeting anyway (silent pickup / voicemail).
+    // Fallback: If no speech detected after 4.5s, send greeting anyway (silent pickup / voicemail).
     //
     // The greeting trigger happens in two places:
-    // - Deepgram onSpeechStarted (inbound) → triggers greeting after 800ms delay
-    // - Fallback timer (4s) → triggers greeting if no speech detected
+    // - Deepgram onSpeechStarted (inbound) → triggers greeting after 400ms delay
+    // - Fallback timer (4.5s) → triggers greeting if no speech detected
     (session as any).greetingTriggeredByCallerSpeech = false;
 
     // Fallback: If caller doesn't speak, send greeting.
     // This handles: silent pickups, voicemail that doesn't announce, etc.
-    // LATENCY FIX (Feb 2026): Reverted from 2s to 4.5s. The 2s timer was too
-    // aggressive, causing the agent to interrupt the prospect's initial "Hello?".
-    // This interruption broke the identity confirmation flow. 4.5s provides a
-    // safe buffer for the prospect to finish their initial greeting.
     const fallbackGreetingTimer = setTimeout(() => {
       if (session.isActive && !session.audioDetection.hasGreetingSent) {
         console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4.5s - sending greeting (fallback)`);
@@ -3509,11 +3519,12 @@ Say exactly this and nothing more: "${openingScript}"
 CRITICAL RULES - VIOLATION OF ANY RULE IS UNACCEPTABLE:
 1. Do NOT add any greetings like "Hello" or "Hi" before or after unless they are part of the exact message above.
 2. Do NOT ask follow-up questions after the opening.
-3. Do NOT say "okay", "great", "perfect", "I understand" or ANY acknowledgement.
+3. Do NOT say "okay", "great", "perfect", "I understand", "thanks for confirming" or ANY acknowledgement.
 4. Do NOT assume, predict, or anticipate the person's response.
 5. Do NOT continue with transition phrases.
 6. Do NOT assume the person confirmed their identity - you MUST hear them EXPLICITLY say "yes" or their name.
 7. Do NOT proceed with the pitch until you HEAR explicit confirmation.
+8. "Hello?" is NOT identity confirmation. It is just someone answering the phone.
 
 After saying this exact message, you MUST:
 - STOP speaking immediately
@@ -5472,7 +5483,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
             if (channel === 'inbound' && session.isActive && !session.audioDetection.hasGreetingSent && !(session as any).greetingTriggeredByCallerSpeech) {
               console.log(`${LOG_PREFIX} 🗣️ Caller speech detected by Deepgram - triggering greeting`);
               (session as any).greetingTriggeredByCallerSpeech = true;
-              
+
               // Clear the fallback timer since speech was detected
               if ((session as any).fallbackGreetingTimer) {
                 clearTimeout((session as any).fallbackGreetingTimer);
@@ -5481,9 +5492,6 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
               }
 
               // Send greeting after a short delay to allow prospect to finish "Hello?"
-              // LATENCY FIX (Feb 2026): Reduced from 800ms to 400ms.
-              // 800ms felt sluggish — Gemini still needs ~300-500ms to generate
-              // the first audio chunk, so total delay was 1.3s+ after "Hello?".
               // 400ms is enough for a typical greeting utterance to complete,
               // and Gemini's VAD will handle barge-in if the prospect keeps talking.
               setTimeout(() => {
@@ -7515,11 +7523,27 @@ You never rush. You listen more than you speak. You sound like a real human, not
 Use natural fillers like "hmm", "well", "got it", "makes sense" instead of robotic phrases like "I understand" or "That is correct".
 </role>
 
+<critical_listening_rule>
+## ABSOLUTE FIRST RULE: LISTEN BEFORE SPEAKING
+
+When the call connects, you MUST remain COMPLETELY SILENT for the first 2-3 seconds.
+Do NOT speak until you hear the other person speak first. This is an outbound call — THEY answer, YOU wait.
+
+During this initial silence, LISTEN carefully to what the caller says:
+- If they say "Hello?" or "Hi" → Ask for the contact by name (Phase 1)
+- If they identify themselves by name (e.g., "This is John", "John speaking") → Skip identity check, go to introduction (Phase 3)
+- If they sound like a gatekeeper ("How may I direct your call?", "Who is calling?") → Handle as gatekeeper (Phase 2)
+
+**NEVER say "thanks for confirming" or "great" or any acknowledgment UNLESS the person has EXPLICITLY confirmed their identity in response to YOUR question.**
+**NEVER assume identity is confirmed just because someone answered the phone.**
+**A person saying "Hello?" is NOT confirming anything — they are simply answering the phone.**
+</critical_listening_rule>
+
 <call_flow>
 ## Outbound Call Flow (follow this sequence exactly)
 
 ### Phase 1: Identity Verification
-When you hear any voice (including "Hello?", "Hi", "Yeah?"), your first response is ALWAYS:
+When you hear a standard greeting (e.g., "Hello?", "Hi", "Yeah?"), your first response is ALWAYS:
 - "Hi, am I speaking with [Contact Name]?"
 
 Wait silently for their answer. Identity is confirmed ONLY by explicit affirmation:
@@ -7545,6 +7569,7 @@ Once identity is confirmed, pause 1 second, then:
 2. Pause 1 second.
 3. "I know your time is valuable — do you have a moment for a quick conversation?"
 4. STOP and wait for their response. Any answer other than "no" or "I'm busy" is permission.
+5. Be warm, kind, and respectful throughout. Show genuine appreciation for their time.
 
 Keep the organization name confidential until identity is confirmed.
 
@@ -7586,9 +7611,16 @@ If the campaign objective is about scheduling a meeting, demo, or discovery call
 - A specific day/time confirmed OR
 - Explicit agreement to receive a calendar invite
 
-### Phase 5: Closing
+### Phase 5: Closing & Farewell
 Complete the full call flow: qualifying questions → confirm email → propose times → get confirmation.
-After your closing remarks, let the prospect respond. Only trigger end_call after they say goodbye.
+After booking is confirmed:
+1. Confirm the meeting details: date, time, and email for the calendar invite
+2. Set expectations: "You'll receive a calendar invite shortly"
+3. Thank them warmly and sincerely for their time
+4. Close gracefully: "Thank you so much for your time, [First Name]. Have a wonderful day!"
+5. Let the prospect respond — wait for their farewell
+6. Only trigger end_call AFTER they say goodbye ("bye", "take care", "thank you")
+
 Call submit_disposition BEFORE every end_call — no exceptions. Execute tools silently; never speak tool names.
 </call_flow>
 
@@ -7617,11 +7649,19 @@ If the prospect says "you keep repeating" or "you already said that", immediatel
 <examples>
 ## Correct Behavior Examples
 
-### Example 1: Identity verification (correct)
+### Example 1: Standard pickup → Identity check (correct)
 Prospect: "Hello?"
 You: "Hi, am I speaking with Sarah Johnson?"
 Prospect: "Yes, this is Sarah."
 You: [1-second pause] "Hi Sarah, this is Alex calling from Acme Solutions. I know your time is valuable — do you have a moment for a quick conversation?"
+
+### Example 1b: Right party self-identifies (correct)
+Prospect: "This is Sarah Johnson."
+You: "Hi Sarah, this is Alex calling from Acme Solutions. I know your time is valuable — do you have a moment for a quick conversation?"
+
+### Example 1c: What NOT to do (INCORRECT — NEVER DO THIS)
+Prospect: "Hello?"
+You: "Great, thanks for confirming!" ← WRONG! "Hello?" is NOT confirmation of anything.
 
 ### Example 2: Gatekeeper (correct)
 Receptionist: "Good morning, how may I direct your call?"
@@ -7654,6 +7694,15 @@ Prospect: "Well, honestly, it's been taking us forever to fill roles..."
 Prospect: "Why did you repeat that?"
 You: "My apologies — let me move on. What I'm curious about is what challenges you're facing with [topic]?"
 [NOTE: Agent acknowledged and immediately changed direction without repeating]
+
+### Example 7: Appointment booking and graceful farewell (correct)
+You: "Would next Tuesday at 10am or Thursday at 2pm work better for a quick 15-minute call?"
+Prospect: "Thursday at 2 works."
+You: "Perfect! Let me confirm — I'll send a calendar invite to your email. You'll be speaking with our team about [topic]. Is there anything specific you'd like us to focus on?"
+Prospect: "No, that sounds good."
+You: "Wonderful. You'll receive that calendar invite shortly. Thank you so much for your time today, Sarah — I really appreciate it. Have a wonderful day!"
+Prospect: "Thanks, you too!"
+You: [call can now end — prospect said farewell]
 </examples>
 
 `;
@@ -8170,9 +8219,10 @@ If permission is given:
 - For meeting/appointment campaigns: ask ONE relevant question, then propose next steps
 - Listen carefully and allow them to speak without interruption
 - Acknowledge their perspective thoughtfully
-- Politely ask whether they would be open to receiving follow-up information
+- Continue the conversation flow through to booking/completion
 - Confirm the email address (${contactEmail}) only if they agree
-- Close the call warmly, thanking them for their time
+- Close the call gracefully: thank them sincerely, set expectations, and say a warm farewell
+- Wait for their farewell before ending the call
 
 ---
 
@@ -8238,15 +8288,20 @@ If you hear an automated phone system (IVR), menu prompts, or "press X for...":
 
 ---
 
-### 7. Call Closure — NO PREMATURE DISCONNECTS (PROSPECT-LED DISCONNECT)
+### 7. Call Closure & Graceful Farewell — NO PREMATURE DISCONNECTS
 At the end of the call:
-- After booking confirmation: (1) Confirm details, (2) Thank them, (3) Set expectations ("You'll receive a calendar invite"), (4) Say "Have a great day!"
+- After booking confirmation:
+  1. Confirm the meeting details (date, time, email for calendar invite)
+  2. Set expectations: "You'll receive a calendar invite shortly"
+  3. Thank them warmly and sincerely: "Thank you so much for your time, ${firstName}"
+  4. Close gracefully: "Have a wonderful day!"
 - WAIT for the prospect to respond after your closing remarks — do NOT call end_call yet
 - The call must NOT be disconnected until:
   * The prospect clearly says "thank you", "bye", "take care", or equivalent
   * The conversation has naturally and MUTUALLY ended
-- NEVER hang up immediately after delivering a closing statement (e.g., "You'll receive an email shortly")
+- NEVER hang up immediately after delivering a closing statement
 - Call termination must always be PROSPECT-LED, not agent-triggered
+- Be genuinely warm and respectful in your farewell — leave them with a positive impression
 
 ---
 
@@ -8739,23 +8794,75 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     }
 
     // ENHANCED VOICEMAIL DETECTION: One-way conversation pattern
-    // If we've been talking for 45+ seconds but got no substantive human responses, it's likely voicemail
+    // If we've been talking for 30+ seconds but got no interactive human responses, it's likely voicemail
     // A real human would respond back with questions/acknowledgments within this timeframe
-    const MAX_ONE_WAY_CONVERSATION_SECONDS = 45;
+    const MAX_ONE_WAY_CONVERSATION_SECONDS = 30;
     if (elapsedSeconds > MAX_ONE_WAY_CONVERSATION_SECONDS && !session.detectedDisposition) {
-      // Count meaningful user responses (more than just "hello", "yes", single words)
-      const substantiveUserResponses = session.transcripts.filter(t => 
+      // Count INTERACTIVE user responses: responses that came AFTER the AI spoke at least once
+      // This filters out voicemail greetings that are just the recorded message playing
+      const firstAiMessage = session.transcripts.find(t => t.role === 'assistant');
+      const firstAiMessageTime = firstAiMessage?.timestamp?.getTime() || Infinity;
+
+      const interactiveUserResponses = session.transcripts.filter(t =>
         t.role === 'user' && t.text && t.text.split(/\s+/).length >= 3 // At least 3 words
+        && t.timestamp && t.timestamp.getTime() > firstAiMessageTime // Must be AFTER AI spoke
       ).length;
-      
+
       // Count AI messages
       const aiMessages = session.transcripts.filter(t => t.role === 'assistant').length;
-      
-      // If AI sent 2+ messages but got 0 substantive responses, likely voicemail/IVR
-      if (aiMessages >= 2 && substantiveUserResponses === 0) {
-        console.warn(`${LOG_PREFIX} ONE-WAY CONVERSATION DETECTED - AI sent ${aiMessages} messages, got ${substantiveUserResponses} substantive responses in ${elapsedSeconds}s`);
+
+      // If AI sent 2+ messages but got 0 interactive responses, likely voicemail/IVR
+      if (aiMessages >= 2 && interactiveUserResponses === 0) {
+        console.warn(`${LOG_PREFIX} ONE-WAY CONVERSATION DETECTED - AI sent ${aiMessages} messages, got ${interactiveUserResponses} interactive responses in ${elapsedSeconds}s`);
         console.log(`${LOG_PREFIX} Transcripts: ${JSON.stringify(session.transcripts.map(t => ({ role: t.role, words: t.text?.split(/\s+/).length || 0, preview: t.text?.substring(0, 30) })))}`);
-        
+
+        session.detectedDisposition = 'voicemail';
+        endCall(session.callId, 'voicemail');
+        return;
+      }
+    }
+
+    // POST-GREETING VOICEMAIL RECHECK: Catch split-segment voicemail greetings
+    // Scenario: "Hi, this is John" → humanDetected=true, then "leave a message after the beep" → IVR
+    // If human was detected but subsequent IVR/voicemail patterns appeared within 15s, revoke humanDetected
+    if (session.audioDetection.humanDetected && !session.detectedDisposition) {
+      const humanDetectedAt = session.audioDetection.humanDetectedAt;
+      if (humanDetectedAt) {
+        const secondsSinceHumanDetected = Math.round((now.getTime() - humanDetectedAt.getTime()) / 1000);
+        // Within 20 seconds of "human" detection, check for voicemail indicators in subsequent patterns
+        if (secondsSinceHumanDetected <= 20) {
+          const patternsAfterHuman = session.audioDetection.audioPatterns.filter(p =>
+            p.timestamp.getTime() > humanDetectedAt.getTime() && p.type === 'ivr'
+          );
+          if (patternsAfterHuman.length > 0) {
+            console.warn(`${LOG_PREFIX} VOICEMAIL RECHECK - Human detected ${secondsSinceHumanDetected}s ago but ${patternsAfterHuman.length} IVR patterns followed. Reclassifying as voicemail.`);
+            console.log(`${LOG_PREFIX} IVR patterns after human: ${patternsAfterHuman.map(p => p.transcript?.substring(0, 40)).join(' | ')}`);
+            session.audioDetection.humanDetected = false;
+            session.detectedDisposition = 'voicemail';
+            session.callOutcome = 'voicemail';
+            endCall(session.callId, 'voicemail');
+            return;
+          }
+        }
+      }
+    }
+
+    // NO-DISPOSITION TIMEOUT: End call if 60s passed without any disposition
+    // Catches cases where humanDetected=true from voicemail greeting but no real conversation
+    const MAX_CALL_WITHOUT_DISPOSITION_SECONDS = 60;
+    if (
+      elapsedSeconds > MAX_CALL_WITHOUT_DISPOSITION_SECONDS
+      && !session.detectedDisposition
+      && session.audioDetection.humanDetected
+    ) {
+      // Check if there's a real back-and-forth conversation happening
+      const userMessages = session.transcripts.filter(t => t.role === 'user').length;
+      const aiMessagesCount = session.transcripts.filter(t => t.role === 'assistant').length;
+      const totalTurns = Math.min(userMessages, aiMessagesCount); // True back-and-forth turns
+
+      // If fewer than 2 real conversational turns in 60s, likely talking to voicemail
+      if (totalTurns < 2) {
+        console.warn(`${LOG_PREFIX} NO-DISPOSITION TIMEOUT - Call ${session.callId} at ${elapsedSeconds}s with only ${totalTurns} conversational turns (user: ${userMessages}, ai: ${aiMessagesCount})`);
         session.detectedDisposition = 'voicemail';
         endCall(session.callId, 'voicemail');
         return;
@@ -8789,17 +8896,23 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       endCall(session.callId, session.detectedDisposition === 'voicemail' ? 'voicemail' : 'no_answer');
       return;
     }
-    
+
     // HARD MAX DURATION FALLBACK: Absolute maximum regardless of conversation state
     // This catches any edge cases where voicemail wasn't detected
-    const ABSOLUTE_HARD_MAX_SECONDS = 180; // 3 minutes absolute max for any call
-    if (elapsedSeconds > ABSOLUTE_HARD_MAX_SECONDS) {
-      console.warn(`${LOG_PREFIX} ABSOLUTE HARD MAX - Force ending call ${session.callId} after ${elapsedSeconds}s (hard limit: ${ABSOLUTE_HARD_MAX_SECONDS}s)`);
+    // CRITICAL: This must terminate the call even if humanDetected=true or disposition is set
+    const ABSOLUTE_HARD_MAX_SECONDS = 120; // 2 minutes absolute max for calls without confirmed disposition
+    const hasConfirmedDisposition = session.detectedDisposition &&
+      session.detectedDisposition !== 'voicemail' &&
+      session.detectedDisposition !== 'no_answer';
+    // For calls WITH a real disposition (qualified_lead, not_interested, etc.), allow campaign/agent max
+    // For calls WITHOUT a disposition or with voicemail/no_answer, hard cap at 2 minutes
+    if (!hasConfirmedDisposition && elapsedSeconds > ABSOLUTE_HARD_MAX_SECONDS) {
+      console.warn(`${LOG_PREFIX} ABSOLUTE HARD MAX - Force ending call ${session.callId} after ${elapsedSeconds}s (hard limit: ${ABSOLUTE_HARD_MAX_SECONDS}s, no confirmed disposition)`);
       if (!session.detectedDisposition) {
         session.detectedDisposition = 'voicemail';
       }
       // Map disposition to valid outcome type
-      const outcome: 'voicemail' | 'no_answer' | 'completed' | 'error' = 
+      const outcome: 'voicemail' | 'no_answer' | 'completed' | 'error' =
         session.detectedDisposition === 'voicemail' ? 'voicemail' :
         session.detectedDisposition === 'no_answer' ? 'no_answer' : 'completed';
       endCall(session.callId, outcome);
