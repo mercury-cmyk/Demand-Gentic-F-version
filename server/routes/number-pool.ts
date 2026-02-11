@@ -52,6 +52,9 @@ import {
   unassignNumberFromAgent,
   getAgentsWithNumbers,
 } from '../services/number-pool-integration';
+import { db } from '../db';
+import { telnyxNumbers, numberAssignments } from '@shared/number-pool-schema';
+import { eq, ne, sql } from 'drizzle-orm';
 
 const router = Router();
 
@@ -227,6 +230,68 @@ router.post('/sync', asyncHandler(async (req, res) => {
     data: {
       ...result,
       reputationRecordsCreated: reputationCreated,
+    },
+  });
+}));
+
+/**
+ * POST /api/number-pool/bulk-activate
+ * Activate all non-retired numbers in the pool and optionally assign them globally
+ */
+router.post('/bulk-activate', asyncHandler(async (req, res) => {
+  const { assignGlobal = true } = req.body || {};
+
+  // Step 1: Activate all non-retired numbers
+  const activated = await db
+    .update(telnyxNumbers)
+    .set({
+      status: 'active',
+      statusReason: 'bulk-activated',
+      statusChangedAt: new Date(),
+    })
+    .where(ne(telnyxNumbers.status, 'retired'))
+    .returning({ id: telnyxNumbers.id, phoneNumberE164: telnyxNumbers.phoneNumberE164 });
+
+  // Step 2: Clear all active cooldowns
+  const { numberCooldowns } = await import('@shared/number-pool-schema');
+  await db
+    .update(numberCooldowns)
+    .set({ isActive: false, endedEarlyAt: new Date() })
+    .where(eq(numberCooldowns.isActive, true));
+
+  // Step 3: Optionally assign all numbers globally (if not already assigned)
+  let assignedCount = 0;
+  if (assignGlobal) {
+    for (const num of activated) {
+      // Check if already has a global assignment
+      const existing = await db
+        .select({ id: numberAssignments.id })
+        .from(numberAssignments)
+        .where(eq(numberAssignments.numberId, num.id))
+        .limit(1);
+
+      if (existing.length === 0) {
+        await db.insert(numberAssignments).values({
+          numberId: num.id,
+          scope: 'global',
+          priority: 50,
+          isActive: true,
+        });
+        assignedCount++;
+      }
+    }
+  }
+
+  // Step 4: Force release any stuck in-use locks
+  const released = forceReleaseAllNumbers();
+
+  res.json({
+    success: true,
+    data: {
+      activated: activated.length,
+      globalAssignments: assignedCount,
+      locksReleased: released,
+      numbers: activated.map(n => n.phoneNumberE164),
     },
   });
 }));
