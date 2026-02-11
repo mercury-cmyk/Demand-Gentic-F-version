@@ -1,4 +1,6 @@
 // Shared phone number helpers for AI calling pipelines
+import { formatPhoneWithCountryCode } from './phone-formatter';
+
 export function normalizeToE164(phoneNumber: string): string {
   let normalized = phoneNumber.replace(/[^\d+]/g, "");
 
@@ -68,30 +70,45 @@ export function getBestPhoneForContact(contact: {
   hqPhoneE164?: string | null;
   country?: string | null;
 }): { phone: string | null; type: 'direct' | 'mobile' | 'hq' | null } {
-  // Try direct phone first
+  const country = contact.country || undefined;
+
+  // Helper: normalize using country-aware formatter, then fallback to heuristic
+  function normalize(phone: string): string | null {
+    // Try country-aware normalization first (handles local numbers correctly)
+    const countryAware = formatPhoneWithCountryCode(phone, country);
+    if (countryAware && isValidE164(countryAware)) return countryAware;
+    // Fallback to heuristic normalization
+    const heuristic = normalizeToE164(phone);
+    return isValidE164(heuristic) ? heuristic : null;
+  }
+
+  // Try direct phone: prefer pre-normalized E164, then normalize raw
+  if (contact.directPhoneE164 && isValidE164(contact.directPhoneE164)) {
+    return { phone: contact.directPhoneE164, type: 'direct' };
+  }
   if (contact.directPhone) {
-    const normalized = normalizeToE164(contact.directPhone);
-    if (isValidE164(normalized)) {
-      return { phone: normalized, type: 'direct' };
-    }
+    const normalized = normalize(contact.directPhone);
+    if (normalized) return { phone: normalized, type: 'direct' };
   }
-  
+
   // Fallback to mobile phone
+  if (contact.mobilePhoneE164 && isValidE164(contact.mobilePhoneE164)) {
+    return { phone: contact.mobilePhoneE164, type: 'mobile' };
+  }
   if (contact.mobilePhone) {
-    const normalized = normalizeToE164(contact.mobilePhone);
-    if (isValidE164(normalized)) {
-      return { phone: normalized, type: 'mobile' };
-    }
+    const normalized = normalize(contact.mobilePhone);
+    if (normalized) return { phone: normalized, type: 'mobile' };
   }
-  
+
   // Last resort: HQ phone
-  if (contact.hqPhone) {
-    const normalized = normalizeToE164(contact.hqPhone);
-    if (isValidE164(normalized)) {
-      return { phone: normalized, type: 'hq' };
-    }
+  if (contact.hqPhoneE164 && isValidE164(contact.hqPhoneE164)) {
+    return { phone: contact.hqPhoneE164, type: 'hq' };
   }
-  
+  if (contact.hqPhone) {
+    const normalized = normalize(contact.hqPhone);
+    if (normalized) return { phone: normalized, type: 'hq' };
+  }
+
   return { phone: null, type: null };
 }
 
@@ -105,9 +122,16 @@ export function normalizePhoneWithCountryCode(
   if (!phone) {
     return { e164: null, normalizedPhone: null };
   }
-  
+
+  // Try country-aware normalization first
+  const countryAware = formatPhoneWithCountryCode(phone, country);
+  if (countryAware && isValidE164(countryAware)) {
+    return { e164: countryAware, normalizedPhone: countryAware };
+  }
+
+  // Fallback to heuristic
   const normalized = normalizeToE164(phone);
-  return { 
+  return {
     e164: isValidE164(normalized) ? normalized : null,
     normalizedPhone: normalized
   };

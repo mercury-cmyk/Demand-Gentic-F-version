@@ -27,6 +27,7 @@ import {
 } from '../utils/business-hours';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
+import { formatPhoneWithCountryCode } from '../lib/phone-formatter';
 import {
   getCallerIdForCall,
   handleCallCompleted,
@@ -986,9 +987,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       continue;
     }
 
-    const normalized = phone.replace(/[^\d+]/g, '');
-    let e164 = normalized.startsWith('+') ? normalized : '+' + normalized.replace(/^0+/, '');
-    
+    // Normalize phone using contact's country for correct country code
+    let e164 = formatPhoneWithCountryCode(phone, country) || normalizeToE164(phone);
+
     // Fix US/Canada numbers: if it's +X where X is 10 digits starting with 2-9, add the 1
     // NANP format: +1 followed by 10 digits (area code starts with 2-9)
     if (e164.match(/^\+[2-9]\d{9}$/)) {

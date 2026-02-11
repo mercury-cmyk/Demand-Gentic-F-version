@@ -13,7 +13,7 @@ import { workerDb } from '../db'; // Use dedicated worker pool
 import { contacts, accounts } from '../../shared/schema';
 import { streamFromS3 } from '../lib/storage';
 import { eq, and, sql, inArray } from 'drizzle-orm';
-import { normalizeName } from '../normalization';
+import { normalizeName, normalizePhoneE164 } from '../normalization';
 import { from as copyFrom } from 'pg-copy-streams';
 import { pipeline } from 'stream/promises';
 
@@ -187,6 +187,13 @@ async function processBatchWithCOPY(
         ...record.contact,
         accountId,
         emailNormalized: record.contact.email?.toLowerCase().trim() || null,
+        // Normalize phone numbers using contact's country for correct country code
+        directPhoneE164: record.contact.directPhone
+          ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
+          : record.contact.directPhoneE164 || null,
+        mobilePhoneE164: record.contact.mobilePhone
+          ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
+          : record.contact.mobilePhoneE164 || null,
       };
 
       // Generate surrogate ID for deduplication: email_normalized if present, otherwise UUID
@@ -558,6 +565,13 @@ export async function processContactsCSVImport(
               ...record.contact,
               accountId,
               emailNormalized: record.contact.email ? record.contact.email.toLowerCase().trim() : null,
+              // Normalize phone numbers using contact's country for correct country code
+              directPhoneE164: record.contact.directPhone
+                ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
+                : record.contact.directPhoneE164 || null,
+              mobilePhoneE164: record.contact.mobilePhone
+                ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
+                : record.contact.mobilePhoneE164 || null,
             };
 
             // Generate surrogate ID for deduplication: email_normalized if present, otherwise UUID
