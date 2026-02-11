@@ -36,13 +36,26 @@ export function UnifiedTranscriptDisplay({
     return { hasAgent, hasProspect, hasSystem };
   }, [transcript.turns]);
 
-  // No transcript available
-  if (!transcript.available || transcript.turns.length === 0) {
+  // No transcript available — but fall back to rawText if present
+  if (!transcript.available || (transcript.turns.length === 0 && !transcript.rawText)) {
     return (
       <div className={cn('flex flex-col items-center justify-center py-12 text-muted-foreground', className)}>
         <MessageSquare className="h-12 w-12 mb-4 opacity-50" />
         <p className="text-sm">No transcript available</p>
         <p className="text-xs mt-1">Transcript may still be processing</p>
+      </div>
+    );
+  }
+
+  // Raw text fallback when no structured turns are available
+  if (transcript.turns.length === 0 && transcript.rawText) {
+    return (
+      <div className={cn('space-y-2', className)}>
+        <ScrollArea className="rounded-lg border" style={{ maxHeight }}>
+          <div className="p-4">
+            <pre className="whitespace-pre-wrap text-sm font-sans">{transcript.rawText}</pre>
+          </div>
+        </ScrollArea>
       </div>
     );
   }

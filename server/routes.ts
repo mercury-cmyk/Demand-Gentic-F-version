@@ -14763,9 +14763,43 @@ Provide JSON response with:
           }
         }
 
-        // Object with a transcript field
-        if (parsed && typeof parsed === 'object' && (parsed as any).transcript) {
+        // Object with a transcript field (string)
+        if (parsed && typeof parsed === 'object' && (parsed as any).transcript && typeof (parsed as any).transcript === 'string') {
           return { transcript: String((parsed as any).transcript), transcriptTurns: undefined };
+        }
+
+        // Object wrapping an array of turns (e.g. { conversation: [...], turns: [...] })
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const turnsArray = (parsed as any).conversation || (parsed as any).turns || (parsed as any).messages;
+          if (Array.isArray(turnsArray) && turnsArray.length > 0) {
+            const turns = turnsArray
+              .map((turn: any) => {
+                const text = turn?.original_message || turn?.message || turn?.text || turn?.content;
+                if (!text) return null;
+                const role: 'agent' | 'assistant' | 'user' | 'contact' | 'system' =
+                  turn?.role === 'assistant' || turn?.role === 'agent' || turn?.agent_metadata
+                    ? 'agent'
+                    : turn?.role === 'system'
+                      ? 'system'
+                      : 'contact';
+                let timestamp: string | undefined;
+                if (typeof turn?.time_in_call_secs === 'number') {
+                  const secs = Math.max(0, Math.floor(turn.time_in_call_secs));
+                  timestamp = `${Math.floor(secs / 60).toString().padStart(2, '0')}:${(secs % 60).toString().padStart(2, '0')}`;
+                } else if (turn?.timestamp) {
+                  const ts = new Date(turn.timestamp);
+                  if (!isNaN(ts.getTime())) timestamp = ts.toISOString();
+                }
+                return { role, text: String(text).trim(), timestamp };
+              })
+              .filter(Boolean) as NormalizedTranscript["transcriptTurns"];
+            if (turns && turns.length > 0) {
+              return {
+                transcript: turns.map(t => `${t.role === 'agent' || t.role === 'assistant' ? 'Agent' : t.role === 'system' ? 'System' : 'Contact'}: ${t.text}`).join('\n'),
+                transcriptTurns: turns,
+              };
+            }
+          }
         }
       } catch {
         // If parsing fails, fall back to raw text below
@@ -14947,8 +14981,13 @@ Provide JSON response with:
             };
           }
 
-          const hasRecording = !!(session.recordingS3Key || session.recordingUrl);
-          const recordingAvailable = session.recordingStatus === 'stored' || !!session.recordingUrl;
+          const hasRecording = !!(session.recordingS3Key || session.recordingUrl || session.telnyxRecordingId);
+          // If recordingStatus is explicitly set use it; otherwise infer from available data
+          const inferredStatus = session.recordingS3Key ? 'stored'
+            : (session.recordingUrl || session.telnyxRecordingId) ? 'stored'
+            : 'none';
+          const effectiveStatus = session.recordingStatus || inferredStatus;
+          const recordingAvailable = effectiveStatus === 'stored' || !!session.recordingUrl || !!session.telnyxRecordingId;
           const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact';
           const aiSettings = session.aiAgentSettings as any;
           const agentName = aiSettings?.persona?.name || aiSettings?.persona?.agentName || undefined;
@@ -14976,7 +15015,7 @@ Provide JSON response with:
             callSummary,
             recordingUrl: session.recordingUrl || undefined,
             recordingS3Key: session.recordingS3Key || undefined,
-            recordingStatus: session.recordingStatus || (hasRecording ? 'pending' : 'none'),
+            recordingStatus: effectiveStatus,
             telnyxRecordingId: session.telnyxRecordingId || undefined,
             hasRecording,
             recordingAvailable,

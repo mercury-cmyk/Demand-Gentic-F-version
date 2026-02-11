@@ -92,6 +92,11 @@ interface ConversationRecord {
   callSummary?: string;
   testResult?: string;
   recordingUrl?: string;
+  recordingS3Key?: string;
+  recordingStatus?: string;
+  telnyxRecordingId?: string;
+  hasRecording?: boolean;
+  source?: string;
   createdAt: string;
   isTestCall: boolean;
 }
@@ -768,13 +773,14 @@ export default function ConversationQualityPage() {
                   )}
 
                   {/* Recording Playback - uses stream endpoint for reliable playback */}
-                  {(selectedConversation.recordingUrl || selectedConversation.source === 'call_session') && (
+                  {(selectedConversation.hasRecording || selectedConversation.recordingUrl || selectedConversation.recordingS3Key || selectedConversation.telnyxRecordingId || selectedConversation.source === 'call_session') && (
                     <div className="bg-muted/50 p-3 rounded-lg">
                       <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
                         <Phone className="h-4 w-4" />
                         Call Recording
                       </h4>
                       <audio
+                        key={selectedConversation.id}
                         controls
                         className="w-full"
                         src={`/api/recordings/${selectedConversation.id}/stream`}

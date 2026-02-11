@@ -58,7 +58,7 @@ function adaptConversationToListItem(conv: any): UnifiedConversationListItem {
     status: conv.status || 'unknown',
     disposition: conv.disposition,
     hasTranscript: !!(conv.transcript && conv.transcript.length > 50) || !!(conv.transcriptTurns && conv.transcriptTurns.length > 0),
-    hasRecording: conv.hasRecording || !!conv.recordingUrl,
+    hasRecording: conv.hasRecording || !!conv.recordingUrl || !!conv.recordingS3Key || !!conv.telnyxRecordingId,
     qualityScore: conv.analysis?.overallScore,
     testResult: conv.testResult,
     issueCount: conv.detectedIssues?.length || conv.analysis?.issues?.length,
@@ -132,8 +132,8 @@ function adaptConversationToDetail(conv: any): UnifiedConversationDetail {
     disposition: conv.disposition,
 
     recording: {
-      available: conv.hasRecording || !!conv.recordingUrl || conv.recordingStatus === 'stored',
-      status: conv.recordingStatus || (conv.recordingUrl ? 'stored' : 'none'),
+      available: conv.hasRecording || !!conv.recordingUrl || !!conv.recordingS3Key || !!conv.telnyxRecordingId || conv.recordingStatus === 'stored',
+      status: conv.recordingStatus || (conv.recordingUrl || conv.recordingS3Key || conv.telnyxRecordingId ? 'stored' : 'none'),
       url: conv.recordingUrl,
       s3Key: conv.recordingS3Key,
       telnyxRecordingId: conv.telnyxRecordingId,
