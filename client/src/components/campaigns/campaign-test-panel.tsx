@@ -105,6 +105,8 @@ interface CampaignTestPanelProps {
   campaignId: string;
   campaignName: string;
   dialMode?: string;
+  /** Hide the Preview Studio button (for client portal use) */
+  hidePreviewStudio?: boolean;
 }
 
 function normalizePhoneToE164(phone: string | null, country: string = 'US'): string | null {
@@ -128,7 +130,7 @@ function normalizePhoneToE164(phone: string | null, country: string = 'US'): str
   return null;
 }
 
-export function CampaignTestPanel({ campaignId, campaignName, dialMode }: CampaignTestPanelProps) {
+export function CampaignTestPanel({ campaignId, campaignName, dialMode, hidePreviewStudio }: CampaignTestPanelProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isTestDialogOpen, setIsTestDialogOpen] = useState(false);
@@ -314,13 +316,15 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Link href={`/preview-studio?campaignId=${campaignId}`}>
-              <Button variant="outline" className="gap-2">
-                <Sparkles className="h-4 w-4" />
-                Preview Studio
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </Button>
-            </Link>
+            {!hidePreviewStudio && (
+              <Link href={`/preview-studio?campaignId=${campaignId}`}>
+                <Button variant="outline" className="gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Preview Studio
+                  <ExternalLink className="h-3 w-3 ml-1" />
+                </Button>
+              </Link>
+            )}
             <Dialog open={isTestDialogOpen} onOpenChange={setIsTestDialogOpen}>
               <DialogTrigger asChild>
                 <Button data-testid="button-new-test-call">

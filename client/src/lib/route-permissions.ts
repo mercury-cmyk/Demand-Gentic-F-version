@@ -38,7 +38,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // ============================================
   { pattern: '/ai-studio', roles: MANAGEMENT_ROLES, description: 'AI Studio Dashboard' },
   { pattern: /^\/ai-studio\//, roles: MANAGEMENT_ROLES, description: 'AI Studio pages' },
-  { pattern: '/preview-studio', roles: CLIENT_ACCESS_ROLES, description: 'Preview Studio' },
+  { pattern: '/preview-studio', roles: MANAGEMENT_ROLES, description: 'Preview Studio (Admin)' },
   { pattern: '/voice-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Voice Simulation' },
   { pattern: '/email-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Email Simulation' },
   { pattern: '/virtual-agents', roles: MANAGEMENT_ROLES, description: 'Virtual Agents' },
