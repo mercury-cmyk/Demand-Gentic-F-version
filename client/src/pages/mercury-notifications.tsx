@@ -42,33 +42,33 @@ import {
 // ─── API Helpers ─────────────────────────────────────────────────────────────
 
 const mercuryApi = {
-  getStatus: () => apiRequest('GET', '/api/mercury/status').then(r => r.json()),
-  verifyConnection: () => apiRequest('POST', '/api/mercury/verify-connection').then(r => r.json()),
-  seedTemplates: () => apiRequest('POST', '/api/mercury/templates/seed').then(r => r.json()),
-  getTemplates: () => apiRequest('GET', '/api/mercury/templates').then(r => r.json()),
-  getTemplate: (key: string) => apiRequest('GET', `/api/mercury/templates/${key}`).then(r => r.json()),
-  createTemplate: (data: any) => apiRequest('POST', '/api/mercury/templates', data).then(r => r.json()),
-  updateTemplate: (key: string, data: any) => apiRequest('PUT', `/api/mercury/templates/${key}`, data).then(r => r.json()),
-  deleteTemplate: (key: string) => apiRequest('DELETE', `/api/mercury/templates/${key}`).then(r => r.json()),
+  getStatus: () => apiRequest('GET', '/api/communications/mercury/status').then(r => r.json()),
+  verifyConnection: () => apiRequest('POST', '/api/communications/mercury/verify-connection').then(r => r.json()),
+  seedTemplates: () => apiRequest('POST', '/api/communications/mercury/templates/seed').then(r => r.json()),
+  getTemplates: () => apiRequest('GET', '/api/communications/mercury/templates').then(r => r.json()),
+  getTemplate: (key: string) => apiRequest('GET', `/api/communications/mercury/templates/${key}`).then(r => r.json()),
+  createTemplate: (data: any) => apiRequest('POST', '/api/communications/mercury/templates', data).then(r => r.json()),
+  updateTemplate: (key: string, data: any) => apiRequest('PUT', `/api/communications/mercury/templates/${key}`, data).then(r => r.json()),
+  deleteTemplate: (key: string) => apiRequest('DELETE', `/api/communications/mercury/templates/${key}`).then(r => r.json()),
   previewTemplate: (key: string, variables?: Record<string, string>) =>
-    apiRequest('POST', `/api/mercury/templates/${key}/preview`, { variables }).then(r => r.json()),
+    apiRequest('POST', `/api/communications/mercury/templates/${key}/preview`, { variables }).then(r => r.json()),
   testSend: (key: string, data: any) =>
-    apiRequest('POST', `/api/mercury/templates/${key}/test-send`, data).then(r => r.json()),
-  aiGenerate: (data: any) => apiRequest('POST', '/api/mercury/templates/ai/generate', data).then(r => r.json()),
-  aiRefine: (data: any) => apiRequest('POST', '/api/mercury/templates/ai/refine', data).then(r => r.json()),
-  inviteDryRun: () => apiRequest('POST', '/api/mercury/invitations/dry-run').then(r => r.json()),
+    apiRequest('POST', `/api/communications/mercury/templates/${key}/test-send`, data).then(r => r.json()),
+  aiGenerate: (data: any) => apiRequest('POST', '/api/communications/mercury/templates/ai/generate', data).then(r => r.json()),
+  aiRefine: (data: any) => apiRequest('POST', '/api/communications/mercury/templates/ai/refine', data).then(r => r.json()),
+  inviteDryRun: () => apiRequest('POST', '/api/communications/mercury/invitations/dry-run').then(r => r.json()),
   inviteSend: (portalBaseUrl?: string) =>
-    apiRequest('POST', '/api/mercury/invitations/send', { portalBaseUrl }).then(r => r.json()),
-  inviteStatus: () => apiRequest('GET', '/api/mercury/invitations/status').then(r => r.json()),
+    apiRequest('POST', '/api/communications/mercury/invitations/send', { portalBaseUrl }).then(r => r.json()),
+  inviteStatus: () => apiRequest('GET', '/api/communications/mercury/invitations/status').then(r => r.json()),
   getLogs: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-    return apiRequest('GET', `/api/mercury/logs${qs}`).then(r => r.json());
+    return apiRequest('GET', `/api/communications/mercury/logs${qs}`).then(r => r.json());
   },
-  retryLog: (id: string) => apiRequest('POST', `/api/mercury/logs/${id}/retry`).then(r => r.json()),
-  processOutbox: () => apiRequest('POST', '/api/mercury/outbox/process').then(r => r.json()),
-  getRules: () => apiRequest('GET', '/api/mercury/notifications/rules').then(r => r.json()),
-  createRule: (data: any) => apiRequest('POST', '/api/mercury/notifications/rules', data).then(r => r.json()),
-  deleteRule: (id: string) => apiRequest('DELETE', `/api/mercury/notifications/rules/${id}`).then(r => r.json()),
+  retryLog: (id: string) => apiRequest('POST', `/api/communications/mercury/logs/${id}/retry`).then(r => r.json()),
+  processOutbox: () => apiRequest('POST', '/api/communications/mercury/outbox/process').then(r => r.json()),
+  getRules: () => apiRequest('GET', '/api/communications/mercury/notifications/rules').then(r => r.json()),
+  createRule: (data: any) => apiRequest('POST', '/api/communications/mercury/notifications/rules', data).then(r => r.json()),
+  deleteRule: (id: string) => apiRequest('DELETE', `/api/communications/mercury/notifications/rules/${id}`).then(r => r.json()),
 };
 
 // ─── Template Gallery Data ───────────────────────────────────────────────────

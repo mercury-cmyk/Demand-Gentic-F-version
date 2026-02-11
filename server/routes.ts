@@ -14158,19 +14158,22 @@ Provide JSON response with:
   app.use('/api/merge-tags', requireAuth, mergeTagsRouter);
 
   // ==================== UNIFIED COMMUNICATIONS SYSTEM ====================
-  // Combines SMTP, Mercury, and Transactional Templates
-  app.use('/api/unified-communications', unifiedEmailSystemRouter);
+  // Primary mount — SMTP providers, Mercury notifications, transactional templates,
+  // and client invitation routes under a single /api/communications prefix.
+  app.use('/api/communications', unifiedEmailSystemRouter);
 
-  // ==================== SMTP TRANSACTIONAL EMAIL SYSTEM ====================
+  // ==================== BACKWARD COMPATIBILITY (DEPRECATED) ====================
+  // These legacy routes remain for backward compatibility and OAuth callbacks.
+  // Frontend uses /api/communications/* paths instead.
   app.use('/api/smtp-providers', requireAuth, smtpProvidersRouter);
   app.use('/api/transactional-templates', requireAuth, transactionalTemplatesRouter);
   app.use('/api/transactional', requireAuth, transactionalTemplatesRouter);
+  app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
+
+  // ==================== EMAIL & DELIVERABILITY ====================
   app.use('/api/domains', requireAuth, domainManagementRouter);
   app.use('/api/deliverability', requireAuth, deliverabilityRouter);
   app.use('/api/email', requireAuth, unifiedEmailRoutes);
-
-  // ==================== MERCURY BRIDGE NOTIFICATIONS ====================
-  app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
 
   // ==================== EMAIL BUILDER (DRAG & DROP) ====================
   app.use('/api/email-builder', emailBuilderRouter);

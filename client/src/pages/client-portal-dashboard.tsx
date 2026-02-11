@@ -769,7 +769,10 @@ export default function ClientPortalDashboard() {
     queryKey: ['client-portal-features', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/settings/features', authHeaders);
-      if (!res.ok) return { enabledFeatures: [] };
+      if (!res.ok) return { enabledFeatures: [
+        'accounts_contacts', 'bulk_upload', 'campaign_creation', 'email_templates',
+        'call_flows', 'voice_selection', 'calendar_booking', 'analytics_dashboard', 'reports_export'
+      ] };
       return res.json();
     },
     enabled: !!user,
@@ -777,7 +780,7 @@ export default function ClientPortalDashboard() {
 
   // Update enabled features when data loads
   useEffect(() => {
-    if (featuresData?.enabledFeatures) {
+    if (featuresData?.enabledFeatures?.length) {
       setEnabledFeatures(featuresData.enabledFeatures);
     }
   }, [featuresData]);
@@ -869,7 +872,7 @@ export default function ClientPortalDashboard() {
       if (!res.ok) return { accounts: [], total: 0 };
       return res.json();
     },
-    enabled: !!user && enabledFeatures.includes('accounts_contacts'),
+    enabled: !!user,
   });
 
   // CRM Contacts query
@@ -885,7 +888,7 @@ export default function ClientPortalDashboard() {
       if (!res.ok) return { contacts: [], total: 0 };
       return res.json();
     },
-    enabled: !!user && enabledFeatures.includes('accounts_contacts'),
+    enabled: !!user,
   });
 
   // CRM Stats query
@@ -900,7 +903,7 @@ export default function ClientPortalDashboard() {
       if (!res.ok) return { totalAccounts: 0, totalContacts: 0, optedOutContacts: 0 };
       return res.json();
     },
-    enabled: !!user && enabledFeatures.includes('accounts_contacts'),
+    enabled: !!user,
   });
 
   // Available voices query
@@ -925,7 +928,7 @@ export default function ClientPortalDashboard() {
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: !!user && enabledFeatures.includes('calendar_booking'),
+    enabled: !!user,
   });
 
   // Booking types query
@@ -936,7 +939,7 @@ export default function ClientPortalDashboard() {
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: !!user && enabledFeatures.includes('calendar_booking'),
+    enabled: !!user,
   });
 
   // Create booking type mutation
@@ -1571,11 +1574,11 @@ export default function ClientPortalDashboard() {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
     { id: 'campaign-order', label: 'Agentic Order', icon: ClipboardList, color: 'from-orange-500 to-amber-500' },
     { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
-    { id: 'accounts', label: 'Accounts', icon: Building2, color: 'from-rose-500 to-pink-500', featureRequired: 'accounts_contacts' },
-    { id: 'contacts', label: 'Contacts', icon: Users, color: 'from-sky-500 to-cyan-500', featureRequired: 'accounts_contacts' },
+    { id: 'accounts', label: 'Accounts', icon: Building2, color: 'from-rose-500 to-pink-500' },
+    { id: 'contacts', label: 'Contacts', icon: Users, color: 'from-sky-500 to-cyan-500' },
     { id: 'intelligence', label: 'Intelligence', icon: Brain, color: 'from-violet-500 to-purple-500' },
     { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
-    { id: 'bookings', label: 'Bookings', icon: Calendar, color: 'from-teal-500 to-green-500', featureRequired: 'calendar_booking' },
+    { id: 'bookings', label: 'Bookings', icon: Calendar, color: 'from-teal-500 to-green-500' },
     { id: 'billing', label: 'Billing', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
     { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'from-gray-500 to-slate-500' },
@@ -1631,7 +1634,7 @@ export default function ClientPortalDashboard() {
                  </Tabs>
                </div>
 
-               {targetMarketTab === 'accounts' && hasFeature('accounts_contacts') && (() => {
+               {targetMarketTab === 'accounts' && (() => {
           const accounts = crmAccounts || [];
           const filteredAccounts = accounts.filter((a: any) => {
             if (crmFilterIndustry && a.industry !== crmFilterIndustry) return false;
@@ -1657,12 +1660,10 @@ export default function ClientPortalDashboard() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {hasFeature('bulk_upload') && (
-                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
+                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
                     <Upload className="h-4 w-4 mr-2" />
                     Import CSV
                   </Button>
-                )}
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredAccounts;
                   const headers = 'Company Name,Industry,Website,Phone';
@@ -1756,7 +1757,7 @@ export default function ClientPortalDashboard() {
                   <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
                   <div className="flex justify-center gap-3">
                     <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
-                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                    <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1840,7 +1841,7 @@ export default function ClientPortalDashboard() {
         })()}
 
 
-               {targetMarketTab === 'contacts' && hasFeature('accounts_contacts') && (() => {
+               {targetMarketTab === 'contacts' && (() => {
           const contacts = crmContacts || [];
           const accounts = crmAccounts || [];
           const filteredContacts = contacts.filter((c: any) => {
@@ -1867,12 +1868,10 @@ export default function ClientPortalDashboard() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {hasFeature('bulk_upload') && (
-                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
+                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
                     <Upload className="h-4 w-4 mr-2" />
                     Import CSV
                   </Button>
-                )}
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredContacts;
                   const headers = 'First Name,Last Name,Email,Phone,Company,Title';
@@ -1966,7 +1965,7 @@ export default function ClientPortalDashboard() {
                   <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
                   <div className="flex justify-center gap-3">
                     <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
-                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                    <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
                   </div>
                 </CardContent>
               </Card>
@@ -3349,7 +3348,7 @@ export default function ClientPortalDashboard() {
         )}
 
         {/* ==================== CRM TAB ==================== */}
-        {activeTab === 'accounts' && hasFeature('accounts_contacts') && (() => {
+        {activeTab === 'accounts' && (() => {
           const accounts = crmAccounts || [];
           const filteredAccounts = accounts.filter((a: any) => {
             if (crmFilterIndustry && a.industry !== crmFilterIndustry) return false;
@@ -3375,12 +3374,10 @@ export default function ClientPortalDashboard() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {hasFeature('bulk_upload') && (
-                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
+                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
                     <Upload className="h-4 w-4 mr-2" />
                     Import CSV
                   </Button>
-                )}
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredAccounts;
                   const headers = 'Company Name,Industry,Website,Phone';
@@ -3474,7 +3471,7 @@ export default function ClientPortalDashboard() {
                   <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
                   <div className="flex justify-center gap-3">
                     <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
-                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                    <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
                   </div>
                 </CardContent>
               </Card>
@@ -3558,7 +3555,7 @@ export default function ClientPortalDashboard() {
         })()}
 
         {/* ==================== CONTACTS TAB ==================== */}
-        {activeTab === 'contacts' && hasFeature('accounts_contacts') && (() => {
+        {activeTab === 'contacts' && (() => {
           const contacts = crmContacts || [];
           const accounts = crmAccounts || [];
           const filteredContacts = contacts.filter((c: any) => {
@@ -3585,12 +3582,10 @@ export default function ClientPortalDashboard() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {hasFeature('bulk_upload') && (
-                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
+                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
                     <Upload className="h-4 w-4 mr-2" />
                     Import CSV
                   </Button>
-                )}
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredContacts;
                   const headers = 'First Name,Last Name,Email,Phone,Company,Title';
@@ -3684,7 +3679,7 @@ export default function ClientPortalDashboard() {
                   <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
                   <div className="flex justify-center gap-3">
                     <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
-                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                    <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
                   </div>
                 </CardContent>
               </Card>
@@ -3803,7 +3798,7 @@ export default function ClientPortalDashboard() {
         )}
 
         {/* ==================== BOOKINGS TAB ==================== */}
-        {activeTab === 'bookings' && hasFeature('calendar_booking') && (
+        {activeTab === 'bookings' && (
           <div className="space-y-6">
             {/* Header */}
             <div className="flex items-center justify-between">

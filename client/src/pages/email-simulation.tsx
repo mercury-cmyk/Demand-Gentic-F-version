@@ -269,9 +269,9 @@ export default function EmailSimulationPage() {
               <SelectTrigger className="bg-white/5 border-white/10 text-white">
                 <SelectValue placeholder={campaignsLoading ? "Loading campaigns..." : "Choose a campaign to simulate"} />
               </SelectTrigger>
-              <SelectContent className="bg-[#1a1a2e] border-white/10">
+              <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                 {campaigns.map((c: any) => (
-                  <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10">
+                  <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                     {c.name}
                   </SelectItem>
                 ))}
@@ -291,9 +291,9 @@ export default function EmailSimulationPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white">
                   <SelectValue placeholder={accountsLoading ? "Loading..." : "Select account"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10 max-h-60">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white max-h-60">
                   {accounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10 focus:text-white">
                       <div className="flex flex-col">
                         <span>{a.name}</span>
                         {a.industry && <span className="text-xs text-white/40">{a.industry}</span>}
@@ -314,9 +314,9 @@ export default function EmailSimulationPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white">
                   <SelectValue placeholder={contactsLoading ? "Loading..." : "Select contact"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10 max-h-60">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white max-h-60">
                   {contacts.map((c) => (
-                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                       <div className="flex flex-col">
                         <span>{c.firstName} {c.lastName}</span>
                         {c.jobTitle && <span className="text-xs text-white/40">{c.jobTitle}</span>}

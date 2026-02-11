@@ -162,9 +162,9 @@ const baseNavigationGroups: NavGroup[] = [
   },
   {
     id: 'resources',
-    label: 'Resources',
+    label: 'How it Works',
     items: [
-      { name: 'Our Services', href: '/client-portal/services', icon: Package },
+      { name: 'Client Guide', href: '/client-portal/services', icon: Package },
     ],
   },
   {
@@ -317,7 +317,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     }
 
     return groups;
-  }, [argyleFeatureStatus?.enabled, enabledFeatures]);
+  }, [argyleFeatureStatus?.enabled, user?.clientAccountName]);
 
   // Show suggestions bubble after a delay if user hasn't interacted
   useEffect(() => {

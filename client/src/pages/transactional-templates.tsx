@@ -172,29 +172,29 @@ export default function TransactionalTemplatesPage() {
 
   // Fetch templates
   const { data: templates = [], isLoading: loadingTemplates } = useQuery<TransactionalTemplate[]>({
-    queryKey: ["/api/transactional-templates", filterEventType],
+    queryKey: ["/api/communications/templates", filterEventType],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filterEventType) params.set("eventType", filterEventType);
-      const res = await apiRequest("GET", `/api/transactional-templates?${params}`);
+      const res = await apiRequest("GET", `/api/communications/templates?${params}`);
       return res.json();
     },
   });
 
   // Fetch SMTP providers
   const { data: smtpProviders = [] } = useQuery<SmtpProvider[]>({
-    queryKey: ["/api/smtp-providers"],
+    queryKey: ["/api/communications/smtp-providers"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/smtp-providers");
+      const res = await apiRequest("GET", "/api/communications/smtp-providers");
       return res.json();
     },
   });
 
   // Fetch logs
   const { data: logs = [], isLoading: loadingLogs } = useQuery({
-    queryKey: ["/api/transactional/logs"],
+    queryKey: ["/api/communications/templates/logs"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/transactional/logs?limit=50");
+      const res = await apiRequest("GET", "/api/communications/templates/logs?limit=50");
       return res.json();
     },
     enabled: activeTab === "logs",
@@ -202,9 +202,9 @@ export default function TransactionalTemplatesPage() {
 
   // Fetch stats
   const { data: stats } = useQuery({
-    queryKey: ["/api/transactional/stats"],
+    queryKey: ["/api/communications/templates/stats"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/transactional/stats");
+      const res = await apiRequest("GET", "/api/communications/templates/stats");
       return res.json();
     },
   });
@@ -212,11 +212,11 @@ export default function TransactionalTemplatesPage() {
   // Create template mutation
   const createMutation = useMutation({
     mutationFn: async (data: typeof newTemplate) => {
-      const res = await apiRequest("POST", "/api/transactional-templates", data);
+      const res = await apiRequest("POST", "/api/communications/templates", data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/transactional-templates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/templates"] });
       toast({ title: "Template created", description: "Transactional template has been created." });
       setShowCreateDialog(false);
       resetNewTemplate();
@@ -229,11 +229,11 @@ export default function TransactionalTemplatesPage() {
   // Update template mutation
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<typeof newTemplate> }) => {
-      const res = await apiRequest("PUT", `/api/transactional-templates/${id}`, data);
+      const res = await apiRequest("PUT", `/api/communications/templates/${id}`, data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/transactional-templates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/templates"] });
       toast({ title: "Template updated", description: "Template has been updated." });
       setEditingTemplate(null);
     },
@@ -245,11 +245,11 @@ export default function TransactionalTemplatesPage() {
   // Delete template mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("DELETE", `/api/transactional-templates/${id}`);
+      const res = await apiRequest("DELETE", `/api/communications/templates/${id}`);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/transactional-templates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/templates"] });
       toast({ title: "Template deleted", description: "Template has been deleted." });
       setShowDeleteDialog(null);
     },
@@ -261,11 +261,11 @@ export default function TransactionalTemplatesPage() {
   // Duplicate template mutation
   const duplicateMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("POST", `/api/transactional-templates/${id}/duplicate`);
+      const res = await apiRequest("POST", `/api/communications/templates/${id}/duplicate`);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/transactional-templates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/communications/templates"] });
       toast({ title: "Template duplicated", description: "A copy has been created." });
     },
     onError: (error: any) => {
@@ -276,7 +276,7 @@ export default function TransactionalTemplatesPage() {
   // Preview mutation
   const previewMutation = useMutation({
     mutationFn: async ({ id, variables }: { id: string; variables: Record<string, string> }) => {
-      const res = await apiRequest("POST", `/api/transactional-templates/${id}/preview`, { variables });
+      const res = await apiRequest("POST", `/api/communications/templates/${id}/preview`, { variables });
       return res.json();
     },
   });

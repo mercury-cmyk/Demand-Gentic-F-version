@@ -371,9 +371,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue placeholder={campaignsLoading ? "Loading..." : "Select campaign"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {campaigns.map(c => (
-                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                       {c.name}
                     </SelectItem>
                   ))}
@@ -392,9 +392,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue placeholder={accountsLoading ? "Loading..." : "Select account"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {accounts.map(a => (
-                    <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10 focus:text-white">
                       <div className="flex items-center gap-2">
                         <Building2 className="h-3 w-3 text-white/40" />
                         {a.name}
@@ -418,9 +418,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue placeholder={contactsLoading ? "Loading..." : "Select contact"} />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {contacts.map(c => (
-                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10">
+                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                       <div className="flex flex-col">
                         <span>{c.fullName || c.email}</span>
                         {c.jobTitle && <span className="text-xs text-white/40">{c.jobTitle}</span>}
@@ -438,9 +438,9 @@ export default function PreviewStudioPage() {
                 <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10">
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
                   {SCENARIOS.map(s => (
-                    <SelectItem key={s.value} value={s.value} className="text-white focus:bg-white/10">
+                    <SelectItem key={s.value} value={s.value} className="text-white focus:bg-white/10 focus:text-white">
                       {s.label}
                     </SelectItem>
                   ))}
