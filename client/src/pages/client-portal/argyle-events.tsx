@@ -216,11 +216,14 @@ export function ArgyleEventsContent() {
   const updateDraftMutation = useMutation({
     mutationFn: async ({ id, draftFields, leadCount }: { id: string; draftFields: Record<string, any>; leadCount: number }) => {
       const res = await fetch(`/api/client-portal/argyle-events/drafts/${id}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ draftFields, leadCount }),
       });
-      if (!res.ok) throw new Error('Failed to update draft');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to update draft');
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -239,7 +242,10 @@ export function ArgyleEventsContent() {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
       });
-      if (!res.ok) throw new Error('Failed to submit');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to submit');
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -473,10 +479,11 @@ export function ArgyleEventsContent() {
             updateDraftMutation.mutate({ id: selectedDraftId, draftFields: fields, leadCount });
           }
         }}
-        onSubmit={() => {
-          if (selectedDraftId) {
-            submitDraftMutation.mutate(selectedDraftId);
-          }
+        onSaveAndSubmit={async (fields, leadCount) => {
+          if (!selectedDraftId) return;
+          // Save first, then submit after save completes
+          await updateDraftMutation.mutateAsync({ id: selectedDraftId, draftFields: fields, leadCount });
+          await submitDraftMutation.mutateAsync(selectedDraftId);
         }}
         isSaving={updateDraftMutation.isPending}
         isSubmitting={submitDraftMutation.isPending}
@@ -496,7 +503,7 @@ interface DraftEditorDialogProps {
   draftData: DraftDetail | null;
   isLoading: boolean;
   onSave: (fields: Record<string, any>, leadCount: number) => void;
-  onSubmit: () => void;
+  onSaveAndSubmit: (fields: Record<string, any>, leadCount: number) => Promise<void>;
   isSaving: boolean;
   isSubmitting: boolean;
 }
@@ -507,13 +514,14 @@ function DraftEditorDialog({
   draftData,
   isLoading,
   onSave,
-  onSubmit,
+  onSaveAndSubmit,
   isSaving,
   isSubmitting,
 }: DraftEditorDialogProps) {
   const [localFields, setLocalFields] = useState<Record<string, any>>({});
   const [localLeadCount, setLocalLeadCount] = useState<string>('');
   const [dirty, setDirty] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
 
   // Initialize local state when draft data loads
   useEffect(() => {
@@ -734,15 +742,22 @@ function DraftEditorDialog({
                        {isSaving ? 'Saving...' : 'Save Draft'}
                      </Button>
                      <Button 
-                       onClick={() => {
-                          if (dirty) handleSave();
-                          onSubmit();
+                       onClick={async () => {
+                          const leadCount = parseInt(localLeadCount, 10);
+                          if (isNaN(leadCount) || leadCount <= 0) return;
+                          setIsLaunching(true);
+                          try {
+                            await onSaveAndSubmit(localFields, leadCount);
+                            setDirty(false);
+                          } finally {
+                            setIsLaunching(false);
+                          }
                        }}
-                       disabled={!canSubmit || isSubmitting}
+                       disabled={!canSubmit || isSubmitting || isLaunching}
                        className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 dark:shadow-none min-w-[160px]"
                        size="lg"
                      >
-                       {isSubmitting ? (
+                       {(isSubmitting || isLaunching) ? (
                           <Loader2 className="h-5 w-5 animate-spin mr-2" />
                        ) : (
                           <Send className="h-5 w-5 mr-2" />

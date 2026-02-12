@@ -15,11 +15,12 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { Link } from 'wouter';
 import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, Brain, MessageSquare, BarChart3 } from 'lucide-react';
+import { RefreshCw, Brain, MessageSquare, BarChart3, Target } from 'lucide-react';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -389,10 +390,18 @@ export default function UnifiedIntelligencePage() {
               </span>
             )}
             {pageTab === 'conversations' && (
-              <Button variant="outline" size="sm" onClick={handleRefresh}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
+              <>
+                <Link href="/unified-intelligence/potential-leads">
+                  <Button variant="outline" size="sm">
+                    <Target className="h-4 w-4 mr-2" />
+                    Potential Leads
+                  </Button>
+                </Link>
+                <Button variant="outline" size="sm" onClick={handleRefresh}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </>
             )}
           </div>
         </div>

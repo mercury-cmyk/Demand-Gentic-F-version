@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import CryptoJS from "crypto-js";
-import { eq, and, or, inArray, isNotNull, isNull, lte, sql, desc, like } from "drizzle-orm";
+import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { storage } from "./storage";
 import { comparePassword, generateToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
@@ -15328,6 +15328,486 @@ Provide JSON response with:
     } catch (error: any) {
       console.error('[QA] Error fetching conversations:', error?.message || error, error?.stack?.slice(0, 500));
       res.status(500).json({ message: "Failed to fetch conversations", error: error?.message });
+    }
+  });
+
+  // ==================== POTENTIAL LEADS API ====================
+  // Get conversations that are potential leads (disposition mismatch, high confidence, etc.)
+  app.get("/api/qa/potential-leads", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const {
+        campaignId,
+        search,
+        source,
+        type,
+        disposition,
+        hasTranscript,
+        minDuration,
+        transcriptQuality,
+        minConfidence,
+        page = '1',
+        limit = '50',
+        sortBy = 'date',
+        sortOrder = 'desc',
+      } = req.query;
+
+      const pageNum = Math.max(1, parseInt(page as string, 10));
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
+      const offset = (pageNum - 1) * limitNum;
+      const minDurationSec = minDuration ? parseInt(minDuration as string, 10) : undefined;
+      const minConfidenceScore = minConfidence ? parseFloat(minConfidence as string) : undefined;
+
+      // ====== DEBUG: Run distribution query to understand the data ======
+      const [totalCallsResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(callSessions);
+      const totalCalls = Number(totalCallsResult?.count || 0);
+
+      const [withTranscriptResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(callSessions)
+        .where(and(isNotNull(callSessions.aiTranscript), sql`length(${callSessions.aiTranscript}) > 50`));
+      const withTranscript = Number(withTranscriptResult?.count || 0);
+
+      const [withAnalysisResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(callSessions)
+        .where(isNotNull(callSessions.aiAnalysis));
+      const withAnalysis = Number(withAnalysisResult?.count || 0);
+
+      const [longCallsResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(callSessions)
+        .where(gte(callSessions.durationSec, 30));
+      const longCalls = Number(longCallsResult?.count || 0);
+
+      // Get disposition breakdown
+      const dispositionBreakdown = await db
+        .select({
+          disposition: callSessions.aiDisposition,
+          count: sql<number>`count(*)`,
+        })
+        .from(callSessions)
+        .groupBy(callSessions.aiDisposition)
+        .orderBy(desc(sql`count(*)`))
+        .limit(20);
+
+      console.log(`[Potential Leads DEBUG] Distribution:
+        Total calls: ${totalCalls}
+        With transcript (>50 chars): ${withTranscript}
+        With AI analysis: ${withAnalysis}
+        Duration >= 30s: ${longCalls}
+        Disposition breakdown: ${JSON.stringify(dispositionBreakdown.slice(0, 10))}
+        Filters: campaignId=${campaignId}, search=${search}, minDuration=${minDuration}, minConfidence=${minConfidence}`);
+
+      // ====== NEW APPROACH: Use heuristics when AI analysis is missing ======
+      // Instead of requiring aiAnalysis, we identify potential leads based on:
+      // 1. Has transcript with meaningful content (bidirectional conversation)
+      // 2. Duration >= 30 seconds (indicates real conversation)
+      // 3. Not clearly voicemail/no_answer disposition
+      // 4. OR has aiAnalysis with potential lead signals
+
+      const conditions: any[] = [];
+
+      // Must have transcript with minimum content
+      conditions.push(isNotNull(callSessions.aiTranscript));
+      conditions.push(sql`length(${callSessions.aiTranscript}) > 50`);
+
+      // Minimum duration to indicate real conversation (30 seconds)
+      const effectiveMinDuration = minDurationSec && minDurationSec > 0 ? minDurationSec : 30;
+      conditions.push(gte(callSessions.durationSec, effectiveMinDuration));
+
+      // Campaign filter
+      if (campaignId && campaignId !== 'all') {
+        conditions.push(eq(callSessions.campaignId, campaignId as string));
+      }
+
+      // Search filter
+      if (search) {
+        const searchPattern = `%${search}%`;
+        conditions.push(
+          or(
+            like(callSessions.aiTranscript, searchPattern),
+            like(callSessions.toNumberE164, searchPattern),
+            like(contacts.firstName, searchPattern),
+            like(contacts.lastName, searchPattern),
+            like(accounts.name, searchPattern)
+          )
+        );
+      }
+
+      // Disposition filter
+      if (disposition && disposition !== 'all') {
+        conditions.push(eq(callSessions.aiDisposition, disposition as string));
+      }
+
+      const whereClause = conditions.length ? and(...conditions) : undefined;
+
+      // Get total count first (for pagination)
+      const [countResult] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(callSessions)
+        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(whereClause);
+      
+      const totalBeforeFilter = Number(countResult?.count || 0);
+
+      console.log(`[Potential Leads DEBUG] After base filters: ${totalBeforeFilter} calls`);
+
+      // Query potential leads with pagination
+      const sessionsQuery = await db
+        .select({
+          id: callSessions.id,
+          campaignId: callSessions.campaignId,
+          campaignName: campaigns.name,
+          contactId: callSessions.contactId,
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          contactEmail: contacts.email,
+          companyName: accounts.name,
+          status: callSessions.status,
+          disposition: callSessions.aiDisposition,
+          agentType: callSessions.agentType,
+          duration: callSessions.durationSec,
+          transcript: callSessions.aiTranscript,
+          analysis: callSessions.aiAnalysis,
+          recordingUrl: callSessions.recordingUrl,
+          recordingS3Key: callSessions.recordingS3Key,
+          recordingStatus: callSessions.recordingStatus,
+          telnyxRecordingId: callSessions.telnyxRecordingId,
+          toNumberE164: callSessions.toNumberE164,
+          createdAt: callSessions.startedAt,
+        })
+        .from(callSessions)
+        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(whereClause)
+        .orderBy(sortOrder === 'asc' ? asc(callSessions.startedAt) : desc(callSessions.startedAt))
+        .limit(500); // Fetch more to allow filtering
+
+      // Helper: Determine transcript quality
+      const getTranscriptQuality = (transcript: string | null): 'missing' | 'one-sided' | 'two-sided' => {
+        if (!transcript || transcript.length < 50) return 'missing';
+        const lower = transcript.toLowerCase();
+        const hasAgent = lower.includes('agent:') || lower.includes('assistant:') || lower.includes('ai:');
+        const hasProspect = lower.includes('contact:') || lower.includes('prospect:') || lower.includes('user:');
+        if (hasAgent && hasProspect) return 'two-sided';
+        if (hasAgent || hasProspect) return 'one-sided';
+        // Check for multiple speakers (newline patterns)
+        const lines = transcript.split('\n').filter(l => l.trim().length > 0);
+        if (lines.length > 3) return 'two-sided';
+        return 'one-sided';
+      };
+
+      // Helper: Detect voicemail/IVR patterns in transcript
+      const isVoicemailOrIVR = (transcript: string | null, disposition: string | null): boolean => {
+        if (!transcript) return true;
+        const lower = transcript.toLowerCase();
+        const dispLower = (disposition || '').toLowerCase();
+        
+        // Disposition-based detection
+        if (['voicemail', 'no_answer', 'busy', 'ivr', 'machine'].includes(dispLower)) {
+          return true;
+        }
+        
+        // Content-based detection
+        const voicemailPatterns = [
+          'leave a message',
+          'leave your message',
+          'after the beep',
+          'after the tone',
+          'not available',
+          'press 1',
+          'press 2',
+          'for english',
+          'para español',
+          'main menu',
+          'directory',
+          'extension',
+          'mailbox',
+          'voicemail',
+          'please hold',
+          'your call is important',
+          'all representatives',
+          'currently unavailable',
+        ];
+        
+        const hasVoicemailPattern = voicemailPatterns.some(p => lower.includes(p));
+        
+        // If mostly one-sided and short lines, likely voicemail
+        const lines = transcript.split('\n').filter(l => l.trim().length > 0);
+        const hasAgent = lower.includes('agent:') || lower.includes('assistant:');
+        const hasContact = lower.includes('contact:') || lower.includes('prospect:');
+        const isOneSided = (hasAgent && !hasContact) || (!hasAgent && hasContact);
+        
+        return hasVoicemailPattern || (isOneSided && lines.length < 5);
+      };
+
+      // Helper: Detect positive engagement signals in transcript
+      const hasPositiveEngagement = (transcript: string | null): { hasSignals: boolean; signals: string[] } => {
+        if (!transcript) return { hasSignals: false, signals: [] };
+        const lower = transcript.toLowerCase();
+        const signals: string[] = [];
+        
+        // Positive engagement indicators
+        const positivePatterns = [
+          { pattern: 'interested', signal: 'Expressed interest' },
+          { pattern: 'tell me more', signal: 'Asked for more information' },
+          { pattern: 'sounds good', signal: 'Positive response' },
+          { pattern: 'sounds interesting', signal: 'Showed interest' },
+          { pattern: 'what is the cost', signal: 'Asked about pricing' },
+          { pattern: 'how much', signal: 'Asked about pricing' },
+          { pattern: 'send me', signal: 'Requested information' },
+          { pattern: 'email me', signal: 'Requested follow-up' },
+          { pattern: 'call me back', signal: 'Requested callback' },
+          { pattern: 'schedule', signal: 'Discussed scheduling' },
+          { pattern: 'meeting', signal: 'Discussed meeting' },
+          { pattern: 'demo', signal: 'Requested demo' },
+          { pattern: 'yes', signal: 'Affirmative responses' },
+          { pattern: 'sure', signal: 'Affirmative responses' },
+          { pattern: 'okay', signal: 'Affirmative responses' },
+          { pattern: 'decision maker', signal: 'Identified decision maker' },
+          { pattern: 'budget', signal: 'Discussed budget' },
+          { pattern: 'timeline', signal: 'Discussed timeline' },
+        ];
+        
+        for (const { pattern, signal } of positivePatterns) {
+          if (lower.includes(pattern) && !signals.includes(signal)) {
+            signals.push(signal);
+          }
+        }
+        
+        return { hasSignals: signals.length >= 2, signals };
+      };
+
+      // Helper: Calculate derived confidence using HEURISTICS when AI analysis is missing
+      const getDerivedConfidence = (analysis: any, transcript: string | null, duration: number | null, disposition: string | null): number => {
+        let confidence = 0;
+        
+        // If we have AI analysis, use it
+        if (analysis) {
+          const qualityData = analysis?.conversationQuality || analysis;
+          
+          // Base confidence from overall score
+          const overallScore = qualityData?.overallScore || 0;
+          confidence += Math.min(40, overallScore * 0.4);
+          
+          // Disposition mismatch bonus
+          const dispReview = qualityData?.dispositionReview;
+          if (dispReview && dispReview.isAccurate === false) {
+            confidence += 25;
+          }
+          
+          // Qualification signals
+          const qualAssessment = qualityData?.qualificationAssessment;
+          if (qualAssessment?.metCriteria || (qualAssessment?.successIndicators?.length || 0) >= 2) {
+            confidence += 20;
+          }
+          
+          // Engagement level bonus
+          if (qualityData?.learningSignals?.engagementLevel === 'high') {
+            confidence += 10;
+          }
+          if (qualityData?.learningSignals?.sentiment === 'positive') {
+            confidence += 5;
+          }
+        } else {
+          // HEURISTIC-BASED confidence when no AI analysis
+          
+          // Duration-based confidence (longer calls = more likely real conversation)
+          if (duration && duration >= 60) {
+            confidence += 30; // 1+ minute conversation
+          } else if (duration && duration >= 45) {
+            confidence += 20;
+          } else if (duration && duration >= 30) {
+            confidence += 10;
+          }
+          
+          // Transcript quality
+          const transcriptQuality = getTranscriptQuality(transcript);
+          if (transcriptQuality === 'two-sided') {
+            confidence += 25; // Bidirectional conversation is good signal
+          } else if (transcriptQuality === 'one-sided') {
+            confidence += 10;
+          }
+          
+          // Positive engagement signals in transcript
+          const { hasSignals, signals } = hasPositiveEngagement(transcript);
+          if (hasSignals) {
+            confidence += 20 + Math.min(15, signals.length * 3);
+          }
+          
+          // Not voicemail/IVR
+          if (!isVoicemailOrIVR(transcript, disposition)) {
+            confidence += 10;
+          }
+          
+          // Disposition suggests potential (callback requests, etc.)
+          const dispLower = (disposition || '').toLowerCase();
+          if (['callback', 'callback_requested', 'follow_up'].includes(dispLower)) {
+            confidence += 15;
+          }
+        }
+        
+        return Math.min(100, confidence);
+      };
+
+      // Helper: Determine derived outcome
+      const getDerivedOutcome = (analysis: any, transcript: string | null, currentDisposition: string | null): string => {
+        // If we have AI analysis with expected disposition, use it
+        if (analysis) {
+          const qualityData = analysis?.conversationQuality || analysis;
+          const dispReview = qualityData?.dispositionReview;
+          
+          if (dispReview?.expectedDisposition && dispReview?.expectedDisposition !== currentDisposition) {
+            return dispReview.expectedDisposition;
+          }
+          
+          const qualAssessment = qualityData?.qualificationAssessment;
+          if (qualAssessment?.metCriteria === true) {
+            return 'qualified_lead';
+          }
+        }
+        
+        // HEURISTIC-BASED derived outcome when no AI analysis
+        const { hasSignals } = hasPositiveEngagement(transcript);
+        if (hasSignals && !isVoicemailOrIVR(transcript, currentDisposition)) {
+          return 'potential_lead';
+        }
+        
+        return currentDisposition || 'unknown';
+      };
+
+      // Transform and filter to potential leads
+      const potentialLeads: any[] = [];
+      let skippedVoicemail = 0;
+      let skippedLowConfidence = 0;
+      let skippedNotPotential = 0;
+
+      for (const session of sessionsQuery) {
+        const analysisObj = session.analysis as any;
+        const qualityData = analysisObj?.conversationQuality || analysisObj;
+        const transcriptQualityValue = getTranscriptQuality(session.transcript);
+        const derivedConfidence = getDerivedConfidence(analysisObj, session.transcript, session.duration, session.disposition);
+        const derivedOutcome = getDerivedOutcome(analysisObj, session.transcript, session.disposition);
+        
+        // Filter: transcript quality
+        if (transcriptQuality && transcriptQuality !== 'all') {
+          if (transcriptQualityValue !== transcriptQuality) continue;
+        }
+        
+        // Filter: minimum confidence
+        if (minConfidenceScore !== undefined && derivedConfidence < minConfidenceScore) {
+          skippedLowConfidence++;
+          continue;
+        }
+
+        // Skip voicemail/IVR
+        if (isVoicemailOrIVR(session.transcript, session.disposition)) {
+          skippedVoicemail++;
+          continue;
+        }
+        
+        // NEW HEURISTIC-BASED POTENTIAL LEAD DETECTION:
+        // A call is a potential lead if:
+        // 1. Has AI analysis with disposition mismatch or qualification signals, OR
+        // 2. Duration >= 45s AND two-sided transcript AND positive engagement signals, OR
+        // 3. Confidence score >= 40 (from heuristics or AI)
+        
+        const dispReview = qualityData?.dispositionReview;
+        const hasAISignals = (
+          (dispReview?.isAccurate === false) ||
+          (qualityData?.qualificationAssessment?.metCriteria === true)
+        );
+        
+        const { hasSignals: hasEngagement, signals: engagementSignals } = hasPositiveEngagement(session.transcript);
+        const hasHeuristicSignals = (
+          (session.duration || 0) >= 45 &&
+          transcriptQualityValue === 'two-sided' &&
+          hasEngagement
+        );
+        
+        const hasConfidenceThreshold = derivedConfidence >= 40;
+        
+        const isPotentialLead = hasAISignals || hasHeuristicSignals || hasConfidenceThreshold;
+        
+        if (!isPotentialLead) {
+          skippedNotPotential++;
+          continue;
+        }
+
+        const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact';
+        const hasRecording = !!(session.recordingS3Key || session.recordingUrl || session.telnyxRecordingId);
+
+        potentialLeads.push({
+          id: session.id,
+          source: 'call_session',
+          campaignId: session.campaignId,
+          campaignName: session.campaignName || 'Unknown Campaign',
+          contactId: session.contactId,
+          contactName,
+          contactEmail: session.contactEmail,
+          contactPhone: session.toNumberE164,
+          companyName: session.companyName || 'Unknown Company',
+          status: session.status,
+          disposition: session.disposition,
+          derivedOutcome,
+          derivedConfidence,
+          transcriptQuality: transcriptQualityValue,
+          agentType: session.agentType,
+          duration: session.duration,
+          hasTranscript: !!(session.transcript && session.transcript.length > 50),
+          hasRecording,
+          hasAIAnalysis: !!analysisObj,
+          engagementSignals: engagementSignals.slice(0, 5),
+          createdAt: session.createdAt?.toISOString() || new Date().toISOString(),
+          // Analysis summary
+          overallScore: qualityData?.overallScore,
+          dispositionReview: dispReview,
+          qualificationAssessment: qualityData?.qualificationAssessment,
+        });
+      }
+
+      // Apply pagination after filtering
+      const total = potentialLeads.length;
+      const paginatedItems = potentialLeads.slice(offset, offset + limitNum);
+      const totalPages = Math.ceil(total / limitNum);
+
+      console.log(`[Potential Leads] Results: ${totalBeforeFilter} base calls -> ${total} potential leads
+        Skipped: voicemail=${skippedVoicemail}, lowConfidence=${skippedLowConfidence}, notPotential=${skippedNotPotential}
+        Returning page ${pageNum}/${totalPages}`);
+
+      // Build diagnostic info for UX
+      const diagnostics = {
+        totalCalls,
+        withTranscript,
+        withAnalysis,
+        longCalls,
+        baseFilteredCalls: totalBeforeFilter,
+        skippedVoicemail,
+        skippedLowConfidence,
+        skippedNotPotential,
+        dispositionBreakdown: dispositionBreakdown.slice(0, 5),
+      };
+
+      res.json({
+        success: true,
+        total,
+        items: paginatedItems,
+        meta: {
+          page: pageNum,
+          limit: limitNum,
+          totalPages,
+          totalBeforeFilter,
+        },
+        diagnostics,
+      });
+    } catch (error: any) {
+      console.error('[Potential Leads] Error:', error?.message || error, error?.stack?.slice(0, 500));
+      res.status(500).json({ message: "Failed to fetch potential leads", error: error?.message });
     }
   });
 

@@ -109,6 +109,7 @@ export const ROUTES = {
   LEADS: '/leads',
   CONVERSATION_QUALITY: '/conversation-quality',
   UNIFIED_INTELLIGENCE: '/unified-intelligence',
+  POTENTIAL_LEADS: '/unified-intelligence/potential-leads',
 
   // ==========================================
   // Data Routes

@@ -64,6 +64,7 @@ import CallReportsPage from "@/pages/call-reports";
 import CallRecordingsPage from "@/pages/call-recordings";
 // CallIntelligenceDashboard removed - page deprecated
 import UnifiedIntelligencePage from "@/pages/unified-intelligence";
+import PotentialLeadsPage from "@/pages/potential-leads";
 
 // Lazy-loaded components
 const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
@@ -401,6 +402,7 @@ function AuthenticatedApp() {
               <Route path="/call-recordings" component={CallRecordingsPage} />
               {/* /call-intelligence route removed - page deprecated */}
               <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
+              <Route path="/unified-intelligence/potential-leads" component={PotentialLeadsPage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/ai-call-analytics">
                 <Redirect to="/call-reports?tab=ai" />
