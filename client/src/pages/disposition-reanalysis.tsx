@@ -1059,26 +1059,26 @@ export default function DispositionReanalysisPage() {
             <div className="flex items-center justify-center py-10">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
-          ) : callDetail ? (
+          ) : activeCallDetail ? (
             <div className="space-y-4">
               {/* Contact info */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs text-muted-foreground">Contact</Label>
-                  <p className="font-medium">{callDetail.contactInfo.name}</p>
-                  <p className="text-sm text-muted-foreground">{callDetail.contactInfo.company}</p>
+                  <p className="font-medium">{activeCallDetail.contactInfo.name}</p>
+                  <p className="text-sm text-muted-foreground">{activeCallDetail.contactInfo.company}</p>
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Campaign</Label>
-                  <p className="font-medium">{callDetail.campaignInfo.name}</p>
+                  <p className="font-medium">{activeCallDetail.campaignInfo.name}</p>
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Phone</Label>
-                  <p className="font-mono text-sm">{callDetail.contactInfo.phone}</p>
+                  <p className="font-mono text-sm">{activeCallDetail.contactInfo.phone}</p>
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Duration / Date</Label>
-                  <p className="text-sm">{formatDuration(callDetail.durationSec)} · {formatDate(callDetail.callDate)}</p>
+                  <p className="text-sm">{formatDuration(activeCallDetail.durationSec)} · {formatDate(activeCallDetail.callDate)}</p>
                 </div>
               </div>
 
@@ -1088,17 +1088,17 @@ export default function DispositionReanalysisPage() {
               <div className="flex items-center gap-4">
                 <div>
                   <Label className="text-xs text-muted-foreground">Current</Label>
-                  <div className="mt-1"><DispositionBadge disposition={callDetail.currentDisposition} /></div>
+                  <div className="mt-1"><DispositionBadge disposition={activeCallDetail.currentDisposition} /></div>
                 </div>
                 <ArrowRight className="h-5 w-5 text-muted-foreground mt-4" />
                 <div>
                   <Label className="text-xs text-muted-foreground">Suggested</Label>
                   <div className="mt-1 flex items-center gap-2">
-                    <DispositionBadge disposition={callDetail.analysis.suggestedDisposition} />
-                    <ConfidenceBadge confidence={callDetail.analysis.confidence} />
+                    <DispositionBadge disposition={activeCallDetail.analysis.suggestedDisposition} />
+                    <ConfidenceBadge confidence={activeCallDetail.analysis.confidence} />
                   </div>
                 </div>
-                {callDetail.analysis.shouldOverride && (
+                {activeCallDetail.analysis.shouldOverride && (
                   <Badge variant="outline" className="bg-amber-100 text-amber-800 mt-4">
                     Override Recommended
                   </Badge>
@@ -1108,26 +1108,26 @@ export default function DispositionReanalysisPage() {
               {/* Reasoning */}
               <div>
                 <Label className="text-xs text-muted-foreground">AI Reasoning</Label>
-                <p className="text-sm mt-1 bg-muted rounded-md p-3">{callDetail.analysis.reasoning}</p>
+                <p className="text-sm mt-1 bg-muted rounded-md p-3">{activeCallDetail.analysis.reasoning}</p>
               </div>
 
               {/* Signals */}
               <div className="grid grid-cols-2 gap-4">
-                {callDetail.analysis.positiveSignals.length > 0 && (
+                {activeCallDetail.analysis.positiveSignals.length > 0 && (
                   <div>
                     <Label className="text-xs text-emerald-600">Positive Signals</Label>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {callDetail.analysis.positiveSignals.map((s, i) => (
+                      {activeCallDetail.analysis.positiveSignals.map((s, i) => (
                         <Badge key={i} variant="outline" className="bg-emerald-50 text-emerald-700 text-xs">{s}</Badge>
                       ))}
                     </div>
                   </div>
                 )}
-                {callDetail.analysis.negativeSignals.length > 0 && (
+                {activeCallDetail.analysis.negativeSignals.length > 0 && (
                   <div>
                     <Label className="text-xs text-red-600">Negative Signals</Label>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {callDetail.analysis.negativeSignals.map((s, i) => (
+                      {activeCallDetail.analysis.negativeSignals.map((s, i) => (
                         <Badge key={i} variant="outline" className="bg-red-50 text-red-700 text-xs">{s}</Badge>
                       ))}
                     </div>
@@ -1136,28 +1136,28 @@ export default function DispositionReanalysisPage() {
               </div>
 
               {/* Recording */}
-              {callDetail.recordingUrl && (
+              {activeCallDetail.recordingUrl && (
                 <div>
                   <Label className="text-xs text-muted-foreground">Recording</Label>
-                  <audio controls className="w-full mt-1" src={callDetail.recordingUrl} />
+                  <audio controls className="w-full mt-1" src={activeCallDetail.recordingUrl} />
                 </div>
               )}
 
               {/* Transcript */}
-              {callDetail.transcript && (
+              {activeCallDetail.transcript && (
                 <div>
                   <Label className="text-xs text-muted-foreground">Transcript</Label>
                   <ScrollArea className="h-[250px] mt-1 border rounded-md p-3 bg-muted/30">
-                    <TranscriptView transcript={callDetail.transcript} />
+                    <TranscriptView transcript={activeCallDetail.transcript} />
                   </ScrollArea>
                 </div>
               )}
 
               {/* Lead info */}
               <div className="flex items-center gap-4 text-sm">
-                {callDetail.hasExistingLead ? (
+                {activeCallDetail.hasExistingLead ? (
                   <Badge variant="outline" className="bg-emerald-50 text-emerald-700">
-                    <CheckCircle2 className="h-3 w-3 mr-1" /> Lead exists: {callDetail.existingLeadId}
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> Lead exists: {activeCallDetail.existingLeadId}
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="bg-slate-50 text-slate-600">
@@ -1171,15 +1171,15 @@ export default function DispositionReanalysisPage() {
           )}
 
           <DialogFooter>
-            {callDetail && (
+            {activeCallDetail && (
               <Button
                 onClick={() => {
                   setDetailCallId(null);
                   setOverrideDialog({
-                    callSessionId: callDetail.callSessionId,
-                    currentDisp: callDetail.currentDisposition,
+                    callSessionId: activeCallDetail.callSessionId,
+                    currentDisp: activeCallDetail.currentDisposition,
                   });
-                  setOverrideDisposition(callDetail.analysis.suggestedDisposition);
+                  setOverrideDisposition(activeCallDetail.analysis.suggestedDisposition);
                 }}
               >
                 Override Disposition

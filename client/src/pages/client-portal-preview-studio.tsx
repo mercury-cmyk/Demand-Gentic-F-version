@@ -199,13 +199,22 @@ export default function ClientPortalPreviewStudioPage() {
     queryKey: ['/api/client-portal/campaigns', selectedCampaignId, 'preview-audience'],
     queryFn: async () => {
       if (!selectedCampaignId) return { accounts: [], contacts: [] };
+      console.log('[PREVIEW STUDIO] Fetching preview-audience for campaign:', selectedCampaignId);
       const res = await fetch(`/api/client-portal/campaigns/${selectedCampaignId}/preview-audience`, {
         headers: getAuthHeaders(),
       });
-      if (!res.ok) throw new Error('Failed to fetch preview audience');
-      return res.json();
+      console.log('[PREVIEW STUDIO] preview-audience HTTP status:', res.status);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('[PREVIEW STUDIO] preview-audience error:', res.status, errText);
+        throw new Error('Failed to fetch preview audience');
+      }
+      const data = await res.json();
+      console.log('[PREVIEW STUDIO] preview-audience response:', JSON.stringify({ accounts: data.accounts?.length, contacts: data.contacts?.length, campaign: data.campaign }));
+      return data;
     },
     enabled: !!selectedCampaignId,
+    retry: false,
   });
 
   // Transform accounts data
@@ -395,11 +404,11 @@ export default function ClientPortalPreviewStudioPage() {
               {/* Campaign */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Campaign</Label>
-                <Select value={selectedCampaignId || ''} onValueChange={(v) => { setSelectedCampaignId(v); setSelectedAccountId(null); setSelectedContactId(null); }}>
+                <Select value={selectedCampaignId ?? undefined} onValueChange={(v) => { setSelectedCampaignId(v); setSelectedAccountId(null); setSelectedContactId(null); }}>
                   <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                     <SelectValue placeholder={campaignsLoading ? "Loading..." : "Select campaign"} />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
+                  <SelectContent className="bg-[#1a1a2e] border-white/10 text-white max-h-60">
                     {campaigns.map(c => (
                       <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                         {c.name}
@@ -413,14 +422,14 @@ export default function ClientPortalPreviewStudioPage() {
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Account</Label>
                 <Select
-                  value={selectedAccountId || ''}
+                  value={selectedAccountId ?? undefined}
                   onValueChange={(v) => { setSelectedAccountId(v); setSelectedContactId(null); }}
                   disabled={!selectedCampaignId}
                 >
                   <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                     <SelectValue placeholder={accountsLoading ? "Loading..." : "Select account"} />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
+                  <SelectContent className="bg-[#1a1a2e] border-white/10 text-white max-h-60">
                     {accounts.map(a => (
                       <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10 focus:text-white">
                         <div className="flex items-center gap-2">
@@ -439,14 +448,14 @@ export default function ClientPortalPreviewStudioPage() {
                   Contact <span className="text-white/30">(Optional)</span>
                 </Label>
                 <Select
-                  value={selectedContactId || ''}
+                  value={selectedContactId ?? undefined}
                   onValueChange={setSelectedContactId}
                   disabled={!selectedAccountId}
                 >
                   <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
                     <SelectValue placeholder={contactsLoading ? "Loading..." : "Select contact"} />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
+                  <SelectContent className="bg-[#1a1a2e] border-white/10 text-white max-h-60">
                     {contacts.map(c => (
                       <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10 focus:text-white">
                         <div className="flex flex-col">

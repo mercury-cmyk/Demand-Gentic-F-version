@@ -206,27 +206,32 @@ router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
  */
 router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (req, res) => {
   const { campaignId } = req.params;
-  console.log('[CLIENT PORTAL] /campaigns/:campaignId/preview-audience - Request received');
-  
+  console.log('[CLIENT PORTAL] /campaigns/:campaignId/preview-audience - Request received, campaignId:', campaignId);
+
   try {
     const clientAccountId = req.clientUser!.clientAccountId;
 
-    // Verify client has access
+    // Verify client has access (check all possible access paths)
     const [directAccess] = await db.select().from(clientCampaignAccess).where(and(eq(clientCampaignAccess.clientAccountId, clientAccountId), or(eq(clientCampaignAccess.campaignId, campaignId), eq(clientCampaignAccess.regularCampaignId, campaignId)))).limit(1);
-    
+
     let workOrderAccess = null;
     if (!directAccess) { const [wo] = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.clientAccountId, clientAccountId), eq(workOrders.campaignId, campaignId))).limit(1); workOrderAccess = wo; }
-    
+
     let intakeAccess = null;
     if(!directAccess && !workOrderAccess) { const [intake] = await db.select({ id: campaignIntakeRequests.id }).from(campaignIntakeRequests).where(and(eq(campaignIntakeRequests.clientAccountId, clientAccountId), eq(campaignIntakeRequests.campaignId, campaignId))).limit(1); intakeAccess = intake; }
 
-    if (!directAccess && !workOrderAccess && !intakeAccess) return res.status(403).json({ message: "You don't have access to this campaign" });
+    // Also check campaigns.clientAccountId (campaigns created by admins or via client portal wizard)
+    let directCampaignAccess = null;
+    if (!directAccess && !workOrderAccess && !intakeAccess) { const [dc] = await db.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.id, campaignId), eq(campaigns.clientAccountId, clientAccountId))).limit(1); directCampaignAccess = dc; }
+
+    if (!directAccess && !workOrderAccess && !intakeAccess && !directCampaignAccess) return res.status(403).json({ message: "You don't have access to this campaign" });
 
     // Try to get campaign details
     const [verificationCampaign] = await db.select().from(verificationCampaigns).where(eq(verificationCampaigns.id, campaignId)).limit(1);
 
     if (verificationCampaign) {
       const sampleContacts = await db.select({ id: verificationContacts.id, firstName: verificationContacts.firstName, lastName: verificationContacts.lastName, email: verificationContacts.email, phone: verificationContacts.phone, title: verificationContacts.title, company: verificationContacts.company }).from(verificationContacts).where(eq(verificationContacts.campaignId, campaignId)).limit(30);
+      console.log('[CLIENT PORTAL] preview-audience: verification campaign found, contacts:', sampleContacts.length);
 
       const accountsMap = new Map();
       for (const contact of sampleContacts) {
@@ -242,36 +247,79 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
     const [regularCampaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
     if (regularCampaign) {
       let sampleContactsData: any[] = [];
-      const queueContacts = await db.select({ id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName, email: contacts.email, phone: contacts.directPhone, title: contacts.jobTitle, accountId: contacts.accountId, accountName: accounts.name, accountWebsite: accounts.website, accountIndustry: accounts.industry }).from(campaignQueue).innerJoin(contacts, eq(campaignQueue.contactId, contacts.id)).innerJoin(accounts, eq(campaignQueue.accountId, accounts.id)).where(eq(campaignQueue.campaignId, campaignId)).limit(30);
-      
-      if (queueContacts.length > 0) { sampleContactsData = queueContacts; } 
-      else {
+
+      // 1. Try campaign queue first (LEFT join accounts so contacts without accountId aren't dropped)
+      const queueContacts = await db.select({
+        id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName,
+        email: contacts.email, phone: contacts.directPhone, title: contacts.jobTitle,
+        accountId: contacts.accountId, companyNorm: contacts.companyNorm,
+        accountName: accounts.name, accountWebsite: accounts.website, accountIndustry: accounts.industry,
+      }).from(campaignQueue)
+        .innerJoin(contacts, eq(campaignQueue.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(eq(campaignQueue.campaignId, campaignId)).limit(30);
+      console.log('[CLIENT PORTAL] preview-audience: regular campaign, queueContacts:', queueContacts.length);
+
+      if (queueContacts.length > 0) {
+        sampleContactsData = queueContacts.map(c => ({
+          ...c,
+          accountName: c.accountName || c.companyNorm || 'Unknown Company',
+        }));
+      } else {
+        // 2. Fall back to audienceRefs (lists, segments, filterGroups)
         const audienceRefs = regularCampaign.audienceRefs as any;
+        console.log('[CLIENT PORTAL] preview-audience: no queue contacts, audienceRefs:', JSON.stringify(audienceRefs));
         if (audienceRefs) {
            const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+           console.log('[CLIENT PORTAL] preview-audience: listIds:', listIds);
            if (Array.isArray(listIds) && listIds.length > 0) {
               const campaignLists = await db.select({ recordIds: lists.recordIds }).from(lists).where(inArray(lists.id, listIds));
+              console.log('[CLIENT PORTAL] preview-audience: found', campaignLists.length, 'lists, recordIds counts:', campaignLists.map(l => l.recordIds?.length || 0));
               let contactIds: string[] = [];
               for(const l of campaignLists) if(l.recordIds && Array.isArray(l.recordIds)) contactIds.push(...l.recordIds);
               contactIds = [...new Set(contactIds)].slice(0, 30);
+              console.log('[CLIENT PORTAL] preview-audience: unique contactIds:', contactIds.length);
               if(contactIds.length > 0) {
-                 const listContacts = await db.select({ id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName, email: contacts.email, phone: contacts.directPhone, title: contacts.jobTitle, accountId: contacts.accountId }).from(contacts).where(inArray(contacts.id, contactIds)).limit(30);
-                 const accountIds = [...new Set(listContacts.map(c => c.accountId).filter(Boolean))] as string[];
-                 let accountDetails: any[] = [];
-                 if(accountIds.length > 0) accountDetails = await db.select({ id: accounts.id, name: accounts.name, website: accounts.website, industry: accounts.industry }).from(accounts).where(inArray(accounts.id, accountIds)).limit(10);
-                 const accountMap = new Map(accountDetails.map(a => [a.id, a]));
-                 sampleContactsData = listContacts.map(c => ({ ...c, accountName: accountMap.get(c.accountId)?.name, accountWebsite: accountMap.get(c.accountId)?.website, accountIndustry: accountMap.get(c.accountId)?.industry }));
+                 const listContacts = await db.select({
+                   id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName,
+                   email: contacts.email, phone: contacts.directPhone, title: contacts.jobTitle,
+                   accountId: contacts.accountId, companyNorm: contacts.companyNorm,
+                   accountName: accounts.name, accountWebsite: accounts.website, accountIndustry: accounts.industry,
+                 }).from(contacts)
+                   .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+                   .where(inArray(contacts.id, contactIds)).limit(30);
+                 console.log('[CLIENT PORTAL] preview-audience: fetched contacts:', listContacts.length, 'with accountIds:', listContacts.map(c => c.accountId).filter(Boolean).length, 'with companyNorm:', listContacts.map(c => c.companyNorm).filter(Boolean).length);
+                 sampleContactsData = listContacts.map(c => ({
+                   ...c,
+                   accountName: c.accountName || c.companyNorm || 'Unknown Company',
+                 }));
               }
            }
         }
       }
 
-      const accountsMap = new Map();
-      for (const c of sampleContactsData) if (c.accountId && !accountsMap.has(c.accountId)) accountsMap.set(c.accountId, { id: c.accountId, name: c.accountName, website: c.accountWebsite, industry: c.accountIndustry });
-      
-      return res.json({ campaign: { id: regularCampaign.id, name: regularCampaign.name, status: regularCampaign.status, type: 'regular' }, accounts: Array.from(accountsMap.values()).slice(0, 10), contacts: sampleContactsData.map(c => ({ ...c, company: c.accountName })), totalAccountsAvailable: accountsMap.size, totalContactsAvailable: sampleContactsData.length });
+      // Build accounts map — use accountId if available, otherwise group by companyNorm/accountName
+      const accountsMap = new Map<string, { id: string; name: string; website?: string | null; industry?: string | null }>();
+      for (const c of sampleContactsData) {
+        if (c.accountId && !accountsMap.has(c.accountId)) {
+          accountsMap.set(c.accountId, { id: c.accountId, name: c.accountName || 'Unknown', website: c.accountWebsite, industry: c.accountIndustry });
+        } else if (!c.accountId && c.accountName && !accountsMap.has(`company_${c.accountName}`)) {
+          // Contacts without accountId — group by company name (like verification campaigns)
+          accountsMap.set(`company_${c.accountName}`, { id: `company_${c.accountName}`, name: c.accountName, website: null, industry: null });
+        }
+      }
+      console.log('[CLIENT PORTAL] preview-audience: final accounts:', accountsMap.size, 'contacts:', sampleContactsData.length);
+
+      return res.json({
+        campaign: { id: regularCampaign.id, name: regularCampaign.name, status: regularCampaign.status, type: 'regular' },
+        accounts: Array.from(accountsMap.values()).slice(0, 10),
+        contacts: sampleContactsData.map(c => ({ ...c, company: c.accountName })),
+        totalAccountsAvailable: accountsMap.size,
+        totalContactsAvailable: sampleContactsData.length,
+      });
     }
 
+    console.log('[CLIENT PORTAL] preview-audience: campaign not found in either table');
     res.status(404).json({ message: "Campaign not found" });
   } catch (error) {
     console.error('[CLIENT PORTAL] Get preview audience error:', error);
