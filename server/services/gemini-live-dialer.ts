@@ -394,6 +394,16 @@ ${context.contactName ? `
 4. If the person is unavailable: "When would be a good time to reach them?" then use submit_disposition with "no_answer" and end_call
 5. Do NOT pitch to the gatekeeper - they are not the decision maker
 
+### AUTOMATED CALL SCREENER (Google Voice / Call Screen):
+If you hear phrases like "record your name and reason for calling", "state your name and reason for calling", or "I'll see if this person is available":
+- This is NOT a human gatekeeper — it's an automated screening system
+- Respond ONCE: "This is ${context.agentName || 'your agent'} calling from ${orgRef} for ${context.contactFirstName || context.contactName || 'the contact'} regarding a business opportunity."
+- Then WAIT SILENTLY — do not speak again until a human voice speaks
+- If the screener repeats its prompt, STAY SILENT — it is processing your response
+- If a human connects after screening, re-verify identity: "Hi, am I speaking with ${context.contactFirstName || context.contactName || 'the contact'}?"
+- If no human connects within 30 seconds of silence, use submit_disposition with "no_answer" and end the call
+- NEVER repeat yourself to the screener — respond exactly ONCE
+
 ### RIGHT PARTY RESPONSES (the actual contact you're calling):
 - "Yes" / "Yeah" / "That's me" / "Speaking"
 - "This is ${context.contactName || '[name]'}" / "I'm ${context.contactName || '[name]'}"
@@ -713,11 +723,20 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   const MAX_HOLD_SILENCE_MS = 45_000; // 45 seconds of hold/silence before forcing end
   let lastContactSpeechAt: number = Date.now();
 
+  function isScreenerContext(): boolean {
+    return transcriptTurns
+      .filter(t => t.role === 'contact')
+      .some(t => /record your name|reason for calling|stay on the line|this person is available|call screening|call assist/i.test(t.text));
+  }
+
   function detectAgentRepetitionLoop(): { isLooping: boolean; phrase: string } {
+    // Lower threshold for screener contexts — agent should NEVER repeat to a screener
+    const effectiveThreshold = isScreenerContext() ? 2 : REPETITION_THRESHOLD;
+
     const recentAgentTurns = transcriptTurns
       .filter(t => t.role === 'agent')
       .slice(-6);
-    if (recentAgentTurns.length < REPETITION_THRESHOLD) return { isLooping: false, phrase: '' };
+    if (recentAgentTurns.length < effectiveThreshold) return { isLooping: false, phrase: '' };
 
     // Normalize and check if recent agent turns are repeating the same phrase
     const normalized = recentAgentTurns.map(t =>
@@ -734,7 +753,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     }
 
     return {
-      isLooping: repeatCount >= REPETITION_THRESHOLD,
+      isLooping: repeatCount >= effectiveThreshold,
       phrase: recentAgentTurns[recentAgentTurns.length - 1].text
     };
   }

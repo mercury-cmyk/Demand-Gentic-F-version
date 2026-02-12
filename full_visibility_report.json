@@ -1,0 +1,812 @@
+[
+  {
+    "id": "c1fa862a-fb39-48be-a515-c55f3764b788",
+    "date": "2026-02-11T19:19:46.081Z",
+    "phone": "+14087454415",
+    "duration": "15s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/61b80958-07a8-11f1-8ad1-02420aef94a0-1770855520.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T002008Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=72c00c60658e512a376d6aaae0c8161380df0c5f5bc0de640aa1fa0649377455",
+    "transcript": "Agent: Hi, am I speaking with Vivek Agarwal?\nContact: Is currently unavailable.\nContact: Please leave a message after the tone.\nContact: When you have finished, please hang up or press the pound key for more options. have finished, please, hang up or press the pound key for more options."
+  },
+  {
+    "id": "95b2309a-9ba0-4180-b1c7-786deabe17e0",
+    "date": "2026-02-11T19:19:20.551Z",
+    "phone": "+13104203223",
+    "duration": "36s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/62608cfe-07a8-11f1-8e3f-02420aef951f-1770855521.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T002008Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=a04e1aa9a6f5d5f0ab2dd6770d9773b60a55e3c75d1036d549acdf8dd0ef5ea0",
+    "transcript": "Agent: Hi, am I speaking with Ed Bondurant?\nContact: Your name and reason for calling. I'll see if this person is available. your record your name and reason for calling. I'll see if this person is available.\nContact: I'm sorry. This person is not available. If you would like to leave an additional message,\nContact: please reply after the tone. 'm sorry, this person is not available. If you would like to leave"
+  },
+  {
+    "id": "97df5200-3a1b-40ab-a13f-dd2b58db1502",
+    "date": "2026-02-11T19:19:15.243Z",
+    "phone": "+15035706326",
+    "duration": "5s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/629fa632-07a8-11f1-bbf7-02420aef961f-1770855521.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001914Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=ab78da781b5e3777e2c99aec2be49e60f9474f1ce6314e37e356194f23f4faa3",
+    "transcript": "N/A"
+  },
+  {
+    "id": "5468f71e-4e41-4182-a211-c56635145e1d",
+    "date": "2026-02-11T19:19:15.028Z",
+    "phone": "+17783490524",
+    "duration": "0s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/613dfa6e-07a8-11f1-a4f1-02420aef99a0-1770855519.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001914Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=6d4bef96a89ca37b9c2e310fba223deec0f0f6ce7f93e97eda5d6e4f33c7845f",
+    "transcript": "N/A"
+  },
+  {
+    "id": "5d29a67b-67cb-413f-9dc8-fd83aead3d8a",
+    "date": "2026-02-11T19:19:14.820Z",
+    "phone": "+14087454415",
+    "duration": "16s",
+    "disposition": "needs_review",
+    "intelligence": {
+      "outcome": "needs_review",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/7a6268fe-07a8-11f1-a95f-02420aef97a0-1770855561.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T002008Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=5d857912d331e636c1aea0c4d7e0194c2d6b7b63c87ed91fd91dface57dcef11",
+    "transcript": "Agent: Hello, may I speak with Vivek Agarwal?\nContact: You called the wrong person. You called a wrong person.\nAgent: My apologies,\nAgent: Hello? May I speak with Vivek Averwell? thank you for letting me know. Have a great day!"
+  },
+  {
+    "id": "45c22274-fbde-4bd4-b86c-82bdc729422d",
+    "date": "2026-02-11T19:19:12.083Z",
+    "phone": "+13106633244",
+    "duration": "18s",
+    "disposition": "needs_review",
+    "intelligence": {
+      "outcome": "needs_review",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/62e8e306-07a8-11f1-b368-02420aef991f-1770855522.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001914Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=3e35d2946c0b4b808633481f89d8ffaaed8f329be34536d6521cb3f9de2f9836",
+    "transcript": "Agent: Hi, am I speaking with Jason Lin?\nContact: Hey, Jason. Wie heißt Jason?\nAgent: Hi Jason,\nAgent: Hi. Am I speaking with Jason Lin? name Onyx, calling on behalf of RingCentral. reaching out because we help companies improve\nAgent: Hi, Jason. My name is Onyx calling on behalf of RingCentral. productivity, security, and save money by consolidating communication\nAgent: I'm reaching out because we help companies improve productivity, services. Can I grab a minute?"
+  },
+  {
+    "id": "de7287f8-9f60-4cc2-b4c6-3eb79d7bfc26",
+    "date": "2026-02-11T19:18:48.996Z",
+    "phone": "+18644620123",
+    "duration": "19s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/45405ce4-07a8-11f1-957f-02420aef99a0-1770855472.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001848Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=05faa5f21440b2277fed665b91f89585868e955794dab1cd50eace83ee9a265d",
+    "transcript": "N/A"
+  },
+  {
+    "id": "9844d643-8b77-43a7-9fbf-e6a9e9efb513",
+    "date": "2026-02-11T19:18:01.533Z",
+    "phone": "+18583006226",
+    "duration": "400s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3b1b003a-07a7-11f1-a778-02420aef991f-1770855025.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=38aee46ee08afa2de4120c4674b7178e04b0600f53329598093dda5adbc23185",
+    "transcript": "N/A"
+  },
+  {
+    "id": "c29e011d-c4dd-48b2-99e1-fb9360954909",
+    "date": "2026-02-11T19:18:00.729Z",
+    "phone": "+15032143070",
+    "duration": "266s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3c8dfa76-07a7-11f1-b149-02420aef96a0-1770855028.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=4bf568d45ac6a246f52f569caccac6f1df108c615909183bf99c1fd50bc7656b",
+    "transcript": "N/A"
+  },
+  {
+    "id": "e724d5a6-4efa-4955-971e-df833a9a407e",
+    "date": "2026-02-11T19:18:00.505Z",
+    "phone": "+15104205047",
+    "duration": "378s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3d4530c4-07a7-11f1-be8d-02420aef93a0-1770855029.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=600a2fafedf8f54cfe1ffb4a3ed971af5ffcfa2fd4df1f2dc738876837be7a2c",
+    "transcript": "N/A"
+  },
+  {
+    "id": "5fb4b905-94b9-4542-96dd-c2afa7d9f33f",
+    "date": "2026-02-11T19:17:58.792Z",
+    "phone": "+13108876476",
+    "duration": "0s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/ded580f6-07a7-11f1-8790-02420aef99a0-1770855300.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=ffaf3fcd5b663aa83ba477f8994032c24117aafdc099fd6284723cfe57955a58",
+    "transcript": "N/A"
+  },
+  {
+    "id": "b978435c-0d82-474e-a193-1c0cbcb4371e",
+    "date": "2026-02-11T19:16:19.593Z",
+    "phone": "+19096514018",
+    "duration": "67s",
+    "disposition": "needs_review",
+    "intelligence": {
+      "outcome": "needs_review",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/e4c7b6aa-07a7-11f1-a094-02420aef981f-1770855310.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=ecfecee5309b378b01113e87074970c8217ecb49814a0100656394571e856a26",
+    "transcript": "Agent: Hi, am I speaking with Brett McPherson?\nContact: Calling Environmental Health and Safety.\nContact: Please listen carefully to the following options.\nContact: If this is an emergency, hang up and dial 911 or go to the emergency department.\nAgent: Hi Brett, name Onyx, calling on behalf of RingCentral. We help\nAgent: Hi. Am I speaking with Brett McCerson? Hi, Brett. My name is Anik. companies improve productivity, security, and save money by consolidating\nAgent: Calling on behalf of RingCentral. We help companies improve productivity, communication services. Can I grab a minute?\nContact: To request a hazardous materials pickup, go to the one portal for the\nContact: online hazardous waste pickup request form.\nContact: If you have questions regarding hazardous materials, email ehs@llu.edu. For questions regarding respiratory"
+  },
+  {
+    "id": "e17c5009-e039-408c-8ad7-434df9debd8d",
+    "date": "2026-02-11T19:16:19.520Z",
+    "phone": "+13109668542",
+    "duration": "45s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/e5c6d658-07a7-11f1-a35f-02420aef96a0-1770855312.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=952655cbe5b9ac3c4ecec96469e3b665c708c262383cc11237c5d75da836638e",
+    "transcript": "Agent: Hi, am\nContact: Melody Rasuling. Is not available. Record your message at the tone.\nContact: When you are finished, hang up or press pound for more options. Mel are finished hang up or press pound for more options."
+  },
+  {
+    "id": "a38a74ad-e4b6-48da-9a40-a80d1b2d80f2",
+    "date": "2026-02-11T19:15:57.554Z",
+    "phone": "+17757625210",
+    "duration": "7s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/f9229160-07a7-11f1-9720-02420aef93a0-1770855344.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=e5fef067ebf0febd75fd459a4f0a8ffa53f0d52763a90b44dff8262a4d50b059",
+    "transcript": "Contact: Your name and reason for calling. I'll see if this person is available.\nAgent: Hello? Am\nContact: record\nAgent: Hello? I speaking\nContact: your name and reason for calling. I'll see if this person is available\nAgent: with Hansel Pierre Doan?"
+  },
+  {
+    "id": "8cb9a97c-e191-48bc-9c1a-511c8897e22a",
+    "date": "2026-02-11T19:15:44.184Z",
+    "phone": "+19252097391",
+    "duration": "40s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/dfb3aade-07a7-11f1-ac62-02420aef961f-1770855302.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=a9f1e6b019f3d8a3831f1f9d9ee9d03b788ea36bebf714cc297645690a00bdcb",
+    "transcript": "Agent: Hi, am I speaking with Utkarsh Sengar?\nContact: 2097391 is not available.\nContact: We didn't get your message either because you were not speaking or because of a bad connection. To disconnect,\nContact: disconnect, press 1. To record your message, press 2. We didn't get your message\nContact: either because you were not speaking or because of a bad connection. To disconnect, press 1."
+  },
+  {
+    "id": "b3d00d94-ef3b-4b5b-8004-a96add8bc403",
+    "date": "2026-02-11T19:15:37.299Z",
+    "phone": "+19168725215",
+    "duration": "66s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/c0242356-07a7-11f1-bb18-02420aef94a0-1770855249.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=775e036a7d3412bd12ca7e6623bc583a413c08908b8c330ff58b7a96efba9cae",
+    "transcript": "Agent: Hi, am I speaking with John Behringer?\nContact: John Behringer with NTPA. Please leave your name and number, and I'll get back to you as soon as I can. This is John Beringer with NTPA, please leave your name and number and I 'll get back to you as soon as I can."
+  },
+  {
+    "id": "d52e47d0-f5c8-4d31-97fe-20605c632a54",
+    "date": "2026-02-11T19:15:33.252Z",
+    "phone": "+15103754468",
+    "duration": "116s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/aa5296c0-07a7-11f1-b0da-02420aef99a0-1770855212.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=34359ee1c84daf598a4382f59a8e5fbd0e8bf15d2f5a6e903cd0bab0f95ad0fa",
+    "transcript": "Contact: Cord your name and reason for calling. I'll see if this person is available.\nAgent: Hi, am\nContact: Record\nAgent: I speaking\nContact: your name and reason for calling. I'll see if this person is available\nAgent: with Juan Jimenez?\nContact: Thanks. Juan Jimenez. Thanks Juan Jiménez, please stay on the line.\nContact: Please stay on the line.\nContact: I'm sorry. This person is not available.\nContact: If you would like to leave an additional message, please reply after the tone. 'm sorry, this person is not available. If you would like to leave"
+  },
+  {
+    "id": "f497b8a1-fe0d-4f0c-bb46-c296b6f27088",
+    "date": "2026-02-11T19:15:18.630Z",
+    "phone": "+18182915435",
+    "duration": "65s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/c0a30edc-07a7-11f1-8fb5-02420aef981f-1770855249.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=7648b1327380c4e50864617bef301d0c71b123b500b3ab2985ca251bbfdeb84d",
+    "transcript": "Agent: Hi, am I speaking with Carlo Colon?\nContact: We are sorry. There is no one available to take your call.\nContact: Please press 1 to leave a message, or press 2 to check voice mail.\nContact: Please record your message after the tone. Press star to discard the recording.\nContact: Or press any digit to end the recording. are sorry, there is no one available to take your call. Please, press"
+  },
+  {
+    "id": "19200328-57d7-422d-9a38-db08253c5b1e",
+    "date": "2026-02-11T19:15:08.795Z",
+    "phone": "+14152756144",
+    "duration": "3s",
+    "disposition": "no_answer",
+    "intelligence": {
+      "outcome": "no_answer",
+      "summary": "No answer received.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/e087c36e-07a7-11f1-8ea5-02420aef941f-1770855303.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001758Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=c659c7576b378760754434471eca98ab66066e4f9bc04739cc8d75f500dd8137",
+    "transcript": "N/A"
+  },
+  {
+    "id": "46763b42-cd30-4d2e-89f1-d04abfaedaf7",
+    "date": "2026-02-11T19:15:08.751Z",
+    "phone": "+18182915435",
+    "duration": "0s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/cda39eda-07a7-11f1-8b9f-02420aef971f-1770855271.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001508Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=c9ca5a0c373769d643f8ae210ed68245487e05dabb7f5388172d52e299544ce7",
+    "transcript": "N/A"
+  },
+  {
+    "id": "711a5872-1dc9-47c6-8dfd-7e7153ad62c6",
+    "date": "2026-02-11T19:15:02.586Z",
+    "phone": "+15304009393",
+    "duration": "4s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/ce2904bc-07a7-11f1-9c0c-02420aef991f-1770855272.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001508Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=ee9fad51e6042f611e8af605eefa7a4b731d784c8ba478069912f10443d9230c",
+    "transcript": "Agent: Hi, am I speaking with Emily Brown?\nContact: Automatic voice message system."
+  },
+  {
+    "id": "118540d8-000b-4eee-80a7-882b1d8956c4",
+    "date": "2026-02-11T19:14:51.584Z",
+    "phone": "+12134525585",
+    "duration": "24s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/c9f265f0-07a7-11f1-b469-02420aef991f-1770855265.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001508Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=04e5e9ed064540ad0ca6435489940554260ac372eac8169a87038ee88ce9b2c7",
+    "transcript": "Agent: Hello, may I speak with Andrius Gurcinas?\nContact: Your"
+  },
+  {
+    "id": "06656a0c-afd8-48af-b261-a2953c91bb94",
+    "date": "2026-02-11T19:14:16.635Z",
+    "phone": "+15307825858",
+    "duration": "198s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3aac6328-07a7-11f1-bb08-02420aef941f-1770855025.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001414Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=e5541bb19a3c4426eb3f7af53e6a8a38f316e5483e0b7d038d5cd34929fe4a7e",
+    "transcript": "N/A"
+  },
+  {
+    "id": "20c29adb-3411-4771-bee4-337fe127712d",
+    "date": "2026-02-11T19:14:15.334Z",
+    "phone": "+15032143070",
+    "duration": "19s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/9c455a36-07a7-11f1-97d9-02420aef951f-1770855188.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001414Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=64268ff228aba7875c3efaf0699f538ce370a267a32fd13bb4d50066146851fd",
+    "transcript": "N/A"
+  },
+  {
+    "id": "4e184898-e190-48af-a9ff-f4267357d3f4",
+    "date": "2026-02-11T19:14:15.124Z",
+    "phone": "+14088913597",
+    "duration": "4s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/a9922a8e-07a7-11f1-9f5b-02420aef971f-1770855211.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001414Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=25ab33d0d45ca048c2cbd729a2b4da8193df92e7262c0e3521cbc40211868f78",
+    "transcript": "N/A"
+  },
+  {
+    "id": "9a4ac1c8-552b-47cc-94cd-86df95cac651",
+    "date": "2026-02-11T19:14:03.603Z",
+    "phone": "+19139088902",
+    "duration": "18s",
+    "disposition": "no_answer",
+    "intelligence": {
+      "outcome": "no_answer",
+      "summary": "No answer received.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/a97cf79a-07a7-11f1-bac0-02420aef99a0-1770855211.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001414Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=bb11014f83df2ee23fd7b37c897c2035dc7b330d006401c69b764819ff1b2a4f",
+    "transcript": "Agent: Hi, am I speaking with Todd Taylor?"
+  },
+  {
+    "id": "218798fe-2264-449a-b56f-12cab89c2db2",
+    "date": "2026-02-11T19:13:51.598Z",
+    "phone": "+15102297905",
+    "duration": "121s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/4b505b6c-07a7-11f1-83d1-02420aef93a0-1770855053.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001350Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=fb82d30c6573f612da6f9313ea7e862b33be5e2e5e02258c17d29984098573e1",
+    "transcript": "N/A"
+  },
+  {
+    "id": "1ee0f168-3ca7-4c65-b5af-9f74ee607d9d",
+    "date": "2026-02-11T19:13:51.487Z",
+    "phone": "+15096988046",
+    "duration": "269s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/07a580a4-07a7-11f1-81e0-02420aef951f-1770854939.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001350Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=91f20ae190398f215dbced4ce0817cc891b8ea8a47a611b182126438093305ca",
+    "transcript": "Agent: Hi, am\nContact: Hi. This is Cody.\nAgent: speaking with Cody Day?\nContact: I'm not available to take your phone call right now. If you could please leave your name,\nContact: back to you as soon as I can. Thank you. Bye. If you could please leave your name back to you as soon as I can. Thank you. Bye."
+  },
+  {
+    "id": "5a20ad35-e08d-4f93-8b9d-3073edca47d1",
+    "date": "2026-02-11T19:13:51.449Z",
+    "phone": "+19494139298",
+    "duration": "125s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3d7b9a56-07a7-11f1-a88f-02420aef93a0-1770855029.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001350Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=8744fc59a583c17705db53131ac1be2e1c7c293978b85dbc03067ece9f1c63d2",
+    "transcript": "N/A"
+  },
+  {
+    "id": "34e5ab59-806a-4a95-8cf2-b05b428623e7",
+    "date": "2026-02-11T19:13:50.095Z",
+    "phone": "+12094676248",
+    "duration": "266s",
+    "disposition": "no_answer",
+    "intelligence": {
+      "outcome": "no_answer",
+      "summary": "No answer received.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/1540e1b8-07a7-11f1-9761-02420aef961f-1770854962.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001414Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=da85a2ba5ac7869a70e6c3e20733fac72f589cc1be9a0b94bd8e9b932d03e549",
+    "transcript": "Agent: Hi, am I speaking with Jeremiah Hisel?"
+  },
+  {
+    "id": "cbd3ae4c-b498-4d2f-ac4b-dd54651d6b6b",
+    "date": "2026-02-11T19:13:50.058Z",
+    "phone": "+15103039252",
+    "duration": "258s",
+    "disposition": "no_answer",
+    "intelligence": {
+      "outcome": "no_answer",
+      "summary": "No answer received.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/185e6ed8-07a7-11f1-b705-02420aef991f-1770854967.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001350Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=0cb9560fb3bbcd6249ce1c257ed234806cd3187a3b32207dafa0d42c8b3dc28e",
+    "transcript": "N/A"
+  },
+  {
+    "id": "492ac921-0370-459e-8421-a8360d639b02",
+    "date": "2026-02-11T19:13:48.230Z",
+    "phone": "+15033528582",
+    "duration": "36s",
+    "disposition": "voicemail",
+    "intelligence": {
+      "outcome": "voicemail",
+      "summary": "Call reached voicemail.",
+      "keyTopics": [
+        "voicemail"
+      ],
+      "nextSteps": [
+        "retry"
+      ],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/9c3c8320-07a7-11f1-b396-02420aef941f-1770855188.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001414Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=89dc13a5936254ef2ed7bbe6734ecfe1f7a4ba23a36188044e673452de8407a3",
+    "transcript": "Agent: Hi, am I speaking with Cory White?\nContact: Your call has been forwarded to the voice mail"
+  },
+  {
+    "id": "2d6d77ae-3170-400c-a672-587e3a0251eb",
+    "date": "2026-02-11T19:13:36.317Z",
+    "phone": "+18055765496",
+    "duration": "23s",
+    "disposition": "not_interested",
+    "intelligence": {
+      "outcome": "not_interested",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/9d2c52a6-07a7-11f1-9509-02420aef991f-1770855190.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001350Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=ed4e8adde7410af8443d82ce5b05a4817ad825aadea6e021e26effea1e4eef4e",
+    "transcript": "Contact: As dialed. Please check the number and try your call again.\nAgent: Hi, am\nContact: Thank you.\nAgent: I speaking with Aaron Bell?\nContact: completed as dialed, please check the number and try your call again. Thank you.\nAgent: on that.\nAgent: Hi. Am I speaking with Aaron Bell? I'm not.\nContact: Your call cannot be completed as dialed."
+  },
+  {
+    "id": "a2e2e930-fba1-44f9-b7da-4cfb0ef7340d",
+    "date": "2026-02-11T19:13:03.862Z",
+    "phone": "+15096988046",
+    "duration": "180s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/07a580a4-07a7-11f1-81e0-02420aef951f-1770854939.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=a56d1f622f280c9f53034285865400fbb85f6698f0e0cf458aaff7d064775c5d",
+    "transcript": "N/A"
+  },
+  {
+    "id": "23b3ec0d-b18b-4cf6-bc36-ed5d56a00d43",
+    "date": "2026-02-11T19:13:03.527Z",
+    "phone": "+15103039252",
+    "duration": "121s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/185e6ed8-07a7-11f1-b705-02420aef991f-1770854967.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=4d3bd35646720a6301cf21a42d7dce45d35faeca09ce14a42d9dee25e35c7e43",
+    "transcript": "N/A"
+  },
+  {
+    "id": "f3c6f4d2-d963-4af6-9a37-0c8509808772",
+    "date": "2026-02-11T19:13:02.796Z",
+    "phone": "+19163356543",
+    "duration": "145s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3b5e2a04-07a7-11f1-bde8-02420aef97a0-1770855026.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=e533615043396d7b0363f218476e9c6f5208bb614a31b29f2e4bf143d55d399a",
+    "transcript": "N/A"
+  },
+  {
+    "id": "e98bc2f8-d770-445c-b628-4536ea995d1e",
+    "date": "2026-02-11T19:13:02.667Z",
+    "phone": "+14158373875",
+    "duration": "76s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3c516d40-07a7-11f1-a510-02420aef97a0-1770855027.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=b3a728b300aa4862bf42991357aae1510a43c54b5a25fc514ecfd4b45167d3a8",
+    "transcript": "N/A"
+  },
+  {
+    "id": "0131a2e8-33e7-4f2c-9a05-424f0451807a",
+    "date": "2026-02-11T19:13:02.532Z",
+    "phone": "+17608407945",
+    "duration": "121s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3c204936-07a7-11f1-b2f2-02420aef93a0-1770855027.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=a830a3fff671c715dc67a70c5defa445f8e14c71462297646f338c15b326b05c",
+    "transcript": "N/A"
+  },
+  {
+    "id": "5b551b7d-930f-4853-9e16-5844d31574a4",
+    "date": "2026-02-11T19:13:02.399Z",
+    "phone": "+14085922110",
+    "duration": "122s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3c98689e-07a7-11f1-b7f1-02420aef951f-1770855028.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=99f9c920851c78262ff17fba5df6e775e2bdef26137ad8ba68b4d3ff52bc6c3d",
+    "transcript": "N/A"
+  },
+  {
+    "id": "0eb24cc8-041c-4fe7-9991-b74abdfe742f",
+    "date": "2026-02-11T19:13:02.271Z",
+    "phone": "+13606203187",
+    "duration": "120s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3c633368-07a7-11f1-bda4-02420aef99a0-1770855028.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=5ea550070a61df77f9316fedfd03d85088f9dfafeae907936d713e14571b72cb",
+    "transcript": "N/A"
+  },
+  {
+    "id": "b7639b70-f012-4d25-8a88-aed925be01c2",
+    "date": "2026-02-11T19:13:02.065Z",
+    "phone": "+15308450030",
+    "duration": "122s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3cc87fac-07a7-11f1-8cd0-02420aef971f-1770855028.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=f8589a1f6b7dccd0f48e06a838d604a83fa2ec1fdca054ae9e72a43559428e38",
+    "transcript": "N/A"
+  },
+  {
+    "id": "98a932c8-a77f-4a16-97e8-023ba364e4a7",
+    "date": "2026-02-11T19:13:01.938Z",
+    "phone": "+14083678512",
+    "duration": "24s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3be64858-07a7-11f1-80b1-02420aef971f-1770855027.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=139ca9f6e2e881a5525e899cf720a79f1d4164bf75a7c3ae85bd4bc380e92fea",
+    "transcript": "N/A"
+  },
+  {
+    "id": "98ff214e-8195-4d08-a9a6-8e6ac1b9f6b4",
+    "date": "2026-02-11T19:13:01.810Z",
+    "phone": "+13602423196",
+    "duration": "58s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3c612b40-07a7-11f1-bbf1-02420aef96a0-1770855028.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=34497f0e7605d9599a087a1def823142183617e55ea65d4bbc7f3f35dcc5f341",
+    "transcript": "N/A"
+  },
+  {
+    "id": "5dde343c-6c14-42ad-9c19-ce70dfff5163",
+    "date": "2026-02-11T19:13:01.680Z",
+    "phone": "+17783224164",
+    "duration": "3s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3cd0a844-07a7-11f1-adab-02420aef94a0-1770855028.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=cd697431d5403df3a726d307a4fb5920263fbe5c592f4a62fbd106b30f4630be",
+    "transcript": "N/A"
+  },
+  {
+    "id": "ce5c250b-be21-45bc-96fe-b4ecfae1edee",
+    "date": "2026-02-11T19:13:01.547Z",
+    "phone": "+14153777415",
+    "duration": "38s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3c23efbe-07a7-11f1-9041-02420aef991f-1770855027.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=415fe63883d9f23a8426d258305d98f62552bbeca691aab5c3c7d875658251b6",
+    "transcript": "N/A"
+  },
+  {
+    "id": "88526b3d-58bc-4ea4-a9a2-33846eff15ee",
+    "date": "2026-02-11T19:13:01.418Z",
+    "phone": "+12066190554",
+    "duration": "123s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3bd8b7a6-07a7-11f1-8280-02420aef96a0-1770855027.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=8b2980e1213456d3cd72b04938da3233ad04431ce42db80fef23a8077d718429",
+    "transcript": "N/A"
+  },
+  {
+    "id": "cf2eec94-30ca-48f7-b2d5-0baa5bb600d1",
+    "date": "2026-02-11T19:13:01.292Z",
+    "phone": "+14088073039",
+    "duration": "126s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/3d8b3ee8-07a7-11f1-a2b1-02420aef99a0-1770855029.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=4eb28044d5b6ebf68794255f2bcc6f90d523470d80b5b43ccbf7e79ab3ee9f4c",
+    "transcript": "N/A"
+  },
+  {
+    "id": "bff7b4cd-cb8b-48eb-b24f-62607bfa5bb7",
+    "date": "2026-02-11T19:13:01.160Z",
+    "phone": "+14086802594",
+    "duration": "4s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/4a0e70fe-07a7-11f1-844b-02420aef971f-1770855050.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=290f5a0cb1efc36f27e5ff2d5543803bd2e85d512833f6ae7ddd585417af4a00",
+    "transcript": "N/A"
+  },
+  {
+    "id": "212029a3-e5b4-4605-8756-8813ff55649f",
+    "date": "2026-02-11T19:13:01.027Z",
+    "phone": "+14152773404",
+    "duration": "4s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/4fe1b888-07a7-11f1-8c63-02420aef991f-1770855060.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=68e2d3c642b595df18c6586289e37cd27b200f9e76eeb85ba4c1203176829ee1",
+    "transcript": "N/A"
+  },
+  {
+    "id": "ca3e7901-dc96-4667-a9ef-fb82478060b6",
+    "date": "2026-02-11T19:13:00.895Z",
+    "phone": "+14086802594",
+    "duration": "4s",
+    "disposition": "N/A",
+    "intelligence": "N/A",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/52add0c4-07a7-11f1-9692-02420aef941f-1770855065.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T001258Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=7731a156913f9a6e71cb8c25bb6cd570d940685f74c94fd526434eeeaccc2aa0",
+    "transcript": "N/A"
+  }
+]

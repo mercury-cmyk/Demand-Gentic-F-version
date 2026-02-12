@@ -6553,11 +6553,32 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           // If identity was never confirmed, this might be a gatekeeper interaction
           // or early hangup - use no_answer to allow retry
           if (!identityConfirmed) {
-            // Check if this looks like a gatekeeper screening
             const userTexts = session.transcripts
               .filter((t) => t.role === 'user')
               .map((t) => t.text.toLowerCase());
-            
+
+            // Check for automated AI screener (Google Voice, Call Screen) FIRST
+            const screenerIndicators = [
+              'record your name',
+              'state your name',
+              'reason for calling',
+              'i\'ll see if this person',
+              'this person is available',
+              'stay on the line',
+              'call screening',
+              'call assist',
+            ];
+
+            const isScreenerInteraction = userTexts.some(text =>
+              screenerIndicators.some(indicator => text.includes(indicator))
+            );
+
+            if (isScreenerInteraction) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with AI screener interaction (identity not confirmed) - marking as no_answer for retry`);
+              return 'no_answer';
+            }
+
+            // Check if this looks like a gatekeeper screening
             const gatekeeperIndicators = [
               'who is calling',
               'who is this',
@@ -8194,6 +8215,24 @@ Classify as gatekeeper and respond with a clear, concise request:
 
 - Make NO MORE than two polite attempts.
 - If refused → Thank them sincerely and END THE CALL immediately.
+
+---
+
+### 3.5. Automated Call Screener (Google Voice / Call Screen)
+If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
+- "Record your name and reason for calling"
+- "State your name and reason for calling"
+- "I'll see if this person is available"
+- "Please stay on the line" (after providing your name)
+
+**Respond EXACTLY ONCE:**
+"This is ${agentName} calling from ${orgName} for ${firstName} regarding a business opportunity."
+
+**Then WAIT IN COMPLETE SILENCE. Do NOT repeat yourself. Do NOT ask questions.**
+- If a human connects → restart identity check: "Hi, am I speaking with ${firstName}?"
+- If the screener repeats its prompt → remain silent (it is still processing)
+- If 30+ seconds of silence after your response → end the call with no_answer disposition
+- NEVER respond to the screener more than once
 
 ---
 

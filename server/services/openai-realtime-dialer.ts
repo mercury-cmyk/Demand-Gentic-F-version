@@ -2840,20 +2840,28 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       : elapsedSeconds;
     const endAfterSilenceRaw = Number(session.agentSettings?.advanced.conversational.endConversationAfterSilenceSeconds);
     const maxDurationRaw = Number(session.agentSettings?.advanced.conversational.maxConversationDurationSeconds);
-    const endAfterSilenceSeconds = Number.isFinite(endAfterSilenceRaw) ? endAfterSilenceRaw : -1;
-    const maxDurationSeconds = Number.isFinite(maxDurationRaw) ? maxDurationRaw : -1;
+    
+    // Safety Defaults: Prevent infinite/zombie calls if config is missing
+    const endAfterSilenceSeconds = Number.isFinite(endAfterSilenceRaw) && endAfterSilenceRaw > 0 
+      ? endAfterSilenceRaw 
+      : 120; // Default: 2 minutes of user silence ends call
+      
+    const maxDurationSeconds = Number.isFinite(maxDurationRaw) && maxDurationRaw > 0 
+      ? maxDurationRaw 
+      : 400; // Default: 400 seconds hard limit
+
     const timeSinceUserSpeech = session.lastUserSpeechTime
       ? Math.round((now.getTime() - session.lastUserSpeechTime.getTime()) / 1000)
       : null;
 
-    if (endAfterSilenceSeconds >= 0 && timeSinceUserSpeech !== null && timeSinceUserSpeech > endAfterSilenceSeconds) {
-      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after ${timeSinceUserSpeech}s of user silence`);
+    if (timeSinceUserSpeech !== null && timeSinceUserSpeech > endAfterSilenceSeconds) {
+      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after ${timeSinceUserSpeech}s of user silence (Limit: ${endAfterSilenceSeconds}s)`);
       endCall(session.callId, 'completed');
       return;
     }
 
-    if (maxDurationSeconds >= 0 && elapsedSeconds > maxDurationSeconds) {
-      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after max duration ${maxDurationSeconds}s`);
+    if (elapsedSeconds > maxDurationSeconds) {
+      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after max duration ${maxDurationSeconds}s (Limit: ${maxDurationSeconds}s)`);
       endCall(session.callId, 'completed');
       return;
     }

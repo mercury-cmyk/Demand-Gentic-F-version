@@ -1,0 +1,471 @@
+[
+  {
+    "id": "4a485ea5-4e5a-474d-88d2-393891f3979a",
+    "date": "12/02/2026, 00:02:59",
+    "phone": "+17144836236",
+    "duration": "152s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-12/d278a09c-07a5-11f1-92da-02420aef98a0-1770854420.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260212%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260212T000355Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=e4eaa8d07d542a7311406700b00d1ef080868d360df1de5eb605e926535f1b1d",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Agent: Hi, am I speaking with Daniel Pestolesi?\nContact: May I ask who's calling? May I ask, who's calling?\nAgent: this Onyx. I'm sorry, having\nAgent: Hi. Am I speaking with Daniel Pasalasi? Oh, hi. This is Onyx. trouble hearing you. Can you hear me okay? Let me try that again. Am I speaking\nAgent: Am I I'm sorry. I'm having trouble hearing you. Can you hear me okay? with Daniel Pestolesi? I'm still hearing you.\nAgent: With Daniel pest let me try that again. Am I speaking with Daniel Pestilasi? I hope I'm not catching you at a bad time.\nAgent: I'm sorry. I'm still having trouble hearing you. Can you hear I hope I'm not catching you at a bad time. catching you\nContact: Transfer to human.\nAgent: I'm sorry, having trouble hearing Can you hear me okay?\nContact: Transfer to human.\nAgent: Certainly, I'll connect you with someone now.\nAgent: I hope I'm not catching you. I'm sorry. I'm still having trouble hearing you. Can you hear me okay?\nContact: Transfer to human. Transfer to human.\nAgent: I'm still I'm sorry, I'm still having\nAgent: Certainly. I'll connect you with someone else. Certainly. I'll connect you with I'm still having trouble hearing you. Can you hear me okay?\nContact: Connection breakdown.\nContact: Transfer to human. breakdown, transfer to human.\nAgent: Certainly, I'll connect you with someone now.\nAgent: I'm sorry. I'm still having trouble hearing you. Can you hear me okay? I'm still having certainly.\nContact: They started trying to you know, it's like, who's this? And then it, like,\nContact: looped four times on itself. They start to trying and I was like, \"Who's this?\" And then it like looked four times on itself.\nContact: Didn't finish a sentence. Didn 't finish a sentence.\nContact: Continue. Continue\nContact: Hello?"
+  },
+  {
+    "id": "804791e7-680d-4637-9330-cdc3833aad0f",
+    "date": "11/02/2026, 23:23:33",
+    "phone": "+14038784904",
+    "duration": "106s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/66b0d758-07a0-11f1-80d0-02420aef941f-1770852092.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T232355Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=e5d209ae022ea389f3b7860ca0001222fcc70a8111828a7cba39f599092f3651",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Contact: Google recording this call for the person you're trying to reach. Can you say what you're calling about?\nAgent: Hi, am I speaking\nContact: Google, recording this call for the person you're trying to reach. Can\nAgent: with Colin\nContact: you say what you're calling about?\nAgent: Yuhas?\nAgent: Hi. Am I speaking with Colin Yujas? Am I speaking with Colin Yuhas?\nContact: Can you tell me what you're calling about? Can you tell me what you're calling about?\nAgent: I need\nAgent: Am I am I speaking with Colin Yujas? to confirm with Colin first.\nContact: One sec. Checking with the person you called. sec, checking with the person you called."
+  },
+  {
+    "id": "7b33e3a7-6eca-4c67-9bef-907a6860fd2e",
+    "date": "11/02/2026, 23:16:17",
+    "phone": "+14083678512",
+    "duration": "18s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/9a61074a-079f-11f1-93fc-02420aef97a0-1770851749.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T231625Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=3d4ecb2fd108a498134f73a3bafee6363076e91a3c3b086863dab4a9beb55e11",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Agent: Hi, am\nContact: See?\nAgent: I speaking with William Michot?\nContact: , this is Ashley.\nContact: No. This is Ashley.\nContact: Hello? Hello"
+  },
+  {
+    "id": "982bbfcf-be2a-43af-b67a-250ae6ff11dc",
+    "date": "11/02/2026, 23:11:21",
+    "phone": "+12067096420",
+    "duration": "92s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/b8ecd4b0-079e-11f1-8a27-02420aef991f-1770851371.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T231125Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=9f2a3ec56d7eac179c4e8502a6bfaf76f3b2c177a655cb08227fbc0642c1fece",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Agent: Hi, am I speaking with Scott Shultis?\nContact: Yes. Yes\nAgent: Hi Scott, name is Onyx, calling on behalf\nContact: Hello? Hello\nAgent: for Scott\nAgent: Hi. Am I speaking with Scott Shoultis? Hi, Scott. My name is Onyx.\nContact: Oh, you're not a real person, are you? , you're not a real person, are you?\nAgent: Let me get someone else on the line for you.\nContact: Hello? Hello\nAgent: Calling on behalf I'm calling for Scott Schultz. Let me get someone else on the line for you. Let me get someone else on the line for you."
+  },
+  {
+    "id": "5081fc4f-75b9-4df0-9f07-9cb7357e2868",
+    "date": "11/02/2026, 22:53:03",
+    "phone": "+12107341978",
+    "duration": "70s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/41180524-079c-11f1-b5fa-02420aef961f-1770850311.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T225622Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=2e93d4cbce8f374c2fd7e161e9dff69afb1c94aa2e54372c808145fcbc6b2fbc",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Agent: Hi, am I speaking with Jacob Montanez?\nContact: Please wait, while we connect your call.\nContact: Please wait while we connect your call.\nContact: We are sorry. There is no one available to take your call."
+  },
+  {
+    "id": "6f72c85c-5785-4222-87e6-771fa8b95620",
+    "date": "11/02/2026, 22:27:10",
+    "phone": "+18585242606",
+    "duration": "10s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/bf7f8c60-0798-11f1-93b9-02420aef98a0-1770848805.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T222920Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=fc7e7721b7d0f7ace8229c6a096e5a88a0435ba353b4e8cb54b78d05dacbd815",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Contact: This is Matthew.\nAgent: Hi Matthew, I'm Onyx from RingCentral\nContact: This is Matthew.\nAgent: calling to share a free white paper export finance that helps businesses\nAgent: Hi, Matthew. I'm Onyx from RingCentral. I'm calling to share a free white paper on access government support programs. Can I send it to your email? I'm connecting\nAgent: export finance that helps UK businesses access government support programs. Can I send it to your email? you to a human operator now."
+  },
+  {
+    "id": "1e0f716b-4eab-49af-b6fe-22c15bbe940a",
+    "date": "11/02/2026, 22:27:01",
+    "phone": "+18012050081",
+    "duration": "28s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/b58feb96-0798-11f1-9b15-02420aef95a0-1770848788.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T222922Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=73c44d9017c2b62e738ff4bef831e81ac230e80426c6fb64620a229bc23fd7b8",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Contact: Reason for calling. I'll see if this person is available. and reason for calling, I'll see if this person is available.\nAgent: Hi, is this Zane Pace?\nContact: Thanks. Thanks , please stay on the line.\nContact: Please stay on the line."
+  },
+  {
+    "id": "a0cc6ad1-7342-47c2-8dc7-50fa46580d29",
+    "date": "11/02/2026, 22:18:18",
+    "phone": "+17089547415",
+    "duration": "21s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/821b7394-0797-11f1-91d7-02420aef941f-1770848273.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T222230Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=514ab6a828bf595bbdb8f4d5b500472384eb1686faf734dd75153e4ec4decc32",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Contact: Before I try to connect you, can I ask what you're calling about? Before I try to connect you, can I ask what you are calling about?\nContact: Hello? Hello\nAgent: Let me check in on that for you.\nContact: Unfortunately, the person you're calling"
+  },
+  {
+    "id": "7d47509e-1ea9-405c-b67c-4a0d4ba4c47b",
+    "date": "11/02/2026, 22:16:54",
+    "phone": "+13145921405",
+    "duration": "58s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/34cfae84-0797-11f1-bdfa-02420aef951f-1770848143.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T221740Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=77f85e8ce1a0fc08f7c1cf91aae39cb5dbfe80174194dffed6c927b1cbf60ec9",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Agent: Hi, am\nContact: Oh,\nAgent: I speaking with Abdirahman Abdi?\nContact: I don't think he's longer working. don't think he's longer working.\nAgent: Oh, he's\nAgent: Hi. Am I speaking with Abdi Rahm Malabdi? no longer there?\nContact: दुआ।\nAgent: Okay, got\nContact: I'm not sure. Let me let me check. Let me check. don't know, so let me let me check, let me check.\nAgent: Please hold for a moment.\nContact: You can try to call 1465.\nAgent: Oh, he's no longer there. Oh, please hold for a moment.\nContact: You can try to call +1 465.\nContact: Hello?\nContact: Hello? Hello Hello.\nAgent: [pauses] I hope I'm not catching you at a bad time.\nContact: Hello? Hello\nAgent: Hello?\nAgent: Please hold for a moment. Hi. I'm hope I'm not catching you at a bad time.\nContact: Okay. Can you try\nContact: to can you try to call +1 465? I I don't know. I'm not sure he's longer here, but try to call, like, +1 465.\nAgent: I'm Onyx\nAgent: Hello? from RingCentral — I'm calling to share a free white paper on export\nContact: Okay\nAgent: finance. Can I\nContact: . Can you try to Can you try to call 1465?\nAgent: send it to your email?\nContact: I don't know I'm not sure he's here but try to call like 1465.\nAgent: Please hold\nAgent: I'm Onyx from RingCentral. I'm calling to share a free white paper on export finance. Can I send it to your email? for a moment."
+  },
+  {
+    "id": "3e4024c3-c1a7-49f9-afde-bd37a23d0880",
+    "date": "11/02/2026, 22:14:33",
+    "phone": "+17205524216",
+    "duration": "40s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/ecb3c11c-0796-11f1-bd75-02420aef97a0-1770848022.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T221634Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=d5df0f3f8a6f39d39516cb183224173793060764b0abd9d9e87b19fdfca7a76f",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Agent: Hello? am I speaking with Jordan Radewan?\nContact: Hello?\nContact: Hello?\nContact: Yeah. Yes. Who who's calling? Hello , yes. Who's calling?\nAgent: Hi Jordan, my name is Onyx, calling on behalf of RingCentral.\nAgent: Hello? Am I speaking with Jordan Radaman? Hi, Jordan. My name is Onyx. I'm reaching out because we help companies improve productivity, security, and save\nAgent: Calling on behalf of RingCentral. I'm reaching out because we help companies improve money by consolidating communication services. Do you have a minute?\nAgent: productivity, security, and save money by consolidating communication services.\nContact: I do not. I'm\nContact: currently in a meeting right now. Can I give you a callback? do not, I'm currently in a meeting right now. Can I give you a call back?\nAgent: I understand, no problem at all. Would there be a better time to connect?\nAgent: Do you have a minute? I understand. No problem at all. Would there be a better time to connect?"
+  },
+  {
+    "id": "af71df50-f4f3-4d12-9751-907d94446738",
+    "date": "11/02/2026, 22:09:34",
+    "phone": "+12088993248",
+    "duration": "110s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/1432ec14-0796-11f1-a31c-02420aef95a0-1770847659.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T221024Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=92f137dc01194684ae174b484115fe898becafecdd80a3cd1a019d1a6ee23f57",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Contact: And reason for calling. I'll see if this person is available. reason for calling I'll see if this person is available."
+  },
+  {
+    "id": "b22adb3d-3ad3-4628-9374-5fd198e3624d",
+    "date": "11/02/2026, 22:08:27",
+    "phone": "+14057425893",
+    "duration": "16s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/218d5ae8-0796-11f1-bd53-02420aef961f-1770847681.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T221024Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=2d9776db346342f40622a168d0ed78843a294291efa62d55d0327bd3dab04ef6",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Agent: Hi, am I speaking with Evan Frank?\nContact: Telephone operator. telefon oprator\nContact: You have the telephone operator, the switchboard. You have a telephone operator at the switchboard."
+  },
+  {
+    "id": "b0b9a65e-9a57-4ba4-aee0-14fe5425409c",
+    "date": "11/02/2026, 22:06:50",
+    "phone": "+12246276335",
+    "duration": "54s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/d5416ec2-0795-11f1-b598-02420aef951f-1770847553.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T220811Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=788ef1a9c8a13b2b8a7c4d08adfd8cd11893d4a1304c31fa0e9fb538aa0cfc63",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Contact: And reason for calling. I'll see if this person is available. name and reason for calling. I'll see if this person is available.\nAgent: Hi, am I speaking with Marcelo Esparza?\nContact: Thanks, Marcellus Barza. Thanks Marcela Garza. Please stay on the line.\nContact: Please stay on the line.\nContact: Hello? Hello\nAgent: Hi, just\nAgent: Hi. Am I speaking with Marcelo Esparza? to confirm, is this Marcelo\nContact: No. Who's this? . Who is this?"
+  },
+  {
+    "id": "f432fc9e-110a-4982-894b-fca6c721e960",
+    "date": "11/02/2026, 21:43:43",
+    "phone": "+12183685168",
+    "duration": "23s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/abe560d6-0792-11f1-9871-02420aef97a0-1770846195.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T214434Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=5b507f97473759c63cc80c143c96d5f8c3955ae9024540d090aaa70649ba041b",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Contact: I'm calling assist by Google. Recording this call for the person you're trying to reach.\nAgent: Hi Trav, I'm Onyx from RingCentral calling to share a free white paper on export finance that helps\nAgent: Hi, Trav. I'm Onyx from RingCentral. I'm calling to share a free white paper on export businesses access government support programs. Can I send it to your email?\nContact: Before I try to connect you, can I ask what you're calling about? 'm Colossus by Google, recording this call for the person you're trying to reach. Before I try to connect you, can I ask what you 're calling about?\nContact: Unfortunately, the person you're calling cannot"
+  },
+  {
+    "id": "35b6f8bf-1d9c-4251-8669-6aeee711717b",
+    "date": "11/02/2026, 21:31:12",
+    "phone": "+14238001435",
+    "duration": "9s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/ea15bda8-0790-11f1-af6a-02420aef97a0-1770845441.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T213151Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=5e9b43f26370164ec1154df3ab3e91790483a566c437fac166d889ffd3b50f70",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Contact: This is Steven speaking.\nAgent: Hi Steffan, this is Onyx from\nContact: 07 speaking.\nAgent: RingCentral. I'm calling to share a free white paper on export finance that helps UK businesses access government\nAgent: Hi, Stefan. This is Onyx from RingCentral. I'm calling to share a free white paper on export finance support programs. Can I send it to your email?"
+  },
+  {
+    "id": "bfaf507d-1e94-453a-93f9-8485377ebd0b",
+    "date": "11/02/2026, 21:31:10",
+    "phone": "+18083711632",
+    "duration": "27s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/e9a6580a-0790-11f1-aff4-02420aef95a0-1770845440.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T213151Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=73d2fd5d4648cc4ec378e4a4e242ee5ccf88eeb120c53a04e7938d714d439263",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Contact: And reason for calling. I'll see if this person is available. name and reason for calling. I'll see if this person is available.\nAgent: Hi, am I speaking with John Bodie?\nContact: Thanks , please stay on the line.\nContact: Thanks. Please stay on the line.\nContact: Hello? Hello hello"
+  },
+  {
+    "id": "ea7f269c-d65b-4058-a67a-fd492528001f",
+    "date": "11/02/2026, 21:16:19",
+    "phone": "+17809062355",
+    "duration": "29s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/d1f05ab4-078e-11f1-97ce-02420aef99a0-1770844541.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T211749Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=d80784c231a71c8ec774b517e980977fa24bc2b560e480ba6ef87da0068fbc5b",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Agent: Hi, am I speaking with Paras Sharma?\nContact: Yeah , this is.\nAgent: Hi Paras,\nAgent: Hi. Am I speaking with Parasol? Onyx from RingCentral.\nContact: Yeah. This is.\nAgent: We help companies improve productivity,\nContact: Hello\nContact: Hello?"
+  },
+  {
+    "id": "089b8388-97f2-4994-97c3-e3425d5489c1",
+    "date": "11/02/2026, 21:02:29",
+    "phone": "+18643466842",
+    "duration": "86s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/c2dc7d3e-078c-11f1-adef-02420aef96a0-1770843657.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T210249Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=537613c1a44b22804df4d4bb321cf45b428ddc3baeb39923ff523257dc0f9ce8",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Agent: Hi, am I speaking with Joey Bruton?\nContact: Call Assist by Google, recording this call for the person you're trying to reach.\nContact: I try to connect you, can I ask what you're calling about? called us by Google, recording this call for the person you're trying to reach . Before I try to connect you, can I ask what you're calling about?\nAgent: I'm trying\nAgent: Hi. Am I speaking with Joy Bruden? to reach Joey I hope I'm not catching you at a bad time.\nContact: Before I try to connect you, could you please give me a quick description of why you're calling? Before I tried to connect to you, could you please give me a quick description of why you are calling?\nAgent: It's just\nAgent: I'm trying to reach Joey Bruton. I hope I'm not catching you at a bad time. a business matter for him. Is he available?\nContact: Okay. One last thing before I transfer you. Can I ask who I'm speaking to? Okay . One last thing before I transfer you. Can I ask who I'm speaking to?\nAgent: This is Onyx.\nContact: Okay. Let me try to get the person you're trying to reach\nContact: on the line. Okay , let me try to get the person you're trying to reach on the line. Hello\nContact: Hello?\nAgent: Hi, just\nAgent: It's just a business matter for him. Is he available? This is Onyx.\nContact: Hello? Hello\nContact: Hello? Hello\nContact: I bought a full trip. below\nAgent: confirm, I hope I'm not catching you at a bad time.\nContact: Terrible time. Hodden bodies. terr\nAgent: Hi. Just to confirm, is I hope I'm not catching you at a bad time. understand. Would there be a better to reach\nContact: No problem. Don't bury everybody. High probability that Barry now right."
+  },
+  {
+    "id": "2ebf2040-47a0-47f9-a151-04e112e826a4",
+    "date": "11/02/2026, 21:00:48",
+    "phone": "+15103056976",
+    "duration": "25s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/abe02d2e-078c-11f1-b81e-02420aef941f-1770843618.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T210137Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=b3518c04e2e58df9de50c9c6e5efa5872fb6137038d7732bc15981cd9425066c",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "IDENTITY_CHECK",
+        "stateHistory": [
+          "IDENTITY_CHECK"
+        ],
+        "identityConfirmed": false
+      }
+    },
+    "transcript": "Contact: Your name and reason for calling. I'll see if this person is available. Record\nAgent: Hi, am\nContact: your name and reason for calling. I'll see if this person is available\nAgent: I speaking with Jarele Brickley?\nContact: Thanks, Jerry Brickley. Jerry Brickley please stay on the line.\nContact: Please stay on the line."
+  },
+  {
+    "id": "8c2852ad-e40e-4dfd-a094-9527b3b7b033",
+    "date": "11/02/2026, 20:45:23",
+    "phone": "+12532463701",
+    "duration": "25s",
+    "disposition": "qualified_lead",
+    "recording": "https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-11/81e54c9a-078a-11f1-a30c-02420aef981f-1770842689.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20260211%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260211T204548Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=8e1ef783ffe9a07cec8ff7a7dba32f8690b84d6b4151f5c2fde0d0edac2812f3",
+    "intelligence": {
+      "outcome": "qualified_lead",
+      "summary": "Conversation recorded but no AI detailed summary generated.",
+      "keyTopics": [],
+      "nextSteps": [],
+      "sentiment": "neutral",
+      "conversationState": {
+        "currentState": "RIGHT_PARTY_INTRO",
+        "stateHistory": [
+          "IDENTITY_CHECK",
+          "RIGHT_PARTY_INTRO"
+        ],
+        "identityConfirmed": true
+      }
+    },
+    "transcript": "Contact: IT service desk. This is Ben. service desk, this is the Ben.\nAgent: Hi, am I speaking with Ben Horbul?\nContact: This is he?\nAgent: Hi. Am I speaking with Ben Horble? this is Onyx from RingCentral. reaching out because\nContact: Quién es usted?\nAgent: we help companies improve productivity,\nAgent: Hi, Ben. This is Onyx from RingCentral. I'm reaching out because we help companies improve security, and save money by consolidating communication services. Can I grab a minute?\nAgent: productivity, security, and save money by consolidating communication services.\nContact: We're not interested. Thank you."
+  }
+]
