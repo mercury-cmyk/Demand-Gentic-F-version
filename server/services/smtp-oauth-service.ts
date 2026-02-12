@@ -407,6 +407,30 @@ export class SmtpOAuthService {
   }
 
   /**
+   * Create a Nodemailer transporter from environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS).
+   * Used as a fallback when no database-configured SMTP provider exists.
+   */
+  createEnvTransporter(): nodemailer.Transporter | null {
+    const host = process.env.SMTP_HOST;
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+
+    if (!host || !user || !pass) {
+      return null;
+    }
+
+    const port = parseInt(process.env.SMTP_PORT || "587", 10);
+    const secure = port === 465;
+
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+    });
+  }
+
+  /**
    * Test SMTP connection for a provider
    */
   async testConnection(provider: SmtpProvider): Promise<SmtpConnectionTestResult> {

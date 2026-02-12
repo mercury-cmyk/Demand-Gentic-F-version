@@ -54,28 +54,32 @@ async function processTransactionalEmailJob(
       .set({ status: "sending" })
       .where(eq(transactionalEmailLogs.id, logId));
 
-    // Get provider
+    // Get provider from DB or fall back to env vars
     const [provider] = await db
       .select()
       .from(smtpProviders)
       .where(eq(smtpProviders.id, providerId));
 
-    if (!provider) {
-      throw new Error(`SMTP provider not found: ${providerId}`);
-    }
+    let transporter;
+    if (provider) {
+      if (!provider.isActive) {
+        throw new Error(`SMTP provider is inactive: ${provider.name}`);
+      }
 
-    if (!provider.isActive) {
-      throw new Error(`SMTP provider is inactive: ${provider.name}`);
-    }
+      // Check rate limits
+      const rateLimitCheck = await smtpOAuthService.checkRateLimits(provider);
+      if (!rateLimitCheck.allowed) {
+        throw new Error(rateLimitCheck.reason);
+      }
 
-    // Check rate limits
-    const rateLimitCheck = await smtpOAuthService.checkRateLimits(provider);
-    if (!rateLimitCheck.allowed) {
-      throw new Error(rateLimitCheck.reason);
+      transporter = await smtpOAuthService.createTransporter(provider);
+    } else {
+      // Fallback: use SMTP env vars
+      transporter = smtpOAuthService.createEnvTransporter();
+      if (!transporter) {
+        throw new Error(`SMTP provider not found: ${providerId} and no SMTP env vars configured`);
+      }
     }
-
-    // Create transporter and send
-    const transporter = await smtpOAuthService.createTransporter(provider);
 
     const toAddress = data.toName
       ? `${data.toName} <${data.to}>`
@@ -108,8 +112,10 @@ async function processTransactionalEmailJob(
       })
       .where(eq(transactionalEmailLogs.id, logId));
 
-    // Update rate limits
-    await smtpOAuthService.updateRateLimits(providerId);
+    // Update rate limits (only for DB providers)
+    if (provider) {
+      await smtpOAuthService.updateRateLimits(providerId);
+    }
 
     console.log(
       `[Transactional Email Worker] Successfully sent email to ${data.to} (${logId})`

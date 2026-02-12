@@ -687,7 +687,7 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
       })
     );
 
-    // 2. Fetch Regular Campaigns
+    // 2. Fetch Regular Campaigns — from clientCampaignAccess table
     const regularAccessList = await db
       .select({
         id: campaigns.id,
@@ -705,8 +705,76 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
         )
       );
 
+    // 3. Fetch campaigns from additional access paths (workOrders, intakeRequests, direct, clientCampaigns)
+    const seenIds = new Set(regularAccessList.map(c => c.id));
+
+    // 3a. Via workOrders
+    const workOrderCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        projectId: campaigns.projectId,
+      })
+      .from(workOrders)
+      .innerJoin(campaigns, eq(workOrders.campaignId, campaigns.id))
+      .where(eq(workOrders.clientAccountId, clientAccountId));
+
+    // 3b. Via campaignIntakeRequests
+    const intakeCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        projectId: campaigns.projectId,
+      })
+      .from(campaignIntakeRequests)
+      .innerJoin(campaigns, eq(campaignIntakeRequests.campaignId, campaigns.id))
+      .where(eq(campaignIntakeRequests.clientAccountId, clientAccountId));
+
+    // 3c. Via campaigns.clientAccountId (admin-assigned)
+    const directCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        projectId: campaigns.projectId,
+      })
+      .from(campaigns)
+      .where(eq(campaigns.clientAccountId, clientAccountId));
+
+    // 3d. Via clientCampaigns table (client-portal-created)
+    const clientCreatedCampaigns = await db
+      .select({
+        id: clientCampaigns.id,
+        name: clientCampaigns.name,
+        status: clientCampaigns.status,
+      })
+      .from(clientCampaigns)
+      .where(eq(clientCampaigns.clientAccountId, clientAccountId));
+
+    // Merge all regular campaigns, deduplicating by ID
+    const allRegularCampaigns = [...regularAccessList];
+    for (const c of [...workOrderCampaigns, ...intakeCampaigns, ...directCampaigns]) {
+      if (!seenIds.has(c.id)) {
+        seenIds.add(c.id);
+        allRegularCampaigns.push(c);
+      }
+    }
+
+    // Add clientCampaigns (they may have a different schema)
+    for (const c of clientCreatedCampaigns) {
+      if (!seenIds.has(c.id)) {
+        seenIds.add(c.id);
+        allRegularCampaigns.push({ ...c, type: 'client_campaign', projectId: null });
+      }
+    }
+
     const enrichedRegularCampaigns = await Promise.all(
-      regularAccessList.map(async (campaign) => {
+      allRegularCampaigns.map(async (campaign) => {
         // Look up project enabledFeatures directly via projectId
         let enabledFeatures = null;
         if (campaign.projectId) {
