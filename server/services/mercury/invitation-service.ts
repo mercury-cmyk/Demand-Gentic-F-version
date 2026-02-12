@@ -309,6 +309,7 @@ export class BulkInvitationService {
     clientUserId?: string;
     clientAccountId?: string;
     reason?: string;
+    errorCode?: string;
   }> {
     const [record] = await db
       .select()
@@ -316,9 +317,18 @@ export class BulkInvitationService {
       .where(eq(mercuryInvitationTokens.token, token))
       .limit(1);
 
-    if (!record) return { valid: false, reason: 'Token not found' };
-    if (record.usedAt) return { valid: false, reason: 'Token already used' };
-    if (new Date(record.expiresAt) < new Date()) return { valid: false, reason: 'Token expired' };
+    if (!record) {
+      console.warn(`[Mercury/Invite] Token not found in DB (first 8 chars: ${token.slice(0, 8)}...)`);
+      return { valid: false, reason: 'This invitation link is not recognized. It may have been replaced by a newer invitation — please check for the most recent email from us.', errorCode: 'TOKEN_NOT_FOUND' };
+    }
+    if (record.usedAt) {
+      console.info(`[Mercury/Invite] Token already used (userId: ${record.clientUserId}, usedAt: ${record.usedAt})`);
+      return { valid: false, reason: 'This invitation has already been accepted. You can log in with the password you created during setup.', errorCode: 'TOKEN_USED' };
+    }
+    if (new Date(record.expiresAt) < new Date()) {
+      console.info(`[Mercury/Invite] Token expired (userId: ${record.clientUserId}, expiredAt: ${record.expiresAt})`);
+      return { valid: false, reason: 'This invitation has expired. Please contact your administrator to send a new invitation.', errorCode: 'TOKEN_EXPIRED' };
+    }
 
     return {
       valid: true,

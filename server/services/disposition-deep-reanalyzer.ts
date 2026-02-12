@@ -249,6 +249,10 @@ function computeConversationMetrics(turns: { role: string; text: string }[]) {
   const contactWords = contactTurns.reduce((sum, t) => sum + t.text.split(/\s+/).length, 0);
   const agentWords = agentTurns.reduce((sum, t) => sum + t.text.split(/\s+/).length, 0);
 
+  // Detect if contact speech is actually an automated call screener (Google Call Screen, etc.)
+  const screenerPattern = /record your name|reason for call|stay on the line|this person is available|call screening|call assist|before I try to connect|Google recording|cannot take your call|who I'm speaking to|what you're calling about/i;
+  const hasScreenerDetected = contactTurns.some(t => screenerPattern.test(t.text));
+
   return {
     totalTurns: turns.length,
     agentTurns: agentTurns.length,
@@ -258,7 +262,8 @@ function computeConversationMetrics(turns: { role: string; text: string }[]) {
     agentWords,
     contactTalkRatio: totalWords > 0 ? Math.round((contactWords / totalWords) * 100) : 0,
     avgContactTurnLength: contactTurns.length > 0 ? Math.round(contactWords / contactTurns.length) : 0,
-    hasRealConversation: contactTurns.length >= 2 && contactWords >= 10,
+    hasRealConversation: contactTurns.length >= 2 && contactWords >= 10 && !hasScreenerDetected,
+    hasScreenerDetected,
   };
 }
 
@@ -401,6 +406,7 @@ Total Turns: ${metrics.totalTurns} (Agent: ${metrics.agentTurns}, Contact: ${met
 Contact Talk Ratio: ${metrics.contactTalkRatio}%
 Contact Words: ${metrics.contactWords} (avg ${metrics.avgContactTurnLength} words/turn)
 Real Conversation: ${metrics.hasRealConversation ? "YES" : "NO"}
+Automated Call Screener Detected: ${metrics.hasScreenerDetected ? "YES — Contact speech contains call screening phrases. Verify if a real human ever connected after the screener." : "NO"}
 
 ═══════════════════════════════════════════════════════
 DISPOSITION CLASSIFICATION RULES
@@ -412,9 +418,32 @@ VALID DISPOSITIONS (choose EXACTLY one):
 3. not_interested — Contact clearly and definitively declined after real engagement (said "no", "not interested", "we're all set", refused value proposition)
 4. do_not_call — Contact explicitly said "don't call me again", "remove me from your list", "stop calling", or similar DNC language
 5. voicemail — Call went to voicemail/answering machine (greeting message, beep, no live human interaction)
-6. no_answer — Phone rang without answer, busy signal, or only IVR/auto-attendant with no human conversation
+6. no_answer — Phone rang without answer, busy signal, or only IVR/auto-attendant with no human conversation. THIS INCLUDES CALLS BLOCKED BY AUTOMATED CALL SCREENING (see call screening rules below).
 7. invalid_data — Wrong number, fax machine, disconnected number, or contact no longer at company
 8. needs_review — ONLY use when the call is genuinely ambiguous (mixed signals, unclear outcome, contact was engaged but no clear resolution)
+
+═══════════════════════════════════════════════════════
+AUTOMATED CALL SCREENING DETECTION (CRITICAL)
+═══════════════════════════════════════════════════════
+Google Call Screen, Google Voice, and similar automated screening services intercept calls BEFORE the real person answers. These are NOT real conversations with the prospect.
+
+SCREENER DETECTION PHRASES (if ANY of these appear in the transcript, the call hit a screener):
+- "record your name" / "record your name and reason for call"
+- "reason for calling" / "what you're calling about"
+- "state your name" / "who I'm speaking to"
+- "this person is available" / "I'll see if this person is available"
+- "call screening" / "call assist"
+- "stay on the line" / "before I try to connect"
+- "Google recording this call" / "Google screening"
+- "the person you're calling cannot take your call"
+- "unfortunately" + "cannot take your call" / "not available"
+
+SCREENER CLASSIFICATION RULES:
+- If a screener was detected AND the prospect NEVER actually connected (screener blocked the call, said "cannot take your call", or call ended during screening) → ALWAYS "no_answer". The contact was NEVER reached.
+- If a screener was detected AND a real human DID connect after screening (agent re-verified identity and had a real business conversation) → classify based on the HUMAN conversation only, ignore the screener portion.
+- A screener asking "who is calling" or "what is this about" is NOT a gatekeeper — it is an automated robot. Do NOT count screener turns as contact engagement.
+- Screener-only calls are NEVER "qualified_lead", "not_interested", or "callback_requested" — the prospect did not participate.
+- Short calls where the only "contact" speech is screener phrases → "no_answer", regardless of call duration.
 
 CRITICAL ANALYSIS RULES:
 - The agent is an AI voice agent — do NOT penalize pronunciation artifacts (these are STT transcription errors)
@@ -427,6 +456,7 @@ CRITICAL ANALYSIS RULES:
 - If contact said "I'm busy right now", "call me back", "not a good time", "in a meeting" → "callback_requested", NOT "not_interested"
 - "not_interested" requires an actual explicit refusal AFTER the value proposition was presented — a hangup alone is NOT "not_interested"
 - Look at the CLOSING of the call — the final few turns often reveal the true outcome
+- CALL SCREENING MISCLASSIFICATION: A call marked "qualified_lead" where the transcript contains screener phrases ("record your name", "reason for calling", "Google recording", "before I try to connect", "cannot take your call") and NO real human business conversation occurred → ALWAYS MISCLASSIFIED. Override to "no_answer". This is the #1 most common misclassification — screener robot speech is NOT prospect engagement.
 - YOUR JOB IS TO FIND MISCLASSIFICATIONS. Be assertive — if the transcript evidence contradicts the current disposition, set shouldOverride to true
 - shouldOverride = true when the transcript clearly shows the current disposition is wrong. You do NOT need extreme certainty — if the evidence points to a different disposition, flag it
 - shouldOverride = false ONLY if the current disposition is genuinely correct based on the transcript evidence
@@ -968,9 +998,13 @@ export async function deepReanalyzeBatch(
   const missedTPFreq = new Map<string, number>();
   let analyzedWithScores = 0;
 
-  for (const session of sessions) {
-    try {
-      summary.totalAnalyzed++;
+  // Process sessions in parallel chunks of 5 to avoid HTTP timeout
+  const CONCURRENCY = 5;
+  for (let chunkStart = 0; chunkStart < sessions.length; chunkStart += CONCURRENCY) {
+    const chunk = sessions.slice(chunkStart, chunkStart + CONCURRENCY);
+    console.log(`${LOG_PREFIX} Processing chunk ${Math.floor(chunkStart / CONCURRENCY) + 1}/${Math.ceil(sessions.length / CONCURRENCY)} (${chunk.length} calls)`);
+
+    const chunkResults = await Promise.allSettled(chunk.map(async (session) => {
       const currentDisp = session.aiDisposition || "unknown";
       const campData = session.campaignId ? campaignCache.get(session.campaignId) : null;
       const attempt = attemptMap.get(session.id);
@@ -992,6 +1026,20 @@ export async function deepReanalyzeBatch(
         campData?.talkingPoints || null,
         campData?.objections || null
       );
+
+      return { session, currentDisp, campData, attempt, contactInfo, leadInfo, transcript, deepResult };
+    }));
+
+    for (const result of chunkResults) {
+      summary.totalAnalyzed++;
+
+      if (result.status === "rejected") {
+        console.error(`${LOG_PREFIX} Error deep-analyzing call in chunk:`, result.reason);
+        summary.totalErrors++;
+        continue;
+      }
+
+      const { session, currentDisp, campData, attempt, contactInfo, leadInfo, transcript, deepResult } = result.value;
 
       // Filter by confidence threshold
       if (filters.confidenceThreshold &&
@@ -1105,9 +1153,6 @@ export async function deepReanalyzeBatch(
       }
 
       summary.calls.push(callDetail);
-    } catch (error) {
-      console.error(`${LOG_PREFIX} Error deep-analyzing ${session.id}:`, error);
-      summary.totalErrors++;
     }
   }
 
@@ -1401,6 +1446,421 @@ export async function exportReanalysisData(
   ].map(escapeCSV).join(","));
 
   return [headers.map(escapeCSV).join(","), ...rows].join("\n");
+}
+
+// ==================== GET CONTACTS BY DISPOSITION ====================
+
+export interface DispositionContactDetail {
+  callSessionId: string;
+  callAttemptId: string | null;
+  contactId: string | null;
+  contactName: string;
+  companyName: string;
+  contactEmail: string | null;
+  contactPhone: string;
+  jobTitle: string | null;
+  city: string | null;
+  state: string | null;
+  campaignId: string;
+  campaignName: string;
+  campaignObjective: string | null;
+  durationSec: number;
+  disposition: string;
+  agentType: string | null;
+  recordingUrl: string | null;
+  fullTranscript: any;
+  parsedTranscript: Array<{ role: string; text: string; turnNumber: number }>;
+  transcriptSummary: string;
+  callDate: string;
+  hasLead: boolean;
+  leadId: string | null;
+  qaStatus: string | null;
+  interactionHistory: Array<{
+    date: string;
+    disposition: string;
+    durationSec: number;
+    callSessionId: string;
+    agentType: string | null;
+    hasRecording: boolean;
+    hasTranscript: boolean;
+  }>;
+  aiAnalysis: any;
+}
+
+export async function getContactsByDisposition(
+  disposition: string,
+  filters: {
+    campaignId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+    offset?: number;
+    search?: string;
+  }
+): Promise<{
+  contacts: DispositionContactDetail[];
+  total: number;
+  disposition: string;
+  page: number;
+  pageSize: number;
+}> {
+  const limit = Math.min(filters.limit || 50, 200);
+  const offset = filters.offset || 0;
+
+  console.log(`${LOG_PREFIX} Getting contacts for disposition: ${disposition}, limit=${limit}, offset=${offset}`);
+
+  // Build conditions
+  const conditions: any[] = [
+    eq(callSessions.aiDisposition, disposition),
+  ];
+  if (filters.campaignId) conditions.push(eq(callSessions.campaignId, filters.campaignId));
+  if (filters.dateFrom) conditions.push(gte(callSessions.startedAt, new Date(filters.dateFrom)));
+  if (filters.dateTo) conditions.push(lte(callSessions.startedAt, new Date(filters.dateTo)));
+
+  // Get total count
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(callSessions)
+    .where(and(...conditions));
+
+  const total = countResult?.count || 0;
+
+  // Get sessions
+  const sessions = await db
+    .select({
+      id: callSessions.id,
+      aiDisposition: callSessions.aiDisposition,
+      aiTranscript: callSessions.aiTranscript,
+      aiAnalysis: callSessions.aiAnalysis,
+      durationSec: callSessions.durationSec,
+      recordingUrl: callSessions.recordingUrl,
+      campaignId: callSessions.campaignId,
+      contactId: callSessions.contactId,
+      startedAt: callSessions.startedAt,
+      toNumberE164: callSessions.toNumberE164,
+      agentType: callSessions.agentType,
+    })
+    .from(callSessions)
+    .where(and(...conditions))
+    .orderBy(desc(callSessions.startedAt))
+    .limit(limit)
+    .offset(offset);
+
+  if (sessions.length === 0) {
+    return { contacts: [], total, disposition, page: Math.floor(offset / limit), pageSize: limit };
+  }
+
+  // Pre-load all call attempts
+  const sessionIds = sessions.map(s => s.id);
+  const attemptMap = new Map<string, { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null; fullTranscript: string | null }>();
+  if (sessionIds.length > 0) {
+    const attempts = await db
+      .select({
+        callSessionId: dialerCallAttempts.callSessionId,
+        id: dialerCallAttempts.id,
+        disposition: dialerCallAttempts.disposition,
+        phoneDialed: dialerCallAttempts.phoneDialed,
+        queueItemId: dialerCallAttempts.queueItemId,
+        fullTranscript: dialerCallAttempts.fullTranscript,
+      })
+      .from(dialerCallAttempts)
+      .where(sql`${dialerCallAttempts.callSessionId} IN (${sql.join(sessionIds.map(id => sql`${id}`), sql`, `)})`);
+    for (const a of attempts) {
+      if (a.callSessionId) attemptMap.set(a.callSessionId, { id: a.id, disposition: a.disposition, phoneDialed: a.phoneDialed, queueItemId: a.queueItemId, fullTranscript: a.fullTranscript });
+    }
+  }
+
+  // Pre-load contacts with full info
+  const contactIds = sessions.map(s => s.contactId).filter(Boolean) as string[];
+  const contactMap = new Map<string, { name: string; company: string; email: string | null; jobTitle: string | null; city: string | null; state: string | null }>();
+  if (contactIds.length > 0) {
+    const cInfos = await db
+      .select({
+        id: contacts.id,
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        jobTitle: contacts.jobTitle,
+        city: contacts.city,
+        state: contacts.state,
+        companyName: accounts.name,
+      })
+      .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(sql`${contacts.id} IN (${sql.join(contactIds.map(id => sql`${id}`), sql`, `)})`);
+    for (const c of cInfos) {
+      contactMap.set(c.id, {
+        name: c.fullName || [c.firstName, c.lastName].filter(Boolean).join(" ") || "Unknown",
+        company: c.companyName || "Unknown",
+        email: c.email,
+        jobTitle: c.jobTitle,
+        city: c.city,
+        state: c.state,
+      });
+    }
+  }
+
+  // Pre-load campaigns
+  const campaignIds = [...new Set(sessions.map(s => s.campaignId).filter(Boolean) as string[])];
+  const campaignMap = new Map<string, { name: string; objective: string | null }>();
+  if (campaignIds.length > 0) {
+    const camps = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        campaignObjective: campaigns.campaignObjective,
+      })
+      .from(campaigns)
+      .where(sql`${campaigns.id} IN (${sql.join(campaignIds.map(id => sql`${id}`), sql`, `)})`);
+    for (const c of camps) {
+      campaignMap.set(c.id, { name: c.name, objective: c.campaignObjective });
+    }
+  }
+
+  // Pre-load leads
+  const attemptIds = Array.from(attemptMap.values()).map(a => a.id);
+  const leadMap = new Map<string, { id: string; qaStatus: string | null }>();
+  if (attemptIds.length > 0) {
+    const existingLeads = await db
+      .select({ id: leads.id, callAttemptId: leads.callAttemptId, qaStatus: leads.qaStatus })
+      .from(leads)
+      .where(sql`${leads.callAttemptId} IN (${sql.join(attemptIds.map(id => sql`${id}`), sql`, `)})`);
+    for (const l of existingLeads) {
+      if (l.callAttemptId) leadMap.set(l.callAttemptId, { id: l.id, qaStatus: l.qaStatus });
+    }
+  }
+
+  // Pre-load interaction history for each contact
+  const interactionMap = new Map<string, Array<{ date: string; disposition: string; durationSec: number; callSessionId: string; agentType: string | null; hasRecording: boolean; hasTranscript: boolean }>>();
+  if (contactIds.length > 0) {
+    const allSessions = await db
+      .select({
+        id: callSessions.id,
+        contactId: callSessions.contactId,
+        aiDisposition: callSessions.aiDisposition,
+        durationSec: callSessions.durationSec,
+        startedAt: callSessions.startedAt,
+        agentType: callSessions.agentType,
+        recordingUrl: callSessions.recordingUrl,
+        aiTranscript: callSessions.aiTranscript,
+      })
+      .from(callSessions)
+      .where(sql`${callSessions.contactId} IN (${sql.join(contactIds.map(id => sql`${id}`), sql`, `)})`)
+      .orderBy(desc(callSessions.startedAt))
+      .limit(500);
+
+    for (const s of allSessions) {
+      if (!s.contactId) continue;
+      const existing = interactionMap.get(s.contactId) || [];
+      existing.push({
+        date: s.startedAt?.toISOString() || "",
+        disposition: s.aiDisposition || "unknown",
+        durationSec: s.durationSec || 0,
+        callSessionId: s.id,
+        agentType: s.agentType,
+        hasRecording: !!s.recordingUrl,
+        hasTranscript: !!s.aiTranscript,
+      });
+      interactionMap.set(s.contactId, existing);
+    }
+  }
+
+  // Apply search filter if provided
+  let filteredSessions = sessions;
+  if (filters.search) {
+    const searchLower = filters.search.toLowerCase();
+    filteredSessions = sessions.filter(s => {
+      const contactInfo = s.contactId ? contactMap.get(s.contactId) : null;
+      if (!contactInfo) return false;
+      return contactInfo.name.toLowerCase().includes(searchLower) ||
+        contactInfo.company.toLowerCase().includes(searchLower) ||
+        (contactInfo.email || "").toLowerCase().includes(searchLower) ||
+        (s.toNumberE164 || "").includes(searchLower);
+    });
+  }
+
+  // Build results
+  const contactResults: DispositionContactDetail[] = filteredSessions.map(session => {
+    const contactInfo = session.contactId ? contactMap.get(session.contactId) : null;
+    const attempt = attemptMap.get(session.id);
+    const campInfo = session.campaignId ? campaignMap.get(session.campaignId) : null;
+    const leadInfo = attempt ? leadMap.get(attempt.id) : null;
+    const interactionHistory = session.contactId ? interactionMap.get(session.contactId) || [] : [];
+    const transcript = attempt?.fullTranscript || session.aiTranscript;
+
+    // Parse transcript into structured turns
+    const turns = parseTranscriptToTurns(transcript);
+    const parsedTranscript = turns.map((t, i) => ({
+      role: t.role,
+      text: t.text,
+      turnNumber: i + 1,
+    }));
+
+    // Generate summary from transcript
+    const transcriptSummary = turns.length > 0
+      ? turns.map(t => `${t.role === "agent" ? "Agent" : "Contact"}: ${t.text}`).join(" | ").slice(0, 500)
+      : String(transcript || "").slice(0, 500);
+
+    return {
+      callSessionId: session.id,
+      callAttemptId: attempt?.id || null,
+      contactId: session.contactId,
+      contactName: contactInfo?.name || "Unknown",
+      companyName: contactInfo?.company || "Unknown",
+      contactEmail: contactInfo?.email || null,
+      contactPhone: session.toNumberE164,
+      jobTitle: contactInfo?.jobTitle || null,
+      city: contactInfo?.city || null,
+      state: contactInfo?.state || null,
+      campaignId: session.campaignId || "",
+      campaignName: campInfo?.name || "Unknown",
+      campaignObjective: campInfo?.objective || null,
+      durationSec: session.durationSec || 0,
+      disposition: session.aiDisposition || "unknown",
+      agentType: session.agentType,
+      recordingUrl: session.recordingUrl,
+      fullTranscript: transcript,
+      parsedTranscript,
+      transcriptSummary,
+      callDate: session.startedAt?.toISOString() || "",
+      hasLead: !!leadInfo,
+      leadId: leadInfo?.id || null,
+      qaStatus: leadInfo?.qaStatus || null,
+      interactionHistory,
+      aiAnalysis: session.aiAnalysis,
+    };
+  });
+
+  return {
+    contacts: contactResults,
+    total,
+    disposition,
+    page: Math.floor(offset / limit),
+    pageSize: limit,
+  };
+}
+
+// ==================== PUSH TO DASHBOARD ====================
+
+export async function pushCallsToDashboard(
+  callSessionIds: string[],
+  userId: string,
+  notes?: string
+): Promise<{ succeeded: number; failed: number; results: Array<{ id: string; success: boolean; leadId?: string; error?: string }> }> {
+  const results: Array<{ id: string; success: boolean; leadId?: string; error?: string }> = [];
+
+  for (const csId of callSessionIds) {
+    try {
+      const [session] = await db
+        .select({
+          id: callSessions.id,
+          campaignId: callSessions.campaignId,
+          contactId: callSessions.contactId,
+          aiTranscript: callSessions.aiTranscript,
+          aiDisposition: callSessions.aiDisposition,
+          recordingUrl: callSessions.recordingUrl,
+          toNumberE164: callSessions.toNumberE164,
+        })
+        .from(callSessions)
+        .where(eq(callSessions.id, csId))
+        .limit(1);
+
+      if (!session) {
+        results.push({ id: csId, success: false, error: "Session not found" });
+        continue;
+      }
+
+      const attempts = await db
+        .select({ id: dialerCallAttempts.id, phoneDialed: dialerCallAttempts.phoneDialed, fullTranscript: dialerCallAttempts.fullTranscript })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.callSessionId, csId))
+        .limit(1);
+      const attempt = attempts[0];
+
+      if (!attempt) {
+        results.push({ id: csId, success: false, error: "No call attempt found" });
+        continue;
+      }
+
+      // Check existing lead
+      const [existingLead] = await db
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.callAttemptId, attempt.id))
+        .limit(1);
+
+      if (existingLead) {
+        // Update existing lead status
+        await db
+          .update(leads)
+          .set({ qaStatus: "approved", qaDecision: notes || "Approved via disposition reanalysis", updatedAt: new Date() })
+          .where(eq(leads.id, existingLead.id));
+        results.push({ id: csId, success: true, leadId: existingLead.id });
+        continue;
+      }
+
+      // Create new lead for dashboard
+      if (!session.campaignId || !session.contactId) {
+        results.push({ id: csId, success: false, error: "Missing campaign or contact" });
+        continue;
+      }
+
+      const [ci] = await db
+        .select({
+          fullName: contacts.fullName,
+          firstName: contacts.firstName,
+          lastName: contacts.lastName,
+          email: contacts.email,
+          companyName: accounts.name,
+        })
+        .from(contacts)
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(eq(contacts.id, session.contactId))
+        .limit(1);
+
+      const contactName = ci?.fullName || [ci?.firstName, ci?.lastName].filter(Boolean).join(" ") || "Unknown";
+
+      const [newLead] = await db
+        .insert(leads)
+        .values({
+          campaignId: session.campaignId,
+          contactId: session.contactId,
+          callAttemptId: attempt.id,
+          contactName,
+          contactEmail: ci?.email || undefined,
+          accountName: ci?.companyName || undefined,
+          qaStatus: "approved",
+          qaDecision: notes || "Pushed to dashboard via disposition reanalysis",
+          dialedNumber: attempt.phoneDialed,
+          recordingUrl: session.recordingUrl,
+          transcript: attempt.fullTranscript || session.aiTranscript || undefined,
+          notes: `Source: disposition_reanalysis_dashboard | by: ${userId}`,
+        })
+        .returning({ id: leads.id });
+
+      if (newLead) {
+        results.push({ id: csId, success: true, leadId: newLead.id });
+
+        // Log the dashboard push
+        await db.insert(activityLog).values({
+          entityType: "call_session",
+          entityId: csId,
+          eventType: "disposition_pushed_to_dashboard" as any,
+          payload: { callSessionId: csId, leadId: newLead.id, notes, pushedBy: userId, pushedAt: new Date().toISOString() },
+          createdBy: userId,
+        }).catch(() => {});
+      }
+    } catch (error: any) {
+      results.push({ id: csId, success: false, error: error.message });
+    }
+  }
+
+  return {
+    succeeded: results.filter(r => r.success).length,
+    failed: results.filter(r => !r.success).length,
+    results,
+  };
 }
 
 // ==================== INTERNAL: APPLY DISPOSITION CHANGE ====================

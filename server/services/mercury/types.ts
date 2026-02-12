@@ -13,7 +13,7 @@ export const MERCURY_DEFAULTS = {
   maxRetries: 3,
   batchSize: 50,
   batchDelayMs: 2000,
-  inviteExpiryDays: 7,
+  inviteExpiryDays: 30,
 } as const;
 
 export const MERCURY_COMPANY_FOOTER = `

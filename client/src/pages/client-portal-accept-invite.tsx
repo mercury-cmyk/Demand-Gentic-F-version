@@ -26,6 +26,7 @@ export default function ClientPortalAcceptInvite() {
   const [isValidating, setIsValidating] = useState(true);
   const [isValid, setIsValid] = useState(false);
   const [invalidReason, setInvalidReason] = useState('');
+  const [errorCode, setErrorCode] = useState('');
   const [user, setUser] = useState<InviteUser | null>(null);
 
   // Form fields
@@ -72,11 +73,12 @@ export default function ClientPortalAcceptInvite() {
           setLastName(data.user.lastName || '');
         } else {
           setIsValid(false);
-          setInvalidReason(data.reason || 'This invitation link is invalid or has expired.');
+          setInvalidReason(data.reason || 'This invitation link is invalid or has expired. Please contact your administrator for a new invitation.');
+          setErrorCode(data.errorCode || '');
         }
       } catch {
         setIsValid(false);
-        setInvalidReason('Unable to validate your invitation. Please try again later.');
+        setInvalidReason('Unable to validate your invitation. Please check your connection and try again.');
       } finally {
         setIsValidating(false);
       }
@@ -153,9 +155,17 @@ export default function ClientPortalAcceptInvite() {
             </div>
             <h2 className="text-xl font-semibold mb-2">Invitation Invalid</h2>
             <p className="text-muted-foreground mb-6 max-w-sm">{invalidReason}</p>
-            <Link href="/client-portal/login">
-              <Button variant="outline">Go to Login</Button>
-            </Link>
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              {errorCode === 'TOKEN_USED' ? (
+                <Link href="/client-portal/login">
+                  <Button className="w-full">Go to Login</Button>
+                </Link>
+              ) : (
+                <Link href="/client-portal/login">
+                  <Button variant="outline" className="w-full">Go to Login</Button>
+                </Link>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
