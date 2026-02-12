@@ -12,6 +12,33 @@ import { batchCheckCampaignSuppression, batchCheckAccountCaps } from '../lib/cam
 
 const router = Router();
 
+/**
+ * Resolve list recordIds to contact IDs, handling both contact-type and account-type lists.
+ * Account-type lists store account IDs in recordIds — we resolve those to contact IDs.
+ */
+async function resolveListToContactIds(
+  list: { entityType: string; recordIds: string[] },
+  dbOrTx: typeof db,
+  logPrefix: string = '[queue]'
+): Promise<string[]> {
+  if (list.entityType === 'account') {
+    // Account-type list: recordIds are account IDs — resolve to contacts belonging to those accounts
+    const contactIds: string[] = [];
+    const batchSize = 1000;
+    for (let i = 0; i < list.recordIds.length; i += batchSize) {
+      const batch = list.recordIds.slice(i, i + batchSize);
+      const accountContacts = await dbOrTx.select({ id: contacts.id })
+        .from(contacts)
+        .where(inArray(contacts.accountId, batch));
+      accountContacts.forEach(c => contactIds.push(c.id));
+    }
+    console.log(`${logPrefix} Resolved ${list.recordIds.length} account IDs -> ${contactIds.length} contact IDs`);
+    return contactIds;
+  }
+  // Contact-type list: recordIds are already contact IDs
+  return list.recordIds;
+}
+
 // Schema for a single filter condition
 const filterConditionSchema = z.object({
   id: z.string(),
@@ -187,21 +214,22 @@ router.post(
             }
           }
           
-          // Resolve from lists
+          // Resolve from lists (handles both contact-type and account-type lists)
           if (audienceRefs.lists && Array.isArray(audienceRefs.lists)) {
             for (const listId of audienceRefs.lists) {
               const [list] = await tx.select()
                 .from(lists)
                 .where(eq(lists.id, listId))
                 .limit(1);
-              
+
               if (list && list.recordIds && list.recordIds.length > 0) {
-                list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
-                console.log(`[queues:set] Found ${list.recordIds.length} contacts from list ${listId}`);
+                const resolvedIds = await resolveListToContactIds(list as any, tx as any, '[queues:set]');
+                resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
+                console.log(`[queues:set] Found ${resolvedIds.length} contacts from list ${listId} (entityType: ${list.entityType})`);
               }
             }
           }
-          
+
           // Resolve from selectedLists (alternate field name)
           if (audienceRefs.selectedLists && Array.isArray(audienceRefs.selectedLists)) {
             for (const listId of audienceRefs.selectedLists) {
@@ -209,14 +237,15 @@ router.post(
                 .from(lists)
                 .where(eq(lists.id, listId))
                 .limit(1);
-              
+
               if (list && list.recordIds && list.recordIds.length > 0) {
-                list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
-                console.log(`[queues:set] Found ${list.recordIds.length} contacts from selectedList ${listId}`);
+                const resolvedIds = await resolveListToContactIds(list as any, tx as any, '[queues:set]');
+                resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
+                console.log(`[queues:set] Found ${resolvedIds.length} contacts from selectedList ${listId} (entityType: ${list.entityType})`);
               }
             }
           }
-          
+
           // Resolve from segments
           if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
             for (const segmentId of audienceRefs.segments) {
@@ -851,11 +880,12 @@ router.post(
               .where(eq(lists.id, listId))
               .limit(1);
             if (list?.recordIds?.length > 0) {
-              list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
+              const resolvedIds = await resolveListToContactIds(list as any, db, '[queues:preview]');
+              resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
             }
           }
         }
-        
+
         if (audienceRefs.selectedLists && Array.isArray(audienceRefs.selectedLists)) {
           for (const listId of audienceRefs.selectedLists) {
             const [list] = await db.select()
@@ -863,11 +893,12 @@ router.post(
               .where(eq(lists.id, listId))
               .limit(1);
             if (list?.recordIds?.length > 0) {
-              list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
+              const resolvedIds = await resolveListToContactIds(list as any, db, '[queues:preview]');
+              resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
             }
           }
         }
-        
+
         if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
           for (const segmentId of audienceRefs.segments) {
             const [segment] = await db.select()
@@ -1075,11 +1106,12 @@ router.post(
               .where(eq(lists.id, listId))
               .limit(1);
             if (list?.recordIds?.length > 0) {
-              list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
+              const resolvedIds = await resolveListToContactIds(list as any, db, '[queues:filter-count]');
+              resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
             }
           }
         }
-        
+
         if (audienceRefs.selectedLists && Array.isArray(audienceRefs.selectedLists)) {
           for (const listId of audienceRefs.selectedLists) {
             const [list] = await db.select()
@@ -1087,11 +1119,12 @@ router.post(
               .where(eq(lists.id, listId))
               .limit(1);
             if (list?.recordIds?.length > 0) {
-              list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
+              const resolvedIds = await resolveListToContactIds(list as any, db, '[queues:filter-count]');
+              resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
             }
           }
         }
-        
+
         if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
           for (const segmentId of audienceRefs.segments) {
             const [segment] = await db.select()

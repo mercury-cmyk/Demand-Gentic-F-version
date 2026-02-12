@@ -1,7 +1,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { db, pool } from '../db';
-import { sql, and, eq, notInArray } from 'drizzle-orm';
+import { sql, and, eq, notInArray, inArray } from 'drizzle-orm';
 import { campaignQueue, contacts, accounts, campaigns, lists } from '@shared/schema';
 import { requireAuth } from '../auth';
 import { z } from 'zod';
@@ -62,7 +62,24 @@ router.post(
             continue;
         }
 
-        const contactIds = list.recordIds as string[];
+        // Handle account-type lists: resolve account IDs to contact IDs
+        let contactIds: string[];
+        if (list.entityType === 'account') {
+          console.log(`[sync-queue] List ${listId} is account-type with ${list.recordIds.length} account IDs — resolving to contacts`);
+          const resolvedContacts: string[] = [];
+          const batchSize = 1000;
+          for (let i = 0; i < list.recordIds.length; i += batchSize) {
+            const batch = list.recordIds.slice(i, i + batchSize);
+            const accountContacts = await db.select({ id: contacts.id })
+              .from(contacts)
+              .where(inArray(contacts.accountId, batch));
+            accountContacts.forEach(c => resolvedContacts.push(c.id));
+          }
+          contactIds = resolvedContacts;
+          console.log(`[sync-queue] Resolved ${list.recordIds.length} account IDs -> ${contactIds.length} contact IDs`);
+        } else {
+          contactIds = list.recordIds as string[];
+        }
         results.contacts_processed += contactIds.length;
 
         // 3. Link Accounts (if requested)

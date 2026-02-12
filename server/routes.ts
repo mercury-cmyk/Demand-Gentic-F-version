@@ -690,12 +690,27 @@ async function resolveAudienceContactsForQueue(
       const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
       if (list && list.recordIds && list.recordIds.length > 0) {
         const batchSize = 1000;
-        for (let i = 0; i < list.recordIds.length; i += batchSize) {
-          const batch = list.recordIds.slice(i, i + batchSize);
-          const listContacts = await storage.getContactsByIds(batch);
-          audienceContacts.push(...listContacts);
+
+        if (list.entityType === 'account') {
+          // Account-type list: recordIds are account IDs — resolve to contacts belonging to those accounts
+          console.log(`${logPrefix} List ${listId} is account-type with ${list.recordIds.length} account IDs — resolving to contacts`);
+          for (let i = 0; i < list.recordIds.length; i += batchSize) {
+            const batch = list.recordIds.slice(i, i + batchSize);
+            const accountContacts = await db.select()
+              .from(contactsTable)
+              .where(inArray(contactsTable.accountId, batch));
+            audienceContacts.push(...accountContacts);
+          }
+          console.log(`${logPrefix} Resolved ${audienceContacts.length} contacts from account-type list ${listId}`);
+        } else {
+          // Contact-type list: recordIds are contact IDs
+          for (let i = 0; i < list.recordIds.length; i += batchSize) {
+            const batch = list.recordIds.slice(i, i + batchSize);
+            const listContacts = await storage.getContactsByIds(batch);
+            audienceContacts.push(...listContacts);
+          }
+          console.log(`${logPrefix} Resolved ${list.recordIds.length} contacts from contact-type list ${listId}`);
         }
-        console.log(`${logPrefix} Resolved ${list.recordIds.length} contacts from list ${listId}`);
       }
     }
   }
@@ -5806,20 +5821,26 @@ export function registerRoutes(app: Express) {
         audienceRefs: updatedAudienceRefs,
       });
 
-      // Auto-populate queue if campaign is active and new lists were added
+      console.log(`[Add Audience Lists] Campaign "${campaign.name}" (${campaign.id}): status=${campaign.status}, addedCount=${addedCount}, totalLists=${updatedLists.length}`);
+
+      // Auto-populate queue — always attempt when campaign is active/paused/draft
+      // (even if list was already in audienceRefs, new contacts may need enqueueing)
       let enqueuedCount = 0;
       let agentQueueAdded = 0;
-      if (updatedCampaign && updatedCampaign.status === 'active' && addedCount > 0) {
+      if (updatedCampaign && updatedCampaign.status !== 'completed' && updatedCampaign.status !== 'cancelled') {
         try {
           const contactsToEnqueue = await resolveAudienceContactsForQueue(
             req.params.id,
             updatedAudienceRefs,
             '[Add Audience Lists]'
           );
+          console.log(`[Add Audience Lists] resolveAudienceContactsForQueue returned ${contactsToEnqueue.length} contacts to enqueue`);
           if (contactsToEnqueue.length > 0) {
             const result = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
             enqueuedCount = result.enqueued;
             console.log(`[Add Audience Lists] Auto-populated ${enqueuedCount} contacts to campaign_queue`);
+          } else {
+            console.log(`[Add Audience Lists] No new contacts to enqueue (all may already be in queue, missing phones, or no accountId)`);
           }
 
           // MANUAL/AI_AGENT DIAL: Also add new contacts to agent_queue for assigned agents
@@ -5837,12 +5858,25 @@ export function registerRoutes(app: Express) {
             const assignedAgentIds = assignedAgents.map(a => a.agentId).filter((id): id is string => !!id);
 
             if (assignedAgentIds.length > 0) {
-              // Resolve contacts from the NEWLY added lists only
+              // Resolve contacts from the NEWLY added lists only (handle account-type lists)
               const newContactIds = new Set<string>();
               for (const listId of listIds) {
                 const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
                 if (list && list.recordIds && list.recordIds.length > 0) {
-                  list.recordIds.forEach((id: string) => newContactIds.add(id));
+                  if (list.entityType === 'account') {
+                    // Account-type list: resolve account IDs to contact IDs
+                    const batchSize = 1000;
+                    for (let i = 0; i < list.recordIds.length; i += batchSize) {
+                      const batch = list.recordIds.slice(i, i + batchSize);
+                      const accountContacts = await db.select({ id: contactsTable.id })
+                        .from(contactsTable)
+                        .where(inArray(contactsTable.accountId, batch));
+                      accountContacts.forEach(c => newContactIds.add(c.id));
+                    }
+                    console.log(`[Add Audience Lists] Resolved ${list.recordIds.length} account IDs -> ${newContactIds.size} contact IDs from account-type list ${listId}`);
+                  } else {
+                    list.recordIds.forEach((id: string) => newContactIds.add(id));
+                  }
                 }
               }
 
@@ -5932,8 +5966,14 @@ export function registerRoutes(app: Express) {
 
       invalidateDashboardCache();
 
+      const msg = enqueuedCount > 0
+        ? `Added ${addedCount} list(s) to campaign "${campaign.name}" and enqueued ${enqueuedCount} contacts`
+        : addedCount > 0
+          ? `Added ${addedCount} list(s) to campaign "${campaign.name}" (contacts may already be in queue)`
+          : `List(s) already assigned to campaign "${campaign.name}" — re-synced queue (${enqueuedCount} new contacts)`;
+
       res.json({
-        message: `Added ${addedCount} list(s) to campaign "${campaign.name}"`,
+        message: msg,
         addedCount,
         totalLists: updatedLists.length,
         enqueuedCount,
@@ -6885,7 +6925,21 @@ export function registerRoutes(app: Express) {
 
         if (campaign?.dialMode === 'manual' || campaign?.dialMode === 'ai_agent') {
           // Manual dial or AI Agent: query agent_queue (manual pull queue)
-          const manualQueue = await db
+          // For admins: if they have no personal queue items, show all agents' queue items for this campaign
+          const userRoles = req.user?.roles || [req.user?.role];
+          const isAdmin = userRoles.includes('admin') || userRoles.includes('campaign_manager');
+
+          const baseConditions = [
+            eq(agentQueue.campaignId, campaignId as string),
+            status ? eq(agentQueue.queueState, status as any) : eq(agentQueue.queueState, 'queued'),
+            or(
+              isNull(agentQueue.scheduledFor),
+              lte(agentQueue.scheduledFor, new Date())
+            ),
+          ];
+
+          // First try the agent's own queue
+          let manualQueue = await db
             .select({
               id: agentQueue.id,
               campaignId: agentQueue.campaignId,
@@ -6893,7 +6947,6 @@ export function registerRoutes(app: Express) {
               contactId: agentQueue.contactId,
               contactName: sql<string>`COALESCE(${contacts.fullName}, CONCAT(${contacts.firstName}, ' ', ${contacts.lastName}))`.as('contactName'),
               contactEmail: contacts.email,
-              // Get all phone fields to determine best phone
               contactDirectPhone: contacts.directPhone,
               contactDirectPhoneE164: contacts.directPhoneE164,
               contactMobilePhone: contacts.mobilePhone,
@@ -6916,16 +6969,216 @@ export function registerRoutes(app: Express) {
             .where(
               and(
                 eq(agentQueue.agentId, agentId),
-                eq(agentQueue.campaignId, campaignId as string),
-                status ? eq(agentQueue.queueState, status as any) : eq(agentQueue.queueState, 'queued'),
-                // CRITICAL FIX: Only return items that are ready to be worked (scheduled date has passed or no schedule)
-                or(
-                  isNull(agentQueue.scheduledFor),
-                  lte(agentQueue.scheduledFor, new Date())
-                )
+                ...baseConditions
               )
             )
             .orderBy(desc(agentQueue.priority), agentQueue.createdAt);
+
+          // Auto-populate: if agent is assigned but has empty queue, populate from campaign audience on-the-fly
+          if (manualQueue.length === 0) {
+            const [activeAssignment] = await db
+              .select({ id: campaignAgentAssignments.id })
+              .from(campaignAgentAssignments)
+              .where(
+                and(
+                  eq(campaignAgentAssignments.agentId, agentId),
+                  eq(campaignAgentAssignments.campaignId, campaignId as string),
+                  eq(campaignAgentAssignments.isActive, true)
+                )
+              )
+              .limit(1);
+
+            if (activeAssignment && campaign.audienceRefs) {
+              console.log(`[AGENT QUEUE] Agent ${agentId} assigned but queue empty - auto-populating from campaign audience`);
+              try {
+                const audienceRefs = campaign.audienceRefs as any;
+                const uniqueContactIds = new Set<string>();
+
+                // Resolve from lists
+                const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+                if (Array.isArray(listIds) && listIds.length > 0) {
+                  for (const listId of listIds) {
+                    const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+                    if (list && list.recordIds && list.recordIds.length > 0) {
+                      list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
+                    }
+                  }
+                }
+
+                // Resolve from segments
+                const segIds = [
+                  ...(audienceRefs.segments && Array.isArray(audienceRefs.segments) ? audienceRefs.segments : []),
+                  ...(audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments) ? audienceRefs.selectedSegments : []),
+                ];
+                for (const segmentId of [...new Set(segIds)]) {
+                  const segment = await storage.getSegment(segmentId);
+                  if (segment && segment.definitionJson) {
+                    const filterSQL = buildFilterQuery(segment.definitionJson as FilterGroup, contacts);
+                    if (filterSQL) {
+                      const segContacts = await db.select({ id: contactsTable.id }).from(contactsTable).where(filterSQL);
+                      segContacts.forEach(c => uniqueContactIds.add(c.id));
+                    }
+                  }
+                }
+
+                // Resolve from filterGroup
+                if (audienceRefs.filterGroup) {
+                  const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
+                  if (filterSQL) {
+                    const filterContacts = await db.select({ id: contactsTable.id }).from(contactsTable).where(filterSQL);
+                    filterContacts.forEach(c => uniqueContactIds.add(c.id));
+                  }
+                }
+
+                if (uniqueContactIds.size > 0) {
+                  // Batch-fetch contacts with account data
+                  const contactIdsArray = Array.from(uniqueContactIds);
+                  const fullContacts: any[] = [];
+                  const batchSize = 500;
+                  for (let i = 0; i < contactIdsArray.length; i += batchSize) {
+                    const batch = contactIdsArray.slice(i, i + batchSize);
+                    const batchResults = await db.select()
+                      .from(contactsTable)
+                      .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+                      .where(inArray(contactsTable.id, batch));
+                    fullContacts.push(...batchResults);
+                  }
+
+                  const eligibleContacts = fullContacts.filter(row => {
+                    if (!row.contacts.accountId) return false;
+                    return getBestPhoneForContact({
+                      directPhone: row.contacts.directPhone,
+                      directPhoneE164: row.contacts.directPhoneE164,
+                      mobilePhone: row.contacts.mobilePhone,
+                      mobilePhoneE164: row.contacts.mobilePhoneE164,
+                      country: row.contacts.country,
+                      hqPhone: row.accounts?.mainPhone,
+                      hqPhoneE164: row.accounts?.mainPhoneE164,
+                      hqCountry: row.accounts?.hqCountry,
+                    }).phone !== null;
+                  });
+
+                  if (eligibleContacts.length > 0) {
+                    const queueItems = eligibleContacts.map(row => ({
+                      id: sql`gen_random_uuid()`,
+                      agentId,
+                      campaignId: campaignId as string,
+                      contactId: row.contacts.id,
+                      accountId: row.contacts.accountId!,
+                      dialedNumber: getBestPhoneForContact({
+                        directPhone: row.contacts.directPhone,
+                        directPhoneE164: row.contacts.directPhoneE164,
+                        mobilePhone: row.contacts.mobilePhone,
+                        mobilePhoneE164: row.contacts.mobilePhoneE164,
+                        country: row.contacts.country,
+                        hqPhone: row.accounts?.mainPhone,
+                        hqPhoneE164: row.accounts?.mainPhoneE164,
+                        hqCountry: row.accounts?.hqCountry,
+                      }).phone || null,
+                      queueState: 'queued' as const,
+                      priority: 0,
+                      createdAt: new Date(),
+                      updatedAt: new Date(),
+                    }));
+
+                    let totalInserted = 0;
+                    for (let i = 0; i < queueItems.length; i += 500) {
+                      const batch = queueItems.slice(i, i + 500);
+                      try {
+                        const result = await db.insert(agentQueue).values(batch).returning({ id: agentQueue.id });
+                        totalInserted += result.length;
+                      } catch (err) {
+                        console.error(`[AGENT QUEUE] Auto-populate batch error:`, err);
+                      }
+                    }
+
+                    console.log(`[AGENT QUEUE] Auto-populated ${totalInserted} contacts for agent ${agentId}`);
+
+                    // Re-fetch the queue after populating
+                    manualQueue = await db
+                      .select({
+                        id: agentQueue.id,
+                        campaignId: agentQueue.campaignId,
+                        campaignName: campaigns.name,
+                        contactId: agentQueue.contactId,
+                        contactName: sql<string>`COALESCE(${contacts.fullName}, CONCAT(${contacts.firstName}, ' ', ${contacts.lastName}))`.as('contactName'),
+                        contactEmail: contacts.email,
+                        contactDirectPhone: contacts.directPhone,
+                        contactDirectPhoneE164: contacts.directPhoneE164,
+                        contactMobilePhone: contacts.mobilePhone,
+                        contactMobilePhoneE164: contacts.mobilePhoneE164,
+                        contactCountry: contacts.country,
+                        accountId: agentQueue.accountId,
+                        accountName: accounts.name,
+                        accountHqPhone: accounts.mainPhone,
+                        accountHqPhoneE164: accounts.mainPhoneE164,
+                        accountHqCountry: accounts.hqCountry,
+                        priority: agentQueue.priority,
+                        status: agentQueue.queueState,
+                        createdAt: agentQueue.createdAt,
+                        updatedAt: agentQueue.updatedAt,
+                      })
+                      .from(agentQueue)
+                      .leftJoin(contacts, eq(agentQueue.contactId, contacts.id))
+                      .leftJoin(accounts, eq(agentQueue.accountId, accounts.id))
+                      .leftJoin(campaigns, eq(agentQueue.campaignId, campaigns.id))
+                      .where(
+                        and(
+                          eq(agentQueue.agentId, agentId),
+                          ...baseConditions
+                        )
+                      )
+                      .orderBy(desc(agentQueue.priority), agentQueue.createdAt);
+                  }
+                }
+              } catch (autoPopErr) {
+                console.error(`[AGENT QUEUE] Auto-populate error (non-fatal):`, autoPopErr);
+              }
+            }
+          }
+
+          // Admin fallback: if still empty and admin, show all agents' items for this campaign
+          if (manualQueue.length === 0 && isAdmin) {
+            console.log(`[AGENT QUEUE] Admin ${agentId} has no personal queue - showing all agents' queue for campaign ${campaignId}`);
+            const allAgentsQueue = await db
+              .select({
+                id: agentQueue.id,
+                campaignId: agentQueue.campaignId,
+                campaignName: campaigns.name,
+                contactId: agentQueue.contactId,
+                contactName: sql<string>`COALESCE(${contacts.fullName}, CONCAT(${contacts.firstName}, ' ', ${contacts.lastName}))`.as('contactName'),
+                contactEmail: contacts.email,
+                contactDirectPhone: contacts.directPhone,
+                contactDirectPhoneE164: contacts.directPhoneE164,
+                contactMobilePhone: contacts.mobilePhone,
+                contactMobilePhoneE164: contacts.mobilePhoneE164,
+                contactCountry: contacts.country,
+                accountId: agentQueue.accountId,
+                accountName: accounts.name,
+                accountHqPhone: accounts.mainPhone,
+                accountHqPhoneE164: accounts.mainPhoneE164,
+                accountHqCountry: accounts.hqCountry,
+                priority: agentQueue.priority,
+                status: agentQueue.queueState,
+                createdAt: agentQueue.createdAt,
+                updatedAt: agentQueue.updatedAt,
+              })
+              .from(agentQueue)
+              .leftJoin(contacts, eq(agentQueue.contactId, contacts.id))
+              .leftJoin(accounts, eq(agentQueue.accountId, accounts.id))
+              .leftJoin(campaigns, eq(agentQueue.campaignId, campaigns.id))
+              .where(and(...baseConditions))
+              .orderBy(desc(agentQueue.priority), agentQueue.createdAt);
+
+            // Deduplicate by contactId (same contact may be in multiple agents' queues)
+            const seen = new Set<string>();
+            manualQueue = allAgentsQueue.filter(item => {
+              if (seen.has(item.contactId)) return false;
+              seen.add(item.contactId);
+              return true;
+            });
+            console.log(`[AGENT QUEUE] Admin fallback: ${allAgentsQueue.length} total -> ${manualQueue.length} deduplicated contacts`);
+          }
 
           // Process each queue item to get best phone
           const processedQueue = manualQueue.map(item => {
