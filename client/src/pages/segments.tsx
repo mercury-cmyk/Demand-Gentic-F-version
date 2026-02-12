@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ListFilter, Users, Upload, Trash2, Download, ArrowRightLeft, Filter, X } from "lucide-react";
+import { Plus, Search, ListFilter, Users, Upload, Trash2, Download, ArrowRightLeft, Filter, X, MoreVertical, Copy, Megaphone } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -46,6 +54,14 @@ export default function SegmentsPage() {
   const [segmentFilterGroup, setSegmentFilterGroup] = useState<FilterGroup | undefined>();
   const [segmentEntityType, setSegmentEntityType] = useState<'contact' | 'account'>('contact');
   const [pageFilterGroup, setPageFilterGroup] = useState<FilterGroup | undefined>();
+  // Copy To List dialog state
+  const [copyToDialogOpen, setCopyToDialogOpen] = useState(false);
+  const [copySourceList, setCopySourceList] = useState<List | null>(null);
+  const [selectedTargetListId, setSelectedTargetListId] = useState<string>("");
+  // Assign to Campaign dialog state
+  const [assignCampaignDialogOpen, setAssignCampaignDialogOpen] = useState(false);
+  const [assignSourceList, setAssignSourceList] = useState<List | null>(null);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const { toast } = useToast();
 
   const { data: segments, isLoading: segmentsLoading } = useQuery<Segment[]>({
@@ -230,6 +246,65 @@ export default function SegmentsPage() {
       toast({
         title: "Success",
         description: "List exported successfully",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message,
+      });
+    },
+  });
+
+  // Campaigns query (only fetched when assign dialog is open)
+  const { data: campaignsData = [], isLoading: campaignsLoading } = useQuery<any[]>({
+    queryKey: ['/api/campaigns', 'for-list-assignment'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/campaigns');
+      return await res.json();
+    },
+    enabled: assignCampaignDialogOpen,
+    staleTime: 0,
+  });
+
+  const mergeListMutation = useMutation({
+    mutationFn: async ({ targetListId, sourceListId }: { targetListId: string; sourceListId: string }) => {
+      const response = await apiRequest('POST', `/api/lists/${targetListId}/merge`, { sourceListId });
+      return await response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/lists'] });
+      setCopyToDialogOpen(false);
+      setCopySourceList(null);
+      setSelectedTargetListId("");
+      toast({
+        title: "Success",
+        description: data.message,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message,
+      });
+    },
+  });
+
+  const assignToCampaignMutation = useMutation({
+    mutationFn: async ({ campaignId, listIds }: { campaignId: string; listIds: string[] }) => {
+      const response = await apiRequest('POST', `/api/campaigns/${campaignId}/add-audience-lists`, { listIds });
+      return await response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/campaigns'] });
+      setAssignCampaignDialogOpen(false);
+      setAssignSourceList(null);
+      setSelectedCampaignIds([]);
+      toast({
+        title: "Success",
+        description: data.message,
       });
     },
     onError: (error: Error) => {
@@ -722,7 +797,7 @@ export default function SegmentsPage() {
                     <TableHead>Source</TableHead>
                     <TableHead>Records</TableHead>
                     <TableHead>Tags</TableHead>
-                    <TableHead className="w-[180px]">Actions</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -754,26 +829,52 @@ export default function SegmentsPage() {
                         ) : '-'}
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => exportListMutation.mutate({ listId: list.id, format: 'csv' })}
-                            disabled={exportListMutation.isPending}
-                            data-testid={`button-export-list-${list.id}`}
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            CSV
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteListMutation.mutate(list.id)}
-                            disabled={deleteListMutation.isPending}
-                            data-testid={`button-delete-list-${list.id}`}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => exportListMutation.mutate({ listId: list.id, format: 'csv' })}
+                                disabled={exportListMutation.isPending}
+                              >
+                                <Download className="mr-2 h-4 w-4" />
+                                Export CSV
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setCopySourceList(list);
+                                  setSelectedTargetListId("");
+                                  setCopyToDialogOpen(true);
+                                }}
+                              >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy To List...
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setAssignSourceList(list);
+                                  setSelectedCampaignIds([]);
+                                  setAssignCampaignDialogOpen(true);
+                                }}
+                              >
+                                <Megaphone className="mr-2 h-4 w-4" />
+                                Assign to Campaign...
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => deleteListMutation.mutate(list.id)}
+                                disabled={deleteListMutation.isPending}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -790,6 +891,137 @@ export default function SegmentsPage() {
               onAction={!searchQuery ? () => setCreateListDialogOpen(true) : undefined}
             />
           )}
+
+          {/* Copy To List Dialog */}
+          <Dialog open={copyToDialogOpen} onOpenChange={setCopyToDialogOpen}>
+            <DialogContent className="sm:max-w-[450px]">
+              <DialogHeader>
+                <DialogTitle>Copy Contacts To List</DialogTitle>
+                <DialogDescription>
+                  Copy all {copySourceList?.recordIds?.length?.toLocaleString() || 0} records from "{copySourceList?.name}" into another list. Duplicates will be automatically skipped.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Target List</label>
+                  <Select value={selectedTargetListId} onValueChange={setSelectedTargetListId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a target list..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lists
+                        ?.filter(l => l.id !== copySourceList?.id && l.entityType === copySourceList?.entityType)
+                        .map(l => (
+                          <SelectItem key={l.id} value={l.id}>
+                            {l.name} ({l.recordIds?.length?.toLocaleString() || 0} records)
+                          </SelectItem>
+                        ))
+                      }
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCopyToDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (copySourceList && selectedTargetListId) {
+                      mergeListMutation.mutate({
+                        targetListId: selectedTargetListId,
+                        sourceListId: copySourceList.id,
+                      });
+                    }
+                  }}
+                  disabled={!selectedTargetListId || mergeListMutation.isPending}
+                >
+                  {mergeListMutation.isPending ? "Copying..." : "Copy Records"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Assign to Campaign Dialog */}
+          <Dialog open={assignCampaignDialogOpen} onOpenChange={setAssignCampaignDialogOpen}>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle>Assign List to Campaign</DialogTitle>
+                <DialogDescription>
+                  Add "{assignSourceList?.name}" ({assignSourceList?.recordIds?.length?.toLocaleString() || 0} records) to one or more campaigns.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 py-4 max-h-[400px] overflow-y-auto">
+                {campaignsLoading ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-12 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                  </div>
+                ) : campaignsData && campaignsData.filter((c: any) => c.status !== 'completed' && c.status !== 'cancelled').length > 0 ? (
+                  campaignsData
+                    .filter((c: any) => c.status !== 'completed' && c.status !== 'cancelled')
+                    .map((campaign: any) => (
+                      <div
+                        key={campaign.id}
+                        className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-all hover:bg-muted/50 ${
+                          selectedCampaignIds.includes(campaign.id) ? 'border-primary bg-primary/5' : ''
+                        }`}
+                        onClick={() => {
+                          setSelectedCampaignIds(prev =>
+                            prev.includes(campaign.id)
+                              ? prev.filter((id: string) => id !== campaign.id)
+                              : [...prev, campaign.id]
+                          );
+                        }}
+                      >
+                        <Checkbox
+                          checked={selectedCampaignIds.includes(campaign.id)}
+                          onCheckedChange={() => {
+                            setSelectedCampaignIds(prev =>
+                              prev.includes(campaign.id)
+                                ? prev.filter((id: string) => id !== campaign.id)
+                                : [...prev, campaign.id]
+                            );
+                          }}
+                        />
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">{campaign.name}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">{campaign.type}</Badge>
+                            <Badge variant="secondary" className="text-xs">{campaign.status}</Badge>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">No campaigns available</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAssignCampaignDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (assignSourceList && selectedCampaignIds.length > 0) {
+                      selectedCampaignIds.forEach(campaignId => {
+                        assignToCampaignMutation.mutate({
+                          campaignId,
+                          listIds: [assignSourceList.id],
+                        });
+                      });
+                    }
+                  }}
+                  disabled={selectedCampaignIds.length === 0 || assignToCampaignMutation.isPending}
+                >
+                  {assignToCampaignMutation.isPending
+                    ? "Assigning..."
+                    : `Assign to ${selectedCampaignIds.length} Campaign${selectedCampaignIds.length !== 1 ? 's' : ''}`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="domains" className="space-y-4 mt-6">

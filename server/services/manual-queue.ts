@@ -257,7 +257,7 @@ export class ManualQueueService {
             AND aq.queue_state = 'queued'
             AND (aq.scheduled_for IS NULL OR aq.scheduled_for <= NOW())
             AND (c.next_call_eligible_at IS NULL OR c.next_call_eligible_at <= NOW())
-          ORDER BY aq.priority DESC, aq.created_at ASC
+          ORDER BY aq.ai_priority_score DESC NULLS LAST, aq.priority DESC, aq.created_at ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         `);
@@ -580,7 +580,7 @@ export class ManualQueueService {
         contact: true,
         account: true,
       },
-      orderBy: [sql`${agentQueue.priority} DESC`, sql`${agentQueue.createdAt} ASC`],
+      orderBy: [sql`${agentQueue.aiPriorityScore} DESC NULLS LAST`, sql`${agentQueue.priority} DESC`, sql`${agentQueue.createdAt} ASC`],
     });
   }
 }

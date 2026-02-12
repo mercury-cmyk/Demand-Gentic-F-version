@@ -9,7 +9,6 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import {
   Phone,
   PhoneOff,
@@ -1509,8 +1508,6 @@ export default function AgentConsolePage() {
     }
   };
 
-  const queueProgress = (queueData?.length || 0) > 0 ? ((currentContactIndex + 1) / (queueData?.length || 1)) * 100 : 0;
-
   // Show loading state when initially loading (not during background refetch)
   if (queueLoading && !(queueData?.length)) {
     return (
@@ -1575,11 +1572,13 @@ export default function AgentConsolePage() {
               )}
               {selectedCampaign && selectedCampaignId && (
                 <div className="mt-6">
-                  <p className="text-sm text-muted-foreground mb-3">Use the button below to set up your queue:</p>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Queue is managed by the unified intelligent queue system. Contacts will be automatically assigned and prioritized.
+                  </p>
                   <QueueControls
                     campaignId={selectedCampaignId}
                     compact={false}
-                    renderDialogs={true}
+                    renderDialogs={false}
                     onQueueUpdated={() => {
                       refetchQueue();
                       toast({
@@ -1669,15 +1668,7 @@ export default function AgentConsolePage() {
             </Button>
           </div>
 
-          {/* Row 3: Queue Progress */}
-          <div className="px-3 pb-2">
-            <div className="text-center mb-1">
-              <span className="text-white text-[10px] font-medium">
-                Contact {currentContactIndex + 1} of {queueData?.length || 0}
-              </span>
-            </div>
-            <Progress value={queueProgress} className="h-1 bg-white/20" />
-          </div>
+
         </div>
 
         {/* Desktop Header - Original Layout */}
@@ -1710,15 +1701,7 @@ export default function AgentConsolePage() {
             )}
           </div>
 
-          {/* Center: Queue Progress */}
-          <div className="flex-1 max-w-lg mx-4">
-            <div className="text-center mb-1">
-              <span className="text-white text-sm font-medium">
-                Contact {currentContactIndex + 1} of {queueData?.length || 0}
-              </span>
-            </div>
-            <Progress value={queueProgress} className="h-2 bg-white/20" />
-          </div>
+
 
           {/* Right: Status & Controls */}
           <div className="flex items-center gap-3 flex-nowrap flex-shrink-0">

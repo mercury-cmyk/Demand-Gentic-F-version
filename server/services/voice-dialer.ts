@@ -225,6 +225,10 @@ interface OpenAIRealtimeSession {
     identityConfirmedAt: Date | null;
     currentState: 'IDENTITY_CHECK' | 'RIGHT_PARTY_INTRO' | 'CONTEXT_FRAMING' | 'DISCOVERY' | 'LISTENING' | 'ACKNOWLEDGEMENT' | 'PERMISSION_REQUEST' | 'CLOSE' | 'GATEKEEPER';
     stateHistory: string[];
+    // State reinforcement tracking (periodic reminders to Gemini)
+    lastStateReinforcementAt: Date | null;
+    stateReinforcementCount: number;
+    userTurnsSinceLastReinforcement: number;
   };
   // Campaign-level max call duration (enforced strictly)
   campaignMaxCallDurationSeconds: number | null;
@@ -267,6 +271,8 @@ interface OpenAIRealtimeSession {
   };
   // Tool call de-duplication
   handledToolCalls: Set<string>;
+  // Circuit breaker: track consecutive function call failures per function name
+  functionCallFailures: Map<string, number>;
   // Campaign type for flow-specific validations
   campaignType: string | null;
   // Qualification criteria from campaign
@@ -1230,6 +1236,9 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 identityConfirmedAt: null,
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
+                lastStateReinforcementAt: null,
+                stateReinforcementCount: 0,
+                userTurnsSinceLastReinforcement: 0,
               },
               // Intelligent audio detection state
               audioDetection: {
@@ -1266,6 +1275,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 receivedAt: null,
               },
               handledToolCalls: new Set(),
+              functionCallFailures: new Map(),
               campaignType: null, // Will be set from campaign config during initialization
               qualificationCriteria: null, // Will be set from campaign config
               // Timing metrics for latency analysis
@@ -1359,6 +1369,9 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 identityConfirmedAt: null,
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
+                lastStateReinforcementAt: null,
+                stateReinforcementCount: 0,
+                userTurnsSinceLastReinforcement: 0,
               },
               // Intelligent audio detection state
               audioDetection: {
@@ -1395,6 +1408,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 receivedAt: null,
               },
               handledToolCalls: new Set(),
+              functionCallFailures: new Map(),
               campaignType: null, // Will be set from campaign config during initialization
               qualificationCriteria: null, // Will be set from campaign config
               // Timing metrics for latency analysis
@@ -2693,6 +2707,42 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           await injectGeminiIdentityLockReminder(session, provider, event.text).catch(err => {
             console.error(`${LOG_PREFIX} Error injecting Gemini identity lock:`, err);
           });
+
+          // Reset repetition tracking since identity confirmation is a major state transition.
+          // The agent's next response (value proposition) should NOT be compared against
+          // pre-confirmation phrases (greetings, "am I speaking with X?" etc.)
+          if ('softResetRepetitionTracking' in provider) {
+            (provider as any).softResetRepetitionTracking();
+          }
+        }
+      }
+
+      // PERIODIC STATE REINFORCEMENT: Remind Gemini of conversation state
+      // Prevents Gemini from "forgetting" context and regressing to earlier states after interruptions
+      if (session.conversationState.identityConfirmed) {
+        session.conversationState.userTurnsSinceLastReinforcement++;
+
+        const REINFORCEMENT_INTERVAL_TURNS = 3; // Every 3 user turns
+        const MIN_REINFORCEMENT_GAP_MS = 15000; // At least 15 seconds between reinforcements
+        const MAX_REINFORCEMENTS = 10; // Don't spam indefinitely
+
+        const timeSinceLastReinforcement = session.conversationState.lastStateReinforcementAt
+          ? Date.now() - session.conversationState.lastStateReinforcementAt.getTime()
+          : Infinity;
+
+        if (
+          session.conversationState.userTurnsSinceLastReinforcement >= REINFORCEMENT_INTERVAL_TURNS &&
+          timeSinceLastReinforcement >= MIN_REINFORCEMENT_GAP_MS &&
+          session.conversationState.stateReinforcementCount < MAX_REINFORCEMENTS
+        ) {
+          const reinforcement = buildStateReinforcementMessage(session);
+          if (reinforcement) {
+            provider.sendTextMessage(reinforcement);
+            session.conversationState.lastStateReinforcementAt = new Date();
+            session.conversationState.stateReinforcementCount++;
+            session.conversationState.userTurnsSinceLastReinforcement = 0;
+            console.log(`${LOG_PREFIX} [StateReinforcement] Injected state reminder #${session.conversationState.stateReinforcementCount} for call: ${session.callId}`);
+          }
         }
       }
 
@@ -2735,9 +2785,74 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       }
     });
 
+    // POST-INTERRUPTION STATE RECOVERY: When Gemini is interrupted, proactively
+    // reinject the current conversation state to prevent regression (e.g., re-asking identity)
+    provider.on('response:cancelled', () => {
+      console.log(`${LOG_PREFIX} [Gemini] Response cancelled/interrupted for call: ${session.callId}`);
+
+      if (session.conversationState.identityConfirmed) {
+        const timeSinceLastReinforcement = session.conversationState.lastStateReinforcementAt
+          ? Date.now() - session.conversationState.lastStateReinforcementAt.getTime()
+          : Infinity;
+
+        // Only inject if we haven't just injected (avoid double-injection within 5s)
+        if (timeSinceLastReinforcement > 5000) {
+          const reinforcement = buildStateReinforcementMessage(session);
+          if (reinforcement) {
+            // Short delay to let the interruption settle before injecting
+            setTimeout(() => {
+              if (session.isActive && !session.isEnding) {
+                provider.sendTextMessage(reinforcement);
+                session.conversationState.lastStateReinforcementAt = new Date();
+                session.conversationState.stateReinforcementCount++;
+                session.conversationState.userTurnsSinceLastReinforcement = 0;
+                console.log(`${LOG_PREFIX} [StateRecovery] Post-interruption state reinforcement for call: ${session.callId}`);
+              }
+            }, 300);
+          }
+        }
+      }
+    });
+
     provider.on('function:call', async (event: any) => {
       console.log(`${LOG_PREFIX} Gemini function call: ${event.name}`);
+
+      // CIRCUIT BREAKER: If same function has failed 3+ times consecutively, stop retrying
+      const MAX_CONSECUTIVE_FAILURES = 3;
+      const failureCount = session.functionCallFailures.get(event.name) || 0;
+      if (failureCount >= MAX_CONSECUTIVE_FAILURES) {
+        console.warn(`${LOG_PREFIX} 🔴 CIRCUIT BREAKER: ${event.name} has failed ${failureCount} times consecutively. Forcing graceful resolution.`);
+
+        if (event.name === 'end_call' || event.name === 'submit_disposition') {
+          // For end_call/disposition stuck in a loop: force end the call
+          console.warn(`${LOG_PREFIX} 🔴 Force-ending call due to ${event.name} loop (${failureCount} failures)`);
+          provider.respondToFunctionCall(event.callId, {
+            success: true,
+            message: 'Call ending gracefully due to repeated issues.'
+          });
+          setImmediate(() => endCall(session.callId, 'error'));
+          return;
+        }
+
+        // For other functions: tell Gemini to stop trying and move on
+        provider.respondToFunctionCall(event.callId, {
+          success: true,
+          message: 'This action is not available right now. Continue the conversation naturally without this function.'
+        });
+        return;
+      }
+
       const result = await handleGeminiFunctionCall(session, event.name, event.args, event.callId);
+
+      // Track consecutive failures per function name
+      if (result && result.success === false) {
+        session.functionCallFailures.set(event.name, failureCount + 1);
+        console.warn(`${LOG_PREFIX} ⚠️ ${event.name} failure #${failureCount + 1}/${MAX_CONSECUTIVE_FAILURES} before circuit breaker triggers`);
+      } else {
+        // Reset failure count on success
+        session.functionCallFailures.set(event.name, 0);
+      }
+
       provider.respondToFunctionCall(event.callId, result);
     });
 
@@ -4794,7 +4909,8 @@ RULES:
 - Lead with the VALUE — answer their curiosity with the campaign offer immediately
 - Do NOT waste time on pleasantries — get to the value proposition in the first sentence
 - NEVER ask discovery or qualification questions before delivering the offer
-- Your entire response MUST be under 7 seconds]`;
+- Your entire response MUST be under 7 seconds
+- PERMANENT: Identity is LOCKED. You will NEVER ask "May I speak with [Name]?" again for the rest of this call, even after silence or interruption.]`;
 
       console.log(`${LOG_PREFIX} [Gemini] EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript?.substring(0, 80) ?? ''}..."`);
     } else {
@@ -4808,7 +4924,8 @@ RULES:
 - Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
 - NEVER ask "do you have a moment?" or "would you be interested?"
 - NEVER ask discovery or qualification questions before the offer
-- Your entire intro MUST be under 7 seconds — cut every unnecessary word]`;
+- Your entire intro MUST be under 7 seconds — cut every unnecessary word
+- PERMANENT: Identity is LOCKED. You will NEVER ask "May I speak with [Name]?" again for the rest of this call, even after silence or interruption.]`;
     }
 
     // Send as a text message that will prompt Gemini to respond
@@ -4819,6 +4936,37 @@ RULES:
   } catch (err) {
     console.error(`${LOG_PREFIX} Failed to inject Gemini identity lock reminder:`, err);
   }
+}
+
+/**
+ * Build a concise state reinforcement message to remind Gemini of the current conversation state.
+ * Used periodically and after interruptions to prevent Gemini from regressing to earlier states
+ * (e.g., re-asking for identity after it was already confirmed).
+ */
+function buildStateReinforcementMessage(session: OpenAIRealtimeSession): string | null {
+  const state = session.conversationState;
+
+  // Only reinforce if identity has been confirmed (pre-confirmation has its own flow)
+  if (!state.identityConfirmed) {
+    return null;
+  }
+
+  const elapsedSinceConfirm = state.identityConfirmedAt
+    ? Math.round((Date.now() - state.identityConfirmedAt.getTime()) / 1000)
+    : 0;
+
+  // Get last 2 agent transcripts for context of what was already said
+  const recentAgentTexts = session.transcripts
+    .filter((t: { role: string; text: string }) => t.role === 'assistant')
+    .slice(-2)
+    .map((t: { role: string; text: string }) => t.text.substring(0, 60))
+    .join(' | ');
+
+  return `[STATE REMINDER: Identity CONFIRMED ${elapsedSinceConfirm}s ago. Current phase: ${state.currentState}. ` +
+    `Do NOT re-ask identity. Do NOT repeat your last message. ` +
+    (recentAgentTexts ? `Your recent messages: "${recentAgentTexts}". ` : '') +
+    `Continue the conversation forward from where you left off. ` +
+    `If the prospect just spoke, respond to what they ACTUALLY said.]`;
 }
 
 /**
@@ -5611,6 +5759,11 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                     injectGeminiIdentityLockReminder(session, geminiProvider, segment.text).catch(err => {
                       console.error(`${LOG_PREFIX} Error injecting Gemini identity lock:`, err);
                     });
+
+                    // Reset repetition tracking for the state transition
+                    if ('softResetRepetitionTracking' in geminiProvider) {
+                      (geminiProvider as any).softResetRepetitionTracking();
+                    }
                   }
                 }
               }
@@ -8570,6 +8723,11 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
       injectGeminiIdentityLockReminder(session, geminiProvider, transcript).catch(err => {
         console.error(`${LOG_PREFIX} Error injecting Gemini identity lock:`, err);
       });
+
+      // Reset repetition tracking for the state transition
+      if ('softResetRepetitionTracking' in geminiProvider) {
+        (geminiProvider as any).softResetRepetitionTracking();
+      }
     }
   }
 }

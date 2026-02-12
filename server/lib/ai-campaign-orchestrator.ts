@@ -686,7 +686,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
             OR cs.to_number_e164 = c.mobile_phone_e164
           )
       )
-    ORDER BY within_hours DESC, phone_priority ASC, cq.priority DESC, cq.created_at ASC
+    ORDER BY within_hours DESC, cq.ai_priority_score DESC NULLS LAST, phone_priority ASC, cq.priority DESC, cq.created_at ASC
     LIMIT ${limit * 3}
   `);
   

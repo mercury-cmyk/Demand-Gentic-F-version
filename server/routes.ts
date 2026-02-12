@@ -40,6 +40,7 @@ import pipelineRouter from './routes/pipeline-routes';
 import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
 import generativeStudioRouter from './routes/generative-studio-routes';
 import dispositionIntelligenceRouter from './routes/disposition-intelligence-routes';
+import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes';
 import queueIntelligenceRouter from './routes/queue-intelligence-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
@@ -4468,6 +4469,53 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // Merge contacts from another list into this list (with dedup)
+  app.post("/api/lists/:id/merge", requireAuth, requireRole('admin', 'campaign_manager', 'data_ops'), async (req, res) => {
+    try {
+      const { sourceListId } = req.body;
+      if (!sourceListId || typeof sourceListId !== 'string') {
+        return res.status(400).json({ message: "sourceListId is required" });
+      }
+
+      const targetList = await storage.getList(req.params.id);
+      if (!targetList) {
+        return res.status(404).json({ message: "Target list not found" });
+      }
+
+      const sourceList = await storage.getList(sourceListId);
+      if (!sourceList) {
+        return res.status(404).json({ message: "Source list not found" });
+      }
+
+      if (targetList.entityType !== sourceList.entityType) {
+        return res.status(400).json({
+          message: `Cannot merge: source list type "${sourceList.entityType}" does not match target list type "${targetList.entityType}"`
+        });
+      }
+
+      if (req.params.id === sourceListId) {
+        return res.status(400).json({ message: "Cannot merge a list into itself" });
+      }
+
+      const existingIds = targetList.recordIds || [];
+      const sourceIds = sourceList.recordIds || [];
+      const mergedIds = Array.from(new Set([...existingIds, ...sourceIds]));
+      const addedCount = mergedIds.length - existingIds.length;
+
+      const updated = await storage.updateList(req.params.id, { recordIds: mergedIds });
+
+      res.json({
+        message: `Merged ${addedCount} new records from "${sourceList.name}" into "${targetList.name}"`,
+        addedCount,
+        totalRecords: mergedIds.length,
+        list: updated,
+      });
+    } catch (error) {
+      console.error('Merge lists error:', error);
+      res.status(500).json({ message: "Failed to merge lists" });
+    }
+  });
+
   // ==================== DOMAIN SETS (Phase 21) ====================
 
   app.get("/api/domain-sets", requireAuth, async (req, res) => {
@@ -5581,6 +5629,67 @@ export function registerRoutes(app: Express) {
     } catch (error) {
       console.error('Error cloning campaign:', error);
       res.status(500).json({ message: "Failed to clone campaign" });
+    }
+  });
+
+  // Add lists to campaign audience (from Lists UI)
+  app.post("/api/campaigns/:id/add-audience-lists", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+    try {
+      const { listIds } = req.body;
+      if (!Array.isArray(listIds) || listIds.length === 0) {
+        return res.status(400).json({ message: "listIds must be a non-empty array" });
+      }
+
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      const existingRefs = (campaign.audienceRefs as any) || {};
+      const existingLists: string[] = existingRefs.lists || existingRefs.selectedLists || [];
+      const updatedLists = Array.from(new Set([...existingLists, ...listIds]));
+      const addedCount = updatedLists.length - existingLists.length;
+
+      const updatedAudienceRefs = {
+        ...existingRefs,
+        lists: updatedLists,
+      };
+
+      const updatedCampaign = await storage.updateCampaign(req.params.id, {
+        audienceRefs: updatedAudienceRefs,
+      });
+
+      // Auto-populate queue if campaign is active and new lists were added
+      let enqueuedCount = 0;
+      if (updatedCampaign && updatedCampaign.status === 'active' && addedCount > 0) {
+        try {
+          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+            req.params.id,
+            updatedAudienceRefs,
+            '[Add Audience Lists]'
+          );
+          if (contactsToEnqueue.length > 0) {
+            const result = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
+            enqueuedCount = result.enqueued;
+            console.log(`[Add Audience Lists] Auto-populated ${enqueuedCount} contacts to queue`);
+          }
+        } catch (queueErr) {
+          console.error('[Add Audience Lists] Queue auto-populate error (non-fatal):', queueErr);
+        }
+      }
+
+      invalidateDashboardCache();
+
+      res.json({
+        message: `Added ${addedCount} list(s) to campaign "${campaign.name}"`,
+        addedCount,
+        totalLists: updatedLists.length,
+        enqueuedCount,
+        campaign: updatedCampaign,
+      });
+    } catch (error) {
+      console.error('Add audience lists error:', error);
+      res.status(500).json({ message: "Failed to add lists to campaign" });
     }
   });
 
@@ -14133,6 +14242,7 @@ Provide JSON response with:
   app.use(pipelineIntelligenceRouter);
   app.use('/api/generative-studio', generativeStudioRouter);
   app.use('/api/disposition-intelligence', dispositionIntelligenceRouter);
+  app.use('/api/disposition-reanalysis', dispositionReanalysisRouter);
   app.use(queueIntelligenceRouter);
 
   // AI Project Creation
