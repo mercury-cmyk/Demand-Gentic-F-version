@@ -13,8 +13,11 @@ import {
   verificationCampaigns,
   accounts,
   contacts,
+  previewStudioSessions,
+  previewSimulationTranscripts,
 } from '@shared/schema';
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   generateClientEmailContent,
@@ -22,14 +25,36 @@ import {
   type GeneratedEmailContent,
 } from '../lib/deepseek-client-email-service';
 import { buildBrandedEmailHtml, type BrandPaletteKey } from '../../client/src/components/email-builder/ai-email-template';
-import { clientAccounts, clientBusinessProfiles } from '@shared/schema';
+import { clientAccounts, clientBusinessProfiles, workOrders, campaignIntakeRequests, clientCampaigns } from '@shared/schema';
 import {
   checkPreviewIntelligence,
   enforcePreviewIntelligence,
   intelligenceGateErrorResponse,
 } from '../services/preview-intelligence-gate';
+import {
+  getVirtualAgentConfig,
+  mergeAgentSettings,
+} from '../services/virtual-agent-settings';
+import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from '../services/number-pool-integration';
+import { ensureVoiceAgentControlLayer } from '../services/voice-agent-control-defaults';
 
 const router = Router();
+
+/**
+ * Unified campaign access check — mirrors the union approach from client-portal.ts preview-audience.
+ * Checks 5 access paths: clientCampaignAccess, workOrders, campaignIntakeRequests,
+ * campaigns.clientAccountId, and clientCampaigns.
+ */
+async function checkClientCampaignAccess(clientAccountId: string, campaignId: string): Promise<boolean> {
+  const accessChecks = await Promise.all([
+    db.select({ id: clientCampaignAccess.id }).from(clientCampaignAccess).where(and(eq(clientCampaignAccess.clientAccountId, clientAccountId), or(eq(clientCampaignAccess.campaignId, campaignId), eq(clientCampaignAccess.regularCampaignId, campaignId)))).limit(1),
+    db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.clientAccountId, clientAccountId), eq(workOrders.campaignId, campaignId))).limit(1),
+    db.select({ id: campaignIntakeRequests.id }).from(campaignIntakeRequests).where(and(eq(campaignIntakeRequests.clientAccountId, clientAccountId), eq(campaignIntakeRequests.campaignId, campaignId))).limit(1),
+    db.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.id, campaignId), eq(campaigns.clientAccountId, clientAccountId))).limit(1),
+    db.select({ id: clientCampaigns.id }).from(clientCampaigns).where(and(eq(clientCampaigns.id, campaignId), eq(clientCampaigns.clientAccountId, clientAccountId))).limit(1),
+  ]);
+  return accessChecks.some(result => result.length > 0);
+}
 
 // Initialize Gemini client
 const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '');
@@ -218,22 +243,10 @@ router.post('/start', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Campaign ID is required' });
     }
 
-    // Verify client has access to this campaign
-    const [access] = await db
-      .select()
-      .from(clientCampaignAccess)
-      .where(
-        and(
-          eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
-          or(
-            eq(clientCampaignAccess.regularCampaignId, campaignId),
-            eq(clientCampaignAccess.campaignId, campaignId)
-          )
-        )
-      )
-      .limit(1);
+    // Verify client has access to this campaign (union approach — all access paths)
+    const hasAccess = await checkClientCampaignAccess(clientUser.clientAccountId, campaignId);
 
-    if (!access) {
+    if (!hasAccess) {
       return res.status(403).json({ error: 'No access to this campaign' });
     }
 
@@ -384,22 +397,10 @@ router.post('/chat', async (req: Request, res: Response) => {
 
     // If no session, create one on-the-fly
     if (!session && campaignId) {
-      // Verify access
-      const [access] = await db
-        .select()
-        .from(clientCampaignAccess)
-        .where(
-        and(
-          eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
-          or(
-            eq(clientCampaignAccess.regularCampaignId, campaignId),
-            eq(clientCampaignAccess.campaignId, campaignId)
-          )
-        )
-        )
-        .limit(1);
+      // Verify access (union approach)
+      const hasAccess = await checkClientCampaignAccess(clientUser.clientAccountId, campaignId);
 
-      if (!access) {
+      if (!hasAccess) {
         return res.status(403).json({ error: 'No access to this campaign' });
       }
 
@@ -782,22 +783,10 @@ router.post('/generate-email-template', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Campaign ID is required' });
     }
 
-    // Verify client has access
-    const [access] = await db
-      .select()
-      .from(clientCampaignAccess)
-      .where(
-        and(
-          eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
-          or(
-            eq(clientCampaignAccess.regularCampaignId, campaignId),
-            eq(clientCampaignAccess.campaignId, campaignId)
-          )
-        )
-      )
-      .limit(1);
+    // Verify client has access (union approach)
+    const hasAccess = await checkClientCampaignAccess(clientUser.clientAccountId, campaignId);
 
-    if (!access) {
+    if (!hasAccess) {
       return res.status(403).json({ error: 'No access to this campaign' });
     }
 
@@ -1179,22 +1168,10 @@ router.post('/generate-email', async (req: Request, res: Response) => {
 
     console.log('[Preview Studio] Generating email for campaign:', campaignId, 'client:', clientUser.email);
 
-    // Verify client has access
-    const [access] = await db
-      .select()
-      .from(clientCampaignAccess)
-      .where(
-        and(
-          eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
-          or(
-            eq(clientCampaignAccess.regularCampaignId, campaignId),
-            eq(clientCampaignAccess.campaignId, campaignId)
-          )
-        )
-      )
-      .limit(1);
+    // Verify client has access (union approach)
+    const hasAccess = await checkClientCampaignAccess(clientUser.clientAccountId, campaignId);
 
-    if (!access) {
+    if (!hasAccess) {
       return res.status(403).json({ error: 'No access to this campaign' });
     }
 
@@ -1317,6 +1294,471 @@ router.post('/generate-email', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Preview Studio] Generate email error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate email' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phone Test Call — Real Telnyx call for client portal (mirrors admin preview)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const clientPhoneTestSchema = z.object({
+  campaignId: z.string(),
+  accountId: z.string(),
+  contactId: z.string().optional(),
+  testPhoneNumber: z.string().min(10, 'Phone number must be at least 10 digits'),
+  voiceProvider: z.enum(['openai', 'google']).default('google'),
+  voice: z.string().optional(),
+});
+
+/**
+ * Resolve virtual agent ID for a campaign (simplified from admin version).
+ */
+async function resolveClientVirtualAgentId(campaignId: string): Promise<string | null> {
+  const [assignment] = await db
+    .select()
+    .from(campaignAgentAssignments)
+    .where(eq(campaignAgentAssignments.campaignId, campaignId))
+    .limit(1);
+  return assignment?.virtualAgentId ?? null;
+}
+
+const CLIENT_PHONE_TEST_FIRST_MESSAGE =
+  "Hello, may I speak with the person in charge of your technology decisions?";
+
+/**
+ * POST /phone-test/start
+ * Initiate a real phone test call from the client portal.
+ */
+router.post('/phone-test/start', async (req: Request, res: Response) => {
+  try {
+    const clientUser = (req as any).clientUser;
+    const body = clientPhoneTestSchema.parse(req.body);
+    const { campaignId, accountId, contactId, testPhoneNumber, voiceProvider, voice: voiceOverride } = body;
+
+    // Access check
+    const hasAccess = await checkClientCampaignAccess(clientUser.clientAccountId, campaignId);
+    if (!hasAccess) {
+      return res.status(403).json({ error: 'No access to this campaign' });
+    }
+
+    // Intelligence gate
+    const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    if (!gateResult.passed) {
+      console.warn(`[Client Phone Test] Intelligence gate BLOCKED for account ${accountId}:`, gateResult.status.missingComponents);
+      return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+    }
+
+    // Environment check
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
+
+    if (!telnyxApiKey || telnyxApiKey.startsWith('REPLACE_ME')) {
+      return res.status(500).json({ error: 'Telnyx not configured' });
+    }
+    if (!openaiApiKey) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' });
+    }
+    if (!texmlAppId) {
+      return res.status(500).json({ error: 'Telnyx TeXML Application ID not configured' });
+    }
+
+    // Get campaign
+    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+
+    // Resolve virtual agent
+    const virtualAgentId = await resolveClientVirtualAgentId(campaignId);
+    if (!virtualAgentId) {
+      return res.status(400).json({
+        error: 'No AI agent assigned to this campaign',
+        suggestion: 'Please ask your admin to assign a virtual agent to the campaign before testing',
+      });
+    }
+
+    const agentConfig = await getVirtualAgentConfig(virtualAgentId);
+    const mergedSettings = mergeAgentSettings(agentConfig?.settings ?? undefined);
+
+    // Get account & contact
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+
+    let contact = null;
+    if (contactId) {
+      const [contactResult] = await db.select().from(contacts).where(eq(contacts.id, contactId)).limit(1);
+      contact = contactResult || null;
+    }
+
+    // Build system prompt
+    const systemPromptSections = [agentConfig?.systemPrompt || ''];
+
+    // Add campaign context
+    const campaignContext = [
+      campaign.name ? `Campaign: ${campaign.name}` : '',
+      campaign.campaignObjective ? `Objective: ${campaign.campaignObjective}` : '',
+      campaign.productServiceInfo ? `Product/Service: ${campaign.productServiceInfo}` : '',
+      campaign.talkingPoints ? `Talking Points: ${campaign.talkingPoints}` : '',
+      campaign.targetAudienceDescription ? `Target Audience: ${campaign.targetAudienceDescription}` : '',
+    ].filter(Boolean).join('\n');
+    if (campaignContext) systemPromptSections.push(campaignContext);
+
+    // Add account intelligence
+    try {
+      const { getOrBuildAccountIntelligence, getOrBuildAccountMessagingBrief } = await import('../services/account-messaging-service');
+      const intelligenceRecord = await getOrBuildAccountIntelligence(accountId);
+      if (intelligenceRecord?.payloadJson) {
+        const intel = intelligenceRecord.payloadJson as any;
+        const intelLines = [
+          intel.companySummary ? `Company Summary: ${intel.companySummary}` : '',
+          intel.industry ? `Industry: ${intel.industry}` : '',
+          intel.employeeCount ? `Size: ~${intel.employeeCount} employees` : '',
+        ].filter(Boolean).join('\n');
+        if (intelLines) systemPromptSections.push(`\n--- Account Intelligence ---\n${intelLines}`);
+      }
+    } catch (e) {
+      // Ignore — intelligence is best-effort
+    }
+
+    // Add contact context
+    if (contact) {
+      const contactCtx = [
+        `Contact: ${(contact as any).fullName || ''}`,
+        (contact as any).jobTitle ? `Title: ${(contact as any).jobTitle}` : '',
+        account?.name ? `Company: ${account.name}` : '',
+      ].filter(Boolean).join('\n');
+      systemPromptSections.push(`\n--- Contact ---\n${contactCtx}`);
+    }
+
+    const useCondensed = mergedSettings.advanced.costOptimization.useCondensedPrompt !== false;
+    const systemPrompt = ensureVoiceAgentControlLayer(
+      systemPromptSections.filter(Boolean).join('\n\n'),
+      useCondensed
+    );
+    const firstMessage = agentConfig?.firstMessage || CLIENT_PHONE_TEST_FIRST_MESSAGE;
+
+    // Normalize phone number
+    let normalizedPhone = testPhoneNumber.replace(/[^\d+]/g, '');
+    if (!normalizedPhone.startsWith('+')) {
+      if (normalizedPhone.startsWith('0')) {
+        normalizedPhone = '+44' + normalizedPhone.substring(1);
+      } else {
+        normalizedPhone = '+' + normalizedPhone;
+      }
+    }
+
+    // Get caller ID
+    let fromNumber = '';
+    let callerNumberId: string | null = null;
+    let callerNumberDecisionId: string | null = null;
+    try {
+      const callerIdResult = await getCallerIdForCall({
+        campaignId,
+        prospectNumber: normalizedPhone,
+        virtualAgentId: virtualAgentId || undefined,
+        callType: 'preview_phone_test',
+      });
+      fromNumber = callerIdResult.callerId;
+      callerNumberId = callerIdResult.numberId;
+      callerNumberDecisionId = callerIdResult.decisionId;
+      if (callerIdResult.jitterDelayMs > 0) {
+        await numberPoolSleep(callerIdResult.jitterDelayMs);
+      }
+    } catch (poolError) {
+      console.warn('[Client Phone Test] Number pool selection failed, using fallback:', poolError);
+      fromNumber = process.env.TELNYX_FROM_NUMBER || '';
+    }
+
+    if (!fromNumber) {
+      return res.status(500).json({ error: 'Caller ID not configured' });
+    }
+
+    // Create preview session
+    const testCallId = `client-preview-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const runId = `run-client-preview-${Date.now()}`;
+
+    // Prepare voice selection
+    let voice = 'Puck';
+    if (voiceProvider === 'google') {
+      voice = (voiceOverride || agentConfig?.voice || 'Puck').toString().trim();
+    } else {
+      const supportedVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar']);
+      const rawVoice = (voiceOverride || agentConfig?.voice || '').toString().trim().toLowerCase();
+      voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
+    }
+
+    const providerForClientState = voiceProvider === 'google' ? 'google' : 'openai_realtime';
+    const providerForSession = voiceProvider === 'google' ? 'google' : 'openai';
+
+    const [session] = await db.insert(previewStudioSessions).values({
+      campaignId,
+      accountId,
+      contactId: contactId || null,
+      userId: clientUser.id || clientUser.clientAccountId,
+      virtualAgentId,
+      sessionType: 'simulation',
+      status: 'active',
+      metadata: {
+        type: 'phone_test',
+        source: 'client_portal',
+        testCallId,
+        testPhoneNumber: normalizedPhone,
+        voiceProvider,
+        startedAt: new Date().toISOString(),
+        accountName: account?.name || null,
+        contactName: (contact as any)?.fullName || null,
+      },
+    }).returning();
+
+    // Custom parameters for WebSocket
+    const customParams = {
+      call_id: testCallId,
+      run_id: runId,
+      campaign_id: campaignId,
+      queue_item_id: `preview-queue-${testCallId}`,
+      call_attempt_id: `preview-attempt-${testCallId}`,
+      contact_id: contactId || `preview-contact-${testCallId}`,
+      called_number: normalizedPhone,
+      from_number: fromNumber,
+      caller_number_id: callerNumberId,
+      caller_number_decision_id: callerNumberDecisionId,
+      virtual_agent_id: virtualAgentId,
+      is_test_call: true,
+      is_preview_test: true,
+      test_call_id: testCallId,
+      preview_session_id: session.id,
+      first_message: firstMessage,
+      voice,
+      agent_name: agentConfig?.systemPrompt ? 'Preview Agent' : 'Default Agent',
+      test_contact: {
+        name: (contact as any)?.fullName || account?.name || 'Preview Contact',
+        company: account?.name || 'Preview Company',
+        title: (contact as any)?.jobTitle || 'Contact',
+        email: (contact as any)?.email || undefined,
+      },
+      provider: providerForClientState,
+    };
+
+    // Store session in Redis
+    const { callSessionStore } = await import('../services/call-session-store');
+    await callSessionStore.setSession(testCallId, {
+      call_id: testCallId,
+      run_id: runId,
+      campaign_id: campaignId,
+      queue_item_id: customParams.queue_item_id,
+      call_attempt_id: customParams.call_attempt_id,
+      contact_id: customParams.contact_id,
+      called_number: normalizedPhone,
+      from_number: fromNumber,
+      caller_number_id: callerNumberId,
+      caller_number_decision_id: callerNumberDecisionId,
+      virtual_agent_id: virtualAgentId,
+      is_test_call: true,
+      is_preview_test: true,
+      test_call_id: testCallId,
+      preview_session_id: session.id,
+      first_message: firstMessage || undefined,
+      voice,
+      agent_name: customParams.agent_name,
+      test_contact: customParams.test_contact,
+      provider: providerForSession,
+      system_prompt: systemPrompt,
+    });
+
+    const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+
+    // Webhook URL
+    let webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+      try {
+        const u = new URL((process.env.TELNYX_WEBHOOK_URL || '').trim());
+        webhookHost = u.host;
+      } catch {}
+    }
+    webhookHost = webhookHost || 'localhost:5000';
+    const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
+    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
+
+    console.log('[Client Phone Test] Initiating Telnyx call to:', normalizedPhone);
+
+    // Make Telnyx call
+    const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
+    const telnyxResponse = await fetch(telnyxEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${telnyxApiKey}`,
+      },
+      body: JSON.stringify({
+        To: normalizedPhone,
+        From: fromNumber,
+        Url: texmlUrl,
+        StatusCallback: (process.env.TELNYX_WEBHOOK_URL || '').trim() || `https://${webhookHost}/api/webhooks/telnyx`,
+      }),
+    });
+
+    if (!telnyxResponse.ok) {
+      releaseNumberWithoutOutcome(callerNumberId);
+      const errorText = await telnyxResponse.text();
+      console.error('[Client Phone Test] Telnyx API error:', errorText);
+
+      let friendlyMessage = 'Telnyx API error';
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.errors?.[0]) {
+          friendlyMessage = errorJson.errors[0].detail || errorJson.errors[0].title || friendlyMessage;
+        }
+      } catch (e) {}
+
+      await db.update(previewStudioSessions)
+        .set({
+          status: 'error',
+          endedAt: new Date(),
+          metadata: { ...(session.metadata as Record<string, unknown> || {}), error: friendlyMessage },
+        })
+        .where(eq(previewStudioSessions.id, session.id));
+
+      return res.status(400).json({ error: friendlyMessage });
+    }
+
+    const telnyxResult = await telnyxResponse.json();
+    const callControlId = telnyxResult.data?.call_control_id;
+
+    // Update session with call control ID
+    await db.update(previewStudioSessions)
+      .set({
+        metadata: { ...(session.metadata as Record<string, unknown> || {}), callControlId },
+      })
+      .where(eq(previewStudioSessions.id, session.id));
+
+    console.log(`[Client Phone Test] Call initiated successfully: ${callControlId}`);
+
+    res.json({
+      success: true,
+      message: 'Phone test initiated. Your phone will ring shortly.',
+      sessionId: session.id,
+      testCallId,
+      callControlId,
+      phoneNumber: normalizedPhone,
+      campaignName: campaign.name,
+      voiceProvider,
+    });
+  } catch (error: any) {
+    console.error('[Client Phone Test] Error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation error', errors: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to initiate phone test' });
+  }
+});
+
+/**
+ * GET /phone-test/:sessionId
+ * Get phone test session status
+ */
+router.get('/phone-test/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    const [session] = await db
+      .select()
+      .from(previewStudioSessions)
+      .where(eq(previewStudioSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Get transcripts if available
+    const transcripts = await db
+      .select()
+      .from(previewSimulationTranscripts)
+      .where(eq(previewSimulationTranscripts.sessionId, sessionId))
+      .orderBy(previewSimulationTranscripts.timestampMs);
+
+    res.json({ session, transcripts });
+  } catch (error) {
+    console.error('[Client Phone Test] Error fetching session:', error);
+    res.status(500).json({ error: 'Failed to fetch phone test session' });
+  }
+});
+
+/**
+ * POST /phone-test/:sessionId/hangup
+ * End an active phone test call
+ */
+router.post('/phone-test/:sessionId/hangup', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    const [session] = await db
+      .select()
+      .from(previewStudioSessions)
+      .where(eq(previewStudioSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const metadata = session.metadata as any;
+    const callControlId = metadata?.callControlId;
+
+    if (!callControlId) {
+      await db.update(previewStudioSessions)
+        .set({
+          status: 'completed',
+          endedAt: new Date(),
+          metadata: { ...metadata, endReason: 'user_hangup_no_call_control' },
+        })
+        .where(eq(previewStudioSessions.id, sessionId));
+
+      return res.json({ success: true, message: 'Session ended (no active call)' });
+    }
+
+    // Hang up via Telnyx
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    if (!telnyxApiKey) {
+      return res.status(500).json({ error: 'Telnyx API key not configured' });
+    }
+
+    console.log(`[Client Phone Test] Hanging up call: ${callControlId}`);
+
+    try {
+      const hangupResponse = await fetch(
+        `https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${telnyxApiKey}`,
+          },
+          body: JSON.stringify({}),
+        }
+      );
+      if (!hangupResponse.ok) {
+        const errorText = await hangupResponse.text();
+        console.error(`[Client Phone Test] Telnyx hangup error: ${hangupResponse.status} - ${errorText}`);
+      } else {
+        console.log(`[Client Phone Test] Telnyx hangup successful for ${callControlId}`);
+      }
+    } catch (telnyxError) {
+      console.error('[Client Phone Test] Telnyx hangup request failed:', telnyxError);
+    }
+
+    await db.update(previewStudioSessions)
+      .set({
+        status: 'completed',
+        endedAt: new Date(),
+        metadata: { ...metadata, endReason: 'user_hangup' },
+      })
+      .where(eq(previewStudioSessions.id, sessionId));
+
+    res.json({ success: true, message: 'Call ended successfully' });
+  } catch (error) {
+    console.error('[Client Phone Test] Hangup error:', error);
+    res.status(500).json({ error: 'Failed to hang up call' });
   }
 });
 
