@@ -110,13 +110,42 @@ const GEMINI_VOICE_PREFERENCES = [
   "Enceladus", "Algenib", "Rasalgethi", "Alnilam",
 ];
 
+// OpenAI voice name → Gemini voice name mapping for cross-provider compatibility
+const OPENAI_TO_GEMINI_QUICK_MAP: Record<string, string> = {
+  'alloy': 'Aoede',
+  'echo': 'Charon',
+  'fable': 'Fenrir',
+  'nova': 'Kore',
+  'shimmer': 'Puck',
+  'onyx': 'Gacrux',
+  'cedar': 'Sulafat',
+  'marin': 'Schedar',
+  'ballad': 'Orus',
+  'ash': 'Sadaltager',
+  'coral': 'Leda',
+  'sage': 'Achernar',
+  'verse': 'Alnilam',
+};
+
 function normalizeVoiceName(preferred?: string) {
   if (preferred) {
+    // Direct match against Gemini voices
     const idx = GEMINI_VOICE_PREFERENCES.findIndex(
       (v) => v.toLowerCase() === preferred.toLowerCase()
     );
     if (idx >= 0) {
       return { voice: GEMINI_VOICE_PREFERENCES[idx], index: idx, fromFallback: false };
+    }
+    // Try mapping from OpenAI voice name
+    const mapped = OPENAI_TO_GEMINI_QUICK_MAP[preferred.toLowerCase()];
+    if (mapped) {
+      const mappedIdx = GEMINI_VOICE_PREFERENCES.findIndex(
+        (v) => v.toLowerCase() === mapped.toLowerCase()
+      );
+      if (mappedIdx >= 0) {
+        console.log(`[Gemini Live] Mapped OpenAI voice "${preferred}" → Gemini "${mapped}"`);
+        return { voice: GEMINI_VOICE_PREFERENCES[mappedIdx], index: mappedIdx, fromFallback: false };
+      }
     }
     console.warn(
       `[Gemini Live] Unknown voice "${preferred}" - falling back to ${GEMINI_VOICE_PREFERENCES[0]}`
@@ -989,21 +1018,18 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (humanInitiated) {
       // Human spoke first (e.g., "Hello?") - respond to their greeting
       console.log('[Gemini Live] ✅ Human spoke first - responding to their greeting');
-      const openingMessage = `The person just answered and said something like "Hello?".
-Your task is to verify their identity.
-Say EXACTLY this and NOTHING else:
-
+      const openingMessage = `The person answered the call. 
+If they said "Hello", acknowledge it naturally (e.g., "Hi") and then ask:
 "${openingText}"
 
+If they introduced themselves (e.g., "This is John"), and it matches the target, acknowledge it and proceed.
+Otherwise, asking for the target is your priority.
+
 Instructions:
-1. Speak ONLY the text in quotes above.
-2. STOP immediately after the question mark.
-3. WAIT for the user to reply.
-4. DO NOT simulate or predict the user's response.
-5. DO NOT say "Thanks for confirming" until you actually hear "Yes" from the user.
-6. After speaking, go COMPLETELY SILENT and listen for a response.
-7. DO NOT generate any speech until you hear actual human words in the audio.
-8. Silence or background noise is NOT a prompt to speak again — just wait.`;
+1. Be natural, not robotic.
+2. Verify the identity using: "${openingText}"
+3. STOP immediately after the question.
+4. WAIT for the user to reply.`;
 
       // Use camelCase for Vertex AI, snake_case for Google AI Studio
       const clientMsg = USE_VERTEX_AI
@@ -2163,6 +2189,14 @@ Instructions:
             // This triggers the AI to respond with its opening message
             if (!humanHasSpoken && waitingForHumanSpeech) {
               humanHasSpoken = true;
+              
+              // CRITICAL FIX: If Gemini detects speech, we know it's a human. 
+              // Bypass any remaining AMD wait to eliminate latency.
+              if (!amdCheckComplete) {
+                amdCheckComplete = true;
+                console.log(`[Gemini Live] 🚀 AMD Bypass: Valid speech detected via Gemini ("${contactText.substring(0, 20)}...") - forcing amdCheckComplete=true`);
+              }
+
               // Clear the timeout since human spoke
               if (humanSpeechWaitTimer) {
                 clearTimeout(humanSpeechWaitTimer);

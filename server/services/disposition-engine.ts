@@ -156,6 +156,10 @@ export async function processDisposition(
     let finalDisposition = disposition;
 
     // SAFETY: Downgrade short AI qualified leads to needs_review to prevent false positives
+    /* 
+    DEPRECATED: This logic overrides processQualifiedLead's internal QA flagging.
+    We WANT short calls to appear in the Leads table as "Under Review", not disappear into the retry queue.
+    
     if (finalDisposition === 'qualified_lead' && callAttempt.agentType === 'ai') {
         const duration = callAttempt.callDurationSeconds || 0;
         if (duration < 30) {
@@ -164,6 +168,7 @@ export async function processDisposition(
             result.actions.push(`Downgraded from qualified_lead (duration ${duration}s < 30s)`);
         }
     }
+    */
 
     // Process based on disposition type
     switch (finalDisposition) {
@@ -213,23 +218,32 @@ export async function processDisposition(
     await updateDialerRunStats(callAttempt.dialerRunId, finalDisposition);
 
     // Track call quality metrics for number reputation (anti-spam)
+    // Uses the outbound caller ID number (fromDid/callerNumberId), NOT the prospect's phone
     try {
-      if (callAttempt.phoneDialed) {
-        // Look up the telnyx_numbers UUID by E.164 phone number
-        const [telnyxNumber] = await db
-          .select({ id: telnyxNumbers.id })
-          .from(telnyxNumbers)
-          .where(eq(telnyxNumbers.phoneNumberE164, callAttempt.phoneDialed))
-          .limit(1);
+      const outboundDid = callAttempt.fromDid;
+      const callerNumberId = callAttempt.callerNumberId;
 
-        if (telnyxNumber) {
+      if (outboundDid || callerNumberId) {
+        let telnyxNumberId: string | null = callerNumberId || null;
+
+        // If we don't have the direct ID reference, look up by the outbound DID
+        if (!telnyxNumberId && outboundDid) {
+          const [telnyxNumber] = await db
+            .select({ id: telnyxNumbers.id })
+            .from(telnyxNumbers)
+            .where(eq(telnyxNumbers.phoneNumberE164, outboundDid))
+            .limit(1);
+          telnyxNumberId = telnyxNumber?.id || null;
+        }
+
+        if (telnyxNumberId) {
           const durationSeconds = callAttempt.callDurationSeconds || 0;
           const answered = !['no_answer', 'voicemail'].includes(finalDisposition);
 
           await callQualityTracker.recordCallQuality({
             callId: callAttempt.id,
-            numberId: telnyxNumber.id,
-            phoneNumberE164: callAttempt.phoneDialed,
+            numberId: telnyxNumberId,
+            phoneNumberE164: outboundDid || callAttempt.phoneDialed,
             durationSeconds,
             answered,
             disconnectReason: mapDispositionToDisconnectReason(finalDisposition),
@@ -238,7 +252,7 @@ export async function processDisposition(
           });
           result.actions.push('Call quality metrics recorded');
         } else {
-          console.warn(`[DispositionEngine] No telnyx number found for ${callAttempt.phoneDialed}, skipping quality tracking`);
+          console.warn(`[DispositionEngine] No telnyx number found for outbound DID ${outboundDid}, skipping quality tracking`);
         }
       }
     } catch (qualityError) {

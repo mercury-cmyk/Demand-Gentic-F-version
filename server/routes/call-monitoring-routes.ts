@@ -12,19 +12,20 @@ import {
   detectPotentialFalsePositives,
   getVoicemailDetectionEfficiency,
 } from '../services/call-monitoring-service';
+import { requireAuth, requireRole } from '../auth';
 
 const router = Router();
 
 /**
  * GET /api/monitoring/calls/metrics
  *
- * Get call metrics for a date range
+ * Get call metrics for a date range (admin/manager only)
  *
  * Query params:
  *   - startDate: ISO date string (default: 7 days ago)
  *   - endDate: ISO date string (default: now)
  */
-router.get('/metrics', async (req, res) => {
+router.get('/metrics', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const startDate = req.query.startDate
       ? new Date(req.query.startDate as string)
@@ -67,7 +68,7 @@ router.get('/metrics', async (req, res) => {
  * Query params:
  *   - date: ISO date string (default: yesterday)
  */
-router.get('/daily-report', async (req, res) => {
+router.get('/daily-report', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const date = req.query.date
       ? new Date(req.query.date as string)
@@ -97,7 +98,7 @@ router.get('/daily-report', async (req, res) => {
  * Query params:
  *   - hours: number of hours to look back (default: 24)
  */
-router.get('/false-positives', async (req, res) => {
+router.get('/false-positives', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const hours = req.query.hours ? parseInt(req.query.hours as string) : 24;
 
@@ -126,7 +127,7 @@ router.get('/false-positives', async (req, res) => {
  * Query params:
  *   - days: number of days to analyze (default: 7)
  */
-router.get('/voicemail-efficiency', async (req, res) => {
+router.get('/voicemail-efficiency', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const days = req.query.days ? parseInt(req.query.days as string) : 7;
 
@@ -151,7 +152,7 @@ router.get('/voicemail-efficiency', async (req, res) => {
  *
  * Health check endpoint showing current system status
  */
-router.get('/health', async (req, res) => {
+router.get('/health', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     // Get metrics for last 24 hours
     const startDate = new Date(Date.now() - 24 * 60 * 60 * 1000);

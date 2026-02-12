@@ -6,7 +6,7 @@
  */
 
 import { Router } from "express";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
 import { db } from "../db";
 import { callQualityRecords, callSessions, campaigns, contacts, accounts, leads, dialerCallAttempts } from "@shared/schema";
 import { eq, and, gte, lte, desc, or, ilike, isNotNull, isNull, sql, count, avg } from "drizzle-orm";
@@ -109,7 +109,7 @@ router.get("/records/:callSessionId", requireAuth, async (req, res) => {
  * GET /api/call-intelligence/campaign/:campaignId
  * Get call quality records for a campaign with optional filtering
  */
-router.get("/campaign/:campaignId", requireAuth, async (req, res) => {
+router.get("/campaign/:campaignId", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { campaignId } = req.params;
     const { startDate, endDate, minScore, sentiment, limit = "50" } = req.query;
@@ -187,7 +187,7 @@ router.get("/campaign/:campaignId", requireAuth, async (req, res) => {
  * GET /api/call-intelligence/problematic/:campaignId
  * Get calls that need attention (low scores or critical issues)
  */
-router.get("/problematic/:campaignId", requireAuth, async (req, res) => {
+router.get("/problematic/:campaignId", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { campaignId } = req.params;
     const { threshold = "60" } = req.query;
@@ -211,7 +211,7 @@ router.get("/problematic/:campaignId", requireAuth, async (req, res) => {
  * GET /api/call-intelligence/summary/:campaignId
  * Get aggregated quality summary for a campaign
  */
-router.get("/summary/:campaignId", requireAuth, async (req, res) => {
+router.get("/summary/:campaignId", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { campaignId } = req.params;
     const { startDate, endDate } = req.query;
@@ -246,7 +246,7 @@ router.get("/summary/:campaignId", requireAuth, async (req, res) => {
  * GET /api/call-intelligence/export/:campaignId
  * Export call quality data for analytics/training
  */
-router.get("/export/:campaignId", requireAuth, async (req, res) => {
+router.get("/export/:campaignId", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { campaignId } = req.params;
     const { startDate, endDate, format = "json" } = req.query;
@@ -337,7 +337,7 @@ function convertToCSV(data: any[]): string {
  * Queries both call_sessions AND dialer_call_attempts tables to provide
  * comprehensive call data from all sources.
  */
-router.get("/unified", requireAuth, async (req, res) => {
+router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const {
       page = "1",
@@ -849,7 +849,7 @@ router.get("/unified", requireAuth, async (req, res) => {
  * Get full details for a single call including complete transcript and quality analysis
  * Searches both call_sessions and dialer_call_attempts tables
  */
-router.get("/unified/:id", requireAuth, async (req, res) => {
+router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1115,7 +1115,7 @@ router.get("/unified/:id", requireAuth, async (req, res) => {
  * POST /api/call-intelligence/unified/:id/analyze
  * Trigger conversation quality analysis for a call
  */
-router.post("/unified/:id/analyze", requireAuth, async (req, res) => {
+router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1239,7 +1239,7 @@ router.post("/unified/:id/analyze", requireAuth, async (req, res) => {
  * Submit feedback on call quality analysis
  * This feedback is used to improve AI analysis accuracy over time
  */
-router.post("/feedback", requireAuth, async (req, res) => {
+router.post("/feedback", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { callSessionId, rating, comment, analysisAccurate, dispositionCorrect } = req.body;
 

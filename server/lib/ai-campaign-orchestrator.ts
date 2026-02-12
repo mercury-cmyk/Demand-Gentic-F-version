@@ -762,7 +762,14 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     return { initiated: 0, skipped: 0 };
   }
 
-  const campaign = await storage.getCampaign(campaignId);
+  // Clear stale "call execution disabled" stall reason if execution is now allowed
+  // (handles case where stall reason was set in dev and persists after deploying to production)
+  const existingCampaign = await storage.getCampaign(campaignId);
+  if (existingCampaign?.lastStallReason?.includes('Call execution disabled')) {
+    await setOrchestratorStallReason(campaignId, null);
+  }
+
+  const campaign = existingCampaign;
   if (!campaign) {
     console.log(`[AI Orchestrator] Campaign ${campaignId} not found`);
     return { initiated: 0, skipped: 0 };

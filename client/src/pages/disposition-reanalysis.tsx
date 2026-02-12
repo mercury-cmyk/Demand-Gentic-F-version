@@ -577,12 +577,12 @@ export default function DispositionReanalysisPage() {
                 {/* Campaign */}
                 <div className="space-y-2">
                   <Label>Campaign</Label>
-                  <Select value={campaignId} onValueChange={setCampaignId}>
+                  <Select value={campaignId || "all"} onValueChange={(v) => setCampaignId(v === "all" ? "" : v)}>
                     <SelectTrigger>
                       <SelectValue placeholder="All campaigns" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All campaigns</SelectItem>
+                      <SelectItem value="all">All campaigns</SelectItem>
                       {campaignsData?.map((c) => (
                         <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                       ))}

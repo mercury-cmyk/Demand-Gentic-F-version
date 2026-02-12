@@ -143,13 +143,7 @@ function generateClientToken(clientUser: typeof clientUsers.$inferSelect, isOwne
 function requireClientAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
-  // Detailed logging for debugging auth issues
-  console.log("[Client Portal Auth] Path:", req.path);
-  console.log("[Client Portal Auth] Method:", req.method);
-  console.log("[Client Portal Auth] Auth header present:", !!authHeader);
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.warn("[Client Portal Auth] REJECTED - Missing or invalid auth header");
     return res.status(401).json({ message: "Authentication required" });
   }
 
@@ -157,21 +151,17 @@ function requireClientAuth(req: Request, res: Response, next: NextFunction) {
 
   // Check for null/undefined token
   if (!token || token === 'null' || token === 'undefined') {
-    console.warn("[Client Portal Auth] REJECTED - Token is null/undefined string");
     return res.status(401).json({ message: "Invalid token - please log in again" });
   }
 
   try {
     const payload = jwt.verify(token, JWT_SECRET) as ClientJWTPayload;
     if (!payload.isClient) {
-      console.warn("[Client Portal Auth] REJECTED - Token is not a client token");
       return res.status(401).json({ message: "Invalid client token" });
     }
-    console.log("[Client Portal Auth] SUCCESS - clientAccountId:", payload.clientAccountId);
     req.clientUser = payload;
     next();
-  } catch (error: any) {
-    console.warn("[Client Portal Auth] REJECTED - JWT verification failed:", error.message);
+  } catch {
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 }
@@ -413,10 +403,7 @@ router.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    console.log('[CLIENT PORTAL LOGIN] Attempt for email:', email);
-
     if (!email || !password) {
-      console.log('[CLIENT PORTAL LOGIN] Missing email or password');
       return res.status(400).json({ message: "Email and password required" });
     }
 
@@ -427,19 +414,14 @@ router.post('/auth/login', async (req, res) => {
       .limit(1);
 
     if (!clientUser) {
-      console.log('[CLIENT PORTAL LOGIN] No user found for email:', email.toLowerCase());
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    console.log('[CLIENT PORTAL LOGIN] User found:', clientUser.id, '| isActive:', clientUser.isActive, '| hasPassword:', !!clientUser.password, '| passwordLength:', clientUser.password?.length);
-
     if (!clientUser.isActive) {
-      console.log('[CLIENT PORTAL LOGIN] Account disabled for:', email);
       return res.status(401).json({ message: "Account is disabled" });
     }
 
     const isValidPassword = await bcrypt.compare(password, clientUser.password);
-    console.log('[CLIENT PORTAL LOGIN] Password valid:', isValidPassword);
     if (!isValidPassword) {
       return res.status(401).json({ message: "Invalid credentials" });
     }

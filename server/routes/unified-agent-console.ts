@@ -31,7 +31,7 @@ const router = Router();
 // DISPOSITION RULES ENGINE
 // ============================================================================
 
-router.get("/disposition-rules", requireAuth, async (req, res) => {
+router.get("/disposition-rules", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const rules = await db
       .select({
@@ -60,7 +60,7 @@ router.get("/disposition-rules", requireAuth, async (req, res) => {
   }
 });
 
-router.get("/disposition-rules/:id", requireAuth, async (req, res) => {
+router.get("/disposition-rules/:id", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const [rule] = await db
       .select()
@@ -152,7 +152,7 @@ router.delete("/disposition-rules/:id", requireAuth, requireRole('admin'), async
 // QC WORK QUEUE
 // ============================================================================
 
-router.get("/qc-queue", requireAuth, async (req, res) => {
+router.get("/qc-queue", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { campaignId, status, producerType, assignedTo } = req.query;
 
@@ -206,7 +206,7 @@ router.get("/qc-queue", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/qc-queue", requireAuth, async (req, res) => {
+router.post("/qc-queue", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const parsed = insertQcWorkQueueSchema.parse(req.body);
 
@@ -225,7 +225,7 @@ router.post("/qc-queue", requireAuth, async (req, res) => {
   }
 });
 
-router.patch("/qc-queue/:id/review", requireAuth, async (req, res) => {
+router.patch("/qc-queue/:id/review", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
     const { status, reviewNotes, scorecard, qcOutcome } = req.body;
 
@@ -254,7 +254,7 @@ router.patch("/qc-queue/:id/review", requireAuth, async (req, res) => {
   }
 });
 
-router.patch("/qc-queue/:id/assign", requireAuth, async (req, res) => {
+router.patch("/qc-queue/:id/assign", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { assignedTo } = req.body;
 
@@ -283,7 +283,7 @@ router.patch("/qc-queue/:id/assign", requireAuth, async (req, res) => {
 // RECYCLE JOBS
 // ============================================================================
 
-router.get("/recycle-jobs", requireAuth, async (req, res) => {
+router.get("/recycle-jobs", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { campaignId, status } = req.query;
 
@@ -331,7 +331,7 @@ router.get("/recycle-jobs", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/recycle-jobs", requireAuth, async (req, res) => {
+router.post("/recycle-jobs", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const parsed = insertRecycleJobSchema.parse(req.body);
 
@@ -409,7 +409,7 @@ router.post("/recycle-jobs/process-eligible", requireAuth, requireRole('admin'),
   }
 });
 
-router.patch("/recycle-jobs/:id/cancel", requireAuth, async (req, res) => {
+router.patch("/recycle-jobs/:id/cancel", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const [updated] = await db
       .update(recycleJobs)
@@ -436,7 +436,7 @@ router.patch("/recycle-jobs/:id/cancel", requireAuth, async (req, res) => {
 // PRODUCER METRICS & REPORTING
 // ============================================================================
 
-router.get("/producer-metrics", requireAuth, async (req, res) => {
+router.get("/producer-metrics", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { campaignId, startDate, endDate, producerType } = req.query;
 
@@ -498,7 +498,7 @@ router.get("/producer-metrics", requireAuth, async (req, res) => {
   }
 });
 
-router.get("/producer-metrics/summary", requireAuth, async (req, res) => {
+router.get("/producer-metrics/summary", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { campaignId, startDate, endDate } = req.query;
 
@@ -546,7 +546,7 @@ router.get("/producer-metrics/summary", requireAuth, async (req, res) => {
 // GOVERNANCE ACTIONS LOG
 // ============================================================================
 
-router.get("/governance-log", requireAuth, async (req, res) => {
+router.get("/governance-log", requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { campaignId, actionType, producerType, limit = "100" } = req.query;
 
@@ -601,7 +601,7 @@ router.get("/governance-log", requireAuth, async (req, res) => {
 // DNC RECONCILIATION
 // ============================================================================
 
-router.get("/dnc-reconciliation", requireAuth, async (req, res) => {
+router.get("/dnc-reconciliation", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { startDate, endDate, source, limit = "100" } = req.query;
 
@@ -699,7 +699,7 @@ router.post("/dnc-reconciliation/run-nightly", requireAuth, requireRole('admin')
 // UNIFIED DASHBOARD STATS
 // ============================================================================
 
-router.get("/dashboard-stats", requireAuth, async (req, res) => {
+router.get("/dashboard-stats", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
     const { campaignId } = req.query;
 

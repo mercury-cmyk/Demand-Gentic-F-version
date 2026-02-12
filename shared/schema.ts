@@ -2870,6 +2870,9 @@ export const leads = pgTable("leads", {
   campaignIdx: index("leads_campaign_idx").on(table.campaignId),
   callAttemptIdx: index("leads_call_attempt_idx").on(table.callAttemptId),
   deletedAtIdx: index("leads_deleted_at_idx").on(table.deletedAt),
+  contactIdx: index("leads_contact_idx").on(table.contactId),
+  agentIdx: index("leads_agent_idx").on(table.agentId),
+  createdIdx: index("leads_created_idx").on(table.createdAt),
 }));
 
 // Lead Tags - Colored tags for organizing leads

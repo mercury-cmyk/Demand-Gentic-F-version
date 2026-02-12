@@ -277,6 +277,11 @@ export const OPENAI_TO_GEMINI_VOICE_MAP: Record<string, string> = {
   // New OpenAI voices with most natural speech (gpt-realtime exclusive)
   'cedar': 'Sulafat',   // Cedar: warm, confident - maps to Sulafat (warm)
   'marin': 'Schedar',   // Marin: calm, professional - maps to Schedar (even)
+  'ballad': 'Orus',     // Ballad: warm, storytelling male - maps to Orus (expressive male)
+  'ash': 'Sadaltager',  // Ash: clear, professional male - maps to Sadaltager (clear male)
+  'coral': 'Leda',      // Coral: warm, friendly female - maps to Leda (warm female)
+  'sage': 'Achernar',   // Sage: calm, wise female - maps to Achernar (calm female)
+  'verse': 'Alnilam',   // Verse: poetic, dynamic male - maps to Alnilam (dynamic male)
 };
 
 // Official Gemini TTS voices (30 total) - all real Google voices
@@ -298,23 +303,23 @@ export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
   'Gacrux': 'onyx',
   'Sulafat': 'cedar',
   'Schedar': 'marin',
-  // Secondary mappings for all other Gemini voices
+  'Orus': 'ballad',
+  'Sadaltager': 'ash',
+  'Leda': 'coral',
+  'Achernar': 'sage',
+  'Alnilam': 'verse',
+  // Secondary mappings for remaining Gemini voices
   'Zephyr': 'alloy',
-  'Leda': 'nova',
-  'Orus': 'echo',
   'Enceladus': 'echo',
   'Iapetus': 'marin',
   'Erinome': 'nova',
   'Algenib': 'onyx',
   'Rasalgethi': 'echo',
   'Laomedeia': 'shimmer',
-  'Achernar': 'nova',
-  'Alnilam': 'fable',
   'Pulcherrima': 'fable',
   'Achird': 'alloy',
   'Vindemiatrix': 'nova',
   'Sadachbia': 'shimmer',
-  'Sadaltager': 'echo',
 };
 
 export function mapVoiceToProvider(voice: string, targetProvider: VoiceProviderType): string {

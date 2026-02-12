@@ -34,10 +34,10 @@ export const apiLimiter = rateLimit({
   }
 });
 
-// Strict rate limiter for authentication endpoints: 50 attempts per 15 minutes (very generous)
+// Strict rate limiter for authentication endpoints: 10 attempts per 15 minutes
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // limit each IP to 50 login requests per windowMs
+  max: 10, // limit each IP to 10 login requests per windowMs
   skipSuccessfulRequests: true, // Don't count successful logins
   standardHeaders: true,
   legacyHeaders: false,
@@ -132,12 +132,12 @@ export function validate(schemas: ValidationSchemas) {
  * Prevents DOS attacks via large payloads
  */
 export const PAYLOAD_LIMITS = {
-  // Standard JSON request limit: 50MB (increased for CSV uploads)
-  json: '50mb',
-  // File upload limit: 50MB
-  upload: '50mb',
-  // URL encoded data limit: 50MB (increased for CSV uploads)
-  urlencoded: '50mb',
+  // Standard JSON request limit: 10MB (sufficient for most API requests and CSV uploads)
+  json: '10mb',
+  // File upload limit: 25MB
+  upload: '25mb',
+  // URL encoded data limit: 10MB
+  urlencoded: '10mb',
 };
 
 /**
@@ -166,15 +166,9 @@ export function sanitizeInput(input: string): string {
   let sanitized = input.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
   sanitized = sanitized.replace(/<[^>]+>/g, '');
   
-  // Remove SQL injection attempts (basic patterns)
-  const sqlPatterns = [
-    /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE)\b)/gi,
-    /(--|#|\/\*|\*\/)/g,
-  ];
-  
-  sqlPatterns.forEach(pattern => {
-    sanitized = sanitized.replace(pattern, '');
-  });
+  // NOTE: SQL injection protection is handled by Drizzle ORM parameterization.
+  // We removed the aggressive keyword filtering to prevent data corruption of valid text (e.g. "Select option").
+  // Basic comment stripping can remain if strictly needed, but parameterization is the primary defense.
   
   return sanitized.trim();
 }
@@ -244,13 +238,24 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   // Referrer policy
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   
-  // Content Security Policy (basic - adjust based on your needs)
+  // Content Security Policy
   // Allow ws: and http://localhost for Vite HMR in development
   const isDev = process.env.NODE_ENV === 'development';
+  const scriptSrc = isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : "script-src 'self' 'unsafe-inline'"; // No unsafe-eval in production
   res.setHeader(
     'Content-Security-Policy',
-    `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob:; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}`
+    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob:; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'`
   );
+
+  // Strict Transport Security (enforce HTTPS for 1 year, include subdomains)
+  if (!isDev) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+
+  // Prevent browsers from caching sensitive responses
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
   
   next();
 }

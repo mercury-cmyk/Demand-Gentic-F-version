@@ -5,7 +5,7 @@ import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { storage } from "./storage";
-import { comparePassword, generateToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
+import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
 import webhooksRouter from "./routes/webhooks";
@@ -1107,75 +1107,31 @@ export function registerRoutes(app: Express) {
 
   // ==================== AUTH ====================
 
-  // ONE-TIME SETUP: Create or reset admin user (REMOVE THIS ENDPOINT AFTER SETUP!)
-  const setupAdminHandler = async (req: any, res: any) => {
-    try {
-      const hashedPassword = await hashPassword("admin123");
-
-      // Check if admin user exists
-      const existingUser = await storage.getUserByUsername("admin");
-
-      if (existingUser) {
-        // Reset password for existing admin
-        await storage.updateUser(existingUser.id, { password: hashedPassword });
-
-        return res.json({
-          message: "Admin password reset successfully",
-          username: "admin",
-          password: "admin123",
-          warning: "Change this password immediately after login!"
-        });
-      }
-
-      // Create new admin user
-      const adminUser = await storage.createUser({
-        username: "admin",
-        email: "admin@crm.local",
-        password: hashedPassword,
-        role: "admin",
-        firstName: "Admin",
-        lastName: "User"
-      });
-
-      // Assign admin role
-      await storage.assignRole(adminUser.id, 'admin');
-
-      res.json({
-        message: "Admin user created successfully",
-        username: "admin",
-        password: "admin123",
-        warning: "Change this password immediately after login!"
-      });
-    } catch (error: any) {
-      console.error('[SETUP] Error with admin user:', error);
-      res.status(500).json({ message: error.message || "Failed to create/reset admin user" });
-    }
-  };
-
-  app.post("/api/setup/create-admin", setupAdminHandler);
-  app.get("/api/setup/create-admin", setupAdminHandler);
+  // SECURITY: Admin setup endpoint disabled in production.
+  // To create an admin user, use the database seed script directly with a secure password.
+  // This endpoint was a critical vulnerability - it allowed unauthenticated admin account creation
+  // with hardcoded credentials and returned the password in the response.
+  app.post("/api/setup/create-admin", (_req: any, res: any) => {
+    res.status(404).json({ message: "Not found" });
+  });
+  app.get("/api/setup/create-admin", (_req: any, res: any) => {
+    res.status(404).json({ message: "Not found" });
+  });
 
   // Apply strict rate limiting to login endpoint (5 attempts per 15 minutes)
   app.post("/api/auth/login", authLimiter, validate({ body: loginSchema }), async (req, res) => {
     try {
       const { username, password } = req.body;
-      console.log('[LOGIN DEBUG] Received username:', username);
 
       const user = await storage.getUserByUsername(username);
-      console.log('[LOGIN DEBUG] User found:', user ? 'YES' : 'NO');
-      console.log('[LOGIN DEBUG] User details:', user ? { id: user.id, username: user.username, email: user.email } : null);
 
       if (!user) {
-        console.log('[LOGIN DEBUG] User not found, returning 401');
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
       // Verify password
-      console.log('[LOGIN DEBUG] Comparing password...');
       const isValid = await comparePassword(password, user.password);
-      console.log('[LOGIN DEBUG] Password valid:', isValid);
       if (!isValid) {
-        console.log('[LOGIN DEBUG] Invalid password, returning 401');
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
@@ -3456,7 +3412,7 @@ export function registerRoutes(app: Express) {
   // ==================== CUSTOM FIELD DEFINITIONS ====================
 
   // Get all custom field definitions
-  app.get('/api/custom-fields', async (req, res) => {
+  app.get('/api/custom-fields', requireAuth, async (req, res) => {
     try {
       const fields = await db.select()
         .from(customFieldDefinitions)
@@ -3469,8 +3425,8 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Create custom field definition
-  app.post('/api/custom-fields', async (req, res) => {
+  // Create custom field definition (admin only)
+  app.post('/api/custom-fields', requireAuth, requireRole('admin', 'data_ops'), async (req, res) => {
     try {
       const data = insertCustomFieldDefinitionSchema.parse(req.body);
 
@@ -3502,8 +3458,8 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Update custom field definition
-  app.patch('/api/custom-fields/:id', async (req, res) => {
+  // Update custom field definition (admin only)
+  app.patch('/api/custom-fields/:id', requireAuth, requireRole('admin', 'data_ops'), async (req, res) => {
     try {
       const { id } = req.params;
       const data = updateCustomFieldDefinitionSchema.parse(req.body);
@@ -3526,8 +3482,8 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Delete (deactivate) custom field definition
-  app.delete('/api/custom-fields/:id', async (req, res) => {
+  // Delete (deactivate) custom field definition (admin only)
+  app.delete('/api/custom-fields/:id', requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -3549,8 +3505,8 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Auto-register custom fields from CSV upload
-  app.post('/api/custom-fields/auto-register', async (req, res) => {
+  // Auto-register custom fields from CSV upload (admin/data_ops only)
+  app.post('/api/custom-fields/auto-register', requireAuth, requireRole('admin', 'data_ops'), async (req, res) => {
     try {
       const { entityType, fieldKeys } = req.body;
 
@@ -11774,8 +11730,8 @@ export function registerRoutes(app: Express) {
 
   // ==================== FILTER FIELDS REGISTRY ====================
 
-  // Filter field metadata is public (no auth required) - only exposes schema/configuration
-  app.get("/api/filters/fields", async (req, res) => {
+  // Filter field metadata - requires authentication to prevent schema exposure
+  app.get("/api/filters/fields", requireAuth, async (req, res) => {
     try {
       type FilterCategory = "contact_fields" | "account_fields" | "account_relationship" | "suppression_fields" | "email_campaign_fields" | "telemarketing_campaign_fields" | "qa_fields" | "list_segment_fields" | "client_portal_fields" | undefined;
       const category = req.query.category as FilterCategory;
@@ -11801,7 +11757,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Get filter fields by entity type (contact, account, lead, campaign, etc.)
-  app.get("/api/filters/fields/entity/:entity", async (req, res) => {
+  app.get("/api/filters/fields/entity/:entity", requireAuth, async (req, res) => {
     try {
       const entity = req.params.entity;
       const includeRelated = req.query.includeRelated === 'true';
@@ -11887,7 +11843,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Get count of records matching filter criteria (with optional audience scope)
-  app.post("/api/filters/count/:entity", async (req, res) => {
+  app.post("/api/filters/count/:entity", requireAuth, async (req, res) => {
     try {
       const entity = req.params.entity;
       const { filterGroup, audienceScope } = req.body;
@@ -11990,7 +11946,7 @@ export function registerRoutes(app: Express) {
   // ==================== INDUSTRY REFERENCE ====================
 
   // Get all standardized industries
-  app.get("/api/industries", async (req, res) => {
+  app.get("/api/industries", requireAuth, async (req, res) => {
     try {
       const industries = await storage.getIndustries();
       res.json(industries);
@@ -12000,7 +11956,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Search industries by name (with autocomplete)
-  app.get("/api/industries/search", async (req, res) => {
+  app.get("/api/industries/search", requireAuth, async (req, res) => {
     try {
       const query = req.query.q as string;
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
@@ -12019,7 +11975,7 @@ export function registerRoutes(app: Express) {
   // ==================== COMPANY SIZE REFERENCE ====================
 
   // Get all standardized company size ranges (sorted by employee count)
-  app.get("/api/company-sizes", async (req, res) => {
+  app.get("/api/company-sizes", requireAuth, async (req, res) => {
     try {
       const sizes = await storage.getCompanySizes();
       res.json(sizes);
@@ -12029,7 +11985,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Get company size by code (A-I)
-  app.get("/api/company-sizes/:code", async (req, res) => {
+  app.get("/api/company-sizes/:code", requireAuth, async (req, res) => {
     try {
       const size = await storage.getCompanySizeByCode(req.params.code);
       if (!size) {
@@ -12044,7 +12000,7 @@ export function registerRoutes(app: Express) {
   // ==================== REVENUE RANGE REFERENCE ====================
 
   // Get all standardized revenue ranges (sorted by revenue)
-  app.get("/api/revenue-ranges", async (req, res) => {
+  app.get("/api/revenue-ranges", requireAuth, async (req, res) => {
     try {
       const ranges = await storage.getRevenueRanges();
       res.json(ranges);
@@ -12054,7 +12010,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Get revenue range by label
-  app.get("/api/revenue-ranges/:label", async (req, res) => {
+  app.get("/api/revenue-ranges/:label", requireAuth, async (req, res) => {
     try {
       const range = await storage.getRevenueRangeByLabel(decodeURIComponent(req.params.label));
       if (!range) {
@@ -14433,13 +14389,35 @@ Provide JSON response with:
   // ==================== CALL CAMPAIGN REPORTING ROUTES ====================
   app.use('/api/reports/calls', reportingRoutes);
 
-  // ==================== CALL RECORDINGS (PUBLIC STREAM ROUTE) ====================
-  // Audio stream endpoint must be public for <audio> elements (can't send auth headers)
-  // Security note: Recording IDs are UUIDs and endpoint only proxies existing recordings
+  // ==================== CALL RECORDINGS (TOKEN-AUTHENTICATED STREAM ROUTE) ====================
+  // Audio stream uses short-lived signed token in query string (audio elements can't send auth headers)
+  // Token is verified server-side before streaming; tokens expire in 15 minutes
   app.get('/api/recordings/:id/stream', async (req, res) => {
-    // Delegate to the recordings router's stream handler
+    const token = req.query.token as string;
+    if (!token) {
+      return res.status(401).send('Authentication required');
+    }
+    // Verify the short-lived stream token
+    const payload = verifyToken(token);
+    if (!payload) {
+      return res.status(401).send('Invalid or expired stream token');
+    }
     const recordingsModule = await import('./routes/recordings');
     return recordingsModule.streamRecording(req, res);
+  });
+
+  // Generate a short-lived stream token for audio playback
+  app.get('/api/recordings/:id/stream-token', requireAuth, async (req, res) => {
+    try {
+      const streamToken = generateToken(
+        { id: req.user!.userId, username: req.user!.username, email: req.user!.email, role: req.user!.role } as any,
+        req.user!.roles || [req.user!.role],
+        '15m'
+      );
+      res.json({ token: streamToken, expiresIn: 900 });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to generate stream token" });
+    }
   });
 
   // ==================== CALL RECORDINGS (AUTHENTICATED) ====================

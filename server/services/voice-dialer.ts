@@ -6189,8 +6189,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           }).returning();
 
           // Schedule post-call analysis with precision turns from recording
-          schedulePostCallAnalysis({
-            callSessionId: testCallSession.id,
+          schedulePostCallAnalysis(testCallSession.id, {
             callAttemptId: isTestCall ? undefined : session.callAttemptId,
             campaignId: session.campaignId,
             contactId: contactIdForSession || undefined,
@@ -6472,8 +6471,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
         if (callSessionId) {
           // POST-CALL ANALYSIS: Schedule precision turn analysis from recording
-          schedulePostCallAnalysis({
-            callSessionId,
+          schedulePostCallAnalysis(callSessionId, {
             callAttemptId: session.callAttemptId,
             campaignId: session.campaignId,
             contactId: session.contactId,
