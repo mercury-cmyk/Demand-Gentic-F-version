@@ -186,6 +186,27 @@ router.get('/intelligence-status', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /intelligence-generate
+ * Auto-generate missing intelligence for a campaign + account.
+ */
+router.post('/intelligence-generate', async (req: Request, res: Response) => {
+  try {
+    const { campaignId, accountId } = req.body;
+    if (!campaignId || !accountId) {
+      return res.status(400).json({ error: 'campaignId and accountId are required' });
+    }
+    const result = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    res.json({
+      success: result.passed,
+      status: result.status,
+    });
+  } catch (error) {
+    console.error('[Client Simulation] Intelligence generation error:', error);
+    res.status(500).json({ error: 'Failed to generate intelligence' });
+  }
+});
+
+/**
  * Start a new simulation session
  */
 router.post('/start', async (req: Request, res: Response) => {

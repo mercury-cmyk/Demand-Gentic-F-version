@@ -12,10 +12,9 @@
 import { db } from '../db';
 import { eq, and, desc } from 'drizzle-orm';
 import {
-  accounts,
   accountIntelligenceRecords,
-  accountIntelligence as orgIntelligenceProfiles,
   campaigns,
+  campaignOrganizations,
   organizationServiceCatalog,
   problemDefinitions,
 } from '@shared/schema';
@@ -105,7 +104,7 @@ export async function checkPreviewIntelligence(params: {
     missingComponents.push('Account Intelligence');
   }
 
-  // 2. Check Organization Intelligence (org_intelligence_profiles)
+  // 2. Check Organization Intelligence (campaignOrganizations — the CLIENT's org running the campaign)
   let orgIntel = {
     available: false,
     hasOfferings: false,
@@ -115,14 +114,7 @@ export async function checkPreviewIntelligence(params: {
   };
 
   try {
-    // Get account to find domain
-    const [account] = await db
-      .select({ id: accounts.id, name: accounts.name, domain: accounts.domain })
-      .from(accounts)
-      .where(eq(accounts.id, accountId))
-      .limit(1);
-
-    // Get campaign to find linked org intelligence
+    // Get campaign to find linked organization
     const [campaign] = await db
       .select({
         id: campaigns.id,
@@ -133,38 +125,42 @@ export async function checkPreviewIntelligence(params: {
       .where(eq(campaigns.id, campaignId))
       .limit(1);
 
-    // Check org intelligence profile - either linked via campaign or by account
-    let orgProfile = null;
+    // Check campaignOrganizations — the client org linked to this campaign
+    let orgProfile: any = null;
 
     if (campaign?.problemIntelligenceOrgId) {
-      // Campaign has a linked org intelligence profile
       const [profile] = await db
         .select()
-        .from(orgIntelligenceProfiles)
-        .where(eq(orgIntelligenceProfiles.id, parseInt(campaign.problemIntelligenceOrgId)))
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.id, campaign.problemIntelligenceOrgId))
         .limit(1);
       orgProfile = profile;
     }
 
-    if (!orgProfile && account?.id) {
-      // Try to find org profile by account ID
-      const [profile] = await db
+    // Fallback: find the default active organization
+    if (!orgProfile) {
+      const [defaultOrg] = await db
         .select()
-        .from(orgIntelligenceProfiles)
-        .where(eq(orgIntelligenceProfiles.accountId, account.id))
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.isActive, true))
         .limit(1);
-      orgProfile = profile;
+      orgProfile = defaultOrg;
     }
 
     if (orgProfile) {
       const identity = orgProfile.identity as any;
+      const hasIdentity = !!(identity && Object.keys(identity).length > 0);
       orgIntel = {
-        available: true,
+        available: hasIdentity,
         hasOfferings: !!(orgProfile.offerings && Object.keys(orgProfile.offerings as any).length > 0),
         hasIcp: !!(orgProfile.icp && Object.keys(orgProfile.icp as any).length > 0),
         hasPositioning: !!(orgProfile.positioning && Object.keys(orgProfile.positioning as any).length > 0),
-        orgName: identity?.legalName || identity?.name || null,
+        orgName: identity?.legalName?.value || identity?.legalName || orgProfile.name || null,
       };
+      // Available if identity exists — offerings/icp/positioning are bonuses
+      if (!hasIdentity) {
+        missingComponents.push('Organization Intelligence');
+      }
     } else {
       missingComponents.push('Organization Intelligence');
     }

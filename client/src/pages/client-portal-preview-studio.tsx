@@ -3,8 +3,8 @@
  * Allows client users to test voice and email experiences for their campaigns.
  * Uses client portal API endpoints for authentication.
  */
-import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -222,6 +222,67 @@ export default function ClientPortalPreviewStudioPage() {
 
   const intelligenceReady = intelligenceStatus?.ready ?? false;
 
+  // Intelligence generation mutation
+  const queryClient = useQueryClient();
+  const [intelligenceAutoTriggered, setIntelligenceAutoTriggered] = useState<string | null>(null);
+  const [intelligencePhase, setIntelligencePhase] = useState<'idle' | 'researching' | 'complete'>('idle');
+
+  const generateIntelligenceMutation = useMutation({
+    mutationFn: async () => {
+      setIntelligencePhase('researching');
+      const res = await fetch('/api/client-portal/simulation/intelligence-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ campaignId: selectedCampaignId, accountId: selectedAccountId }),
+      });
+      if (!res.ok) throw new Error('Failed to generate intelligence');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/simulation/intelligence-status'] });
+      if (data.success) {
+        setIntelligencePhase('complete');
+        toast({ title: 'Intelligence Ready', description: 'All components researched. You can now start the preview.' });
+      } else {
+        setIntelligencePhase('idle');
+        const missing = data.status?.missingComponents?.join(', ') || 'some components';
+        toast({ variant: 'destructive', title: 'Partial Generation', description: `Still missing: ${missing}` });
+      }
+    },
+    onError: (error: Error) => {
+      setIntelligencePhase('idle');
+      toast({ variant: 'destructive', title: 'Generation Failed', description: error.message });
+    },
+  });
+
+  // Auto-trigger intelligence generation when missing and context is selected
+  const autoTriggerKey = `${selectedCampaignId}-${selectedAccountId}`;
+  useEffect(() => {
+    if (
+      intelligenceStatus &&
+      !intelligenceStatus.ready &&
+      !generateIntelligenceMutation.isPending &&
+      selectedCampaignId &&
+      selectedAccountId &&
+      intelligenceAutoTriggered !== autoTriggerKey
+    ) {
+      setIntelligenceAutoTriggered(autoTriggerKey);
+      generateIntelligenceMutation.mutate();
+    }
+  }, [intelligenceStatus, selectedCampaignId, selectedAccountId, autoTriggerKey, intelligenceAutoTriggered]);
+
+  // Reset phase when intelligence becomes ready from cache
+  useEffect(() => {
+    if (intelligenceReady && intelligencePhase !== 'complete') {
+      setIntelligencePhase('complete');
+    }
+  }, [intelligenceReady]);
+
+  // Reset when campaign/account changes
+  useEffect(() => {
+    setIntelligencePhase('idle');
+  }, [selectedCampaignId, selectedAccountId]);
+
   // Transform accounts data
   const accounts: Account[] = (audienceData?.accounts || []).map(a => ({
     id: a.id,
@@ -321,12 +382,12 @@ export default function ClientPortalPreviewStudioPage() {
 
         {/* Main Content */}
         <div className="relative z-10 flex h-[calc(100vh-200px)]">
-          {/* Left Panel - Context Selection */}
-          <div className="w-64 border-r border-white/5 bg-black/20 backdrop-blur-xl flex flex-col shrink-0">
+          {/* Left Panel - Context & Intelligence */}
+          <div className="w-80 border-r border-white/5 bg-black/20 backdrop-blur-xl flex flex-col shrink-0">
             <div className="p-3 border-b border-white/5">
               <h2 className="text-sm font-semibold text-white/80 flex items-center gap-2">
                 <Settings2 className="h-4 w-4 text-purple-400" />
-                Context
+                Context & Intelligence
               </h2>
             </div>
 
@@ -400,89 +461,122 @@ export default function ClientPortalPreviewStudioPage() {
 
             </div>
 
-            {/* Intelligence Status */}
+            {/* Intelligence Research Steps — expanded panel */}
             {hasBasicContext && (
-              <div className="border-t border-white/5">
+              <div className="border-t border-white/5 flex-shrink-0">
                 {intelligenceLoading ? (
-                  <div className="p-3 bg-gradient-to-r from-blue-500/10 to-purple-500/10">
+                  <div className="p-4 bg-gradient-to-r from-blue-500/10 to-purple-500/10">
                     <div className="flex items-center gap-2 text-blue-400 text-sm">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       <span>Checking intelligence...</span>
                     </div>
                   </div>
-                ) : intelligenceReady ? (
-                  <div className="p-3 bg-gradient-to-r from-green-500/10 to-emerald-500/10">
-                    <div className="flex items-center gap-2 text-green-400 text-sm">
-                      <ShieldCheck className="h-4 w-4" />
-                      <span>Intelligence Ready</span>
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-center gap-1.5 text-xs text-green-400/80">
-                        <Brain className="h-3 w-3" />
-                        <span>Account Intelligence{intelligenceStatus?.accountIntelligence?.confidence ? ` (${Math.round(intelligenceStatus.accountIntelligence.confidence * 100)}%)` : ''}</span>
+                ) : (() => {
+                  const isResearching = generateIntelligenceMutation.isPending || intelligencePhase === 'researching';
+                  const acctDone = intelligenceStatus?.accountIntelligence?.available || (intelligenceReady);
+                  const orgDone = intelligenceStatus?.organizationIntelligence?.available || (intelligenceReady);
+                  const solnDone = intelligenceStatus?.solutionMapping?.available || (intelligenceReady);
+                  const allDone = acctDone && orgDone && solnDone;
+
+                  const stepItems = [
+                    { key: 'acct', label: 'Account Intelligence', description: 'Prospect company research', icon: Brain, done: acctDone, confidence: intelligenceStatus?.accountIntelligence?.confidence },
+                    { key: 'org', label: 'Organization Intelligence', description: 'Your company profile', icon: Building2, done: orgDone },
+                    { key: 'soln', label: 'Solution Mapping', description: 'Product-problem alignment', icon: Target, done: solnDone },
+                  ];
+
+                  return (
+                    <div className={cn(
+                      "p-4 transition-colors duration-500",
+                      allDone
+                        ? "bg-gradient-to-r from-green-500/10 to-emerald-500/10"
+                        : isResearching
+                          ? "bg-gradient-to-r from-blue-500/10 to-purple-500/10"
+                          : "bg-gradient-to-r from-amber-500/10 to-orange-500/10"
+                    )}>
+                      {/* Header */}
+                      <div className="flex items-center gap-2 text-sm mb-4">
+                        {allDone ? (
+                          <><ShieldCheck className="h-4 w-4 text-green-400" /><span className="text-green-400 font-medium">Ready to Preview</span></>
+                        ) : isResearching ? (
+                          <><Loader2 className="h-4 w-4 text-blue-400 animate-spin" /><span className="text-blue-400 font-medium">Researching Intelligence...</span></>
+                        ) : (
+                          <><ShieldAlert className="h-4 w-4 text-amber-400" /><span className="text-amber-400 font-medium">Preparing Intelligence</span></>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-green-400/80">
-                        <Building2 className="h-3 w-3" />
-                        <span>Org Intelligence</span>
+
+                      {/* Steps — spacious vertical layout */}
+                      <div className="space-y-2.5">
+                        {stepItems.map((step) => {
+                          const Icon = step.icon;
+                          const showSpinner = isResearching && !step.done;
+                          return (
+                            <div key={step.key} className={cn(
+                              "flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-500",
+                              step.done ? "bg-green-500/10 border border-green-500/20" : showSpinner ? "bg-blue-500/5 border border-blue-500/15" : "bg-white/5 border border-white/5"
+                            )}>
+                              {/* Status indicator */}
+                              <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                                {step.done ? (
+                                  <CheckCircle2 className="h-5 w-5 text-green-400 animate-in zoom-in-50 duration-300" />
+                                ) : showSpinner ? (
+                                  <Loader2 className="h-5 w-5 text-blue-400 animate-spin" />
+                                ) : (
+                                  <div className="h-4 w-4 rounded-full border-2 border-white/20" />
+                                )}
+                              </div>
+                              {/* Icon + label + description */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <Icon className={cn("h-3.5 w-3.5 flex-shrink-0", step.done ? "text-green-400/70" : showSpinner ? "text-blue-400/70" : "text-white/30")} />
+                                  <span className={cn(
+                                    "text-xs font-medium transition-colors duration-300",
+                                    step.done ? "text-green-400/90" : showSpinner ? "text-blue-400/80" : "text-white/50"
+                                  )}>
+                                    {step.label}
+                                    {step.done && step.confidence ? ` (${Math.round(step.confidence * 100)}%)` : ''}
+                                  </span>
+                                </div>
+                                <p className={cn(
+                                  "text-[10px] mt-0.5 ml-5.5",
+                                  step.done ? "text-green-400/50" : showSpinner ? "text-blue-400/50" : "text-white/25"
+                                )}>{step.description}</p>
+                              </div>
+                              {/* Status badge */}
+                              <span className={cn(
+                                "text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-md shrink-0",
+                                step.done ? "text-green-400 bg-green-500/15" : showSpinner ? "text-blue-400 bg-blue-500/15" : "text-white/25 bg-white/5"
+                              )}>
+                                {step.done ? 'Done' : showSpinner ? 'Researching' : 'Pending'}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-green-400/80">
-                        <Target className="h-3 w-3" />
-                        <span>Solution Mapping</span>
-                      </div>
-                    </div>
-                    <p className="text-xs text-white/40 mt-1 truncate">
-                      {selectedAccount?.name} {selectedContact && `• ${selectedContact.fullName}`}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="p-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10">
-                    <div className="flex items-center gap-2 text-amber-400 text-sm">
-                      <ShieldAlert className="h-4 w-4" />
-                      <span>Intelligence Required</span>
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      {intelligenceStatus?.accountIntelligence && (
-                        <div className="flex items-center gap-1.5 text-xs">
-                          {intelligenceStatus.accountIntelligence.available ? (
-                            <CheckCircle2 className="h-3 w-3 text-green-400" />
-                          ) : (
-                            <AlertCircle className="h-3 w-3 text-amber-400" />
-                          )}
-                          <span className={intelligenceStatus.accountIntelligence.available ? 'text-green-400/80' : 'text-amber-400/80'}>
-                            Account Intelligence
-                          </span>
-                        </div>
-                      )}
-                      {intelligenceStatus?.organizationIntelligence && (
-                        <div className="flex items-center gap-1.5 text-xs">
-                          {intelligenceStatus.organizationIntelligence.available ? (
-                            <CheckCircle2 className="h-3 w-3 text-green-400" />
-                          ) : (
-                            <AlertCircle className="h-3 w-3 text-amber-400" />
-                          )}
-                          <span className={intelligenceStatus.organizationIntelligence.available ? 'text-green-400/80' : 'text-amber-400/80'}>
-                            Org Intelligence
-                          </span>
-                        </div>
-                      )}
-                      {intelligenceStatus?.solutionMapping && (
-                        <div className="flex items-center gap-1.5 text-xs">
-                          {intelligenceStatus.solutionMapping.available ? (
-                            <CheckCircle2 className="h-3 w-3 text-green-400" />
-                          ) : (
-                            <AlertCircle className="h-3 w-3 text-amber-400" />
-                          )}
-                          <span className={intelligenceStatus.solutionMapping.available ? 'text-green-400/80' : 'text-amber-400/80'}>
-                            Solution Mapping
-                          </span>
-                        </div>
+
+                      {/* Footer message */}
+                      {allDone ? (
+                        <p className="text-xs text-green-400/70 mt-3 flex items-center gap-1.5">
+                          <Sparkles className="h-3 w-3" />
+                          All intelligence ready — start the preview.
+                        </p>
+                      ) : isResearching ? (
+                        <p className="text-xs text-blue-400/60 mt-3">
+                          Analyzing {selectedAccount?.name || 'account'} and mapping solutions...
+                        </p>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full mt-3 h-8 text-xs border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                          onClick={() => generateIntelligenceMutation.mutate()}
+                          disabled={generateIntelligenceMutation.isPending}
+                        >
+                          <Wand2 className="h-3 w-3 mr-1.5" />Generate Intelligence
+                        </Button>
                       )}
                     </div>
-                    <p className="text-xs text-amber-400/60 mt-2">
-                      Contact your admin to configure missing intelligence components.
-                    </p>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -543,135 +637,102 @@ function VoicePreviewSection({
   setIsMuted,
   voiceTranscripts,
 }: VoicePreviewSectionProps) {
-  const maleVoices = GEMINI_VOICES.filter(v => v.gender === 'male');
-  const femaleVoices = GEMINI_VOICES.filter(v => v.gender === 'female');
-
   return (
-    <div className="h-full flex">
-      {/* Voice Configuration Panel */}
-      <div className="w-80 border-r border-white/5 bg-black/10 flex flex-col">
-        <div className="p-4 border-b border-white/5">
-          <h3 className="text-base font-semibold text-white flex items-center gap-2">
-            <Volume2 className="h-4 w-4 text-purple-400" />
-            Voice Configuration
-          </h3>
-          <p className="text-[11px] text-white/40 mt-1">24 Gemini voices available</p>
+    <div className="h-full flex flex-col">
+      {/* Compact Voice Configuration Bar */}
+      <div className="border-b border-white/5 bg-black/10 backdrop-blur-sm">
+        <div className="px-5 py-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Voice Select */}
+            <div className="flex items-center gap-2 min-w-0">
+              <Volume2 className="h-4 w-4 text-purple-400 shrink-0" />
+              <Label className="text-[10px] font-medium text-white/50 uppercase tracking-wider shrink-0">Voice</Label>
+              <Select value={selectedVoice} onValueChange={setSelectedVoice}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white h-8 text-sm w-[180px]">
+                  <SelectValue placeholder="Select voice" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white max-h-72">
+                  <div className="px-2 py-1.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Male Voices</div>
+                  {GEMINI_VOICES.filter(v => v.gender === 'male').map(voice => (
+                    <SelectItem key={voice.id} value={voice.id} className="text-white focus:bg-white/10 focus:text-white">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{voice.displayName}</span>
+                        <span className="text-[10px] text-white/40">{voice.personality.split(',')[0]}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  <div className="px-2 py-1.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider border-t border-white/5 mt-1">Female Voices</div>
+                  {GEMINI_VOICES.filter(v => v.gender === 'female').map(voice => (
+                    <SelectItem key={voice.id} value={voice.id} className="text-white focus:bg-white/10 focus:text-white">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{voice.displayName}</span>
+                        <span className="text-[10px] text-white/40">{voice.personality.split(',')[0]}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* Preview button */}
+              <button
+                onClick={() => onPreviewVoice(selectedVoice)}
+                disabled={previewingVoiceId === selectedVoice}
+                className={cn(
+                  "h-8 w-8 rounded-lg flex items-center justify-center transition-all duration-200 shrink-0 border",
+                  previewingVoiceId === selectedVoice
+                    ? "bg-purple-500/30 border-purple-400/50"
+                    : "bg-white/5 hover:bg-purple-500/20 border-white/10 hover:border-purple-400/50"
+                )}
+                title="Preview voice"
+              >
+                {previewingVoiceId === selectedVoice ? (
+                  <Loader2 className="h-3.5 w-3.5 text-purple-400 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 text-purple-400 ml-0.5" />
+                )}
+              </button>
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-6 bg-white/10 shrink-0" />
+
+            {/* Tone Select */}
+            <div className="flex items-center gap-2 min-w-0">
+              <Label className="text-[10px] font-medium text-white/50 uppercase tracking-wider shrink-0">Tone</Label>
+              <Select value={voiceTone} onValueChange={setVoiceTone}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white h-8 text-sm w-[160px]">
+                  <SelectValue placeholder="Select tone" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
+                  {VOICE_TONES.map(tone => (
+                    <SelectItem key={tone.value} value={tone.value} className="text-white focus:bg-white/10 focus:text-white">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{tone.label}</span>
+                        <span className="text-[10px] text-white/40">{tone.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-6 bg-white/10 shrink-0" />
+
+            {/* Selected voice info badge */}
+            {selectedVoiceInfo && (
+              <div className="flex items-center gap-1.5">
+                <Badge variant="outline" className="border-purple-500/30 text-purple-300 text-[10px] h-6">
+                  {selectedVoiceInfo.displayName}
+                </Badge>
+                <span className="text-[10px] text-white/30">{selectedVoiceInfo.personality}</span>
+              </div>
+            )}
+          </div>
         </div>
-
-        <ScrollArea className="flex-1 p-4">
-          {/* Voice Selection */}
-          <div className="space-y-4 mb-4">
-            <div className="space-y-2">
-              <Label className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Male Voices ({maleVoices.length})</Label>
-              <div className="space-y-1">
-                {maleVoices.map(voice => (
-                  <div
-                    key={voice.id}
-                    onClick={() => setSelectedVoice(voice.id)}
-                    className={cn(
-                      "group w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer",
-                      selectedVoice === voice.id
-                        ? "bg-blue-500/20 border-blue-500/50 shadow-sm shadow-blue-500/10"
-                        : "bg-white/5 border-white/10 hover:bg-white/10"
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-white font-medium text-sm">{voice.displayName}</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onPreviewVoice(voice.id); }}
-                        disabled={previewingVoiceId === voice.id}
-                        className={cn(
-                          "h-6 w-6 rounded-full flex items-center justify-center transition-all duration-200 shrink-0",
-                          previewingVoiceId === voice.id
-                            ? "bg-blue-500/30 border border-blue-400/50"
-                            : "bg-white/10 hover:bg-blue-500/30 border border-transparent hover:border-blue-400/50 opacity-0 group-hover:opacity-100",
-                          selectedVoice === voice.id && "opacity-100"
-                        )}
-                        title={`Preview ${voice.displayName}`}
-                      >
-                        {previewingVoiceId === voice.id ? (
-                          <Loader2 className="h-3 w-3 text-blue-400 animate-spin" />
-                        ) : (
-                          <Play className="h-3 w-3 text-blue-400 ml-0.5" />
-                        )}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-white/40 mt-0.5 leading-tight">{voice.personality}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Female Voices ({femaleVoices.length})</Label>
-              <div className="space-y-1">
-                {femaleVoices.map(voice => (
-                  <div
-                    key={voice.id}
-                    onClick={() => setSelectedVoice(voice.id)}
-                    className={cn(
-                      "group w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer",
-                      selectedVoice === voice.id
-                        ? "bg-pink-500/20 border-pink-500/50 shadow-sm shadow-pink-500/10"
-                        : "bg-white/5 border-white/10 hover:bg-white/10"
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-white font-medium text-sm">{voice.displayName}</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onPreviewVoice(voice.id); }}
-                        disabled={previewingVoiceId === voice.id}
-                        className={cn(
-                          "h-6 w-6 rounded-full flex items-center justify-center transition-all duration-200 shrink-0",
-                          previewingVoiceId === voice.id
-                            ? "bg-pink-500/30 border border-pink-400/50"
-                            : "bg-white/10 hover:bg-pink-500/30 border border-transparent hover:border-pink-400/50 opacity-0 group-hover:opacity-100",
-                          selectedVoice === voice.id && "opacity-100"
-                        )}
-                        title={`Preview ${voice.displayName}`}
-                      >
-                        {previewingVoiceId === voice.id ? (
-                          <Loader2 className="h-3 w-3 text-pink-400 animate-spin" />
-                        ) : (
-                          <Play className="h-3 w-3 text-pink-400 ml-0.5" />
-                        )}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-white/40 mt-0.5 leading-tight">{voice.personality}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <Separator className="bg-white/10 mb-4" />
-
-          {/* Tone Selection */}
-          <div className="space-y-2">
-            <Label className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Tone</Label>
-            <div className="space-y-1">
-              {VOICE_TONES.map(tone => (
-                <button
-                  key={tone.value}
-                  onClick={() => setVoiceTone(tone.value)}
-                  className={cn(
-                    "w-full p-2.5 rounded-lg border text-left transition-all",
-                    voiceTone === tone.value
-                      ? "bg-purple-500/20 border-purple-500/50"
-                      : "bg-white/5 border-white/10 hover:bg-white/10"
-                  )}
-                >
-                  <span className="text-white text-sm">{tone.label}</span>
-                  <p className="text-[10px] text-white/40 mt-0.5">{tone.description}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        </ScrollArea>
       </div>
 
       {/* Simulation Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {!hasContext ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center max-w-md">
@@ -703,7 +764,7 @@ function VoicePreviewSection({
                     <h3 className="text-white font-medium">
                       {voiceSimStatus === 'active' ? 'Call Active' : 'Ready'}
                     </h3>
-                    <p className="text-sm text-white/50">{selectedVoiceInfo?.displayName}</p>
+                    <p className="text-sm text-white/50">{selectedVoiceInfo?.displayName} — {VOICE_TONES.find(t => t.value === voiceTone)?.label || voiceTone}</p>
                   </div>
                 </div>
                 <div className="flex gap-2">
