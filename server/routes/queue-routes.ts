@@ -1513,12 +1513,24 @@ router.get(
 
       // Parse audienceRefs
       const audienceRefs = campaign.audienceRefs as any || {};
+      const allListIds = [...(audienceRefs.lists || []), ...(audienceRefs.selectedLists || [])];
+      const listDetails: any[] = [];
+      for (const listId of allListIds) {
+        const [list] = await db.select({
+          id: lists.id,
+          name: lists.name,
+          entityType: lists.entityType,
+          recordCount: sql<number>`array_length(${lists.recordIds}, 1)`,
+        }).from(lists).where(eq(lists.id, listId)).limit(1);
+        if (list) listDetails.push(list);
+      }
       const audienceRefsInfo = {
         hasFilterGroup: !!audienceRefs.filterGroup,
         filterGroupConditions: audienceRefs.filterGroup?.conditions?.length || 0,
         lists: audienceRefs.lists || [],
         selectedLists: audienceRefs.selectedLists || [],
         segments: audienceRefs.segments || [],
+        listDetails,
       };
 
       // Get sample contacts if audience exists
