@@ -15,6 +15,10 @@ import type {
   AgentExecutionInput, 
   AgentExecutionOutput,
 } from './types';
+import {
+  AgentEndpointDescriptor,
+  renderEndpointDirectory,
+} from './endpoint-registry';
 
 // ==================== FOUNDATIONAL PROMPT ====================
 
@@ -405,9 +409,39 @@ You MUST maintain awareness of what you have ALREADY SAID in this conversation. 
 You are now ready to conduct professional, compliant, and effective B2B outbound calls.
 `;
 
+const VOICE_AGENT_ENDPOINTS: AgentEndpointDescriptor[] = [
+  {
+    method: 'POST',
+    path: '/api/agents/voice/build-prompt',
+    summary: 'Assemble full voice call system prompt with campaign/contact context',
+    handler: 'coreVoiceAgent.execute',
+    tags: ['prompt_build'],
+  },
+  {
+    method: 'POST',
+    path: '/api/agents/voice/first-message',
+    summary: 'Generate compliant first message and validate opening variables',
+    handler: 'coreVoiceAgent.buildFirstMessage',
+    tags: ['opening', 'validation'],
+  },
+];
+
+const VOICE_AGENT_ENDPOINT_DIRECTORY = renderEndpointDirectory(
+  'Voice Agent',
+  VOICE_AGENT_ENDPOINTS
+);
+
 // ==================== KNOWLEDGE SECTIONS ====================
 
 export const VOICE_AGENT_KNOWLEDGE_SECTIONS: AgentKnowledgeSection[] = [
+  {
+    id: 'endpoint_registry',
+    name: 'API Endpoint Registry',
+    category: 'governance',
+    priority: 0,
+    isRequired: true,
+    content: VOICE_AGENT_ENDPOINT_DIRECTORY,
+  },
   {
     id: 'voice_ivr_navigation',
     name: 'IVR & Phone System Navigation',

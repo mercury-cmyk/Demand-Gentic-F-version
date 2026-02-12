@@ -19,7 +19,7 @@ export default function TermsOfServicePage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human-Led Strategy. AI-Powered Execution.</span>
+              <span className="text-[10px] text-muted-foreground font-medium">DemandGentic—Human-Led Strategy. AI-Powered Execution.</span>
             </div>
           </div>
           <div className="flex items-center gap-4">

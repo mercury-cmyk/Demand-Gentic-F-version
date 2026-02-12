@@ -30,94 +30,211 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
   {
     templateKey: 'client_invite',
     name: 'Client Portal Invitation',
-    description: 'Invitation email sent to client users to access the client portal.',
+    description: 'Premium invitation email sent to client users to set up their portal account.',
     category: 'invitation',
-    subjectTemplate: 'You\'re invited to the {{companyName}} Client Portal',
+    subjectTemplate: '{{companyName}} — Your Client Portal is Ready',
     htmlTemplate: `<!DOCTYPE html>
-<html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
 <head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<![endif]-->
 <style>
-@media only screen and (max-width: 600px) {
-  .main-table { width: 100% !important; }
-  .mobile-padding { padding: 20px !important; }
-  .mobile-header { padding: 32px 20px !important; }
-  .mobile-text { font-size: 16px !important; }
+@media only screen and (max-width: 620px) {
+  .main-table { width: 100% !important; min-width: 100% !important; }
+  .mobile-padding { padding: 24px 20px !important; }
+  .mobile-header { padding: 40px 24px !important; }
+  .mobile-text { font-size: 15px !important; line-height: 1.6 !important; }
+  .mobile-btn { padding: 14px 32px !important; }
+  .feature-cell { display: block !important; width: 100% !important; padding: 8px 0 !important; }
 }
 </style>
 </head>
-<body style="margin:0; padding:0; background-color:#f9fafb;">
+<body style="margin:0; padding:0; background-color:#f0f2f5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;">
   <!-- Preheader -->
-  <div style="display:none; font-size:1px; color:#f9fafb; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden;">
-    Invited to Pivotal B2B Client Portal.
+  <div style="display:none; font-size:1px; color:#f0f2f5; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">
+    Your personalized workspace is ready — set up your account to access campaigns, leads, and real-time analytics.
   </div>
 
-  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f9fafb; min-height:100vh;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f0f2f5;">
     <tr>
-      <td align="center" style="padding: 20px 0;">
-        <!-- Main Container -->
-        <table role="presentation" class="main-table" width="600" border="0" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin: 0 auto;">
-          
-          <!-- Header -->
-          <tr>
-            <td class="mobile-header" style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 48px 32px; text-align: center;">
-              <h1 style="color: #ffffff; margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 28px; font-weight: 700;">Welcome Aboard</h1>
-              <p style="color: #bfdbfe; margin: 12px 0 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px;">Pivotal B2B Client Portal</p>
-            </td>
-          </tr>
+      <td align="center" style="padding: 32px 16px;">
 
-          <!-- Content -->
+        <!-- Main Card -->
+        <table role="presentation" class="main-table" width="600" border="0" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow: 0 8px 30px rgba(0,0,0,0.08);">
+
+          <!-- Header Band -->
           <tr>
-            <td class="mobile-padding" style="padding: 40px 32px; text-align: center;">
-              <!-- Emoji Icon -->
+            <td class="mobile-header" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%); padding: 52px 40px; text-align: center;">
               <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
                 <tr>
-                  <td align="center" style="padding-bottom: 24px;">
-                     <div style="width: 64px; height: 64px; background-color: #eff6ff; border-radius: 50%; line-height: 64px; font-size: 32px;">👋</div>
+                  <td align="center" style="padding-bottom: 16px;">
+                    <div style="width: 56px; height: 56px; background-color: rgba(255,255,255,0.12); border-radius: 14px; line-height: 56px; font-size: 28px; display: inline-block;">&#9889;</div>
                   </td>
                 </tr>
-              </table>
-
-              <h2 style="margin: 0 0 16px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 20px; color: #111827; font-weight: 600;">Hi {{firstName}},</h2>
-              
-              <p class="mobile-text" style="margin: 0 0 32px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #4b5563;">
-                You've been invited to join the <strong>{{companyName}}</strong> workspace. 
-                Access your dashboard to track campaigns, review leads, and monitor performance in real-time.
-              </p>
-
-              <!-- Button -->
-              <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin: 0 auto;">
                 <tr>
-                  <td align="center" style="border-radius: 50px; background-color: #2563eb;">
-                    <a href="{{inviteLink}}" target="_blank" style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 50px; display: inline-block; border: 1px solid #2563eb;">
-                      Get Started Now
-                    </a>
+                  <td align="center">
+                    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:26px; font-weight:700; letter-spacing:-0.3px;">Your Portal is Ready</h1>
+                    <p style="color:#94a3b8; margin:10px 0 0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; font-weight:400;">Pivotal B2B &middot; DemandGentic.ai</p>
                   </td>
                 </tr>
               </table>
-
-              <p style="margin: 32px 0 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; color: #6b7280;">
-                Link valid for <strong>{{expiryDays}} days</strong>.
-              </p>
             </td>
           </tr>
 
-          <!-- Footer Link Fallback -->
+          <!-- Body Content -->
           <tr>
-            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #f3f4f6;">
-              <p style="margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #9ca3af; line-height: 1.5;">
-                Button not working? Copy and paste this link:<br>
-                <a href="{{inviteLink}}" style="color: #2563eb; text-decoration: none; word-break: break-all;">{{inviteLink}}</a>
+            <td class="mobile-padding" style="padding: 44px 40px 20px;">
+              <h2 style="margin:0 0 8px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:20px; color:#0f172a; font-weight:600;">Hi {{firstName}},</h2>
+
+              <p class="mobile-text" style="margin:0 0 28px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; line-height:1.7; color:#475569;">
+                You've been invited to the <strong style="color:#0f172a;">{{companyName}}</strong> workspace on our demand generation platform. Your account is ready — just set your password to get started.
+              </p>
+
+              <!-- CTA Button -->
+              <table role="presentation" border="0" cellspacing="0" cellpadding="0" width="100%">
+                <tr>
+                  <td align="center" style="padding: 4px 0 32px;">
+                    <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td align="center" style="border-radius:10px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); box-shadow: 0 4px 14px rgba(37,99,235,0.35);">
+                          <a href="{{inviteLink}}" target="_blank" class="mobile-btn" style="font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:16px; font-weight:600; color:#ffffff; text-decoration:none; padding:16px 44px; border-radius:10px; display:inline-block; letter-spacing:0.2px;">
+                            Set Up My Account
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Feature Highlights -->
+          <tr>
+            <td class="mobile-padding" style="padding: 0 40px 36px;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc; border-radius:12px; border: 1px solid #e2e8f0;">
+                <tr>
+                  <td style="padding: 24px 28px 8px;">
+                    <p style="margin:0 0 16px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.8px;">What you'll get access to</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 28px 24px;">
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">Real-time campaign dashboard</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">Lead review &amp; approvals</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">Call recordings &amp; analytics</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">AI-powered reporting</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Expiry Notice -->
+          <tr>
+            <td class="mobile-padding" style="padding: 0 40px 32px;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="background-color:#fffbeb; border-radius:8px; border: 1px solid #fde68a; padding: 14px 20px;">
+                    <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; color:#92400e; line-height:1.5;">
+                      <strong>Heads up:</strong> This invitation link expires in <strong>{{expiryDays}} days</strong>. After that, you'll need to request a new one.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding: 0 40px;">
+              <div style="border-top: 1px solid #e2e8f0;"></div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px 40px 32px; text-align: center;">
+              <p style="margin:0 0 8px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:12px; color:#94a3b8; line-height:1.5;">
+                Button not working? Copy and paste this link into your browser:
+              </p>
+              <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:12px; line-height:1.5;">
+                <a href="{{inviteLink}}" style="color:#2563eb; text-decoration:none; word-break:break-all;">{{inviteLink}}</a>
               </p>
             </td>
           </tr>
         </table>
 
-        <!-- Copyright -->
-        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+        <!-- Below-Card Footer -->
+        <table role="presentation" width="600" class="main-table" border="0" cellspacing="0" cellpadding="0">
           <tr>
-            <td align="center" style="padding-top: 24px; padding-bottom: 24px;">
-              <p style="margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #9ca3af;">
+            <td align="center" style="padding: 28px 20px;">
+              <p style="margin:0 0 4px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:12px; color:#94a3b8;">
+                Pivotal B2B &middot; DemandGentic.ai Platform
+              </p>
+              <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#cbd5e1;">
                 &copy; 2026 Pivotal B2B. All rights reserved.
               </p>
             </td>
@@ -129,20 +246,30 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
   </table>
 </body>
 </html>`,
-    textTemplate: `Welcome to Pivotal B2B
+    textTemplate: `Your Client Portal is Ready
+===========================
 
 Hi {{firstName}},
 
-You've been invited to join the {{companyName}} workspace on Pivotal B2B.
+You've been invited to the {{companyName}} workspace on the Pivotal B2B demand generation platform.
 
-Access your dashboard to track campaigns, review leads, and monitor performance in real-time.
+Your account is ready — just click the link below to set your password and get started.
 
-Get Started: {{inviteLink}}
+Set Up Your Account: {{inviteLink}}
 
-This invitation is valid for {{expiryDays}} days.
+What you'll get access to:
+- Real-time campaign dashboard
+- Lead review & approvals
+- Call recordings & analytics
+- AI-powered reporting
+
+This invitation link expires in {{expiryDays}} days.
 
 If you have trouble with the link, copy and paste this URL into your browser:
-{{inviteLink}}`,
+{{inviteLink}}
+
+--
+Pivotal B2B - DemandGentic.ai Platform`,
     variables: [
       { name: 'firstName', description: 'Recipient first name', required: true, exampleValue: 'Jane' },
       { name: 'lastName', description: 'Recipient last name', required: false, exampleValue: 'Smith' },

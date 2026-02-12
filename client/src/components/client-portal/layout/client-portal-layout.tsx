@@ -65,6 +65,7 @@ import {
   Mic,
   TestTube,
   Building2,
+  Plus,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -123,6 +124,7 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'Campaigns',
     items: [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
+      { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus, highlighted: true },
       { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
       // { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },

@@ -1,14 +1,18 @@
 /**
- * Disposition Reanalysis Page
+ * Disposition Reanalysis Page (Deep AI Analysis)
  *
- * Admin page for bulk analyzing and re-routing call dispositions.
- * Allows viewing stats, previewing changes, analyzing individual calls,
- * and applying disposition corrections.
+ * Comprehensive admin page for AI-powered call disposition reanalysis with:
+ *   - Deep transcript analysis against campaign goals
+ *   - Agent behavior scoring (engagement, empathy, closing, objection handling)
+ *   - Call quality assessment vs campaign QA parameters
+ *   - Misclassification detection with confidence scoring
+ *   - Push-to-client / QA / export capabilities
+ *   - Full transcript viewer with audio playback
  *
  * Route: /disposition-reanalysis
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
@@ -45,6 +49,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { Progress } from '@/components/ui/progress';
 import {
   RefreshCw,
   Search,
@@ -64,6 +69,13 @@ import {
   Users,
   TrendingUp,
   ArrowUpDown,
+  Download,
+  Send,
+  Brain,
+  Target,
+  Star,
+  MessageSquare,
+  Activity,
 } from 'lucide-react';
 
 // ==================== TYPES ====================
@@ -83,15 +95,41 @@ interface StatsResponse {
   potentialMisclassifications: number;
 }
 
-interface ReanalysisCall {
+interface AgentBehaviorScore {
+  engagementScore: number;
+  empathyScore: number;
+  objectionHandlingScore: number;
+  closingScore: number;
+  qualificationScore: number;
+  scriptAdherenceScore: number;
+  overallScore: number;
+  strengths: string[];
+  weaknesses: string[];
+  coachingNotes: string;
+}
+
+interface CallQualityAssessment {
+  campaignAlignmentScore: number;
+  talkingPointsCoverage: number;
+  missedTalkingPoints: string[];
+  objectionResponseQuality: string;
+  sentimentProgression: string;
+  identityConfirmed: boolean;
+  qualificationMet: boolean;
+  keyMoments: Array<{ timestamp: string; description: string; impact: string }>;
+}
+
+interface DeepReanalysisCall {
   callSessionId: string;
   callAttemptId: string | null;
   contactId: string | null;
   contactName: string;
   companyName: string;
+  contactEmail: string | null;
+  contactPhone: string;
   campaignId: string;
   campaignName: string;
-  phoneDialed: string;
+  campaignObjective: string | null;
   durationSec: number;
   currentDisposition: string;
   suggestedDisposition: string;
@@ -100,51 +138,60 @@ interface ReanalysisCall {
   positiveSignals: string[];
   negativeSignals: string[];
   shouldOverride: boolean;
+  agentType: string | null;
+  agentBehavior: AgentBehaviorScore | null;
+  callQuality: CallQualityAssessment | null;
+  fullTranscript: any;
   transcriptPreview: string;
   recordingUrl: string | null;
   callDate: string;
   hasLead: boolean;
   leadId: string | null;
+  qaStatus: string | null;
   actionTaken: string | null;
+  pushStatus: {
+    pushedToClient: boolean;
+    pushedToQA: boolean;
+    exportedAt: string | null;
+  };
 }
 
-interface ReanalysisSummary {
+interface DeepReanalysisSummary {
   totalAnalyzed: number;
   totalShouldChange: number;
   totalChanged: number;
   totalErrors: number;
   dryRun: boolean;
-  breakdown: { currentDisposition: string; suggestedDisposition: string; count: number }[];
-  calls: ReanalysisCall[];
+  avgConfidence: number;
+  avgAgentScore: number;
+  avgCallQuality: number;
+  breakdown: { currentDisposition: string; suggestedDisposition: string; count: number; avgConfidence: number }[];
+  agentBehaviorSummary: {
+    avgEngagement: number;
+    avgEmpathy: number;
+    avgObjectionHandling: number;
+    avgClosing: number;
+    avgQualification: number;
+    avgScriptAdherence: number;
+    topStrengths: string[];
+    topWeaknesses: string[];
+  };
+  callQualitySummary: {
+    avgCampaignAlignment: number;
+    avgTalkingPointsCoverage: number;
+    topMissedTalkingPoints: string[];
+    identityConfirmedRate: number;
+    qualificationMetRate: number;
+  };
+  calls: DeepReanalysisCall[];
   actionsSummary: {
     newLeadsCreated: number;
     leadsRemovedFromCampaign: number;
     movedToQA: number;
     movedToNeedsReview: number;
     retriesScheduled: number;
+    pushedToClient: number;
   };
-}
-
-interface SingleCallAnalysis {
-  callSessionId: string;
-  callAttemptId: string | null;
-  currentDisposition: string;
-  analysis: {
-    suggestedDisposition: string;
-    confidence: number;
-    reasoning: string;
-    positiveSignals: string[];
-    negativeSignals: string[];
-    shouldOverride: boolean;
-  };
-  contactInfo: { name: string; company: string; phone: string };
-  campaignInfo: { id: string; name: string };
-  transcript: any;
-  recordingUrl: string | null;
-  durationSec: number;
-  callDate: string;
-  hasExistingLead: boolean;
-  existingLeadId: string | null;
 }
 
 interface Campaign {
@@ -221,20 +268,25 @@ export default function DispositionReanalysisPage() {
   const [dateTo, setDateTo] = useState<string>('');
   const [minDuration, setMinDuration] = useState<string>('');
   const [maxDuration, setMaxDuration] = useState<string>('');
-  const [batchLimit, setBatchLimit] = useState<string>('50');
+  const [batchLimit, setBatchLimit] = useState<string>('30');
+  const [agentTypeFilter, setAgentTypeFilter] = useState<string>('all');
+  const [confidenceThreshold, setConfidenceThreshold] = useState<string>('');
 
   // State
   const [activeTab, setActiveTab] = useState<string>('overview');
-  const [previewResult, setPreviewResult] = useState<ReanalysisSummary | null>(null);
+  const [previewResult, setPreviewResult] = useState<DeepReanalysisSummary | null>(null);
   const [selectedCalls, setSelectedCalls] = useState<Set<string>>(new Set());
   const [detailCallId, setDetailCallId] = useState<string | null>(null);
+  const [detailCall, setDetailCall] = useState<DeepReanalysisCall | null>(null);
   const [overrideDialog, setOverrideDialog] = useState<{ callSessionId: string; currentDisp: string } | null>(null);
   const [overrideDisposition, setOverrideDisposition] = useState<string>('');
   const [overrideReason, setOverrideReason] = useState<string>('');
+  const [pushClientDialog, setPushClientDialog] = useState(false);
+  const [clientNotes, setClientNotes] = useState('');
+  const [resultsFilter, setResultsFilter] = useState<'all' | 'changes' | 'correct'>('all');
 
   // ==================== QUERIES ====================
 
-  // Load campaigns for filter dropdown
   const { data: campaignsData } = useQuery<Campaign[]>({
     queryKey: ['/api/campaigns'],
     queryFn: async () => {
@@ -244,7 +296,6 @@ export default function DispositionReanalysisPage() {
     },
   });
 
-  // Load disposition stats
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery<StatsResponse>({
     queryKey: ['/api/disposition-reanalysis/stats', campaignId, dateFrom, dateTo],
     queryFn: async () => {
@@ -257,24 +308,28 @@ export default function DispositionReanalysisPage() {
     },
   });
 
-  // Single call detail
-  const { data: callDetail, isLoading: detailLoading } = useQuery<SingleCallAnalysis>({
-    queryKey: ['/api/disposition-reanalysis/analyze', detailCallId],
+  // Deep single call analysis
+  const { data: deepCallDetail, isLoading: detailLoading } = useQuery<DeepReanalysisCall>({
+    queryKey: ['/api/disposition-reanalysis/deep/analyze', detailCallId],
     queryFn: async () => {
-      const res = await apiRequest('GET', `/api/disposition-reanalysis/analyze/${detailCallId}`);
+      const res = await apiRequest('GET', `/api/disposition-reanalysis/deep/analyze/${detailCallId}`);
       return res.json();
     },
-    enabled: !!detailCallId,
+    enabled: !!detailCallId && !detailCall,
   });
+
+  // Use either inline detail (from batch) or fetched detail
+  const activeCallDetail = detailCall || deepCallDetail;
 
   // ==================== MUTATIONS ====================
 
-  // Preview (dry-run)
+  // Deep Preview (dry-run)
   const previewMutation = useMutation({
     mutationFn: async () => {
       const body: any = {
         hasTranscript: true,
-        limit: parseInt(batchLimit) || 50,
+        limit: parseInt(batchLimit) || 30,
+        agentType: agentTypeFilter,
       };
       if (campaignId) body.campaignId = campaignId;
       if (dispositionFilter.length > 0) body.dispositions = dispositionFilter;
@@ -282,26 +337,28 @@ export default function DispositionReanalysisPage() {
       if (dateTo) body.dateTo = dateTo;
       if (minDuration) body.minDurationSec = parseInt(minDuration);
       if (maxDuration) body.maxDurationSec = parseInt(maxDuration);
+      if (confidenceThreshold) body.confidenceThreshold = parseFloat(confidenceThreshold) / 100;
 
-      const res = await apiRequest('POST', '/api/disposition-reanalysis/preview', body);
-      return res.json() as Promise<ReanalysisSummary>;
+      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/preview', body);
+      return res.json() as Promise<DeepReanalysisSummary>;
     },
     onSuccess: (data) => {
       setPreviewResult(data);
       setActiveTab('results');
-      toast({ title: 'Preview Complete', description: `Analyzed ${data.totalAnalyzed} calls. ${data.totalShouldChange} would change.` });
+      toast({ title: 'Deep Analysis Complete', description: `Analyzed ${data.totalAnalyzed} calls. ${data.totalShouldChange} misclassifications found. Avg agent score: ${Math.round(data.avgAgentScore)}/100` });
     },
     onError: (err: any) => {
-      toast({ title: 'Preview Failed', description: err.message, variant: 'destructive' });
+      toast({ title: 'Analysis Failed', description: err.message, variant: 'destructive' });
     },
   });
 
-  // Apply changes
+  // Deep Apply
   const applyMutation = useMutation({
     mutationFn: async () => {
       const body: any = {
         hasTranscript: true,
-        limit: parseInt(batchLimit) || 50,
+        limit: parseInt(batchLimit) || 30,
+        agentType: agentTypeFilter,
       };
       if (campaignId) body.campaignId = campaignId;
       if (dispositionFilter.length > 0) body.dispositions = dispositionFilter;
@@ -309,17 +366,15 @@ export default function DispositionReanalysisPage() {
       if (dateTo) body.dateTo = dateTo;
       if (minDuration) body.minDurationSec = parseInt(minDuration);
       if (maxDuration) body.maxDurationSec = parseInt(maxDuration);
+      if (confidenceThreshold) body.confidenceThreshold = parseFloat(confidenceThreshold) / 100;
 
-      const res = await apiRequest('POST', '/api/disposition-reanalysis/apply', body);
-      return res.json() as Promise<ReanalysisSummary>;
+      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/apply', body);
+      return res.json() as Promise<DeepReanalysisSummary>;
     },
     onSuccess: (data) => {
       setPreviewResult(data);
       queryClient.invalidateQueries({ queryKey: ['/api/disposition-reanalysis/stats'] });
-      toast({
-        title: 'Changes Applied',
-        description: `Updated ${data.totalChanged} of ${data.totalShouldChange} calls. ${data.totalErrors} errors.`,
-      });
+      toast({ title: 'Changes Applied', description: `Updated ${data.totalChanged} dispositions. ${data.totalErrors} errors.` });
     },
     onError: (err: any) => {
       toast({ title: 'Apply Failed', description: err.message, variant: 'destructive' });
@@ -329,10 +384,7 @@ export default function DispositionReanalysisPage() {
   // Single override
   const overrideMutation = useMutation({
     mutationFn: async ({ callSessionId, newDisposition, reason }: { callSessionId: string; newDisposition: string; reason: string }) => {
-      const res = await apiRequest('POST', `/api/disposition-reanalysis/override/${callSessionId}`, {
-        newDisposition,
-        reason,
-      });
+      const res = await apiRequest('POST', `/api/disposition-reanalysis/override/${callSessionId}`, { newDisposition, reason });
       return res.json();
     },
     onSuccess: (data) => {
@@ -340,9 +392,6 @@ export default function DispositionReanalysisPage() {
       setOverrideDisposition('');
       setOverrideReason('');
       queryClient.invalidateQueries({ queryKey: ['/api/disposition-reanalysis/stats'] });
-      if (previewResult) {
-        previewMutation.mutate(); // Refresh preview
-      }
       toast({ title: 'Disposition Updated', description: data.action || 'Success' });
     },
     onError: (err: any) => {
@@ -350,27 +399,57 @@ export default function DispositionReanalysisPage() {
     },
   });
 
-  // Bulk override selected calls
+  // Bulk override
   const bulkOverrideMutation = useMutation({
     mutationFn: async ({ newDisposition, reason }: { newDisposition: string; reason: string }) => {
-      const overrides = Array.from(selectedCalls).map(callSessionId => ({
-        callSessionId,
-        newDisposition,
-        reason,
-      }));
+      const overrides = Array.from(selectedCalls).map(callSessionId => ({ callSessionId, newDisposition, reason }));
       const res = await apiRequest('POST', '/api/disposition-reanalysis/bulk-override', { overrides });
       return res.json();
     },
     onSuccess: (data) => {
       setSelectedCalls(new Set());
       queryClient.invalidateQueries({ queryKey: ['/api/disposition-reanalysis/stats'] });
-      toast({
-        title: 'Bulk Override Complete',
-        description: `${data.succeeded} succeeded, ${data.failed} failed out of ${data.totalProcessed}`,
-      });
+      toast({ title: 'Bulk Override Complete', description: `${data.succeeded} succeeded, ${data.failed} failed` });
     },
     onError: (err: any) => {
       toast({ title: 'Bulk Override Failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  // Push to QA
+  const pushToQAMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/push-to-qa', {
+        callSessionIds: Array.from(selectedCalls),
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: 'Pushed to QA', description: `${data.succeeded} pushed, ${data.failed} failed` });
+      setSelectedCalls(new Set());
+    },
+    onError: (err: any) => {
+      toast({ title: 'Push to QA Failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  // Push to Client
+  const pushToClientMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/push-to-client', {
+        callSessionIds: Array.from(selectedCalls),
+        clientNotes,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setPushClientDialog(false);
+      setClientNotes('');
+      toast({ title: 'Pushed to Client', description: `${data.succeeded} calls pushed to client portal` });
+      setSelectedCalls(new Set());
+    },
+    onError: (err: any) => {
+      toast({ title: 'Push to Client Failed', description: err.message, variant: 'destructive' });
     },
   });
 
@@ -397,6 +476,38 @@ export default function DispositionReanalysisPage() {
       .map(c => c.callSessionId);
     setSelectedCalls(new Set(changeable));
   }, [previewResult]);
+
+  const handleExport = useCallback(async (format: 'csv' | 'json') => {
+    if (!previewResult?.calls?.length) return;
+    try {
+      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/export', {
+        calls: previewResult.calls,
+        format,
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `disposition-reanalysis-${new Date().toISOString().split('T')[0]}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Export Complete', description: `Downloaded ${previewResult.calls.length} records as ${format.toUpperCase()}` });
+    } catch (err: any) {
+      toast({ title: 'Export Failed', description: err.message, variant: 'destructive' });
+    }
+  }, [previewResult, toast]);
+
+  const filteredCalls = useMemo(() => {
+    if (!previewResult?.calls) return [];
+    switch (resultsFilter) {
+      case 'changes':
+        return previewResult.calls.filter(c => c.shouldOverride && c.suggestedDisposition !== c.currentDisposition);
+      case 'correct':
+        return previewResult.calls.filter(c => !c.shouldOverride || c.suggestedDisposition === c.currentDisposition);
+      default:
+        return previewResult.calls;
+    }
+  }, [previewResult, resultsFilter]);
 
   // ==================== RENDER ====================
 

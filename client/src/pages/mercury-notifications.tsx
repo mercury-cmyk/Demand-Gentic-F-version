@@ -60,6 +60,10 @@ const mercuryApi = {
   inviteSend: (portalBaseUrl?: string) =>
     apiRequest('POST', '/api/communications/mercury/invitations/send', { portalBaseUrl }).then(r => r.json()),
   inviteStatus: () => apiRequest('GET', '/api/communications/mercury/invitations/status').then(r => r.json()),
+  inviteSendSingle: (clientUserId: string, portalBaseUrl?: string) =>
+    apiRequest('POST', '/api/communications/invitations/send-single', { clientUserId, portalBaseUrl }).then(r => r.json()),
+  invitePreviewSingle: (clientUserId: string, portalBaseUrl?: string) =>
+    apiRequest('POST', '/api/communications/invitations/preview', { clientUserId, portalBaseUrl }).then(r => r.json()),
   getLogs: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return apiRequest('GET', `/api/communications/mercury/logs${qs}`).then(r => r.json());
@@ -1143,6 +1147,7 @@ function InvitationsTab() {
   const { toast } = useToast();
   const [dryRunData, setDryRunData] = useState<any>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
   const [sendResult, setSendResult] = useState<any>(null);
 
   const dryRunMutation = useMutation({
@@ -1194,20 +1199,27 @@ function InvitationsTab() {
             Bulk Client Invitations
           </CardTitle>
           <CardDescription>
-            Send invitation emails to all eligible client portal users.
+            Preview the invitation email draft, review eligible recipients, then send to all.
             Dry Run is always available. Actual send requires the bulk_invites_enabled feature flag.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex gap-2">
+          {/* Action buttons */}
+          <div className="flex gap-2 flex-wrap">
             <Button onClick={() => dryRunMutation.mutate()} disabled={dryRunMutation.isPending} variant="outline">
               {dryRunMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
-              Dry Run (Preview)
+              Preview Recipients & Draft
             </Button>
+            {dryRunData?.templatePreview?.html && (
+              <Button onClick={() => setShowEmailPreview(true)} variant="outline">
+                <Mail className="h-4 w-4 mr-1" />
+                View Email Draft
+              </Button>
+            )}
             {dryRunData && dryRunData.eligibleCount > 0 && (
               <Button onClick={() => setShowConfirm(true)} variant="default">
                 <Send className="h-4 w-4 mr-1" />
-                Send {dryRunData.eligibleCount} Invitations
+                Send to All ({dryRunData.eligibleCount})
               </Button>
             )}
           </div>
@@ -1220,12 +1232,13 @@ function InvitationsTab() {
           )}
 
           {dryRunData && (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              {/* Stats row */}
               <div className="grid grid-cols-2 gap-4">
                 <Card>
                   <CardContent className="pt-4 text-center">
                     <p className="text-3xl font-bold text-green-600">{dryRunData.eligibleCount}</p>
-                    <p className="text-sm text-muted-foreground">Eligible</p>
+                    <p className="text-sm text-muted-foreground">Eligible Recipients</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -1236,6 +1249,26 @@ function InvitationsTab() {
                 </Card>
               </div>
 
+              {/* Inline email draft preview */}
+              {dryRunData.templatePreview?.html && (
+                <Card className="border-primary/20">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-primary" />
+                      Email Draft Preview
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Subject: <strong>{dryRunData.templatePreview.subject || 'N/A'}</strong>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="border rounded-lg overflow-hidden bg-white">
+                      <SandboxedPreview html={dryRunData.templatePreview.html} />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {dryRunData.eligibleCount === 0 && dryRunData.skippedCount === 0 && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
                   <AlertTriangle className="h-4 w-4 inline mr-1" />
@@ -1245,7 +1278,7 @@ function InvitationsTab() {
 
               {dryRunData.eligible?.length > 0 && (
                 <div>
-                  <h4 className="font-medium text-sm mb-2">Eligible Recipients (sample)</h4>
+                  <h4 className="font-medium text-sm mb-2">Eligible Recipients {dryRunData.eligible.length > 10 ? `(showing 10 of ${dryRunData.eligible.length})` : ''}</h4>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1274,7 +1307,7 @@ function InvitationsTab() {
 
               {dryRunData.skipped?.length > 0 && (
                 <div>
-                  <h4 className="font-medium text-sm mb-2">Skipped</h4>
+                  <h4 className="font-medium text-sm mb-2">Skipped ({dryRunData.skipped.length})</h4>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1291,6 +1324,9 @@ function InvitationsTab() {
                       ))}
                     </TableBody>
                   </Table>
+                  {dryRunData.skipped.length > 5 && (
+                    <p className="text-xs text-muted-foreground mt-1">...and {dryRunData.skipped.length - 5} more</p>
+                  )}
                 </div>
               )}
             </div>
@@ -1338,9 +1374,20 @@ function InvitationsTab() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Bulk Invitation</AlertDialogTitle>
-            <AlertDialogDescription>
-              You are about to send invitation emails to <strong>{dryRunData?.eligibleCount || 0}</strong> client users.
-              This action will queue emails for delivery. Are you sure?
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  You are about to send invitation emails to <strong>{dryRunData?.eligibleCount || 0}</strong> client users.
+                  Each user will receive a unique secure link to set up their password and access the portal.
+                </p>
+                {dryRunData?.templatePreview?.subject && (
+                  <div className="bg-muted/50 rounded-md p-3 text-xs">
+                    <p className="text-muted-foreground mb-1">Email subject:</p>
+                    <p className="font-medium">{dryRunData.templatePreview.subject}</p>
+                  </div>
+                )}
+                <p className="text-sm">Links expire in 7 days. Are you sure you want to proceed?</p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1352,6 +1399,41 @@ function InvitationsTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Full Email Draft Preview Dialog */}
+      <Dialog open={showEmailPreview} onOpenChange={setShowEmailPreview}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Invitation Email Draft
+            </DialogTitle>
+            <DialogDescription>
+              This is how the invitation email will appear to recipients. Template variables (name, company, link) will be personalized per user.
+            </DialogDescription>
+          </DialogHeader>
+          {dryRunData?.templatePreview && (
+            <div className="space-y-3 flex-1 overflow-auto">
+              <div className="bg-muted/50 rounded-md p-3">
+                <p className="text-xs text-muted-foreground mb-1">Subject Line</p>
+                <p className="font-medium text-sm">{dryRunData.templatePreview.subject}</p>
+              </div>
+              <div className="border rounded-lg overflow-hidden bg-white">
+                <SandboxedPreview html={dryRunData.templatePreview.html} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEmailPreview(false)}>Close</Button>
+            {dryRunData && dryRunData.eligibleCount > 0 && (
+              <Button onClick={() => { setShowEmailPreview(false); setShowConfirm(true); }}>
+                <Send className="h-4 w-4 mr-1" />
+                Send to All ({dryRunData.eligibleCount})
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

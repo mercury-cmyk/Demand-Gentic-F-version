@@ -110,6 +110,7 @@ import PublicBookingPage from "@/pages/public-booking";
 import AdminBookingsPage from "@/pages/admin-bookings";
 import ClientPortalLogin from "@/pages/client-portal-login";
 import ClientPortalJoin from "@/pages/client-portal-join";
+import ClientPortalAcceptInvite from "@/pages/client-portal-accept-invite";
 import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import ClientPortalSimulations from "@/pages/client-portal-simulations";
 import ClientPortalVoiceSimulation from "@/pages/client-portal-voice-simulation";
@@ -118,6 +119,7 @@ import ClientServices from "@/pages/client-portal/client-services";
 import ClientPortalPreviewStudio from "@/pages/client-portal-preview-studio";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
 import AgentCatalogPage from "@/pages/client-portal/agent-catalog";
+import ClientPortalCampaignCreate from "@/pages/client-portal/campaign-create";
 import ClientPortalIntelligence from "@/pages/client-portal-intelligence";
 import ClientPortalGenerativeStudio from "@/pages/client-portal-generative-studio";
 import ClientPortalCampaignQueue from "@/pages/client-portal-campaign-queue";
@@ -268,6 +270,11 @@ const parseJwtPayload = (token: string): Record<string, unknown> | null => {
     return null;
   }
 };
+
+/** Catch-all redirect for unmatched /client-portal/* paths (e.g. typos) */
+function ClientPortalRedirectToDashboard() {
+  return <Redirect to="/client-portal/dashboard" />;
+}
 
 function AuthenticatedApp() {
   const { user, token, getToken } = useAuth();
@@ -619,9 +626,10 @@ function Router() {
       <Route path="/forms/:id" component={LeadFormPublicPage} />
       <Route path="/book/:username/:slug" component={PublicBookingPage} />
 
-      {/* Client Portal public routes (login/join only) */}
+      {/* Client Portal public routes (login/join/invite) */}
       <Route path="/client-portal/login" component={ClientPortalLogin} />
       <Route path="/client-portal/join/:slug" component={ClientPortalJoin} />
+      <Route path="/client-portal/accept-invite" component={ClientPortalAcceptInvite} />
 
       {/* ================================================
           PROTECTED ROUTES - Authentication required
@@ -704,12 +712,31 @@ function Router() {
           <ClientPortalEmailCampaigns />
         </ClientPortalProtectedRoute>
       </Route>
+      <Route path="/client-portal/create-campaign">
+        <ClientPortalProtectedRoute>
+          <ClientPortalCampaignCreate />
+        </ClientPortalProtectedRoute>
+      </Route>
       <Route path="/client-portal/services">
         <ClientPortalProtectedRoute>
           <ClientPortalLayout>
             <ClientServices />
           </ClientPortalLayout>
         </ClientPortalProtectedRoute>
+      </Route>
+
+      {/* Client Portal catch-all — redirect unmatched /client-portal/ subpaths to dashboard */}
+      <Route path="/client-portal/:rest+">
+        <ClientPortalProtectedRoute>
+          <ClientPortalRedirectToDashboard />
+        </ClientPortalProtectedRoute>
+      </Route>
+
+      {/* Admin routes that start with /client-portal- (not client portal routes) */}
+      <Route path="/client-portal-admin">
+        <ProtectedRoute>
+          <AuthenticatedApp />
+        </ProtectedRoute>
       </Route>
 
       {/* Main dashboard */}

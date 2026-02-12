@@ -20,6 +20,10 @@ import type {
   AgentExecutionOutput,
   AgentCampaignContext
 } from './types';
+import {
+  AgentEndpointDescriptor,
+  renderEndpointDirectory,
+} from './endpoint-registry';
 import OpenAI from 'openai';
 import { unifiedEmailRouter, type EmailGenerationRequest, type EmailGenerationResponse } from '../unified-email-router';
 
@@ -314,9 +318,60 @@ This foundational prompt is the single source of truth for all email activity.
 You are now ready to generate expert-level, campaign-aware, compliant, and high-converting B2B emails.
 `;
 
+const EMAIL_AGENT_ENDPOINTS: AgentEndpointDescriptor[] = [
+  {
+    method: 'POST',
+    path: '/api/agents/email/generate',
+    summary: 'Generate a single email via core agent (campaign + contact context)',
+    handler: 'coreEmailAgent.execute',
+    tags: ['generation'],
+  },
+  {
+    method: 'POST',
+    path: '/api/agents/email/generate-followup',
+    summary: 'Generate numbered follow-up email against previous message',
+    handler: 'coreEmailAgent.generateFollowUpEmail',
+    tags: ['generation', 'follow_up'],
+  },
+  {
+    method: 'POST',
+    path: '/api/agents/email/generate-transactional',
+    summary: 'Generate transactional email (confirmation, notification, reminder, digest)',
+    handler: 'coreEmailAgent.generateTransactionalEmail',
+    tags: ['generation', 'transactional'],
+  },
+  {
+    method: 'POST',
+    path: '/api/email/generate/campaign',
+    summary: 'Generate campaign email via unified router (uses coreEmailAgent)',
+    handler: 'coreEmailAgent.generateCampaignEmailUnified',
+    tags: ['generation', 'campaign'],
+  },
+  {
+    method: 'POST',
+    path: '/api/email/generate/batch',
+    summary: 'Batch generate personalized campaign emails for contacts',
+    handler: 'coreEmailAgent.generateBatchEmails',
+    tags: ['generation', 'batch'],
+  },
+];
+
+const EMAIL_AGENT_ENDPOINT_DIRECTORY = renderEndpointDirectory(
+  'Email Agent',
+  EMAIL_AGENT_ENDPOINTS
+);
+
 // ==================== KNOWLEDGE SECTIONS ====================
 
 export const EMAIL_AGENT_KNOWLEDGE_SECTIONS: AgentKnowledgeSection[] = [
+  {
+    id: 'endpoint_registry',
+    name: 'API Endpoint Registry',
+    category: 'governance',
+    priority: 0,
+    isRequired: true,
+    content: EMAIL_AGENT_ENDPOINT_DIRECTORY,
+  },
   {
     id: 'email_deliverability',
     name: 'Deliverability Intelligence',

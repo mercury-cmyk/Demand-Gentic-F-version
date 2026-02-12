@@ -950,6 +950,26 @@ export default function ClientPortalAdmin() {
     },
   });
 
+  const sendInviteMutation = useMutation({
+    mutationFn: async ({ clientUserId }: { clientUserId: string }) => {
+      const res = await apiRequest('POST', '/api/communications/invitations/send-single', {
+        clientUserId,
+        portalBaseUrl: window.location.origin,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to send invitation');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: 'Invitation sent', description: data.message || 'The user will receive an email with a setup link.' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Send failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
   const updateClientMutation = useMutation({
     mutationFn: async (payload: Partial<any>) => {
       if (!selectedClient) throw new Error('No client selected');
@@ -1527,7 +1547,21 @@ export default function ClientPortalAdmin() {
                                     {user.isActive ? 'Active' : 'Inactive'}
                                   </Badge>
                                 </TableCell>
-                                <TableCell className="text-right">
+                                <TableCell className="text-right space-x-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={sendInviteMutation.isPending}
+                                    onClick={() => sendInviteMutation.mutate({ clientUserId: user.id })}
+                                    title="Send invitation email with portal setup link"
+                                  >
+                                    {sendInviteMutation.isPending && sendInviteMutation.variables?.clientUserId === user.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                    ) : (
+                                      <Send className="h-3.5 w-3.5 mr-1" />
+                                    )}
+                                    Invite
+                                  </Button>
                                   <Button
                                     variant="ghost"
                                     size="sm"

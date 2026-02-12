@@ -12,6 +12,10 @@ import type {
   AgentExecutionInput,
   AgentExecutionOutput,
 } from './types';
+import {
+  AgentEndpointDescriptor,
+  renderEndpointDirectory,
+} from './endpoint-registry';
 
 // ==================== FOUNDATIONAL PROMPT ====================
 
@@ -132,9 +136,32 @@ Return a single JSON object with this structure:
 Do not generate outreach content. Only provide governance decisions.
 `;
 
+const COMPLIANCE_AGENT_ENDPOINTS: AgentEndpointDescriptor[] = [
+  {
+    method: 'POST',
+    path: '/api/agents/compliance/build-prompt',
+    summary: 'Assemble compliance prompt with campaign/contact/org context',
+    handler: 'coreComplianceAgent.execute',
+    tags: ['prompt_build', 'compliance_gate'],
+  },
+];
+
+const COMPLIANCE_AGENT_ENDPOINT_DIRECTORY = renderEndpointDirectory(
+  'Compliance Agent',
+  COMPLIANCE_AGENT_ENDPOINTS
+);
+
 // ==================== KNOWLEDGE SECTIONS ====================
 
 export const COMPLIANCE_AGENT_KNOWLEDGE_SECTIONS: AgentKnowledgeSection[] = [
+  {
+    id: 'endpoint_registry',
+    name: 'API Endpoint Registry',
+    category: 'governance',
+    priority: 0,
+    isRequired: true,
+    content: COMPLIANCE_AGENT_ENDPOINT_DIRECTORY,
+  },
   {
     id: 'compliance_global_rules',
     name: 'Global Compliance Baseline',

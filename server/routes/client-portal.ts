@@ -501,7 +501,16 @@ router.get('/auth/me', requireClientAuth, async (req, res) => {
 
 // Analytics, reports, recordings, conversations, email campaigns
 // IMPORTANT: Must be mounted AFTER unauthenticated /auth/* routes to avoid intercepting login
-router.use('/', requireClientAuth, clientPortalAnalyticsRouter);
+// NOTE: Previously this was `router.use('/', requireClientAuth, analyticsRouter)` which
+// acted as a catch-all and blocked /admin/* routes (that use requireAuth, not client auth)
+// from ever being reached.  Now we conditionally skip client auth for /admin/* paths.
+router.use((req: Request, res: Response, next: NextFunction) => {
+  // Let /admin/* requests pass through without client auth — they use requireAuth instead
+  if (req.path.startsWith('/admin')) return next();
+  // For all other paths, apply client auth then forward to the analytics sub-router
+  requireClientAuth(req, res, next);
+});
+router.use('/', clientPortalAnalyticsRouter);
 
 // ==================== CLIENT ORDERS ====================
 
