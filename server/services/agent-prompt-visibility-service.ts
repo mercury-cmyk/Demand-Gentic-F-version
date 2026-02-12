@@ -779,7 +779,7 @@ Campaign Script:
 This is a discovery call to understand their current lead generation challenges and explore how our platform might help accelerate their pipeline.
 
 Organization Context:
-We are DemandGentic.ai By Pivotal B2B, a B2B demand generation platform that helps companies improve outbound efficiency through AI-powered voice and email agents.`;
+We are Pivotal B2B, a B2B demand generation platform that helps companies improve outbound efficiency through AI-powered voice and email agents.`;
 
   const openaiFullPrompt = openaiSystemPrompt + userPromptTemplate;
   const geminiFullPrompt = geminiSystemPrompt + userPromptTemplate;

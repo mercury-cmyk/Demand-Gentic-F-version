@@ -238,12 +238,12 @@ export default function ResourcesCentrePublic() {
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setLocation("/")}>
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
               <div className="relative flex items-center justify-center">
-                <span className="font-bold text-sm text-violet-700 tracking-tighter">DG</span>
+                <span className="font-bold text-sm text-violet-700 tracking-tighter">PB</span>
                 <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
+              <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
               <span className="text-[10px] text-muted-foreground font-medium">Resources Centre</span>
             </div>
           </div>
@@ -496,7 +496,7 @@ export default function ResourcesCentrePublic() {
             Ready to Transform Your B2B Pipeline?
           </h2>
           <p className="text-lg text-white/80 mb-8 max-w-2xl mx-auto">
-            Schedule a strategy call with our team to see how DemandGentic.ai can help you
+            Schedule a strategy call with our team to see how Pivotal B2B can help you
             generate more qualified leads with AI-powered demand generation.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -517,9 +517,9 @@ export default function ResourcesCentrePublic() {
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-2">
               <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20">
-                <span className="font-bold text-sm text-white tracking-tighter">DG</span>
+                <span className="font-bold text-sm text-white tracking-tighter">PB</span>
               </div>
-              <span className="font-bold">DemandGentic.ai</span>
+              <span className="font-bold">Pivotal B2B</span>
             </div>
             <div className="flex gap-6 text-slate-400 text-sm">
               <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>

@@ -432,7 +432,7 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
            <CardHeader className="py-2 px-4 bg-muted/20 flex flex-row justify-between items-center rounded-t-lg">
              <div className="flex items-center gap-2">
                <div className="font-semibold text-sm">{msg.role === 'user' ? 'You' : 'AI Agent'}</div>
-               <div className="text-xs text-muted-foreground">&lt;{msg.role === 'user' ? 'client@example.com' : 'ai@demandgentic.com'}&gt;</div>
+               <div className="text-xs text-muted-foreground">&lt;{msg.role === 'user' ? 'client@example.com' : 'ai@pivotal-b2b.com'}&gt;</div>
              </div>
              <div className="text-xs text-muted-foreground">{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
            </CardHeader>

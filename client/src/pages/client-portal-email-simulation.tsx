@@ -211,7 +211,7 @@ export default function ClientPortalEmailSimulationPage() {
             <div className="flex items-center gap-2">
               <div className="font-semibold text-sm">{msg.role === 'user' ? 'You (Prospect)' : 'AI Agent'}</div>
               <div className="text-xs text-muted-foreground">
-                &lt;{msg.role === 'user' ? 'prospect@company.com' : 'agent@demandgentic.com'}&gt;
+                &lt;{msg.role === 'user' ? 'prospect@company.com' : 'agent@pivotal-b2b.com'}&gt;
               </div>
             </div>
             <div className="flex items-center gap-2">

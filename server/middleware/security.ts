@@ -34,10 +34,11 @@ export const apiLimiter = rateLimit({
   }
 });
 
-// Strict rate limiter for authentication endpoints: 10 attempts per 15 minutes
+// Strict rate limiter for authentication endpoints: 30 attempts per 15 minutes
+// (accounts for shared office IPs, MFA retries, and multiple users behind NAT)
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // limit each IP to 10 login requests per windowMs
+  max: 30, // limit each IP to 30 login requests per windowMs
   skipSuccessfulRequests: true, // Don't count successful logins
   standardHeaders: true,
   legacyHeaders: false,

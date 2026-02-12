@@ -227,7 +227,7 @@ export default function EmailSimulationPage() {
           <CardHeader className="py-2 px-4 bg-white/5 flex flex-row justify-between items-center rounded-t-lg">
             <div className="flex items-center gap-2">
               <div className="font-semibold text-sm text-white">{msg.role === 'user' ? 'You (Prospect)' : 'AI Agent'}</div>
-              <div className="text-xs text-white/40">&lt;{msg.role === 'user' ? 'prospect@company.com' : 'agent@demandgentic.com'}&gt;</div>
+              <div className="text-xs text-white/40">&lt;{msg.role === 'user' ? 'prospect@company.com' : 'agent@pivotal-b2b.com'}&gt;</div>
             </div>
             <div className="flex items-center gap-2">
               <Button

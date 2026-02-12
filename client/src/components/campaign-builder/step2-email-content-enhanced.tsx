@@ -292,7 +292,7 @@ export function Step2EmailContentEnhanced({
               initialSubject={subject}
               initialPreheader={preheader}
               initialHtml={htmlContent}
-              organizationName="DemandGentic.ai By Pivotal B2B"
+              organizationName="Pivotal B2B"
               organizationAddress="123 Business Street, Suite 500, San Francisco, CA 94105"
               sampleContacts={sampleContacts}
               senderProfileId={senderProfileId}

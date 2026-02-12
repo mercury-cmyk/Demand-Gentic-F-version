@@ -566,7 +566,7 @@ export default function SmtpProvidersPage() {
               <Label htmlFor="displayName">Display Name (From Name)</Label>
               <Input
                 id="displayName"
-                placeholder="DemandGentic"
+                placeholder="Pivotal B2B"
                 value={newProvider.displayName}
                 onChange={(e) => setNewProvider({ ...newProvider, displayName: e.target.value })}
               />

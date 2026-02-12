@@ -6,6 +6,7 @@
  */
 
 import type { AgentKnowledgeSection } from '../types';
+import { AgentEndpointDescriptor, renderEndpointDirectory } from '../endpoint-registry';
 
 export const RESEARCH_ANALYSIS_FOUNDATIONAL_PROMPT = `
 # CORE RESEARCH & ANALYSIS AGENT - FOUNDATIONAL PROMPT v1.0
@@ -384,7 +385,107 @@ Do not include markdown code blocks or explanatory text outside the JSON.
 Ensure all fields match the expected schema for the analysis type.
 `;
 
+const RESEARCH_ANALYSIS_ENDPOINTS: AgentEndpointDescriptor[] = [
+  {
+    method: 'POST',
+    path: '/api/research/leads/:leadId/analyze',
+    summary: 'Single lead quality scoring (ICP fit, accuracy, compliance, relevance)',
+    handler: 'coreResearchAnalysisAgent.analyzeLeadQuality',
+    tags: ['lead_quality'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/leads/batch-analyze',
+    summary: 'Batch lead quality scoring across up to 100 leads',
+    handler: 'coreResearchAnalysisAgent.analyzeLeadQuality',
+    tags: ['lead_quality', 'batch'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/emails/analyze',
+    summary: 'Email content, personalization, compliance, and deliverability review',
+    handler: 'coreResearchAnalysisAgent.analyzeEmailQuality',
+    tags: ['email_quality'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/calls/:callId/analyze',
+    summary: 'Call quality analysis, disposition validation, and coaching signals',
+    handler: 'coreResearchAnalysisAgent.analyzeCallQuality',
+    tags: ['call_quality'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/contacts/:contactId/engagement',
+    summary: 'Cross-channel engagement scoring for a contact',
+    handler: 'coreResearchAnalysisAgent.analyzeEngagement',
+    tags: ['engagement'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/accounts/:accountId/health',
+    summary: 'Account health scoring including fit, engagement, intent, and risk',
+    handler: 'coreResearchAnalysisAgent.scoreAccountHealth',
+    tags: ['account_health'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/contacts/:contactId/communication-quality',
+    summary: 'Communication quality review across email, call, and SMS history',
+    handler: 'coreResearchAnalysisAgent.analyzeCommunicationQuality',
+    tags: ['communication_quality'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/next-best-actions',
+    summary: 'Generate prioritized next-best-action recommendations',
+    handler: 'coreResearchAnalysisAgent.generateNextBestActions',
+    tags: ['next_best_action'],
+  },
+  {
+    method: 'GET',
+    path: '/api/research/scoring-models',
+    summary: 'List available scoring model configurations',
+    handler: 'coreResearchAnalysisAgent.listScoringConfigs',
+    tags: ['scoring_models'],
+  },
+  {
+    method: 'GET',
+    path: '/api/research/scoring-models/:modelId',
+    summary: 'Retrieve a specific scoring model configuration',
+    handler: 'coreResearchAnalysisAgent.getScoringConfig',
+    tags: ['scoring_models'],
+  },
+  {
+    method: 'POST',
+    path: '/api/research/scoring-models',
+    summary: 'Register a custom scoring model configuration',
+    handler: 'coreResearchAnalysisAgent.registerScoringConfig',
+    tags: ['scoring_models'],
+  },
+  {
+    method: 'GET',
+    path: '/api/research/status',
+    summary: 'Operational status, prompt version, and capabilities for the agent',
+    handler: 'coreResearchAnalysisAgent',
+    tags: ['status'],
+  },
+];
+
+const RESEARCH_ANALYSIS_ENDPOINT_DIRECTORY = renderEndpointDirectory(
+  'Research & Analysis',
+  RESEARCH_ANALYSIS_ENDPOINTS
+);
+
 export const RESEARCH_ANALYSIS_KNOWLEDGE_SECTIONS: AgentKnowledgeSection[] = [
+  {
+    id: 'endpoint_registry',
+    name: 'API Endpoint Registry',
+    category: 'governance',
+    priority: 0,
+    isRequired: true,
+    content: RESEARCH_ANALYSIS_ENDPOINT_DIRECTORY,
+  },
   {
     id: 'qa_scoring_methodology',
     name: 'QA Scoring Methodology',

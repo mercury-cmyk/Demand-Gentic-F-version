@@ -202,7 +202,7 @@ export default function ClientServices() {
           <Badge className="mb-4 bg-indigo-500/20 text-indigo-200 border-indigo-500/30 hover:bg-indigo-500/30">Client Guide</Badge>
           <h1 className="text-4xl font-bold tracking-tight mb-4">Welcome, {clientName}</h1>
           <p className="text-lg text-slate-300 leading-relaxed">
-            This guide is designed to help you get the most out of DemandGentic.ai. 
+            This guide is designed to help you get the most out of Pivotal B2B. 
             Follow the steps below to orchestrate your campaigns, manage your intelligence, and drive pipeline growth.
           </p>
         </div>

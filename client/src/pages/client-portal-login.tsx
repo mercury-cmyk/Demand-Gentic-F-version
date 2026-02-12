@@ -57,7 +57,7 @@ export default function ClientPortalLogin() {
           <div className="flex justify-center mb-6">
             <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10 shrink-0 shadow-sm">
               <div className="relative flex items-center justify-center">
-                <span className="font-bold text-xl text-primary tracking-tighter">DG</span>
+                <span className="font-bold text-xl text-primary tracking-tighter">PB</span>
                 <Sparkles className="h-4 w-4 text-blue-500 absolute -top-1.5 -right-2" />
               </div>
             </div>
@@ -66,7 +66,7 @@ export default function ClientPortalLogin() {
             Client Portal
           </CardTitle>
           <div className="text-muted-foreground font-medium text-xs uppercase tracking-widest mt-1 mb-2">
-            Human Intel, AI Execute By DemandGentic
+            Human-Led Strategy. AI-Powered Execution. Built for B2B Demand
           </div>
           <CardDescription className="text-base">
             Intelligent B2B demand generation platform

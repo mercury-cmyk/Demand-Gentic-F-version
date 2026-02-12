@@ -48,13 +48,13 @@ export default function LandingPage() {
           <div className="flex items-center gap-2">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
               <div className="relative flex items-center justify-center">
-                <span className="font-bold text-sm text-violet-700 tracking-tighter">DG</span>
+                <span className="font-bold text-sm text-violet-700 tracking-tighter">PB</span>
                 <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human Led Intelligence, AI Led Execution — By DemandGentic</span>
+              <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human-Led Strategy. AI-Powered Execution.</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -90,7 +90,7 @@ export default function LandingPage() {
           <div className="text-center max-w-4xl mx-auto">
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
-              Human Led Intelligence. AI Led Execution.
+              Human-Led Strategy. AI-Powered Execution.
             </Badge>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
@@ -290,7 +290,7 @@ export default function LandingPage() {
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
               We are not just a platform — we are The Problem Solvers.
-              Human led intelligence meets AI led execution: organization intelligence powers every agent,
+              Human-Led Strategy, AI-Powered Execution: organization intelligence powers every agent,
               every voice conversation, every piece of content, and every pipeline decision.
               Truth, human-to-human connection, and empathy are never optional — they're the foundation.
             </p>
@@ -306,7 +306,7 @@ export default function LandingPage() {
                   <Users className="h-7 w-7 text-white" />
                 </div>
                 <Badge className="mb-3 bg-violet-100 text-violet-700 border-none">The Problem Solvers</Badge>
-                <h3 className="text-xl font-bold mb-2">Human Led Intelligence</h3>
+                <h3 className="text-xl font-bold mb-2">Human-Led Strategy</h3>
                 <p className="text-muted-foreground text-sm mb-4">
                   11+ years of front-line B2B demand experience. We lead with problem intelligence,
                   solution mapping, and empathy — AI executes what humans architect.
@@ -387,7 +387,7 @@ export default function LandingPage() {
           <div className="p-8 rounded-3xl bg-slate-900 text-white">
             <div className="text-center mb-8">
               <h3 className="text-2xl font-bold mb-2">How It Comes Together</h3>
-              <p className="text-slate-400">Human led intelligence, AI led execution — from reasoning to qualified pipeline</p>
+              <p className="text-slate-400">Human-Led Strategy. AI-Powered Execution — from reasoning to qualified pipeline</p>
             </div>
             <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
               {[
@@ -1066,7 +1066,7 @@ export default function LandingPage() {
 
           <div className="text-center p-8 rounded-2xl bg-slate-900 text-white">
             <p className="text-2xl font-bold">
-              Human Led Intelligence. AI Led Execution.{" "}
+              Human-Led Strategy. AI-Powered Execution.{" "}
               <span className="text-violet-400">We are The Problem Solvers.</span>
             </p>
           </div>
@@ -1183,20 +1183,20 @@ export default function LandingPage() {
               <div className="flex items-center gap-2 mb-4">
                 <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 shrink-0">
                   <div className="relative flex items-center justify-center">
-                    <span className="font-bold text-sm text-white tracking-tighter">DG</span>
+                    <span className="font-bold text-sm text-white tracking-tighter">PB</span>
                     <Sparkles className="h-2 w-2 text-blue-400 absolute -top-1 -right-1.5" />
                   </div>
                 </div>
                 <div className="flex flex-col">
-                  <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-                  <span className="text-[10px] text-slate-400 font-medium">Human Led Intelligence, AI Led Execution — By DemandGentic</span>
+                  <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Human-Led Strategy. AI-Powered Execution.</span>
                 </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">
                 Your entire revenue engine. Voice, content, pipeline, data — one intelligent platform.
               </p>
               <div className="text-slate-500 text-xs space-y-1">
-                <p className="font-medium text-slate-400">DemandGentic LLC</p>
+                <p className="font-medium text-slate-400">Pivotal B2B LLC</p>
                 <p>Lewes, Delaware</p>
                 <p><a href="tel:+14179003844" className="hover:text-white transition-colors">(417) 900-3844</a></p>
                 <p><a href="https://demandgentic.ai/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">demandgentic.ai</a></p>

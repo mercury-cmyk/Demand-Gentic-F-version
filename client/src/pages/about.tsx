@@ -46,7 +46,7 @@ export default function AboutPage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human-Led Strategy. AI-Powered Execution.</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -601,13 +601,13 @@ export default function AboutPage() {
               <div className="flex items-center gap-2 mb-4">
                 <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 shrink-0">
                   <div className="relative flex items-center justify-center">
-                    <span className="font-bold text-sm text-white tracking-tighter">DG</span>
+                    <span className="font-bold text-sm text-white tracking-tighter">PB</span>
                     <Sparkles className="h-2 w-2 text-blue-400 absolute -top-1 -right-1.5" />
                   </div>
                 </div>
                 <div className="flex flex-col">
-                  <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-                  <span className="text-[10px] text-slate-400 font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+                  <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Human-Led Strategy. AI-Powered Execution.</span>
                 </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">

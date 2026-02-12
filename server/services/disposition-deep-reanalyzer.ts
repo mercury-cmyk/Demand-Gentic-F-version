@@ -1,0 +1,1528 @@
+/**
+ * Disposition Deep Reanalyzer Service
+ *
+ * AI-powered deep analysis of call recordings & transcripts to detect
+ * misclassified dispositions with:
+ *   - Full transcript analysis against campaign goals
+ *   - Agent behavior scoring (engagement, empathy, closing, objection handling)
+ *   - Call quality assessment vs campaign QA parameters
+ *   - Misclassification detection with confidence scoring
+ *   - Push-to-client / QA / export capabilities
+ */
+
+import { db } from "../db";
+import {
+  callSessions,
+  dialerCallAttempts,
+  campaigns,
+  campaignQueue,
+  leads,
+  contacts,
+  accounts,
+  activityLog,
+  qcWorkQueue,
+  callQualityRecords,
+  type CanonicalDisposition,
+} from "@shared/schema";
+import { eq, and, sql, gte, lte, isNotNull, desc } from "drizzle-orm";
+import {
+  loadCampaignQualificationContext,
+  determineSmartDisposition,
+  type DispositionAnalysisResult,
+  type CampaignQualificationContext,
+} from "./smart-disposition-analyzer";
+import OpenAI from "openai";
+
+const LOG_PREFIX = "[DeepReanalyzer]";
+
+// ==================== AI CLIENT ====================
+
+function getAIClient(): { client: OpenAI; model: string } {
+  const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
+  if (hasDeepSeek) {
+    return {
+      client: new OpenAI({
+        apiKey: process.env.DEEPSEEK_API_KEY,
+        baseURL: "https://api.deepseek.com/v1",
+      }),
+      model: "deepseek-chat",
+    };
+  }
+  return {
+    client: new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    }),
+    model: "gpt-4o",
+  };
+}
+
+// ==================== TYPES ====================
+
+export interface DeepReanalysisFilter {
+  campaignId?: string;
+  dispositions?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  minDurationSec?: number;
+  maxDurationSec?: number;
+  hasTranscript?: boolean;
+  hasRecording?: boolean;
+  agentType?: "ai" | "human" | "all";
+  confidenceThreshold?: number; // Only show results above this confidence
+  limit?: number;
+  offset?: number;
+}
+
+export interface AgentBehaviorScore {
+  engagementScore: number;       // 0-100
+  empathyScore: number;          // 0-100
+  objectionHandlingScore: number;// 0-100
+  closingScore: number;          // 0-100
+  qualificationScore: number;    // 0-100
+  scriptAdherenceScore: number;  // 0-100
+  overallScore: number;          // 0-100
+  strengths: string[];
+  weaknesses: string[];
+  coachingNotes: string;
+}
+
+export interface CallQualityAssessment {
+  campaignAlignmentScore: number;  // 0-100
+  talkingPointsCoverage: number;   // 0-100
+  missedTalkingPoints: string[];
+  objectionResponseQuality: string;
+  sentimentProgression: string;    // "positive" | "negative" | "neutral" | "mixed"
+  identityConfirmed: boolean;
+  qualificationMet: boolean;
+  keyMoments: Array<{
+    timestamp: string;
+    description: string;
+    impact: "positive" | "negative" | "neutral";
+  }>;
+}
+
+export interface DeepReanalysisCallDetail {
+  callSessionId: string;
+  callAttemptId: string | null;
+  contactId: string | null;
+  contactName: string;
+  companyName: string;
+  contactEmail: string | null;
+  contactPhone: string;
+  campaignId: string;
+  campaignName: string;
+  campaignObjective: string | null;
+  durationSec: number;
+  currentDisposition: string;
+  suggestedDisposition: string;
+  confidence: number;
+  reasoning: string;
+  positiveSignals: string[];
+  negativeSignals: string[];
+  shouldOverride: boolean;
+  agentType: string | null;
+  agentBehavior: AgentBehaviorScore | null;
+  callQuality: CallQualityAssessment | null;
+  fullTranscript: any;
+  transcriptPreview: string;
+  recordingUrl: string | null;
+  callDate: string;
+  hasLead: boolean;
+  leadId: string | null;
+  qaStatus: string | null;
+  actionTaken: string | null;
+  // For push / export
+  pushStatus: {
+    pushedToClient: boolean;
+    pushedToQA: boolean;
+    exportedAt: string | null;
+  };
+}
+
+export interface DeepReanalysisSummary {
+  totalAnalyzed: number;
+  totalShouldChange: number;
+  totalChanged: number;
+  totalErrors: number;
+  dryRun: boolean;
+  avgConfidence: number;
+  avgAgentScore: number;
+  avgCallQuality: number;
+  breakdown: {
+    currentDisposition: string;
+    suggestedDisposition: string;
+    count: number;
+    avgConfidence: number;
+  }[];
+  agentBehaviorSummary: {
+    avgEngagement: number;
+    avgEmpathy: number;
+    avgObjectionHandling: number;
+    avgClosing: number;
+    avgQualification: number;
+    avgScriptAdherence: number;
+    topStrengths: string[];
+    topWeaknesses: string[];
+  };
+  callQualitySummary: {
+    avgCampaignAlignment: number;
+    avgTalkingPointsCoverage: number;
+    topMissedTalkingPoints: string[];
+    identityConfirmedRate: number;
+    qualificationMetRate: number;
+  };
+  calls: DeepReanalysisCallDetail[];
+  actionsSummary: {
+    newLeadsCreated: number;
+    leadsRemovedFromCampaign: number;
+    movedToQA: number;
+    movedToNeedsReview: number;
+    retriesScheduled: number;
+    pushedToClient: number;
+  };
+}
+
+// ==================== TRANSCRIPT PARSING ====================
+
+/**
+ * Parse transcript from any stored format into structured turns.
+ * Transcripts are stored as plain text "Agent: ...\nContact: ..." lines,
+ * but may also be JSON arrays from older formats.
+ */
+function parseTranscriptToTurns(transcript: any): { role: string; text: string }[] {
+  if (!transcript) return [];
+
+  const raw = typeof transcript === "string" ? transcript : JSON.stringify(transcript);
+
+  // Try JSON array format first (legacy/test calls)
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((t: any) => ({
+        role: String(t.role || t.speaker || "unknown").toLowerCase(),
+        text: String(t.message || t.text || t.content || "").trim(),
+      })).filter((t: { text: string }) => t.text.length > 0);
+    }
+  } catch {
+    // Not JSON — expected for plain text transcripts
+  }
+
+  // Plain text format: "Agent: ...\nContact: ..." (primary format from Gemini dialer)
+  const lines = raw.split("\n").filter((l: string) => l.trim());
+  const turns: { role: string; text: string }[] = [];
+  let currentRole = "";
+  let currentText = "";
+
+  for (const line of lines) {
+    const match = line.match(/^(Agent|Contact|agent|contact|AI|Human|System|unknown)\s*:\s*(.*)$/i);
+    if (match) {
+      // Save previous turn
+      if (currentRole && currentText.trim()) {
+        turns.push({ role: currentRole, text: currentText.trim() });
+      }
+      currentRole = match[1].toLowerCase();
+      if (currentRole === "ai" || currentRole === "human") {
+        currentRole = currentRole === "ai" ? "agent" : "contact";
+      }
+      currentText = match[2];
+    } else if (currentRole) {
+      // Continuation of previous speaker
+      currentText += " " + line.trim();
+    }
+  }
+  // Push final turn
+  if (currentRole && currentText.trim()) {
+    turns.push({ role: currentRole, text: currentText.trim() });
+  }
+
+  return turns;
+}
+
+/**
+ * Compute conversation metrics from parsed turns
+ */
+function computeConversationMetrics(turns: { role: string; text: string }[]) {
+  const agentTurns = turns.filter(t => t.role === "agent");
+  const contactTurns = turns.filter(t => t.role === "contact");
+  const totalWords = turns.reduce((sum, t) => sum + t.text.split(/\s+/).length, 0);
+  const contactWords = contactTurns.reduce((sum, t) => sum + t.text.split(/\s+/).length, 0);
+  const agentWords = agentTurns.reduce((sum, t) => sum + t.text.split(/\s+/).length, 0);
+
+  return {
+    totalTurns: turns.length,
+    agentTurns: agentTurns.length,
+    contactTurns: contactTurns.length,
+    totalWords,
+    contactWords,
+    agentWords,
+    contactTalkRatio: totalWords > 0 ? Math.round((contactWords / totalWords) * 100) : 0,
+    avgContactTurnLength: contactTurns.length > 0 ? Math.round(contactWords / contactTurns.length) : 0,
+    hasRealConversation: contactTurns.length >= 2 && contactWords >= 10,
+  };
+}
+
+// ==================== DEEP AI ANALYSIS ====================
+
+/**
+ * Run AI-powered deep transcript analysis for a single call
+ */
+async function runDeepAIAnalysis(
+  transcript: any,
+  campaignContext: CampaignQualificationContext | null,
+  currentDisposition: string,
+  durationSec: number,
+  campaignObjective: string | null,
+  qaParameters: any,
+  talkingPoints: any,
+  campaignObjections: any
+): Promise<{
+  agentBehavior: AgentBehaviorScore;
+  callQuality: CallQualityAssessment;
+  dispositionAssessment: {
+    suggestedDisposition: string;
+    confidence: number;
+    reasoning: string;
+    positiveSignals: string[];
+    negativeSignals: string[];
+    shouldOverride: boolean;
+  };
+}> {
+  const { client, model } = getAIClient();
+
+  // Parse transcript into structured turns
+  const turns = parseTranscriptToTurns(transcript);
+  const metrics = computeConversationMetrics(turns);
+
+  // Format transcript with turn numbers for AI analysis
+  let structuredTranscript = "";
+  if (turns.length > 0) {
+    structuredTranscript = turns
+      .map((t, i) => `[Turn ${i + 1}] ${t.role === "agent" ? "AGENT" : "CONTACT"}: ${t.text}`)
+      .join("\n");
+  } else {
+    // Fallback: use raw string
+    structuredTranscript = String(transcript || "").trim();
+  }
+
+  if (!structuredTranscript || structuredTranscript.length < 20) {
+    return getDefaultDeepAnalysis(currentDisposition, durationSec);
+  }
+
+  // Smart truncation: keep beginning + end (closing part is critical for disposition)
+  const maxChars = 16000;
+  let finalTranscript = structuredTranscript;
+  if (structuredTranscript.length > maxChars) {
+    const keepStart = Math.floor(maxChars * 0.4);
+    const keepEnd = Math.floor(maxChars * 0.55);
+    finalTranscript =
+      structuredTranscript.slice(0, keepStart) +
+      "\n\n[... middle of conversation omitted for brevity ...]\n\n" +
+      structuredTranscript.slice(-keepEnd);
+  }
+
+  // Build talking points string
+  const talkingPointsStr = Array.isArray(talkingPoints)
+    ? talkingPoints.map((tp: any) => typeof tp === "string" ? tp : tp.point || tp.content || JSON.stringify(tp)).join("\n  - ")
+    : "";
+
+  // Build objections string
+  const objectionsStr = Array.isArray(campaignObjections)
+    ? campaignObjections.map((o: any) => `Objection: "${o.objection || o.text || ""}" → Expected Response: "${o.response || ""}"`).join("\n  ")
+    : "";
+
+  // Extract full qualification context
+  const qualificationCriteria = campaignContext?.qualificationCriteria;
+  const qualifyingConditions = Array.isArray(qualificationCriteria?.qualifyingConditions)
+    ? qualificationCriteria.qualifyingConditions.join("\n  - ")
+    : "";
+  const disqualifyingConditions = Array.isArray(qualificationCriteria?.disqualifyingConditions)
+    ? qualificationCriteria.disqualifyingConditions.join("\n  - ")
+    : "";
+  const positiveKeywords = campaignContext?.positiveKeywords?.length
+    ? campaignContext.positiveKeywords.join(", ")
+    : "";
+  const negativeKeywords = campaignContext?.negativeKeywords?.length
+    ? campaignContext.negativeKeywords.join(", ")
+    : "";
+
+  // Meeting/success criteria
+  const meetingCriteria = campaignContext?.successIndicators?.meetingCriteria;
+  const meetingCriteriaStr = meetingCriteria
+    ? `Min Seniority: ${meetingCriteria.minimumSeniority || "N/A"}, Required Authority: ${meetingCriteria.requiredAuthority?.join(", ") || "N/A"}, Timeframe: ${meetingCriteria.timeframeRequirement || "N/A"}`
+    : "";
+
+  const secondarySuccess = campaignContext?.successIndicators?.secondarySuccess;
+  const secondarySuccessStr = Array.isArray(secondarySuccess)
+    ? secondarySuccess.join(", ")
+    : "";
+
+  // QA parameters
+  let qaParamsStr = "";
+  if (qaParameters) {
+    try {
+      const qa = typeof qaParameters === "string" ? JSON.parse(qaParameters) : qaParameters;
+      const parts: string[] = [];
+      if (qa.minCallDuration) parts.push(`Min call duration: ${qa.minCallDuration}s`);
+      if (qa.identityVerificationRequired) parts.push("Identity verification required");
+      if (qa.companyMentionRequired) parts.push("Company mention required");
+      if (qa.interestConfirmationRequired) parts.push("Interest confirmation required");
+      if (qa.qualificationQuestions?.length) parts.push(`Qualification questions: ${qa.qualificationQuestions.join(", ")}`);
+      qaParamsStr = parts.join("\n  - ");
+    } catch { /* ignore parse errors */ }
+  }
+
+  const systemPrompt = `You are a senior B2B call center QA analyst performing deep disposition reanalysis. Your job is to determine if calls were correctly classified by analyzing the ACTUAL conversation content.
+
+═══════════════════════════════════════════════════════
+CAMPAIGN CONTEXT
+═══════════════════════════════════════════════════════
+Campaign: ${campaignContext?.campaignName || "Unknown"}
+Objective: ${campaignObjective || "Not specified"}
+Primary Success Criteria: ${campaignContext?.successIndicators?.primarySuccess || "Not specified"}
+${secondarySuccessStr ? `Secondary Success Criteria: ${secondarySuccessStr}` : ""}
+${campaignContext?.successIndicators?.qualifiedLeadDefinition ? `Qualified Lead Definition: ${campaignContext.successIndicators.qualifiedLeadDefinition}` : ""}
+${meetingCriteriaStr ? `Meeting Criteria: ${meetingCriteriaStr}` : ""}
+
+${talkingPointsStr ? `Required Talking Points:\n  - ${talkingPointsStr}` : ""}
+${objectionsStr ? `Known Objections & Responses:\n  ${objectionsStr}` : ""}
+${qualifyingConditions ? `Qualifying Conditions:\n  - ${qualifyingConditions}` : ""}
+${disqualifyingConditions ? `Disqualifying Conditions:\n  - ${disqualifyingConditions}` : ""}
+${positiveKeywords ? `Positive Signal Keywords: ${positiveKeywords}` : ""}
+${negativeKeywords ? `Negative Signal Keywords: ${negativeKeywords}` : ""}
+${qaParamsStr ? `QA Parameters:\n  - ${qaParamsStr}` : ""}
+
+═══════════════════════════════════════════════════════
+CALL METADATA
+═══════════════════════════════════════════════════════
+Current Disposition: ${currentDisposition}
+Call Duration: ${durationSec}s
+Total Turns: ${metrics.totalTurns} (Agent: ${metrics.agentTurns}, Contact: ${metrics.contactTurns})
+Contact Talk Ratio: ${metrics.contactTalkRatio}%
+Contact Words: ${metrics.contactWords} (avg ${metrics.avgContactTurnLength} words/turn)
+Real Conversation: ${metrics.hasRealConversation ? "YES" : "NO"}
+
+═══════════════════════════════════════════════════════
+DISPOSITION CLASSIFICATION RULES
+═══════════════════════════════════════════════════════
+
+VALID DISPOSITIONS (choose EXACTLY one):
+1. qualified_lead — Contact expressed genuine interest AND met qualification criteria (agreed to meeting/demo/next steps, provided availability, confirmed authority/need)
+2. callback_requested — Contact explicitly asked to be called back at a different time (gave a specific time or said "call me later/tomorrow/next week")
+3. not_interested — Contact clearly and definitively declined after real engagement (said "no", "not interested", "we're all set", refused value proposition)
+4. do_not_call — Contact explicitly said "don't call me again", "remove me from your list", "stop calling", or similar DNC language
+5. voicemail — Call went to voicemail/answering machine (greeting message, beep, no live human interaction)
+6. no_answer — Phone rang without answer, busy signal, or only IVR/auto-attendant with no human conversation
+7. invalid_data — Wrong number, fax machine, disconnected number, or contact no longer at company
+8. needs_review — ONLY use when the call is genuinely ambiguous (mixed signals, unclear outcome, contact was engaged but no clear resolution)
+
+CRITICAL ANALYSIS RULES:
+- The agent is an AI voice agent — do NOT penalize pronunciation artifacts (these are STT transcription errors)
+- The system intentionally uses a two-step opening: 1) confirm identity 2) introduce purpose — this is BY DESIGN
+- Base disposition EXCLUSIVELY on what was ACTUALLY SAID in the transcript, never on assumptions
+- A call currently marked "not_interested" where the contact asked questions, showed curiosity, or engaged for 60+ seconds → MISCLASSIFIED, change to "needs_review" or "callback_requested"
+- A call currently marked "qualified_lead" but contact only said "sure", "okay", "uh huh" without real commitment, or no explicit agreement to next steps → MISCLASSIFIED, change to "needs_review"
+- A call currently marked "qualified_lead" where the contact hung up, said "not right now", or the call ended abruptly → MISCLASSIFIED
+- Short calls (<15s) with no contact speech are almost always "no_answer" or "voicemail" — if currently marked otherwise, OVERRIDE
+- If contact said "I'm busy right now", "call me back", "not a good time", "in a meeting" → "callback_requested", NOT "not_interested"
+- "not_interested" requires an actual explicit refusal AFTER the value proposition was presented — a hangup alone is NOT "not_interested"
+- Look at the CLOSING of the call — the final few turns often reveal the true outcome
+- YOUR JOB IS TO FIND MISCLASSIFICATIONS. Be assertive — if the transcript evidence contradicts the current disposition, set shouldOverride to true
+- shouldOverride = true when the transcript clearly shows the current disposition is wrong. You do NOT need extreme certainty — if the evidence points to a different disposition, flag it
+- shouldOverride = false ONLY if the current disposition is genuinely correct based on the transcript evidence
+
+Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
+{
+  "agentBehavior": {
+    "engagementScore": <0-100>,
+    "empathyScore": <0-100>,
+    "objectionHandlingScore": <0-100>,
+    "closingScore": <0-100>,
+    "qualificationScore": <0-100>,
+    "scriptAdherenceScore": <0-100>,
+    "overallScore": <0-100>,
+    "strengths": ["specific strength from this call"],
+    "weaknesses": ["specific weakness from this call"],
+    "coachingNotes": "one actionable coaching recommendation"
+  },
+  "callQuality": {
+    "campaignAlignmentScore": <0-100>,
+    "talkingPointsCoverage": <0-100>,
+    "missedTalkingPoints": ["specific points that were not covered"],
+    "objectionResponseQuality": "good|fair|poor|n/a",
+    "sentimentProgression": "positive|negative|neutral|mixed",
+    "identityConfirmed": <boolean - did agent confirm contact's identity?>,
+    "qualificationMet": <boolean - did contact meet campaign qualification criteria?>,
+    "keyMoments": [{"timestamp": "Turn N", "description": "what happened", "impact": "positive|negative|neutral"}]
+  },
+  "dispositionAssessment": {
+    "suggestedDisposition": "<EXACTLY one of: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data, needs_review, callback_requested>",
+    "confidence": <0.0-1.0>,
+    "reasoning": "2-3 sentence explanation citing specific parts of the transcript that justify this disposition",
+    "positiveSignals": ["quote or paraphrase specific contact statements showing interest"],
+    "negativeSignals": ["quote or paraphrase specific contact statements showing disinterest"],
+    "shouldOverride": <boolean - true ONLY if current disposition is clearly wrong>
+  }
+}`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Analyze this call transcript:\n\n${finalTranscript}` },
+      ],
+      temperature: 0.1,
+      max_tokens: 5000,
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error("Empty AI response");
+
+    const parsed = JSON.parse(content);
+
+    // Validate suggested disposition is a valid value
+    const validDispositions = [
+      "qualified_lead", "not_interested", "do_not_call", "voicemail",
+      "no_answer", "invalid_data", "needs_review", "callback_requested",
+    ];
+    const suggestedDisp = validDispositions.includes(parsed.dispositionAssessment?.suggestedDisposition)
+      ? parsed.dispositionAssessment.suggestedDisposition
+      : currentDisposition;
+
+    // Accept AI's override decision — it has already been instructed to only override when evidence is clear
+    const confidence = Math.min(Math.max(parsed.dispositionAssessment?.confidence ?? 0.5, 0), 1);
+    const shouldOverride = (parsed.dispositionAssessment?.shouldOverride ?? false) && confidence >= 0.5;
+
+    return {
+      agentBehavior: {
+        engagementScore: clampScore(parsed.agentBehavior?.engagementScore),
+        empathyScore: clampScore(parsed.agentBehavior?.empathyScore),
+        objectionHandlingScore: clampScore(parsed.agentBehavior?.objectionHandlingScore),
+        closingScore: clampScore(parsed.agentBehavior?.closingScore),
+        qualificationScore: clampScore(parsed.agentBehavior?.qualificationScore),
+        scriptAdherenceScore: clampScore(parsed.agentBehavior?.scriptAdherenceScore),
+        overallScore: clampScore(parsed.agentBehavior?.overallScore),
+        strengths: Array.isArray(parsed.agentBehavior?.strengths) ? parsed.agentBehavior.strengths : [],
+        weaknesses: Array.isArray(parsed.agentBehavior?.weaknesses) ? parsed.agentBehavior.weaknesses : [],
+        coachingNotes: parsed.agentBehavior?.coachingNotes || "",
+      },
+      callQuality: {
+        campaignAlignmentScore: clampScore(parsed.callQuality?.campaignAlignmentScore),
+        talkingPointsCoverage: clampScore(parsed.callQuality?.talkingPointsCoverage, 0),
+        missedTalkingPoints: Array.isArray(parsed.callQuality?.missedTalkingPoints) ? parsed.callQuality.missedTalkingPoints : [],
+        objectionResponseQuality: parsed.callQuality?.objectionResponseQuality || "n/a",
+        sentimentProgression: parsed.callQuality?.sentimentProgression || "neutral",
+        identityConfirmed: parsed.callQuality?.identityConfirmed ?? false,
+        qualificationMet: parsed.callQuality?.qualificationMet ?? false,
+        keyMoments: Array.isArray(parsed.callQuality?.keyMoments) ? parsed.callQuality.keyMoments : [],
+      },
+      dispositionAssessment: {
+        suggestedDisposition: suggestedDisp,
+        confidence,
+        reasoning: parsed.dispositionAssessment?.reasoning || "AI analysis completed",
+        positiveSignals: Array.isArray(parsed.dispositionAssessment?.positiveSignals) ? parsed.dispositionAssessment.positiveSignals : [],
+        negativeSignals: Array.isArray(parsed.dispositionAssessment?.negativeSignals) ? parsed.dispositionAssessment.negativeSignals : [],
+        shouldOverride,
+      },
+    };
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} AI analysis failed:`, error.message);
+    return getDefaultDeepAnalysis(currentDisposition, durationSec);
+  }
+}
+
+/** Clamp a score to 0-100, defaulting to given value */
+function clampScore(val: any, defaultVal: number = 50): number {
+  const n = typeof val === "number" ? val : defaultVal;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function getDefaultDeepAnalysis(currentDisposition: string, durationSec: number) {
+  return {
+    agentBehavior: {
+      engagementScore: 0,
+      empathyScore: 0,
+      objectionHandlingScore: 0,
+      closingScore: 0,
+      qualificationScore: 0,
+      scriptAdherenceScore: 0,
+      overallScore: 0,
+      strengths: [],
+      weaknesses: ["Insufficient transcript data for analysis"],
+      coachingNotes: "No transcript available for behavior analysis",
+    },
+    callQuality: {
+      campaignAlignmentScore: 0,
+      talkingPointsCoverage: 0,
+      missedTalkingPoints: [],
+      objectionResponseQuality: "n/a" as const,
+      sentimentProgression: "neutral" as const,
+      identityConfirmed: false,
+      qualificationMet: false,
+      keyMoments: [],
+    },
+    dispositionAssessment: {
+      suggestedDisposition: currentDisposition,
+      confidence: 0.3,
+      reasoning: "Insufficient data for deep analysis — no actionable transcript",
+      positiveSignals: [] as string[],
+      negativeSignals: [] as string[],
+      shouldOverride: false,
+    },
+  };
+}
+
+// ==================== DEEP SINGLE CALL ANALYSIS ====================
+
+export async function deepAnalyzeSingleCall(
+  callSessionId: string
+): Promise<DeepReanalysisCallDetail | null> {
+  console.log(`${LOG_PREFIX} Deep analyzing: ${callSessionId}`);
+
+  const [session] = await db
+    .select({
+      id: callSessions.id,
+      aiDisposition: callSessions.aiDisposition,
+      aiTranscript: callSessions.aiTranscript,
+      durationSec: callSessions.durationSec,
+      recordingUrl: callSessions.recordingUrl,
+      campaignId: callSessions.campaignId,
+      contactId: callSessions.contactId,
+      startedAt: callSessions.startedAt,
+      toNumberE164: callSessions.toNumberE164,
+      agentType: callSessions.agentType,
+    })
+    .from(callSessions)
+    .where(eq(callSessions.id, callSessionId))
+    .limit(1);
+
+  if (!session) return null;
+
+  // Get call attempt with full transcript
+  const attempts = await db
+    .select({
+      id: dialerCallAttempts.id,
+      disposition: dialerCallAttempts.disposition,
+      phoneDialed: dialerCallAttempts.phoneDialed,
+      fullTranscript: dialerCallAttempts.fullTranscript,
+      queueItemId: dialerCallAttempts.queueItemId,
+    })
+    .from(dialerCallAttempts)
+    .where(eq(dialerCallAttempts.callSessionId, callSessionId))
+    .limit(1);
+
+  const attempt = attempts[0] || null;
+
+  // Get contact & account info
+  let contactName = "Unknown";
+  let companyName = "Unknown";
+  let contactEmail: string | null = null;
+  if (session.contactId) {
+    const [ci] = await db
+      .select({
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        companyName: accounts.name,
+      })
+      .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(eq(contacts.id, session.contactId))
+      .limit(1);
+    if (ci) {
+      contactName = ci.fullName || [ci.firstName, ci.lastName].filter(Boolean).join(" ") || "Unknown";
+      companyName = ci.companyName || "Unknown";
+      contactEmail = ci.email;
+    }
+  }
+
+  // Get campaign with full context
+  let campaignName = "Unknown";
+  let campaignObjective: string | null = null;
+  let qaParams: any = null;
+  let talkingPoints: any = null;
+  let campaignObjections: any = null;
+  if (session.campaignId) {
+    const [camp] = await db
+      .select({
+        name: campaigns.name,
+        campaignObjective: campaigns.campaignObjective,
+        qaParameters: campaigns.qaParameters,
+        talkingPoints: campaigns.talkingPoints,
+        campaignObjections: campaigns.campaignObjections,
+      })
+      .from(campaigns)
+      .where(eq(campaigns.id, session.campaignId))
+      .limit(1);
+    if (camp) {
+      campaignName = camp.name;
+      campaignObjective = camp.campaignObjective;
+      qaParams = camp.qaParameters;
+      talkingPoints = camp.talkingPoints;
+      campaignObjections = camp.campaignObjections;
+    }
+  }
+
+  // Check lead
+  let leadId: string | null = null;
+  let qaStatus: string | null = null;
+  if (attempt) {
+    const [existingLead] = await db
+      .select({ id: leads.id, qaStatus: leads.qaStatus })
+      .from(leads)
+      .where(eq(leads.callAttemptId, attempt.id))
+      .limit(1);
+    leadId = existingLead?.id || null;
+    qaStatus = existingLead?.qaStatus || null;
+  }
+
+  // Load campaign context for smart analysis
+  const campaignCtx = session.campaignId
+    ? await loadCampaignQualificationContext(session.campaignId)
+    : null;
+
+  // Use full transcript from attempt if available, otherwise session
+  const transcript = attempt?.fullTranscript || session.aiTranscript;
+  const currentDisp = session.aiDisposition || "unknown";
+
+  // Run deep AI analysis
+  const deepAnalysis = await runDeepAIAnalysis(
+    transcript,
+    campaignCtx,
+    currentDisp,
+    session.durationSec || 0,
+    campaignObjective,
+    qaParams,
+    talkingPoints,
+    campaignObjections
+  );
+
+  // Build transcript preview from parsed turns
+  const previewTurns = parseTranscriptToTurns(transcript);
+  const transcriptPreview = previewTurns.length > 0
+    ? previewTurns.map(t => `${t.role === "agent" ? "Agent" : "Contact"}: ${t.text}`).join(" | ").slice(0, 400)
+    : String(transcript || "").slice(0, 400);
+
+  return {
+    callSessionId: session.id,
+    callAttemptId: attempt?.id || null,
+    contactId: session.contactId,
+    contactName,
+    companyName,
+    contactEmail,
+    contactPhone: session.toNumberE164,
+    campaignId: session.campaignId || "",
+    campaignName,
+    campaignObjective,
+    durationSec: session.durationSec || 0,
+    currentDisposition: currentDisp,
+    suggestedDisposition: deepAnalysis.dispositionAssessment.suggestedDisposition,
+    confidence: deepAnalysis.dispositionAssessment.confidence,
+    reasoning: deepAnalysis.dispositionAssessment.reasoning,
+    positiveSignals: deepAnalysis.dispositionAssessment.positiveSignals,
+    negativeSignals: deepAnalysis.dispositionAssessment.negativeSignals,
+    shouldOverride: deepAnalysis.dispositionAssessment.shouldOverride,
+    agentType: session.agentType,
+    agentBehavior: deepAnalysis.agentBehavior,
+    callQuality: deepAnalysis.callQuality,
+    fullTranscript: transcript,
+    transcriptPreview,
+    recordingUrl: session.recordingUrl,
+    callDate: session.startedAt?.toISOString() || "",
+    hasLead: !!leadId,
+    leadId,
+    qaStatus,
+    actionTaken: null,
+    pushStatus: {
+      pushedToClient: false,
+      pushedToQA: !!leadId && qaStatus === "under_review",
+      exportedAt: null,
+    },
+  };
+}
+
+// ==================== DEEP BATCH REANALYSIS ====================
+
+export async function deepReanalyzeBatch(
+  filters: DeepReanalysisFilter,
+  dryRun: boolean = true
+): Promise<DeepReanalysisSummary> {
+  const limit = Math.min(filters.limit || 50, 200);
+  const offset = filters.offset || 0;
+
+  console.log(`${LOG_PREFIX} Starting deep batch reanalysis. DryRun=${dryRun}, Limit=${limit}`);
+
+  // Build conditions
+  const conditions: any[] = [];
+  if (filters.campaignId) conditions.push(eq(callSessions.campaignId, filters.campaignId));
+  if (filters.dispositions?.length) {
+    conditions.push(
+      sql`${callSessions.aiDisposition} IN (${sql.join(
+        filters.dispositions.map((d) => sql`${d}`),
+        sql`, `
+      )})`
+    );
+  }
+  if (filters.dateFrom) conditions.push(gte(callSessions.startedAt, new Date(filters.dateFrom)));
+  if (filters.dateTo) conditions.push(lte(callSessions.startedAt, new Date(filters.dateTo)));
+  if (filters.minDurationSec !== undefined) conditions.push(gte(callSessions.durationSec, filters.minDurationSec));
+  if (filters.maxDurationSec !== undefined) conditions.push(lte(callSessions.durationSec, filters.maxDurationSec));
+  if (filters.hasTranscript !== false) conditions.push(isNotNull(callSessions.aiTranscript));
+  if (filters.hasRecording) conditions.push(isNotNull(callSessions.recordingUrl));
+  if (filters.agentType && filters.agentType !== "all") {
+    conditions.push(eq(callSessions.agentType, filters.agentType));
+  }
+
+  const whereClause = conditions.length > 0 ? and(...conditions) : isNotNull(callSessions.aiTranscript);
+
+  const sessions = await db
+    .select({
+      id: callSessions.id,
+      aiDisposition: callSessions.aiDisposition,
+      aiTranscript: callSessions.aiTranscript,
+      durationSec: callSessions.durationSec,
+      recordingUrl: callSessions.recordingUrl,
+      campaignId: callSessions.campaignId,
+      contactId: callSessions.contactId,
+      startedAt: callSessions.startedAt,
+      toNumberE164: callSessions.toNumberE164,
+      agentType: callSessions.agentType,
+    })
+    .from(callSessions)
+    .where(whereClause)
+    .orderBy(desc(callSessions.startedAt))
+    .limit(limit)
+    .offset(offset);
+
+  console.log(`${LOG_PREFIX} Found ${sessions.length} calls to deep-analyze`);
+
+  // Pre-load contexts
+  const campaignCache = new Map<string, {
+    ctx: CampaignQualificationContext | null;
+    name: string;
+    objective: string | null;
+    qaParams: any;
+    talkingPoints: any;
+    objections: any;
+  }>();
+
+  for (const s of sessions) {
+    if (s.campaignId && !campaignCache.has(s.campaignId)) {
+      const ctx = await loadCampaignQualificationContext(s.campaignId);
+      const [camp] = await db
+        .select({
+          name: campaigns.name,
+          campaignObjective: campaigns.campaignObjective,
+          qaParameters: campaigns.qaParameters,
+          talkingPoints: campaigns.talkingPoints,
+          campaignObjections: campaigns.campaignObjections,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.id, s.campaignId))
+        .limit(1);
+      campaignCache.set(s.campaignId, {
+        ctx,
+        name: camp?.name || "Unknown",
+        objective: camp?.campaignObjective || null,
+        qaParams: camp?.qaParameters || null,
+        talkingPoints: camp?.talkingPoints || null,
+        objections: camp?.campaignObjections || null,
+      });
+    }
+  }
+
+  // Pre-load attempts
+  const sessionIds = sessions.map((s) => s.id);
+  const attemptMap = new Map<string, { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null; fullTranscript: string | null }>();
+  if (sessionIds.length > 0) {
+    const attempts = await db
+      .select({
+        callSessionId: dialerCallAttempts.callSessionId,
+        id: dialerCallAttempts.id,
+        disposition: dialerCallAttempts.disposition,
+        phoneDialed: dialerCallAttempts.phoneDialed,
+        queueItemId: dialerCallAttempts.queueItemId,
+        fullTranscript: dialerCallAttempts.fullTranscript,
+      })
+      .from(dialerCallAttempts)
+      .where(
+        sql`${dialerCallAttempts.callSessionId} IN (${sql.join(
+          sessionIds.map((id) => sql`${id}`),
+          sql`, `
+        )})`
+      );
+    for (const a of attempts) {
+      if (a.callSessionId) {
+        attemptMap.set(a.callSessionId, {
+          id: a.id,
+          disposition: a.disposition,
+          phoneDialed: a.phoneDialed,
+          queueItemId: a.queueItemId,
+          fullTranscript: a.fullTranscript,
+        });
+      }
+    }
+  }
+
+  // Pre-load contacts
+  const contactIds = sessions.map((s) => s.contactId).filter(Boolean) as string[];
+  const contactMap = new Map<string, { name: string; company: string; email: string | null }>();
+  if (contactIds.length > 0) {
+    const cInfos = await db
+      .select({
+        id: contacts.id,
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        companyName: accounts.name,
+      })
+      .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(
+        sql`${contacts.id} IN (${sql.join(
+          contactIds.map((id) => sql`${id}`),
+          sql`, `
+        )})`
+      );
+    for (const c of cInfos) {
+      contactMap.set(c.id, {
+        name: c.fullName || [c.firstName, c.lastName].filter(Boolean).join(" ") || "Unknown",
+        company: c.companyName || "Unknown",
+        email: c.email,
+      });
+    }
+  }
+
+  // Pre-load leads
+  const attemptIds = Array.from(attemptMap.values()).map((a) => a.id);
+  const leadMap = new Map<string, { id: string; qaStatus: string | null }>();
+  if (attemptIds.length > 0) {
+    const existingLeads = await db
+      .select({ id: leads.id, callAttemptId: leads.callAttemptId, qaStatus: leads.qaStatus })
+      .from(leads)
+      .where(
+        sql`${leads.callAttemptId} IN (${sql.join(
+          attemptIds.map((id) => sql`${id}`),
+          sql`, `
+        )})`
+      );
+    for (const l of existingLeads) {
+      if (l.callAttemptId) {
+        leadMap.set(l.callAttemptId, { id: l.id, qaStatus: l.qaStatus });
+      }
+    }
+  }
+
+  // Initialize summary
+  const summary: DeepReanalysisSummary = {
+    totalAnalyzed: 0,
+    totalShouldChange: 0,
+    totalChanged: 0,
+    totalErrors: 0,
+    dryRun,
+    avgConfidence: 0,
+    avgAgentScore: 0,
+    avgCallQuality: 0,
+    breakdown: [],
+    agentBehaviorSummary: {
+      avgEngagement: 0,
+      avgEmpathy: 0,
+      avgObjectionHandling: 0,
+      avgClosing: 0,
+      avgQualification: 0,
+      avgScriptAdherence: 0,
+      topStrengths: [],
+      topWeaknesses: [],
+    },
+    callQualitySummary: {
+      avgCampaignAlignment: 0,
+      avgTalkingPointsCoverage: 0,
+      topMissedTalkingPoints: [],
+      identityConfirmedRate: 0,
+      qualificationMetRate: 0,
+    },
+    calls: [],
+    actionsSummary: {
+      newLeadsCreated: 0,
+      leadsRemovedFromCampaign: 0,
+      movedToQA: 0,
+      movedToNeedsReview: 0,
+      retriesScheduled: 0,
+      pushedToClient: 0,
+    },
+  };
+
+  const breakdownMap = new Map<string, { count: number; totalConf: number }>();
+  let totalConfidence = 0;
+  let totalAgentScore = 0;
+  let totalCallQuality = 0;
+  let totalEngagement = 0, totalEmpathy = 0, totalObjHand = 0, totalClosing = 0, totalQualif = 0, totalScript = 0;
+  let totalCampAlign = 0, totalTPCoverage = 0;
+  let identityConfirmedCount = 0, qualificationMetCount = 0;
+  const strengthsFreq = new Map<string, number>();
+  const weaknessesFreq = new Map<string, number>();
+  const missedTPFreq = new Map<string, number>();
+  let analyzedWithScores = 0;
+
+  for (const session of sessions) {
+    try {
+      summary.totalAnalyzed++;
+      const currentDisp = session.aiDisposition || "unknown";
+      const campData = session.campaignId ? campaignCache.get(session.campaignId) : null;
+      const attempt = attemptMap.get(session.id);
+      const contactInfo = session.contactId
+        ? contactMap.get(session.contactId) || { name: "Unknown", company: "Unknown", email: null }
+        : { name: "Unknown", company: "Unknown", email: null };
+      const leadInfo = attempt ? leadMap.get(attempt.id) : null;
+
+      const transcript = attempt?.fullTranscript || session.aiTranscript;
+
+      // Run deep AI analysis
+      const deepResult = await runDeepAIAnalysis(
+        transcript,
+        campData?.ctx || null,
+        currentDisp,
+        session.durationSec || 0,
+        campData?.objective || null,
+        campData?.qaParams || null,
+        campData?.talkingPoints || null,
+        campData?.objections || null
+      );
+
+      // Filter by confidence threshold
+      if (filters.confidenceThreshold &&
+          deepResult.dispositionAssessment.confidence < filters.confidenceThreshold) {
+        continue;
+      }
+
+      // Build transcript preview from parsed turns
+      const previewTurns = parseTranscriptToTurns(transcript);
+      const transcriptPreview = previewTurns.length > 0
+        ? previewTurns.map(t => `${t.role === "agent" ? "Agent" : "Contact"}: ${t.text}`).join(" | ").slice(0, 400)
+        : String(transcript || "").slice(0, 400);
+
+      const callDetail: DeepReanalysisCallDetail = {
+        callSessionId: session.id,
+        callAttemptId: attempt?.id || null,
+        contactId: session.contactId,
+        contactName: contactInfo.name,
+        companyName: contactInfo.company,
+        contactEmail: contactInfo.email,
+        contactPhone: session.toNumberE164,
+        campaignId: session.campaignId || "",
+        campaignName: campData?.name || "Unknown",
+        campaignObjective: campData?.objective || null,
+        durationSec: session.durationSec || 0,
+        currentDisposition: currentDisp,
+        suggestedDisposition: deepResult.dispositionAssessment.suggestedDisposition,
+        confidence: deepResult.dispositionAssessment.confidence,
+        reasoning: deepResult.dispositionAssessment.reasoning,
+        positiveSignals: deepResult.dispositionAssessment.positiveSignals,
+        negativeSignals: deepResult.dispositionAssessment.negativeSignals,
+        shouldOverride: deepResult.dispositionAssessment.shouldOverride,
+        agentType: session.agentType,
+        agentBehavior: deepResult.agentBehavior,
+        callQuality: deepResult.callQuality,
+        fullTranscript: transcript,
+        transcriptPreview,
+        recordingUrl: session.recordingUrl,
+        callDate: session.startedAt?.toISOString() || "",
+        hasLead: !!leadInfo,
+        leadId: leadInfo?.id || null,
+        qaStatus: leadInfo?.qaStatus || null,
+        actionTaken: null,
+        pushStatus: {
+          pushedToClient: false,
+          pushedToQA: !!leadInfo && leadInfo.qaStatus === "under_review",
+          exportedAt: null,
+        },
+      };
+
+      // Aggregate scores
+      totalConfidence += deepResult.dispositionAssessment.confidence;
+      if (deepResult.agentBehavior.overallScore > 0) {
+        analyzedWithScores++;
+        totalAgentScore += deepResult.agentBehavior.overallScore;
+        totalCallQuality += deepResult.callQuality.campaignAlignmentScore;
+        totalEngagement += deepResult.agentBehavior.engagementScore;
+        totalEmpathy += deepResult.agentBehavior.empathyScore;
+        totalObjHand += deepResult.agentBehavior.objectionHandlingScore;
+        totalClosing += deepResult.agentBehavior.closingScore;
+        totalQualif += deepResult.agentBehavior.qualificationScore;
+        totalScript += deepResult.agentBehavior.scriptAdherenceScore;
+        totalCampAlign += deepResult.callQuality.campaignAlignmentScore;
+        totalTPCoverage += deepResult.callQuality.talkingPointsCoverage;
+        if (deepResult.callQuality.identityConfirmed) identityConfirmedCount++;
+        if (deepResult.callQuality.qualificationMet) qualificationMetCount++;
+
+        for (const s of deepResult.agentBehavior.strengths) {
+          strengthsFreq.set(s, (strengthsFreq.get(s) || 0) + 1);
+        }
+        for (const w of deepResult.agentBehavior.weaknesses) {
+          weaknessesFreq.set(w, (weaknessesFreq.get(w) || 0) + 1);
+        }
+        for (const tp of deepResult.callQuality.missedTalkingPoints) {
+          missedTPFreq.set(tp, (missedTPFreq.get(tp) || 0) + 1);
+        }
+      }
+
+      // Check for disposition change — count any call where AI suggests a different disposition
+      const dispositionDiffers = deepResult.dispositionAssessment.suggestedDisposition !== currentDisp;
+      if (dispositionDiffers) {
+        summary.totalShouldChange++;
+        const key = `${currentDisp} → ${deepResult.dispositionAssessment.suggestedDisposition}`;
+        const existing = breakdownMap.get(key) || { count: 0, totalConf: 0 };
+        existing.count++;
+        existing.totalConf += deepResult.dispositionAssessment.confidence;
+        breakdownMap.set(key, existing);
+
+        // Only apply DB changes when not dry-run AND AI explicitly flagged shouldOverride
+        if (!dryRun && deepResult.dispositionAssessment.shouldOverride) {
+          const result = await applyDeepDispositionChange(
+            session,
+            attempt,
+            deepResult.dispositionAssessment.suggestedDisposition as CanonicalDisposition,
+            leadInfo?.id || null,
+            currentDisp
+          );
+          if (result.success) {
+            summary.totalChanged++;
+            callDetail.actionTaken = result.action || null;
+            if (result.action?.includes("lead created")) summary.actionsSummary.newLeadsCreated++;
+            if (result.action?.includes("removed")) summary.actionsSummary.leadsRemovedFromCampaign++;
+            if (result.action?.includes("QA")) summary.actionsSummary.movedToQA++;
+            if (result.action?.includes("needs_review")) summary.actionsSummary.movedToNeedsReview++;
+            if (result.action?.includes("retry")) summary.actionsSummary.retriesScheduled++;
+          } else {
+            summary.totalErrors++;
+            callDetail.actionTaken = `ERROR: ${result.error}`;
+          }
+        }
+      }
+
+      summary.calls.push(callDetail);
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Error deep-analyzing ${session.id}:`, error);
+      summary.totalErrors++;
+    }
+  }
+
+  // Compute averages
+  const n = summary.totalAnalyzed || 1;
+  const ns = analyzedWithScores || 1;
+  summary.avgConfidence = totalConfidence / n;
+  summary.avgAgentScore = totalAgentScore / ns;
+  summary.avgCallQuality = totalCallQuality / ns;
+
+  summary.agentBehaviorSummary = {
+    avgEngagement: Math.round(totalEngagement / ns),
+    avgEmpathy: Math.round(totalEmpathy / ns),
+    avgObjectionHandling: Math.round(totalObjHand / ns),
+    avgClosing: Math.round(totalClosing / ns),
+    avgQualification: Math.round(totalQualif / ns),
+    avgScriptAdherence: Math.round(totalScript / ns),
+    topStrengths: [...strengthsFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([s]) => s),
+    topWeaknesses: [...weaknessesFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([w]) => w),
+  };
+
+  summary.callQualitySummary = {
+    avgCampaignAlignment: Math.round(totalCampAlign / ns),
+    avgTalkingPointsCoverage: Math.round(totalTPCoverage / ns),
+    topMissedTalkingPoints: [...missedTPFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([tp]) => tp),
+    identityConfirmedRate: Math.round((identityConfirmedCount / ns) * 100),
+    qualificationMetRate: Math.round((qualificationMetCount / ns) * 100),
+  };
+
+  // Build breakdown
+  for (const [key, data] of breakdownMap) {
+    const [current, suggested] = key.split(" → ");
+    summary.breakdown.push({
+      currentDisposition: current,
+      suggestedDisposition: suggested,
+      count: data.count,
+      avgConfidence: Math.round((data.totalConf / data.count) * 100) / 100,
+    });
+  }
+  summary.breakdown.sort((a, b) => b.count - a.count);
+
+  console.log(`${LOG_PREFIX} Deep batch complete: Analyzed=${summary.totalAnalyzed}, ShouldChange=${summary.totalShouldChange}, Changed=${summary.totalChanged}`);
+  return summary;
+}
+
+// ==================== PUSH TO QA ====================
+
+export async function pushCallsToQA(
+  callSessionIds: string[],
+  userId: string
+): Promise<{ succeeded: number; failed: number; results: Array<{ id: string; success: boolean; leadId?: string; error?: string }> }> {
+  const results: Array<{ id: string; success: boolean; leadId?: string; error?: string }> = [];
+
+  for (const csId of callSessionIds) {
+    try {
+      const [session] = await db
+        .select({
+          id: callSessions.id,
+          campaignId: callSessions.campaignId,
+          contactId: callSessions.contactId,
+          aiTranscript: callSessions.aiTranscript,
+          recordingUrl: callSessions.recordingUrl,
+          toNumberE164: callSessions.toNumberE164,
+        })
+        .from(callSessions)
+        .where(eq(callSessions.id, csId))
+        .limit(1);
+
+      if (!session) {
+        results.push({ id: csId, success: false, error: "Session not found" });
+        continue;
+      }
+
+      const attempts = await db
+        .select({ id: dialerCallAttempts.id, phoneDialed: dialerCallAttempts.phoneDialed })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.callSessionId, csId))
+        .limit(1);
+      const attempt = attempts[0];
+
+      if (!attempt) {
+        results.push({ id: csId, success: false, error: "No call attempt found" });
+        continue;
+      }
+
+      // Check existing lead
+      const [existingLead] = await db
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.callAttemptId, attempt.id))
+        .limit(1);
+
+      if (existingLead) {
+        // Update existing lead to QA
+        await db
+          .update(leads)
+          .set({ qaStatus: "under_review", updatedAt: new Date() })
+          .where(eq(leads.id, existingLead.id));
+
+        results.push({ id: csId, success: true, leadId: existingLead.id });
+        continue;
+      }
+
+      // Create new lead and push to QA
+      if (!session.campaignId || !session.contactId) {
+        results.push({ id: csId, success: false, error: "Missing campaign or contact" });
+        continue;
+      }
+
+      const [ci] = await db
+        .select({
+          fullName: contacts.fullName,
+          firstName: contacts.firstName,
+          lastName: contacts.lastName,
+          email: contacts.email,
+          companyName: accounts.name,
+        })
+        .from(contacts)
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(eq(contacts.id, session.contactId))
+        .limit(1);
+
+      const contactName = ci?.fullName || [ci?.firstName, ci?.lastName].filter(Boolean).join(" ") || "Unknown";
+
+      const [newLead] = await db
+        .insert(leads)
+        .values({
+          campaignId: session.campaignId,
+          contactId: session.contactId,
+          callAttemptId: attempt.id,
+          contactName,
+          contactEmail: ci?.email || undefined,
+          accountName: ci?.companyName || undefined,
+          qaStatus: "under_review",
+          qaDecision: "Pushed to QA via disposition reanalysis",
+          dialedNumber: attempt.phoneDialed,
+          recordingUrl: session.recordingUrl,
+          transcript: session.aiTranscript || undefined,
+          notes: `Source: disposition_reanalysis_push | by: ${userId}`,
+        })
+        .returning({ id: leads.id });
+
+      if (newLead) {
+        await db.insert(qcWorkQueue).values({
+          callSessionId: csId,
+          leadId: newLead.id,
+          campaignId: session.campaignId,
+          producerType: "ai",
+          status: "pending",
+          priority: 1,
+        });
+        results.push({ id: csId, success: true, leadId: newLead.id });
+      }
+    } catch (error: any) {
+      results.push({ id: csId, success: false, error: error.message });
+    }
+  }
+
+  return {
+    succeeded: results.filter((r) => r.success).length,
+    failed: results.filter((r) => !r.success).length,
+    results,
+  };
+}
+
+// ==================== PUSH TO CLIENT ====================
+
+export async function pushCallsToClient(
+  callSessionIds: string[],
+  clientNotes: string,
+  userId: string
+): Promise<{ succeeded: number; failed: number; results: Array<{ id: string; success: boolean; error?: string }> }> {
+  const results: Array<{ id: string; success: boolean; error?: string }> = [];
+
+  for (const csId of callSessionIds) {
+    try {
+      // Log the push-to-client action
+      await db.insert(activityLog).values({
+        entityType: "call_session",
+        entityId: csId,
+        eventType: "disposition_pushed_to_client" as any,
+        payload: {
+          callSessionId: csId,
+          clientNotes,
+          pushedBy: userId,
+          pushedAt: new Date().toISOString(),
+        },
+        createdBy: userId,
+      });
+
+      results.push({ id: csId, success: true });
+    } catch (error: any) {
+      results.push({ id: csId, success: false, error: error.message });
+    }
+  }
+
+  return {
+    succeeded: results.filter((r) => r.success).length,
+    failed: results.filter((r) => !r.success).length,
+    results,
+  };
+}
+
+// ==================== EXPORT REANALYSIS ====================
+
+export async function exportReanalysisData(
+  calls: DeepReanalysisCallDetail[],
+  format: "csv" | "json"
+): Promise<string> {
+  if (format === "json") {
+    return JSON.stringify(
+      calls.map((c) => ({
+        callSessionId: c.callSessionId,
+        contactName: c.contactName,
+        companyName: c.companyName,
+        contactEmail: c.contactEmail,
+        contactPhone: c.contactPhone,
+        campaignName: c.campaignName,
+        campaignObjective: c.campaignObjective,
+        durationSec: c.durationSec,
+        callDate: c.callDate,
+        agentType: c.agentType,
+        currentDisposition: c.currentDisposition,
+        suggestedDisposition: c.suggestedDisposition,
+        confidence: Math.round(c.confidence * 100),
+        shouldOverride: c.shouldOverride,
+        reasoning: c.reasoning,
+        positiveSignals: c.positiveSignals.join("; "),
+        negativeSignals: c.negativeSignals.join("; "),
+        agentOverallScore: c.agentBehavior?.overallScore ?? "N/A",
+        engagementScore: c.agentBehavior?.engagementScore ?? "N/A",
+        empathyScore: c.agentBehavior?.empathyScore ?? "N/A",
+        objectionHandlingScore: c.agentBehavior?.objectionHandlingScore ?? "N/A",
+        closingScore: c.agentBehavior?.closingScore ?? "N/A",
+        qualificationScore: c.agentBehavior?.qualificationScore ?? "N/A",
+        scriptAdherenceScore: c.agentBehavior?.scriptAdherenceScore ?? "N/A",
+        campaignAlignmentScore: c.callQuality?.campaignAlignmentScore ?? "N/A",
+        talkingPointsCoverage: c.callQuality?.talkingPointsCoverage ?? "N/A",
+        sentimentProgression: c.callQuality?.sentimentProgression ?? "N/A",
+        identityConfirmed: c.callQuality?.identityConfirmed ?? "N/A",
+        qualificationMet: c.callQuality?.qualificationMet ?? "N/A",
+        recordingUrl: c.recordingUrl || "",
+        hasLead: c.hasLead,
+        leadId: c.leadId || "",
+        qaStatus: c.qaStatus || "",
+        coachingNotes: c.agentBehavior?.coachingNotes || "",
+      })),
+      null,
+      2
+    );
+  }
+
+  // CSV
+  const headers = [
+    "Call Session ID", "Contact Name", "Company", "Email", "Phone",
+    "Campaign", "Campaign Objective", "Duration (sec)", "Call Date", "Agent Type",
+    "Current Disposition", "Suggested Disposition", "Confidence %", "Should Override",
+    "Reasoning", "Positive Signals", "Negative Signals",
+    "Agent Overall Score", "Engagement", "Empathy", "Objection Handling",
+    "Closing", "Qualification", "Script Adherence",
+    "Campaign Alignment", "Talking Points Coverage", "Sentiment",
+    "Identity Confirmed", "Qualification Met",
+    "Recording URL", "Has Lead", "Lead ID", "QA Status", "Coaching Notes",
+  ];
+
+  const escapeCSV = (val: any) => {
+    const str = String(val ?? "");
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const rows = calls.map((c) => [
+    c.callSessionId, c.contactName, c.companyName, c.contactEmail || "",
+    c.contactPhone, c.campaignName, c.campaignObjective || "",
+    c.durationSec, c.callDate, c.agentType || "",
+    c.currentDisposition, c.suggestedDisposition,
+    Math.round(c.confidence * 100), c.shouldOverride ? "Yes" : "No",
+    c.reasoning, c.positiveSignals.join("; "), c.negativeSignals.join("; "),
+    c.agentBehavior?.overallScore ?? "", c.agentBehavior?.engagementScore ?? "",
+    c.agentBehavior?.empathyScore ?? "", c.agentBehavior?.objectionHandlingScore ?? "",
+    c.agentBehavior?.closingScore ?? "", c.agentBehavior?.qualificationScore ?? "",
+    c.agentBehavior?.scriptAdherenceScore ?? "",
+    c.callQuality?.campaignAlignmentScore ?? "", c.callQuality?.talkingPointsCoverage ?? "",
+    c.callQuality?.sentimentProgression ?? "",
+    c.callQuality?.identityConfirmed ? "Yes" : "No",
+    c.callQuality?.qualificationMet ? "Yes" : "No",
+    c.recordingUrl || "", c.hasLead ? "Yes" : "No", c.leadId || "",
+    c.qaStatus || "", c.agentBehavior?.coachingNotes || "",
+  ].map(escapeCSV).join(","));
+
+  return [headers.map(escapeCSV).join(","), ...rows].join("\n");
+}
+
+// ==================== INTERNAL: APPLY DISPOSITION CHANGE ====================
+
+async function applyDeepDispositionChange(
+  session: { id: string; campaignId: string | null; contactId: string | null; aiTranscript: string | null; recordingUrl: string | null; toNumberE164: string },
+  attempt: { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null; fullTranscript: string | null } | undefined,
+  newDisposition: CanonicalDisposition,
+  existingLeadId: string | null,
+  oldDisposition: string
+): Promise<{ success: boolean; action?: string; error?: string }> {
+  try {
+    console.log(`${LOG_PREFIX} Applying: ${session.id} | ${oldDisposition} → ${newDisposition}`);
+
+    await db
+      .update(callSessions)
+      .set({ aiDisposition: newDisposition })
+      .where(eq(callSessions.id, session.id));
+
+    if (attempt) {
+      await db
+        .update(dialerCallAttempts)
+        .set({ disposition: newDisposition, updatedAt: new Date() })
+        .where(eq(dialerCallAttempts.id, attempt.id));
+    }
+
+    let action = `Deep reanalysis: ${oldDisposition} → ${newDisposition}`;
+
+    switch (newDisposition) {
+      case "qualified_lead":
+        if (!existingLeadId && attempt && session.campaignId && session.contactId) {
+          const [ci] = await db
+            .select({
+              fullName: contacts.fullName,
+              firstName: contacts.firstName,
+              lastName: contacts.lastName,
+              email: contacts.email,
+              companyName: accounts.name,
+            })
+            .from(contacts)
+            .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+            .where(eq(contacts.id, session.contactId))
+            .limit(1);
+
+          const contactName = ci?.fullName || [ci?.firstName, ci?.lastName].filter(Boolean).join(" ") || "Unknown";
+          const [newLead] = await db
+            .insert(leads)
+            .values({
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              callAttemptId: attempt.id,
+              contactName,
+              contactEmail: ci?.email || undefined,
+              accountName: ci?.companyName || undefined,
+              qaStatus: "under_review",
+              qaDecision: "Deep reanalysis: reclassified as qualified lead",
+              dialedNumber: attempt.phoneDialed,
+              recordingUrl: session.recordingUrl,
+              transcript: attempt.fullTranscript || session.aiTranscript || undefined,
+              notes: "Source: deep_disposition_reanalysis",
+            })
+            .returning({ id: leads.id });
+
+          if (newLead) {
+            await db.insert(qcWorkQueue).values({
+              callSessionId: session.id,
+              leadId: newLead.id,
+              campaignId: session.campaignId,
+              producerType: "ai",
+              status: "pending",
+              priority: 1,
+            });
+            action += ` | New lead created (${newLead.id}) → QA queue`;
+          }
+        }
+        if (attempt?.queueItemId) {
+          await db.update(campaignQueue).set({ status: "done", updatedAt: new Date() }).where(eq(campaignQueue.id, attempt.queueItemId));
+        }
+        break;
+
+      case "not_interested":
+        if (attempt?.queueItemId) {
+          await db.update(campaignQueue).set({ status: "removed", removedReason: "not_interested_deep_reanalysis", updatedAt: new Date() }).where(eq(campaignQueue.id, attempt.queueItemId));
+          action += " | Removed from campaign queue";
+        }
+        if (existingLeadId) {
+          await db.update(leads).set({ qaStatus: "rejected", qaDecision: "Deep reanalysis: not interested", updatedAt: new Date() }).where(eq(leads.id, existingLeadId));
+          action += ` | Lead ${existingLeadId} rejected`;
+        }
+        break;
+
+      case "needs_review":
+        if (attempt?.queueItemId) {
+          await db.update(campaignQueue).set({ status: "queued", targetAgentType: "human", updatedAt: new Date() }).where(eq(campaignQueue.id, attempt.queueItemId));
+          action += " | Flagged for human review (needs_review)";
+        }
+        break;
+
+      case "voicemail":
+      case "no_answer":
+        if (attempt?.queueItemId) {
+          const retryDays = newDisposition === "voicemail" ? 3 : 1;
+          const nextAt = new Date();
+          nextAt.setDate(nextAt.getDate() + retryDays);
+          await db.update(campaignQueue).set({ status: "queued", nextAttemptAt: nextAt, updatedAt: new Date() }).where(eq(campaignQueue.id, attempt.queueItemId));
+          action += ` | Scheduled retry in ${retryDays} days`;
+        }
+        break;
+    }
+
+    // Log
+    await db.insert(activityLog).values({
+      entityType: "call_session",
+      entityId: session.id,
+      eventType: "disposition_deep_reanalysis" as any,
+      payload: { oldDisposition, newDisposition, callSessionId: session.id, action },
+      createdBy: null,
+    }).catch(() => {});
+
+    return { success: true, action };
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} Apply failed for ${session.id}:`, error);
+    return { success: false, error: error.message };
+  }
+}

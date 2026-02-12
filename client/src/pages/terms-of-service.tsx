@@ -13,13 +13,13 @@ export default function TermsOfServicePage() {
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setLocation("/welcome")}>
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
               <div className="relative flex items-center justify-center">
-                <span className="font-bold text-sm text-violet-700 tracking-tighter">DG</span>
+                <span className="font-bold text-sm text-violet-700 tracking-tighter">PB</span>
                 <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+              <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human-Led Strategy. AI-Powered Execution.</span>
             </div>
           </div>
           <div className="flex items-center gap-4">

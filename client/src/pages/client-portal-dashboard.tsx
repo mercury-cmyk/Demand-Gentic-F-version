@@ -3071,8 +3071,8 @@ export default function ClientPortalDashboard() {
                   <h3 className="font-semibold mb-2">Email Support</h3>
                   <p className="text-sm text-muted-foreground mb-4">Get help via email. We typically respond within 2-4 hours.</p>
                   <Button variant="outline" className="w-full" asChild>
-                    <a href="mailto:support@demandgentic.ai">
-                      support@demandgentic.ai
+                    <a href="mailto:support@pivotal-b2b.com">
+                      support@pivotal-b2b.com
                     </a>
                   </Button>
                 </CardContent>
@@ -3125,7 +3125,7 @@ export default function ClientPortalDashboard() {
                       <p className="text-sm text-muted-foreground">CEO</p>
                       <div className="flex gap-2 mt-2">
                         <Button variant="ghost" size="sm" asChild>
-                          <a href="mailto:zahid.m@demandgentic.ai">
+                          <a href="mailto:zahid.m@pivotal-b2b.com">
                             <Mail className="h-4 w-4" />
                           </a>
                         </Button>
@@ -3147,7 +3147,7 @@ export default function ClientPortalDashboard() {
                       <p className="text-sm text-muted-foreground">Client Success Director</p>
                       <div className="flex gap-2 mt-2">
                         <Button variant="ghost" size="sm" asChild>
-                          <a href="mailto:tabasum.hamdard@demandgentic.ai">
+                          <a href="mailto:tabasum.hamdard@pivotal-b2b.com">
                             <Mail className="h-4 w-4" />
                           </a>
                         </Button>

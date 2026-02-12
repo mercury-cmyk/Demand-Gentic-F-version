@@ -13,13 +13,13 @@ export default function PrivacyPolicyPage() {
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setLocation("/welcome")}>
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
               <div className="relative flex items-center justify-center">
-                <span className="font-bold text-sm text-violet-700 tracking-tighter">DG</span>
+                <span className="font-bold text-sm text-violet-700 tracking-tighter">PB</span>
                 <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+              <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human-Led Strategy. AI-Powered Execution.</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -45,7 +45,7 @@ export default function PrivacyPolicyPage() {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold mb-4">1. Introduction</h2>
               <p className="text-muted-foreground mb-4">
-                Pivotal B2B LLC ("Company," "we," "us," or "our"), operating as DemandGentic.ai, respects your privacy and is committed to protecting your personal data. This privacy policy explains how we collect, use, disclose, and safeguard your information when you visit our website or use our services.
+                Pivotal B2B LLC ("Company," "we," "us," or "our"), respects your privacy and is committed to protecting your personal data. This privacy policy explains how we collect, use, disclose, and safeguard your information when you visit our website or use our services.
               </p>
               <p className="text-muted-foreground mb-4">
                 <strong>Company Information:</strong><br />
@@ -208,7 +208,7 @@ export default function PrivacyPolicyPage() {
       <footer className="py-8 px-6 bg-slate-900 text-white">
         <div className="max-w-4xl mx-auto text-center">
           <p className="text-slate-500 text-sm">
-            © 2024 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
+            © 2024 Pivotal B2B LLC. All rights reserved.
           </p>
           <div className="flex justify-center gap-6 mt-4 text-slate-500 text-sm">
             <span className="text-white">Privacy Policy</span>

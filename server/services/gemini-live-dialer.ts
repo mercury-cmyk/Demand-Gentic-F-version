@@ -308,13 +308,13 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
     
     // Account/Organization placeholders
     '{{account.name}}': context.accountName,
-    '{{org.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
-    '{{organization.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
+    '{{org.name}}': context.organizationName || 'Pivotal B2B',
+    '{{organization.name}}': context.organizationName || 'Pivotal B2B',
     
     // Agent identity - use campaign organization name
-    '{{agent.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
-    '{{agent.fullName}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
-    '{{agent.firstName}}': context.organizationName?.split(' ')[0] || 'DemandGentic',
+    '{{agent.name}}': context.organizationName || 'Pivotal B2B',
+    '{{agent.fullName}}': context.organizationName || 'Pivotal B2B',
+    '{{agent.firstName}}': context.organizationName?.split(' ')[0] || 'Pivotal',
     
     // Campaign placeholders
     '{{campaign.name}}': context.campaignName,
@@ -339,18 +339,18 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
     result = result.replace(/\[Organization\]/g, context.organizationName);
     result = result.replace(/\[Company\]/g, context.organizationName);
   } else {
-    result = result.replace(/\[Organization\]/g, 'DemandGentic.ai By Pivotal B2B');
-    result = result.replace(/\[Company\]/g, 'DemandGentic.ai By Pivotal B2B');
+    result = result.replace(/\[Organization\]/g, 'Pivotal B2B');
+    result = result.replace(/\[Company\]/g, 'Pivotal B2B');
   }
   
   return result;
 }
 
 /**
- * Build DemandGentic.ai By Pivotal B2B identity preamble for the system prompt
+ * Build Pivotal B2B identity preamble for the system prompt
  */
 function buildDemandGenticIdentityPreamble(context: CallContext): string {
-  const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
+  const orgRef = context.organizationName || 'Pivotal B2B';
 
   // Build talking points string if available
   let talkingPointsStr = '';

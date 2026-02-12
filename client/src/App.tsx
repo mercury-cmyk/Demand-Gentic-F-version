@@ -307,7 +307,8 @@ function AuthenticatedApp() {
               <RouteGuard userRoles={resolvedUserRoles}>
             <Switch>
               <Route path="/" component={Dashboard} />
-              
+              <Route path="/dashboard" component={Dashboard} />
+
               {/* Accounts & Contacts */}
               <Route path="/accounts" component={AccountsPage} />
               <Route path="/accounts/:id" component={AccountDetailPage} />

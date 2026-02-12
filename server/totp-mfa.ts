@@ -12,7 +12,7 @@ export interface TotpSecret {
  */
 export async function generateTotpSecret(
   username: string,
-  issuer: string = 'DemandGentic.ai By Pivotal B2B'
+  issuer: string = 'Pivotal B2B'
 ): Promise<TotpSecret> {
   const secret = speakeasy.generateSecret({
     name: `${issuer} (${username})`,

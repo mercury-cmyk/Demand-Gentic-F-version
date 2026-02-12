@@ -411,16 +411,16 @@ export function AppSidebar({ userRoles = ["admin"] }: AppSidebarProps) {
                   <div className="flex items-center gap-2.5">
                     <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10 shrink-0">
                       <div className="relative flex items-center justify-center">
-                        <span className="font-bold text-base text-primary tracking-tighter">DG</span>
+                        <span className="font-bold text-base text-primary tracking-tighter">PB</span>
                         <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
                       </div>
                     </div>
                     <span className="text-lg font-bold tracking-tight text-sidebar-foreground whitespace-nowrap">
-                      DemandGentic
+                      Pivotal B2B
                     </span>
                   </div>
                   <span className="text-[10px] text-muted-foreground leading-3 font-medium pl-1 opacity-80 mt-1">
-                    Human Intel, <br/>AI Execute By Pivotal B2B
+                    Human-Led Strategy. <br/>AI-Powered Execution.
                   </span>
                 </div>
 
