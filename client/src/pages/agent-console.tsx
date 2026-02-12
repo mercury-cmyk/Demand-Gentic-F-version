@@ -323,6 +323,24 @@ function getPhoneTypeLabel(phoneType: 'direct' | 'mobile' | 'hq' | null): string
   }
 }
 
+// Format phone number for human-readable display using libphonenumber-js
+// e.g., "+441908802874" → "+44 1908 802874", "+12025551234" → "+1 202 555 1234"
+function formatPhoneForDisplay(phone: string | null, country?: string | null): string {
+  if (!phone) return '';
+  try {
+    // Try parsing with country hint first, then without
+    const countryCode = country ? getCountryCode(country) : undefined;
+    const parsed = parsePhoneNumberFromString(phone, countryCode as any);
+    if (parsed) {
+      return parsed.formatInternational();
+    }
+  } catch {
+    // Parsing failed, fall through
+  }
+  // Fallback: return the raw phone as-is
+  return phone;
+}
+
 // Contact type with additional fields
 type Contact = {
   id: string;
@@ -351,6 +369,7 @@ type QueueItem = {
   contactEmail: string | null;
   contactPhone: string | null;
   phoneType: 'direct' | 'mobile' | 'hq' | null;
+  contactCountry: string | null;
   accountId: string;
   accountName: string | null;
   priority: number;
@@ -782,14 +801,20 @@ export default function AgentConsolePage() {
     const options: Array<{ type: 'direct' | 'company' | 'manual'; number: string; label: string }> = [];
 
     // Queue already provides the best phone and its type
-    const phoneLabel = currentQueueItem.phoneType 
+    const phoneLabel = currentQueueItem.phoneType
       ? getPhoneTypeLabel(currentQueueItem.phoneType)
       : 'Phone';
+
+    // Format the phone number for human-readable display with country context
+    const displayPhone = formatPhoneForDisplay(
+      currentQueueItem.contactPhone,
+      currentQueueItem.contactCountry
+    );
 
     options.push({
       type: currentQueueItem.phoneType === 'hq' ? 'company' : 'direct',
       number: currentQueueItem.contactPhone,
-      label: `${phoneLabel}: ${currentQueueItem.contactPhone}`
+      label: `${phoneLabel}: ${displayPhone}`
     });
 
     return options;
@@ -1322,10 +1347,12 @@ export default function AgentConsolePage() {
         return;
       }
     } else if (selectedPhoneType === 'direct') {
-      phoneNumber = contactDetails?.directPhone || null;
+      // Use the already-normalized phone from queue (getBestPhoneForContact on server)
+      // Fall back to raw contactDetails only if queue phone not available
+      phoneNumber = currentQueueItem?.contactPhone || contactDetails?.directPhone || null;
       phoneLabel = 'Direct Phone';
     } else if (selectedPhoneType === 'company') {
-      phoneNumber = contactDetails?.account?.mainPhone || null;
+      phoneNumber = currentQueueItem?.contactPhone || contactDetails?.account?.mainPhone || null;
       phoneLabel = 'Company Phone';
     }
 
@@ -1339,8 +1366,9 @@ export default function AgentConsolePage() {
     }
 
     // Get the contact's country for proper phone normalization
-    // Check contact country first, then account country, then default to US
+    // Check contact country first, then queue item country, then account country, then default to US
     const rawCountry = fullContactDetails?.country ||
+                       currentQueueItem?.contactCountry ||
                        fullContactDetails?.account?.hqCountry ||
                        'US';
     const contactCountry = getCountryCode(rawCountry);
@@ -2117,7 +2145,7 @@ export default function AgentConsolePage() {
                         setSelectedPhoneType(value);
                         setShowManualDial(value === 'manual');
                       }}>
-                        <SelectTrigger className="h-8 bg-white/10 text-white border-white/20 text-sm w-[200px]" data-testid="select-phone-type">
+                        <SelectTrigger className="h-8 bg-white/10 text-white border-white/20 text-sm w-[280px]" data-testid="select-phone-type">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

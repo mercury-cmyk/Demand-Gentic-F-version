@@ -7,10 +7,27 @@
 
 import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+// Use DeepSeek for coaching analysis (cheaper, good at reasoning tasks)
+// Falls back to OpenAI if DeepSeek is not configured
+function getAIClient(): { client: OpenAI; model: string } {
+  const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
+  if (hasDeepSeek) {
+    return {
+      client: new OpenAI({
+        apiKey: process.env.DEEPSEEK_API_KEY,
+        baseURL: 'https://api.deepseek.com/v1',
+      }),
+      model: 'deepseek-chat',
+    };
+  }
+  return {
+    client: new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    }),
+    model: 'gpt-4o',
+  };
+}
 
 const LOG_PREFIX = '[DispositionIntelligence]';
 
@@ -197,10 +214,11 @@ ${callSummaries}
 Generate a comprehensive coaching analysis. Be specific — reference actual phrases from the transcripts. Prioritize issues by frequency and impact on campaign objectives.`;
 
   try {
-    console.log(`${LOG_PREFIX} Generating coaching for ${calls.length} calls...`);
+    const { client, model } = getAIClient();
+    console.log(`${LOG_PREFIX} Generating coaching for ${calls.length} calls using ${model}...`);
 
-    const response = await openai.chat.completions.create({
-      model: 'deepseek-chat',
+    const response = await client.chat.completions.create({
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },

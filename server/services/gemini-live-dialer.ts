@@ -397,7 +397,7 @@ ${context.contactName ? `
 ### AUTOMATED CALL SCREENER (Google Voice / Call Screen):
 If you hear phrases like "record your name and reason for calling", "state your name and reason for calling", or "I'll see if this person is available":
 - This is NOT a human gatekeeper — it's an automated screening system
-- Respond ONCE: "This is ${context.agentName || 'your agent'} calling from ${orgRef} for ${context.contactFirstName || context.contactName || 'the contact'} regarding a business opportunity."
+- Respond ONCE: "I'm calling on behalf of ${orgRef} for ${context.contactFirstName || context.contactName || 'the contact'} regarding a business opportunity."
 - Then WAIT SILENTLY — do not speak again until a human voice speaks
 - If the screener repeats its prompt, STAY SILENT — it is processing your response
 - If a human connects after screening, re-verify identity: "Hi, am I speaking with ${context.contactFirstName || context.contactName || 'the contact'}?"
