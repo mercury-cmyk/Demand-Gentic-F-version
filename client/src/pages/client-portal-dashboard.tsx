@@ -2453,19 +2453,7 @@ export default function ClientPortalDashboard() {
                 <p className="text-muted-foreground w-full md:w-auto">View and manage your AI-powered campaigns</p>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                {campaigns.length > 0 && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setPreviewCampaignId('');
-                      setShowPreviewStudio(true);
-                    }}
-                    className="gap-2 w-full sm:w-auto"
-                  >
-                    <Play className="h-4 w-4" />
-                    Preview Studio
-                  </Button>
-                )}
+                {/* Preview Studio button removed - clients use /client-portal/preview-studio instead */}
               </div>
             </div>
 
@@ -6063,6 +6051,7 @@ export default function ClientPortalDashboard() {
               campaignId={clientTestCampaignId}
               campaignName={campaigns.find(c => c.id === clientTestCampaignId)?.name || 'Campaign'}
               dialMode="ai_agent"
+              hidePreviewStudio={true}
             />
           )}
         </DialogContent>
