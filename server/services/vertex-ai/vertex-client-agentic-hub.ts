@@ -222,33 +222,43 @@ export class VertexClientAgenticHub extends EventEmitter {
   }
 
   private async assertCampaignAccess(campaignId: string) {
-    const [record] = await db
+    // 1. Try regular campaigns first
+    const [regularRecord] = await db
       .select({ campaign: campaigns })
       .from(campaigns)
       .innerJoin(
         clientCampaignAccess,
         and(
           eq(clientCampaignAccess.clientAccountId, this.context.clientAccountId),
-          or(
-            eq(clientCampaignAccess.regularCampaignId, campaigns.id),
-            eq(clientCampaignAccess.campaignId, campaigns.id)
-          )
+          eq(clientCampaignAccess.regularCampaignId, campaigns.id)
         )
       )
-      .where(
-        and(
-          eq(campaigns.id, campaignId),
-          eq(campaigns.approvalStatus, 'published'),
-          eq(campaigns.clientAccountId, this.context.clientAccountId)
-        )
-      )
+      .where(eq(campaigns.id, campaignId))
       .limit(1);
 
-    if (!record) {
-      throw new Error("Campaign not found or access denied");
+    if (regularRecord) {
+      return regularRecord.campaign;
     }
 
-    return record.campaign;
+    // 2. Try verification campaigns
+    const [verificationRecord] = await db
+      .select({ campaign: verificationCampaigns })
+      .from(verificationCampaigns)
+      .innerJoin(
+        clientCampaignAccess,
+        and(
+          eq(clientCampaignAccess.clientAccountId, this.context.clientAccountId),
+          eq(clientCampaignAccess.campaignId, verificationCampaigns.id)
+        )
+      )
+      .where(eq(verificationCampaigns.id, campaignId))
+      .limit(1);
+
+    if (verificationRecord) {
+      return verificationRecord.campaign;
+    }
+
+    throw new Error("Campaign not found or access denied");
   }
 
   private formatCampaignValue(value: unknown): string {

@@ -1853,30 +1853,26 @@ export class DatabaseStorage implements IStorage {
 
     if (dialMode === 'manual') {
       // MANUAL MODE: Query agentQueue table
-      const whereConditions = status 
+      const whereConditions = status
         ? and(eq(agentQueue.campaignId, campaignId), eq(agentQueue.queueState, status as any))
         : eq(agentQueue.campaignId, campaignId);
 
-      const results = await db
+      const rows = await db
         .select({
           id: agentQueue.id,
           campaignId: agentQueue.campaignId,
           contactId: agentQueue.contactId,
           accountId: agentQueue.accountId,
           priority: agentQueue.priority,
-          status: agentQueue.queueState, // Map queueState to status for consistency
+          status: agentQueue.queueState,
           removedReason: agentQueue.removedReason,
           queuedAt: agentQueue.createdAt,
           processedAt: agentQueue.updatedAt,
-          contact: {
-            firstName: contacts.firstName,
-            lastName: contacts.lastName,
-            email: contacts.email,
-            phoneNumber: contacts.directPhone,
-          },
-          account: {
-            name: accounts.name,
-          },
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          contactEmail: contacts.email,
+          contactPhone: contacts.directPhone,
+          accountName: accounts.name,
         })
         .from(agentQueue)
         .leftJoin(contacts, eq(agentQueue.contactId, contacts.id))
@@ -1884,14 +1880,31 @@ export class DatabaseStorage implements IStorage {
         .where(whereConditions)
         .orderBy(desc(agentQueue.priority), agentQueue.createdAt);
 
-      return results;
+      return rows.map(r => ({
+        id: r.id,
+        campaignId: r.campaignId,
+        contactId: r.contactId,
+        accountId: r.accountId,
+        priority: r.priority,
+        status: r.status,
+        removedReason: r.removedReason,
+        queuedAt: r.queuedAt,
+        processedAt: r.processedAt,
+        contact: r.contactFirstName ? {
+          firstName: r.contactFirstName,
+          lastName: r.contactLastName,
+          email: r.contactEmail,
+          phoneNumber: r.contactPhone,
+        } : null,
+        account: r.accountName ? { name: r.accountName } : null,
+      }));
     } else {
       // POWER MODE: Query campaignQueue table
-      const whereConditions = status 
+      const whereConditions = status
         ? and(eq(campaignQueue.campaignId, campaignId), eq(campaignQueue.status, status as any))
         : eq(campaignQueue.campaignId, campaignId);
 
-      const results = await db
+      const rows = await db
         .select({
           id: campaignQueue.id,
           campaignId: campaignQueue.campaignId,
@@ -1902,15 +1915,11 @@ export class DatabaseStorage implements IStorage {
           removedReason: campaignQueue.removedReason,
           queuedAt: campaignQueue.createdAt,
           processedAt: campaignQueue.updatedAt,
-          contact: {
-            firstName: contacts.firstName,
-            lastName: contacts.lastName,
-            email: contacts.email,
-            phoneNumber: contacts.directPhone,
-          },
-          account: {
-            name: accounts.name,
-          },
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          contactEmail: contacts.email,
+          contactPhone: contacts.directPhone,
+          accountName: accounts.name,
         })
         .from(campaignQueue)
         .leftJoin(contacts, eq(campaignQueue.contactId, contacts.id))
@@ -1918,7 +1927,24 @@ export class DatabaseStorage implements IStorage {
         .where(whereConditions)
         .orderBy(desc(campaignQueue.priority), campaignQueue.createdAt);
 
-      return results;
+      return rows.map(r => ({
+        id: r.id,
+        campaignId: r.campaignId,
+        contactId: r.contactId,
+        accountId: r.accountId,
+        priority: r.priority,
+        status: r.status,
+        removedReason: r.removedReason,
+        queuedAt: r.queuedAt,
+        processedAt: r.processedAt,
+        contact: r.contactFirstName ? {
+          firstName: r.contactFirstName,
+          lastName: r.contactLastName,
+          email: r.contactEmail,
+          phoneNumber: r.contactPhone,
+        } : null,
+        account: r.accountName ? { name: r.accountName } : null,
+      }));
     }
   }
 

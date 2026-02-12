@@ -420,7 +420,7 @@ export function AppSidebar({ userRoles = ["admin"] }: AppSidebarProps) {
                     </span>
                   </div>
                   <span className="text-[10px] text-muted-foreground leading-3 font-medium pl-1 opacity-80 mt-1">
-                    DemandGentic—Human-Led Strategy.<br/>AI-Powered Execution.
+                    DemandGentic---Human-Led Strategy.<br/>AI-Powered Execution.
                   </span>
                 </div>
 

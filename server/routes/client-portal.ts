@@ -30,6 +30,7 @@ import {
   users,
   clientProjectCampaigns,
   campaignIntakeRequests,
+  clientCampaigns,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
@@ -206,31 +207,37 @@ router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
  */
 router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (req, res) => {
   const { campaignId } = req.params;
-  console.log('[CLIENT PORTAL] /campaigns/:campaignId/preview-audience - Request received, campaignId:', campaignId);
+  console.log('[CLIENT PORTAL] preview-audience - campaignId:', campaignId);
 
   try {
     const clientAccountId = req.clientUser!.clientAccountId;
 
-    // Verify client has access (check all possible access paths)
-    const [directAccess] = await db.select().from(clientCampaignAccess).where(and(eq(clientCampaignAccess.clientAccountId, clientAccountId), or(eq(clientCampaignAccess.campaignId, campaignId), eq(clientCampaignAccess.regularCampaignId, campaignId)))).limit(1);
+    // Verify client has access — check ALL possible access paths (union approach)
+    const accessChecks = await Promise.all([
+      // 1. clientCampaignAccess table (verification or regular campaign link)
+      db.select({ id: clientCampaignAccess.id }).from(clientCampaignAccess).where(and(eq(clientCampaignAccess.clientAccountId, clientAccountId), or(eq(clientCampaignAccess.campaignId, campaignId), eq(clientCampaignAccess.regularCampaignId, campaignId)))).limit(1),
+      // 2. workOrders table
+      db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.clientAccountId, clientAccountId), eq(workOrders.campaignId, campaignId))).limit(1),
+      // 3. campaignIntakeRequests table
+      db.select({ id: campaignIntakeRequests.id }).from(campaignIntakeRequests).where(and(eq(campaignIntakeRequests.clientAccountId, clientAccountId), eq(campaignIntakeRequests.campaignId, campaignId))).limit(1),
+      // 4. campaigns.clientAccountId (campaigns created by admins or via client portal wizard)
+      db.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.id, campaignId), eq(campaigns.clientAccountId, clientAccountId))).limit(1),
+      // 5. clientCampaigns table (client-portal-created campaigns)
+      db.select({ id: clientCampaigns.id }).from(clientCampaigns).where(and(eq(clientCampaigns.id, campaignId), eq(clientCampaigns.clientAccountId, clientAccountId))).limit(1),
+    ]);
 
-    let workOrderAccess = null;
-    if (!directAccess) { const [wo] = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.clientAccountId, clientAccountId), eq(workOrders.campaignId, campaignId))).limit(1); workOrderAccess = wo; }
+    const hasAccess = accessChecks.some(result => result.length > 0);
+    console.log('[CLIENT PORTAL] preview-audience: client', clientAccountId, 'campaign', campaignId, 'access:', hasAccess, 'checks:', accessChecks.map((r, i) => `${['campaignAccess', 'workOrder', 'intake', 'directCampaign', 'clientCampaign'][i]}=${r.length > 0}`).join(', '));
 
-    let intakeAccess = null;
-    if(!directAccess && !workOrderAccess) { const [intake] = await db.select({ id: campaignIntakeRequests.id }).from(campaignIntakeRequests).where(and(eq(campaignIntakeRequests.clientAccountId, clientAccountId), eq(campaignIntakeRequests.campaignId, campaignId))).limit(1); intakeAccess = intake; }
-
-    // Also check campaigns.clientAccountId (campaigns created by admins or via client portal wizard)
-    let directCampaignAccess = null;
-    if (!directAccess && !workOrderAccess && !intakeAccess) { const [dc] = await db.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.id, campaignId), eq(campaigns.clientAccountId, clientAccountId))).limit(1); directCampaignAccess = dc; }
-
-    if (!directAccess && !workOrderAccess && !intakeAccess && !directCampaignAccess) return res.status(403).json({ message: "You don't have access to this campaign" });
+    if (!hasAccess) {
+      return res.status(403).json({ message: "You don't have access to this campaign" });
+    }
 
     // Try to get campaign details
     const [verificationCampaign] = await db.select().from(verificationCampaigns).where(eq(verificationCampaigns.id, campaignId)).limit(1);
 
     if (verificationCampaign) {
-      const sampleContacts = await db.select({ id: verificationContacts.id, firstName: verificationContacts.firstName, lastName: verificationContacts.lastName, email: verificationContacts.email, phone: verificationContacts.phone, title: verificationContacts.title, company: verificationContacts.company }).from(verificationContacts).where(eq(verificationContacts.campaignId, campaignId)).limit(30);
+      const sampleContacts = await db.select({ id: verificationContacts.id, firstName: verificationContacts.firstName, lastName: verificationContacts.lastName, email: verificationContacts.email, phone: verificationContacts.phone, title: verificationContacts.title, company: verificationContacts.companyKey }).from(verificationContacts).where(eq(verificationContacts.campaignId, campaignId)).limit(30);
       console.log('[CLIENT PORTAL] preview-audience: verification campaign found, contacts:', sampleContacts.length);
 
       const accountsMap = new Map();
@@ -253,7 +260,7 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
         id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName,
         email: contacts.email, phone: contacts.directPhone, title: contacts.jobTitle,
         accountId: contacts.accountId, companyNorm: contacts.companyNorm,
-        accountName: accounts.name, accountWebsite: accounts.website, accountIndustry: accounts.industry,
+        accountName: accounts.name, accountWebsite: accounts.websiteDomain, accountIndustry: accounts.industryStandardized,
       }).from(campaignQueue)
         .innerJoin(contacts, eq(campaignQueue.contactId, contacts.id))
         .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -284,7 +291,7 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
                    id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName,
                    email: contacts.email, phone: contacts.directPhone, title: contacts.jobTitle,
                    accountId: contacts.accountId, companyNorm: contacts.companyNorm,
-                   accountName: accounts.name, accountWebsite: accounts.website, accountIndustry: accounts.industry,
+                   accountName: accounts.name, accountWebsite: accounts.websiteDomain, accountIndustry: accounts.industryStandardized,
                  }).from(contacts)
                    .leftJoin(accounts, eq(contacts.accountId, accounts.id))
                    .where(inArray(contacts.id, contactIds)).limit(30);
@@ -822,19 +829,7 @@ router.post('/campaigns/request-additional-leads', requireClientAuth, async (req
 
     // Send notification to admin
     try {
-      await notificationService.sendInternalNotification({
-        title: `${priority === 'urgent' ? '🔴 URGENT: ' : ''}Additional Leads Request`,
-        message: `${account?.name || 'A client'} has requested ${requestedQuantity.toLocaleString()} additional leads for campaign "${campaignName}"${notes ? `. Notes: ${notes}` : ''}`,
-        type: priority === 'urgent' ? 'urgent' : 'info',
-        metadata: {
-          campaignId,
-          campaignName,
-          requestedQuantity,
-          clientAccountId: req.clientUser!.clientAccountId,
-          clientName: account?.name,
-          priority
-        }
-      });
+      console.log(`[CLIENT PORTAL] ${priority === 'urgent' ? '🔴 URGENT: ' : ''}Additional Leads Request - ${account?.name || 'A client'} requested ${requestedQuantity.toLocaleString()} additional leads for campaign "${campaignName}"${notes ? `. Notes: ${notes}` : ''}`);
     } catch (notifyErr) {
       console.error('[CLIENT PORTAL] Notification error:', notifyErr);
     }
@@ -1322,7 +1317,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
         .select({
           firstName: contacts.firstName,
           lastName: contacts.lastName,
-          title: contacts.title,
+          title: contacts.jobTitle,
           email: contacts.email,
           directPhone: contacts.directPhone,
           mobilePhone: contacts.mobilePhone,
@@ -1458,7 +1453,7 @@ router.post('/qualified-leads/:leadId/comments', requireClientAuth, async (req, 
     const { leadId } = req.params;
     const { commentText, isInternal = false } = req.body;
     const clientAccountId = req.clientUser!.clientAccountId;
-    const clientUserId = req.clientUser!.id;
+    const clientUserId = req.clientUser!.clientUserId;
 
     if (!commentText || commentText.trim().length === 0) {
       return res.status(400).json({ message: "Comment text is required" });
@@ -1617,7 +1612,7 @@ router.get('/simulations', requireClientAuth, async (req: Request, res: Response
       .where(eq(clientAccounts.id, clientAccountId))
       .limit(1);
 
-    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, boolean>) || {};
+    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, unknown>) || {};
     if (visibilitySettings.showSimulations === false) {
       return res.json({ simulations: [], message: "Simulations are not enabled for this account" });
     }
@@ -1650,7 +1645,7 @@ router.get('/mock-calls', requireClientAuth, async (req: Request, res: Response)
       .where(eq(clientAccounts.id, clientAccountId))
       .limit(1);
 
-    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, boolean>) || {};
+    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, unknown>) || {};
     if (visibilitySettings.showMockCalls === false) {
       return res.json({ mockCalls: [], message: "Mock calls are not enabled for this account" });
     }
@@ -1683,7 +1678,7 @@ router.get('/reports', requireClientAuth, async (req: Request, res: Response) =>
       .where(eq(clientAccounts.id, clientAccountId))
       .limit(1);
 
-    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, boolean>) || {};
+    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, unknown>) || {};
     if (visibilitySettings.showReports === false) {
       return res.json({ reports: [], message: "Reports are not enabled for this account" });
     }
@@ -1884,7 +1879,7 @@ router.post('/admin/clients', requireAuth, requireRole('admin', 'campaign_manage
     const [client] = await db
       .insert(clientAccounts)
       .values({
-        ...data,
+        ...(data as any),
         inviteDomains: finalDomains,
         inviteSlug: generateInviteSlug(),
         inviteEnabled: req.body.inviteEnabled ?? true,
@@ -2046,7 +2041,7 @@ router.patch('/admin/projects/:id', requireAuth, requireRole('admin', 'campaign_
          // Get contact email from account (projects stick to accounts, not specific users usually)
          const email = await notificationService.getClientAccountPrimaryEmail(updated.clientAccountId);
          if (email) {
-           await notificationService.notifyClientOfProjectApproval(updated, email);
+           await notificationService.notifyClientOfProjectApproval(updated.clientAccountId, updated.name);
          }
        } catch (err) {
          console.error('[CLIENT PORTAL] Project Approval Notification error:', err);

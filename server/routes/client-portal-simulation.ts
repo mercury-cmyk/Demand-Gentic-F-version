@@ -10,9 +10,24 @@ import {
   clientCampaignAccess,
   campaignAgentAssignments,
   virtualAgents,
+  verificationCampaigns,
+  accounts,
+  contacts,
 } from '@shared/schema';
 import { v4 as uuidv4 } from 'uuid';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  generateClientEmailContent,
+  VARIANT_SPECS,
+  type GeneratedEmailContent,
+} from '../lib/deepseek-client-email-service';
+import { buildBrandedEmailHtml, type BrandPaletteKey } from '../../client/src/components/email-builder/ai-email-template';
+import { clientAccounts, clientBusinessProfiles } from '@shared/schema';
+import {
+  checkPreviewIntelligence,
+  enforcePreviewIntelligence,
+  intelligenceGateErrorResponse,
+} from '../services/preview-intelligence-gate';
 
 const router = Router();
 
@@ -152,6 +167,25 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 /**
+ * GET /intelligence-status
+ * Check intelligence readiness for a campaign + account before running preview/test.
+ */
+router.get('/intelligence-status', async (req: Request, res: Response) => {
+  try {
+    const clientUser = (req as any).clientUser;
+    const { campaignId, accountId } = req.query as { campaignId: string; accountId: string };
+    if (!campaignId || !accountId) {
+      return res.status(400).json({ error: 'campaignId and accountId are required' });
+    }
+    const status = await checkPreviewIntelligence({ accountId, campaignId });
+    res.json(status);
+  } catch (error) {
+    console.error('[Client Simulation] Intelligence status check error:', error);
+    res.status(500).json({ error: 'Failed to check intelligence status' });
+  }
+});
+
+/**
  * Start a new simulation session
  */
 router.post('/start', async (req: Request, res: Response) => {
@@ -194,7 +228,6 @@ router.post('/start', async (req: Request, res: Response) => {
     }
 
     // REMOVED: Strict check for 'published' status and clientAccountId ownership.
-    // Access is already verified via clientCampaignAccess above.
 
     // Try to get virtual agent if assigned
     let agentPersona = '';
@@ -747,12 +780,37 @@ router.post('/generate-email-template', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'No access to this campaign' });
     }
 
-    // Get campaign details
-    const [campaign] = await db
+    // Get campaign details (try regular first, then verification)
+    let campaign: any = null;
+    const [regularCamp] = await db
       .select(CAMPAIGN_SIMULATION_SELECT)
       .from(campaigns)
       .where(eq(campaigns.id, campaignId))
       .limit(1);
+
+    if (regularCamp) {
+      campaign = regularCamp;
+    } else {
+      const [verifCamp] = await db
+        .select({
+          id: verificationCampaigns.id,
+          name: verificationCampaigns.name,
+          status: verificationCampaigns.status,
+        })
+        .from(verificationCampaigns)
+        .where(eq(verificationCampaigns.id, campaignId))
+        .limit(1);
+      if (verifCamp) {
+        campaign = {
+          ...verifCamp,
+          campaignObjective: 'Appointment Setting / Contact Verification',
+          productServiceInfo: null,
+          talkingPoints: [],
+          targetAudienceDescription: null,
+          successCriteria: 'Qualified meeting booked',
+        };
+      }
+    }
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
@@ -1078,5 +1136,167 @@ Best regards,
     variables: ['firstName', 'company', 'senderName', 'senderTitle'],
   };
 }
+
+/**
+ * Generate email for Preview Studio using DeepSeek AI + branded HTML builder
+ * Maps to /api/client-portal/simulation/generate-email
+ */
+router.post('/generate-email', async (req: Request, res: Response) => {
+  try {
+    const clientUser = (req as any).clientUser;
+    const {
+      campaignId,
+      accountId,
+      contactId,
+      emailType = 'cold_outreach',
+      brandPalette,
+    } = req.body;
+
+    if (!campaignId) {
+      return res.status(400).json({ error: 'Campaign ID is required' });
+    }
+
+    console.log('[Preview Studio] Generating email for campaign:', campaignId, 'client:', clientUser.email);
+
+    // Verify client has access
+    const [access] = await db
+      .select()
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
+          or(
+            eq(clientCampaignAccess.regularCampaignId, campaignId),
+            eq(clientCampaignAccess.campaignId, campaignId)
+          )
+        )
+      )
+      .limit(1);
+
+    if (!access) {
+      return res.status(403).json({ error: 'No access to this campaign' });
+    }
+
+    // ── Intelligence Gate ── Enforce account intelligence + org intelligence + solution mapping
+    if (accountId) {
+      const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+      if (!gateResult.passed) {
+        console.warn(`[Preview Studio] Intelligence gate BLOCKED email generation for account ${accountId}:`, gateResult.status.missingComponents);
+        return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+      }
+    }
+
+    // Map emailType to variant spec for differentiated output
+    const emailTypeToVariant: Record<string, number> = {
+      cold_outreach: 1,   // branded
+      follow_up: 0,       // plain / direct
+      meeting_request: 1, // branded
+      nurture: 2,         // newsletter
+      breakup: 0,         // plain / direct
+    };
+    const variantIdx = emailTypeToVariant[emailType] ?? 1;
+    const variantSpec = VARIANT_SPECS[variantIdx];
+
+    // Resolve business profile for branded footer
+    const [businessProfile] = await db
+      .select()
+      .from(clientBusinessProfiles)
+      .where(eq(clientBusinessProfiles.clientAccountId, clientUser.clientAccountId))
+      .limit(1);
+
+    const [clientAccount] = await db
+      .select({ name: clientAccounts.name })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientUser.clientAccountId))
+      .limit(1);
+
+    const companyName =
+      businessProfile?.dbaName ||
+      businessProfile?.legalBusinessName ||
+      clientAccount?.name ||
+      '';
+
+    const companyAddress = (() => {
+      if (!businessProfile?.addressLine1 || !businessProfile?.city || !businessProfile?.state || !businessProfile?.postalCode) return undefined;
+      const line1 = businessProfile.addressLine1;
+      const line2 = businessProfile.addressLine2 ? `, ${businessProfile.addressLine2}` : '';
+      const cityStateZip = `${businessProfile.city}, ${businessProfile.state} ${businessProfile.postalCode}`;
+      return `${line1}${line2} - ${cityStateZip}`;
+    })();
+
+    // Generate AI-powered email content via DeepSeek
+    const content = await generateClientEmailContent({
+      campaignId,
+      clientAccountId: clientUser.clientAccountId,
+      emailType: emailType || 'cold_outreach',
+      tone: 'professional',
+      variantSpec,
+    });
+
+    const palette: BrandPaletteKey = brandPalette || 'indigo';
+
+    // Build styled HTML using the branded email builder
+    let html = buildBrandedEmailHtml({
+      copy: content,
+      brandPalette: palette,
+      companyName,
+      companyAddress,
+      ctaUrl: '{{campaign.landing_page}}',
+      includeFooter: true,
+    });
+
+    // Get account and contact details to personalise
+    let accountName = '';
+    let contactName = '';
+    let contactTitle = '';
+
+    if (accountId) {
+      const [account] = await db
+        .select({ name: accounts.name })
+        .from(accounts)
+        .where(eq(accounts.id, accountId))
+        .limit(1);
+      if (account) accountName = account.name;
+    }
+
+    if (contactId) {
+      const [contact] = await db
+        .select({ fullName: contacts.fullName, jobTitle: contacts.jobTitle })
+        .from(contacts)
+        .where(eq(contacts.id, contactId))
+        .limit(1);
+      if (contact) {
+        contactName = contact.fullName || '';
+        contactTitle = contact.jobTitle || '';
+      }
+    }
+
+    // Substitute real values into the HTML
+    const firstName = contactName.split(' ')[0] || '';
+    if (firstName) html = html.replace(/\{\{first_name\}\}/g, firstName).replace(/\{\{firstName\}\}/g, firstName);
+    if (contactName) html = html.replace(/\{\{fullName\}\}/g, contactName);
+    if (accountName) html = html.replace(/\{\{company\}\}/g, accountName);
+    if (contactTitle) html = html.replace(/\{\{jobTitle\}\}/g, contactTitle);
+
+    let subject = content.subject || 'Follow-up';
+    if (accountName) subject = subject.replace(/\{\{company\}\}/g, accountName);
+
+    console.log('[Preview Studio] Email generated successfully:', subject);
+
+    // Return in the shape the Preview Studio expects
+    res.json({
+      subject,
+      preheader: content.heroSubtitle || content.intro?.substring(0, 100) || '',
+      html,
+      variant: variantSpec.label,
+      variantStyle: variantSpec.style,
+      campaign: { id: campaignId, name: '' },
+      rawContent: content,
+    });
+  } catch (error: any) {
+    console.error('[Preview Studio] Generate email error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate email' });
+  }
+});
 
 export default router;

@@ -900,6 +900,44 @@ export function registerRoutes(app: Express) {
 
   // Note: The public audio endpoint is defined in ai-calls.ts router at /audio/:audioId
 
+  // ==================== PUBLIC IMAGE SERVE (No Auth) ====================
+  // Must be before the catch-all requireAuth on /api so <img src="..."> works without cookies/headers
+  app.get('/api/email-builder/images/serve/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { emailBuilderImages } = await import('@shared/schema');
+      const [image] = await db
+        .select()
+        .from(emailBuilderImages)
+        .where(eq(emailBuilderImages.id, id))
+        .limit(1);
+
+      if (!image) return res.status(404).json({ error: 'Image not found' });
+
+      if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
+        const gcsMatch = image.storedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
+        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${process.env.GCS_BUCKET || 'demandgentic-storage'}/`, '');
+
+        res.setHeader('Content-Type', image.mimeType || 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+        const { getFromS3 } = await import('./lib/storage');
+        const stream = await getFromS3(key);
+        stream.on('error', (err: any) => {
+          if (!res.headersSent) res.status(500).json({ error: 'Storage error' });
+        });
+        stream.pipe(res);
+      } else if (image.storedUrl) {
+        res.redirect(image.storedUrl);
+      } else {
+        res.status(404).json({ error: 'Image file not found' });
+      }
+    } catch (error: any) {
+      console.error('[ImageServe:Public] Error:', error.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Failed to serve image' });
+    }
+  });
+
   // ==================== AUTH ====================
 
   // ==================== USERS (Admin Only) ====================
@@ -7164,8 +7202,16 @@ export function registerRoutes(app: Express) {
               accountName: item.accountName,
               priority: item.priority,
               status: item.status,
+              queuedAt: item.createdAt,
               createdAt: item.createdAt,
               updatedAt: item.updatedAt,
+              contact: item.contactName ? {
+                firstName: item.contactName.split(' ')[0] || '',
+                lastName: item.contactName.split(' ').slice(1).join(' ') || '',
+                email: item.contactEmail,
+                phoneNumber: bestPhone.phone,
+              } : null,
+              account: item.accountName ? { name: item.accountName } : null,
             };
           });
 
@@ -7237,8 +7283,16 @@ export function registerRoutes(app: Express) {
               accountName: item.accountName,
               priority: item.priority,
               status: item.status,
+              queuedAt: item.createdAt,
               createdAt: item.createdAt,
               updatedAt: item.updatedAt,
+              contact: item.contactName ? {
+                firstName: item.contactName.split(' ')[0] || '',
+                lastName: item.contactName.split(' ').slice(1).join(' ') || '',
+                email: item.contactEmail,
+                phoneNumber: bestPhone.phone,
+              } : null,
+              account: item.accountName ? { name: item.accountName } : null,
             };
           });
 

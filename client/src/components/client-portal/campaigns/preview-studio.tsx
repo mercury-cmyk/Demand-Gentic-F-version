@@ -78,15 +78,6 @@ interface PreviewStudioProps {
   preselectedCampaignId?: string;
 }
 
-// Predefined scenarios for testing
-const TEST_SCENARIOS = [
-  { id: 'cold_intro', name: 'Cold Introduction', description: 'First-time outreach to a prospect' },
-  { id: 'gatekeeper', name: 'Gatekeeper Navigation', description: 'Getting past the receptionist' },
-  { id: 'objection_budget', name: 'Budget Objection', description: 'Prospect says they have no budget' },
-  { id: 'objection_timing', name: 'Timing Objection', description: 'Prospect says now is not a good time' },
-  { id: 'objection_competitor', name: 'Competitor Objection', description: 'Prospect uses a competitor' },
-  { id: 'decision_maker', name: 'Decision Maker', description: 'Speaking with a decision maker' },
-];
 
 // Audio visualization component
 function AudioVisualizer({ isActive }: { isActive: boolean }) {
@@ -157,7 +148,6 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(preselectedCampaignId || '');
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
   const [selectedContactId, setSelectedContactId] = useState<string | undefined>();
-  const [selectedScenario, setSelectedScenario] = useState<string>('cold_intro');
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true);
@@ -329,7 +319,6 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
           campaignId: selectedCampaignId,
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           userMessage,
-          scenario: selectedScenario,
         }),
       });
 
@@ -378,7 +367,6 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
           campaignId: selectedCampaignId,
           accountId: selectedAccountId,
           contactId: selectedContactId,
-          scenario: selectedScenario,
         }),
       });
 
@@ -677,58 +665,6 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
                 </div>
               </div>
 
-              {/* Scenario Selection */}
-              <div className="space-y-3">
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-primary" />
-                  Test Scenario
-                </Label>
-                <div className="grid gap-2">
-                  {TEST_SCENARIOS.map((scenario) => (
-                    <button
-                      key={scenario.id}
-                      onClick={() => setSelectedScenario(scenario.id)}
-                      className={cn(
-                        'flex items-center gap-3 p-3 rounded-lg border text-left transition-all',
-                        selectedScenario === scenario.id
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
-                      )}
-                    >
-                      <div className={cn(
-                        'w-4 h-4 rounded-full border-2 flex items-center justify-center',
-                        selectedScenario === scenario.id ? 'border-primary' : 'border-muted-foreground'
-                      )}>
-                        {selectedScenario === scenario.id && (
-                          <div className="w-2 h-2 rounded-full bg-primary" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{scenario.name}</p>
-                        <p className="text-xs text-muted-foreground">{scenario.description}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mode Selection */}
-              <div className="space-y-3">
-                <Label className="text-sm font-medium">Simulation Mode</Label>
-                <Tabs value={mode} onValueChange={(v) => setMode(v as 'text' | 'voice')} className="w-full">
-                  <TabsList className="grid w-full grid-cols-2 h-12">
-                    <TabsTrigger value="text" className="flex items-center gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                      <MessageSquare className="h-4 w-4" />
-                      Text Chat
-                    </TabsTrigger>
-                    <TabsTrigger value="voice" className="flex items-center gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                      <Phone className="h-4 w-4" />
-                      Voice Call
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
-
               {/* What to Expect */}
               <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
                 <CardContent className="p-4">
@@ -774,7 +710,7 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
                 ) : (
                   <>
                     <Play className="h-5 w-5 mr-2" />
-                    Start {mode === 'voice' ? 'Voice Call' : 'Text Chat'}
+                    Start Simulation
                   </>
                 )}
               </Button>
