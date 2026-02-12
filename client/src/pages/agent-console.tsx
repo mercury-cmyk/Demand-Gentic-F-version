@@ -424,22 +424,23 @@ export default function AgentConsolePage() {
     return false;
   });
 
-  // Fetch agent's active campaign assignment
+  // Fetch agent's active campaign assignment (poll every 10s to detect reassignments)
   const { data: activeCampaign } = useQuery<{
     campaignId: string;
     campaignName: string;
     assignedAt: Date;
   } | null>({
     queryKey: ['/api/agents/me/active-campaign'],
+    refetchInterval: 10000,
   });
 
-  // Automatically select the active campaign when it's loaded
+  // Automatically select the active campaign when loaded OR when it changes (e.g. reassignment)
   useEffect(() => {
-    if (activeCampaign?.campaignId && !selectedCampaignId) {
-      console.log('[AGENT CONSOLE] Auto-selecting active campaign:', activeCampaign.campaignId);
+    if (activeCampaign?.campaignId && activeCampaign.campaignId !== selectedCampaignId) {
+      console.log('[AGENT CONSOLE] Active campaign changed, switching to:', activeCampaign.campaignId, activeCampaign.campaignName);
       setSelectedCampaignId(activeCampaign.campaignId);
     }
-  }, [activeCampaign, selectedCampaignId]);
+  }, [activeCampaign?.campaignId]);
 
   // CRITICAL FIX: Reset contact index when campaign changes
   // This prevents showing stale contacts from the previous queue
@@ -1203,9 +1204,10 @@ export default function AgentConsolePage() {
     return result;
   };
 
-  // Get agent's assigned campaigns
+  // Get agent's assigned campaigns (poll to detect reassignments)
   const { data: agentAssignments = [] } = useQuery<Array<{ campaignId: string; campaignName: string }>>({
     queryKey: ['/api/campaigns/agent-assignments'],
+    refetchInterval: 10000,
   });
 
   const campaigns: Campaign[] = agentAssignments.length > 0 

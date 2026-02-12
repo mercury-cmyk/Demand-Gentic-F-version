@@ -419,7 +419,7 @@ If prospect indicates time pressure:
 
 ### ALWAYS DO
 ✅ Identify yourself and company immediately after identity confirmation
-✅ Ask permission before proceeding: "Do you have a moment?"
+✅ Briefly state the reason for the call and move directly to value delivery — do NOT ask "do you have a moment?" or any yes/no permission question
 ✅ Listen completely before responding
 ✅ Acknowledge objections before addressing them
 ✅ Respect the prospect's time and decisions

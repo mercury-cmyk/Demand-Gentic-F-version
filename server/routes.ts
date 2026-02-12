@@ -5476,7 +5476,154 @@ export function registerRoutes(app: Express) {
 
             if (contactsToEnqueue.length > 0) {
               const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
-              console.log(`[Campaign Update] Auto-populated ${enqueued} contacts to queue`);
+              console.log(`[Campaign Update] Auto-populated ${enqueued} contacts to campaign_queue`);
+            }
+
+            // MANUAL/AI_AGENT DIAL: Also populate agent_queue for assigned agents
+            const dialMode = campaign.dialMode || 'manual';
+            if (audienceChanged && (dialMode === 'manual' || dialMode === 'ai_agent')) {
+              const assignedAgents = await db
+                .select({ agentId: campaignAgentAssignments.agentId })
+                .from(campaignAgentAssignments)
+                .where(
+                  and(
+                    eq(campaignAgentAssignments.campaignId, req.params.id),
+                    eq(campaignAgentAssignments.isActive, true)
+                  )
+                );
+
+              const assignedAgentIds = assignedAgents
+                .map(a => a.agentId)
+                .filter((id): id is string => !!id);
+
+              if (assignedAgentIds.length > 0) {
+                console.log(`[Campaign Update] Manual/AI mode - syncing agent_queue for ${assignedAgentIds.length} assigned agents`);
+
+                // Resolve ALL audience contacts (not just new ones for campaignQueue)
+                const audienceRefs = campaign.audienceRefs as any;
+                const uniqueContactIds = new Set<string>();
+
+                // Resolve from lists
+                const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+                if (Array.isArray(listIds) && listIds.length > 0) {
+                  for (const listId of listIds) {
+                    const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+                    if (list && list.recordIds && list.recordIds.length > 0) {
+                      list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
+                    }
+                  }
+                }
+
+                // Resolve from segments
+                const segmentIds = [
+                  ...(audienceRefs.segments && Array.isArray(audienceRefs.segments) ? audienceRefs.segments : []),
+                  ...(audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments) ? audienceRefs.selectedSegments : []),
+                ];
+                for (const segmentId of [...new Set(segmentIds)]) {
+                  const segment = await storage.getSegment(segmentId);
+                  if (segment && segment.definitionJson) {
+                    const filterSQL = buildFilterQuery(segment.definitionJson as FilterGroup, contacts);
+                    if (filterSQL) {
+                      const segContacts = await db.select({ id: contactsTable.id }).from(contactsTable).where(filterSQL);
+                      segContacts.forEach(c => uniqueContactIds.add(c.id));
+                    }
+                  }
+                }
+
+                // Resolve from filterGroup
+                if (audienceRefs.filterGroup) {
+                  const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
+                  if (filterSQL) {
+                    const filterContacts = await db.select({ id: contactsTable.id }).from(contactsTable).where(filterSQL);
+                    filterContacts.forEach(c => uniqueContactIds.add(c.id));
+                  }
+                }
+
+                if (uniqueContactIds.size > 0) {
+                  // Batch-fetch contacts with account data for phone validation
+                  const contactIdsArray = Array.from(uniqueContactIds);
+                  const fullContacts: any[] = [];
+                  const batchSize = 500;
+                  for (let i = 0; i < contactIdsArray.length; i += batchSize) {
+                    const batch = contactIdsArray.slice(i, i + batchSize);
+                    const batchResults = await db.select()
+                      .from(contactsTable)
+                      .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+                      .where(inArray(contactsTable.id, batch));
+                    fullContacts.push(...batchResults);
+                  }
+
+                  // Filter: must have accountId and callable phone
+                  const eligibleContacts = fullContacts.filter(row => {
+                    if (!row.contacts.accountId) return false;
+                    return getBestPhoneForContact({
+                      directPhone: row.contacts.directPhone,
+                      directPhoneE164: row.contacts.directPhoneE164,
+                      mobilePhone: row.contacts.mobilePhone,
+                      mobilePhoneE164: row.contacts.mobilePhoneE164,
+                      country: row.contacts.country,
+                      hqPhone: row.accounts?.mainPhone,
+                      hqPhoneE164: row.accounts?.mainPhoneE164,
+                      hqCountry: row.accounts?.hqCountry,
+                    }).phone !== null;
+                  });
+
+                  // For each agent, insert NEW contacts that aren't already in their queue
+                  let totalAgentQueueAdded = 0;
+                  for (const agentId of assignedAgentIds) {
+                    // Get existing agent queue contacts for this campaign
+                    const existingItems = await db
+                      .select({ contactId: agentQueue.contactId })
+                      .from(agentQueue)
+                      .where(
+                        and(
+                          eq(agentQueue.agentId, agentId),
+                          eq(agentQueue.campaignId, req.params.id)
+                        )
+                      );
+                    const existingSet = new Set(existingItems.map(item => item.contactId));
+
+                    const newItems = eligibleContacts
+                      .filter(row => !existingSet.has(row.contacts.id))
+                      .map(row => ({
+                        id: sql`gen_random_uuid()`,
+                        agentId,
+                        campaignId: req.params.id,
+                        contactId: row.contacts.id,
+                        accountId: row.contacts.accountId!,
+                        dialedNumber: getBestPhoneForContact({
+                          directPhone: row.contacts.directPhone,
+                          directPhoneE164: row.contacts.directPhoneE164,
+                          mobilePhone: row.contacts.mobilePhone,
+                          mobilePhoneE164: row.contacts.mobilePhoneE164,
+                          country: row.contacts.country,
+                          hqPhone: row.accounts?.mainPhone,
+                          hqPhoneE164: row.accounts?.mainPhoneE164,
+                          hqCountry: row.accounts?.hqCountry,
+                        }).phone || null,
+                        queueState: 'queued' as const,
+                        priority: 0,
+                        createdAt: new Date(),
+                        updatedAt: new Date(),
+                      }));
+
+                    if (newItems.length > 0) {
+                      const insertBatchSize = 500;
+                      for (let i = 0; i < newItems.length; i += insertBatchSize) {
+                        const batch = newItems.slice(i, i + insertBatchSize);
+                        try {
+                          const result = await db.insert(agentQueue).values(batch).returning({ id: agentQueue.id });
+                          totalAgentQueueAdded += result.length;
+                        } catch (err) {
+                          console.error(`[Campaign Update] Agent queue batch insert error:`, err);
+                        }
+                      }
+                    }
+                  }
+
+                  console.log(`[Campaign Update] Added ${totalAgentQueueAdded} new items to agent_queue across ${assignedAgentIds.length} agents`);
+                }
+              }
             }
           } else {
             console.log(`[Campaign Update] Queue already has ${queuedCount} items — skipping auto-populate`);
@@ -5661,6 +5808,7 @@ export function registerRoutes(app: Express) {
 
       // Auto-populate queue if campaign is active and new lists were added
       let enqueuedCount = 0;
+      let agentQueueAdded = 0;
       if (updatedCampaign && updatedCampaign.status === 'active' && addedCount > 0) {
         try {
           const contactsToEnqueue = await resolveAudienceContactsForQueue(
@@ -5671,7 +5819,111 @@ export function registerRoutes(app: Express) {
           if (contactsToEnqueue.length > 0) {
             const result = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
             enqueuedCount = result.enqueued;
-            console.log(`[Add Audience Lists] Auto-populated ${enqueuedCount} contacts to queue`);
+            console.log(`[Add Audience Lists] Auto-populated ${enqueuedCount} contacts to campaign_queue`);
+          }
+
+          // MANUAL/AI_AGENT DIAL: Also add new contacts to agent_queue for assigned agents
+          const dialMode = updatedCampaign.dialMode || 'manual';
+          if (dialMode === 'manual' || dialMode === 'ai_agent') {
+            const assignedAgents = await db
+              .select({ agentId: campaignAgentAssignments.agentId })
+              .from(campaignAgentAssignments)
+              .where(
+                and(
+                  eq(campaignAgentAssignments.campaignId, req.params.id),
+                  eq(campaignAgentAssignments.isActive, true)
+                )
+              );
+            const assignedAgentIds = assignedAgents.map(a => a.agentId).filter((id): id is string => !!id);
+
+            if (assignedAgentIds.length > 0) {
+              // Resolve contacts from the NEWLY added lists only
+              const newContactIds = new Set<string>();
+              for (const listId of listIds) {
+                const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+                if (list && list.recordIds && list.recordIds.length > 0) {
+                  list.recordIds.forEach((id: string) => newContactIds.add(id));
+                }
+              }
+
+              if (newContactIds.size > 0) {
+                // Batch-fetch contacts with account data
+                const contactIdsArray = Array.from(newContactIds);
+                const fullContacts: any[] = [];
+                const batchSize = 500;
+                for (let i = 0; i < contactIdsArray.length; i += batchSize) {
+                  const batch = contactIdsArray.slice(i, i + batchSize);
+                  const batchResults = await db.select()
+                    .from(contactsTable)
+                    .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+                    .where(inArray(contactsTable.id, batch));
+                  fullContacts.push(...batchResults);
+                }
+
+                const eligibleContacts = fullContacts.filter(row => {
+                  if (!row.contacts.accountId) return false;
+                  return getBestPhoneForContact({
+                    directPhone: row.contacts.directPhone,
+                    directPhoneE164: row.contacts.directPhoneE164,
+                    mobilePhone: row.contacts.mobilePhone,
+                    mobilePhoneE164: row.contacts.mobilePhoneE164,
+                    country: row.contacts.country,
+                    hqPhone: row.accounts?.mainPhone,
+                    hqPhoneE164: row.accounts?.mainPhoneE164,
+                    hqCountry: row.accounts?.hqCountry,
+                  }).phone !== null;
+                });
+
+                for (const agentId of assignedAgentIds) {
+                  const existingItems = await db
+                    .select({ contactId: agentQueue.contactId })
+                    .from(agentQueue)
+                    .where(and(
+                      eq(agentQueue.agentId, agentId),
+                      eq(agentQueue.campaignId, req.params.id)
+                    ));
+                  const existingSet = new Set(existingItems.map(item => item.contactId));
+
+                  const newItems = eligibleContacts
+                    .filter(row => !existingSet.has(row.contacts.id))
+                    .map(row => ({
+                      id: sql`gen_random_uuid()`,
+                      agentId,
+                      campaignId: req.params.id,
+                      contactId: row.contacts.id,
+                      accountId: row.contacts.accountId!,
+                      dialedNumber: getBestPhoneForContact({
+                        directPhone: row.contacts.directPhone,
+                        directPhoneE164: row.contacts.directPhoneE164,
+                        mobilePhone: row.contacts.mobilePhone,
+                        mobilePhoneE164: row.contacts.mobilePhoneE164,
+                        country: row.contacts.country,
+                        hqPhone: row.accounts?.mainPhone,
+                        hqPhoneE164: row.accounts?.mainPhoneE164,
+                        hqCountry: row.accounts?.hqCountry,
+                      }).phone || null,
+                      queueState: 'queued' as const,
+                      priority: 0,
+                      createdAt: new Date(),
+                      updatedAt: new Date(),
+                    }));
+
+                  if (newItems.length > 0) {
+                    for (let i = 0; i < newItems.length; i += 500) {
+                      const batch = newItems.slice(i, i + 500);
+                      try {
+                        const result = await db.insert(agentQueue).values(batch).returning({ id: agentQueue.id });
+                        agentQueueAdded += result.length;
+                      } catch (err) {
+                        console.error(`[Add Audience Lists] Agent queue batch insert error:`, err);
+                      }
+                    }
+                  }
+                }
+
+                console.log(`[Add Audience Lists] Added ${agentQueueAdded} new items to agent_queue across ${assignedAgentIds.length} agents`);
+              }
+            }
           }
         } catch (queueErr) {
           console.error('[Add Audience Lists] Queue auto-populate error (non-fatal):', queueErr);
@@ -5685,6 +5937,7 @@ export function registerRoutes(app: Express) {
         addedCount,
         totalLists: updatedLists.length,
         enqueuedCount,
+        agentQueueAdded,
         campaign: updatedCampaign,
       });
     } catch (error) {

@@ -488,8 +488,12 @@ Verbally summarize the whitepaper content using these intelligence layers:
 Example summary:
 "The whitepaper covers [3 key topics]. What's resonating most with [similar companies/roles] is [specific insight]. It's a quick 10-minute read with actionable takeaways."
 
-### Stage 3: Interest Gauge (Conversational)
-Don't ask "Are you interested?" directly. Instead:
+### Stage 3: Rapport & Interest Gauge (Conversational)
+First, acknowledge their role and company to build rapport:
+- "I see you're [Title] at [Company] — that's actually why this is relevant..."
+- "Given your role as [Title] at [Company], this should resonate..."
+
+Then gauge interest conversationally — don't ask "Are you interested?" directly. Instead:
 - "Does [topic X] resonate with challenges you're seeing?"
 - "Have you explored [related topic] in your role?"
 - "What's your current approach to [problem area]?"
@@ -499,12 +503,12 @@ Listen for:
 - **Neutral Signals**: "Maybe" / "Not sure" / "I'd have to think about it"
 - **Low Interest Signals**: "Not really our focus" / "We're all set" / "Not interested"
 
-### Stage 4: Permission-Based Delivery
+### Stage 4: Assumptive Delivery
 **If High Interest:**
 "Great! I'll email you the whitepaper right now. What's the best email address?"
 - Confirm spelling
 - Set expectation: "You'll have it within 5 minutes. It's PDF format, 15 pages."
-- Ask: "Would you like me to include my contact info in case you have questions after reading?"
+- State (don't ask): "I'll include my contact info so you can reach out if you have questions after reading."
 
 **If Neutral:**
 "No worries. How about this - I'll send you a quick one-pager summary via email. If it looks relevant, you can download the full whitepaper from there. Fair enough?"

@@ -1124,8 +1124,9 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
 
           // Escalating recovery: each level is more aggressive
           if (this.consecutiveRepetitions === 1) {
-            // Level 1: Just suppress output (handled by not emitting below)
-            console.warn(`${LOG_PREFIX} Level 1: Suppressing repeated output`);
+            // Level 1: Suppress output AND cancel audio to stop repeated phrases
+            console.warn(`${LOG_PREFIX} Level 1: Suppressing repeated output + cancelling audio`);
+            this.cancelResponse();
           } else if (this.consecutiveRepetitions === 2) {
             // Level 2: Cancel + gentle redirect
             console.warn(`${LOG_PREFIX} Level 2: Cancel + redirect`);

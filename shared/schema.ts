@@ -2323,6 +2323,9 @@ export const agentDefaults = pgTable("agent_defaults", {
   defaultTrainingGuidelines: jsonb("default_training_guidelines").notNull().$type<string[]>(),
   defaultVoiceProvider: text("default_voice_provider").notNull().default('google'),
   defaultVoice: text("default_voice").notNull().default('Fenrir'),
+  // Global concurrent call limits
+  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(100), // Per-campaign default
+  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(100),   // System-wide cap
   updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -4919,7 +4919,9 @@ RULES:
 
 Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
 
-RULES:
+${session.campaignType === 'content_syndication' ? `CONTENT CAMPAIGN RAPPORT: Before your pitch, briefly acknowledge the prospect's role and company to build rapport. Example: "I see you're the [Title] at [Company], that's actually why I'm reaching out..." — then bridge directly into the content insight and assume delivery by confirming the email. Do NOT ask "would you like to receive it?" — state the value and confirm the email.
+
+` : ''}RULES:
 - Lead with the VALUE — not with "thanks for confirming" or pleasantries
 - Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
 - NEVER ask "do you have a moment?" or "would you be interested?"
@@ -5083,7 +5085,9 @@ CRITICAL: Within 2 SECONDS of this message, you MUST be speaking. Silence = FAIL
 
 Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
 
-RULES:
+${session.campaignType === 'content_syndication' ? `CONTENT CAMPAIGN RAPPORT: Before your pitch, briefly acknowledge the prospect's role and company to build rapport. Example: "I see you're the [Title] at [Company], that's actually why I'm reaching out..." — then bridge directly into the content insight and assume delivery by confirming the email. Do NOT ask "would you like to receive it?" — state the value and confirm the email.
+
+` : ''}RULES:
 - Lead with the VALUE — not with "thanks for confirming" or pleasantries
 - Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
 - NEVER ask "do you have a moment?" or "would you be interested?"
@@ -8219,6 +8223,9 @@ async function buildSystemPrompt(
   const firstName = contactInfo?.firstName || 'the contact';
   const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ''} ${contactInfo?.lastName || ''}`.trim() || 'the contact';
   const contactEmail = contactInfo?.email || '';
+  const contactJobTitle = contactInfo?.jobTitle || '';
+  const contactCompany = contactInfo?.company || contactInfo?.companyName || '';
+  const campaignType = campaignConfig?.type || campaignConfig?.campaignType || '';
 
   // Build pronunciation guide for agent name if it's unusual
   const agentNamePronunciation = agentName.toLowerCase() === 'laomedeia'
@@ -8325,19 +8332,29 @@ If the person confirms they are ${fullName}:
 3. If they agree, proceed with the campaign objective (book meeting, confirm email for content, etc.).
 4. Close warmly — thank them for their time, say goodbye.
 
+${campaignType === 'content_syndication' ? `**CONTENT CAMPAIGN RAPPORT STEP (MANDATORY):**
+After identity is confirmed and before your pitch, build brief rapport by acknowledging their role and company:
+- Reference their title (${contactJobTitle}) and company (${contactCompany}) naturally to show you know who they are
+- Example: "Oh great — I see you're the ${contactJobTitle} over at ${contactCompany}, that's actually why I'm reaching out..."
+- This should feel natural, not scripted — use it as a bridge INTO the value statement
+- Keep it to ONE sentence — acknowledge role/company → bridge to content relevance
+- Then deliver the content insight and assume delivery (confirm email)
+- Do NOT turn this into a discovery question — it's a statement of recognition, not an interrogation` : ''}
+
 **TIMING RULE: Your entire post-confirmation intro MUST be under 7 seconds. No filler. No pleasantries. Value first.**
 
 **CRITICAL RULES:**
 - Lead with what's in it for THEM — not with who you are
 - Do NOT say "Great, thanks for confirming" or any other pleasantry before the value hook
 - Do NOT ask "do you have a moment?" or "would you be interested?"
+- NEVER frame your pitch as a yes/no question. Do NOT use phrases like "would you like to receive", "are you interested in", "wondered if you'd be open to", "want to receive a free copy?". Instead, state the value and ASSUME the next step (e.g. confirm email, propose a time).
 - Keep the entire intro to ONE short sentence — name + org + value + ask
 - Use the campaign objective and talking points from the Campaign Context section below to frame your value proposition
 
 If permission is given for other campaign types:
 - Clearly and briefly state the call purpose aligned with the campaign objective
 - Deliver it concisely, naturally, and in a human-sounding tone — NOT scripted
-- For content/white paper campaigns: simply ask if they'd like to receive it — no discovery questions
+- For content/white paper campaigns: FIRST acknowledge their role and company briefly to build rapport (e.g. "I see you're the ${contactJobTitle} at ${contactCompany}, that's actually why I'm reaching out..."), THEN state one compelling insight from the content, THEN ASSUME interest and confirm the email address — do NOT ask "would you like to receive it?" or any yes/no permission question. Example: "I see you're heading up [role] at [company] — we just published a report showing [insight]. I'll send it over, is ${contactEmail} still the best address?"
 - For meeting/appointment campaigns: ask ONE relevant question, then propose next steps
 - Listen carefully and allow them to speak without interruption
 - Acknowledge their perspective thoughtfully
