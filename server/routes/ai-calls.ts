@@ -64,7 +64,7 @@ Guidelines:
 - Include strategic pauses with "..." where appropriate
 
 You must return a JSON object with exactly these fields:
-- opening: The initial greeting and introduction (2-3 sentences)
+- opening: The initial greeting, introduction, and brief acknowledgment of their role/company (2-3 sentences)
 - gatekeeper: How to professionally navigate past gatekeepers (2-3 responses)
 - pitch: The main value proposition and call to action (3-5 sentences)
 - objections: Common objection responses as a paragraph with multiple objection handles

@@ -809,6 +809,13 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let waitingForHumanSpeech: boolean = true; // Set to false to have AI speak first
   let humanSpeechWaitTimer: NodeJS.Timeout | null = null;
 
+  // POST-GREETING COOLDOWN: After the agent finishes its opening greeting,
+  // enforce a silence period to prevent the agent from self-responding to
+  // ambient noise or its own echo. Only allow new speech after cooldown OR
+  // when actual human speech (inputTranscription) is detected.
+  let greetingCooldownUntil: number = 0;
+  let greetingTurnCompleted: boolean = false;
+
   // AMD (Answering Machine Detection) tracking
   // CRITICAL: Wait for AMD result before speaking to avoid talking to voicemail/IVR
   let amdCheckComplete: boolean = false;
@@ -993,17 +1000,16 @@ Instructions:
 2. STOP immediately after the question mark.
 3. WAIT for the user to reply.
 4. DO NOT simulate or predict the user's response.
-5. DO NOT say "Thanks for confirming" until you actually hear "Yes" from the user.`;
+5. DO NOT say "Thanks for confirming" until you actually hear "Yes" from the user.
+6. After speaking, go COMPLETELY SILENT and listen for a response.
+7. DO NOT generate any speech until you hear actual human words in the audio.
+8. Silence or background noise is NOT a prompt to speak again — just wait.`;
 
-      geminiWs?.send(JSON.stringify({
-        clientContent: {
-          turns: [{
-            role: 'user',
-            parts: [{ text: openingMessage }],
-          }],
-          turnComplete: true,
-        },
-      }));
+      // Use camelCase for Vertex AI, snake_case for Google AI Studio
+      const clientMsg = USE_VERTEX_AI
+        ? { clientContent: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turnComplete: true } }
+        : { client_content: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turn_complete: true } };
+      geminiWs?.send(JSON.stringify(clientMsg));
     } else {
       // Timeout expired - AI takes initiative (human was silent)
       console.log('[Gemini Live] ✅ Timeout expired - AI taking initiative');
@@ -1018,17 +1024,16 @@ Instructions:
 2. STOP immediately after the question mark.
 3. WAIT for the user to reply.
 4. DO NOT simulate or predict the user's response.
-5. DO NOT say "Thanks for confirming" until you actually hear "Yes" from the user.`;
+5. DO NOT say "Thanks for confirming" until you actually hear "Yes" from the user.
+6. After speaking, go COMPLETELY SILENT and listen for a response.
+7. DO NOT generate any speech until you hear actual human words in the audio.
+8. Silence or background noise is NOT a prompt to speak again — just wait.`;
 
-      geminiWs?.send(JSON.stringify({
-        clientContent: {
-          turns: [{
-            role: 'user',
-            parts: [{ text: openingMessage }],
-          }],
-          turnComplete: true,
-        },
-      }));
+      // Use camelCase for Vertex AI, snake_case for Google AI Studio
+      const clientMsg = USE_VERTEX_AI
+        ? { clientContent: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turnComplete: true } }
+        : { client_content: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turn_complete: true } };
+      geminiWs?.send(JSON.stringify(clientMsg));
     }
 
     console.log(`[Gemini Live] 📢 Opening message queued: "${openingText}"`);
@@ -1464,19 +1469,19 @@ Instructions:
             const pcm16kBuffer = g711ToPcm16k(g711Buffer, g711Format);
             const pcm16kBase64 = pcm16kBuffer.toString('base64');
 
-            // Use snake_case for Vertex AI, camelCase for Google AI Studio
+            // Use camelCase for Vertex AI, snake_case for Google AI Studio
             const audioMessage = USE_VERTEX_AI ? {
-              realtime_input: {
-                media_chunks: [{
-                  data: pcm16kBase64,
-                  mime_type: 'audio/pcm;rate=16000'
-                }]
-              }
-            } : {
               realtimeInput: {
                 mediaChunks: [{
                   data: pcm16kBase64,
                   mimeType: 'audio/pcm;rate=16000'
+                }]
+              }
+            } : {
+              realtime_input: {
+                media_chunks: [{
+                  data: pcm16kBase64,
+                  mime_type: 'audio/pcm;rate=16000'
                 }]
               }
             };
@@ -1762,19 +1767,19 @@ Instructions:
             // Generate 20ms of silence (320 samples at 16kHz, 16-bit = 640 bytes)
             const silenceFrame = Buffer.alloc(640, 0);
             const silenceBase64 = silenceFrame.toString('base64');
-            // Use snake_case for Vertex AI, camelCase for Google AI Studio
+            // Use camelCase for Vertex AI, snake_case for Google AI Studio
             const silenceMessage = USE_VERTEX_AI ? {
-              realtime_input: {
-                media_chunks: [{
-                  data: silenceBase64,
-                  mime_type: 'audio/pcm;rate=16000'
-                }]
-              }
-            } : {
               realtimeInput: {
                 mediaChunks: [{
                   data: silenceBase64,
                   mimeType: 'audio/pcm;rate=16000'
+                }]
+              }
+            } : {
+              realtime_input: {
+                media_chunks: [{
+                  data: silenceBase64,
+                  mime_type: 'audio/pcm;rate=16000'
                 }]
               }
             };
@@ -1785,7 +1790,7 @@ Instructions:
         }
       }, AUDIO_KEEPALIVE_INTERVAL);
 
-      // Send Setup Message - use snake_case for Vertex AI, camelCase for Google AI Studio
+      // Send Setup Message - use camelCase for Vertex AI, snake_case for Google AI Studio
       const modelName = getModelName();
       console.log(`[Gemini Live] Sending setup with model: ${modelName}`);
 
@@ -1794,7 +1799,7 @@ Instructions:
           model: modelName,
           tools: [
             {
-              function_declarations: [
+              functionDeclarations: [
                 {
                   name: "book_appointment",
                   description: "Books an appointment or meeting for the user. Call this when the user confirms a date and time.",
@@ -1859,31 +1864,41 @@ Instructions:
               ]
             }
           ],
-          generation_config: {
-            response_modalities: ["AUDIO"],
-            speech_config: {
-              voice_config: {
-                prebuilt_voice_config: {
-                  voice_name: voiceName
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: voiceName
                 }
               }
             }
           },
           // CRITICAL: Enable transcription of both AI output and user input
           // This provides full transcript of the conversation for analysis
-          output_audio_transcription: {},
-          input_audio_transcription: {},
-          system_instruction: {
+          outputAudioTranscription: {},
+          inputAudioTranscription: {},
+          systemInstruction: {
             parts: [{ text: systemPrompt }]
-          }
+          },
+          // VAD configuration: Conservative silence detection to prevent
+          // mid-sentence cutoffs and false turn triggers
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: false,
+              startOfSpeechSensitivity: 'LOW',
+              endOfSpeechSensitivity: 'LOW',
+              silenceDuration: 1.5,
+            },
+          },
         }
       } : {
-        // Google AI Studio version (camelCase)
+        // Google AI Studio version (snake_case)
         setup: {
           model: modelName,
           tools: [
             {
-              functionDeclarations: [
+              function_declarations: [
                 {
                   name: "book_appointment",
                   description: "Books an appointment or meeting for the user. Call this when the user confirms a date and time.",
@@ -1934,23 +1949,33 @@ Instructions:
               ]
             }
           ],
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: voiceName
+          generation_config: {
+            response_modalities: ["AUDIO"],
+            speech_config: {
+              voice_config: {
+                prebuilt_voice_config: {
+                  voice_name: voiceName
                 }
               }
             }
           },
           // CRITICAL: Enable transcription of both AI output and user input
           // This provides full transcript of the conversation for analysis
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
-          systemInstruction: {
+          output_audio_transcription: {},
+          input_audio_transcription: {},
+          system_instruction: {
             parts: [{ text: systemPrompt }]
-          }
+          },
+          // VAD configuration: Conservative silence detection to prevent
+          // mid-sentence cutoffs and false turn triggers
+          realtime_input_config: {
+            automatic_activity_detection: {
+              disabled: false,
+              start_of_speech_sensitivity: 'LOW',
+              end_of_speech_sensitivity: 'LOW',
+              silence_duration: 1.5,
+            },
+          },
         }
       };
       geminiWs?.send(JSON.stringify(setupMessage));
@@ -2128,6 +2153,12 @@ Instructions:
             audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Contact transcript captured: "${contactText.substring(0, 100)}${contactText.length > 100 ? '...' : ''}"`);
 
+            // Clear post-greeting cooldown when human actually speaks
+            if (greetingCooldownUntil > 0) {
+              greetingCooldownUntil = 0;
+              console.log(`[Gemini Live] ❄️ Post-greeting cooldown cleared - human spoke`);
+            }
+
             // NATURAL CONVERSATION: Detect when human speaks first
             // This triggers the AI to respond with its opening message
             if (!humanHasSpoken && waitingForHumanSpeech) {
@@ -2179,6 +2210,14 @@ Instructions:
               if (!openingMessageSent) {
                 console.log(`[Gemini Live] 🚫 Dropping premature audio output - waiting for opening message instruction`);
                 continue; // Skip this audio chunk but continue processing other parts
+              }
+
+              // POST-GREETING COOLDOWN: After greeting finishes, suppress any new AI speech
+              // for 2 seconds unless actual human speech was detected. This prevents the agent
+              // from self-responding to ambient noise or its own echo.
+              if (greetingCooldownUntil > 0 && Date.now() < greetingCooldownUntil) {
+                console.log(`[Gemini Live] ❄️ Dropping audio during post-greeting cooldown (${Math.round(greetingCooldownUntil - Date.now())}ms left)`);
+                continue;
               }
 
               // Calculate bytes received
@@ -2772,6 +2811,15 @@ Instructions:
         // NOTE: Goodbye detection now handled by end_call tool (audio-only mode optimization)
         if (response.serverContent?.turnComplete) {
           console.log('[Gemini Live] ✨ AI turn complete');
+
+          // POST-GREETING COOLDOWN: After the first agent turn (the greeting),
+          // enforce a 2-second silence window. This prevents Gemini from treating
+          // ambient noise or its own echo as user input and immediately self-responding.
+          if (openingMessageSent && !greetingTurnCompleted) {
+            greetingTurnCompleted = true;
+            greetingCooldownUntil = Date.now() + 2000; // 2-second cooldown
+            console.log('[Gemini Live] ❄️ Post-greeting cooldown: suppressing AI speech for 2s unless human speaks');
+          }
         }
 
         // Handle Interruptions (user started talking while AI was speaking)

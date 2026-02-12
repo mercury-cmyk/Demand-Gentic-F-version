@@ -1124,8 +1124,9 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
 
           // Escalating recovery: each level is more aggressive
           if (this.consecutiveRepetitions === 1) {
-            // Level 1: Just suppress output (handled by not emitting below)
-            console.warn(`${LOG_PREFIX} Level 1: Suppressing repeated output`);
+            // Level 1: Suppress output AND cancel audio to stop repeated phrases
+            console.warn(`${LOG_PREFIX} Level 1: Suppressing repeated output + cancelling audio`);
+            this.cancelResponse();
           } else if (this.consecutiveRepetitions === 2) {
             // Level 2: Cancel + gentle redirect
             console.warn(`${LOG_PREFIX} Level 2: Cancel + redirect`);
@@ -1197,12 +1198,27 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
       this.emit('audio:done');
       this.setResponding(false, this.currentResponseId || undefined);
       this.currentResponseId = null;
+
+      // Cooldown: a successful turn completion means the model is behaving normally
+      if (this.consecutiveRepetitions > 0) {
+        this.consecutiveRepetitions = Math.max(0, this.consecutiveRepetitions - 1);
+      }
     }
 
     // Interrupted
     if (content.interrupted) {
       console.log(`${LOG_PREFIX} 🛑 Response interrupted`);
       this.currentTranscript = '';
+
+      // CRITICAL FIX: Reset repetition tracking on interruption.
+      // When Gemini is interrupted, the phrase it was saying got cut off.
+      // If it tries to say something similar next (resuming its thought),
+      // we should NOT count that as a repetition — only true loops.
+      this.consecutiveRepetitions = 0;
+      if (this.recentPhrases.length > 5) {
+        this.recentPhrases = this.recentPhrases.slice(-5);
+      }
+
       if (this.currentResponseId) {
         this.emit('response:cancelled', { responseId: this.currentResponseId });
       }
@@ -1303,6 +1319,18 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
    */
   clearRecentPhrases(): void {
     this.recentPhrases = [];
+  }
+
+  /**
+   * Soft-reset repetition tracking after a major state transition (e.g. identity confirmation).
+   * Keeps the last few phrases for minimal loop detection but resets the escalation counter.
+   */
+  softResetRepetitionTracking(): void {
+    this.consecutiveRepetitions = 0;
+    if (this.recentPhrases.length > 3) {
+      this.recentPhrases = this.recentPhrases.slice(-3);
+    }
+    console.log(`${LOG_PREFIX} 🔄 Repetition tracking soft-reset (kept ${this.recentPhrases.length} phrases)`);
   }
 
   /**

@@ -14,7 +14,7 @@ import * as sipDialer from '../services/sip';
 import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
 import { db } from '../db';
-import { campaigns, campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents, dialerCallAttempts, dialerRuns } from '@shared/schema';
+import { campaigns, campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents, dialerCallAttempts, dialerRuns, agentDefaults } from '@shared/schema';
 import { eq, sql, inArray, and } from 'drizzle-orm';
 import { checkSuppressionBulk } from './suppression.service';
 import { getBestPhoneForContact } from './phone-utils';
@@ -44,11 +44,42 @@ import {
 } from '../services/active-call-tracker';
 
 const ORCHESTRATOR_INTERVAL_MS = 10000; // Check every 10 seconds (increased frequency)
-const DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '100', 10); // Max 100 concurrent calls per campaign by default
-const GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10); // System-wide maximum (Telnyx capacity)
+const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '100', 10);
+const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10);
 const DELAY_BETWEEN_CALLS_MS = 250; // 250ms delay between call batches (faster ramp-up)
 const PARALLEL_CALL_BATCH_SIZE = 25; // Batch size of 25 for efficient ramp-up
 const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
+
+// Cached concurrency limits from DB (refreshed every 60s)
+let _cachedDefaultMaxConcurrent = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
+let _cachedGlobalMaxConcurrent = ENV_GLOBAL_MAX_CONCURRENT_CALLS;
+let _concurrencyLastFetched = 0;
+const CONCURRENCY_CACHE_TTL_MS = 60000; // 1 minute
+
+async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: number }> {
+  const now = Date.now();
+  if (now - _concurrencyLastFetched < CONCURRENCY_CACHE_TTL_MS) {
+    return { defaultMax: _cachedDefaultMaxConcurrent, globalMax: _cachedGlobalMaxConcurrent };
+  }
+  try {
+    const [defaults] = await db.select({
+      defaultMaxConcurrentCalls: agentDefaults.defaultMaxConcurrentCalls,
+      globalMaxConcurrentCalls: agentDefaults.globalMaxConcurrentCalls,
+    }).from(agentDefaults).limit(1);
+    if (defaults) {
+      _cachedDefaultMaxConcurrent = defaults.defaultMaxConcurrentCalls ?? ENV_DEFAULT_MAX_CONCURRENT_CALLS;
+      _cachedGlobalMaxConcurrent = defaults.globalMaxConcurrentCalls ?? ENV_GLOBAL_MAX_CONCURRENT_CALLS;
+    }
+    _concurrencyLastFetched = now;
+  } catch (e) {
+    console.warn('[AI Orchestrator] Failed to load concurrency limits from DB, using env/cached values');
+  }
+  return { defaultMax: _cachedDefaultMaxConcurrent, globalMax: _cachedGlobalMaxConcurrent };
+}
+
+// Legacy constants for backward compat (now dynamically loaded)
+let DEFAULT_MAX_CONCURRENT_CALLS = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
+let GLOBAL_MAX_CONCURRENT_CALLS = ENV_GLOBAL_MAX_CONCURRENT_CALLS;
 
 // Telnyx error codes that should pause the campaign (account-level issues)
 const TELNYX_ACCOUNT_DISABLED_CODE = 10010; // "Account is disabled D17"
@@ -686,7 +717,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
             OR cs.to_number_e164 = c.mobile_phone_e164
           )
       )
-    ORDER BY within_hours DESC, phone_priority ASC, cq.priority DESC, cq.created_at ASC
+    ORDER BY within_hours DESC, cq.ai_priority_score DESC NULLS LAST, phone_priority ASC, cq.priority DESC, cq.created_at ASC
     LIMIT ${limit * 3}
   `);
   
@@ -792,7 +823,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
   // Get current in-progress count
   const inProgressCount = await getInProgressCount(campaignId);
-  const maxConcurrent = (aiSettings as any).maxConcurrentCalls || DEFAULT_MAX_CONCURRENT_CALLS;
+  const { defaultMax } = await getConcurrencyLimits();
+  const maxConcurrent = (aiSettings as any).maxConcurrentCalls || defaultMax;
   const campaignSlots = Math.max(0, maxConcurrent - inProgressCount);
   const requestedSlots = typeof options?.maxNewCalls === 'number'
     ? Math.max(0, Math.floor(options.maxNewCalls))
@@ -1688,16 +1720,17 @@ async function orchestratorTick(): Promise<OrchestratorJobResult> {
     }
 
     const globalInProgress = await getGlobalInProgressCount();
-    let availableGlobalSlots = Math.max(0, GLOBAL_MAX_CONCURRENT_CALLS - globalInProgress);
+    const { globalMax } = await getConcurrencyLimits();
+    let availableGlobalSlots = Math.max(0, globalMax - globalInProgress);
 
-    const perCampaignShare = Math.max(1, Math.floor(GLOBAL_MAX_CONCURRENT_CALLS / Math.max(campaigns.length, 1)));
+    const perCampaignShare = Math.max(1, Math.floor(globalMax / Math.max(campaigns.length, 1)));
     const startIndex = campaigns.length > 0 ? lastCampaignStartIndex % campaigns.length : 0;
     const orderedCampaigns = campaigns.length > 0
       ? [...campaigns.slice(startIndex), ...campaigns.slice(0, startIndex)]
       : campaigns;
     lastCampaignStartIndex = campaigns.length > 0 ? (startIndex + 1) % campaigns.length : 0;
 
-    console.log(`[AI Orchestrator] Processing ${campaigns.length} active AI campaign(s)${stuckReset > 0 ? ` (watchdog freed ${stuckReset} slots)` : ''} (global ${globalInProgress}/${GLOBAL_MAX_CONCURRENT_CALLS}, share ${perCampaignShare}, start index ${startIndex})`);
+    console.log(`[AI Orchestrator] Processing ${campaigns.length} active AI campaign(s)${stuckReset > 0 ? ` (watchdog freed ${stuckReset} slots)` : ''} (global ${globalInProgress}/${globalMax}, share ${perCampaignShare}, start index ${startIndex})`);
 
     if (availableGlobalSlots <= 0) {
       console.log('[AI Orchestrator] Pausing tick - global concurrency limit reached');
@@ -1767,7 +1800,8 @@ export function initializeAiCampaignOrchestrator(): void {
       if (job.data.type === 'tick') {
         return orchestratorTick();
       } else if (job.data.type === 'campaign-replenish' && job.data.campaignId) {
-        const globalSlots = Math.max(0, GLOBAL_MAX_CONCURRENT_CALLS - (await getGlobalInProgressCount()));
+        const { globalMax } = await getConcurrencyLimits();
+        const globalSlots = Math.max(0, globalMax - (await getGlobalInProgressCount()));
         if (globalSlots <= 0) {
           console.log(`[AI Orchestrator] Replenish skipped for ${job.data.campaignId} - global limit reached`);
           return { processed: true, callsInitiated: 0, message: 'Global concurrency limit reached' };

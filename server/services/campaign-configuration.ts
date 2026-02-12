@@ -30,7 +30,7 @@ export const CAMPAIGN_CONFIGURATIONS: Record<string, CampaignConfiguration> = {
       "Explicit consent obtained",
       "Interest validated"
     ],
-    openingMessageTemplate: "Hi {{contact.firstName}}, I'm specific_agent_name calling from {{company_name}}. We just released a report on {{topic}}, and I wanted to see if you'd be interested in receiving a copy?"
+    openingMessageTemplate: "Hi {{contact.firstName}}, I'm specific_agent_name calling from {{company_name}}. I see you're the {{contact.jobTitle}} over at {{contact.companyName}} — that's actually why I'm reaching out. We just released a report on {{topic}} that's been really relevant for folks in your kind of role. I'd like to send it your way — is {{contact.email}} still the best address?"
   },
   live_webinar: {
     type: "live_webinar",

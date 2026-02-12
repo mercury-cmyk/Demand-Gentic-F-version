@@ -84,6 +84,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         defaultTrainingGuidelines: SYSTEM_DEFAULT_TRAINING,
         defaultVoiceProvider: 'google',
         defaultVoice: 'Fenrir',
+        defaultMaxConcurrentCalls: 100,
+        globalMaxConcurrentCalls: 100,
         isSystemDefault: true,
         updatedAt: null,
       });
@@ -114,6 +116,8 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
       defaultTrainingGuidelines,
       defaultVoiceProvider,
       defaultVoice,
+      defaultMaxConcurrentCalls,
+      globalMaxConcurrentCalls,
     } = req.body;
 
     console.log(`${LOG_PREFIX} Updating global agent defaults`);
@@ -136,6 +140,8 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
           defaultTrainingGuidelines: defaultTrainingGuidelines || SYSTEM_DEFAULT_TRAINING,
           defaultVoiceProvider: defaultVoiceProvider || 'google',
           defaultVoice: defaultVoice || 'Fenrir',
+          defaultMaxConcurrentCalls: typeof defaultMaxConcurrentCalls === 'number' ? defaultMaxConcurrentCalls : 100,
+          globalMaxConcurrentCalls: typeof globalMaxConcurrentCalls === 'number' ? globalMaxConcurrentCalls : 100,
           updatedAt: new Date(),
         })
         .where(eq(agentDefaults.id, existing.id))
@@ -150,6 +156,8 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
           defaultTrainingGuidelines: defaultTrainingGuidelines || SYSTEM_DEFAULT_TRAINING,
           defaultVoiceProvider: defaultVoiceProvider || 'google',
           defaultVoice: defaultVoice || 'Fenrir',
+          defaultMaxConcurrentCalls: typeof defaultMaxConcurrentCalls === 'number' ? defaultMaxConcurrentCalls : 100,
+          globalMaxConcurrentCalls: typeof globalMaxConcurrentCalls === 'number' ? globalMaxConcurrentCalls : 100,
         })
         .returning();
     }
@@ -187,6 +195,8 @@ router.post('/reset', requireAuth, async (req: Request, res: Response) => {
       defaultTrainingGuidelines: SYSTEM_DEFAULT_TRAINING,
       defaultVoiceProvider: 'google',
       defaultVoice: 'Fenrir',
+      defaultMaxConcurrentCalls: 100,
+      globalMaxConcurrentCalls: 100,
       isSystemDefault: true,
       updatedAt: null,
       message: 'Reset to system defaults successfully',

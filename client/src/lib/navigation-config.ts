@@ -397,6 +397,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
         description: 'Custom reports and exports',
       },
+      {
+        id: 'disposition-reanalysis',
+        title: 'Disposition Reanalysis',
+        url: '/disposition-reanalysis',
+        icon: 'RefreshCw',
+        roles: QA_ROLES,
+        description: 'Analyze calls, detect misclassified dispositions, and re-route leads',
+      },
     ],
   },
 

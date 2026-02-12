@@ -16,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Save, RotateCcw, Settings, Info, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, Save, RotateCcw, Settings, Info, CheckCircle2, AlertCircle, PhoneCall } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,6 +36,8 @@ interface AgentDefaults {
   defaultTrainingGuidelines: string[];
   defaultVoiceProvider: string;
   defaultVoice: string;
+  defaultMaxConcurrentCalls: number;
+  globalMaxConcurrentCalls: number;
   isSystemDefault: boolean;
   updatedAt: string | null;
 }
@@ -49,6 +51,8 @@ export function AgentDefaultsConfiguration() {
   const [trainingGuidelines, setTrainingGuidelines] = useState<string[]>([]);
   const [voiceProvider, setVoiceProvider] = useState('google');
   const [voice, setVoice] = useState('Kore');
+  const [defaultMaxConcurrentCalls, setDefaultMaxConcurrentCalls] = useState(100);
+  const [globalMaxConcurrentCalls, setGlobalMaxConcurrentCalls] = useState(100);
   const [newGuideline, setNewGuideline] = useState('');
 
   // Fetch current defaults
@@ -68,6 +72,8 @@ export function AgentDefaultsConfiguration() {
       setTrainingGuidelines(defaults.defaultTrainingGuidelines);
       setVoiceProvider(defaults.defaultVoiceProvider);
       setVoice(defaults.defaultVoice);
+      setDefaultMaxConcurrentCalls(defaults.defaultMaxConcurrentCalls ?? 100);
+      setGlobalMaxConcurrentCalls(defaults.globalMaxConcurrentCalls ?? 100);
     }
   }, [defaults]);
 
@@ -80,6 +86,8 @@ export function AgentDefaultsConfiguration() {
         defaultTrainingGuidelines: trainingGuidelines,
         defaultVoiceProvider: voiceProvider,
         defaultVoice: voice,
+        defaultMaxConcurrentCalls,
+        globalMaxConcurrentCalls,
       });
       return res.json();
     },
@@ -112,6 +120,8 @@ export function AgentDefaultsConfiguration() {
       setTrainingGuidelines(data.defaultTrainingGuidelines);
       setVoiceProvider(data.defaultVoiceProvider);
       setVoice(data.defaultVoice);
+      setDefaultMaxConcurrentCalls(data.defaultMaxConcurrentCalls ?? 100);
+      setGlobalMaxConcurrentCalls(data.globalMaxConcurrentCalls ?? 100);
       toast({
         title: 'Reset complete',
         description: 'Global agent defaults have been reset to system defaults.',
@@ -357,6 +367,59 @@ export function AgentDefaultsConfiguration() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Concurrent Call Limits */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <PhoneCall className="h-4 w-4" />
+            Concurrent Call Limits
+          </CardTitle>
+          <CardDescription>
+            Control how many simultaneous calls can run per campaign and system-wide
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label htmlFor="defaultMaxConcurrent">Per-Campaign Default</Label>
+              <Input
+                id="defaultMaxConcurrent"
+                type="number"
+                min={1}
+                max={500}
+                value={defaultMaxConcurrentCalls}
+                onChange={(e) => setDefaultMaxConcurrentCalls(Math.max(1, parseInt(e.target.value) || 1))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Maximum concurrent calls each campaign can make unless overridden in campaign settings.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="globalMaxConcurrent">System-Wide Maximum</Label>
+              <Input
+                id="globalMaxConcurrent"
+                type="number"
+                min={1}
+                max={1000}
+                value={globalMaxConcurrentCalls}
+                onChange={(e) => setGlobalMaxConcurrentCalls(Math.max(1, parseInt(e.target.value) || 1))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Total concurrent calls across all campaigns combined (Telnyx capacity limit).
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2 rounded-lg border p-3 bg-amber-50/50 dark:bg-amber-950/20">
+            <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-muted-foreground">
+              Setting these too high may exceed your telephony provider's capacity. The system-wide max
+              caps the total across all active campaigns, while per-campaign default limits each campaign individually.
+              Individual campaigns can override the per-campaign default in their AI settings.
+            </p>
           </div>
         </CardContent>
       </Card>

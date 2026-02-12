@@ -595,44 +595,11 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
     return (
       <>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => setShowReplaceDialog(true)}
-            disabled={isPending || !campaignId}
-            size="sm"
-            variant="outline"
-            className="bg-white/10 text-white border-white/20 hover:bg-white/20"
-            data-testid="button-replace-queue"
-            title="Set Queue - Replace your current queue with contacts matching filters"
-          >
-            <Replace className="h-3 w-3 mr-1.5" />
-            Set Queue
-          </Button>
-
-          <Button
-            onClick={() => setShowClearDialog(true)}
-            disabled={isPending || !campaignId}
-            size="sm"
-            variant="outline"
-            className="bg-white/10 text-white border-white/20 hover:bg-white/20"
-            data-testid="button-clear-queue"
-          >
-            <Trash2 className="h-3 w-3 mr-1.5" />
-            Clear Queue
-          </Button>
-
-          {isAdminOrManager && (
-            <Button
-              onClick={() => setShowClearAllDialog(true)}
-              disabled={isPending || !campaignId}
-              size="sm"
-              variant="outline"
-              className="bg-destructive/80 text-white border-white/20 hover:bg-destructive"
-              data-testid="button-clear-all-queues"
-            >
-              <Trash2 className="h-3 w-3 mr-1.5" />
-              Clear All
-            </Button>
-          )}
+          {/* Custom queue controls disabled — unified intelligent queue system active */}
+          <Badge variant="secondary" className="bg-white/10 text-white border-white/20" data-testid="badge-unified-queue">
+            <Lightbulb className="h-3 w-3 mr-1.5" />
+            Intelligent Queue
+          </Badge>
           
           {isLoadingStats ? (
             <Loader2 className="h-4 w-4 animate-spin text-white ml-2" data-testid="loader-queue-stats" />
@@ -642,8 +609,6 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
             </Badge>
           )}
         </div>
-        
-        {renderSharedDialogs()}
       </>
     );
   }
@@ -655,8 +620,14 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Queue Management</CardTitle>
-              <CardDescription>Manage your campaign queue</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <Lightbulb className="h-4 w-4 text-primary" />
+                Unified Intelligent Queue
+              </CardTitle>
+              <CardDescription>
+                Contacts are automatically prioritized by the intelligent scoring engine.
+                Queue distribution, tracking, and release are managed centrally for both human and AI agents.
+              </CardDescription>
             </div>
             {isLoadingStats ? (
               <Loader2 className="h-4 w-4 animate-spin" data-testid="loader-queue-stats" />
@@ -669,45 +640,13 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
             )}
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => setShowReplaceDialog(true)}
-              disabled={isPending || !campaignId}
-              variant="default"
-              data-testid="button-replace-queue"
-              title="Clear your current queue and replace it with contacts matching filters. If no filters, queues all available campaign contacts."
-            >
-              <Replace className="h-4 w-4 mr-2" />
-              Set Queue (Replace)
-            </Button>
-
-            <Button
-              onClick={() => setShowClearDialog(true)}
-              disabled={isPending || !campaignId}
-              variant="secondary"
-              data-testid="button-clear-queue"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Clear My Queue
-            </Button>
-
-            {isAdminOrManager && (
-              <Button
-                onClick={() => setShowClearAllDialog(true)}
-                disabled={isPending || !campaignId}
-                variant="destructive"
-                data-testid="button-clear-all-queues"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Clear All Queues
-              </Button>
-            )}
-          </div>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Custom queue filters have been replaced by the unified intelligent queue system.
+            Contacts are scored and prioritized automatically based on industry fit, role fit, account fit, intent topics, and historical conversion data.
+          </p>
         </CardContent>
       </Card>
-      
-      {renderSharedDialogs()}
     </>
   );
 }

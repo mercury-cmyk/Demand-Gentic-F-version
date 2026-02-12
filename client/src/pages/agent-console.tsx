@@ -9,7 +9,6 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import {
   Phone,
   PhoneOff,
@@ -425,22 +424,33 @@ export default function AgentConsolePage() {
     return false;
   });
 
-  // Fetch agent's active campaign assignment
+  // Fetch agent's active campaign assignment (poll every 10s to detect reassignments)
   const { data: activeCampaign } = useQuery<{
     campaignId: string;
     campaignName: string;
     assignedAt: Date;
   } | null>({
     queryKey: ['/api/agents/me/active-campaign'],
+    refetchInterval: 10000,
   });
 
-  // Automatically select the active campaign when it's loaded
+  // Track the last known active campaign to detect real reassignments vs refetch noise
+  const prevActiveCampaignRef = useRef<string | null>(null);
+
+  // Auto-select active campaign on initial load, and switch only on real reassignment
   useEffect(() => {
-    if (activeCampaign?.campaignId && !selectedCampaignId) {
-      console.log('[AGENT CONSOLE] Auto-selecting active campaign:', activeCampaign.campaignId);
+    if (!activeCampaign?.campaignId) return;
+
+    const isInitialLoad = prevActiveCampaignRef.current === null;
+    const isReassignment = prevActiveCampaignRef.current !== null && prevActiveCampaignRef.current !== activeCampaign.campaignId;
+
+    if (isInitialLoad || isReassignment) {
+      console.log('[AGENT CONSOLE] Active campaign changed, switching to:', activeCampaign.campaignId, activeCampaign.campaignName);
       setSelectedCampaignId(activeCampaign.campaignId);
     }
-  }, [activeCampaign, selectedCampaignId]);
+
+    prevActiveCampaignRef.current = activeCampaign.campaignId;
+  }, [activeCampaign?.campaignId]);
 
   // CRITICAL FIX: Reset contact index when campaign changes
   // This prevents showing stale contacts from the previous queue
@@ -766,12 +776,10 @@ export default function AgentConsolePage() {
     }
   };
 
-  // Fetch agent queue data
+  // Fetch agent queue data — only when a campaign is selected to prevent layout shifts
   const { data: queueData = [], isLoading: queueLoading, refetch: refetchQueue, error: queueError, isFetching: queueFetching, isPlaceholderData } = useQuery<QueueItem[]>({
-    queryKey: selectedCampaignId 
-      ? [`/api/agents/me/queue?campaignId=${selectedCampaignId}&status=queued`]
-      : ['/api/agents/me/queue?status=queued'],
-    placeholderData: (previousData) => previousData, // Keep previous data during refetch to prevent UI flickering
+    queryKey: [`/api/agents/me/queue?campaignId=${selectedCampaignId}&status=queued`],
+    enabled: !!selectedCampaignId,
     staleTime: 30000, // Consider data fresh for 30 seconds
   });
 
@@ -1204,9 +1212,10 @@ export default function AgentConsolePage() {
     return result;
   };
 
-  // Get agent's assigned campaigns
+  // Get agent's assigned campaigns (poll to detect reassignments)
   const { data: agentAssignments = [] } = useQuery<Array<{ campaignId: string; campaignName: string }>>({
     queryKey: ['/api/campaigns/agent-assignments'],
+    refetchInterval: 10000,
   });
 
   const campaigns: Campaign[] = agentAssignments.length > 0 
@@ -1509,25 +1518,20 @@ export default function AgentConsolePage() {
     }
   };
 
-  const queueProgress = (queueData?.length || 0) > 0 ? ((currentContactIndex + 1) / (queueData?.length || 1)) * 100 : 0;
-
-  // Show loading state when initially loading (not during background refetch)
-  if (queueLoading && !(queueData?.length)) {
+  // Show loading state while waiting for campaign selection or initial queue load
+  if (!selectedCampaignId || (queueLoading && !(queueData?.length))) {
     return (
       <div className="container mx-auto p-6">
         <div className="mb-6">
           <h1 className="text-2xl font-bold">Agent Console</h1>
-          {selectedCampaign && (
-            <p className="text-sm text-muted-foreground">
-              Campaign: {selectedCampaign.name}
-            </p>
-          )}
         </div>
         <Card>
           <CardContent className="pt-6">
             <div className="text-center py-12">
               <div className="animate-spin w-8 h-8 mx-auto border-4 border-primary border-t-transparent rounded-full mb-4" />
-              <p className="text-muted-foreground">Loading queue...</p>
+              <p className="text-muted-foreground">
+                {!selectedCampaignId ? 'Loading campaign...' : 'Loading queue...'}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -1575,11 +1579,13 @@ export default function AgentConsolePage() {
               )}
               {selectedCampaign && selectedCampaignId && (
                 <div className="mt-6">
-                  <p className="text-sm text-muted-foreground mb-3">Use the button below to set up your queue:</p>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Queue is managed by the unified intelligent queue system. Contacts will be automatically assigned and prioritized.
+                  </p>
                   <QueueControls
                     campaignId={selectedCampaignId}
                     compact={false}
-                    renderDialogs={true}
+                    renderDialogs={false}
                     onQueueUpdated={() => {
                       refetchQueue();
                       toast({
@@ -1669,15 +1675,7 @@ export default function AgentConsolePage() {
             </Button>
           </div>
 
-          {/* Row 3: Queue Progress */}
-          <div className="px-3 pb-2">
-            <div className="text-center mb-1">
-              <span className="text-white text-[10px] font-medium">
-                Contact {currentContactIndex + 1} of {queueData?.length || 0}
-              </span>
-            </div>
-            <Progress value={queueProgress} className="h-1 bg-white/20" />
-          </div>
+
         </div>
 
         {/* Desktop Header - Original Layout */}
@@ -1710,15 +1708,7 @@ export default function AgentConsolePage() {
             )}
           </div>
 
-          {/* Center: Queue Progress */}
-          <div className="flex-1 max-w-lg mx-4">
-            <div className="text-center mb-1">
-              <span className="text-white text-sm font-medium">
-                Contact {currentContactIndex + 1} of {queueData?.length || 0}
-              </span>
-            </div>
-            <Progress value={queueProgress} className="h-2 bg-white/20" />
-          </div>
+
 
           {/* Right: Status & Controls */}
           <div className="flex items-center gap-3 flex-nowrap flex-shrink-0">

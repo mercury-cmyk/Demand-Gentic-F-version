@@ -2323,6 +2323,9 @@ export const agentDefaults = pgTable("agent_defaults", {
   defaultTrainingGuidelines: jsonb("default_training_guidelines").notNull().$type<string[]>(),
   defaultVoiceProvider: text("default_voice_provider").notNull().default('google'),
   defaultVoice: text("default_voice").notNull().default('Fenrir'),
+  // Global concurrent call limits
+  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(100), // Per-campaign default
+  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(100),   // System-wide cap
   updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -2682,6 +2685,10 @@ export const agentQueue = pgTable("agent_queue", {
   // Provenance tracking
   enqueuedBy: text("enqueued_by"), // system|userId|dv_project_id
   enqueuedReason: text("enqueued_reason"), // campaign_audience|retry|callback|dv_enrollment|manual_add
+  // Unified Queue Intelligence scoring (shared with campaign_queue)
+  aiPriorityScore: integer("ai_priority_score"), // 0-1000 composite score
+  aiScoredAt: timestamp("ai_scored_at"), // when last scored
+  aiScoreBreakdown: jsonb("ai_score_breakdown"), // { industry, topic, accountFit, roleFit, historical }
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({

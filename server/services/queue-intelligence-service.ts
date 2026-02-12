@@ -138,10 +138,68 @@ export async function scoreQueueContacts(
   const avgScore = Math.round(totalScore / scoredContacts.length);
   const duration = Date.now() - startTime;
   console.log(
-    `${LOG_PREFIX} Scored ${scoredContacts.length} contacts for campaign ${campaignId} (avg: ${avgScore}, took ${duration}ms)`
+    `${LOG_PREFIX} Scored ${scoredContacts.length} campaign_queue contacts for campaign ${campaignId} (avg: ${avgScore}, took ${duration}ms)`
   );
 
-  return { scored: scoredContacts.length, avgScore, duration };
+  // 8. UNIFIED QUEUE: Also score agent_queue contacts for the same campaign
+  //    This ensures human agents in manual dial mode get the same intelligent ordering
+  let agentQueueScored = 0;
+  let agentQueueContacts: QueueContactRow[] = [];
+  try {
+    agentQueueContacts = await loadAgentQueueContacts(campaignId);
+  } catch (err: any) {
+    console.warn(`${LOG_PREFIX} agent_queue query failed, skipping:`, err.message || err);
+  }
+  if (agentQueueContacts.length > 0) {
+    const agentScoredContacts: Array<{ queueId: string; score: number; breakdown: ScoreBreakdown }> = [];
+    let agentTotalScore = 0;
+
+    for (const contact of agentQueueContacts) {
+      const industryScore = calculateIndustryScore(contact, targetIndustries, historical);
+      const topicScore = calculateTopicScore(contact, targetKeywords);
+      const accountFitScore = calculateAccountFitScore(contact, targetCompanySize, pipelineScores);
+      const roleFitScore = calculateRoleFitScore(contact, targetRoles);
+      const historicalScore = calculateHistoricalScore(contact, historical);
+
+      const composite = Math.round(
+        industryScore * 0.25 +
+        topicScore * 0.20 +
+        accountFitScore * 0.25 +
+        roleFitScore * 0.15 +
+        historicalScore * 0.15
+      );
+      const finalScore = Math.min(1000, composite * 5);
+
+      agentScoredContacts.push({
+        queueId: contact.queueId,
+        score: finalScore,
+        breakdown: {
+          industry: industryScore,
+          topic: topicScore,
+          accountFit: accountFitScore,
+          roleFit: roleFitScore,
+          historical: historicalScore,
+        },
+      });
+      agentTotalScore += finalScore;
+    }
+
+    await batchUpdateAgentQueueScores(agentScoredContacts);
+    agentQueueScored = agentScoredContacts.length;
+    const agentAvg = agentScoredContacts.length > 0 ? Math.round(agentTotalScore / agentScoredContacts.length) : 0;
+    console.log(
+      `${LOG_PREFIX} Scored ${agentQueueScored} agent_queue contacts for campaign ${campaignId} (avg: ${agentAvg})`
+    );
+  }
+
+  const totalScored = scoredContacts.length + agentQueueScored;
+  const combinedAvg = totalScored > 0 ? Math.round(totalScore / scoredContacts.length) : 0;
+  const durationFinal = Date.now() - startTime;
+  console.log(
+    `${LOG_PREFIX} Unified scoring complete: ${totalScored} total contacts (${scoredContacts.length} campaign_queue + ${agentQueueScored} agent_queue) in ${durationFinal}ms`
+  );
+
+  return { scored: totalScored, avgScore: combinedAvg, duration: durationFinal };
 }
 
 // ============================================
@@ -520,6 +578,65 @@ async function loadQueuedContacts(campaignId: string): Promise<QueueContactRow[]
   }));
 }
 
+/**
+ * Load queued contacts from agent_queue (human agents in manual dial mode)
+ * Uses the same schema as loadQueuedContacts for unified scoring
+ */
+async function loadAgentQueueContacts(campaignId: string): Promise<QueueContactRow[]> {
+  const result = await pool.query(
+    `
+    SELECT
+      aq.id AS queue_id,
+      aq.contact_id,
+      COALESCE(aq.account_id, c.account_id) AS account_id,
+      c.first_name AS contact_first_name,
+      c.last_name AS contact_last_name,
+      c.full_name AS contact_full_name,
+      c.job_title,
+      c.seniority_level,
+      c.department,
+      c.intent_topics AS contact_intent_topics,
+      a.name AS account_name,
+      a.industry_standardized,
+      a.industry_secondary,
+      a.staff_count,
+      a.annual_revenue,
+      a.employees_size_range,
+      a.revenue_range,
+      a.intent_topics AS account_intent_topics,
+      a.tech_stack
+    FROM agent_queue aq
+    INNER JOIN contacts c ON c.id = aq.contact_id
+    LEFT JOIN accounts a ON a.id = COALESCE(aq.account_id, c.account_id)
+    WHERE aq.campaign_id = $1
+      AND aq.queue_state = 'queued'
+    `,
+    [campaignId]
+  );
+
+  return result.rows.map(r => ({
+    queueId: r.queue_id,
+    contactId: r.contact_id,
+    accountId: r.account_id,
+    contactFirstName: r.contact_first_name,
+    contactLastName: r.contact_last_name,
+    contactFullName: r.contact_full_name,
+    jobTitle: r.job_title,
+    seniorityLevel: r.seniority_level,
+    department: r.department,
+    contactIntentTopics: r.contact_intent_topics,
+    accountName: r.account_name || '',
+    industryStandardized: r.industry_standardized,
+    industrySecondary: r.industry_secondary,
+    staffCount: r.staff_count,
+    annualRevenue: r.annual_revenue,
+    employeesSizeRange: r.employees_size_range,
+    revenueRange: r.revenue_range,
+    accountIntentTopics: r.account_intent_topics,
+    techStack: r.tech_stack,
+  }));
+}
+
 async function loadHistoricalData(
   campaignId: string,
   tenantId: string
@@ -535,7 +652,7 @@ async function loadHistoricalData(
     INNER JOIN contacts c ON c.id = dca.contact_id
     INNER JOIN accounts a ON a.id = c.account_id
     INNER JOIN campaigns camp ON camp.id = dca.campaign_id
-    WHERE camp.tenant_id = $1
+    WHERE camp.owner_id = $1
       AND dca.disposition IS NOT NULL
       AND a.industry_standardized IS NOT NULL
     GROUP BY a.industry_standardized
@@ -562,7 +679,7 @@ async function loadHistoricalData(
     FROM dialer_call_attempts dca
     INNER JOIN contacts c ON c.id = dca.contact_id
     INNER JOIN campaigns camp ON camp.id = dca.campaign_id
-    WHERE camp.tenant_id = $1
+    WHERE camp.owner_id = $1
       AND dca.disposition IS NOT NULL
       AND c.seniority_level IS NOT NULL
     GROUP BY c.seniority_level
@@ -607,23 +724,29 @@ async function loadPipelineScores(
 ): Promise<Map<string, { priorityScore: number; readinessScore: number }>> {
   if (accountIds.length === 0) return new Map();
 
-  const result = await pool.query(
-    `
-    SELECT account_id, priority_score, readiness_score
-    FROM pipeline_accounts
-    WHERE account_id = ANY($1)
-    `,
-    [accountIds]
-  );
+  try {
+    const result = await pool.query(
+      `
+      SELECT account_id, priority_score, readiness_score
+      FROM pipeline_accounts
+      WHERE account_id = ANY($1)
+      `,
+      [accountIds]
+    );
 
-  const map = new Map<string, { priorityScore: number; readinessScore: number }>();
-  for (const r of result.rows) {
-    map.set(r.account_id, {
-      priorityScore: r.priority_score || 0,
-      readinessScore: r.readiness_score || 0,
-    });
+    const map = new Map<string, { priorityScore: number; readinessScore: number }>();
+    for (const r of result.rows) {
+      map.set(r.account_id, {
+        priorityScore: r.priority_score || 0,
+        readinessScore: r.readiness_score || 0,
+      });
+    }
+    return map;
+  } catch (error: any) {
+    // Pipeline scores are optional — degrade gracefully on any error
+    console.warn('[QueueIntelligence] pipeline_accounts query failed, skipping pipeline scores:', error.message || error);
+    return new Map();
   }
-  return map;
 }
 
 // ============================================
@@ -1016,7 +1139,7 @@ async function batchUpdateScores(
 
     batch.forEach((s, idx) => {
       const baseIdx = idx * 3;
-      valueClauses.push(`($${baseIdx + 1}, $${baseIdx + 2}, $${baseIdx + 3}::jsonb)`);
+      valueClauses.push(`($${baseIdx + 1}::text, $${baseIdx + 2}::integer, $${baseIdx + 3}::jsonb)`);
       values.push(s.queueId, s.score, JSON.stringify(s.breakdown));
     });
 
@@ -1035,7 +1158,52 @@ async function batchUpdateScores(
         ),
         updated_at = NOW()
       FROM (VALUES ${valueClauses.join(", ")}) AS v(id, score, breakdown)
-      WHERE cq.id = v.id::text
+      WHERE cq.id = v.id
+        AND v.score IS NOT NULL
+      `,
+      values
+    );
+  }
+}
+
+/**
+ * Batch update agent_queue scores (unified intelligence scoring for human agents)
+ * Mirrors batchUpdateScores but targets agent_queue table
+ */
+async function batchUpdateAgentQueueScores(
+  scores: Array<{ queueId: string; score: number; breakdown: ScoreBreakdown }>
+): Promise<void> {
+  if (scores.length === 0) return;
+
+  const batchSize = 500;
+  for (let i = 0; i < scores.length; i += batchSize) {
+    const batch = scores.slice(i, i + batchSize);
+
+    const values: any[] = [];
+    const valueClauses: string[] = [];
+
+    batch.forEach((s, idx) => {
+      const baseIdx = idx * 3;
+      valueClauses.push(`($${baseIdx + 1}::text, $${baseIdx + 2}::integer, $${baseIdx + 3}::jsonb)`);
+      values.push(s.queueId, s.score, JSON.stringify(s.breakdown));
+    });
+
+    await pool.query(
+      `
+      UPDATE agent_queue AS aq
+      SET
+        ai_priority_score = v.score,
+        ai_scored_at = NOW(),
+        ai_score_breakdown = v.breakdown,
+        priority = v.score + COALESCE(
+          CASE
+            WHEN aq.priority > 0 AND aq.priority <= 200 THEN aq.priority
+            ELSE 0
+          END, 0
+        ),
+        updated_at = NOW()
+      FROM (VALUES ${valueClauses.join(", ")}) AS v(id, score, breakdown)
+      WHERE aq.id = v.id
         AND v.score IS NOT NULL
       `,
       values
