@@ -507,6 +507,16 @@ Examples of early questions:
 
 ---
 
+## NON-ENGLISH LANGUAGE HANDLING
+
+If the contact responds in a language other than English (e.g., Spanish, French, Portuguese, etc.):
+- Recognize this immediately — do NOT continue speaking English as if nothing happened.
+- Say: "I apologize, I only speak English. Is there someone else I can speak with?"
+- If they continue in a non-English language, politely end the call.
+- Submit disposition as "no_answer" with a note indicating the language barrier.
+
+---
+
 ## ⚠️ KNOWLEDGE HIERARCHY (CRITICAL)
 
 **YOUR KNOWLEDGE AND CONTEXT ALWAYS TAKE PRIORITY.**
@@ -1809,7 +1819,7 @@ Instructions:
                     properties: {
                       disposition: {
                         type: "string",
-                        description: "The call outcome. Valid values: 'qualified_lead' (interested, wants meeting/callback), 'not_interested' (declined, not relevant), 'do_not_call' (requested removal from list), 'voicemail' (left voicemail or machine), 'no_answer' (no one answered, callback requested, gatekeeper block, busy - will retry), 'invalid_data' (wrong number, disconnected)"
+                        description: "The call outcome. Valid values: 'qualified_lead' (ONLY when meeting booked with confirmed date/time/email - NOT for 'send me info' requests), 'not_interested' (declined, not relevant, or said 'send info' without booking a meeting), 'do_not_call' (requested removal from list), 'voicemail' (left voicemail or machine), 'no_answer' (no one answered, callback requested, gatekeeper block, busy - will retry), 'invalid_data' (wrong number, disconnected)"
                       },
                       notes: {
                         type: "string",

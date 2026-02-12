@@ -279,21 +279,39 @@ export default function ClientServices() {
       )}
 
       {/* How It Works - Steps */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {steps.map((step, i) => (
-          <Card key={i} className="border-slate-200 shadow-sm hover:shadow-md transition-all">
-            <CardContent className="p-6 flex flex-col h-full">
-              <div className="h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center mb-4">
-                <step.icon className="h-6 w-6 text-indigo-600" />
-              </div>
-              <h3 className="text-lg font-bold mb-2">{step.title}</h3>
-              <p className="text-sm text-muted-foreground mb-4 flex-grow">{step.description}</p>
-              <Button asChild variant="outline" className="w-full mt-auto">
-                <a href={step.link}>{step.action}</a>
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="relative rounded-2xl bg-gradient-to-br from-indigo-50 via-white to-violet-50 border border-indigo-100 p-8 shadow-sm">
+        <div className="text-center mb-8">
+          <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200 mb-3 text-xs font-semibold tracking-wide uppercase">
+            Get Started in 4 Steps
+          </Badge>
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">How It Works</h2>
+          <p className="text-sm text-slate-500 mt-2 max-w-xl mx-auto">
+            Go from setup to results in minutes. Follow these steps to launch your first AI-powered campaign.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 relative">
+          {/* Connector line (visible on large screens) */}
+          <div className="hidden lg:block absolute top-10 left-[12.5%] right-[12.5%] h-0.5 bg-gradient-to-r from-indigo-200 via-violet-300 to-indigo-200 z-0" />
+
+          {steps.map((step, i) => (
+            <Card key={i} className="relative z-10 border-slate-200/80 bg-white/80 backdrop-blur-sm shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group">
+              <CardContent className="p-6 flex flex-col h-full">
+                <div className="relative h-14 w-14 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center mb-4 shadow-md group-hover:scale-110 transition-transform duration-300">
+                  <step.icon className="h-6 w-6 text-white" />
+                  <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-white border-2 border-indigo-500 flex items-center justify-center text-[10px] font-bold text-indigo-600">
+                    {i + 1}
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-2">{step.title}</h3>
+                <p className="text-sm text-slate-500 mb-4 flex-grow leading-relaxed">{step.description}</p>
+                <Button asChild className="w-full mt-auto bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
+                  <a href={step.link}>{step.action} &rarr;</a>
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
       <div className="py-8">

@@ -382,13 +382,16 @@ Call submit_disposition with "no_answer" when:
 - **DO NOT use this if a human answered** - use needs_review, not_interested, or qualified_lead instead
 
 ### qualified_lead
-Call submit_disposition with "qualified_lead" ONLY when ALL THREE conditions are met:
-1. Identity confirmed (prospect confirmed they are the named contact)
-2. Meaningful conversation occurred (30+ seconds of actual dialogue)
-3. Clear interest signals (asked questions about offer, requested follow-up, or agreed to receive materials)
+Call submit_disposition with "qualified_lead" ONLY when ALL FOUR conditions are met:
+1. Identity confirmed (prospect verified they are the named contact)
+2. **HUMAN VERIFICATION**: You are speaking to a REAL HUMAN, not an automated system, IVR, or Google Call Screen.
+3. Meaningful conversation occurred (30+ seconds of actual dialogue).
+4. Clear interest signals (asked questions, requested follow-up, or agreed to materials).
 
-**A simple "yes" or "sure" is NOT sufficient for qualified_lead.**
-**AI call screening does NOT count as talking to the prospect - do NOT mark as qualified_lead.**
+**CRITICAL RULES FOR QUALIFIED LEADS:**
+- **Automated Systems / Google Call Screen ("Name and reason for calling"):** -> **voicemail** (NEVER qualified_lead)
+- **Gatekeepers / Receptionists:** -> **needs_review** (unless you reached the target contact)
+- **A simple "yes" or "sure":** -> **needs_review** (NOT qualified_lead)
 
 ### 📌 DECISION FLOWCHART (USE THIS):
 1. Did a machine/voicemail/AI screening answer? → **voicemail**
@@ -960,13 +963,16 @@ Call submit_disposition with "no_answer" when:
 - **DO NOT use this if a human answered** - use needs_review, not_interested, or qualified_lead instead
 
 ### qualified_lead
-Call submit_disposition with "qualified_lead" ONLY when ALL THREE conditions are met:
-1. Identity confirmed (prospect confirmed they are the named contact)
-2. Meaningful conversation occurred (30+ seconds of actual dialogue)
-3. Clear interest signals (asked questions about offer, requested follow-up, or agreed to receive materials)
+Call submit_disposition with "qualified_lead" ONLY when ALL FOUR conditions are met:
+1. Identity confirmed (prospect verified they are the named contact)
+2. **HUMAN VERIFICATION**: You are speaking to a REAL HUMAN, not an automated system, IVR, or Google Call Screen.
+3. Meaningful conversation occurred (30+ seconds of actual dialogue).
+4. Clear interest signals (asked questions, requested follow-up, or agreed to materials).
 
-**A simple "yes" or "sure" is NOT sufficient for qualified_lead.**
-**AI call screening does NOT count as talking to the prospect - do NOT mark as qualified_lead.**
+**CRITICAL RULES FOR QUALIFIED LEADS:**
+- **Automated Systems / Google Call Screen ("Name and reason for calling"):** -> **voicemail** (NEVER qualified_lead)
+- **Gatekeepers / Receptionists:** -> **needs_review** (unless you reached the target contact)
+- **A simple "yes" or "sure":** -> **needs_review** (NOT qualified_lead)
 
 ### 📌 DECISION FLOWCHART (USE THIS):
 1. Did a machine/voicemail/AI screening answer? → **voicemail**

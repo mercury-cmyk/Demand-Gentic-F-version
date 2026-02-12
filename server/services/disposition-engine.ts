@@ -153,8 +153,20 @@ export async function processDisposition(
       ...campaignConfig
     };
 
+    let finalDisposition = disposition;
+
+    // SAFETY: Downgrade short AI qualified leads to needs_review to prevent false positives
+    if (finalDisposition === 'qualified_lead' && callAttempt.agentType === 'ai') {
+        const duration = callAttempt.callDurationSeconds || 0;
+        if (duration < 30) {
+            console.warn(`[DispositionEngine] 🛡️ Downgrading qualified_lead to needs_review (Short AI Call: ${duration}s)`);
+            finalDisposition = 'needs_review';
+            result.actions.push(`Downgraded from qualified_lead (duration ${duration}s < 30s)`);
+        }
+    }
+
     // Process based on disposition type
-    switch (disposition) {
+    switch (finalDisposition) {
       case 'qualified_lead':
         await processQualifiedLead(callAttempt, rules, result, callData);
         break;
@@ -188,17 +200,17 @@ export async function processDisposition(
     await db
       .update(dialerCallAttempts)
       .set({
-        disposition,
+        disposition: finalDisposition,
         updatedAt: new Date()
       })
       .where(eq(dialerCallAttempts.id, callAttemptId));
 
     // Update contact-level retry suppression
-    await updateContactSuppression(callAttempt.contactId, disposition);
-    result.actions.push(`Contact suppression updated for outcome: ${disposition}`);
+    await updateContactSuppression(callAttempt.contactId, finalDisposition);
+    result.actions.push(`Contact suppression updated for outcome: ${finalDisposition}`);
 
     // Update dialer run statistics
-    await updateDialerRunStats(callAttempt.dialerRunId, disposition);
+    await updateDialerRunStats(callAttempt.dialerRunId, finalDisposition);
 
     // Track call quality metrics for number reputation (anti-spam)
     try {
@@ -212,7 +224,7 @@ export async function processDisposition(
 
         if (telnyxNumber) {
           const durationSeconds = callAttempt.callDurationSeconds || 0;
-          const answered = !['no_answer', 'voicemail'].includes(disposition);
+          const answered = !['no_answer', 'voicemail'].includes(finalDisposition);
 
           await callQualityTracker.recordCallQuality({
             callId: callAttempt.id,
@@ -220,7 +232,7 @@ export async function processDisposition(
             phoneNumberE164: callAttempt.phoneDialed,
             durationSeconds,
             answered,
-            disconnectReason: mapDispositionToDisconnectReason(disposition),
+            disconnectReason: mapDispositionToDisconnectReason(finalDisposition),
             disconnectedBy: durationSeconds < 20 ? 'prospect' : 'unknown',
             prospectSpokeFirst: true, // We don't track this yet
           });
@@ -241,9 +253,9 @@ export async function processDisposition(
       callSessionId: callAttempt.callSessionId,
       dispositionId: null,
       triggerRuleId: null,
-      actionType: dispositionToActionType(disposition),
+      actionType: dispositionToActionType(finalDisposition),
       producerType: callAttempt.agentType,
-      actionPayload: { disposition, callAttemptId, actions: result.actions },
+      actionPayload: { disposition: finalDisposition, callAttemptId, actions: result.actions },
       result: result.errors.length === 0 ? 'success' : 'partial',
       errorMessage: result.errors.join('; ') || null,
       executedBy: processedBy

@@ -3220,25 +3220,24 @@ Only AFTER completing these steps can you submit the disposition.`
         };
       }
 
-      // MINIMUM TALKING POINT COMPLETION CHECK
-      // If the contact confirmed identity but the agent hasn't mentioned the white paper yet,
+      // MINIMUM VALUE DELIVERY CHECK
+      // If the contact confirmed identity but the agent hasn't delivered the value proposition yet,
       // block termination and force the agent to deliver the offer.
+      // Uses campaign talking points dynamically rather than hardcoded content.
       const identityConfirmed = session.conversationState?.identityConfirmed === true;
-      const whitePaperMentioned = agentTranscriptText.includes('white paper') ||
-        agentTranscriptText.includes('whitepaper') ||
-        agentTranscriptText.includes('free paper') ||
-        agentTranscriptText.includes('government support') ||
-        agentTranscriptText.includes('government programs') ||
-        agentTranscriptText.includes('send it across');
       const isNotInterested = reason.includes('not interested') || reason.includes('declined') || reason.includes('refused');
       const isExplicitStop = reason.includes('do not call') || reason.includes('stop calling') || reason.includes('remove');
 
-      if (identityConfirmed && !whitePaperMentioned && !isNotInterested && !isExplicitStop &&
+      // Check if the agent delivered at least some substantive content (not just greetings)
+      const agentWordCount = agentTranscriptText.split(/\s+/).filter(Boolean).length;
+      const hasDeliveredValue = agentWordCount >= 20; // Agent said at least 20 words (enough for a value prop)
+
+      if (identityConfirmed && !hasDeliveredValue && !isNotInterested && !isExplicitStop &&
           session.detectedDisposition !== 'voicemail' && session.detectedDisposition !== 'invalid_data') {
-        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - White paper offer NOT delivered yet! Identity confirmed but key talking point missed.`);
+        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Value proposition NOT delivered yet! Identity confirmed but agent only said ${agentWordCount} words.`);
         return {
           success: false,
-          error: 'STOP — you have NOT delivered the white paper offer yet. The purpose of this call is to offer the free white paper. Before ending, you MUST say: "Before I let you go, I just wanted to mention we have a free white paper on government programs for UK businesses — can I send it to your email?" Only AFTER they respond to this can you end the call.'
+          error: 'STOP — you have NOT delivered your value proposition yet. The prospect confirmed their identity but you haven\'t explained why you\'re calling. Before ending, you MUST deliver your pitch based on the campaign objective and talking points. Only AFTER the prospect responds can you end the call.'
         };
       }
 
@@ -3340,19 +3339,30 @@ Only AFTER completing these steps can you submit the disposition.`
           session.detectedDisposition = 'voicemail';
           console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: voicemail (from reason)`);
         }
-        // If reason indicates successful flow completion (email confirmed, goodbye said)
+        // If reason indicates a COMPLETED BOOKING FLOW (meeting confirmed with date/time)
         // This catches cases where submit_disposition was blocked (e.g., native-audio no text transcripts)
-        // but the AI clearly completed the booking/qualification flow
+        // but the AI clearly completed the booking/qualification flow.
+        // STRICT: Must have evidence of actual meeting booking, NOT just "send info" or "follow up".
+        // "Send me info" / "sure, email me" = polite brush-off, NOT qualified_lead.
         else if (
-          userTranscriptCount >= 3 && callDurationSeconds >= 30 &&
-          (reason.includes('confirmed email') || reason.includes('confirm email') ||
-           reason.includes('accepted') || reason.includes('polite goodbye') ||
-           reason.includes('whitepaper') || reason.includes('calendar invite') ||
-           reason.includes('follow up') || reason.includes('follow-up') ||
-           reason.includes('send information') || reason.includes('agreed'))
+          userTranscriptCount >= 3 && callDurationSeconds >= 60 &&
+          (reason.includes('calendar invite') ||
+           (reason.includes('meeting') && (reason.includes('confirmed') || reason.includes('booked') || reason.includes('scheduled'))) ||
+           (reason.includes('confirmed email') && reason.includes('confirmed') && (reason.includes('time') || reason.includes('date') || reason.includes('meeting'))))
         ) {
           session.detectedDisposition = 'qualified_lead';
-          console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (from end_call reason indicating successful completion: "${reason}")`);
+          console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (from end_call reason with booking evidence: "${reason}")`);
+        }
+        // Soft interest (send info, whitepaper, follow-up) → needs_review for human QA, NOT auto-qualified
+        else if (
+          userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
+          (reason.includes('whitepaper') || reason.includes('send information') ||
+           reason.includes('follow up') || reason.includes('follow-up') ||
+           reason.includes('accepted') || reason.includes('agreed') ||
+           reason.includes('polite goodbye'))
+        ) {
+          session.detectedDisposition = 'needs_review';
+          console.log(`${LOG_PREFIX} [Gemini] 🔍 Inferred disposition: needs_review (soft interest signals but no confirmed booking: "${reason}")`);
         }
       }
       
@@ -4776,17 +4786,14 @@ async function injectGeminiIdentityLockReminder(
       // Prospect asked a question immediately after confirming identity
       promptMessage = `[SYSTEM UPDATE: Identity CONFIRMED. The prospect just said: "${prospectTranscript}"
 
-They asked a question. Respond IMMEDIATELY — value first, under 7 seconds:
+They asked a question. Respond IMMEDIATELY — value first, under 7 seconds.
 
-"I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
-
-Then STOP and WAIT for their response.
+Deliver your value proposition from the campaign context and talking points. Then STOP and WAIT for their response.
 
 RULES:
-- Lead with the VALUE — answer their curiosity with the offer immediately
-- Do NOT waste time on pleasantries — get to the white paper in the first sentence
-- NEVER ask discovery or qualification questions — just offer the white paper
-- Do NOT ask "would you be interested?" — just ask to send it
+- Lead with the VALUE — answer their curiosity with the campaign offer immediately
+- Do NOT waste time on pleasantries — get to the value proposition in the first sentence
+- NEVER ask discovery or qualification questions before delivering the offer
 - Your entire response MUST be under 7 seconds]`;
 
       console.log(`${LOG_PREFIX} [Gemini] EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript?.substring(0, 80) ?? ''}..."`);
@@ -4794,18 +4801,14 @@ RULES:
       // Standard identity confirmation - proceed with value-lead intro (5-7 seconds max)
       promptMessage = `[SYSTEM UPDATE: Identity CONFIRMED. Speak IMMEDIATELY — value first, no pleasantries.
 
-Say this in ONE breath (under 7 seconds):
-"Hi [first name], I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
-
-Then STOP and WAIT for their response.
+Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
 
 RULES:
-- Lead with the VALUE (free white paper) — not with "thanks for confirming" or pleasantries
+- Lead with the VALUE — not with "thanks for confirming" or pleasantries
 - Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
 - NEVER ask "do you have a moment?" or "would you be interested?"
-- NEVER ask discovery or qualification questions
-- Your entire intro MUST be under 7 seconds — cut every unnecessary word
-- You MUST mention the white paper — this is the entire purpose of the call]`;
+- NEVER ask discovery or qualification questions before the offer
+- Your entire intro MUST be under 7 seconds — cut every unnecessary word]`;
     }
 
     // Send as a text message that will prompt Gemini to respond
@@ -4913,19 +4916,16 @@ async function injectIdentityLockReminder(session: OpenAIRealtimeSession, prospe
 
 CRITICAL: You MUST respond IMMEDIATELY. Do NOT go silent. Do NOT pause.
 
-Lead with value first, under 7 seconds. Use this exact pattern:
-"Great question — quick version: I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
+Lead with value first, under 7 seconds. Deliver your value proposition from the campaign context and talking points.
 
 Then STOP and WAIT for their response.
 
 RULES:
-- Lead with the VALUE — answer their curiosity with the offer immediately
-- Do NOT waste time on pleasantries — get to the white paper in the first sentence
-- NEVER ask discovery or qualification questions — just offer the white paper
-- Do NOT ask "would you be interested?" — just ask to send it
-- Your entire response MUST be under 7 seconds
-- You MUST mention the white paper — this is the entire purpose of the call`;
-      
+- Lead with the VALUE — answer their curiosity with the campaign offer immediately
+- Do NOT waste time on pleasantries — get to the value proposition in the first sentence
+- NEVER ask discovery or qualification questions before delivering the offer
+- Your entire response MUST be under 7 seconds`;
+
       console.log(`${LOG_PREFIX} EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript?.substring(0, 80) ?? ''}..."`);
     } else {
       // Standard identity confirmation - proceed with value-first intro
@@ -4933,18 +4933,14 @@ RULES:
 
 CRITICAL: Within 2 SECONDS of this message, you MUST be speaking. Silence = FAILURE.
 
-Say this in ONE breath (under 7 seconds):
-"Hi [first name], I'm [your name] from [organization] — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
-
-Then STOP and WAIT for their response.
+Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
 
 RULES:
-- Lead with the VALUE (free white paper) — not with "thanks for confirming" or pleasantries
+- Lead with the VALUE — not with "thanks for confirming" or pleasantries
 - Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
 - NEVER ask "do you have a moment?" or "would you be interested?"
-- NEVER ask discovery or qualification questions
-- Your entire intro MUST be under 7 seconds — cut every unnecessary word
-- You MUST mention the white paper — this is the entire purpose of the call`;
+- NEVER ask discovery or qualification questions before the offer
+- Your entire intro MUST be under 7 seconds — cut every unnecessary word`;
     }
 
     // Add a system message to reinforce identity lock
@@ -7589,11 +7585,11 @@ If the prospect says "you keep repeating" or "you already said that", immediatel
 Prospect: "Hello?"
 You: "Hi, am I speaking with Sarah Johnson?"
 Prospect: "Yes, this is Sarah."
-You: "Hi Sarah, I'm Alex from Acme Solutions — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
+You: "Hi Sarah, I'm Alex from Acme Solutions — [deliver campaign value proposition concisely]. Can I grab a quick minute?"
 
 ### Example 1b: Right party self-identifies → Value-lead offer (correct)
 Prospect: "This is Sarah Johnson."
-You: "Hi Sarah, I'm Alex from Acme Solutions — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
+You: "Hi Sarah, I'm Alex from Acme Solutions — [deliver campaign value proposition concisely]. Can I grab a quick minute?"
 
 ### Example 1c: What NOT to do (INCORRECT — NEVER DO THIS)
 Prospect: "Hello?"
@@ -8150,19 +8146,19 @@ Ambiguity, hesitation, or deflection = NOT confirmed. Ask one clarifying questio
 If the person confirms they are ${fullName}:
 
 1. Lead IMMEDIATELY with the value — your name and org are secondary:
-   "Hi ${firstName}, I'm ${agentName} from ${orgName} — I'm calling to share a free white paper on export finance that helps UK businesses access government support programs. Can I send it to your email?"
+   "Hi ${firstName}, I'm ${agentName} from ${orgName} — [deliver campaign value proposition concisely]. Can I grab a minute?"
 2. WAIT for their response. If they say no, respect it and end politely.
-3. If they agree, confirm their email address (${contactEmail}).
+3. If they agree, proceed with the campaign objective (book meeting, confirm email for content, etc.).
 4. Close warmly — thank them for their time, say goodbye.
 
 **TIMING RULE: Your entire post-confirmation intro MUST be under 7 seconds. No filler. No pleasantries. Value first.**
 
 **CRITICAL RULES:**
-- Lead with what's in it for THEM — the free white paper — not with who you are
+- Lead with what's in it for THEM — not with who you are
 - Do NOT say "Great, thanks for confirming" or any other pleasantry before the value hook
 - Do NOT ask "do you have a moment?" or "would you be interested?"
 - Keep the entire intro to ONE short sentence — name + org + value + ask
-- You MUST deliver the white paper offer — this is the entire purpose of the call
+- Use the campaign objective and talking points from the Campaign Context section below to frame your value proposition
 
 If permission is given for other campaign types:
 - Clearly and briefly state the call purpose aligned with the campaign objective
@@ -8262,17 +8258,20 @@ At the end of the call:
 
 Your post-confirmation response must contain ALL of these in ONE sentence (under 7 seconds):
 1. Your name and organization (brief — "I'm ${agentName} from ${orgName}")
-2. The core value: "free white paper on export finance that helps UK businesses access government support programs"
-3. The ask: "Can I send it to your email?"
-
-**You are NOT allowed to end the call or submit a disposition until you have delivered the white paper offer.**
-If the prospect tries to end the call before you've offered the white paper, quickly say: "Just one thing before you go — we have a free white paper on export finance for UK businesses, can I send it to your email?"
+2. The core value proposition from the Campaign Context section
+3. A clear ask aligned with the campaign objective
 
 **Do NOT waste time before the value hook:**
 - Do NOT say "Thanks for confirming", "Great", "I appreciate your time" — go straight to the offer
 - Do NOT ask any discovery or qualification questions before the offer
-- Do NOT ask "Are you focused on exporting?" / "Are you looking at government programs?" / "What challenges are you facing?"
-- The white paper is FREE — there's no need to qualify. Just offer it.
+- Keep it concise and relevant to the prospect's role and industry
+
+### 9. NON-ENGLISH LANGUAGE HANDLING
+If the contact responds in a language other than English:
+- Recognize this immediately — do NOT continue speaking English as if nothing happened
+- Say: "I apologize, I only speak English. Is there someone else I can speak with?"
+- If they continue in a non-English language, politely end the call
+- Submit disposition as "no_answer" with a note indicating the language barrier
 
 ---
 

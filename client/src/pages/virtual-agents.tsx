@@ -102,7 +102,7 @@ interface VirtualAgent {
   firstMessage: string | null;
   settings: Record<string, unknown> | null;
   isActive: boolean;
-  demandAgentType: 'demand_intel' | 'demand_qual' | 'demand_engage' | null;
+  demandAgentType: 'demand_intel' | 'demand_qual' | 'demand_engage' | 'demand_architect' | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -358,7 +358,7 @@ type OrgPromptData = {
   agentVoiceDefaults: string[];
 };
 
-type TrainingCenter = Record<'general_intelligence' | 'demand_intel' | 'demand_qual' | 'demand_engage', string[]>;
+type TrainingCenter = Record<'general_intelligence' | 'demand_intel' | 'demand_qual' | 'demand_engage' | 'demand_architect', string[]>;
 
 // OpenAI voice options
 const OPENAI_VOICES = [
@@ -801,6 +801,7 @@ const AGENT_TYPE_OPTIONS = [
   { value: 'demand_qual', label: 'Voice Agent', description: 'Voice calls - BANT qualification and objection handling' },
   { value: 'demand_engage', label: 'Email Agent', description: 'Personalized email sequences and optimization' },
   { value: 'demand_intel', label: 'Research & Reason Agent', description: 'Account research, buying signals, and intelligence analysis' },
+  { value: 'demand_architect', label: 'The Architect', description: 'AI & coding solutions expert - system design, code generation, and technical architecture' },
 ];
 
 const DEFAULT_TRAINING_CENTER: TrainingCenter = {
@@ -894,6 +895,15 @@ const DEFAULT_TRAINING_CENTER: TrainingCenter = {
     'Craft subject lines that drive opens',
     'Match tone to recipient seniority',
     'Include relevant social proof',
+  ],
+  demand_architect: [
+    'Design scalable architectures with clear component boundaries',
+    'Recommend AI integration patterns (RAG, fine-tuning, agent orchestration)',
+    'Review code for quality, performance, and security issues',
+    'Evaluate tech stacks against project requirements and team capability',
+    'Provide solution blueprints with implementation roadmaps',
+    'Always present trade-offs with 2-3 options before recommending',
+    'Include code examples alongside architectural guidance',
   ]
 };
 

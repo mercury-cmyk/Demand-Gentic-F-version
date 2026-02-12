@@ -1677,7 +1677,7 @@ export default function ClientPortalDashboard() {
             return true;
           });
           const allIndustries = [...new Set(accounts.map((a: any) => a.industry).filter(Boolean))];
-          const currentItems = filteredAccounts;
+          const currentItems = filteredAccounts.slice(0, 20); // Limit visibility to 20 assigned accounts
 
           return (
           <div className="space-y-6 max-w-7xl mx-auto">
@@ -1690,6 +1690,11 @@ export default function ClientPortalDashboard() {
                 <p className="text-slate-500 dark:text-slate-400 font-light">
                   Accounts assigned to your campaigns and targeting
                 </p>
+                {filteredAccounts.length > 20 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                    Showing top 20 of {filteredAccounts.length} assigned accounts
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <Button variant="outline" size="sm" onClick={() => {
@@ -1789,7 +1794,7 @@ export default function ClientPortalDashboard() {
                       <TableHeader>
                         <TableRow className="bg-slate-50 dark:bg-slate-800">
                           <TableHead className="w-10">
-                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredAccounts.length && filteredAccounts.length > 0} onChange={() => toggleSelectAll(filteredAccounts)} />
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === currentItems.length && currentItems.length > 0} onChange={() => toggleSelectAll(currentItems)} />
                           </TableHead>
                           <TableHead>Company</TableHead>
                           <TableHead>Industry</TableHead>
@@ -1800,7 +1805,7 @@ export default function ClientPortalDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredAccounts.map((account: any) => (
+                        {currentItems.map((account: any) => (
                           <TableRow key={account.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(account, 'account')}>
                             <TableCell onClick={e => e.stopPropagation()}>
                               <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={() => toggleCrmSelection(account.id)} />
@@ -1833,7 +1838,7 @@ export default function ClientPortalDashboard() {
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredAccounts.map((account: any) => (
+                {currentItems.map((account: any) => (
                   <Card key={account.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(account, 'account')}>
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
@@ -1873,7 +1878,7 @@ export default function ClientPortalDashboard() {
             return true;
           });
           const allIndustries = [...new Set(contacts.map((c: any) => c.industry).filter(Boolean))];
-          const currentItems = filteredContacts;
+          const currentItems = filteredContacts.slice(0, 50); // Limit visibility to 50 assigned contacts
 
           return (
           <div className="space-y-6 max-w-7xl mx-auto">
@@ -1886,6 +1891,11 @@ export default function ClientPortalDashboard() {
                 <p className="text-slate-500 dark:text-slate-400 font-light">
                   Contacts assigned to your campaigns
                 </p>
+                {filteredContacts.length > 50 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                    Showing top 50 of {filteredContacts.length} assigned contacts
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <Button variant="outline" size="sm" onClick={() => {
@@ -1985,7 +1995,7 @@ export default function ClientPortalDashboard() {
                       <TableHeader>
                         <TableRow className="bg-slate-50 dark:bg-slate-800">
                           <TableHead className="w-10">
-                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredContacts.length && filteredContacts.length > 0} onChange={() => toggleSelectAll(filteredContacts)} />
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === currentItems.length && currentItems.length > 0} onChange={() => toggleSelectAll(currentItems)} />
                           </TableHead>
                           <TableHead>Name</TableHead>
                           <TableHead>Email</TableHead>
@@ -1996,7 +2006,7 @@ export default function ClientPortalDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredContacts.map((contact: any) => (
+                        {currentItems.map((contact: any) => (
                           <TableRow key={contact.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(contact, 'contact')}>
                             <TableCell onClick={e => e.stopPropagation()}>
                               <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={() => toggleCrmSelection(contact.id)} />
@@ -2031,7 +2041,7 @@ export default function ClientPortalDashboard() {
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredContacts.map((contact: any) => (
+                {currentItems.map((contact: any) => (
                   <Card key={contact.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(contact, 'contact')}>
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">

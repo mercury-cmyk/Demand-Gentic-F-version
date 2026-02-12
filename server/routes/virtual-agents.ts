@@ -837,7 +837,7 @@ router.post("/create-smart", requireAuth, requireRole('admin'), async (req, res)
 
 const createDemandAgentSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  demandAgentType: z.enum(['demand_intel', 'demand_qual', 'demand_engage']),
+  demandAgentType: z.enum(['demand_intel', 'demand_qual', 'demand_engage', 'demand_architect']),
   taskDescription: z.string().min(10, "Task description must be at least 10 characters"),
   firstMessage: z.string().optional(),
   voice: z.enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']).optional().default('nova'),
@@ -857,6 +857,9 @@ const createDemandAgentSchema = z.object({
     // For demand_engage
     personalizationLevel: z.number().min(1).max(3).optional(),
     sequenceType: z.enum(['cold', 'warm', 'reengagement']).optional(),
+    // For demand_architect
+    techStack: z.array(z.string()).optional(),
+    architectureStyle: z.enum(['monolith', 'microservices', 'serverless', 'hybrid']).optional(),
   }).optional(),
 });
 
@@ -994,6 +997,14 @@ router.get("/demand-types", requireAuth, async (req, res) => {
         defaultProvider: getDefaultProvider('demand_engage'),
         icon: 'mail',
         capabilities: ['Email Personalization', 'Sequence Optimization', 'Engagement Tracking', 'A/B Testing'],
+      },
+      {
+        type: 'demand_architect',
+        name: 'The Architect',
+        description: getDemandAgentDescription('demand_architect'),
+        defaultProvider: getDefaultProvider('demand_architect'),
+        icon: 'code',
+        capabilities: ['System Design', 'AI Integration', 'Code Optimization', 'Solution Blueprinting'],
       },
     ],
   });

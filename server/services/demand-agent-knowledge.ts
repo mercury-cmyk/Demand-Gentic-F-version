@@ -990,14 +990,153 @@ Track and optimize:
 `,
 };
 
+// ==================== DEMAND ARCHITECT KNOWLEDGE ====================
+
+export const DEMAND_ARCHITECT_KNOWLEDGE = {
+  name: "The Architect",
+  description: "Coding and AI solutions expert mastermind - system design, architecture, and intelligent automation",
+
+  architectureMethodology: `
+## SYSTEM ARCHITECTURE METHODOLOGY
+
+### Design Principles
+1. **Simplicity First** - Prefer the simplest solution that meets requirements; avoid premature abstraction
+2. **Modularity** - Design loosely coupled, highly cohesive components with clear interfaces
+3. **Scalability** - Architect for 10x current load; rebuild for 100x
+4. **Resilience** - Design for failure: circuit breakers, retries, graceful degradation
+5. **Observability** - Every system must be measurable: logs, metrics, traces
+
+### Architecture Decision Framework
+When evaluating technical choices:
+- **Context**: What problem are we solving? What constraints exist?
+- **Options**: List 2-3 viable approaches with trade-offs
+- **Decision**: Choose based on team capability, timeline, and scale requirements
+- **Consequences**: Document what we gain and what we sacrifice
+
+### System Design Patterns
+- **Event-Driven Architecture**: Use for async workflows, decoupled services, real-time processing
+- **CQRS**: Separate read/write models when query patterns differ significantly from writes
+- **Saga Pattern**: Manage distributed transactions across services
+- **API Gateway**: Centralize authentication, rate limiting, and routing
+- **Circuit Breaker**: Prevent cascade failures in distributed systems
+`,
+
+  aiSolutionPatterns: `
+## AI & ML SOLUTION PATTERNS
+
+### LLM Integration Strategies
+- **Direct API**: Best for prototyping and low-volume use cases
+- **RAG (Retrieval-Augmented Generation)**: Ground LLM responses in your data using vector stores
+- **Fine-Tuning**: When you need consistent behavior on domain-specific tasks
+- **Agent Orchestration**: Chain multiple LLM calls with tool use for complex workflows
+- **Prompt Engineering**: Structured prompts with system/user/assistant roles, few-shot examples
+
+### AI Architecture Components
+- **Vector Databases**: Pinecone, Pgvector, Weaviate for semantic search and RAG
+- **Embedding Pipelines**: Chunk documents, generate embeddings, index for retrieval
+- **Evaluation Frameworks**: Automated testing of AI outputs (accuracy, hallucination detection)
+- **Guardrails**: Input validation, output filtering, content safety, cost controls
+- **Caching**: Semantic caching for repeated queries, embedding cache for performance
+
+### AI-Powered Feature Patterns
+- **Conversational AI**: Multi-turn dialogue with context preservation and tool calling
+- **Content Generation**: Template-guided generation with brand voice consistency
+- **Classification & Routing**: Intent detection, sentiment analysis, lead scoring
+- **Data Extraction**: Structured extraction from unstructured text (emails, transcripts)
+- **Recommendation Systems**: Collaborative filtering, content-based, hybrid approaches
+`,
+
+  codeQualityStandards: `
+## CODE QUALITY & OPTIMIZATION
+
+### Code Review Principles
+- **Readability**: Code is read 10x more than written; optimize for the reader
+- **Single Responsibility**: Each function/class should do one thing well
+- **Error Handling**: Handle errors at the right level; fail fast, recover gracefully
+- **Testing**: Unit tests for logic, integration tests for boundaries, e2e for workflows
+- **Performance**: Profile before optimizing; measure impact of changes
+
+### TypeScript Best Practices
+- Use strict mode and exhaustive type checking
+- Prefer interfaces over types for public APIs
+- Use discriminated unions for state machines
+- Leverage generics for reusable, type-safe patterns
+- Avoid any — use unknown with type guards instead
+
+### Database Optimization
+- Index strategy: Cover frequent queries, avoid over-indexing
+- Query optimization: Use EXPLAIN ANALYZE, avoid N+1 queries
+- Connection pooling: Proper pool sizing for concurrent workloads
+- Data modeling: Normalize for writes, denormalize for reads when needed
+- Migration safety: Always backward-compatible, never drop columns in production
+`,
+
+  techStackEvaluation: `
+## TECH STACK EVALUATION FRAMEWORK
+
+### Evaluation Criteria
+1. **Team Expertise**: Can the team ship with this technology today?
+2. **Ecosystem Maturity**: Libraries, documentation, community support
+3. **Performance Characteristics**: Latency, throughput, resource efficiency
+4. **Operational Complexity**: Deployment, monitoring, debugging
+5. **Cost Profile**: Licensing, infrastructure, engineering time
+
+### Modern Stack Recommendations
+- **Frontend**: React/Next.js, TypeScript, Tailwind CSS, shadcn/ui
+- **Backend**: Node.js/Express or Fastify, TypeScript, Drizzle ORM
+- **Database**: PostgreSQL (primary), Redis (cache/queue), S3 (files)
+- **AI/ML**: OpenAI/Anthropic APIs, LangChain, vector stores
+- **Infrastructure**: Docker, Kubernetes or serverless, CI/CD pipelines
+- **Observability**: Structured logging, Prometheus/Grafana, distributed tracing
+
+### API Design Principles
+- RESTful for CRUD operations, GraphQL for complex data requirements
+- Version APIs from day one (/v1/, /v2/)
+- Use proper HTTP status codes and consistent error responses
+- Rate limiting, pagination, and filtering as standard features
+- OpenAPI/Swagger documentation for all endpoints
+`,
+
+  solutionBlueprintProcess: `
+## SOLUTION BLUEPRINT PROCESS
+
+### Discovery Phase
+1. Gather requirements through structured questions
+2. Identify constraints (budget, timeline, team size, existing systems)
+3. Map integration points and data flows
+4. Define success metrics and acceptance criteria
+
+### Design Phase
+1. Create high-level architecture diagrams
+2. Define component boundaries and interfaces
+3. Specify data models and storage strategy
+4. Plan deployment and scaling approach
+5. Document security considerations
+
+### Implementation Guidance
+1. Start with the critical path — what must work first?
+2. Build incrementally: MVP, iterate, scale
+3. Establish CI/CD and testing infrastructure early
+4. Code review every change; pair on complex problems
+5. Ship to production early and often
+
+### Communication Style
+- Explain complex concepts with clear analogies
+- Always provide code examples alongside architectural guidance
+- Present trade-offs honestly — no silver bullets
+- Tailor depth to audience: executive summary vs. technical deep-dive
+- Use diagrams and structured output for clarity
+`,
+};
+
 // ==================== HELPER FUNCTIONS ====================
 
 /**
  * Get knowledge for a specific demand agent type
  */
 export function getDemandAgentKnowledge(
-  type: 'demand_intel' | 'demand_qual' | 'demand_engage'
-): typeof DEMAND_INTEL_KNOWLEDGE | typeof DEMAND_QUAL_KNOWLEDGE | typeof DEMAND_ENGAGE_KNOWLEDGE {
+  type: 'demand_intel' | 'demand_qual' | 'demand_engage' | 'demand_architect'
+): typeof DEMAND_INTEL_KNOWLEDGE | typeof DEMAND_QUAL_KNOWLEDGE | typeof DEMAND_ENGAGE_KNOWLEDGE | typeof DEMAND_ARCHITECT_KNOWLEDGE {
   switch (type) {
     case 'demand_intel':
       return DEMAND_INTEL_KNOWLEDGE;
@@ -1005,6 +1144,8 @@ export function getDemandAgentKnowledge(
       return DEMAND_QUAL_KNOWLEDGE;
     case 'demand_engage':
       return DEMAND_ENGAGE_KNOWLEDGE;
+    case 'demand_architect':
+      return DEMAND_ARCHITECT_KNOWLEDGE;
     default:
       throw new Error(`Unknown demand agent type: ${type}`);
   }
@@ -1014,7 +1155,7 @@ export function getDemandAgentKnowledge(
  * Build complete knowledge string for agent prompt injection
  */
 export function buildDemandAgentKnowledgePrompt(
-  type: 'demand_intel' | 'demand_qual' | 'demand_engage'
+  type: 'demand_intel' | 'demand_qual' | 'demand_engage' | 'demand_architect'
 ): string {
   const knowledge = getDemandAgentKnowledge(type);
 
@@ -1046,7 +1187,7 @@ export function buildDemandAgentKnowledgePrompt(
 /**
  * Get default first message for agent type
  */
-export function getDefaultFirstMessage(type: 'demand_intel' | 'demand_qual' | 'demand_engage'): string {
+export function getDefaultFirstMessage(type: 'demand_intel' | 'demand_qual' | 'demand_engage' | 'demand_architect'): string {
   switch (type) {
     case 'demand_intel':
       return 'Initiating account research and intelligence gathering...';
@@ -1054,6 +1195,8 @@ export function getDefaultFirstMessage(type: 'demand_intel' | 'demand_qual' | 'd
       return 'Hello, may I please speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?';
     case 'demand_engage':
       return 'Preparing personalized email sequence based on account intelligence...';
+    case 'demand_architect':
+      return 'Analyzing your technical requirements and designing the optimal architecture...';
     default:
       return 'Hello';
   }
@@ -1062,7 +1205,7 @@ export function getDefaultFirstMessage(type: 'demand_intel' | 'demand_qual' | 'd
 /**
  * Get default provider for agent type
  */
-export function getDefaultProvider(type: 'demand_intel' | 'demand_qual' | 'demand_engage'): string {
+export function getDefaultProvider(type: 'demand_intel' | 'demand_qual' | 'demand_engage' | 'demand_architect'): string {
   switch (type) {
     case 'demand_intel':
       return 'openai_gpt4'; // Research needs high accuracy
@@ -1070,6 +1213,8 @@ export function getDefaultProvider(type: 'demand_intel' | 'demand_qual' | 'deman
       return 'openai_realtime'; // Voice needs realtime API
     case 'demand_engage':
       return 'openai_gpt4'; // Email generation needs quality
+    case 'demand_architect':
+      return 'openai_gpt4'; // Architecture needs deep reasoning
     default:
       return 'openai_realtime';
   }
@@ -1078,7 +1223,7 @@ export function getDefaultProvider(type: 'demand_intel' | 'demand_qual' | 'deman
 /**
  * Get agent type description for UI display
  */
-export function getDemandAgentDescription(type: 'demand_intel' | 'demand_qual' | 'demand_engage'): string {
+export function getDemandAgentDescription(type: 'demand_intel' | 'demand_qual' | 'demand_engage' | 'demand_architect'): string {
   switch (type) {
     case 'demand_intel':
       return 'Research agent for deep account intelligence, buying signal detection, and pain hypothesis generation';
@@ -1086,6 +1231,8 @@ export function getDemandAgentDescription(type: 'demand_intel' | 'demand_qual' |
       return 'Voice agent for BANT qualification, objection handling, and live demand validation';
     case 'demand_engage':
       return 'Email agent for personalized engagement sequences and deliverability optimization';
+    case 'demand_architect':
+      return 'AI & coding solutions architect for technical design, code generation, and system optimization';
     default:
       return 'Virtual agent';
   }

@@ -814,6 +814,12 @@ export async function transcribeCallSession(callSessionId: string): Promise<bool
       return false;
     }
 
+    const audioUrl = call.recordingUrl || (call.recordingS3Key ? await getPresignedDownloadUrl(call.recordingS3Key, 3600) : null);
+    if (!audioUrl) {
+      console.log('[Transcription] No usable audio URL for call session:', callSessionId);
+      return false;
+    }
+
     // Log transcription started
     console.log(`[Transcription] 🎙️ STARTED: Call ${callSessionId} | Recording: ${audioUrl.substring(0, 50)}...`);
 

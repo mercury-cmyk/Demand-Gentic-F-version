@@ -54,9 +54,10 @@ export const agentTypeEnum = pgEnum('agent_type', ['human', 'ai']);
 
 // Specialized Demand Agent Types - for coordinated demand generation
 export const demandAgentTypeEnum = pgEnum('demand_agent_type', [
-  'demand_intel',   // Research/Intelligence Agent - account research, buying signals
-  'demand_qual',    // Voice Qualification Agent - BANT qualification, objection handling
-  'demand_engage'   // Email Engagement Agent - personalized sequences, optimization
+  'demand_intel',      // Research/Intelligence Agent - account research, buying signals
+  'demand_qual',       // Voice Qualification Agent - BANT qualification, objection handling
+  'demand_engage',     // Email Engagement Agent - personalized sequences, optimization
+  'demand_architect'   // The Architect - coding, AI solutions, system design mastermind
 ]);
 
 // Email Suppression Reason Enum

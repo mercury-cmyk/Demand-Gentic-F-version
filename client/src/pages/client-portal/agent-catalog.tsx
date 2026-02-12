@@ -15,6 +15,7 @@ import {
   Sparkles,
   Zap,
   Phone,
+  Code,
   Target,
   Building2,
   ArrowRight,
@@ -167,6 +168,30 @@ const AGENT_CATALOG: AgentTypeDefinition[] = [
       'Data Validation',
       'API Integration',
       'Automated Updates'
+    ]
+  },
+  {
+    id: 'architect',
+    title: 'The Architect',
+    icon: Code,
+    category: 'Intelligence',
+    color: 'text-cyan-500',
+    gradient: 'from-cyan-600/20 via-teal-500/10 to-transparent',
+    accentBorder: 'border-cyan-500/30',
+    rank: 'Mastermind',
+    motto: '"Code is poetry; architecture is its symphony."',
+    description: 'AI & coding solutions expert that designs system architectures, evaluates tech stacks, and provides hands-on guidance for building intelligent applications.',
+    expertise: [
+      'System Design',
+      'AI Integration',
+      'Code Optimization',
+      'API Architecture'
+    ],
+    capabilities: [
+      'Solution Blueprinting',
+      'Tech Stack Analysis',
+      'Code Generation',
+      'Performance Optimization'
     ]
   }
 ];

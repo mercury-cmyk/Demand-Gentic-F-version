@@ -1507,8 +1507,8 @@ export class TelnyxAiBridge extends EventEmitter {
     }
 
     // Fall back to phase-based inference
-    // BUG FIX: "closing" phase means prospect engaged through the full pitch - likely qualified
-    if (phase === "closing") return "qualified";
+    // REMOVED: "closing" phase is too ambiguous with AI screeners - do not auto-qualify
+    // if (phase === "closing") return "qualified";
 
     // For pitch and objection_handling phases, check for explicit rejection
     // FIX: Don't automatically mark as not_interested without explicit negative keywords

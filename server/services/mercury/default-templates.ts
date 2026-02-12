@@ -33,42 +33,116 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
     description: 'Invitation email sent to client users to access the client portal.',
     category: 'invitation',
     subjectTemplate: 'You\'re invited to the {{companyName}} Client Portal',
-    htmlTemplate: `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 24px 32px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Welcome to Pivotal B2B</h1>
+    htmlTemplate: `<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+@media only screen and (max-width: 600px) {
+  .main-table { width: 100% !important; }
+  .mobile-padding { padding: 20px !important; }
+  .mobile-header { padding: 32px 20px !important; }
+  .mobile-text { font-size: 16px !important; }
+}
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f9fafb;">
+  <!-- Preheader -->
+  <div style="display:none; font-size:1px; color:#f9fafb; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden;">
+    Invited to Pivotal B2B Client Portal.
   </div>
-  <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-    <p style="font-size: 16px; color: #374151;">Hi {{firstName}},</p>
-    <p style="font-size: 14px; color: #4b5563; line-height: 1.6;">
-      You've been invited to access the <strong>{{companyName}}</strong> Client Portal on the Pivotal B2B platform.
-      From here you can track your campaigns, review leads, and manage your projects.
-    </p>
-    <div style="text-align: center; margin: 32px 0;">
-      <a href="{{inviteLink}}" style="background-color: #2563eb; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: 600; display: inline-block;">
-        Accept Invitation
-      </a>
-    </div>
-    <p style="font-size: 13px; color: #6b7280;">
-      This invitation link expires in <strong>{{expiryDays}} days</strong>.
-      If you didn't expect this email, you can safely ignore it.
-    </p>
-    {{#if portalUrl}}
-    <p style="font-size: 12px; color: #9ca3af; margin-top: 16px;">
-      Or copy this link: <a href="{{inviteLink}}" style="color: #3b82f6;">{{inviteLink}}</a>
-    </p>
-    {{/if}}
-  </div>
-</div>`,
-    textTemplate: `Hi {{firstName}},
 
-You've been invited to access the {{companyName}} Client Portal on Pivotal B2B.
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f9fafb; min-height:100vh;">
+    <tr>
+      <td align="center" style="padding: 20px 0;">
+        <!-- Main Container -->
+        <table role="presentation" class="main-table" width="600" border="0" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin: 0 auto;">
+          
+          <!-- Header -->
+          <tr>
+            <td class="mobile-header" style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 48px 32px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 28px; font-weight: 700;">Welcome Aboard</h1>
+              <p style="color: #bfdbfe; margin: 12px 0 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px;">Pivotal B2B Client Portal</p>
+            </td>
+          </tr>
 
-Accept your invitation: {{inviteLink}}
+          <!-- Content -->
+          <tr>
+            <td class="mobile-padding" style="padding: 40px 32px; text-align: center;">
+              <!-- Emoji Icon -->
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center" style="padding-bottom: 24px;">
+                     <div style="width: 64px; height: 64px; background-color: #eff6ff; border-radius: 50%; line-height: 64px; font-size: 32px;">👋</div>
+                  </td>
+                </tr>
+              </table>
 
-This link expires in {{expiryDays}} days.
+              <h2 style="margin: 0 0 16px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 20px; color: #111827; font-weight: 600;">Hi {{firstName}},</h2>
+              
+              <p class="mobile-text" style="margin: 0 0 32px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #4b5563;">
+                You've been invited to join the <strong>{{companyName}}</strong> workspace. 
+                Access your dashboard to track campaigns, review leads, and monitor performance in real-time.
+              </p>
 
-If you didn't expect this email, you can safely ignore it.`,
+              <!-- Button -->
+              <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin: 0 auto;">
+                <tr>
+                  <td align="center" style="border-radius: 50px; background-color: #2563eb;">
+                    <a href="{{inviteLink}}" target="_blank" style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 50px; display: inline-block; border: 1px solid #2563eb;">
+                      Get Started Now
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 32px 0 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; color: #6b7280;">
+                Link valid for <strong>{{expiryDays}} days</strong>.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer Link Fallback -->
+          <tr>
+            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #f3f4f6;">
+              <p style="margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #9ca3af; line-height: 1.5;">
+                Button not working? Copy and paste this link:<br>
+                <a href="{{inviteLink}}" style="color: #2563eb; text-decoration: none; word-break: break-all;">{{inviteLink}}</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Copyright -->
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+          <tr>
+            <td align="center" style="padding-top: 24px; padding-bottom: 24px;">
+              <p style="margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #9ca3af;">
+                &copy; 2026 Pivotal B2B. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+    textTemplate: `Welcome to Pivotal B2B
+
+Hi {{firstName}},
+
+You've been invited to join the {{companyName}} workspace on Pivotal B2B.
+
+Access your dashboard to track campaigns, review leads, and monitor performance in real-time.
+
+Get Started: {{inviteLink}}
+
+This invitation is valid for {{expiryDays}} days.
+
+If you have trouble with the link, copy and paste this URL into your browser:
+{{inviteLink}}`,
     variables: [
       { name: 'firstName', description: 'Recipient first name', required: true, exampleValue: 'Jane' },
       { name: 'lastName', description: 'Recipient last name', required: false, exampleValue: 'Smith' },

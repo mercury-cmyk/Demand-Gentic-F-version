@@ -14941,7 +14941,7 @@ Provide JSON response with:
         console.log(`[QA] Found ${sessions.length} call sessions, ${qualityRecordMap.size} quality record fallbacks`);
 
         // ===== HELPER: Transform a single session row into conversation format =====
-        function transformSession(session: typeof sessions[0]) {
+        const transformSession = (session: typeof sessions[0]) => {
           const normalized = normalizeTranscript(session.transcript);
 
           // Extract issues from analysis if available
@@ -15039,7 +15039,7 @@ Provide JSON response with:
             createdAt: session.createdAt?.toISOString() || new Date().toISOString(),
             isTestCall: false,
           };
-        }
+        };
 
         // ===== CONSOLIDATE: Deduplicate by contact — one entry per contact (latest call) =====
         // Group sessions by contactId (or by id if no contactId, to avoid merging unrelated unknowns)
@@ -15068,8 +15068,8 @@ Provide JSON response with:
             (conv as any).callHistory = group.map(s => ({
               id: s.id,
               status: s.status,
-              disposition: s.aiDisposition || undefined,
-              duration: s.durationSec || undefined,
+              disposition: s.disposition || undefined,
+              duration: s.duration || undefined,
               hasTranscript: !!(s.transcript),
               hasRecording: !!(s.recordingS3Key || s.recordingUrl),
               hasAnalysis: !!(s.analysis),

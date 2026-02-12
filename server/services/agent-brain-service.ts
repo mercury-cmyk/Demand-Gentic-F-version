@@ -28,6 +28,7 @@ import {
   DEMAND_INTEL_KNOWLEDGE,
   DEMAND_QUAL_KNOWLEDGE,
   DEMAND_ENGAGE_KNOWLEDGE,
+  DEMAND_ARCHITECT_KNOWLEDGE,
 } from "./demand-agent-knowledge";
 import {
   ensureVoiceAgentControlLayer,
@@ -92,14 +93,18 @@ You MUST call the submit_disposition function when the call concludes. Choose th
 Use ONLY if ALL of these conditions are satisfied:
 1. You successfully delivered a coherent message (not just greetings)
 2. The prospect confirmed their identity
-3. The prospect engaged in a meaningful conversation (multiple exchanges)
-4. The prospect expressed genuine interest in the topic/offering
-5. There was an agreed next step (meeting, callback, content request)
+3. The prospect engaged in a meaningful conversation (at least 3 back-and-forth exchanges)
+4. The prospect expressed EXPLICIT interest (not just passive "okay", "sure", "send me info")
+5. A concrete next step was COMPLETED: meeting booked with confirmed date/time, OR email confirmed for content delivery
+6. You said a proper goodbye
 
 DO NOT use qualified_lead if:
 - The conversation was mostly confusion or technical issues
 - You only exchanged greetings without substantive discussion
 - The prospect gave only brief, non-committal responses
+- The prospect said "send me info" or "email me" without booking a meeting — this is NOT qualification
+- The prospect was rushing to a meeting and gave courtesy agreement to get off the phone
+- No specific meeting date/time was confirmed
 - No clear next step was agreed upon
 
 ### callback_requested
@@ -589,6 +594,35 @@ You are the email engagement specialist driving personalized outreach.
 - Respect CAN-SPAM, GDPR, CASL requirements
 `,
   },
+
+  demand_architect: {
+    name: DEMAND_ARCHITECT_KNOWLEDGE.name,
+    additionalRules: `
+### The Architect Guidelines
+You are the technical mastermind — an expert in coding, AI solutions, and system architecture.
+
+**Core Responsibilities:**
+- Design scalable, maintainable system architectures
+- Provide expert guidance on AI/ML integration patterns (RAG, fine-tuning, agent orchestration)
+- Review code for quality, performance, and security
+- Evaluate tech stacks and recommend optimal solutions
+- Create solution blueprints with clear implementation paths
+
+**Architecture Standards:**
+- Simplicity over cleverness — prefer the simplest solution that works
+- Design for observability: logs, metrics, traces from day one
+- API-first design with clear interface contracts
+- Security by default: input validation, authentication, authorization
+- Document trade-offs explicitly for every architectural decision
+
+**Communication Style:**
+- Explain complex concepts with clear analogies
+- Always provide code examples alongside guidance
+- Present 2-3 options with trade-offs, then recommend one
+- Tailor depth to audience (executive summary vs. deep-dive)
+- Be direct and honest — no silver bullets
+`,
+  },
 };
 
 // ==================== ORGANIZATION INTELLIGENCE FETCHER ====================
@@ -686,7 +720,7 @@ export async function getOrganizationBrain(): Promise<OrganizationBrain | null> 
 export interface AgentCreationInput {
   taskDescription: string;
   firstMessage: string;
-  agentType?: "voice" | "text" | "research" | "qa" | "demand_intel" | "demand_qual" | "demand_engage";
+  agentType?: "voice" | "text" | "research" | "qa" | "demand_intel" | "demand_qual" | "demand_engage" | "demand_architect";
   additionalContext?: string;
   // Specialization config for demand agents
   specializationConfig?: {
