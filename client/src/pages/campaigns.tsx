@@ -174,8 +174,8 @@ export default function CampaignsPage() {
       return Object.fromEntries(snapshots);
     },
     enabled: campaigns.length > 0,
-    refetchInterval: 2000, // Real-time stats - refresh every 2 seconds
-    staleTime: 0, // Always fetch fresh data
+    refetchInterval: 10000, // Refresh every 10 seconds (reduced from 2s to prevent server overload)
+    staleTime: 5000,
   });
 
   // Fetch queue stats for phone campaigns (all types that support phone/AI calling)
@@ -224,8 +224,8 @@ export default function CampaignsPage() {
       return stats;
     },
     enabled: phoneCampaigns.length > 0 && !!token,
-    refetchInterval: 2000, // Real-time stats - refresh every 2 seconds
-    staleTime: 0, // Always fetch fresh data
+    refetchInterval: 10000, // Refresh every 10 seconds (reduced from 2s to prevent server overload)
+    staleTime: 5000,
   });
 
   // Toggle status mutation

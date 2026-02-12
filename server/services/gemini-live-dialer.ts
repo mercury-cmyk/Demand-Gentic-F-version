@@ -162,6 +162,11 @@ const RECONNECT_BASE_DELAY = 1000; // 1 second base reconnect delay
 const MAX_RECONNECT_DELAY = 30000; // 30 second max reconnect delay
 const MAX_RECONNECT_ATTEMPTS = 5; // Max reconnect attempts before giving up
 
+// ABSOLUTE SAFETY TIMEOUT: Kill any call that's been alive longer than this, regardless of state.
+// Prevents zombie calls (e.g., 131min "No Answer" calls) when Telnyx streams stay open
+// but no audio arrives and maxCallDuration timer never starts.
+const ABSOLUTE_CALL_SAFETY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes hard limit
+
 // AMD (Answering Machine Detection) constants
 // NOTE: TeXML endpoint no longer triggers AMD, so this is mostly a backup timeout
 // Reduced from 4000ms to 500ms since AMD webhooks rarely arrive for TeXML calls
@@ -886,8 +891,55 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let keepaliveInterval: NodeJS.Timeout | null = null;
   let audioTimeoutTimer: NodeJS.Timeout | null = null;
   let maxCallDurationTimer: NodeJS.Timeout | null = null;
+  let absoluteSafetyTimer: NodeJS.Timeout | null = null;
   let reconnectAttempts = 0;
   let geminiConnected = false;
+
+  // ABSOLUTE SAFETY TIMEOUT: Unconditionally kill this call after 10 minutes
+  // This prevents zombie calls when Telnyx streams stay open but call is never answered
+  absoluteSafetyTimer = setTimeout(async () => {
+    const elapsed = Math.round((Date.now() - metrics.startTime) / 1000);
+    console.warn(`[Gemini Live] ⛔ ABSOLUTE SAFETY TIMEOUT (${ABSOLUTE_CALL_SAFETY_TIMEOUT_MS / 1000}s) reached for call ${callId} - force killing. State: answered=${callAnswered}, audioIn=${incomingAudioCount}, setup=${setupComplete}`);
+
+    // Hangup via Telnyx if we have a call control ID
+    if (callControlId) {
+      try {
+        await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log(`[Gemini Live] ⛔ Safety timeout: Telnyx hangup sent for ${callControlId}`);
+      } catch (e) {
+        console.error(`[Gemini Live] ⛔ Safety timeout: Telnyx hangup failed:`, e);
+      }
+    }
+
+    // Process fallback disposition if not already processed
+    if (!dispositionProcessed && callContext.callAttemptId) {
+      try {
+        const disposition: CanonicalDisposition = callAnswered ? 'not_interested' : 'no_answer';
+        callContext.disposition = disposition;
+        await processDisposition(callContext.callAttemptId, disposition, 'absolute_safety_timeout');
+        dispositionProcessed = true;
+        console.log(`[Gemini Live] ⛔ Safety timeout: disposition set to ${disposition}`);
+
+        if (callContext.queueItemId) {
+          const queueStatus = getQueueStatusFromDisposition(disposition);
+          await db.update(campaignQueue)
+            .set({ status: queueStatus, updatedAt: new Date(), enqueuedReason: `Safety timeout after ${elapsed}s` })
+            .where(eq(campaignQueue.id, callContext.queueItemId));
+        }
+      } catch (e) {
+        console.error('[Gemini Live] ⛔ Safety timeout: disposition processing failed:', e);
+      }
+    }
+
+    cleanup();
+    geminiWs?.close();
+  }, ABSOLUTE_CALL_SAFETY_TIMEOUT_MS);
 
   // DIAGNOSTIC: Log state to debug silent agent issues
   let diagnosticTimer: NodeJS.Timeout | null = null;
@@ -901,6 +953,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (keepaliveInterval) clearInterval(keepaliveInterval);
     if (audioTimeoutTimer) clearTimeout(audioTimeoutTimer);
     if (maxCallDurationTimer) clearTimeout(maxCallDurationTimer);
+    if (absoluteSafetyTimer) clearTimeout(absoluteSafetyTimer);
     if (amdWaitTimer) clearTimeout(amdWaitTimer);
     if (humanSpeechWaitTimer) clearTimeout(humanSpeechWaitTimer);
     if (diagnosticTimer) clearInterval(diagnosticTimer);
