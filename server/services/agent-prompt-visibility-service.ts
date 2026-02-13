@@ -565,7 +565,7 @@ Website Content:
     },
     gemini: {
       provider: 'gemini',
-      model: process.env.VERTEX_REASONING_MODEL || 'gemini-2.0-flash-thinking-exp-01-21',
+      model: process.env.VERTEX_REASONING_MODEL || 'gemini-3-pro-preview',
       systemPrompt: geminiSystemPrompt,
       userPromptTemplate: `Analyze the following organization for B2B engagement:
 

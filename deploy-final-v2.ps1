@@ -150,8 +150,11 @@ $env_vars = @(
     "DEEPGRAM_MODEL=nova-2-phonecall",
     "DEEPGRAM_LANGUAGE=en-US",
 
-    # AI Quality
-    "CONVERSATION_QUALITY_MODEL=deepseek-chat",
+    # AI Quality (now using Vertex AI Gemini natively)
+    "CONVERSATION_QUALITY_MODEL=vertex-ai-gemini",
+
+    # Vertex AI Model Overrides
+    "VERTEX_REASONING_MODEL=gemini-3-pro-preview",
 
     # Production URLs
     "BASE_URL=https://demandgentic.ai",
@@ -181,7 +184,11 @@ gcloud run deploy demandgentic-api `
   --allow-unauthenticated `
   --vpc-connector pivotal-connector `
   --vpc-egress private-ranges-only `
-  --max-instances 1 `
-  --concurrency 500 `
+  --min-instances 1 `
+  --max-instances 10 `
+  --cpu 2 `
+  --memory 2Gi `
+  --concurrency 80 `
+  --timeout 300 `
   --set-secrets=$secrets `
   --set-env-vars=$env_vars

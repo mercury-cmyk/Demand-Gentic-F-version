@@ -269,51 +269,16 @@ CRITICAL RULES:
 3. STT artifacts (misspellings, garbled words) are NOT agent errors.
 4. Focus on: objective achievement, talking point coverage, qualification, and disposition accuracy.`;
 
-    // Use DeepSeek or Gemini for evaluation
-    const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
-    const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY);
+    // Use Vertex AI Gemini for evaluation (Google-native)
+    const { generateJSON } = await import("./vertex-ai/vertex-client");
 
-    let jsonStr: string | null = null;
-
-    if (hasDeepSeek) {
-      const OpenAI = (await import("openai")).default;
-      const client = new OpenAI({
-        apiKey: process.env.DEEPSEEK_API_KEY,
-        baseURL: "https://api.deepseek.com/v1",
-      });
-      const response = await client.chat.completions.create({
-        model: "deepseek-chat",
-        messages: [
-          { role: "system", content: "Return only valid JSON. No markdown." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.2,
-      });
-      jsonStr = response.choices[0]?.message?.content || null;
-    } else if (hasGemini) {
-      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genai = new GoogleGenerativeAI(geminiKey!);
-      const model = genai.getGenerativeModel({
-        model: "gemini-2.0-flash",
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
-      });
-      const result = await model.generateContent(prompt);
-      jsonStr = result.response?.text() || null;
-    }
-
-    if (!jsonStr) {
-      console.warn(`${LOG_PREFIX} No AI provider available for campaign outcome evaluation`);
+    let raw: any;
+    try {
+      raw = await generateJSON(prompt, { temperature: 0.2, maxTokens: 4096 });
+    } catch (vertexError: any) {
+      console.warn(`${LOG_PREFIX} Vertex AI evaluation failed: ${vertexError.message}`);
       return null;
     }
-
-    // Parse JSON (strip markdown fences if present)
-    let cleaned = jsonStr.trim();
-    if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
-    else if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
-    if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
-
-    const raw = JSON.parse(cleaned.trim());
 
     return {
       campaignName: campaign.name || "Unknown",

@@ -1,7 +1,7 @@
 /**
  * UKEF Disposition Validator
  *
- * Uses AI (DeepSeek primary, Vertex AI fallback) to analyze call transcripts
+ * Uses Vertex AI Gemini to analyze call transcripts
  * and recommend a disposition. Compares with the existing disposition and
  * flags mismatches for human review.
  *
@@ -16,7 +16,7 @@
  * - No audio stored or processed by this module
  */
 
-import OpenAI from 'openai';
+import { generateJSON } from '../../services/vertex-ai/vertex-client';
 import { db } from '../../db';
 import { leads, dialerCallAttempts, campaigns } from '@shared/schema';
 import { eq, sql } from 'drizzle-orm';
@@ -28,21 +28,6 @@ import {
   type DispositionValidationStatus,
   type PipelineConfig,
 } from './types';
-
-// ─── AI Client Setup ────────────────────────────────────────────────────────
-
-let _deepseekClient: OpenAI | null = null;
-function getDeepSeekClient(): OpenAI {
-  if (!_deepseekClient) {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) throw new Error('DeepSeek API key not configured. Set DEEPSEEK_API_KEY.');
-    _deepseekClient = new OpenAI({
-      apiKey,
-      baseURL: 'https://api.deepseek.com/v1',
-    });
-  }
-  return _deepseekClient;
-}
 
 // ─── Disposition Analysis Prompt ─────────────────────────────────────────────
 
@@ -103,31 +88,12 @@ export async function analyzeDisposition(
   transcript: string,
   existingDisposition: string | null
 ): Promise<DispositionAnalysisResult> {
-  const client = getDeepSeekClient();
-
-  const response = await client.chat.completions.create({
-    model: 'deepseek-chat',
-    messages: [
-      { role: 'system', content: DISPOSITION_SYSTEM_PROMPT },
-      { role: 'user', content: buildUserPrompt(transcript, existingDisposition) + '\n\nRespond with valid JSON only.' },
-    ],
-    temperature: 0.2,
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
-
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error('DeepSeek returned empty response for disposition analysis');
+  const fullPrompt = `${DISPOSITION_SYSTEM_PROMPT}\n\n${buildUserPrompt(transcript, existingDisposition)}\n\nRespond with valid JSON only.`;
 
   try {
-    return JSON.parse(content) as DispositionAnalysisResult;
-  } catch {
-    // Try to extract JSON from markdown code block
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[1].trim()) as DispositionAnalysisResult;
-    }
-    throw new Error(`Failed to parse disposition analysis response: ${content.substring(0, 200)}`);
+    return await generateJSON<DispositionAnalysisResult>(fullPrompt, { temperature: 0.2, maxTokens: 2000 });
+  } catch (error: any) {
+    throw new Error(`Vertex AI disposition analysis failed: ${error.message}`);
   }
 }
 

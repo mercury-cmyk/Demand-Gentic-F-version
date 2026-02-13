@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { generateJSON } from "./vertex-ai/vertex-client";
 import { db } from "../db";
 import { campaigns } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -127,23 +127,6 @@ const DEFAULT_DIMENSIONS = {
 };
 
 const MAX_TRANSCRIPT_CHARS = 12000;
-const FALLBACK_MODEL = "deepseek-chat";
-
-let deepseekClient: OpenAI | null = null;
-
-function getDeepSeekClient(): OpenAI {
-  if (!deepseekClient) {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-      throw new Error("DEEPSEEK_API_KEY is not configured.");
-    }
-    deepseekClient = new OpenAI({
-      apiKey,
-      baseURL: "https://api.deepseek.com/v1",
-    });
-  }
-  return deepseekClient;
-}
 
 async function resolveCampaignContext(campaignId?: string): Promise<{
   name?: string;
@@ -665,7 +648,6 @@ export async function analyzeConversationQuality(
   }
 
   const { text: transcriptText, truncated } = truncateTranscript(trimmed);
-  const model = process.env.CONVERSATION_QUALITY_MODEL || "deepseek-chat";
   const campaignContext = await resolveCampaignContext(input.campaignId);
 
   const contextLines = [
@@ -692,7 +674,7 @@ export async function analyzeConversationQuality(
     campaignContext.aiAgentSettings ? `Call flow scripts: ${JSON.stringify(campaignContext.aiAgentSettings)}` : null,
   ].filter(Boolean);
 
-  const prompt = `You are the DeepSeek real-time conversation quality monitor for B2B campaigns.
+  const prompt = `You are the Vertex AI real-time conversation quality monitor for B2B campaigns.
 You must continuously evaluate adherence to campaign objectives, flow compliance, disposition accuracy, qualification alignment, and breakdowns.
 
 CRITICAL RULES FOR ANALYSIS — DO NOT VIOLATE:
@@ -789,63 +771,16 @@ Return JSON with this exact shape and no extra keys:
 }`;
 
   try {
-    let response;
-    let actualModel = model;
+    const actualModel = "vertex-ai-gemini";
 
-    // Try DeepSeek first, fall back to Gemini if DeepSeek is not configured
-    const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
-    const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY);
-
-    if (hasDeepSeek) {
-      response = await getDeepSeekClient().chat.completions.create({
-        model,
-        messages: [
-          { role: "system", content: "Return only valid JSON. No markdown." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-      });
-    } else if (hasGemini) {
-      // Fallback: Use Gemini via Google AI SDK
-      console.log("[ConversationQuality] DeepSeek not configured, falling back to Gemini");
-      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genai = new GoogleGenerativeAI(geminiKey!);
-      const geminiModel = genai.getGenerativeModel({
-        model: "gemini-2.0-flash",
-        generationConfig: { temperature: 0.3, responseMimeType: "application/json" },
-      });
-      const geminiResult = await geminiModel.generateContent(prompt);
-      const geminiContent = geminiResult.response?.text() || null;
-      if (!geminiContent) {
-        return buildFallbackAnalysis(input, "analysis_failed", "Gemini returned empty content.");
-      }
-      actualModel = "gemini-2.0-flash";
-      // Wrap in OpenAI-compatible format for uniform handling below
-      response = {
-        choices: [{ message: { content: geminiContent } }],
-      } as any;
-    } else {
-      console.warn("[ConversationQuality] No AI provider configured (DEEPSEEK_API_KEY or GEMINI_API_KEY required)");
-      return buildFallbackAnalysis(input, "analysis_failed", "No AI provider configured for quality analysis.");
+    // Use Vertex AI Gemini (Google-native) for quality analysis
+    let raw: any;
+    try {
+      raw = await generateJSON(prompt, { temperature: 0.3, maxTokens: 8192 });
+    } catch (vertexError: any) {
+      console.warn(`[ConversationQuality] Vertex AI analysis failed: ${vertexError.message}`);
+      return buildFallbackAnalysis(input, "analysis_failed", `Vertex AI failed: ${vertexError.message}`);
     }
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      return buildFallbackAnalysis(input, "analysis_failed", `${actualModel} returned empty content.`);
-    }
-
-    let jsonStr = content.trim();
-    if (jsonStr.startsWith("```json")) {
-      jsonStr = jsonStr.slice(7);
-    } else if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.slice(3);
-    }
-    if (jsonStr.endsWith("```")) {
-      jsonStr = jsonStr.slice(0, -3);
-    }
-
-    const raw = JSON.parse(jsonStr.trim());
     const qualityDimensions = raw.qualityDimensions || {};
     const campaignAlignment = raw.campaignAlignment || {};
     const flowCompliance = raw.flowCompliance || {};
