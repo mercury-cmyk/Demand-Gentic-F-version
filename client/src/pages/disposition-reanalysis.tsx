@@ -6,7 +6,7 @@
  *   - Agent behavior scoring (engagement, empathy, closing, objection handling)
  *   - Call quality assessment vs campaign QA parameters
  *   - Misclassification detection with confidence scoring
- *   - Clickable disposition counts → drill into filtered contacts
+ *   - Clickable disposition counts ? drill into filtered contacts
  *   - Professional chat-style transcript viewer (agent/prospect organized)
  *   - Push-to-dashboard / QA / client portal from contact detail
  *   - Full recording playback, interaction history, and action bar
@@ -617,7 +617,7 @@ export default function DispositionReanalysisPage() {
     setSelectedCalls(new Set(changeable));
   }, [previewResult]);
 
-  // Click a disposition count → navigate to contacts tab filtered
+  // Click a disposition count ? navigate to contacts tab filtered
   const handleDispositionCountClick = useCallback((disposition: string) => {
     setContactsDisposition(disposition);
     setContactsPage(0);
@@ -740,7 +740,7 @@ export default function DispositionReanalysisPage() {
                   <Phone className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm text-muted-foreground">Total Calls</span>
                 </div>
-                <p className="text-2xl font-bold mt-1">{stats?.total?.toLocaleString() || '—'}</p>
+                <p className="text-2xl font-bold mt-1">{stats?.total?.toLocaleString() || '�'}</p>
               </CardContent>
             </Card>
             <Card>
@@ -1050,11 +1050,11 @@ export default function DispositionReanalysisPage() {
                         <p className="text-xl font-bold text-red-600">{previewResult.actionsSummary.leadsRemovedFromCampaign}</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-sm text-muted-foreground">→ QA</p>
+                        <p className="text-sm text-muted-foreground">? QA</p>
                         <p className="text-xl font-bold text-blue-600">{previewResult.actionsSummary.movedToQA}</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-sm text-muted-foreground">→ Review</p>
+                        <p className="text-sm text-muted-foreground">? Review</p>
                         <p className="text-xl font-bold text-amber-600">{previewResult.actionsSummary.movedToNeedsReview}</p>
                       </div>
                       <div className="text-center">
@@ -1456,7 +1456,7 @@ export default function DispositionReanalysisPage() {
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Duration / Date</Label>
-                  <p className="text-sm">{formatDuration(activeCallDetail.durationSec)} · {formatDate(activeCallDetail.callDate)}</p>
+                  <p className="text-sm">{formatDuration(activeCallDetail.durationSec)} � {formatDate(activeCallDetail.callDate)}</p>
                 </div>
               </div>
 
@@ -1679,3 +1679,4 @@ function TranscriptView({ transcript }: { transcript: any }) {
     </div>
   );
 }
+

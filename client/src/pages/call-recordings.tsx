@@ -40,7 +40,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/contexts/AuthContext";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 // Recording status badge colors
@@ -92,7 +92,6 @@ function formatDate(dateStr: string | null | undefined): string {
     minute: '2-digit'
   });
 }
-
 interface Recording {
   id: string;
   telnyxCallId?: string | null;
@@ -152,15 +151,55 @@ function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: stri
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Always use our stream endpoint to proxy the audio (bypasses CORS issues with Telnyx)
-  const audioUrl = `/api/recordings/${recordingId}/stream`;
+  // Use a blob URL for audio to allow Authorization header
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (audioUrl && audioRef.current) {
-      audioRef.current.src = audioUrl;
-      audioRef.current.load();
-    }
-  }, [audioUrl]);
+    let isMounted = true;
+    const fetchAudio = async () => {
+      setIsLoading(true);
+      setError(null);
+      setBlobUrl(null);
+      let triedRefresh = false;
+      while (true) {
+        try {
+          // Use apiRequest for consistent auth and refresh logic
+          const res = await apiRequest('GET', `/api/recordings/${recordingId}/stream`, undefined, { timeout: 60000 });
+          if (res.status === 401) {
+            if (!triedRefresh && typeof window !== 'undefined' && window.location) {
+              // If your app has a refresh flow, trigger it here (simulate by reloading)
+              triedRefresh = true;
+              // Optionally, call your refresh logic here
+              // await refreshToken();
+              // continue;
+              break;
+            }
+            setError('Session expired / not authorized. Please re-login.');
+            setIsLoading(false);
+            return;
+          }
+          if (!res.ok) throw new Error('Failed to fetch audio');
+          const blob = await res.blob();
+          if (!isMounted) return;
+          const url = URL.createObjectURL(blob);
+          setBlobUrl(url);
+          break;
+        } catch (err: any) {
+          if (!isMounted) return;
+          setError('Failed to load audio');
+          break;
+        } finally {
+          if (isMounted) setIsLoading(false);
+        }
+      }
+    };
+    fetchAudio();
+    return () => {
+      isMounted = false;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordingId]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -174,7 +213,7 @@ function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: stri
       setError('Failed to load audio');
       setIsLoading(false);
     };
-
+      <audio ref={audioRef} preload="metadata" src={blobUrl || undefined} />
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
     audio.addEventListener('canplay', handleCanPlay);
@@ -219,7 +258,7 @@ function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: stri
   };
 
   // Only show loading if we're setting up audio
-  if (isLoading && !audioUrl) {
+  if (isLoading && !blobUrl) {
     return (
       <div className="flex items-center justify-center p-4 bg-muted rounded-lg">
         <Loader2 className="h-5 w-5 animate-spin mr-2" />
@@ -230,10 +269,17 @@ function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: stri
 
   if (error) {
     return (
-      <div className="flex items-center justify-center p-4 bg-destructive/10 rounded-lg text-destructive">
-        <AlertCircle className="h-5 w-5 mr-2" />
-        <span>{error || 'Failed to load recording'}</span>
-        <Button variant="ghost" size="sm" onClick={onClose} className="ml-4">
+      <div className="flex flex-col items-center justify-center p-4 bg-destructive/10 rounded-lg text-destructive">
+        <div className="flex items-center mb-2">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          <span>{error || 'Failed to load recording'}</span>
+        </div>
+        {error.includes('re-login') && (
+          <Button variant="outline" size="sm" onClick={() => window.location.href = '/login'}>
+            Re-authenticate
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={onClose} className="mt-2">
           Close
         </Button>
       </div>
@@ -242,8 +288,7 @@ function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: stri
 
   return (
     <div className="bg-muted p-4 rounded-lg space-y-3">
-      <audio ref={audioRef} preload="metadata" />
-      
+      <audio ref={audioRef} preload="metadata" src={blobUrl || undefined} />
       {/* Progress bar */}
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted-foreground w-12">
@@ -260,49 +305,15 @@ function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: stri
           {formatDuration(duration)}
         </span>
       </div>
-      
       {/* Controls */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={togglePlay}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : isPlaying ? (
-              <Pause className="h-4 w-4" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-          </Button>
-          
-          <Button variant="ghost" size="icon" onClick={toggleMute}>
-            {isMuted ? (
-              <VolumeX className="h-4 w-4" />
-            ) : (
-              <Volume2 className="h-4 w-4" />
-            )}
-          </Button>
-          
-          <Slider
-            value={[isMuted ? 0 : volume]}
-            max={1}
-            step={0.01}
-            onValueChange={handleVolumeChange}
-            className="w-24"
-          />
-        </div>
-        
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             asChild
           >
-            <a href={audioUrl} download target="_blank" rel="noopener noreferrer">
+            <a href={blobUrl || undefined} download target="_blank" rel="noopener noreferrer">
               <Download className="h-4 w-4 mr-1" />
               Download
             </a>
@@ -316,7 +327,7 @@ function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: stri
   );
 }
 
-export default function CallRecordingsPage() {
+function CallRecordingsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1107,3 +1118,5 @@ export default function CallRecordingsPage() {
     </div>
   );
 }
+
+export default CallRecordingsPage;
