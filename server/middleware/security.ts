@@ -247,7 +247,7 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
     : "script-src 'self' 'unsafe-inline'"; // No unsafe-eval in production
   res.setHeader(
     'Content-Security-Policy',
-    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob:; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'`
+    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob: https://s3.amazonaws.com https://*.s3.amazonaws.com https://storage.googleapis.com https://*.storage.googleapis.com; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'`
   );
 
   // Strict Transport Security (enforce HTTPS for 1 year, include subdomains)

@@ -1,67 +1,9 @@
-import OpenAI from "openai";
 import { workerDb as db } from "../db";
 import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { generateJSON, chat } from "./vertex-ai/vertex-client";
-
-// Lazy DeepSeek client – instantiate only when needed and when credentials exist
-let _deepseekClient: OpenAI | null = null;
-function getDeepSeekClient(): OpenAI {
-  if (!_deepseekClient) {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-      throw new Error("DeepSeek API key not configured. Set DEEPSEEK_API_KEY.");
-    }
-    _deepseekClient = new OpenAI({
-      apiKey,
-      baseURL: "https://api.deepseek.com/v1",
-    });
-  }
-  return _deepseekClient;
-}
-
-/**
- * Generate JSON response using DeepSeek for conversation quality analysis
- * Uses deepseek-chat model which is optimized for reasoning tasks
- */
-async function analyzeWithDeepSeek<T>(
-  systemPrompt: string,
-  userPrompt: string,
-  options: { temperature?: number; maxTokens?: number } = {}
-): Promise<T> {
-  const client = getDeepSeekClient();
-  const { temperature = 0.3, maxTokens = 2000 } = options;
-
-  const response = await client.chat.completions.create({
-    model: "deepseek-chat",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt + "\n\nRespond with valid JSON only. No markdown code blocks, no explanation." }
-    ],
-    temperature,
-    max_tokens: maxTokens,
-    response_format: { type: "json_object" },
-  });
-
-  const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("DeepSeek returned empty response");
-  }
-
-  // Parse and return JSON
-  try {
-    return JSON.parse(content) as T;
-  } catch (e) {
-    // Try to extract JSON from potential markdown code block
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[1].trim()) as T;
-    }
-    throw new Error(`Failed to parse DeepSeek response as JSON: ${content.substring(0, 200)}`);
-  }
-}
+import { deepAnalyzeJSON, chat } from "./vertex-ai/vertex-client";
 
 interface QAParameters {
   required_info: string[];
@@ -269,28 +211,25 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       "You are an expert B2B lead qualification analyst. Analyze call transcripts and data to determine if leads meet qualification criteria. Return structured JSON analysis."
     );
 
-    // Use DeepSeek for conversation quality analysis (cost-effective, high reasoning)
+    // Use Gemini 3 Deep Think for conversation quality analysis
     let rawAnalysis: any;
     try {
-      console.log(`[AI-QA] Using DeepSeek for conversation quality analysis (lead: ${leadId})`);
-      rawAnalysis = await analyzeWithDeepSeek<any>(systemPrompt, analysisPrompt, {
+      console.log(`[AI-QA] Using Gemini 3 Deep Think for lead qualification (lead: ${leadId})`);
+      const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
+      rawAnalysis = await deepAnalyzeJSON<any>(fullPrompt, {
         temperature: 0.3,
         maxTokens: 2000,
       });
-    } catch (deepseekError: any) {
-      console.error('[AI-QA] DeepSeek analysis failed:', deepseekError.message);
-      // Fallback to Vertex AI if DeepSeek fails
-      console.log('[AI-QA] Falling back to Vertex AI...');
-      const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
+    } catch (analysisError: any) {
+      console.error('[AI-QA] Deep Think analysis failed:', analysisError.message);
+      // Fallback to chat-based analysis
+      console.log('[AI-QA] Falling back to chat...');
       try {
-        rawAnalysis = await generateJSON<any>(fullPrompt, {
-          temperature: 0.3,
-          maxTokens: 2000,
-        });
-      } catch (vertexError) {
-        console.error('[AI-QA] Vertex AI fallback also failed');
         const textResponse = await chat(systemPrompt, [{ role: "user", content: analysisPrompt + "\n\nRespond with valid JSON only." }], { temperature: 0.3, maxTokens: 2000 });
         rawAnalysis = JSON.parse(textResponse);
+      } catch (chatError) {
+        console.error('[AI-QA] Chat fallback also failed');
+        throw chatError;
       }
     }
 

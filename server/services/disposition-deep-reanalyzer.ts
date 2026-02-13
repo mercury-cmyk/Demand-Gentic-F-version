@@ -31,7 +31,7 @@ import {
   type DispositionAnalysisResult,
   type CampaignQualificationContext,
 } from "./smart-disposition-analyzer";
-import { generateJSON } from "./vertex-ai/vertex-client";
+import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
 
 const LOG_PREFIX = "[DeepReanalyzer]";
 
@@ -473,7 +473,7 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 
   try {
     const fullPrompt = `${systemPrompt}\n\nAnalyze this call transcript:\n\n${finalTranscript}`;
-    const parsed = await generateJSON<any>(fullPrompt, { temperature: 0.1, maxTokens: 5000 });
+    const parsed = await deepAnalyzeJSON<any>(fullPrompt, { temperature: 0.1, maxTokens: 5000 });
 
     // Validate suggested disposition is a valid value
     const validDispositions = [

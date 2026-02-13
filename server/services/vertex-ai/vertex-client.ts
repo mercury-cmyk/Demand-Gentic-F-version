@@ -515,6 +515,82 @@ export async function reason(
   return { thinking: thinking.trim(), answer: answer.trim() };
 }
 
+/**
+ * Deep analysis with Gemini 3 Deep Think that returns structured JSON.
+ * Primary model for all deep reasoning/analysis endpoints.
+ * Falls back to generateJSON (Gemini Flash) if Deep Think is unavailable.
+ */
+export async function deepAnalyzeJSON<T>(
+  prompt: string,
+  options: GenerationOptions = {}
+): Promise<T> {
+  const modelId = currentConfig.models.reasoning;
+  const isGemini3 = modelId.includes("gemini-3");
+
+  // Fallback to standard generateJSON if not on Gemini 3
+  if (!isGemini3) {
+    return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
+  }
+
+  if (!_reasoningAuth) {
+    _reasoningAuth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+  }
+  const accessToken = await _reasoningAuth.getAccessToken();
+  const endpoint = `https://aiplatform.googleapis.com/v1/projects/${currentConfig.projectId}/locations/global/publishers/google/models/${modelId}:generateContent`;
+
+  const data: any = await withRetry(async () => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: options.temperature ?? 0.2,
+          maxOutputTokens: options.maxTokens ?? 8192,
+          topP: options.topP ?? 0.95,
+          responseMimeType: "application/json",
+          thinkingConfig: {
+            thinkingLevel: "HIGH",
+          },
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      const err: any = new Error(`Gemini 3 Deep Think JSON request failed: ${res.status} ${res.statusText}`);
+      err.code = res.status;
+      throw err;
+    }
+
+    return res.json();
+  });
+
+  // Extract the non-thought text part (the JSON answer)
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  let jsonText = "";
+  for (const part of parts) {
+    if (!part.thought && part.text) {
+      jsonText += part.text;
+    }
+  }
+
+  // Parse JSON
+  try {
+    let cleaned = jsonText.trim();
+    if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+    if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+    if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+    return JSON.parse(cleaned.trim());
+  } catch (error) {
+    console.error("[VertexAI] Deep Think JSON parse failed, falling back to generateJSON:", jsonText.substring(0, 200));
+    // Fallback to standard generateJSON
+    return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
+  }
+}
+
 // ==================== EMBEDDINGS ====================
 
 /**
@@ -708,6 +784,7 @@ export default {
   getImageModel,
   generateText,
   generateJSON,
+  deepAnalyzeJSON,
   chat,
   streamChat,
   reason,

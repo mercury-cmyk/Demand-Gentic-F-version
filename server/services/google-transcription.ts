@@ -377,6 +377,42 @@ export async function transcribeFromRecording(
   recordingUrl: string,
   options?: TranscriptionAudioSourceOptions
 ): Promise<{ transcript: string; wordCount: number } | null> {
+  // If we have a direct GCS URI, use long-running recognition with URI to bypass inline limits.
+  if (recordingUrl.startsWith('gs://')) {
+    try {
+      const client = getSpeechClient();
+      const config: RecognitionConfig = {
+        model: 'telephony',
+        languageCode: 'en-US',
+        alternativeLanguageCodes: ['en-GB'],
+        enableAutomaticPunctuation: true,
+        enableWordConfidence: true,
+        diarizationConfig: {
+          enableSpeakerDiarization: true,
+          minSpeakerCount: 2,
+          maxSpeakerCount: 2,
+        },
+        useEnhanced: true,
+      };
+      const audio: RecognitionAudio = { uri: recordingUrl };
+      const [operation] = await client.longRunningRecognize({ config, audio });
+      const [response] = await operation.promise();
+      if (!response.results || response.results.length === 0) return null;
+      const transcriptText = response.results
+        .map(result => result.alternatives?.[0]?.transcript || '')
+        .join(' ')
+        .trim();
+      return {
+        transcript: transcriptText,
+        wordCount: transcriptText.split(/\s+/).length,
+      };
+    } catch (error) {
+      if (options?.throwOnError) throw error;
+      console.error('[Transcription] Error with GCS URI transcription:', error);
+      return null;
+    }
+  }
+
   // Use throwOnError to ensure reliability service can detect permanent errors (like 403)
   const transcript = await submitTranscription(recordingUrl, { ...options, throwOnError: true });
   if (!transcript) return null;
@@ -681,55 +717,87 @@ export async function submitStructuredTranscription(
   try {
     const client = getSpeechClient();
 
-    // Download audio file
-    const audioData = await downloadAudio(audioUrl, options);
-    if (!audioData) {
-      return null;
-    }
+    // If we have a direct GCS URI, avoid downloading and use long-running with URI to bypass inline size limits
+    const isGcsUri = audioUrl.startsWith('gs://');
 
-    console.log(`[Transcription] 🎤 Starting structured transcription | Audio type: ${audioData.mimeType}`);
+    let audioData: { base64: string; mimeType: string } | null = null;
+    let config: RecognitionConfig | null = null;
+    let audio: RecognitionAudio;
 
-    const config: RecognitionConfig = {
-      model: 'telephony',
-      languageCode: 'en-US',
-      alternativeLanguageCodes: ['en-GB'],
-      encoding: getEncodingFromMimeType(audioData.mimeType),
-      sampleRateHertz: audioData.mimeType === 'audio/wav' ? 8000 : undefined,
-      enableAutomaticPunctuation: true,
-      enableWordConfidence: true,
-      diarizationConfig: {
-        enableSpeakerDiarization: true,
-        minSpeakerCount: 2,
-        maxSpeakerCount: 2,
-      },
-      useEnhanced: true,
-    };
-
-    if (audioData.mimeType === 'audio/wav') {
-      const wavChannels = getWavChannelCount(audioData.base64);
-      if (wavChannels) {
-        config.audioChannelCount = wavChannels;
-        config.enableSeparateRecognitionPerChannel = wavChannels > 1;
+    if (isGcsUri) {
+      console.log(`[Transcription] 🎤 Using GCS URI for structured transcription: ${audioUrl}`);
+      config = {
+        model: 'telephony',
+        languageCode: 'en-US',
+        alternativeLanguageCodes: ['en-GB'],
+        enableAutomaticPunctuation: true,
+        enableWordConfidence: true,
+        diarizationConfig: {
+          enableSpeakerDiarization: true,
+          minSpeakerCount: 2,
+          maxSpeakerCount: 2,
+        },
+        useEnhanced: true,
+      };
+      audio = { uri: audioUrl };
+    } else {
+      // Download audio file
+      audioData = await downloadAudio(audioUrl, options);
+      if (!audioData) {
+        return null;
       }
+
+      console.log(`[Transcription] 🎤 Starting structured transcription | Audio type: ${audioData.mimeType}`);
+
+      config = {
+        model: 'telephony',
+        languageCode: 'en-US',
+        alternativeLanguageCodes: ['en-GB'],
+        encoding: getEncodingFromMimeType(audioData.mimeType),
+        sampleRateHertz: audioData.mimeType === 'audio/wav' ? 8000 : undefined,
+        enableAutomaticPunctuation: true,
+        enableWordConfidence: true,
+        diarizationConfig: {
+          enableSpeakerDiarization: true,
+          minSpeakerCount: 2,
+          maxSpeakerCount: 2,
+        },
+        useEnhanced: true,
+      };
+
+      if (audioData.mimeType === 'audio/wav') {
+        const wavChannels = getWavChannelCount(audioData.base64);
+        if (wavChannels) {
+          config.audioChannelCount = wavChannels;
+          config.enableSeparateRecognitionPerChannel = wavChannels > 1;
+        }
+      }
+
+      audio = { content: audioData.base64 };
     }
-
-    const audio: RecognitionAudio = {
-      content: audioData.base64,
-    };
-
-    const audioSizeBytes = Buffer.from(audioData.base64, 'base64').length;
-    const estimatedDurationSeconds = audioSizeBytes / (8000 * 2);
 
     let results: protos.google.cloud.speech.v1.ISpeechRecognitionResult[] = [];
 
-    if (estimatedDurationSeconds > 60) {
-      console.log(`[Transcription] Using long-running recognition (estimated ${Math.round(estimatedDurationSeconds)}s)`);
-      const [operation] = await client.longRunningRecognize({ config, audio });
+    // Decide path: use long-running if GCS URI or estimated >60s
+    const useLongRunning =
+      isGcsUri ||
+      (() => {
+        if (!audioData) return true; // GCS path already handled
+        const audioSizeBytes = Buffer.from(audioData.base64, 'base64').length;
+        const estimatedDurationSeconds = audioSizeBytes / (8000 * 2);
+        return estimatedDurationSeconds > 60;
+      })();
+
+    if (useLongRunning) {
+      console.log(`[Transcription] Using long-running recognition${isGcsUri ? ' (GCS URI)' : ''}`);
+      const [operation] = await client.longRunningRecognize({ config: config!, audio });
       const [response] = await operation.promise();
       results = response.results || [];
     } else {
+      const audioSizeBytes = Buffer.from(audioData!.base64, 'base64').length;
+      const estimatedDurationSeconds = audioSizeBytes / (8000 * 2);
       console.log(`[Transcription] Using synchronous recognition (estimated ${Math.round(estimatedDurationSeconds)}s)`);
-      const [response] = await client.recognize({ config, audio });
+      const [response] = await client.recognize({ config: config!, audio });
       results = response.results || [];
     }
 

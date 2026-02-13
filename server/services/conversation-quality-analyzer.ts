@@ -1,4 +1,4 @@
-import { generateJSON } from "./vertex-ai/vertex-client";
+import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
 import { db } from "../db";
 import { campaigns } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -127,6 +127,8 @@ const DEFAULT_DIMENSIONS = {
 };
 
 const MAX_TRANSCRIPT_CHARS = 12000;
+const QUALITY_ANALYSIS_MODEL = "vertex-ai-gemini";
+const FALLBACK_MODEL = QUALITY_ANALYSIS_MODEL;
 
 async function resolveCampaignContext(campaignId?: string): Promise<{
   name?: string;
@@ -771,12 +773,12 @@ Return JSON with this exact shape and no extra keys:
 }`;
 
   try {
-    const actualModel = "vertex-ai-gemini";
+    const actualModel = QUALITY_ANALYSIS_MODEL;
 
-    // Use Vertex AI Gemini (Google-native) for quality analysis
+    // Use Gemini 3 Deep Think for quality analysis
     let raw: any;
     try {
-      raw = await generateJSON(prompt, { temperature: 0.3, maxTokens: 8192 });
+      raw = await deepAnalyzeJSON(prompt, { temperature: 0.3, maxTokens: 8192 });
     } catch (vertexError: any) {
       console.warn(`[ConversationQuality] Vertex AI analysis failed: ${vertexError.message}`);
       return buildFallbackAnalysis(input, "analysis_failed", `Vertex AI failed: ${vertexError.message}`);

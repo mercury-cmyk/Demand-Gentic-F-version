@@ -269,12 +269,12 @@ CRITICAL RULES:
 3. STT artifacts (misspellings, garbled words) are NOT agent errors.
 4. Focus on: objective achievement, talking point coverage, qualification, and disposition accuracy.`;
 
-    // Use Vertex AI Gemini for evaluation (Google-native)
-    const { generateJSON } = await import("./vertex-ai/vertex-client");
+    // Use Gemini 3 Deep Think for evaluation
+    const { deepAnalyzeJSON } = await import("./vertex-ai/vertex-client");
 
     let raw: any;
     try {
-      raw = await generateJSON(prompt, { temperature: 0.2, maxTokens: 4096 });
+      raw = await deepAnalyzeJSON(prompt, { temperature: 0.2, maxTokens: 4096 });
     } catch (vertexError: any) {
       console.warn(`${LOG_PREFIX} Vertex AI evaluation failed: ${vertexError.message}`);
       return null;
@@ -332,6 +332,8 @@ export async function runPostCallAnalysis(
     disposition?: string;
     /** If a Gemini transcript is available from the live session, use as fallback */
     geminiTranscript?: string;
+    /** Optional GCS URI (gs://bucket/key) to avoid inline download limits for long audio */
+    gcsUri?: string;
   }
 ): Promise<PostCallAnalysisResult> {
   const startTime = Date.now();
@@ -382,10 +384,10 @@ export async function runPostCallAnalysis(
     const callDurationSec = options?.callDurationSec || session.durationSec || 0;
 
     // 2. Get audio URL for transcription
-    let audioUrl: string | null = null;
+    let audioUrl: string | null = options?.gcsUri || null;
 
     // Prefer S3/GCS recording (our own recording is stereo — inbound + outbound)
-    if (session.recordingS3Key && isS3Configured()) {
+    if (!audioUrl && session.recordingS3Key && isS3Configured()) {
       try {
         audioUrl = await getPresignedDownloadUrl(session.recordingS3Key, 3600);
         console.log(`${LOG_PREFIX} Using S3 recording: ${session.recordingS3Key}`);
