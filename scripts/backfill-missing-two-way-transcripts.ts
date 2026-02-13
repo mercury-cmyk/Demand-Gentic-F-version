@@ -14,7 +14,7 @@ import "dotenv/config";
 import OpenAI from "openai";
 import { pool } from "../server/db";
 import { getPresignedDownloadUrl } from "../server/lib/storage";
-import { fetchTelnyxRecording, searchRecordingsByDialedNumber } from "../server/services/telnyx-recordings";
+import { fetchTelnyxRecording } from "../server/services/telnyx-recordings";
 import { submitStructuredTranscription } from "../server/services/google-transcription";
 
 type CandidateTable = "leads" | "call_sessions";
@@ -28,6 +28,7 @@ interface Candidate {
   recordingS3Key: string | null;
   telnyxCallId: string | null;
   toNumber: string | null;
+  fromNumber: string | null;
 }
 
 interface DiarizedUtterance {
@@ -137,7 +138,8 @@ async function loadCandidates(): Promise<Candidate[]> {
        recording_url,
        recording_s3_key,
        telnyx_call_id,
-       to_number_e164
+       to_number_e164,
+       from_number
      FROM call_sessions
      WHERE started_at >= $1
        AND COALESCE(duration_sec, 0) >= $2
@@ -162,6 +164,7 @@ async function loadCandidates(): Promise<Candidate[]> {
     recordingS3Key: r.recording_s3_key || null,
     telnyxCallId: r.telnyx_call_id || null,
     toNumber: null,
+    fromNumber: null,
   }));
 
   const callSessions: Candidate[] = callSessionRows.rows.map((r: any) => ({
@@ -173,6 +176,7 @@ async function loadCandidates(): Promise<Candidate[]> {
     recordingS3Key: r.recording_s3_key || null,
     telnyxCallId: r.telnyx_call_id || null,
     toNumber: r.to_number_e164 || null,
+    fromNumber: r.from_number || null,
   }));
 
   return [...leads, ...callSessions]
@@ -222,28 +226,59 @@ async function resolveAudioUrl(
     }
   }
 
-  if (candidate.toNumber) {
+  if (candidate.toNumber || candidate.fromNumber) {
     try {
-      const start = new Date(candidate.createdAt);
-      start.setMinutes(start.getMinutes() - 30);
-      const end = new Date(candidate.createdAt);
-      end.setMinutes(end.getMinutes() + 30);
+      const targetMs = new Date(candidate.createdAt).getTime();
+      const start = new Date(targetMs - 8 * 60 * 60 * 1000);
+      const end = new Date(targetMs + 8 * 60 * 60 * 1000);
+      const all: any[] = [];
 
-      const recordings: any[] = await searchRecordingsByDialedNumber(candidate.toNumber, start, end);
-      if (recordings.length > 0) {
-        recordings.sort((a, b) => {
-          const da = Math.abs(Number(a?.duration_millis || 0) / 1000 - candidate.durationSec);
-          const db = Math.abs(Number(b?.duration_millis || 0) / 1000 - candidate.durationSec);
-          return da - db;
+      async function searchBy(field: "to" | "from", value: string): Promise<void> {
+        const u = new URL("https://api.telnyx.com/v2/recordings");
+        u.searchParams.set(`filter[${field}]`, value);
+        u.searchParams.set("filter[created_at][gte]", start.toISOString());
+        u.searchParams.set("filter[created_at][lte]", end.toISOString());
+        u.searchParams.set("page[size]", "50");
+
+        const res = await fetch(u.toString(), {
+          headers: { Authorization: `Bearer ${TELNYX_API_KEY}` },
         });
+        if (!res.ok) return;
 
-        const completed = recordings.find((r) => r?.status === "completed");
-        const best = completed || recordings[0];
-        const freshUrl = best?.download_urls?.mp3 || best?.download_urls?.wav || null;
-        if (freshUrl) return freshUrl;
+        const payload = await res.json().catch(() => ({}));
+        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        all.push(...rows);
       }
+
+      if (candidate.toNumber) await searchBy("to", candidate.toNumber);
+      if (candidate.fromNumber) await searchBy("from", candidate.fromNumber);
+
+      const unique = new Map<string, any>();
+      for (const item of all) {
+        if (item?.id) unique.set(item.id, item);
+      }
+      const recordings = Array.from(unique.values());
+      if (recordings.length === 0) return null;
+
+      recordings.sort((a, b) => {
+        const durationDiffA = Math.abs(Number(a?.duration_millis || 0) / 1000 - candidate.durationSec);
+        const durationDiffB = Math.abs(Number(b?.duration_millis || 0) / 1000 - candidate.durationSec);
+        const timeDiffA = Math.abs(new Date(a?.created_at || 0).getTime() - targetMs) / 60000;
+        const timeDiffB = Math.abs(new Date(b?.created_at || 0).getTime() - targetMs) / 60000;
+
+        const penaltyA = durationDiffA * 3 + timeDiffA;
+        const penaltyB = durationDiffB * 3 + timeDiffB;
+        return penaltyA - penaltyB;
+      });
+
+      const completed = recordings.find((r) => r?.status === "completed");
+      const best = completed || recordings[0];
+      const freshUrl = best?.download_urls?.mp3 || best?.download_urls?.wav || null;
+      if (freshUrl) return freshUrl;
     } catch (err: any) {
-      logVerbose(`  [resolve] telnyx phone-window search failed (${candidate.toNumber}): ${err.message}`);
+      logVerbose(
+        `  [resolve] telnyx phone-window search failed (${candidate.toNumber || candidate.fromNumber}): ${err.message}`
+      );
     }
   }
 
@@ -478,8 +513,7 @@ async function updateCallSession(candidate: Candidate, structured: StructuredTra
   await pool.query(
     `UPDATE call_sessions
      SET ai_transcript = $1,
-         ai_analysis = COALESCE(ai_analysis, '{}'::jsonb) || $2::jsonb,
-         updated_at = NOW()
+         ai_analysis = COALESCE(ai_analysis, '{}'::jsonb) || $2::jsonb
      WHERE id = $3`,
     [
       formatted.fullText,

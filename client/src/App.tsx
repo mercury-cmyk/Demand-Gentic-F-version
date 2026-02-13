@@ -23,6 +23,7 @@ import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
 import LandingPage from "@/pages/landing";
+import UkefLandingPage from "@/pages/ukef-landing";
 import AboutPage from "@/pages/about";
 import PrivacyPolicyPage from "@/pages/privacy-policy";
 import TermsOfServicePage from "@/pages/terms-of-service";
@@ -595,6 +596,11 @@ function Router() {
       </Route>
       <Route path="/welcome">
         <LandingPage />
+      </Route>
+      
+      {/* UK Export Finance Campaign */}
+      <Route path="/uk-export-finance/whitepaper">
+        <UkefLandingPage />
       </Route>
 
       {/* Static public pages */}

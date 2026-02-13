@@ -293,9 +293,97 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       console.warn(`[AI-QA] ⚠️ SHORT DURATION: Lead ${leadId} has call duration ${callDuration}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Forcing manual review.`);
     }
     
+    // =========================================================================
+    // CALL SCREENING / BOT DETECTION — Must run BEFORE any qualification logic
+    // Detects: Google Call Assist, call screening bots, IVR, voicemail, etc.
+    // These are NOT human conversations and must NEVER be qualified.
+    // =========================================================================
+    const transcriptLower = (lead.transcript || '').toLowerCase();
+    
+    // Google Call Assist / Call Screening patterns
+    const isCallScreening = /call\s*assist\s*by\s*google|calling\s*assist\s*by\s*google|google.*recording\s*this\s*call\s*for|i'?m\s*screening\s*calls|before\s*i\s*try\s*to\s*connect\s*you|can\s*i\s*ask\s*what\s*you'?re?\s*calling\s*about|let\s*me\s*try\s*to\s*get\s*the\s*person.*on\s*the\s*line|screening\s*this\s*call/i.test(transcriptLower);
+    
+    // IVR / Auto-attendant patterns
+    const isIVR = /press\s*\d+\s*(for|to)|your\s*call\s*is\s*(important|being\s*recorded)|please\s*hold|for\s*english\s*press|para\s*español|automated\s*attendant|dial\s*by\s*name|extension\s*number/i.test(transcriptLower);
+    
+    // Voicemail patterns (when wrongly dispositioned as qualified)
+    const isVoicemail = /leave\s*(a\s*)?message|after\s*the\s*(tone|beep)|voicemail\s*box|mailbox\s*is\s*full|not\s*available.*leave/i.test(transcriptLower);
+    
+    // No real prospect engagement — agent talked but contact never responded meaningfully
+    // Count actual contact turns (excluding screening bot phrases)
+    const contactTurns = (lead.transcript || '').split('\n')
+      .filter((line: string) => /^contact:/i.test(line.trim()))
+      .map((line: string) => line.replace(/^contact:\s*/i, '').trim())
+      .filter((text: string) => {
+        const lower = text.toLowerCase();
+        // Exclude bot/screening phrases — these are NOT human responses
+        const isBotPhrase = /call\s*assist|google|recording\s*this\s*call|try\s*to\s*connect|what\s*you'?re?\s*calling\s*about|get\s*the\s*person|on\s*the\s*line|screening/i.test(lower);
+        // Exclude very short non-substantive responses
+        const isTooShort = lower.replace(/[^a-z]/g, '').length < 3;
+        return !isBotPhrase && !isTooShort;
+      });
+    
+    const hasNoHumanEngagement = contactTurns.length === 0;
+    const isNonHumanCall = isCallScreening || isIVR || isVoicemail || hasNoHumanEngagement;
+    
+    if (isNonHumanCall) {
+      const reasons: string[] = [];
+      if (isCallScreening) reasons.push('Call screening bot detected (e.g., Google Call Assist)');
+      if (isIVR) reasons.push('IVR/auto-attendant detected');
+      if (isVoicemail) reasons.push('Voicemail detected');
+      if (hasNoHumanEngagement) reasons.push(`No human prospect engagement (0 substantive contact turns)`);
+      
+      const rejectReason = `❌ AUTO-REJECTED: Non-human call — ${reasons.join('; ')}. AI Score overridden to 0.`;
+      console.warn(`[AI-QA] 🤖 NON-HUMAN CALL: Lead ${leadId} — ${reasons.join('; ')}`);
+      
+      // Force rejection regardless of what AI analysis said
+      await db.update(leads)
+        .set({
+          aiScore: '0',
+          aiAnalysis: rawAnalysis as any,
+          aiQualificationStatus: 'not_qualified',
+          qaStatus: 'rejected',
+          qaDecision: rejectReason,
+          qaData: {
+            ...updatedQaData,
+            non_human_call: true,
+            non_human_reasons: reasons,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, leadId));
+      
+      // Log the rejection
+      try {
+        await db.insert(activityLog).values({
+          entityType: 'lead',
+          entityId: leadId,
+          eventType: 'qa_auto_rejected' as any,
+          payload: {
+            score: 0,
+            qualificationStatus: 'not_qualified',
+            qaStatus: 'rejected',
+            qaDecision: rejectReason,
+            nonHumanCall: true,
+            nonHumanReasons: reasons,
+            originalAiScore: normalizedAnalysis.score,
+            campaignId: lead.campaignId,
+          },
+          createdBy: null,
+        });
+      } catch (logErr) {
+        console.error('[AI-QA] Failed to log non-human call rejection:', logErr);
+      }
+      
+      return {
+        ...normalizedAnalysis,
+        score: 0,
+        qualification_status: 'not_qualified',
+      };
+    }
+
     // Check for EXPLICIT callback/interest signals using conservative patterns
     // These must be prospect-initiated phrases, not common AI agent script lines
-    const transcriptLower = (lead.transcript || '').toLowerCase();
     
     // Very explicit callback requests from prospect
     const hasCallbackSignal = /call me back|ring me back|phone me back|call me tomorrow|try me again later|can you call me/i.test(transcriptLower);
