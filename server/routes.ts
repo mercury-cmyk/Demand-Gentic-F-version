@@ -667,12 +667,23 @@ async function ensureMailboxTokens(userId: string) {
  * Deduplicates, filters for accountId presence, validates callable phones,
  * and returns contacts ready to enqueue — excluding any already in the queue.
  */
+interface QueueResolveStats {
+  rawTotal: number;
+  unique: number;
+  droppedNoAccount: number;
+  droppedNoPhone: number;
+  alreadyQueued: number;
+  readyToEnqueue: number;
+  listBreakdown: Array<{ listId: string; listName: string; entityType: string; recordCount: number; contactsResolved: number }>;
+}
+
 async function resolveAudienceContactsForQueue(
   campaignId: string,
   audienceRefs: any,
   logPrefix: string = '[Queue Populate]'
-): Promise<Array<{ contactId: string; accountId: string; priority: number }>> {
+): Promise<{ contacts: Array<{ contactId: string; accountId: string; priority: number }>; stats: QueueResolveStats }> {
   let audienceContacts: any[] = [];
+  const listBreakdown: QueueResolveStats['listBreakdown'] = [];
 
   // 1. Resolve contacts from filterGroup (Advanced Filters)
   if (audienceRefs.filterGroup) {
@@ -692,6 +703,7 @@ async function resolveAudienceContactsForQueue(
       const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
       if (list && list.recordIds && list.recordIds.length > 0) {
         const batchSize = 1000;
+        const beforeCount = audienceContacts.length;
 
         if (list.entityType === 'account') {
           // Account-type list: recordIds are account IDs — resolve to contacts belonging to those accounts
@@ -703,7 +715,9 @@ async function resolveAudienceContactsForQueue(
               .where(inArray(contactsTable.accountId, batch));
             audienceContacts.push(...accountContacts);
           }
-          console.log(`${logPrefix} Resolved ${audienceContacts.length} contacts from account-type list ${listId}`);
+          const resolved = audienceContacts.length - beforeCount;
+          console.log(`${logPrefix} Resolved ${resolved} contacts from account-type list ${listId}`);
+          listBreakdown.push({ listId, listName: list.name || listId, entityType: 'account', recordCount: list.recordIds.length, contactsResolved: resolved });
         } else {
           // Contact-type list: recordIds are contact IDs
           for (let i = 0; i < list.recordIds.length; i += batchSize) {
@@ -711,8 +725,12 @@ async function resolveAudienceContactsForQueue(
             const listContacts = await storage.getContactsByIds(batch);
             audienceContacts.push(...listContacts);
           }
-          console.log(`${logPrefix} Resolved ${list.recordIds.length} contacts from contact-type list ${listId}`);
+          const resolved = audienceContacts.length - beforeCount;
+          console.log(`${logPrefix} Resolved ${resolved} contacts from contact-type list ${listId}`);
+          listBreakdown.push({ listId, listName: list.name || listId, entityType: 'contact', recordCount: list.recordIds.length, contactsResolved: resolved });
         }
+      } else {
+        listBreakdown.push({ listId, listName: list?.name || listId, entityType: list?.entityType || 'unknown', recordCount: list?.recordIds?.length || 0, contactsResolved: 0 });
       }
     }
   }
@@ -739,7 +757,10 @@ async function resolveAudienceContactsForQueue(
   console.log(`${logPrefix} Audience breakdown: ${audienceContacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${skippedNoAccount} dropped: no accountId)`);
 
   if (contactsWithAccount.length === 0) {
-    return [];
+    return {
+      contacts: [],
+      stats: { rawTotal: audienceContacts.length, unique: uniqueContacts.length, droppedNoAccount: skippedNoAccount, droppedNoPhone: 0, alreadyQueued: 0, readyToEnqueue: 0, listBreakdown },
+    };
   }
 
   // 5. Phone validation: batch-fetch with account data
@@ -788,11 +809,22 @@ async function resolveAudienceContactsForQueue(
 
   console.log(`${logPrefix} SUMMARY: ${uniqueContacts.length} audience -> ${skippedNoAccount} no account -> ${skippedNoPhone} no phone -> ${alreadyQueued} already queued -> ${newContacts.length} ready to enqueue`);
 
-  return newContacts.map(row => ({
-    contactId: row.contacts.id,
-    accountId: row.contacts.accountId!,
-    priority: 0,
-  }));
+  return {
+    contacts: newContacts.map(row => ({
+      contactId: row.contacts.id,
+      accountId: row.contacts.accountId!,
+      priority: 0,
+    })),
+    stats: {
+      rawTotal: audienceContacts.length,
+      unique: uniqueContacts.length,
+      droppedNoAccount: skippedNoAccount,
+      droppedNoPhone: skippedNoPhone,
+      alreadyQueued,
+      readyToEnqueue: newContacts.length,
+      listBreakdown,
+    },
+  };
 }
 
 export function registerRoutes(app: Express) {
@@ -5310,7 +5342,7 @@ export function registerRoutes(app: Express) {
       // Auto-populate queue from audience if defined (all campaign types with audience)
       if (campaign.audienceRefs) {
         try {
-          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+          const { contacts: contactsToEnqueue, stats: queueStats } = await resolveAudienceContactsForQueue(
             campaign.id,
             campaign.audienceRefs as any,
             '[Campaign Creation]'
@@ -5320,7 +5352,7 @@ export function registerRoutes(app: Express) {
             const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
             console.log(`[Campaign Creation] Auto-populated ${enqueued} contacts to queue for campaign ${campaign.id}`);
           } else {
-            console.log(`[Campaign Creation] No eligible contacts found for campaign ${campaign.id}`);
+            console.log(`[Campaign Creation] No eligible contacts found for campaign ${campaign.id} (stats: ${JSON.stringify(queueStats)})`);
           }
         } catch (queueErr) {
           console.error(`[Campaign Creation] Queue auto-populate error (non-fatal):`, queueErr);
@@ -5479,7 +5511,7 @@ export function registerRoutes(app: Express) {
           if (audienceChanged || (statusChangedToActive && queuedCount === 0)) {
             console.log(`[Campaign Update] Auto-populating queue (audienceChanged=${audienceChanged}, statusActive=${statusChangedToActive}, currentQueued=${queuedCount})`);
 
-            const contactsToEnqueue = await resolveAudienceContactsForQueue(
+            const { contacts: contactsToEnqueue } = await resolveAudienceContactsForQueue(
               req.params.id,
               campaign.audienceRefs as any,
               '[Campaign Update]'
@@ -5825,7 +5857,7 @@ export function registerRoutes(app: Express) {
       let agentQueueAdded = 0;
       if (updatedCampaign && updatedCampaign.status !== 'completed' && updatedCampaign.status !== 'cancelled') {
         try {
-          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+          const { contacts: contactsToEnqueue } = await resolveAudienceContactsForQueue(
             req.params.id,
             updatedAudienceRefs,
             '[Add Audience Lists]'
@@ -6018,7 +6050,7 @@ export function registerRoutes(app: Express) {
       // === AUTO-POPULATE QUEUE ON LAUNCH (all campaign types with audience) ===
       if (updated.audienceRefs) {
         try {
-          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+          const { contacts: contactsToEnqueue, stats: queueStats } = await resolveAudienceContactsForQueue(
             req.params.id,
             updated.audienceRefs as any,
             '[LAUNCH CAMPAIGN]'
@@ -6028,7 +6060,7 @@ export function registerRoutes(app: Express) {
             const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
             console.log(`[LAUNCH CAMPAIGN] Auto-populated ${enqueued} contacts to queue`);
           } else {
-            console.log(`[LAUNCH CAMPAIGN] No new contacts to enqueue (all already queued or no eligible contacts)`);
+            console.log(`[LAUNCH CAMPAIGN] No new contacts to enqueue — stats: ${JSON.stringify(queueStats)}`);
           }
         } catch (queueErr) {
           // Non-fatal: campaign is launched, queue population is best-effort
@@ -6557,7 +6589,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Use shared helper: resolves audience, deduplicates, phone-validates, skips already-queued
-      const contactsToEnqueue = await resolveAudienceContactsForQueue(
+      const { contacts: contactsToEnqueue, stats } = await resolveAudienceContactsForQueue(
         req.params.id,
         audienceRefs,
         '[Queue Populate]'
@@ -6583,9 +6615,12 @@ export function registerRoutes(app: Express) {
       }
 
       res.json({
-        message: `Successfully enqueued ${enqueuedCount} contacts`,
+        message: enqueuedCount > 0
+          ? `Successfully enqueued ${enqueuedCount} contacts`
+          : `No contacts could be enqueued. ${stats.unique} contacts found in lists → ${stats.droppedNoAccount} dropped (no account linked), ${stats.droppedNoPhone} dropped (no phone number), ${stats.alreadyQueued} already in queue.`,
         enqueuedCount,
         queueItemsAssigned: assignResult.assigned,
+        stats,
       });
     } catch (error) {
       console.error('Queue population error:', error);

@@ -255,10 +255,33 @@ export function PhoneCampaignPanel({
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['/api/campaigns/queue-stats'] });
       queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaign.id}/queue`] });
-      toast({
-        title: 'Queue Synced',
-        description: data.message || `Enqueued ${data.enqueuedCount || 0} contacts.`,
-      });
+      const stats = data.stats;
+      if (data.enqueuedCount > 0) {
+        toast({
+          title: 'Queue Synced',
+          description: `Enqueued ${data.enqueuedCount} contacts.`,
+        });
+      } else if (stats) {
+        // Show detailed breakdown so user knows WHY no contacts were enqueued
+        const parts: string[] = [];
+        if (stats.unique === 0) parts.push('No contacts found in assigned lists');
+        if (stats.droppedNoAccount > 0) parts.push(`${stats.droppedNoAccount} have no account linked`);
+        if (stats.droppedNoPhone > 0) parts.push(`${stats.droppedNoPhone} have no phone number`);
+        if (stats.alreadyQueued > 0) parts.push(`${stats.alreadyQueued} already in queue`);
+        toast({
+          title: '0 Contacts Enqueued',
+          description: stats.unique === 0
+            ? `Lists contain ${stats.rawTotal} raw records but 0 resolved to contacts. Check that your lists have valid contact or account IDs.`
+            : `${stats.unique} contacts found. ${parts.join(', ')}.`,
+          variant: 'destructive',
+          duration: 15000,
+        });
+      } else {
+        toast({
+          title: 'Queue Synced',
+          description: data.message || 'No new contacts to add.',
+        });
+      }
     },
     onError: (error: any) => {
       toast({
