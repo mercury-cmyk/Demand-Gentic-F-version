@@ -17,6 +17,7 @@ import {
 import { AudioTranscoder } from "./audio-transcoder";
 
 const LOG_PREFIX = "[OpenAI-Provider]";
+const DEBUG = process.env.DEBUG_VOICE_PROVIDERS === 'true';
 
 // ==================== OPENAI MESSAGE TYPES ====================
 
@@ -110,7 +111,7 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
       "wss://api.openai.com/v1/realtime?model=gpt-realtime";
 
     return new Promise((resolve, reject) => {
-      console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime API...`);
+      if (DEBUG) console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime API...`);
 
       this.ws = new WebSocket(url, {
         headers: {
@@ -130,7 +131,7 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
 
       this.ws.on("open", () => {
         clearTimeout(this.connectionTimeout!);
-        console.log(`${LOG_PREFIX} Connected to OpenAI Realtime API`);
+        if (DEBUG) console.log(`${LOG_PREFIX} Connected to OpenAI Realtime API`);
         this.setConnected(true);
 
         // If we have pending config, send it now
@@ -147,7 +148,7 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
       });
 
       this.ws.on("close", (code, reason) => {
-        console.log(`${LOG_PREFIX} WebSocket closed: ${code} - ${reason}`);
+        if (DEBUG) console.log(`${LOG_PREFIX} WebSocket closed: ${code} - ${reason}`);
         this.setConnected(false);
         this.ws = null;
       });
@@ -235,7 +236,7 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
     };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Session configured with voice: ${voice}`);
+    if (DEBUG) console.log(`${LOG_PREFIX} Session configured with voice: ${voice}`);
   }
 
   sendAudio(audioBuffer: Buffer): void {
@@ -286,7 +287,7 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
     };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Response cancelled`);
+    if (DEBUG) console.log(`${LOG_PREFIX} Response cancelled`);
 
     if (this.currentResponseId) {
       this.emit('response:cancelled', { responseId: this.currentResponseId });
@@ -371,7 +372,7 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
     };
 
     this.ws.send(JSON.stringify(responseMessage));
-    console.log(`${LOG_PREFIX} Opening message sent: "${text.substring(0, 50)}..."`);
+    if (DEBUG) console.log(`${LOG_PREFIX} Opening message sent: "${text.substring(0, 50)}..."`);
   }
 
   private handleMessage(data: string): void {
@@ -390,7 +391,7 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
       // Session events
       case 'session.created':
       case 'session.updated':
-        console.log(`${LOG_PREFIX} Session ${type.split('.')[1]}`);
+        if (DEBUG) console.log(`${LOG_PREFIX} Session ${type.split('.')[1]}`);
         break;
 
       // Response lifecycle

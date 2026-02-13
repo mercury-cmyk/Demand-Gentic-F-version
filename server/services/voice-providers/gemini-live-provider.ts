@@ -50,6 +50,7 @@ import {
 } from "./gemini-types";
 
 const LOG_PREFIX = "[Gemini-Provider]";
+const DEBUG = process.env.DEBUG_VOICE_PROVIDERS === 'true';
 
 // ==================== GEMINI LIVE PROVIDER ====================
 
@@ -110,14 +111,16 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // Prefer Vertex AI when project ID is available (better model support + required for native audio)
     const useVertexAI = !!projectId;
 
-    console.log(`${LOG_PREFIX} Configuration:`, {
-      model,
-      useVertexAI,
-      hasApiKey: !!apiKey,
-      hasProjectId: !!projectId,
-      projectId: projectId || 'N/A',
-      reason: useVertexAI ? 'Using Vertex AI (project ID available)' : 'Using Google AI Studio (no project ID)'
-    });
+    if (DEBUG) {
+      console.log(`${LOG_PREFIX} Configuration:`, {
+        model,
+        useVertexAI,
+        hasApiKey: !!apiKey,
+        hasProjectId: !!projectId,
+        projectId: projectId || 'N/A',
+        reason: useVertexAI ? 'Using Vertex AI (project ID available)' : 'Using Google AI Studio (no project ID)'
+      });
+    }
 
     if (!useVertexAI && !apiKey) {
       throw new Error("Google Cloud Project ID (for Vertex AI) or API key (for Google AI Studio) required");
@@ -130,7 +133,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
         if (useVertexAI) {
           // Vertex AI endpoint - use OAuth2
-          console.log(`${LOG_PREFIX} Using Vertex AI endpoint for project: ${projectId}`);
+          if (DEBUG) console.log(`${LOG_PREFIX} Using Vertex AI endpoint for project: ${projectId}`);
 
           this.auth = new GoogleAuth({
             scopes: ['https://www.googleapis.com/auth/cloud-platform'],
@@ -153,7 +156,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
           };
         } else {
           // Google AI endpoint - use API key
-          console.log(`${LOG_PREFIX} Using Google AI endpoint`);
+          if (DEBUG) console.log(`${LOG_PREFIX} Using Google AI endpoint`);
 
           wsUrl = getGeminiLiveEndpoint({
             projectId: '',
@@ -165,9 +168,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
           // API key is in the URL query param
         }
 
-        console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
-        console.log(`${LOG_PREFIX} Mode: ${useVertexAI ? 'Vertex AI' : 'Google AI Studio'}, Model: ${model}`);
-        console.log(`${LOG_PREFIX} WebSocket URL: ${wsUrl.replace(/key=[^&]+/, 'key=***')}`);
+        if (DEBUG) {
+          console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
+          console.log(`${LOG_PREFIX} Mode: ${useVertexAI ? 'Vertex AI' : 'Google AI Studio'}, Model: ${model}`);
+          console.log(`${LOG_PREFIX} WebSocket URL: ${wsUrl.replace(/key=[^&]+/, 'key=***')}`);
+        }
 
         this.ws = new WebSocket(wsUrl, { headers });
 
@@ -234,12 +239,12 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       try {
         if (attempt > 0) {
           const backoffMs = Math.pow(2, attempt - 1) * 1000;
-          console.log(`${LOG_PREFIX} Retry attempt ${attempt}/${maxRetries} after ${backoffMs}ms backoff...`);
+          if (DEBUG) console.log(`${LOG_PREFIX} Retry attempt ${attempt}/${maxRetries} after ${backoffMs}ms backoff...`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
 
           // Force re-authentication by clearing cached auth
           if (this.auth) {
-            console.log(`${LOG_PREFIX} Refreshing OAuth token for retry...`);
+            if (DEBUG) console.log(`${LOG_PREFIX} Refreshing OAuth token for retry...`);
             this.auth = null;
           }
 
@@ -324,7 +329,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         if (!settled) {
           settled = true;
           clearTimeout(timeout);
-          console.log(`${LOG_PREFIX} Setup complete, configure() resolving`);
+          if (DEBUG) console.log(`${LOG_PREFIX} Setup complete, configure() resolving`);
           resolve();
         }
       };
@@ -367,7 +372,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
       // Send setup message
       this.sendSetupMessage(config);
-      console.log(`${LOG_PREFIX} Setup message sent, waiting for setupComplete... (timeout: ${SETUP_TIMEOUT_MS / 1000}s)`);
+      if (DEBUG) console.log(`${LOG_PREFIX} Setup message sent, waiting for setupComplete... (timeout: ${SETUP_TIMEOUT_MS / 1000}s)`);
     });
   }
 
@@ -482,13 +487,15 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     const setupMessage = { setup };
 
     // Log the exact message for debugging (redact system prompt)
-    const debugSetup = { ...setup };
-    if (this.useVertexAI) {
-      debugSetup.systemInstruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
-    } else {
-      debugSetup.system_instruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+    if (DEBUG) {
+      const debugSetup = { ...setup };
+      if (this.useVertexAI) {
+        debugSetup.systemInstruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+      } else {
+        debugSetup.system_instruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+      }
+      console.log(`${LOG_PREFIX} Setup message (${this.useVertexAI ? 'Vertex AI/camelCase' : 'Google AI/snake_case'}):`, JSON.stringify(debugSetup, null, 2));
     }
-    console.log(`${LOG_PREFIX} Setup message (${this.useVertexAI ? 'Vertex AI/camelCase' : 'Google AI/snake_case'}):`, JSON.stringify(debugSetup, null, 2));
 
     this.ws.send(JSON.stringify(setupMessage));
     console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}, format: ${this.useVertexAI ? 'camelCase' : 'snake_case'}`);
@@ -549,7 +556,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    * This reduces latency, CPU overhead, and network usage during live calls.
    */
   private async initializeSpeechToText(): Promise<void> {
-    console.log(`${LOG_PREFIX} Speech-to-Text DISABLED — post-call transcription enabled`);
+    if (DEBUG) console.log(`${LOG_PREFIX} Speech-to-Text DISABLED — post-call transcription enabled`);
     this.sttEnabled = false;
     return;
   }
@@ -635,7 +642,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
               isFinal: true,
               timestamp: new Date(),
             });
-            console.log(`${LOG_PREFIX} User said: ${transcript.substring(0, 100)}${transcript.length > 100 ? '...' : ''}`);
+            if (DEBUG) console.log(`${LOG_PREFIX} User said: ${transcript.substring(0, 100)}${transcript.length > 100 ? '...' : ''}`);
             this.currentUserTranscript = '';
           } else if (transcript.trim()) {
             // Update interim transcript
@@ -652,7 +659,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       // DEADLINE_EXCEEDED is expected after ~5 minutes, restart if still active
       if (errorCode === 4 || errorMsg.includes('DEADLINE_EXCEEDED')) {
         if (this.sttActive) {
-          console.log(`${LOG_PREFIX} STT stream deadline exceeded, restarting...`);
+          if (DEBUG) console.log(`${LOG_PREFIX} STT stream deadline exceeded, restarting...`);
           setTimeout(() => this.startRecognizeStream().catch(() => {}), 100);
         }
       } else if (errorCode === 8 || errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('Quota exceeded')) {
@@ -710,7 +717,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // Set a timeout to restart the stream before Google's 5-minute limit
     this.sttRestartTimeout = setTimeout(() => {
       if (this.sttEnabled && this.sttActive) {
-        console.log(`${LOG_PREFIX} STT stream approaching limit, restarting...`);
+        if (DEBUG) console.log(`${LOG_PREFIX} STT stream approaching limit, restarting...`);
         this.startRecognizeStream().catch(() => {});
       }
     }, 4 * 60 * 1000); // 4 minutes (before 5-minute limit)
@@ -865,7 +872,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    * to the actual audio stream for their real response.
    */
   sendOpeningMessage(text: string): void {
-    console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
+    if (DEBUG) console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
       // Instead of silently dropping, queue the message for when setup completes
       console.warn(`${LOG_PREFIX} ⏳ Opening message queued - not ready yet (ws=${!!this.ws}, state=${this.ws?.readyState}, setup=${this.setupComplete})`);
@@ -903,7 +910,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Opening message sent (turnComplete=true, minimal trigger): "${text.substring(0, 50)}..."`);
+    if (DEBUG) console.log(`${LOG_PREFIX} Opening message sent (turnComplete=true, minimal trigger): "${text.substring(0, 50)}..."`);
   }
 
   /**
@@ -916,7 +923,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    * @param heardText - What the caller said during the listening window
    */
   sendContextualOpening(defaultGreeting: string, callerType: 'right_party' | 'gatekeeper', heardText: string): void {
-    console.log(`${LOG_PREFIX} 🎙️ sendContextualOpening called: type=${callerType}, heard="${heardText.substring(0, 80)}"`);
+    if (DEBUG) console.log(`${LOG_PREFIX} 🎙️ sendContextualOpening called: type=${callerType}, heard="${heardText.substring(0, 80)}"`);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
       console.warn(`${LOG_PREFIX} ❌ Cannot send contextual opening - not ready`);
       return;
@@ -949,26 +956,27 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
         };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Contextual opening sent (type=${callerType}): "${triggerText.substring(0, 80)}..."`);
+    if (DEBUG) console.log(`${LOG_PREFIX} Contextual opening sent (type=${callerType}): "${triggerText.substring(0, 80)}..."`);
   }
 
   private handleMessage(data: string): void {
     try {
       const message = JSON.parse(data);
 
-      // Log incoming message type
-      if (message.setup_complete || message.setupComplete) {
-        console.log(`${LOG_PREFIX} 📬 Message received: SETUP_COMPLETE`);
-      } else if (message.server_content || message.serverContent) {
-        console.log(`${LOG_PREFIX} 📬 Message received: SERVER_CONTENT`);
-      } else if (message.tool_call || message.toolCall) {
-        console.log(`${LOG_PREFIX} 📬 Message received: TOOL_CALL`);
-      } else {
-        // Log full unknown message for debugging (especially during setup phase)
-        const msgStr = JSON.stringify(message);
-        console.log(`${LOG_PREFIX} 📬 Message received (${this.setupComplete ? 'post-setup' : 'PRE-SETUP'}): ${msgStr.substring(0, 300)}`);
-        if (!this.setupComplete && msgStr.length > 300) {
-          console.log(`${LOG_PREFIX} 📬 Full pre-setup message: ${msgStr}`);
+      // Log incoming message type (gated - fires on every WS message)
+      if (DEBUG) {
+        if (message.setup_complete || message.setupComplete) {
+          console.log(`${LOG_PREFIX} 📬 Message received: SETUP_COMPLETE`);
+        } else if (message.server_content || message.serverContent) {
+          console.log(`${LOG_PREFIX} 📬 Message received: SERVER_CONTENT`);
+        } else if (message.tool_call || message.toolCall) {
+          console.log(`${LOG_PREFIX} 📬 Message received: TOOL_CALL`);
+        } else {
+          const msgStr = JSON.stringify(message);
+          console.log(`${LOG_PREFIX} 📬 Message received (${this.setupComplete ? 'post-setup' : 'PRE-SETUP'}): ${msgStr.substring(0, 300)}`);
+          if (!this.setupComplete && msgStr.length > 300) {
+            console.log(`${LOG_PREFIX} 📬 Full pre-setup message: ${msgStr}`);
+          }
         }
       }
 
@@ -994,7 +1002,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
   private dispatchMessage(message: GeminiServerMessage): void {
     // Setup complete
     if (isSetupComplete(message)) {
-      console.log(`${LOG_PREFIX} Setup complete - ready to receive audio`);
+      if (DEBUG) console.log(`${LOG_PREFIX} Setup complete - ready to receive audio`);
       this.setupComplete = true;
       this.setConnected(true);
       // Initialize Speech-to-Text for user transcription (async, don't block)
@@ -1005,7 +1013,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
       if (this.pendingOpeningMessage) {
         const queuedText = this.pendingOpeningMessage;
         this.pendingOpeningMessage = null;
-        console.log(`${LOG_PREFIX} 📤 Flushing queued opening message after setup_complete`);
+        if (DEBUG) console.log(`${LOG_PREFIX} 📤 Flushing queued opening message after setup_complete`);
         this.sendOpeningMessage(queuedText);
       }
       return;
@@ -1048,17 +1056,17 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
         if (audioData) {
           this.handleAudioOutput(audioData);
         } else {
-             console.warn(`${LOG_PREFIX} ⚠️ Detected AudioPart but failed to extract data!`);
+             if (DEBUG) console.warn(`${LOG_PREFIX} ⚠️ Detected AudioPart but failed to extract data!`);
         }
       } else {
-        console.log(`${LOG_PREFIX} ⚠️ No audio part in model turn. Parts: ${parts.map((p: any) => Object.keys(p)[0]).join(', ')}`);
+        if (DEBUG) console.log(`${LOG_PREFIX} ⚠️ No audio part in model turn. Parts: ${parts.map((p: any) => Object.keys(p)[0]).join(', ')}`);
       }
 
       // Handle text output (for transcription)
       if (hasTextPart(parts)) {
         const text = extractText(parts);
         if (text) {
-          console.log(`${LOG_PREFIX} 📝 Text output: ${text.substring(0, 100)}`);
+          if (DEBUG) console.log(`${LOG_PREFIX} 📝 Text output: ${text.substring(0, 100)}`);
           this.currentTranscript += text;
           this.emit('transcript:agent', {
             text,
@@ -1071,7 +1079,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
       // Handle function calls in content
       const functionCalls = extractFunctionCalls(parts);
       if (functionCalls.length > 0) {
-        console.log(`${LOG_PREFIX} 🔧 Function calls: ${functionCalls.map(f => f.name).join(', ')}`);
+        if (DEBUG) console.log(`${LOG_PREFIX} 🔧 Function calls: ${functionCalls.map(f => f.name).join(', ')}`);
       }
       for (const fc of functionCalls) {
         const callId = fc.id || `fc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -1084,9 +1092,11 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
       }
     } else {
       // Log what this server_content actually contains (for debugging)
-      const contentKeys = Object.keys(content).filter(k => k !== 'model_turn' && k !== 'modelTurn');
-      if (contentKeys.length > 0) {
-        console.log(`${LOG_PREFIX} 📋 Server content (no model_turn), keys: ${contentKeys.join(', ')}`);
+      if (DEBUG) {
+        const contentKeys = Object.keys(content).filter(k => k !== 'model_turn' && k !== 'modelTurn');
+        if (contentKeys.length > 0) {
+          console.log(`${LOG_PREFIX} 📋 Server content (no model_turn), keys: ${contentKeys.join(', ')}`);
+        }
       }
     }
 
@@ -1096,7 +1106,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
       const inputTranscription = content.input_transcription || content.inputTranscription;
       const text = inputTranscription.text || inputTranscription.transcript || '';
       if (text.trim()) {
-        console.log(`${LOG_PREFIX} 👂 INPUT TRANSCRIPTION (caller): "${text}"`);
+        if (DEBUG) console.log(`${LOG_PREFIX} 👂 INPUT TRANSCRIPTION (caller): "${text}"`);
         // Emit as user transcript so voice-dialer can detect human speech
         this.emit('transcript:user', {
           text: text.trim(),
@@ -1173,7 +1183,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
             this.recentPhrases.shift(); // Remove oldest
           }
 
-          console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${text}"`);
+          if (DEBUG) console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${text}"`);
           this.emit('transcript:agent', {
             text: text.trim(),
             isFinal: true,
@@ -1185,9 +1195,9 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
 
     // Turn complete
     if (content.turn_complete || content.turnComplete) {
-      console.log(`${LOG_PREFIX} ✋ Turn complete signal received`);
+      if (DEBUG) console.log(`${LOG_PREFIX} ✋ Turn complete signal received`);
       if (this.currentTranscript) {
-        console.log(`${LOG_PREFIX} 📝 Final transcript: ${this.currentTranscript}`);
+        if (DEBUG) console.log(`${LOG_PREFIX} 📝 Final transcript: ${this.currentTranscript}`);
         this.emit('transcript:agent', {
           text: this.currentTranscript,
           isFinal: true,
@@ -1207,7 +1217,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
 
     // Interrupted
     if (content.interrupted) {
-      console.log(`${LOG_PREFIX} 🛑 Response interrupted`);
+      if (DEBUG) console.log(`${LOG_PREFIX} 🛑 Response interrupted`);
       this.currentTranscript = '';
 
       // CRITICAL FIX: Reset repetition tracking on interruption.
@@ -1258,7 +1268,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     if (!this._isResponding) {
       this.currentResponseId = `resp-${Date.now()}`;
       this.setResponding(true, this.currentResponseId);
-      console.log(`${LOG_PREFIX} 🎬 Starting new response: ${this.currentResponseId}`);
+      if (DEBUG) console.log(`${LOG_PREFIX} 🎬 Starting new response: ${this.currentResponseId}`);
     }
 
     // Decode PCM audio from Gemini (24kHz)
@@ -1273,10 +1283,12 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     this.audioChunkCount++;
 
     // Log only first chunk and then periodically (every 100 chunks / ~2s)
-    if (this.audioChunkCount === 1) {
-      console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO chunk: ${pcmBuffer.length}B PCM→${g711Buffer.length}B G.711 (${durationMs.toFixed(0)}ms)`);
-    } else if (this.audioChunkCount % 100 === 0) {
-      console.log(`${LOG_PREFIX} 📊 Audio stats: ${this.audioChunkCount} chunks, ${this.audioPlaybackMs.toFixed(0)}ms total playback`);
+    if (DEBUG) {
+      if (this.audioChunkCount === 1) {
+        console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO chunk: ${pcmBuffer.length}B PCM→${g711Buffer.length}B G.711 (${durationMs.toFixed(0)}ms)`);
+      } else if (this.audioChunkCount % 100 === 0) {
+        console.log(`${LOG_PREFIX} 📊 Audio stats: ${this.audioChunkCount} chunks, ${this.audioPlaybackMs.toFixed(0)}ms total playback`);
+      }
     }
 
     this.emit('audio:delta', {
@@ -1330,7 +1342,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     if (this.recentPhrases.length > 3) {
       this.recentPhrases = this.recentPhrases.slice(-3);
     }
-    console.log(`${LOG_PREFIX} 🔄 Repetition tracking soft-reset (kept ${this.recentPhrases.length} phrases)`);
+    if (DEBUG) console.log(`${LOG_PREFIX} 🔄 Repetition tracking soft-reset (kept ${this.recentPhrases.length} phrases)`);
   }
 
   /**
