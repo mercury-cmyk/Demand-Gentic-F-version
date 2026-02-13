@@ -115,7 +115,7 @@ function formatValue(val: unknown): string {
 }
 
 async function getCampaignContext(campaignId: string, clientAccountId: string): Promise<{ context: string; campaign: any } | null> {
-  // 1. Try regular campaigns first
+  // 1. Try regular campaigns via clientCampaignAccess (both regularCampaignId and campaignId columns)
   const [regularRecord] = await db
     .select({ campaign: campaigns })
     .from(campaigns)
@@ -123,7 +123,10 @@ async function getCampaignContext(campaignId: string, clientAccountId: string): 
       clientCampaignAccess,
       and(
         eq(clientCampaignAccess.clientAccountId, clientAccountId),
-        eq(clientCampaignAccess.regularCampaignId, campaigns.id)
+        or(
+          eq(clientCampaignAccess.regularCampaignId, campaigns.id),
+          eq(clientCampaignAccess.campaignId, campaigns.id)
+        )
       )
     )
     .where(eq(campaigns.id, campaignId))
@@ -131,18 +134,23 @@ async function getCampaignContext(campaignId: string, clientAccountId: string): 
 
   if (regularRecord) {
     const campaign = regularRecord.campaign;
-    const context = `CAMPAIGN CONTEXT:
-- Campaign Name: ${campaign.name}
-- Campaign Objective: ${campaign.campaignObjective || 'Not specified'}
-- Product/Service: ${campaign.productServiceInfo || 'Not specified'}
-- Target Audience: ${campaign.targetAudienceDescription || 'Not specified'}
-- Key Talking Points: ${formatValue(campaign.talkingPoints)}
-- Success Criteria: ${campaign.successCriteria || 'Not specified'}
-- Value Proposition: ${campaign.valueProposition || 'Not specified'}`;
+    const context = formatRegularCampaignContext(campaign);
     return { context, campaign };
   }
 
-  // 2. Try verification campaigns
+  // 2. Try direct campaign ownership (campaigns.clientAccountId)
+  const [directRecord] = await db
+    .select()
+    .from(campaigns)
+    .where(and(eq(campaigns.id, campaignId), eq(campaigns.clientAccountId, clientAccountId)))
+    .limit(1);
+
+  if (directRecord) {
+    const context = formatRegularCampaignContext(directRecord);
+    return { context, campaign: directRecord };
+  }
+
+  // 3. Try verification campaigns
   const [verificationRecord] = await db
     .select({ campaign: verificationCampaigns })
     .from(verificationCampaigns)
@@ -166,6 +174,17 @@ async function getCampaignContext(campaignId: string, clientAccountId: string): 
   }
 
   return null;
+}
+
+function formatRegularCampaignContext(campaign: any): string {
+  return `CAMPAIGN CONTEXT:
+- Campaign Name: ${campaign.name}
+- Campaign Objective: ${campaign.campaignObjective || 'Not specified'}
+- Product/Service: ${campaign.productServiceInfo || 'Not specified'}
+- Target Audience: ${campaign.targetAudienceDescription || 'Not specified'}
+- Key Talking Points: ${formatValue(campaign.talkingPoints)}
+- Success Criteria: ${campaign.successCriteria || 'Not specified'}
+- Value Proposition: ${campaign.valueProposition || 'Not specified'}`;
 }
 
 /**
