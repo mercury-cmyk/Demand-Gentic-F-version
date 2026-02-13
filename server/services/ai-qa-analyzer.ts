@@ -194,12 +194,19 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
         } : null
       };
 
-      // Generate dynamic evaluation prompt
+      // Generate dynamic evaluation prompt (includes campaign objective & success criteria)
       analysisPrompt = generateDynamicEvaluationPrompt(
         parsedRules,
         customQaFields,
         lead.transcript,
-        contactData
+        contactData,
+        {
+          campaignName: campaign?.name,
+          campaignObjective: campaign?.campaignObjective,
+          successCriteria: campaign?.successCriteria,
+          targetAudienceDescription: campaign?.targetAudienceDescription,
+          campaignContextBrief: campaign?.campaignContextBrief,
+        }
       );
     } else {
       // Use standard evaluation (pass existingQaData for CH info)
@@ -458,9 +465,18 @@ ${hasCompaniesHouseData ? `
 **IMPORTANT: This company has been officially verified through the UK Companies House registry. Do NOT mark "Company Registration Number", "Company Status", or "Legal Name" as missing - they are already validated and available above.**
 ` : ''}
 
-## CAMPAIGN OFFER:
-${campaign?.name || 'Content offer'}
-Call Script Context: ${campaign?.callScript?.substring(0, 500) || 'Marketing campaign'}
+## CAMPAIGN OBJECTIVE & SUCCESS CRITERIA:
+- Campaign: ${campaign?.name || 'Content offer'}
+- Objective: ${campaign?.campaignObjective || 'Not specified'}
+- Success Criteria: ${campaign?.successCriteria || 'Not specified'}
+- Target Audience: ${campaign?.targetAudienceDescription || 'Not specified'}
+- Context Brief: ${campaign?.campaignContextBrief || 'Not specified'}
+- Call Script Context: ${campaign?.callScript?.substring(0, 500) || 'Marketing campaign'}
+
+**IMPORTANT**: Score this lead against the campaign objective and success criteria above.
+- The lead MUST align with the stated objective to be considered qualified.
+- The success criteria define what a successful outcome looks like — verify whether the call achieved it.
+- If the target audience is specified, verify that the prospect matches the described profile.
 
 ## QUALIFICATION CRITERIA:
 ${JSON.stringify(qaParams, null, 2)}
@@ -529,7 +545,10 @@ Return JSON in this exact format:
   }
 }
 
-Calculate final score as weighted average. If score >= ${qaParams.min_score}, status is "qualified". If score < 40, status is "not_qualified". Otherwise "needs_review".`;
+## SCORING GUIDANCE:
+- Calculate final score as weighted average.
+- If score >= ${qaParams.min_score}, status is "qualified". If score < 40, status is "not_qualified". Otherwise "needs_review".
+- CRITICAL: A lead can only be "qualified" if it aligns with the Campaign Objective and meets the Success Criteria listed above. Even if individual scores are high, reject or flag for review if the call outcome does not match the campaign's stated success criteria.`;
 }
 
 /**

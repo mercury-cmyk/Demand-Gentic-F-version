@@ -37,6 +37,7 @@ import {
 } from '../services/virtual-agent-settings';
 import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from '../services/number-pool-integration';
 import { ensureVoiceAgentControlLayer } from '../services/voice-agent-control-defaults';
+import { resolveAgentAssignment } from '../services/unified-call-context';
 
 const router = Router();
 
@@ -1369,17 +1370,18 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    // Resolve virtual agent
-    const virtualAgentId = await resolveClientVirtualAgentId(campaignId);
-    if (!virtualAgentId) {
+    // Resolve agent assignment using unified resolver
+    // This supports BOTH inline aiAgentSettings (wizard-configured) AND legacy virtual agent assignments
+    const agentAssignment = await resolveAgentAssignment(campaignId);
+    if (!agentAssignment) {
       return res.status(400).json({
-        error: 'No AI agent assigned to this campaign',
-        suggestion: 'Please ask your admin to assign a virtual agent to the campaign before testing',
+        error: 'No AI agent configured for this campaign',
+        suggestion: 'Please configure AI voice settings in the campaign wizard, or ask your admin to assign a virtual agent before testing',
       });
     }
 
-    const agentConfig = await getVirtualAgentConfig(virtualAgentId);
-    const mergedSettings = mergeAgentSettings(agentConfig?.settings ?? undefined);
+    const virtualAgentId = agentAssignment.virtualAgentId;
+    const mergedSettings = mergeAgentSettings(agentAssignment.settings ?? undefined);
 
     // Get account & contact
     const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
@@ -1390,22 +1392,25 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       contact = contactResult || null;
     }
 
-    // Build system prompt
-    const systemPromptSections = [agentConfig?.systemPrompt || ''];
+    // Build system prompt - start with the resolved agent's prompt
+    const systemPromptSections = [agentAssignment.systemPrompt || ''];
 
-    // Add campaign context
-    const campaignContext = [
-      campaign.name ? `Campaign: ${campaign.name}` : '',
-      campaign.campaignObjective ? `Objective: ${campaign.campaignObjective}` : '',
-      campaign.productServiceInfo ? `Product/Service: ${campaign.productServiceInfo}` : '',
-      campaign.talkingPoints ? `Talking Points: ${campaign.talkingPoints}` : '',
-      campaign.targetAudienceDescription ? `Target Audience: ${campaign.targetAudienceDescription}` : '',
-    ].filter(Boolean).join('\n');
-    if (campaignContext) systemPromptSections.push(campaignContext);
+    // Add campaign context (only if not already embedded by inline agent resolver)
+    const isInlineAgent = virtualAgentId?.startsWith('campaign-') && virtualAgentId?.includes('-inline');
+    if (!isInlineAgent) {
+      const campaignContext = [
+        campaign.name ? `Campaign: ${campaign.name}` : '',
+        campaign.campaignObjective ? `Objective: ${campaign.campaignObjective}` : '',
+        campaign.productServiceInfo ? `Product/Service: ${campaign.productServiceInfo}` : '',
+        campaign.talkingPoints ? `Talking Points: ${campaign.talkingPoints}` : '',
+        campaign.targetAudienceDescription ? `Target Audience: ${campaign.targetAudienceDescription}` : '',
+      ].filter(Boolean).join('\n');
+      if (campaignContext) systemPromptSections.push(campaignContext);
+    }
 
     // Add account intelligence
     try {
-      const { getOrBuildAccountIntelligence, getOrBuildAccountMessagingBrief } = await import('../services/account-messaging-service');
+      const { getOrBuildAccountIntelligence } = await import('../services/account-messaging-service');
       const intelligenceRecord = await getOrBuildAccountIntelligence(accountId);
       if (intelligenceRecord?.payloadJson) {
         const intel = intelligenceRecord.payloadJson as any;
@@ -1435,7 +1440,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       systemPromptSections.filter(Boolean).join('\n\n'),
       useCondensed
     );
-    const firstMessage = agentConfig?.firstMessage || CLIENT_PHONE_TEST_FIRST_MESSAGE;
+    const firstMessage = agentAssignment.firstMessage || CLIENT_PHONE_TEST_FIRST_MESSAGE;
 
     // Normalize phone number
     let normalizedPhone = testPhoneNumber.replace(/[^\d+]/g, '');
@@ -1480,10 +1485,10 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
     // Prepare voice selection
     let voice = 'Puck';
     if (voiceProvider === 'google') {
-      voice = (voiceOverride || agentConfig?.voice || 'Puck').toString().trim();
+      voice = (voiceOverride || agentAssignment.voice || 'Puck').toString().trim();
     } else {
       const supportedVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar']);
-      const rawVoice = (voiceOverride || agentConfig?.voice || '').toString().trim().toLowerCase();
+      const rawVoice = (voiceOverride || agentAssignment.voice || '').toString().trim().toLowerCase();
       voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
     }
 
@@ -1522,14 +1527,14 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       from_number: fromNumber,
       caller_number_id: callerNumberId,
       caller_number_decision_id: callerNumberDecisionId,
-      virtual_agent_id: virtualAgentId,
+      virtual_agent_id: virtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
       test_call_id: testCallId,
       preview_session_id: session.id,
       first_message: firstMessage,
       voice,
-      agent_name: agentConfig?.systemPrompt ? 'Preview Agent' : 'Default Agent',
+      agent_name: agentAssignment.agentName || 'Preview Agent',
       test_contact: {
         name: (contact as any)?.fullName || account?.name || 'Preview Contact',
         company: account?.name || 'Preview Company',
@@ -1552,7 +1557,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       from_number: fromNumber,
       caller_number_id: callerNumberId,
       caller_number_decision_id: callerNumberDecisionId,
-      virtual_agent_id: virtualAgentId,
+      virtual_agent_id: virtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
       test_call_id: testCallId,

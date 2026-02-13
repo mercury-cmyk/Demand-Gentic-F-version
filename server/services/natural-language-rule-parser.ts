@@ -114,7 +114,14 @@ export function generateDynamicEvaluationPrompt(
     options?: string[];
   }>,
   transcript: string,
-  contactData?: any
+  contactData?: any,
+  campaignContext?: {
+    campaignName?: string;
+    campaignObjective?: string | null;
+    successCriteria?: string | null;
+    targetAudienceDescription?: string | null;
+    campaignContextBrief?: string | null;
+  }
 ): string {
   const criteriaInstructions = parsedRules.criteria
     .map((rule, idx) => {
@@ -148,9 +155,24 @@ export function generateDynamicEvaluationPrompt(
     })
     .join("\n");
 
+  // Build campaign objective section if available
+  const campaignObjectiveSection = campaignContext ? `
+## CAMPAIGN OBJECTIVE & SUCCESS CRITERIA:
+- Campaign: ${campaignContext.campaignName || 'Not specified'}
+- Objective: ${campaignContext.campaignObjective || 'Not specified'}
+- Success Criteria: ${campaignContext.successCriteria || 'Not specified'}
+- Target Audience: ${campaignContext.targetAudienceDescription || 'Not specified'}
+- Context Brief: ${campaignContext.campaignContextBrief || 'Not specified'}
+
+**IMPORTANT**: Score this lead against the campaign objective and success criteria above.
+- The lead MUST align with the stated objective to be considered qualified.
+- The success criteria define what a successful outcome looks like — verify whether the call achieved it.
+- If the target audience is specified, verify that the prospect matches the described profile.
+` : '';
+
   return `
 You are an expert call quality analyst. Evaluate this sales call transcript and extract qualification data.
-
+${campaignObjectiveSection}
 ## CUSTOM QUALIFICATION RULES:
 ${criteriaInstructions}
 
@@ -204,6 +226,8 @@ ${transcript}
 3. Determine if the lead is "qualified", "not_qualified", or "needs_review"
 4. Provide detailed reasoning for your assessment
 
+CRITICAL: A lead can only be "qualified" if it aligns with the Campaign Objective and meets the Success Criteria. Even if individual rule scores are high, reject or flag for review if the call outcome does not match the campaign's stated success criteria.
+
 Return your analysis in the following JSON format:
 {
   "qa_data": {
@@ -211,7 +235,7 @@ Return your analysis in the following JSON format:
   },
   "ai_score": number (0-100),
   "ai_qualification_status": "qualified" | "not_qualified" | "needs_review",
-  "reasoning": "detailed explanation",
+  "reasoning": "detailed explanation including alignment with campaign objective",
   "rule_violations": ["list of rules that were not met"],
   "rule_achievements": ["list of rules that were met"]
 }
