@@ -204,8 +204,8 @@ export class BulkInvitationService {
             continue;
           }
 
-          // Idempotency key: per-job + per-user — ensures retries don't duplicate
-          const idempotencyKey = `invite_${jobId}_${candidate.clientUserId}`;
+          // Idempotency key: per-user — prevents duplicate invites across jobs
+          const idempotencyKey = `invite_client_${candidate.clientUserId}`;
 
           // Queue email
           const { outboxId, skipped } = await mercuryEmailService.queueEmail({
@@ -379,6 +379,23 @@ export class BulkInvitationService {
     if (!user.email) return { success: false, error: 'Client user has no email address' };
     if (!user.isActive) return { success: false, error: 'Client user is inactive' };
 
+    // Guard: check for existing active (non-expired, non-used) invitation token
+    const [existingToken] = await db
+      .select({ id: mercuryInvitationTokens.id, expiresAt: mercuryInvitationTokens.expiresAt })
+      .from(mercuryInvitationTokens)
+      .where(
+        and(
+          eq(mercuryInvitationTokens.clientUserId, params.clientUserId),
+          isNull(mercuryInvitationTokens.usedAt),
+        )
+      )
+      .orderBy(desc(mercuryInvitationTokens.createdAt))
+      .limit(1);
+
+    if (existingToken && new Date(existingToken.expiresAt) > new Date()) {
+      return { success: false, error: 'This user already has an active pending invitation. Please wait for it to expire or be used before sending a new one.' };
+    }
+
     try {
       // Generate invitation token
       const token = mercuryEmailService.generateInviteToken();
@@ -404,7 +421,8 @@ export class BulkInvitationService {
       }
 
       const jobId = `single_invite_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-      const idempotencyKey = `invite_${jobId}_${user.id}`;
+      // Idempotency key: per-user — prevents duplicate invites across requests
+      const idempotencyKey = `invite_client_${user.id}`;
 
       // Queue email
       const { outboxId, skipped } = await mercuryEmailService.queueEmail({
