@@ -3235,7 +3235,14 @@ export const callQualityRecords = pgTable("call_quality_records", {
   analysisStage: text("analysis_stage"), // realtime | post_call
   interactionType: text("interaction_type"), // live_call | test_call | simulation
   analyzedAt: timestamp("analyzed_at"),
-  
+
+  // Showcase fields — pinned best-agent-performance calls for client demos
+  isShowcase: boolean("is_showcase").default(false),
+  showcaseCategory: text("showcase_category"), // objection_handling | professional_close | engagement_mastery | difficult_situation | perfect_flow | empathetic_response
+  showcaseNotes: text("showcase_notes"),
+  showcasedAt: timestamp("showcased_at"),
+  showcasedBy: varchar("showcased_by").references(() => users.id, { onDelete: 'set null' }),
+
   // Timestamps
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -3246,6 +3253,7 @@ export const callQualityRecords = pgTable("call_quality_records", {
   contactIdx: index("call_quality_records_contact_idx").on(table.contactId),
   scoreIdx: index("call_quality_records_score_idx").on(table.overallQualityScore),
   createdAtIdx: index("call_quality_records_created_at_idx").on(table.createdAt),
+  showcaseIdx: index("call_quality_records_showcase_idx").on(table.isShowcase),
 }));
 
 // Call Dispositions - Links call sessions to dispositions with notes

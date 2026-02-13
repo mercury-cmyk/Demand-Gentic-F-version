@@ -40,6 +40,7 @@ import pipelineRouter from './routes/pipeline-routes';
 import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
 import generativeStudioRouter from './routes/generative-studio-routes';
 import dispositionIntelligenceRouter from './routes/disposition-intelligence-routes';
+import showcaseCallsRouter from './routes/showcase-calls-routes';
 import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes';
 import dispositionDeepReanalysisRouter from './routes/disposition-deep-reanalysis-routes';
 import queueIntelligenceRouter from './routes/queue-intelligence-routes';
@@ -14781,6 +14782,7 @@ Provide JSON response with:
   app.use(pipelineIntelligenceRouter);
   app.use('/api/generative-studio', generativeStudioRouter);
   app.use('/api/disposition-intelligence', dispositionIntelligenceRouter);
+  app.use('/api/showcase-calls', showcaseCallsRouter);
   app.use('/api/disposition-reanalysis', dispositionReanalysisRouter);
   app.use('/api/disposition-deep-reanalysis', dispositionDeepReanalysisRouter);
   app.use(queueIntelligenceRouter);

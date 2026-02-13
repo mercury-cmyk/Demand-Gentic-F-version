@@ -12,14 +12,14 @@ spec:
     metadata:
       annotations:
         autoscaling.knative.dev/minScale: "1"
-        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/maxScale: "15"
         run.googleapis.com/cpu-throttling: "false"
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/us-central1/connectors/pivotal-connector
         run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
-      containerConcurrency: 80
-      timeoutSeconds: 300
+      containerConcurrency: 120
+      timeoutSeconds: 900
       serviceAccountName: demandgentic-sa@PROJECT_ID.iam.gserviceaccount.com
       containers:
         - image: gcr.io/PROJECT_ID/demandgentic-api:latest
@@ -42,8 +42,8 @@ spec:
               value: "https://demandgentic.ai"
           resources:
             limits:
-              cpu: "2"
-              memory: 2Gi
+              cpu: "4"
+              memory: 4Gi
           startupProbe:
             httpGet:
               path: /api/health

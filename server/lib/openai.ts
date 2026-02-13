@@ -13,6 +13,8 @@ function getClient(): OpenAI {
     _instance = new OpenAI({
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
       apiKey,
+      timeout: 120_000, // 2 minute timeout (down from 10 minute default)
+      maxRetries: 2,    // SDK-level retries for transient errors
     });
   }
   return _instance;

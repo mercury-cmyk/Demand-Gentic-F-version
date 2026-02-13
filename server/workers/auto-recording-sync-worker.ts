@@ -131,30 +131,78 @@ async function transcribeWithSpeakers(
 
     const { text: plainTranscript, utterances } = result;
 
-    // Heuristic: First speaker is Agent
-    const uniqueSpeakers = Array.from(new Set(utterances.map(u => u.speaker)));
-    const agentSpeaker = uniqueSpeakers[0] || 'Speaker 1'; 
-    
-    const transcriptTurns = utterances.map(u => ({
-      role: u.speaker === agentSpeaker ? 'agent' : 'contact',
-      text: u.text,
-      timeOffset: u.start, // Store offset instead of fake Date
-      speaker: u.speaker
-    }));
+    const hasChannelTags = utterances.some((u: any) => typeof u.channelTag === 'number');
 
-    // Build structured transcript (legacy format compatibility)
-    const structuredTranscript = {
-      fullTranscript: plainTranscript,
-      conversation: utterances.map(u => ({
-        speaker: u.speaker === agentSpeaker ? 'Agent' : 'Prospect',
+    let transcriptTurns: Array<{
+      role: 'agent' | 'contact';
+      text: string;
+      timeOffset: number;
+      speaker: string;
+    }> = [];
+    let structuredTranscript: any;
+
+    if (hasChannelTags) {
+      // Strict mapping for stereo recordings from call-recording-manager:
+      // Channel 1 (left) = Contact, Channel 2 (right) = Agent.
+      transcriptTurns = utterances
+        .map((u: any) => {
+          if (u.channelTag === 2) {
+            return {
+              role: 'agent' as const,
+              text: u.text,
+              timeOffset: u.start,
+              speaker: 'Channel 2',
+            };
+          }
+          if (u.channelTag === 1) {
+            return {
+              role: 'contact' as const,
+              text: u.text,
+              timeOffset: u.start,
+              speaker: 'Channel 1',
+            };
+          }
+          return null;
+        })
+        .filter((t): t is NonNullable<typeof t> => !!t);
+
+      structuredTranscript = {
+        fullTranscript: plainTranscript,
+        conversation: transcriptTurns.map(t => ({
+          speaker: t.role === 'agent' ? 'Agent' : 'Prospect',
+          text: t.text,
+          timestamp: t.timeOffset,
+        })),
+        speakerMapping: {
+          'Channel 2': 'Agent',
+          'Channel 1': 'Prospect',
+        },
+      };
+    } else {
+      // Fallback for non-stereo/legacy transcripts.
+      const uniqueSpeakers = Array.from(new Set(utterances.map(u => u.speaker)));
+      const agentSpeaker = uniqueSpeakers[0] || 'Speaker 1';
+
+      transcriptTurns = utterances.map(u => ({
+        role: u.speaker === agentSpeaker ? 'agent' : 'contact',
         text: u.text,
-        timestamp: u.start,
-      })),
-      speakerMapping: {
-        [agentSpeaker]: 'Agent',
-        [uniqueSpeakers.find(s => s !== agentSpeaker) || 'Speaker 2']: 'Prospect',
-      },
-    };
+        timeOffset: u.start, // Store offset instead of fake Date
+        speaker: u.speaker
+      }));
+
+      structuredTranscript = {
+        fullTranscript: plainTranscript,
+        conversation: utterances.map(u => ({
+          speaker: u.speaker === agentSpeaker ? 'Agent' : 'Prospect',
+          text: u.text,
+          timestamp: u.start,
+        })),
+        speakerMapping: {
+          [agentSpeaker]: 'Agent',
+          [uniqueSpeakers.find(s => s !== agentSpeaker) || 'Speaker 2']: 'Prospect',
+        },
+      };
+    }
 
     console.log('[AutoRecordingSyncWorker] ✅ Google Cloud Speech-to-Text completed');
     return {

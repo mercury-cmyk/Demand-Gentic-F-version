@@ -13,16 +13,20 @@ import { pool } from '../server/db';
 import { submitTranscription, transcribeFromRecording } from '../server/services/google-transcription';
 
 async function transcribeNewLeads() {
-  const client = await pool.connect();
+  const concurrency = Math.max(1, parseInt(process.env.TRANSCRIBE_CONCURRENCY || '3', 10));
+  const delayMs = Math.max(0, parseInt(process.env.TRANSCRIBE_DELAY_MS || '250', 10));
+  const limitEnv = process.env.TRANSCRIBE_LIMIT;
+  const limit = limitEnv ? parseInt(limitEnv, 10) : undefined;
 
   try {
     console.log('='.repeat(80));
     console.log('TRANSCRIBE: Leads in "New" QA Status Missing Transcripts');
     console.log('='.repeat(80));
     console.log(`Run at: ${new Date().toISOString()}\n`);
+    console.log(`Config: concurrency=${concurrency} delayMs=${delayMs}${limit ? ` limit=${limit}` : ''}\n`);
 
     // 1. Find leads in 'new' status that have no transcript but do have a recording source
-    const { rows: leadsToTranscribe } = await client.query(`
+    const { rows: leadsToTranscribe } = await pool.query(`
       SELECT 
         l.id AS lead_id,
         l.contact_name,
@@ -65,9 +69,14 @@ async function transcribeNewLeads() {
       ORDER BY l.created_at DESC
     `);
 
-    console.log(`Found ${leadsToTranscribe.length} leads needing transcription\n`);
+    const leads =
+      typeof limit === 'number' && !Number.isNaN(limit)
+        ? leadsToTranscribe.slice(0, Math.max(0, limit))
+        : leadsToTranscribe;
 
-    if (leadsToTranscribe.length === 0) {
+    console.log(`Found ${leads.length} leads needing transcription\n`);
+
+    if (leads.length === 0) {
       console.log('All leads in "new" status already have transcripts.');
       return;
     }
@@ -77,14 +86,15 @@ async function transcribeNewLeads() {
     let failed = 0;
     let noRecording = 0;
 
-    for (let i = 0; i < leadsToTranscribe.length; i++) {
-      const lead = leadsToTranscribe[i];
-      console.log(`\n[${i + 1}/${leadsToTranscribe.length}] ${lead.contact_name || 'Unknown'} | ${lead.campaign_name || 'N/A'} | ${lead.call_duration || '?'}s`);
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    async function processLead(lead: any, index: number) {
+      console.log(`\n[${index + 1}/${leads.length}] ${lead.contact_name || 'Unknown'} | ${lead.campaign_name || 'N/A'} | ${lead.call_duration || '?'}s`);
 
       // Step 1: Check if call_session already has a transcript we can copy
       if (lead.session_transcript && lead.session_transcript.trim().length > 20) {
         console.log(`  -> Copying transcript from call_session (${lead.session_transcript.length} chars)`);
-        await client.query(`
+        await pool.query(`
           UPDATE leads 
           SET transcript = $1, 
               transcription_status = 'completed',
@@ -94,13 +104,13 @@ async function transcribeNewLeads() {
         copiedFromSession++;
         transcribed++;
         console.log(`  -> DONE (copied from session)`);
-        continue;
+        return;
       }
 
       // Step 1b: Check alt session (matched by contact+campaign)
       if (lead.alt_session_transcript && lead.alt_session_transcript.trim().length > 20) {
         console.log(`  -> Copying transcript from alt call_session ${lead.alt_session_id} (${lead.alt_session_transcript.length} chars)`);
-        await client.query(`
+        await pool.query(`
           UPDATE leads 
           SET transcript = $1, 
               transcription_status = 'completed',
@@ -110,7 +120,7 @@ async function transcribeNewLeads() {
         copiedFromSession++;
         transcribed++;
         console.log(`  -> DONE (copied from alt session)`);
-        continue;
+        return;
       }
 
       // Step 2: Resolve the best recording URL 
@@ -194,7 +204,7 @@ async function transcribeNewLeads() {
 
       // Priority 5: Try linked dialer_call_attempt recording
       if (!recordingUrl && lead.call_attempt_id) {
-        const { rows: [attempt] } = await client.query(`
+        const { rows: [attempt] } = await pool.query(`
           SELECT recording_url, full_transcript 
           FROM dialer_call_attempts 
           WHERE id = $1
@@ -202,7 +212,7 @@ async function transcribeNewLeads() {
 
         if (attempt?.full_transcript && attempt.full_transcript.trim().length > 20) {
           console.log(`  -> Copying transcript from dialer_call_attempts (${attempt.full_transcript.length} chars)`);
-          await client.query(`
+          await pool.query(`
             UPDATE leads 
             SET transcript = $1, 
                 transcription_status = 'completed',
@@ -212,7 +222,7 @@ async function transcribeNewLeads() {
           copiedFromSession++;
           transcribed++;
           console.log(`  -> DONE (copied from dialer attempt)`);
-          continue;
+          return;
         }
 
         if (attempt?.recording_url) {
@@ -224,7 +234,7 @@ async function transcribeNewLeads() {
       if (!recordingUrl) {
         console.log(`  -> NO recording source found. Skipping.`);
         noRecording++;
-        continue;
+        return;
       }
 
       // Step 3: Transcribe!
@@ -242,7 +252,7 @@ async function transcribeNewLeads() {
 
         if (transcript && transcript.trim().length > 10) {
           // Save transcript to lead
-          await client.query(`
+          await pool.query(`
             UPDATE leads 
             SET transcript = $1, 
                 transcription_status = 'completed',
@@ -252,7 +262,7 @@ async function transcribeNewLeads() {
 
           // Also update linked call_session if exists
           if (lead.call_session_id) {
-            await client.query(`
+            await pool.query(`
               UPDATE call_sessions 
               SET ai_transcript = $1 
               WHERE id = $2 AND (ai_transcript IS NULL OR length(ai_transcript) < 20)
@@ -263,7 +273,7 @@ async function transcribeNewLeads() {
           console.log(`  -> DONE (${transcript.trim().length} chars)`);
         } else {
           console.log(`  -> Transcription returned empty/short result`);
-          await client.query(`
+          await pool.query(`
             UPDATE leads 
             SET transcription_status = 'failed',
                 updated_at = NOW()
@@ -273,7 +283,7 @@ async function transcribeNewLeads() {
         }
       } catch (err: any) {
         console.error(`  -> Transcription error: ${err.message}`);
-        await client.query(`
+        await pool.query(`
           UPDATE leads 
           SET transcription_status = 'failed',
               updated_at = NOW()
@@ -282,15 +292,28 @@ async function transcribeNewLeads() {
         failed++;
       }
 
-      // Rate limit between API calls
-      await new Promise(r => setTimeout(r, 1000));
+      // Rate limit between API calls (per worker)
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
     }
+
+    let nextIndex = 0;
+    async function worker() {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= leads.length) return;
+        await processLead(leads[index], index);
+      }
+    }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
     // Summary
     console.log(`\n${'='.repeat(80)}`);
     console.log('TRANSCRIPTION COMPLETE');
     console.log('='.repeat(80));
-    console.log(`  Total leads processed:  ${leadsToTranscribe.length}`);
+    console.log(`  Total leads processed:  ${leads.length}`);
     console.log(`  Transcribed:            ${transcribed}`);
     console.log(`    - Copied from session:  ${copiedFromSession}`);
     console.log(`    - Freshly transcribed:  ${transcribed - copiedFromSession}`);
@@ -299,7 +322,6 @@ async function transcribeNewLeads() {
     console.log('='.repeat(80));
 
   } finally {
-    client.release();
     await pool.end();
   }
 }

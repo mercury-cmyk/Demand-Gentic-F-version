@@ -957,6 +957,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (amdWaitTimer) clearTimeout(amdWaitTimer);
     if (humanSpeechWaitTimer) clearTimeout(humanSpeechWaitTimer);
     if (diagnosticTimer) clearInterval(diagnosticTimer);
+    if ((geminiWs as any)?._setupTimeout) clearTimeout((geminiWs as any)._setupTimeout);
     if (geminiWs) {
       geminiWs.close();
       geminiWs = null;
@@ -2058,6 +2059,24 @@ Instructions:
         }
       };
       geminiWs?.send(JSON.stringify(setupMessage));
+
+      // SETUP TIMEOUT: If Gemini doesn't respond with setup_complete within 20s,
+      // the setup message was likely rejected (wrong model name, bad casing, etc.)
+      const setupTimeout = setTimeout(() => {
+        if (!setupComplete) {
+          console.error(`[Gemini Live] ❌ SETUP TIMEOUT - no setup_complete received within 20s!`);
+          console.error(`[Gemini Live] 💡 Possible causes: wrong model name (${GEMINI_MODEL_ID}), incorrect JSON casing, or Vertex AI auth failure`);
+          console.error(`[Gemini Live] 💡 Using ${USE_VERTEX_AI ? 'Vertex AI (camelCase)' : 'Google AI Studio (snake_case)'}`);
+          // Close and let reconnect logic handle it
+          geminiWs?.close(1000, 'Setup timeout');
+        }
+      }, 20000);
+
+      // Clear setup timeout when setup completes (handled in message handler below)
+      const originalSetupComplete = setupComplete;
+      const clearSetupTimeout = () => clearTimeout(setupTimeout);
+      // Store reference so message handler can clear it
+      (geminiWs as any)._setupTimeout = setupTimeout;
     });
 
     // Track first audio response from Gemini after opening message
@@ -2087,6 +2106,10 @@ Instructions:
         if (response.setupComplete !== undefined || response.setup_complete !== undefined) {
           setupComplete = true;
           reconnectAttempts = 0;
+          // Clear setup timeout
+          if ((geminiWs as any)?._setupTimeout) {
+            clearTimeout((geminiWs as any)._setupTimeout);
+          }
           console.log('[Gemini Live] ✅ Setup complete - Gemini is ready');
 
           // CRITICAL: Try to send opening message

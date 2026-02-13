@@ -398,6 +398,15 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Custom reports and exports',
       },
       {
+        id: 'showcase-calls',
+        title: 'Showcase Calls',
+        url: '/showcase-calls',
+        icon: 'Trophy',
+        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
+        description: 'Best AI agent call performances for client demos',
+      },
+      {
         id: 'disposition-reanalysis',
         title: 'Disposition Reanalysis',
         url: '/disposition-reanalysis',

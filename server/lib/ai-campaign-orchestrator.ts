@@ -46,8 +46,8 @@ import {
 const ORCHESTRATOR_INTERVAL_MS = 10000; // Check every 10 seconds (increased frequency)
 const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '100', 10);
 const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10);
-const DELAY_BETWEEN_CALLS_MS = 250; // 250ms delay between call batches (faster ramp-up)
-const PARALLEL_CALL_BATCH_SIZE = 25; // Batch size of 25 for efficient ramp-up
+const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches (prevents burst overload)
+const PARALLEL_CALL_BATCH_SIZE = 10; // Smaller batches to avoid DB pool exhaustion
 const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
 
 // Cached concurrency limits from DB (refreshed every 60s)

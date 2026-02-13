@@ -15,10 +15,13 @@ import {
 } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import { withAiConcurrency } from "../lib/ai-concurrency";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  timeout: 120_000,
+  maxRetries: 2,
 });
 
 // ============================================================================
@@ -234,7 +237,7 @@ Output as JSON with these fields:
 
 Make the HTML fully self-contained with inline styles. Use modern, clean design. Make it mobile-responsive.`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await withAiConcurrency(() => openai.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -243,7 +246,7 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
     response_format: { type: 'json_object' },
     temperature: 0.7,
     max_tokens: 8000,
-  });
+  }), 'generative-studio');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
   const tokensUsed = completion.usage?.total_tokens || 0;
@@ -328,7 +331,7 @@ Output as JSON:
   "tips": ["tip 1 for improving this email", "tip 2"]
 }`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await withAiConcurrency(() => openai.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -337,7 +340,7 @@ Output as JSON:
     response_format: { type: 'json_object' },
     temperature: 0.7,
     max_tokens: 6000,
-  });
+  }), 'generative-studio-email');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
   const tokensUsed = completion.usage?.total_tokens || 0;
@@ -429,7 +432,7 @@ Output as JSON:
   "tags": ["tag1", "tag2"]
 }`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await withAiConcurrency(() => openai.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -438,7 +441,7 @@ Output as JSON:
     response_format: { type: 'json_object' },
     temperature: 0.7,
     max_tokens: 8000,
-  });
+  }), 'generative-studio');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
   const tokensUsed = completion.usage?.total_tokens || 0;
@@ -541,7 +544,7 @@ Output as JSON:
   "tags": ["tag1", "tag2"]
 }`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await withAiConcurrency(() => openai.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -550,7 +553,7 @@ Output as JSON:
     response_format: { type: 'json_object' },
     temperature: 0.7,
     max_tokens: 16000,
-  });
+  }), 'generative-studio-ebook');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
   const tokensUsed = completion.usage?.total_tokens || 0;
@@ -657,7 +660,7 @@ Output as JSON:
   "tags": ["tag1", "tag2"]
 }`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await withAiConcurrency(() => openai.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -666,7 +669,7 @@ Output as JSON:
     response_format: { type: 'json_object' },
     temperature: 0.7,
     max_tokens: 8000,
-  });
+  }), 'generative-studio');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
   const tokensUsed = completion.usage?.total_tokens || 0;
@@ -774,13 +777,13 @@ Output as JSON:
 
   messages.push({ role: 'user', content: params.message });
 
-  const completion = await openai.chat.completions.create({
+  const completion = await withAiConcurrency(() => openai.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages,
     response_format: { type: 'json_object' },
     temperature: 0.8,
     max_tokens: 2000,
-  });
+  }), 'generative-studio-chat');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
   const tokensUsed = completion.usage?.total_tokens || 0;
@@ -850,7 +853,7 @@ Output the refined content in the same format as the original. Return as JSON:
   "changesSummary": "brief summary of changes made"
 }`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await withAiConcurrency(() => openai.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -859,7 +862,7 @@ Output the refined content in the same format as the original. Return as JSON:
     response_format: { type: 'json_object' },
     temperature: 0.5,
     max_tokens: 8000,
-  });
+  }), 'generative-studio-refine');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
   const tokensUsed = completion.usage?.total_tokens || 0;

@@ -3,10 +3,13 @@ import { db } from "../db";
 import { accounts } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import { withAiConcurrency } from "../lib/ai-concurrency";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  timeout: 120_000,
+  maxRetries: 2,
 });
 
 interface AccountEnrichmentResult {
@@ -78,7 +81,7 @@ If information is not available, use null for that field. Be conservative with c
       "You are a B2B company research analyst. Provide accurate, verified company information based on public sources."
     );
 
-    const completion = await openai.chat.completions.create({
+    const completion = await withAiConcurrency(() => openai.chat.completions.create({
       model: 'gpt-4.1-mini',
       messages: [
         {
@@ -92,7 +95,7 @@ If information is not available, use null for that field. Be conservative with c
       ],
       response_format: { type: 'json_object' },
       temperature: 0.2,
-    });
+    }), 'account-enrichment');
 
     const resultText = completion.choices[0]?.message?.content;
     if (!resultText) return null;
@@ -300,7 +303,7 @@ Return JSON format:
       "You are a B2B sales intelligence analyst. Provide strategic account insights based on available data."
     );
 
-    const completion = await openai.chat.completions.create({
+    const completion = await withAiConcurrency(() => openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
@@ -314,7 +317,7 @@ Return JSON format:
       ],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-    });
+    }), 'account-brief');
 
     const resultText = completion.choices[0]?.message?.content;
     if (!resultText) return null;

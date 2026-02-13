@@ -5,6 +5,8 @@ import {
   getActiveCallSessions,
   isRedisAvailable,
 } from "../services/call-session-store";
+import { poolMetrics } from "../db";
+import { getAiConcurrencyStats } from "../lib/ai-concurrency";
 
 const router = Router();
 
@@ -14,16 +16,28 @@ const router = Router();
  */
 router.get("/health", async (req, res) => {
   try {
+    const dbStats = poolMetrics.getStats();
+    const aiStats = getAiConcurrencyStats();
+
     // Basic health check - service is running
     const health = {
       status: "healthy",
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       environment: process.env.NODE_ENV || "development",
+      dbPool: dbStats,
+      aiConcurrency: aiStats,
+      memory: {
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      },
     };
 
-    // Log health check for Cloud Run log validation
-    console.log(`[Health Check] ${health.timestamp} - Status: ${health.status}, Uptime: ${Math.floor(health.uptime)}s`);
+    // Degrade if DB pool or AI concurrency are stressed
+    if (!dbStats.isHealthy || aiStats.queued > 20) {
+      (health as any).status = "degraded";
+    }
 
     res.status(200).json(health);
   } catch (error) {

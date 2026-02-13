@@ -67,6 +67,7 @@ import UnifiedIntelligencePage from "@/pages/unified-intelligence";
 
 import PotentialLeadsPage from "@/pages/potential-leads";
 import DispositionReanalysisPage from "@/pages/disposition-reanalysis";
+import ShowcaseCallsPage from "@/pages/showcase-calls";
 
 // Lazy-loaded components
 const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
@@ -414,6 +415,7 @@ function AuthenticatedApp() {
               <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
               <Route path="/unified-intelligence/potential-leads" component={PotentialLeadsPage} />
               <Route path="/disposition-reanalysis" component={DispositionReanalysisPage} />
+              <Route path="/showcase-calls" component={ShowcaseCallsPage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/ai-call-analytics">
                 <Redirect to="/call-reports?tab=ai" />

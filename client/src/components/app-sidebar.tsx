@@ -23,6 +23,8 @@ import {
   Brain,
   FolderKanban,
   Wand2,
+  Trophy,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -85,6 +87,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Brain,
   FolderKanban,
   Wand2,
+  Trophy,
+  RefreshCw,
 };
 
 function resolveIcon(iconName: string): LucideIcon {
