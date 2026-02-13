@@ -181,6 +181,17 @@ interface ClientActivityLog {
   createdAt: string;
 }
 
+interface AgenticCapability {
+  name: string;
+  description: string;
+  features: string[];
+}
+
+interface AgenticCapabilitiesResponse {
+  success: boolean;
+  capabilities: Record<string, AgenticCapability>;
+}
+
 interface Project {
   id: string;
   name: string;
@@ -798,7 +809,24 @@ export default function ClientPortalDashboard() {
     }
   }, [featuresData]);
 
-  // Argyle events feature status check â€” key includes tenant for cache isolation
+  // Agent capabilities (loaded only when AgentX tab is active)
+  const {
+    data: agenticCapabilitiesData,
+    isLoading: agenticCapabilitiesLoading,
+    error: agenticCapabilitiesError,
+    refetch: refetchAgenticCapabilities,
+  } = useQuery<AgenticCapabilitiesResponse>({
+    queryKey: ['client-portal-agentic-capabilities', user?.clientAccountId],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/agentic/capabilities', authHeaders);
+      if (!res.ok) throw new Error('Failed to fetch agent capabilities');
+      return res.json();
+    },
+    enabled: !!user && activeTab === 'agent-x',
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Argyle events feature status check — key includes tenant for cache isolation
   const { data: argyleFeatureStatus } = useQuery<{ enabled: boolean }>({
     queryKey: ['argyle-events-feature-status', user?.clientAccountId],
     queryFn: async () => {
@@ -2431,16 +2459,60 @@ export default function ClientPortalDashboard() {
                 Autonomous Agents & Workflow Automation
               </p>
             </div>
-            
-            <div className="flex-1 flex items-center justify-center min-h-[400px] border rounded-lg border-dashed">
-               <div className="text-center">
-                  <Sparkles className="h-10 w-10 text-violet-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium">AgentX Console</h3>
-                  <p className="text-muted-foreground max-w-sm mt-2">
-                    Autonomous agent controls and workflow automation tools will appear here.
+
+            {agenticCapabilitiesLoading ? (
+              <div className="flex-1 flex items-center justify-center min-h-[320px] border rounded-lg border-dashed">
+                <div className="text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-violet-500 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Loading agent capabilities...</p>
+                </div>
+              </div>
+            ) : agenticCapabilitiesError ? (
+              <div className="flex-1 flex items-center justify-center min-h-[320px] border rounded-lg border-dashed">
+                <div className="text-center max-w-md px-6">
+                  <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-3" />
+                  <h3 className="text-base font-semibold">Unable to load capabilities</h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4">
+                    We could not fetch AgentX capabilities from the client portal API.
                   </p>
-               </div>
-            </div>
+                  <Button variant="outline" onClick={() => refetchAgenticCapabilities()}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  {Object.entries(agenticCapabilitiesData?.capabilities || {}).map(([key, capability]) => (
+                    <Card key={key} className="border-violet-100 dark:border-violet-900/40">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg">{capability.name}</CardTitle>
+                        <CardDescription>{capability.description}</CardDescription>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <div className="flex flex-wrap gap-2">
+                          {(capability.features || []).map((feature) => (
+                            <Badge key={`${key}-${feature}`} variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100">
+                              {feature}
+                            </Badge>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {Object.keys(agenticCapabilitiesData?.capabilities || {}).length === 0 && (
+                  <Card className="border-dashed">
+                    <CardContent className="py-10 text-center">
+                      <Sparkles className="h-8 w-8 text-violet-300 mx-auto mb-3" />
+                      <p className="text-sm text-muted-foreground">No capabilities returned for this account yet.</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -6309,3 +6381,4 @@ function CampaignQueueDialog({ open, onOpenChange, campaignId }: { open: boolean
     </Dialog>
   );
 }
+
