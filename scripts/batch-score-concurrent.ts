@@ -69,18 +69,29 @@ async function scoreOneLead(lead: LeadRow, index: number, total: number): Promis
       if (!csId) {
         const client = await pool.connect();
         try {
-          const ins = await client.query(`
-            INSERT INTO call_sessions (id, telnyx_call_id, campaign_id, contact_id, status, to_number_e164, created_at)
-            VALUES (gen_random_uuid(), $1, $2, $3, 'completed', $4, NOW())
-            ON CONFLICT (telnyx_call_id) DO UPDATE SET campaign_id = EXCLUDED.campaign_id
-            RETURNING id
-          `, [
-            lead.telnyx_call_id || `batch-${lead.lead_id}`,
-            lead.campaign_id,
-            lead.contact_id,
-            lead.contact_phone || lead.dialed_number || '+10000000000'
-          ]);
-          csId = ins.rows[0].id;
+          // Check if one already exists for this telnyx_call_id
+          if (lead.telnyx_call_id) {
+            const existing = await client.query(
+              `SELECT id FROM call_sessions WHERE telnyx_call_id = $1 LIMIT 1`,
+              [lead.telnyx_call_id]
+            );
+            if (existing.rows.length > 0) {
+              csId = existing.rows[0].id;
+            }
+          }
+          if (!csId) {
+            const ins = await client.query(`
+              INSERT INTO call_sessions (id, telnyx_call_id, campaign_id, contact_id, status, to_number_e164, created_at)
+              VALUES (gen_random_uuid(), $1, $2, $3, 'completed', $4, NOW())
+              RETURNING id
+            `, [
+              lead.telnyx_call_id || `batch-${lead.lead_id}`,
+              lead.campaign_id,
+              lead.contact_id,
+              lead.contact_phone || lead.dialed_number || '+10000000000'
+            ]);
+            csId = ins.rows[0].id;
+          }
         } finally { client.release(); }
       }
 

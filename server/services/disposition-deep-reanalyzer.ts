@@ -48,6 +48,8 @@ export interface DeepReanalysisFilter {
   hasRecording?: boolean;
   agentType?: "ai" | "human" | "all";
   confidenceThreshold?: number; // Only show results above this confidence
+  minTurns?: number; // Minimum transcript turn count
+  maxTurns?: number; // Maximum transcript turn count
   limit?: number;
   offset?: number;
 }
@@ -771,7 +773,7 @@ export async function deepReanalyzeBatch(
 
   const whereClause = conditions.length > 0 ? and(...conditions) : isNotNull(callSessions.aiTranscript);
 
-  const sessions = await db
+  let sessions = await db
     .select({
       id: callSessions.id,
       aiDisposition: callSessions.aiDisposition,
@@ -791,6 +793,22 @@ export async function deepReanalyzeBatch(
     .offset(offset);
 
   console.log(`${LOG_PREFIX} Found ${sessions.length} calls to deep-analyze`);
+
+  // Filter by transcript turn count if specified
+  if (filters.minTurns !== undefined || filters.maxTurns !== undefined) {
+    sessions = sessions.filter((s) => {
+      try {
+        const transcript = s.aiTranscript ? (typeof s.aiTranscript === "string" ? JSON.parse(s.aiTranscript) : s.aiTranscript) : [];
+        const turnCount = Array.isArray(transcript) ? transcript.length : 0;
+        if (filters.minTurns !== undefined && turnCount < filters.minTurns) return false;
+        if (filters.maxTurns !== undefined && turnCount > filters.maxTurns) return false;
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    console.log(`${LOG_PREFIX} After turn filter (${filters.minTurns || 0}-${filters.maxTurns || '∞'}): ${sessions.length} calls remain`);
+  }
 
   // Pre-load contexts
   const campaignCache = new Map<string, {
@@ -1286,7 +1304,8 @@ export async function pushCallsToQA(
 export async function pushCallsToClient(
   callSessionIds: string[],
   clientNotes: string,
-  userId: string
+  userId: string,
+  samplePush: boolean = false
 ): Promise<{ succeeded: number; failed: number; results: Array<{ id: string; success: boolean; error?: string }> }> {
   const results: Array<{ id: string; success: boolean; error?: string }> = [];
 
@@ -1300,6 +1319,8 @@ export async function pushCallsToClient(
         payload: {
           callSessionId: csId,
           clientNotes,
+          samplePush,
+          qualityValidated: samplePush,
           pushedBy: userId,
           pushedAt: new Date().toISOString(),
         },
@@ -1823,6 +1844,170 @@ export async function pushCallsToDashboard(
     succeeded: results.filter(r => r.success).length,
     failed: results.filter(r => !r.success).length,
     results,
+  };
+}
+
+// ==================== VALIDATE CALLS FOR CLIENT SAMPLES ====================
+
+export interface ClientSampleValidation {
+  callSessionId: string;
+  contactName: string;
+  companyName: string;
+  campaignName: string;
+  durationSec: number;
+  turnCount: number;
+  recordingUrl: string | null;
+  passed: boolean;
+  issues: string[];
+}
+
+export async function validateCallsForClientSamples(
+  callSessionIds: string[]
+): Promise<{ validations: ClientSampleValidation[]; passedCount: number; failedCount: number }> {
+  const validations: ClientSampleValidation[] = [];
+
+  const NON_CONVERSATION_DISPOSITIONS = ["no_answer", "voicemail", "invalid_data"];
+  const SCREENER_PATTERN = /record your name|reason for call|stay on the line|this person is available|call screening|call assist|before I try to connect|Google recording|cannot take your call|who I'm speaking to|what you're calling about/i;
+
+  for (const csId of callSessionIds) {
+    const issues: string[] = [];
+
+    const [session] = await db
+      .select({
+        id: callSessions.id,
+        status: callSessions.status,
+        durationSec: callSessions.durationSec,
+        recordingUrl: callSessions.recordingUrl,
+        recordingStatus: callSessions.recordingStatus,
+        aiTranscript: callSessions.aiTranscript,
+        aiDisposition: callSessions.aiDisposition,
+        campaignId: callSessions.campaignId,
+        contactId: callSessions.contactId,
+      })
+      .from(callSessions)
+      .where(eq(callSessions.id, csId))
+      .limit(1);
+
+    if (!session) {
+      validations.push({
+        callSessionId: csId,
+        contactName: "Unknown",
+        companyName: "Unknown",
+        campaignName: "Unknown",
+        durationSec: 0,
+        turnCount: 0,
+        recordingUrl: null,
+        passed: false,
+        issues: ["Call session not found"],
+      });
+      continue;
+    }
+
+    // Lookup contact + campaign info
+    let contactName = "Unknown";
+    let companyName = "Unknown";
+    let campaignName = "Unknown";
+
+    if (session.contactId) {
+      const [ci] = await db
+        .select({ fullName: contacts.fullName, firstName: contacts.firstName, lastName: contacts.lastName, companyName: accounts.name })
+        .from(contacts)
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(eq(contacts.id, session.contactId))
+        .limit(1);
+      if (ci) {
+        contactName = ci.fullName || [ci.firstName, ci.lastName].filter(Boolean).join(" ") || "Unknown";
+        companyName = ci.companyName || "Unknown";
+      }
+    }
+
+    if (session.campaignId) {
+      const [camp] = await db
+        .select({ name: campaigns.name })
+        .from(campaigns)
+        .where(eq(campaigns.id, session.campaignId))
+        .limit(1);
+      if (camp) campaignName = camp.name;
+    }
+
+    // Check 1: Call status
+    if (session.status === "failed") {
+      issues.push("Call failed (technical error)");
+    }
+
+    // Check 2: Recording availability
+    if (!session.recordingUrl) {
+      issues.push("No recording available");
+    } else if (session.recordingStatus === "failed") {
+      issues.push("Recording failed to process");
+    } else if (session.recordingStatus !== "stored") {
+      issues.push(`Recording not ready (status: ${session.recordingStatus || "unknown"})`);
+    }
+
+    // Check 3: Minimum duration
+    const durationSec = session.durationSec || 0;
+    if (durationSec < 15) {
+      issues.push(`Call too short (${durationSec}s) - likely dead air or instant hangup`);
+    }
+
+    // Check 4: Disposition check
+    const disposition = session.aiDisposition || "unknown";
+    if (NON_CONVERSATION_DISPOSITIONS.includes(disposition)) {
+      issues.push(`Disposition is "${disposition}" - not a real conversation`);
+    }
+
+    // Check 5-7: Transcript analysis
+    let turnCount = 0;
+    if (!session.aiTranscript) {
+      issues.push("No transcript available");
+    } else {
+      try {
+        const parsed = typeof session.aiTranscript === "string" ? JSON.parse(session.aiTranscript) : session.aiTranscript;
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          issues.push("Transcript is empty or invalid");
+        } else {
+          turnCount = parsed.length;
+          const turns = parsed.map((t: any) => ({ role: t.role || "unknown", text: t.message || t.text || "" }));
+          const contactTurns = turns.filter((t: any) => t.role !== "agent" && t.role !== "assistant");
+          const contactWords = contactTurns.reduce((sum: number, t: any) => sum + t.text.split(/\s+/).filter(Boolean).length, 0);
+
+          // Check 5: Minimum turn count
+          if (turnCount < 4) {
+            issues.push(`Only ${turnCount} transcript turns - not enough back-and-forth`);
+          }
+
+          // Check 6: Prospect engagement
+          if (contactTurns.length < 2 || contactWords < 10) {
+            issues.push(`Low prospect engagement (${contactTurns.length} turns, ${contactWords} words)`);
+          }
+
+          // Check 7: Screener detection
+          if (contactTurns.some((t: any) => SCREENER_PATTERN.test(t.text))) {
+            issues.push("Automated call screener detected - not a direct conversation");
+          }
+        }
+      } catch {
+        issues.push("Transcript could not be parsed");
+      }
+    }
+
+    validations.push({
+      callSessionId: csId,
+      contactName,
+      companyName,
+      campaignName,
+      durationSec,
+      turnCount,
+      recordingUrl: session.recordingUrl,
+      passed: issues.length === 0,
+      issues,
+    });
+  }
+
+  return {
+    validations,
+    passedCount: validations.filter((v) => v.passed).length,
+    failedCount: validations.filter((v) => !v.passed).length,
   };
 }
 

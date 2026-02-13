@@ -258,6 +258,24 @@ interface Campaign {
   name: string;
 }
 
+interface ClientSampleValidation {
+  callSessionId: string;
+  contactName: string;
+  companyName: string;
+  campaignName: string;
+  durationSec: number;
+  turnCount: number;
+  recordingUrl: string | null;
+  passed: boolean;
+  issues: string[];
+}
+
+interface ClientSampleValidationResponse {
+  validations: ClientSampleValidation[];
+  passedCount: number;
+  failedCount: number;
+}
+
 const DISPOSITION_LABELS: Record<string, string> = {
   qualified_lead: 'Qualified Lead',
   not_interested: 'Not Interested',
@@ -345,6 +363,8 @@ export default function DispositionReanalysisPage() {
   const [batchLimit, setBatchLimit] = useState<string>('30');
   const [agentTypeFilter, setAgentTypeFilter] = useState<string>('all');
   const [confidenceThreshold, setConfidenceThreshold] = useState<string>('');
+  const [minTurns, setMinTurns] = useState<string>('');
+  const [maxTurns, setMaxTurns] = useState<string>('');
 
   // State
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -368,6 +388,11 @@ export default function DispositionReanalysisPage() {
   const [pushDashboardNotes, setPushDashboardNotes] = useState('');
   const [pushDashboardDialog, setPushDashboardDialog] = useState(false);
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+
+  // Client sample validation state
+  const [sampleValidationResult, setSampleValidationResult] = useState<ClientSampleValidationResponse | null>(null);
+  const [sampleValidationDialog, setSampleValidationDialog] = useState(false);
+  const [sampleClientNotes, setSampleClientNotes] = useState('');
 
   // ==================== QUERIES ====================
 
@@ -439,6 +464,8 @@ export default function DispositionReanalysisPage() {
       if (minDuration) body.minDurationSec = parseInt(minDuration);
       if (maxDuration) body.maxDurationSec = parseInt(maxDuration);
       if (confidenceThreshold) body.confidenceThreshold = parseFloat(confidenceThreshold) / 100;
+      if (minTurns) body.minTurns = parseInt(minTurns);
+      if (maxTurns) body.maxTurns = parseInt(maxTurns);
 
       const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/preview', body, { timeout: 600000 });
       return res.json() as Promise<DeepReanalysisSummary>;
@@ -468,6 +495,8 @@ export default function DispositionReanalysisPage() {
       if (minDuration) body.minDurationSec = parseInt(minDuration);
       if (maxDuration) body.maxDurationSec = parseInt(maxDuration);
       if (confidenceThreshold) body.confidenceThreshold = parseFloat(confidenceThreshold) / 100;
+      if (minTurns) body.minTurns = parseInt(minTurns);
+      if (maxTurns) body.maxTurns = parseInt(maxTurns);
 
       const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/apply', body, { timeout: 600000 });
       return res.json() as Promise<DeepReanalysisSummary>;
@@ -582,6 +611,51 @@ export default function DispositionReanalysisPage() {
     },
     onError: (err: any) => {
       toast({ title: 'Push to Dashboard Failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  // Validate calls for client samples
+  const validateForClientMutation = useMutation({
+    mutationFn: async (ids?: string[]) => {
+      const callIds = ids || Array.from(selectedCalls.size > 0 ? selectedCalls : selectedContactIds);
+      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/validate-for-client', {
+        callSessionIds: callIds,
+      });
+      return res.json() as Promise<ClientSampleValidationResponse>;
+    },
+    onSuccess: (data) => {
+      setSampleValidationResult(data);
+      setSampleValidationDialog(true);
+    },
+    onError: (err: any) => {
+      toast({ title: 'Validation Failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  // Push validated samples to client
+  const pushSamplesToClientMutation = useMutation({
+    mutationFn: async () => {
+      if (!sampleValidationResult) throw new Error('No validation result');
+      const passingIds = sampleValidationResult.validations.filter(v => v.passed).map(v => v.callSessionId);
+      if (passingIds.length === 0) throw new Error('No calls passed validation');
+      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/push-to-client', {
+        callSessionIds: passingIds,
+        clientNotes: sampleClientNotes,
+        samplePush: true,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setSampleValidationDialog(false);
+      setSampleValidationResult(null);
+      setSampleClientNotes('');
+      toast({ title: 'Samples Pushed to Client', description: `${data.succeeded} validated recordings pushed to client portal` });
+      setSelectedCalls(new Set());
+      setSelectedContactIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ['/api/disposition-reanalysis/contacts-by-disposition'] });
+    },
+    onError: (err: any) => {
+      toast({ title: 'Push Samples Failed', description: err.message, variant: 'destructive' });
     },
   });
 
@@ -740,7 +814,7 @@ export default function DispositionReanalysisPage() {
                   <Phone className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm text-muted-foreground">Total Calls</span>
                 </div>
-                <p className="text-2xl font-bold mt-1">{stats?.total?.toLocaleString() || '—'}</p>
+                <p className="text-2xl font-bold mt-1">{stats?.total?.toLocaleString() || 'ï¿½'}</p>
               </CardContent>
             </Card>
             <Card>
@@ -891,6 +965,18 @@ export default function DispositionReanalysisPage() {
                 <div className="space-y-2">
                   <Label>Batch Size</Label>
                   <Input type="number" placeholder="50" value={batchLimit} onChange={(e) => setBatchLimit(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {/* Turn number range */}
+                <div className="space-y-2">
+                  <Label>Min Turns</Label>
+                  <Input type="number" placeholder="0" value={minTurns} onChange={(e) => setMinTurns(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Max Turns</Label>
+                  <Input type="number" placeholder="Any" value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} />
                 </div>
               </div>
 
@@ -1099,6 +1185,16 @@ export default function DispositionReanalysisPage() {
                       {bulkOverrideMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                       Apply to Selected
                     </Button>
+                    <Separator orientation="vertical" className="h-6" />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={validateForClientMutation.isPending}
+                      onClick={() => validateForClientMutation.mutate()}
+                    >
+                      {validateForClientMutation.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Volume2 className="mr-1 h-3 w-3" />}
+                      Push as Client Samples
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => setSelectedCalls(new Set())}>
                       Clear Selection
                     </Button>
@@ -1260,6 +1356,15 @@ export default function DispositionReanalysisPage() {
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setPushDashboardDialog(true)}>
                       <BarChart3 className="mr-1 h-3 w-3" /> Push to Dashboard
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={validateForClientMutation.isPending}
+                      onClick={() => validateForClientMutation.mutate(Array.from(selectedContactIds))}
+                    >
+                      {validateForClientMutation.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Volume2 className="mr-1 h-3 w-3" />}
+                      Push as Client Samples
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => setSelectedContactIds(new Set())}>Clear</Button>
                   </CardContent>
@@ -1456,7 +1561,7 @@ export default function DispositionReanalysisPage() {
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Duration / Date</Label>
-                  <p className="text-sm">{formatDuration(activeCallDetail.durationSec)} · {formatDate(activeCallDetail.callDate)}</p>
+                  <p className="text-sm">{formatDuration(activeCallDetail.durationSec)} ï¿½ {formatDate(activeCallDetail.callDate)}</p>
                 </div>
               </div>
 
@@ -1626,6 +1731,128 @@ export default function DispositionReanalysisPage() {
               {overrideMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Apply Override
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== CLIENT SAMPLE VALIDATION DIALOG ==================== */}
+      <Dialog open={sampleValidationDialog} onOpenChange={(open) => {
+        if (!open) {
+          setSampleValidationDialog(false);
+          setSampleValidationResult(null);
+          setSampleClientNotes('');
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Push Recordings as Client Samples</DialogTitle>
+            <DialogDescription>
+              Quality validation ensures only real conversations without technical issues are sent to clients.
+            </DialogDescription>
+          </DialogHeader>
+
+          {sampleValidationResult && (
+            <div className="space-y-4">
+              {/* Summary */}
+              <div className="grid grid-cols-3 gap-3">
+                <Card>
+                  <CardContent className="pt-4 text-center">
+                    <p className="text-sm text-muted-foreground">Total Checked</p>
+                    <p className="text-xl font-bold">{sampleValidationResult.validations.length}</p>
+                  </CardContent>
+                </Card>
+                <Card className="border-emerald-200">
+                  <CardContent className="pt-4 text-center">
+                    <p className="text-sm text-emerald-600">Passed</p>
+                    <p className="text-xl font-bold text-emerald-700">{sampleValidationResult.passedCount}</p>
+                  </CardContent>
+                </Card>
+                <Card className={sampleValidationResult.failedCount > 0 ? 'border-red-200' : ''}>
+                  <CardContent className="pt-4 text-center">
+                    <p className="text-sm text-red-600">Failed</p>
+                    <p className="text-xl font-bold text-red-700">{sampleValidationResult.failedCount}</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Validation list */}
+              <ScrollArea className="h-[350px]">
+                <div className="space-y-2">
+                  {/* Passed calls first, then failed */}
+                  {[...sampleValidationResult.validations]
+                    .sort((a, b) => (a.passed === b.passed ? 0 : a.passed ? -1 : 1))
+                    .map((v) => (
+                    <div
+                      key={v.callSessionId}
+                      className={`flex items-start gap-3 rounded-lg border p-3 ${
+                        v.passed ? 'bg-emerald-50/50 border-emerald-200' : 'bg-red-50/50 border-red-200'
+                      }`}
+                    >
+                      <div className="mt-0.5 flex-shrink-0">
+                        {v.passed ? (
+                          <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                        ) : (
+                          <XCircle className="h-5 w-5 text-red-500" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm truncate">{v.contactName}</p>
+                          <span className="text-xs text-muted-foreground">({v.companyName})</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                          <span>{v.campaignName}</span>
+                          <span>{formatDuration(v.durationSec)}</span>
+                          <span>{v.turnCount} turns</span>
+                          {v.recordingUrl ? (
+                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 text-[10px] py-0">Rec</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] py-0">No Rec</Badge>
+                          )}
+                        </div>
+                        {v.issues.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {v.issues.map((issue, idx) => (
+                              <Badge key={idx} variant="outline" className="bg-red-100 text-red-700 text-[10px] font-normal">
+                                {issue}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+
+              {/* Client notes */}
+              {sampleValidationResult.passedCount > 0 && (
+                <div className="space-y-2">
+                  <Label>Client Notes (optional)</Label>
+                  <Textarea
+                    placeholder="Notes to include with the sample recordings..."
+                    value={sampleClientNotes}
+                    onChange={(e) => setSampleClientNotes(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setSampleValidationDialog(false); setSampleValidationResult(null); setSampleClientNotes(''); }}>
+              Cancel
+            </Button>
+            {sampleValidationResult && sampleValidationResult.passedCount > 0 && (
+              <Button
+                disabled={pushSamplesToClientMutation.isPending}
+                onClick={() => pushSamplesToClientMutation.mutate()}
+              >
+                {pushSamplesToClientMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                Push {sampleValidationResult.passedCount} Passing Calls
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

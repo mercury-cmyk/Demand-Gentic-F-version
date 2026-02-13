@@ -27,6 +27,7 @@ import {
   pushCallsToDashboard,
   exportReanalysisData,
   getContactsByDisposition,
+  validateCallsForClientSamples,
   type DeepReanalysisFilter,
 } from "../services/disposition-deep-reanalyzer";
 import type { CanonicalDisposition } from "@shared/schema";
@@ -285,6 +286,8 @@ router.post("/deep/preview", requireAuth, async (req: Request, res: Response) =>
       hasRecording: req.body.hasRecording,
       agentType: req.body.agentType || "all",
       confidenceThreshold: req.body.confidenceThreshold,
+      minTurns: req.body.minTurns,
+      maxTurns: req.body.maxTurns,
       limit: Math.min(req.body.limit || 50, 200),
       offset: req.body.offset || 0,
     };
@@ -314,6 +317,8 @@ router.post("/deep/apply", requireAuth, async (req: Request, res: Response) => {
       hasRecording: req.body.hasRecording,
       agentType: req.body.agentType || "all",
       confidenceThreshold: req.body.confidenceThreshold,
+      minTurns: req.body.minTurns,
+      maxTurns: req.body.maxTurns,
       limit: Math.min(req.body.limit || 30, 100),
       offset: req.body.offset || 0,
     };
@@ -372,7 +377,7 @@ router.post("/deep/push-to-qa", requireAuth, async (req: Request, res: Response)
 // POST /deep/push-to-client - Push selected calls to client
 router.post("/deep/push-to-client", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { callSessionIds, clientNotes } = req.body;
+    const { callSessionIds, clientNotes, samplePush } = req.body;
     if (!Array.isArray(callSessionIds) || callSessionIds.length === 0) {
       return res.status(400).json({ error: "callSessionIds array is required" });
     }
@@ -381,11 +386,30 @@ router.post("/deep/push-to-client", requireAuth, async (req: Request, res: Respo
     }
 
     const userId = (req as any).user?.id || "system";
-    const result = await pushCallsToClient(callSessionIds, clientNotes || "", userId);
+    const result = await pushCallsToClient(callSessionIds, clientNotes || "", userId, !!samplePush);
     res.json(result);
   } catch (error: any) {
     console.error("[DispositionReanalysis] Push to client error:", error);
     res.status(500).json({ error: `Push to client failed: ${error.message}` });
+  }
+});
+
+// POST /deep/validate-for-client - Validate calls before pushing as client samples
+router.post("/deep/validate-for-client", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { callSessionIds } = req.body;
+    if (!Array.isArray(callSessionIds) || callSessionIds.length === 0) {
+      return res.status(400).json({ error: "callSessionIds array is required" });
+    }
+    if (callSessionIds.length > 200) {
+      return res.status(400).json({ error: "Maximum 200 calls per validation request" });
+    }
+
+    const result = await validateCallsForClientSamples(callSessionIds);
+    res.json(result);
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Validate for client error:", error);
+    res.status(500).json({ error: `Validation failed: ${error.message}` });
   }
 });
 

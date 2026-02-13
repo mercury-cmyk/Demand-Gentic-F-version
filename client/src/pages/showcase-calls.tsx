@@ -58,6 +58,11 @@ interface ShowcaseStats {
   };
   byCategory: Array<{ category: string; count: number }>;
   topCampaigns: Array<{ campaignId: string; campaignName: string; count: number; avgScore: number }>;
+  conversationPool?: {
+    totalConversations: number;
+    avgScore: number;
+    highPerformers: number;
+  };
 }
 
 interface ShowcaseListResponse {
@@ -296,11 +301,27 @@ export default function ShowcaseCallsPage() {
               <span className="text-sm font-medium">{stats.total}</span>
               <span className="text-xs text-muted-foreground">showcased</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg">
-              <BarChart3 className="h-4 w-4 text-blue-500" />
-              <span className="text-sm font-medium">{stats.averages.overall}</span>
-              <span className="text-xs text-muted-foreground">avg score</span>
-            </div>
+            {stats.total > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg">
+                <BarChart3 className="h-4 w-4 text-blue-500" />
+                <span className="text-sm font-medium">{stats.averages.overall}</span>
+                <span className="text-xs text-muted-foreground">avg score</span>
+              </div>
+            )}
+            {stats.conversationPool && (
+              <>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg">
+                  <MessageSquare className="h-4 w-4 text-green-500" />
+                  <span className="text-sm font-medium">{stats.conversationPool.totalConversations}</span>
+                  <span className="text-xs text-muted-foreground">real conversations</span>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg">
+                  <Sparkles className="h-4 w-4 text-purple-500" />
+                  <span className="text-sm font-medium">{stats.conversationPool.highPerformers}</span>
+                  <span className="text-xs text-muted-foreground">high performers</span>
+                </div>
+              </>
+            )}
             {stats.byCategory.map((cat) => {
               const Icon = CATEGORY_ICONS[cat.category] || Sparkles;
               return (
