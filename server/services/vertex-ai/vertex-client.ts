@@ -222,7 +222,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
         throw error;
       }
 
-      const backoffMs = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 500, 16000);
+      const backoffMs = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 1000, 30000);
       console.warn(`[VertexAI] Rate limited (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${Math.round(backoffMs)}ms...`);
       await new Promise((r) => setTimeout(r, backoffMs));
     }
@@ -538,35 +538,41 @@ export async function deepAnalyzeJSON<T>(
   const accessToken = await _reasoningAuth.getAccessToken();
   const endpoint = `https://aiplatform.googleapis.com/v1/projects/${currentConfig.projectId}/locations/global/publishers/google/models/${modelId}:generateContent`;
 
-  const data: any = await withRetry(async () => {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: options.temperature ?? 0.2,
-          maxOutputTokens: options.maxTokens ?? 8192,
-          topP: options.topP ?? 0.95,
-          responseMimeType: "application/json",
-          thinkingConfig: {
-            thinkingLevel: "HIGH",
-          },
+  let data: any;
+  try {
+    data = await withRetry(async () => {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
         },
-      }),
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: options.temperature ?? 0.2,
+            maxOutputTokens: options.maxTokens ?? 8192,
+            topP: options.topP ?? 0.95,
+            responseMimeType: "application/json",
+            thinkingConfig: {
+              thinkingLevel: "HIGH",
+            },
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const err: any = new Error(`Gemini 3 Deep Think JSON request failed: ${res.status} ${res.statusText}`);
+        err.code = res.status;
+        throw err;
+      }
+
+      return res.json();
     });
-
-    if (!res.ok) {
-      const err: any = new Error(`Gemini 3 Deep Think JSON request failed: ${res.status} ${res.statusText}`);
-      err.code = res.status;
-      throw err;
-    }
-
-    return res.json();
-  });
+  } catch (error: any) {
+    console.warn(`[VertexAI] Deep Think request failed (${error.message}). Falling back to standard Gemini Flash model.`);
+    return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
+  }
 
   // Extract the non-thought text part (the JSON answer)
   const parts = data.candidates?.[0]?.content?.parts || [];

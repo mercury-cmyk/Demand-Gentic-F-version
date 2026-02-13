@@ -13,7 +13,7 @@
 import "dotenv/config";
 import OpenAI from "openai";
 import { pool } from "../server/db";
-import { getPresignedDownloadUrl } from "../server/lib/storage";
+import { BUCKET, getPresignedDownloadUrl, uploadToS3 } from "../server/lib/storage";
 import { fetchTelnyxRecording } from "../server/services/telnyx-recordings";
 import { submitStructuredTranscription } from "../server/services/google-transcription";
 
@@ -455,7 +455,17 @@ async function transcribeStrictTwoWay(
     diarized = await diarizeFromUrl(audioUrl);
   } catch (err: any) {
     logVerbose(`  [diarize] Telnyx diarization unavailable, falling back to Google STT: ${err.message}`);
-    const fallback = await submitStructuredTranscription(audioUrl, {
+    let fallbackSource = audioUrl;
+
+    // Google STT rejects larger inline payloads; upload and use gs:// URI when audio is large.
+    if (audio.buffer.length > 900_000) {
+      const tempKey = `recordings/tmp-two-way/${candidate.table}/${candidate.id}-${Date.now()}.${extension}`;
+      await uploadToS3(tempKey, audio.buffer, audio.mimeType);
+      fallbackSource = `gs://${BUCKET}/${tempKey}`;
+      logVerbose(`  [diarize] Uploaded fallback audio to ${fallbackSource}`);
+    }
+
+    const fallback = await submitStructuredTranscription(fallbackSource, {
       telnyxCallId: candidate.telnyxCallId,
       recordingS3Key: candidate.recordingS3Key,
       throwOnError: true,
