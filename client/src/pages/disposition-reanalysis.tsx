@@ -8,7 +8,7 @@
  * Route: /disposition-reanalysis
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
@@ -228,9 +228,16 @@ export default function DispositionReanalysisPage() {
   const [previewResult, setPreviewResult] = useState<ReanalysisSummary | null>(null);
   const [selectedCalls, setSelectedCalls] = useState<Set<string>>(new Set());
   const [detailCallId, setDetailCallId] = useState<string | null>(null);
+  // For next/prev navigation in detail dialog
+  const [detailIdx, setDetailIdx] = useState<number | null>(null);
   const [overrideDialog, setOverrideDialog] = useState<{ callSessionId: string; currentDisp: string } | null>(null);
   const [overrideDisposition, setOverrideDisposition] = useState<string>('');
   const [overrideReason, setOverrideReason] = useState<string>('');
+
+  // Reset detailIdx when previewResult changes (e.g. after dry run)
+  useEffect(() => {
+    setDetailIdx(null);
+  }, [previewResult]);
 
   // ==================== QUERIES ====================
 
@@ -863,6 +870,7 @@ export default function DispositionReanalysisPage() {
                           .concat(previewResult.calls.filter(c => !c.shouldOverride && c.suggestedDisposition === c.currentDisposition))
                           .map((call) => {
                             const hasChange = call.shouldOverride && call.suggestedDisposition !== call.currentDisposition;
+                            const idx = previewResult.calls.findIndex(c => c.callSessionId === call.callSessionId);
                             return (
                               <TableRow
                                 key={call.callSessionId}
@@ -902,7 +910,10 @@ export default function DispositionReanalysisPage() {
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => setDetailCallId(call.callSessionId)}
+                                      onClick={() => {
+                                        setDetailCallId(call.callSessionId);
+                                        setDetailIdx(idx);
+                                      }}
                                     >
                                       <Eye className="h-3.5 w-3.5" />
                                     </Button>
@@ -1060,20 +1071,54 @@ export default function DispositionReanalysisPage() {
           )}
 
           <DialogFooter>
-            {callDetail && (
-              <Button
-                onClick={() => {
-                  setDetailCallId(null);
-                  setOverrideDialog({
-                    callSessionId: callDetail.callSessionId,
-                    currentDisp: callDetail.currentDisposition,
-                  });
-                  setOverrideDisposition(callDetail.analysis.suggestedDisposition);
-                }}
-              >
-                Override Disposition
-              </Button>
-            )}
+            <div className="flex w-full justify-between items-center gap-2">
+              {previewResult && detailIdx !== null && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={detailIdx <= 0}
+                  onClick={() => {
+                    if (detailIdx > 0) {
+                      const prevCall = previewResult.calls[detailIdx - 1];
+                      setDetailCallId(prevCall.callSessionId);
+                      setDetailIdx(detailIdx - 1);
+                    }
+                  }}
+                >
+                  Previous
+                </Button>
+              )}
+              {callDetail && (
+                <Button
+                  onClick={() => {
+                    setDetailCallId(null);
+                    setOverrideDialog({
+                      callSessionId: callDetail.callSessionId,
+                      currentDisp: callDetail.currentDisposition,
+                    });
+                    setOverrideDisposition(callDetail.analysis.suggestedDisposition);
+                  }}
+                >
+                  Override Disposition
+                </Button>
+              )}
+              {previewResult && detailIdx !== null && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={detailIdx >= previewResult.calls.length - 1}
+                  onClick={() => {
+                    if (detailIdx < previewResult.calls.length - 1) {
+                      const nextCall = previewResult.calls[detailIdx + 1];
+                      setDetailCallId(nextCall.callSessionId);
+                      setDetailIdx(detailIdx + 1);
+                    }
+                  }}
+                >
+                  Next
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

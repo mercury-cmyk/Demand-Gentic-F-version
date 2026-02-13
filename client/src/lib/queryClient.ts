@@ -2,25 +2,28 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 async function throwIfResNotOk(res: Response, url?: string) {
   if (!res.ok) {
-    // Handle 401 Unauthorized - automatically logout and redirect to login
+    // Handle 401 Unauthorized - do NOT logout for /api/recordings/:id/stream
     if (res.status === 401) {
-      // Check if it's a client portal route, BUT exclude admin routes starting with /api/client-portal/admin/
-      const isAdminClientPortalRoute = !!url?.includes('/api/client-portal/admin/');
-      const isClientPortalRoute = !!url?.includes('/api/client-portal/') && !isAdminClientPortalRoute;
-      
-      if (isClientPortalRoute || window.location.pathname.startsWith('/client-portal/')) {
-        // Use centralized session cleanup to clear cache + localStorage
-        const { clearClientPortalSession } = await import('./client-portal-session');
-        clearClientPortalSession();
-        window.location.href = '/client-portal/login';
-      } else {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('authUser');
-        window.location.href = '/login';
+      const isStreamEndpoint = url?.match(/\/api\/recordings\/(.+)\/stream/);
+      // Only logout for non-stream endpoints
+      if (!isStreamEndpoint) {
+        // Check if it's a client portal route, BUT exclude admin routes starting with /api/client-portal/admin/
+        const isAdminClientPortalRoute = !!url?.includes('/api/client-portal/admin/');
+        const isClientPortalRoute = !!url?.includes('/api/client-portal/') && !isAdminClientPortalRoute;
+        if (isClientPortalRoute || window.location.pathname.startsWith('/client-portal/')) {
+          // Use centralized session cleanup to clear cache + localStorage
+          const { clearClientPortalSession } = await import('./client-portal-session');
+          clearClientPortalSession();
+          window.location.href = '/client-portal/login';
+        } else {
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('authUser');
+          window.location.href = '/login';
+        }
       }
+      // Always throw for 401 so caller can handle local error
       throw new Error('Session expired. Please login again.');
     }
-    
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
   }
