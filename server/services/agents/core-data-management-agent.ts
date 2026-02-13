@@ -11,6 +11,10 @@ import type {
   AgentExecutionInput,
   AgentExecutionOutput,
 } from './types';
+import {
+  AgentEndpointDescriptor,
+  renderEndpointDirectory,
+} from './endpoint-registry';
 
 // ==================== FOUNDATIONAL PROMPT ====================
 
@@ -99,9 +103,32 @@ Return a single JSON object with this structure:
 Do not execute campaigns or outreach. Focus only on data quality and readiness.
 `;
 
+const DATA_MANAGEMENT_AGENT_ENDPOINTS: AgentEndpointDescriptor[] = [
+  {
+    method: 'POST',
+    path: '/api/agents/data-management/build-prompt',
+    summary: 'Assemble data-management prompt with campaign/contact/org context',
+    handler: 'coreDataManagementAgent.execute',
+    tags: ['prompt_build', 'data_quality'],
+  },
+];
+
+const DATA_MANAGEMENT_ENDPOINT_DIRECTORY = renderEndpointDirectory(
+  'Data Management Agent',
+  DATA_MANAGEMENT_AGENT_ENDPOINTS
+);
+
 // ==================== KNOWLEDGE SECTIONS ====================
 
 export const DATA_MANAGEMENT_AGENT_KNOWLEDGE_SECTIONS: AgentKnowledgeSection[] = [
+  {
+    id: 'endpoint_registry',
+    name: 'API Endpoint Registry',
+    category: 'governance',
+    priority: 0,
+    isRequired: true,
+    content: DATA_MANAGEMENT_ENDPOINT_DIRECTORY,
+  },
   {
     id: 'data_structuring',
     name: 'Data Structuring Standards',

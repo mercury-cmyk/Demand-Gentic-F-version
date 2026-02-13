@@ -5,7 +5,7 @@
 
 import OpenAI from 'openai';
 import { db } from '../db';
-import { campaigns, clientCampaignAccess } from '@shared/schema';
+import { campaigns, clientCampaignAccess, verificationCampaigns } from '@shared/schema';
 import { eq, and, or } from 'drizzle-orm';
 
 export interface ClientEmailGenerationRequest {
@@ -115,28 +115,23 @@ function formatValue(val: unknown): string {
 }
 
 async function getCampaignContext(campaignId: string, clientAccountId: string): Promise<{ context: string; campaign: any } | null> {
-  // Verify access and get campaign
-  const [record] = await db
+  // 1. Try regular campaigns first
+  const [regularRecord] = await db
     .select({ campaign: campaigns })
     .from(campaigns)
     .innerJoin(
       clientCampaignAccess,
       and(
         eq(clientCampaignAccess.clientAccountId, clientAccountId),
-        or(
-          eq(clientCampaignAccess.regularCampaignId, campaigns.id),
-          eq(clientCampaignAccess.campaignId, campaigns.id)
-        )
+        eq(clientCampaignAccess.regularCampaignId, campaigns.id)
       )
     )
     .where(eq(campaigns.id, campaignId))
     .limit(1);
 
-  if (!record) return null;
-
-  const campaign = record.campaign;
-
-  const context = `CAMPAIGN CONTEXT:
+  if (regularRecord) {
+    const campaign = regularRecord.campaign;
+    const context = `CAMPAIGN CONTEXT:
 - Campaign Name: ${campaign.name}
 - Campaign Objective: ${campaign.campaignObjective || 'Not specified'}
 - Product/Service: ${campaign.productServiceInfo || 'Not specified'}
@@ -144,8 +139,33 @@ async function getCampaignContext(campaignId: string, clientAccountId: string): 
 - Key Talking Points: ${formatValue(campaign.talkingPoints)}
 - Success Criteria: ${campaign.successCriteria || 'Not specified'}
 - Value Proposition: ${campaign.valueProposition || 'Not specified'}`;
+    return { context, campaign };
+  }
 
-  return { context, campaign };
+  // 2. Try verification campaigns
+  const [verificationRecord] = await db
+    .select({ campaign: verificationCampaigns })
+    .from(verificationCampaigns)
+    .innerJoin(
+      clientCampaignAccess,
+      and(
+        eq(clientCampaignAccess.clientAccountId, clientAccountId),
+        eq(clientCampaignAccess.campaignId, verificationCampaigns.id)
+      )
+    )
+    .where(eq(verificationCampaigns.id, campaignId))
+    .limit(1);
+
+  if (verificationRecord) {
+    const campaign = verificationRecord.campaign;
+    const context = `CAMPAIGN CONTEXT:
+- Campaign Name: ${campaign.name}
+- Campaign Type: Verification / Appointment Setting
+- Status: ${campaign.status || 'active'}`;
+    return { context, campaign };
+  }
+
+  return null;
 }
 
 /**

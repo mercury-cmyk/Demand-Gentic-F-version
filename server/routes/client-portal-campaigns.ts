@@ -24,8 +24,15 @@ import {
 } from '@shared/schema';
 import { z } from 'zod';
 import { isFeatureEnabled } from '../feature-flags';
+import multer from 'multer';
 
 const router = Router();
+
+// Multer config for campaign file uploads (memory storage — no cloud storage)
+const campaignUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
+});
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -889,6 +896,280 @@ router.post('/voice-preview', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[CLIENT CAMPAIGNS] Voice preview error:', error);
     res.status(500).json({ message: 'Failed to generate voice preview' });
+  }
+});
+
+/**
+ * POST /quick-create - Simplified campaign creation from client portal
+ *
+ * Creates a project (pending approval) + work order in one step.
+ * Both campaign creation and work order creation require project approval.
+ * Simplified mandatory fields only — most config is optional.
+ */
+router.post('/quick-create', campaignUpload.array('files', 10), async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    const clientUserId = req.clientUser?.clientUserId;
+
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Parse JSON payload from multipart 'data' field, falling back to req.body
+    const rawPayload = req.body.data ? JSON.parse(req.body.data) : req.body;
+
+    // Simplified schema — only essential fields are required
+    const quickCreateSchema = z.object({
+      // Required
+      name: z.string().min(1, 'Campaign name is required'),
+      channel: z.enum(['voice', 'email', 'combo']),
+      objective: z.string().min(1, 'Campaign objective is required'),
+
+      // Optional — everything else
+      description: z.string().optional(),
+      campaignType: z.string().optional(),
+      targetAudience: z.string().optional(),
+      targetLeadCount: z.number().optional(),
+      targetIndustries: z.array(z.string()).optional(),
+      targetTitles: z.array(z.string()).optional(),
+      targetRegions: z.array(z.string()).optional(),
+      targetCompanySize: z.string().optional(),
+      talkingPoints: z.array(z.string()).optional(),
+      successCriteria: z.string().optional(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      budget: z.number().optional(),
+      priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+
+      // Email-specific (optional)
+      emailSubject: z.string().optional(),
+      emailBody: z.string().optional(),
+
+      // Voice-specific (optional)
+      selectedVoice: z.string().optional(),
+      callScript: z.string().optional(),
+
+      // Whether to create a new project or link to existing
+      projectId: z.string().optional(),
+
+      // URLs (optional)
+      referenceUrls: z.array(z.string()).optional(),
+      landingPageUrl: z.string().optional(),
+    });
+
+    const data = quickCreateSchema.parse(rawPayload);
+
+    // --- Step 1: Create or link project (pending approval) ---
+    let projectId = data.projectId;
+
+    if (!projectId) {
+      // Auto-create a project from campaign info
+      const { clientProjects } = await import('@shared/schema');
+      const [newProject] = await db
+        .insert(clientProjects)
+        .values({
+          clientAccountId,
+          name: data.name,
+          description: data.description || data.objective,
+          status: 'pending',
+          requestedLeadCount: data.targetLeadCount || null,
+          budgetAmount: data.budget ? data.budget.toString() : null,
+        })
+        .returning();
+
+      projectId = newProject.id;
+
+      // Notify admins about new project needing approval
+      try {
+        const [account] = await db
+          .select({ name: clientAccounts.name })
+          .from(clientAccounts)
+          .where(eq(clientAccounts.id, clientAccountId));
+
+        // Log for admin visibility
+        console.log(`[CLIENT CAMPAIGNS] Quick-create: Project "${newProject.name}" created (pending approval) for ${account?.name || clientAccountId}`);
+      } catch (notifyErr) {
+        console.error('[CLIENT CAMPAIGNS] Notification error:', notifyErr);
+      }
+    } else {
+      // Verify client owns the referenced project
+      const { clientProjects } = await import('@shared/schema');
+      const [existingProject] = await db
+        .select({ id: clientProjects.id, status: clientProjects.status })
+        .from(clientProjects)
+        .where(
+          and(
+            eq(clientProjects.id, projectId),
+            eq(clientProjects.clientAccountId, clientAccountId)
+          )
+        )
+        .limit(1);
+
+      if (!existingProject) {
+        return res.status(404).json({ message: 'Project not found or access denied' });
+      }
+
+      // Project must be approved (active) for immediate campaign creation
+      // If still pending, the work order is created but won't be processed until approval
+      if (existingProject.status === 'rejected') {
+        return res.status(400).json({ message: 'Cannot create campaign under a rejected project' });
+      }
+    }
+
+    // --- Step 2: Create work order with campaign config ---
+    const orderNumber = await generateOrderNumber();
+
+    const defaultCampaignType = data.channel === 'email'
+      ? 'email'
+      : data.channel === 'combo'
+        ? 'combo'
+        : 'call';
+
+    const campaignConfig: Record<string, unknown> = {
+      channel: data.channel,
+      campaignType: data.campaignType || defaultCampaignType,
+      objective: data.objective,
+      talkingPoints: data.talkingPoints?.filter((p: string) => p.trim()) || [],
+      successCriteria: data.successCriteria || '',
+      targetAudience: data.targetAudience || '',
+      audienceSource: 'request_handling',
+    };
+
+    // Add channel-specific config
+    if (data.channel === 'email' || data.channel === 'combo') {
+      campaignConfig.emailSubject = data.emailSubject || '';
+      campaignConfig.emailBody = data.emailBody || '';
+    }
+    if (data.channel === 'voice' || data.channel === 'combo') {
+      campaignConfig.aiAgent = {
+        voice: data.selectedVoice || 'Aoede',
+        persona: 'professional',
+        tone: 'professional',
+        openingScript: data.callScript || '',
+      };
+    }
+
+    // Add URLs
+    if (data.referenceUrls?.length) campaignConfig.referenceUrls = data.referenceUrls;
+    if (data.landingPageUrl) campaignConfig.landingPageUrl = data.landingPageUrl;
+
+    // Store uploaded file attachments as base64 in campaignConfig (no cloud storage)
+    const uploadedFiles = req.files as Express.Multer.File[] | undefined;
+    const fileCategories: string[] = Array.isArray(req.body.fileCategories)
+      ? req.body.fileCategories
+      : req.body.fileCategories
+        ? [req.body.fileCategories]
+        : [];
+
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      campaignConfig.attachments = uploadedFiles.map((f, i) => ({
+        name: f.originalname,
+        size: f.size,
+        type: f.mimetype,
+        category: fileCategories[i] || 'asset',
+        data: f.buffer.toString('base64'),
+      }));
+    }
+
+    const [newOrder] = await db
+      .insert(workOrders)
+      .values({
+        orderNumber,
+        clientAccountId,
+        clientUserId,
+        title: data.name,
+        description: data.description || data.objective,
+        orderType: mapChannelToOrderType(data.channel, data.campaignType || defaultCampaignType),
+        priority: data.priority,
+        status: 'submitted',
+        projectId,
+        targetIndustries: data.targetIndustries?.length ? data.targetIndustries : null,
+        targetTitles: data.targetTitles?.length ? data.targetTitles : null,
+        targetCompanySize: data.targetCompanySize || null,
+        targetRegions: data.targetRegions?.length ? data.targetRegions : null,
+        targetLeadCount: data.targetLeadCount || null,
+        requestedStartDate: data.startDate || null,
+        requestedEndDate: data.endDate || null,
+        estimatedBudget: data.budget ? data.budget.toString() : null,
+        campaignConfig,
+        submittedAt: new Date(),
+      })
+      .returning();
+
+    // --- Step 3: Log activity ---
+    try {
+      const { clientPortalActivityLogs } = await import('@shared/schema');
+      await db.insert(clientPortalActivityLogs).values({
+        clientAccountId,
+        clientUserId: clientUserId || null,
+        entityType: 'campaign',
+        entityId: newOrder.id,
+        action: 'campaign_quick_created',
+        details: {
+          name: data.name,
+          channel: data.channel,
+          projectId,
+          orderNumber,
+          requiresApproval: true,
+        },
+      });
+    } catch (logErr) {
+      console.error('[CLIENT CAMPAIGNS] Activity log error:', logErr);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Campaign submitted successfully. It will be activated after project approval.',
+      campaign: {
+        id: newOrder.id,
+        orderNumber: newOrder.orderNumber,
+        name: newOrder.title,
+        status: newOrder.status,
+        channel: data.channel,
+        type: data.campaignType || defaultCampaignType,
+        projectId,
+        requiresApproval: true,
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation failed', errors: error.errors });
+    }
+    console.error('[CLIENT CAMPAIGNS] Quick-create error:', error);
+    res.status(500).json({ message: 'Failed to create campaign' });
+  }
+});
+
+/**
+ * GET /projects-for-campaign - List approved projects for campaign linking
+ */
+router.get('/projects-for-campaign', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { clientProjects } = await import('@shared/schema');
+
+    const projects = await db
+      .select({
+        id: clientProjects.id,
+        name: clientProjects.name,
+        status: clientProjects.status,
+        description: clientProjects.description,
+      })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.clientAccountId, clientAccountId),
+          inArray(clientProjects.status, ['active', 'pending', 'draft'])
+        )
+      )
+      .orderBy(desc(clientProjects.createdAt));
+
+    res.json(projects);
+  } catch (error) {
+    console.error('[CLIENT CAMPAIGNS] Projects list error:', error);
+    res.status(500).json({ message: 'Failed to fetch projects' });
   }
 });
 

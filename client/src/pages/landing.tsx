@@ -54,7 +54,7 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human-Led Strategy. AI-Powered Execution.</span>
+              <span className="text-[10px] text-muted-foreground font-medium">DemandGentic---Human-Led Strategy. AI-Powered Execution.</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -65,8 +65,8 @@ export default function LandingPage() {
             <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">About</a>
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => setLocation("/login")}>
-              Sign In
+            <Button variant="ghost" onClick={() => setLocation("/client-portal/login")}>
+              Client Login
             </Button>
             <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
               Schedule Demo
@@ -90,7 +90,7 @@ export default function LandingPage() {
           <div className="text-center max-w-4xl mx-auto">
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
-              Human-Led Strategy. AI-Powered Execution.
+              DemandGentic---Human-Led Strategy. AI-Powered Execution.
             </Badge>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
@@ -290,7 +290,7 @@ export default function LandingPage() {
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
               We are not just a platform — we are The Problem Solvers.
-              Human-Led Strategy, AI-Powered Execution: organization intelligence powers every agent,
+              DemandGentic---Human-Led Strategy, AI-Powered Execution: organization intelligence powers every agent,
               every voice conversation, every piece of content, and every pipeline decision.
               Truth, human-to-human connection, and empathy are never optional — they're the foundation.
             </p>
@@ -387,7 +387,7 @@ export default function LandingPage() {
           <div className="p-8 rounded-3xl bg-slate-900 text-white">
             <div className="text-center mb-8">
               <h3 className="text-2xl font-bold mb-2">How It Comes Together</h3>
-              <p className="text-slate-400">Human-Led Strategy. AI-Powered Execution — from reasoning to qualified pipeline</p>
+              <p className="text-slate-400">DemandGentic---Human-Led Strategy. AI-Powered Execution --- from reasoning to qualified pipeline</p>
             </div>
             <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
               {[
@@ -1066,7 +1066,7 @@ export default function LandingPage() {
 
           <div className="text-center p-8 rounded-2xl bg-slate-900 text-white">
             <p className="text-2xl font-bold">
-              Human-Led Strategy. AI-Powered Execution.{" "}
+              DemandGentic---Human-Led Strategy. AI-Powered Execution.{" "}
               <span className="text-violet-400">We are The Problem Solvers.</span>
             </p>
           </div>
@@ -1189,7 +1189,7 @@ export default function LandingPage() {
                 </div>
                 <div className="flex flex-col">
                   <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
-                  <span className="text-[10px] text-slate-400 font-medium">Human-Led Strategy. AI-Powered Execution.</span>
+                  <span className="text-[10px] text-slate-400 font-medium">DemandGentic---Human-Led Strategy. AI-Powered Execution.</span>
                 </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">

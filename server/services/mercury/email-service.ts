@@ -50,22 +50,27 @@ export class MercuryEmailService {
 
     try {
       const provider = await this.getDefaultProvider();
-      if (!provider) {
-        return { success: false, error: 'No active SMTP provider configured' };
-      }
 
-      // Rate limit check
-      const rateLimitCheck = await smtpOAuthService.checkRateLimits(provider);
-      if (!rateLimitCheck.allowed) {
-        return { success: false, error: `Rate limit exceeded: ${rateLimitCheck.reason}` };
+      let transporter;
+      if (provider) {
+        // Rate limit check (only for DB providers)
+        const rateLimitCheck = await smtpOAuthService.checkRateLimits(provider);
+        if (!rateLimitCheck.allowed) {
+          return { success: false, error: `Rate limit exceeded: ${rateLimitCheck.reason}` };
+        }
+        transporter = await smtpOAuthService.createTransporter(provider);
+      } else {
+        // Fallback: use SMTP_HOST/SMTP_USER/SMTP_PASS env vars
+        transporter = smtpOAuthService.createEnvTransporter();
+        if (!transporter) {
+          return { success: false, error: 'No active SMTP provider configured and SMTP_HOST/SMTP_USER/SMTP_PASS env vars are not set' };
+        }
       }
-
-      const transporter = await smtpOAuthService.createTransporter(provider);
 
       const mailOptions = {
         from: {
           name: request.fromName || MERCURY_DEFAULTS.fromName,
-          address: request.fromEmail || MERCURY_DEFAULTS.fromEmail,
+          address: request.fromEmail || (provider?.emailAddress || process.env.SMTP_USER || MERCURY_DEFAULTS.fromEmail),
         },
         to: request.to,
         cc: request.cc?.join(', '),
@@ -78,8 +83,10 @@ export class MercuryEmailService {
 
       const info = await transporter.sendMail(mailOptions);
 
-      // Update rate limits
-      await smtpOAuthService.updateRateLimits(provider.id);
+      // Update rate limits (only for DB providers)
+      if (provider) {
+        await smtpOAuthService.updateRateLimits(provider.id);
+      }
 
       console.log(`[Mercury] Email sent: to=${request.to}, subject="${request.subject.substring(0, 50)}...", messageId=${info.messageId}`);
 
@@ -345,30 +352,55 @@ export class MercuryEmailService {
    */
   async verifyConnection(): Promise<SmtpConnectionStatus> {
     const provider = await this.getDefaultProvider();
-    if (!provider) {
+
+    // If we have a DB provider, test that
+    if (provider) {
+      try {
+        await smtpOAuthService.testConnection(provider);
+        return {
+          configured: true,
+          verified: true,
+          providerName: provider.name,
+          fromEmail: provider.emailAddress || MERCURY_DEFAULTS.fromEmail,
+          lastVerifiedAt: new Date(),
+        };
+      } catch (error: any) {
+        return {
+          configured: true,
+          verified: false,
+          providerName: provider.name,
+          fromEmail: provider.emailAddress || MERCURY_DEFAULTS.fromEmail,
+          error: error.message,
+        };
+      }
+    }
+
+    // Fallback: try env-var SMTP
+    const envTransporter = smtpOAuthService.createEnvTransporter();
+    if (!envTransporter) {
       return {
         configured: false,
         verified: false,
         fromEmail: MERCURY_DEFAULTS.fromEmail,
-        error: 'No active SMTP provider configured',
+        error: 'No active SMTP provider configured and SMTP_HOST/SMTP_USER/SMTP_PASS env vars are not set',
       };
     }
 
     try {
-      const result = await smtpOAuthService.testConnection(provider);
+      await envTransporter.verify();
       return {
         configured: true,
         verified: true,
-        providerName: provider.name,
-        fromEmail: provider.emailAddress || MERCURY_DEFAULTS.fromEmail,
+        providerName: `ENV (${process.env.SMTP_HOST})`,
+        fromEmail: process.env.SMTP_USER || MERCURY_DEFAULTS.fromEmail,
         lastVerifiedAt: new Date(),
       };
     } catch (error: any) {
       return {
         configured: true,
         verified: false,
-        providerName: provider.name,
-        fromEmail: provider.emailAddress || MERCURY_DEFAULTS.fromEmail,
+        providerName: `ENV (${process.env.SMTP_HOST})`,
+        fromEmail: process.env.SMTP_USER || MERCURY_DEFAULTS.fromEmail,
         error: error.message,
       };
     }

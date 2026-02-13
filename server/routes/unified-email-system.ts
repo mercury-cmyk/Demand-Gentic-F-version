@@ -2,10 +2,13 @@ import { Router, Request, Response } from "express";
 import { smtpProvidersRouter } from "./mercury-bridge";
 import mercuryRouter, { seedDefaultTemplates } from "./mercury-bridge";
 import transactionalTemplatesRouter from "./transactional-templates";
-import { requireAuth } from "../auth";
+import { requireAuth, hashPassword } from "../auth";
 import { requireFeatureFlag } from "../feature-flags";
 import { bulkInvitationService } from "../services/mercury/invitation-service";
 import { z } from "zod";
+import { db } from "../db";
+import { clientUsers, clientAccounts, mercuryInvitationTokens } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 /**
  * Unified Communications Router
@@ -14,15 +17,124 @@ import { z } from "zod";
  * into a single unified API surface at /api/communications.
  *
  * Sub-routes:
- *   /smtp-providers   — SMTP provider CRUD, OAuth, verification
- *   /mercury          — Mercury notifications, templates, bulk invitations, rules, logs
- *   /templates        — Transactional email templates CRUD, send, logs, stats
- *   /onboarding       — Template seeding for initial setup
- *   /invitations      — Single-user invitation preview and send
+ *   /smtp-providers     — SMTP provider CRUD, OAuth, verification
+ *   /mercury            — Mercury notifications, templates, bulk invitations, rules, logs
+ *   /templates          — Transactional email templates CRUD, send, logs, stats
+ *   /onboarding         — Template seeding for initial setup
+ *   /invitations        — Single-user invitation preview, send, accept (public)
  */
 const router = Router();
 
-// Apply authentication to all routes
+// =============================================================================
+// PUBLIC ROUTES (No authentication required — accessed by invited users)
+// =============================================================================
+
+/**
+ * POST /api/communications/invitations/validate-token
+ * Validate an invitation token and return user info for the setup form.
+ * PUBLIC — no auth required (this is the first thing an invited user hits).
+ */
+router.post("/invitations/validate-token", async (req: Request, res: Response) => {
+  try {
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ valid: false, reason: "Token is required" });
+    }
+
+    const result = await bulkInvitationService.validateToken(token);
+    if (!result.valid) {
+      return res.json(result);
+    }
+
+    // Fetch user details to populate the setup form
+    const [user] = await db
+      .select({
+        id: clientUsers.id,
+        email: clientUsers.email,
+        firstName: clientUsers.firstName,
+        lastName: clientUsers.lastName,
+        clientAccountId: clientUsers.clientAccountId,
+        accountName: clientAccounts.name,
+      })
+      .from(clientUsers)
+      .leftJoin(clientAccounts, eq(clientUsers.clientAccountId, clientAccounts.id))
+      .where(eq(clientUsers.id, result.clientUserId!))
+      .limit(1);
+
+    if (!user) {
+      return res.json({ valid: false, reason: "User account not found" });
+    }
+
+    res.json({
+      valid: true,
+      user: {
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        companyName: user.accountName || 'Your Organization',
+      },
+    });
+  } catch (error: any) {
+    console.error("[Communications/Invitations] Validate token error:", error.message);
+    res.status(500).json({ valid: false, reason: "Server error" });
+  }
+});
+
+/**
+ * POST /api/communications/invitations/accept
+ * Accept an invitation: set password, update profile, mark token used.
+ * PUBLIC — no auth required (the invited user is setting up their account).
+ */
+const acceptInviteSchema = z.object({
+  token: z.string().min(1, "Invitation token is required"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+});
+
+router.post("/invitations/accept", async (req: Request, res: Response) => {
+  try {
+    const parsed = acceptInviteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    }
+
+    const { token, password, firstName, lastName } = parsed.data;
+
+    // Validate the token
+    const validation = await bulkInvitationService.validateToken(token);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: validation.reason || "Invalid invitation" });
+    }
+
+    // Hash password and update user
+    const hashedPassword = await hashPassword(password);
+
+    await db
+      .update(clientUsers)
+      .set({
+        password: hashedPassword,
+        firstName,
+        lastName,
+        updatedAt: new Date(),
+      })
+      .where(eq(clientUsers.id, validation.clientUserId!));
+
+    // Mark invitation token as used
+    await bulkInvitationService.markTokenUsed(token);
+
+    console.log(`[Communications/Invitations] Invitation accepted for user ${validation.clientUserId}`);
+
+    res.json({ success: true, message: "Account setup complete. You can now log in." });
+  } catch (error: any) {
+    console.error("[Communications/Invitations] Accept invite error:", error.message);
+    res.status(500).json({ success: false, error: "Failed to set up account. Please try again." });
+  }
+});
+
+// =============================================================================
+// AUTHENTICATED ROUTES
+// =============================================================================
 router.use(requireAuth);
 
 // 1. SMTP Providers Management

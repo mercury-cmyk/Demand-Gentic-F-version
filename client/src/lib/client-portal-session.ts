@@ -45,7 +45,7 @@ export function getClientPortalUser(): ClientPortalUser | null {
 // ─── Session Lifecycle ───────────────────────────────────────────────────────
 
 /**
- * Clear ALL client portal session state.
+ * Clear client portal session state.
  * Call on:
  *   - explicit logout
  *   - BEFORE setting new user on login (to flush previous tenant's cache)
@@ -61,10 +61,22 @@ export function clearClientPortalSession(): void {
   // 2. Remove feature / interaction keys
   localStorage.removeItem(DEMAND_ASSISTANT_KEY);
 
-  // 3. Clear ALL React Query cache — this is critical.
-  //    Without this, feature probes (argyle, UKEF), campaigns, orders, etc.
-  //    from the previous tenant persist and cause stale nav / data bleed.
-  queryClient.clear();
+  // 3. Clear only client-portal-related React Query cache.
+  //    Previously this called queryClient.clear() which wiped ALL cache,
+  //    including admin auth state — causing admin users to be logged out
+  //    when using "Login as Client" from the client management page.
+  //    Now we selectively remove only client-portal and tenant-specific query keys.
+  queryClient.removeQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      if (!key || key.length === 0) return false;
+      const firstKey = String(key[0]);
+      return firstKey.includes('client-portal') ||
+             firstKey.includes('/api/client-portal') ||
+             firstKey.startsWith('argyle-') ||
+             firstKey.startsWith('ukef-');
+    },
+  });
 }
 
 /**

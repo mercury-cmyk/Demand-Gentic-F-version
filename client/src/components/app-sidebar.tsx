@@ -400,7 +400,7 @@ export function AppSidebar({ userRoles = ["admin"] }: AppSidebarProps) {
               // Collapsed: Show only logo icon
               <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 hover:bg-primary/20 transition-all duration-300 cursor-pointer group border border-primary/10">
                 <div className="relative flex items-center justify-center">
-                  <span className="font-bold text-xl text-primary tracking-tighter">DG</span>
+                  <span className="font-bold text-xl text-primary tracking-tighter">PB</span>
                   <Sparkles className="h-2.5 w-2.5 text-blue-500 absolute -top-1 -right-2 animate-pulse" />
                 </div>
               </div>
@@ -420,7 +420,7 @@ export function AppSidebar({ userRoles = ["admin"] }: AppSidebarProps) {
                     </span>
                   </div>
                   <span className="text-[10px] text-muted-foreground leading-3 font-medium pl-1 opacity-80 mt-1">
-                    Human-Led Strategy. <br/>AI-Powered Execution.
+                    DemandGentic---Human-Led Strategy.<br/>AI-Powered Execution.
                   </span>
                 </div>
 

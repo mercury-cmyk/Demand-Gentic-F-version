@@ -30,94 +30,239 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
   {
     templateKey: 'client_invite',
     name: 'Client Portal Invitation',
-    description: 'Invitation email sent to client users to access the client portal.',
+    description: 'Premium invitation email sent to client users to set up their portal account.',
     category: 'invitation',
-    subjectTemplate: 'You\'re invited to the {{companyName}} Client Portal',
+    subjectTemplate: '{{companyName}} — Your Client Portal is Ready',
     htmlTemplate: `<!DOCTYPE html>
-<html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
 <head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<![endif]-->
 <style>
-@media only screen and (max-width: 600px) {
-  .main-table { width: 100% !important; }
-  .mobile-padding { padding: 20px !important; }
-  .mobile-header { padding: 32px 20px !important; }
-  .mobile-text { font-size: 16px !important; }
+:root { color-scheme: light only; }
+@media only screen and (max-width: 620px) {
+  .main-table { width: 100% !important; min-width: 100% !important; }
+  .mobile-padding { padding: 24px 20px !important; }
+  .mobile-header { padding: 40px 24px !important; }
+  .mobile-text { font-size: 15px !important; line-height: 1.6 !important; }
+  .mobile-btn { padding: 14px 32px !important; }
+  .feature-cell { display: block !important; width: 100% !important; padding: 8px 0 !important; }
 }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap { background-color: #ffffff !important; }
+  .card-wrap td { background-color: #ffffff !important; }
+  h1, h2, h3, p, td, span, a { color: inherit !important; }
+  .header-band { background-color: #1e293b !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .header-band p { color: #cbd5e1 !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #475569 !important; }
+  .cta-btn { background-color: #2563eb !important; color: #ffffff !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #1e293b !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .header-band p { color: #cbd5e1 !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #475569 !important; }
+[data-ogsc] .cta-btn { background-color: #2563eb !important; color: #ffffff !important; }
 </style>
 </head>
-<body style="margin:0; padding:0; background-color:#f9fafb;">
+<body style="margin:0; padding:0; background-color:#f0f2f5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;">
   <!-- Preheader -->
-  <div style="display:none; font-size:1px; color:#f9fafb; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden;">
-    Invited to Pivotal B2B Client Portal.
+  <div style="display:none; font-size:1px; color:#f0f2f5; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">
+    Your personalized workspace is ready — set up your account to access campaigns, leads, and real-time analytics.
   </div>
 
-  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f9fafb; min-height:100vh;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;">
     <tr>
-      <td align="center" style="padding: 20px 0;">
-        <!-- Main Container -->
-        <table role="presentation" class="main-table" width="600" border="0" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin: 0 auto;">
-          
-          <!-- Header -->
-          <tr>
-            <td class="mobile-header" style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 48px 32px; text-align: center;">
-              <h1 style="color: #ffffff; margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 28px; font-weight: 700;">Welcome Aboard</h1>
-              <p style="color: #bfdbfe; margin: 12px 0 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px;">Pivotal B2B Client Portal</p>
-            </td>
-          </tr>
+      <td align="center" style="padding: 32px 16px;">
 
-          <!-- Content -->
+        <!-- Main Card -->
+        <table role="presentation" class="main-table card-wrap" width="600" border="0" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border-radius:16px;">
+
+          <!-- Header Band -->
           <tr>
-            <td class="mobile-padding" style="padding: 40px 32px; text-align: center;">
-              <!-- Emoji Icon -->
+            <td class="mobile-header header-band" style="background-color:#1e293b; padding: 52px 40px; text-align: center;">
               <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
                 <tr>
-                  <td align="center" style="padding-bottom: 24px;">
-                     <div style="width: 64px; height: 64px; background-color: #eff6ff; border-radius: 50%; line-height: 64px; font-size: 32px;">👋</div>
+                  <td align="center" style="padding-bottom: 16px;">
+                    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin:0 auto;"><tr><td style="width:56px; height:56px; background-color:#293548; border-radius:14px; text-align:center; vertical-align:middle; font-size:28px; line-height:56px;">&#9889;</td></tr></table>
                   </td>
                 </tr>
-              </table>
-
-              <h2 style="margin: 0 0 16px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 20px; color: #111827; font-weight: 600;">Hi {{firstName}},</h2>
-              
-              <p class="mobile-text" style="margin: 0 0 32px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #4b5563;">
-                You've been invited to join the <strong>{{companyName}}</strong> workspace. 
-                Access your dashboard to track campaigns, review leads, and monitor performance in real-time.
-              </p>
-
-              <!-- Button -->
-              <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin: 0 auto;">
                 <tr>
-                  <td align="center" style="border-radius: 50px; background-color: #2563eb;">
-                    <a href="{{inviteLink}}" target="_blank" style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 50px; display: inline-block; border: 1px solid #2563eb;">
-                      Get Started Now
-                    </a>
+                  <td align="center">
+                    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:26px; font-weight:700; letter-spacing:-0.3px;">Your Portal is Ready</h1>
+                    <p style="color:#cbd5e1; margin:10px 0 0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; font-weight:400;">Pivotal B2B &middot; DemandGentic.ai</p>
                   </td>
                 </tr>
               </table>
-
-              <p style="margin: 32px 0 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; color: #6b7280;">
-                Link valid for <strong>{{expiryDays}} days</strong>.
-              </p>
             </td>
           </tr>
 
-          <!-- Footer Link Fallback -->
+          <!-- Body Content -->
           <tr>
-            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #f3f4f6;">
-              <p style="margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #9ca3af; line-height: 1.5;">
-                Button not working? Copy and paste this link:<br>
-                <a href="{{inviteLink}}" style="color: #2563eb; text-decoration: none; word-break: break-all;">{{inviteLink}}</a>
+            <td class="mobile-padding" style="padding: 44px 40px 20px;">
+              <h2 class="body-text" style="margin:0 0 8px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:20px; color:#0f172a; font-weight:600;">Hi {{firstName}},</h2>
+
+              <p class="mobile-text body-text-light" style="margin:0 0 28px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; line-height:1.7; color:#475569;">
+                You've been invited to the <strong style="color:#0f172a;">{{companyName}}</strong> workspace on our demand generation platform. Your account is ready — just set your password to get started.
+              </p>
+
+              <!-- CTA Button -->
+              <table role="presentation" border="0" cellspacing="0" cellpadding="0" width="100%">
+                <tr>
+                  <td align="center" style="padding: 4px 0 32px;">
+                    <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td align="center">
+                          <!--[if mso]>
+                          <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{inviteLink}}" style="height:52px;v-text-anchor:middle;width:260px;" arcsize="19%" stroke="f" fillcolor="#2563eb">
+                          <w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;">Set Up My Account</center>
+                          </v:roundrect>
+                          <![endif]-->
+                          <!--[if !mso]><!-->
+                          <a href="{{inviteLink}}" target="_blank" class="mobile-btn cta-btn" style="font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:16px; font-weight:600; color:#ffffff; text-decoration:none; padding:16px 44px; border-radius:10px; display:inline-block; letter-spacing:0.2px; background-color:#2563eb;">
+                            Set Up My Account
+                          </a>
+                          <!--<![endif]-->
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Feature Highlights -->
+          <tr>
+            <td class="mobile-padding" style="padding: 0 40px 36px;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc; border-radius:12px; border: 1px solid #e2e8f0;">
+                <tr>
+                  <td style="padding: 24px 28px 8px;">
+                    <p style="margin:0 0 16px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.8px;">What you'll get access to</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 28px 24px;">
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">Real-time campaign dashboard</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">Lead review &amp; approvals</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">Call recordings &amp; analytics</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td class="feature-cell" style="padding: 6px 0; vertical-align:top; width:50%;">
+                          <table role="presentation" border="0" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td style="width:28px; vertical-align:top; padding-top:2px;">
+                                <div style="width:20px; height:20px; background-color:#dbeafe; border-radius:50%; text-align:center; line-height:20px; font-size:11px;">&#10003;</div>
+                              </td>
+                              <td style="padding-left:8px;">
+                                <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; color:#334155; line-height:1.4;">AI-powered reporting</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Expiry Notice -->
+          <tr>
+            <td class="mobile-padding" style="padding: 0 40px 32px;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="background-color:#fffbeb; border-radius:8px; border: 1px solid #fde68a; padding: 14px 20px;">
+                    <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; color:#92400e; line-height:1.5;">
+                      <strong>Heads up:</strong> This invitation link expires in <strong>{{expiryDays}} days</strong>. After that, you'll need to request a new one.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding: 0 40px;">
+              <div style="border-top: 1px solid #e2e8f0;"></div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px 40px 32px; text-align: center;">
+              <p style="margin:0 0 8px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:12px; color:#94a3b8; line-height:1.5;">
+                Button not working? Copy and paste this link into your browser:
+              </p>
+              <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:12px; line-height:1.5;">
+                <a href="{{inviteLink}}" style="color:#2563eb; text-decoration:none; word-break:break-all;">{{inviteLink}}</a>
               </p>
             </td>
           </tr>
         </table>
 
-        <!-- Copyright -->
-        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+        <!-- Below-Card Footer -->
+        <table role="presentation" width="600" class="main-table" border="0" cellspacing="0" cellpadding="0">
           <tr>
-            <td align="center" style="padding-top: 24px; padding-bottom: 24px;">
-              <p style="margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #9ca3af;">
+            <td align="center" style="padding: 28px 20px;">
+              <p style="margin:0 0 4px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:12px; color:#94a3b8;">
+                Pivotal B2B &middot; DemandGentic.ai Platform
+              </p>
+              <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#cbd5e1;">
                 &copy; 2026 Pivotal B2B. All rights reserved.
               </p>
             </td>
@@ -129,20 +274,30 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
   </table>
 </body>
 </html>`,
-    textTemplate: `Welcome to Pivotal B2B
+    textTemplate: `Your Client Portal is Ready
+===========================
 
 Hi {{firstName}},
 
-You've been invited to join the {{companyName}} workspace on Pivotal B2B.
+You've been invited to the {{companyName}} workspace on the Pivotal B2B demand generation platform.
 
-Access your dashboard to track campaigns, review leads, and monitor performance in real-time.
+Your account is ready — just click the link below to set your password and get started.
 
-Get Started: {{inviteLink}}
+Set Up Your Account: {{inviteLink}}
 
-This invitation is valid for {{expiryDays}} days.
+What you'll get access to:
+- Real-time campaign dashboard
+- Lead review & approvals
+- Call recordings & analytics
+- AI-powered reporting
+
+This invitation link expires in {{expiryDays}} days.
 
 If you have trouble with the link, copy and paste this URL into your browser:
-{{inviteLink}}`,
+{{inviteLink}}
+
+--
+Pivotal B2B - DemandGentic.ai Platform`,
     variables: [
       { name: 'firstName', description: 'Recipient first name', required: true, exampleValue: 'Jane' },
       { name: 'lastName', description: 'Recipient last name', required: false, exampleValue: 'Smith' },
@@ -159,35 +314,58 @@ If you have trouble with the link, copy and paste this URL into your browser:
     description: 'Notification sent to client when their project/campaign request is approved by admin.',
     category: 'notification',
     subjectTemplate: 'Your project "{{projectName}}" has been approved!',
-    htmlTemplate: `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); padding: 24px 32px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Project Approved ✓</h1>
-  </div>
-  <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-    <p style="font-size: 16px; color: #374151;">Hi {{recipientName}},</p>
-    <p style="font-size: 14px; color: #4b5563; line-height: 1.6;">
-      Great news! Your project request <strong>"{{projectName}}"</strong> has been approved.
-    </p>
-    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 16px; margin: 16px 0;">
-      <p style="margin: 4px 0; font-size: 14px; color: #166534;"><strong>Project:</strong> {{projectName}}</p>
-      <p style="margin: 4px 0; font-size: 14px; color: #166534;"><strong>Approved on:</strong> {{approvalDate}}</p>
-      {{#if approvedBy}}
-      <p style="margin: 4px 0; font-size: 14px; color: #166534;"><strong>Approved by:</strong> {{approvedBy}}</p>
-      {{/if}}
-    </div>
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #059669 !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+  .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #059669 !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+[data-ogsc] .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#059669; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">Project Approved</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">Hi {{recipientName}},</p>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px;">Great news! Your project request <strong>"{{projectName}}"</strong> has been approved.</p>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:16px 0;"><tr><td style="background-color:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:16px;">
+      <p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Project:</strong> {{projectName}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Approved on:</strong> {{approvalDate}}</p>
+      {{#if approvedBy}}<p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Approved by:</strong> {{approvedBy}}</p>{{/if}}
+    </td></tr></table>
     {{#if portalLink}}
-    <div style="text-align: center; margin: 24px 0;">
-      <a href="{{portalLink}}" style="background-color: #059669; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-size: 15px; font-weight: 600; display: inline-block;">
-        View in Client Portal
-      </a>
-    </div>
+    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin:24px 0;" align="center"><tr><td align="center">
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{portalLink}}" style="height:44px;v-text-anchor:middle;width:220px;" arcsize="14%" stroke="f" fillcolor="#059669"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;">View in Client Portal</center></v:roundrect><![endif]-->
+      <!--[if !mso]><!--><a href="{{portalLink}}" style="background-color:#059669; color:#ffffff; padding:12px 28px; border-radius:6px; text-decoration:none; font-size:15px; font-weight:600; display:inline-block; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">View in Client Portal</a><!--<![endif]-->
+    </td></tr></table>
     {{/if}}
-    <p style="font-size: 13px; color: #6b7280;">
-      Your campaign is now being set up. We'll notify you when leads start coming in.
-    </p>
-  </div>
-</div>`,
+    <p style="font-size:13px; color:#6b7280; margin:16px 0 0;">Your campaign is now being set up. We'll notify you when leads start coming in.</p>
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
     textTemplate: `Hi {{recipientName}},
 
 Great news! Your project request "{{projectName}}" has been approved.
@@ -212,26 +390,50 @@ Your campaign is now being set up. We'll notify you when leads start coming in.`
     description: 'Notification sent to client when their project/campaign request is rejected.',
     category: 'notification',
     subjectTemplate: 'Update on your project "{{projectName}}"',
-    htmlTemplate: `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #9333ea 0%, #a855f7 100%); padding: 24px 32px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Project Update</h1>
-  </div>
-  <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-    <p style="font-size: 16px; color: #374151;">Hi {{recipientName}},</p>
-    <p style="font-size: 14px; color: #4b5563; line-height: 1.6;">
-      We've reviewed your project request <strong>"{{projectName}}"</strong> and unfortunately we're unable to proceed with it at this time.
-    </p>
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #7c3aed !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #7c3aed !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#7c3aed; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">Project Update</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">Hi {{recipientName}},</p>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px;">We've reviewed your project request <strong>"{{projectName}}"</strong> and unfortunately we're unable to proceed with it at this time.</p>
     {{#if rejectionReason}}
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
-      <p style="margin: 0; font-size: 14px; color: #991b1b;"><strong>Reason:</strong> {{rejectionReason}}</p>
-    </div>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:16px 0;"><tr><td style="background-color:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:16px;">
+      <p style="margin:0; font-size:14px; color:#991b1b;"><strong>Reason:</strong> {{rejectionReason}}</p>
+    </td></tr></table>
     {{/if}}
-    <p style="font-size: 13px; color: #6b7280;">
-      You can submit a new request or contact your account manager for more details.
-    </p>
-  </div>
-</div>`,
+    <p style="font-size:13px; color:#6b7280; margin:16px 0 0;">You can submit a new request or contact your account manager for more details.</p>
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
     textTemplate: `Hi {{recipientName}},
 
 We've reviewed your project request "{{projectName}}" and unfortunately we're unable to proceed with it at this time.
@@ -251,32 +453,57 @@ You can submit a new request or contact your account manager for more details.`,
     description: 'Notification that a campaign has been launched and is live.',
     category: 'notification',
     subjectTemplate: 'Campaign "{{campaignName}}" is now live!',
-    htmlTemplate: `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 24px 32px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Campaign Live 🚀</h1>
-  </div>
-  <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-    <p style="font-size: 16px; color: #374151;">Hi {{recipientName}},</p>
-    <p style="font-size: 14px; color: #4b5563; line-height: 1.6;">
-      Your campaign <strong>"{{campaignName}}"</strong> is now live and leads will start being generated.
-    </p>
-    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 16px; margin: 16px 0;">
-      <p style="margin: 4px 0; font-size: 14px; color: #1e40af;"><strong>Campaign:</strong> {{campaignName}}</p>
-      <p style="margin: 4px 0; font-size: 14px; color: #1e40af;"><strong>Started:</strong> {{launchDate}}</p>
-      {{#if targetLeadCount}}
-      <p style="margin: 4px 0; font-size: 14px; color: #1e40af;"><strong>Target Leads:</strong> {{targetLeadCount}}</p>
-      {{/if}}
-    </div>
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #2563eb !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+  .cta-btn { background-color: #2563eb !important; color: #ffffff !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #2563eb !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+[data-ogsc] .cta-btn { background-color: #2563eb !important; color: #ffffff !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#2563eb; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">Campaign Live</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">Hi {{recipientName}},</p>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px;">Your campaign <strong>"{{campaignName}}"</strong> is now live and leads will start being generated.</p>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:16px 0;"><tr><td style="background-color:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:16px;">
+      <p style="margin:4px 0; font-size:14px; color:#1e40af;"><strong>Campaign:</strong> {{campaignName}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#1e40af;"><strong>Started:</strong> {{launchDate}}</p>
+      {{#if targetLeadCount}}<p style="margin:4px 0; font-size:14px; color:#1e40af;"><strong>Target Leads:</strong> {{targetLeadCount}}</p>{{/if}}
+    </td></tr></table>
     {{#if portalLink}}
-    <div style="text-align: center; margin: 24px 0;">
-      <a href="{{portalLink}}" style="background-color: #2563eb; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-size: 15px; font-weight: 600; display: inline-block;">
-        Track Progress
-      </a>
-    </div>
+    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin:24px 0;" align="center"><tr><td align="center">
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{portalLink}}" style="height:44px;v-text-anchor:middle;width:200px;" arcsize="14%" stroke="f" fillcolor="#2563eb"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;">Track Progress</center></v:roundrect><![endif]-->
+      <!--[if !mso]><!--><a href="{{portalLink}}" style="background-color:#2563eb; color:#ffffff; padding:12px 28px; border-radius:6px; text-decoration:none; font-size:15px; font-weight:600; display:inline-block; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">Track Progress</a><!--<![endif]-->
+    </td></tr></table>
     {{/if}}
-  </div>
-</div>`,
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
     textTemplate: `Hi {{recipientName}},
 
 Your campaign "{{campaignName}}" is now live and leads will start being generated.
@@ -299,25 +526,52 @@ Track progress: {{portalLink}}`,
     description: 'Notification that new leads have been delivered for a campaign.',
     category: 'notification',
     subjectTemplate: '{{leadCount}} new leads delivered for "{{campaignName}}"',
-    htmlTemplate: `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); padding: 24px 32px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">New Leads Delivered</h1>
-  </div>
-  <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-    <p style="font-size: 16px; color: #374151;">Hi {{recipientName}},</p>
-    <p style="font-size: 14px; color: #4b5563; line-height: 1.6;">
-      <strong>{{leadCount}} new leads</strong> have been delivered for campaign <strong>"{{campaignName}}"</strong>.
-    </p>
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #059669 !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+  .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #059669 !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+[data-ogsc] .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#059669; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">New Leads Delivered</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">Hi {{recipientName}},</p>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px;"><strong>{{leadCount}} new leads</strong> have been delivered for campaign <strong>"{{campaignName}}"</strong>.</p>
     {{#if portalLink}}
-    <div style="text-align: center; margin: 24px 0;">
-      <a href="{{portalLink}}" style="background-color: #059669; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-size: 15px; font-weight: 600; display: inline-block;">
-        View Leads
-      </a>
-    </div>
+    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin:24px 0;" align="center"><tr><td align="center">
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{portalLink}}" style="height:44px;v-text-anchor:middle;width:180px;" arcsize="14%" stroke="f" fillcolor="#059669"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;">View Leads</center></v:roundrect><![endif]-->
+      <!--[if !mso]><!--><a href="{{portalLink}}" style="background-color:#059669; color:#ffffff; padding:12px 28px; border-radius:6px; text-decoration:none; font-size:15px; font-weight:600; display:inline-block; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">View Leads</a><!--<![endif]-->
+    </td></tr></table>
     {{/if}}
-  </div>
-</div>`,
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
     textTemplate: `Hi {{recipientName}},
 
 {{leadCount}} new leads have been delivered for campaign "{{campaignName}}".
@@ -336,23 +590,49 @@ View leads: {{portalLink}}`,
     description: 'A test email template for verifying Mercury Bridge configuration.',
     category: 'system',
     subjectTemplate: '[Mercury Test] Email delivery test at {{timestamp}}',
-    htmlTemplate: `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 24px 32px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Mercury Bridge — Test Email</h1>
-  </div>
-  <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-    <p style="font-size: 16px; color: #374151;">This is a test email from the Mercury Bridge notification system.</p>
-    <div style="background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 6px; padding: 16px; margin: 16px 0;">
-      <p style="margin: 4px 0; font-size: 14px; color: #4338ca;"><strong>Timestamp:</strong> {{timestamp}}</p>
-      <p style="margin: 4px 0; font-size: 14px; color: #4338ca;"><strong>Sent by:</strong> {{adminName}}</p>
-      <p style="margin: 4px 0; font-size: 14px; color: #4338ca;"><strong>Environment:</strong> {{environment}}</p>
-    </div>
-    <p style="font-size: 13px; color: #6b7280;">
-      If you received this email, the Mercury Bridge SMTP configuration is working correctly.
-    </p>
-  </div>
-</div>`,
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #6366f1 !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #6366f1 !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#6366f1; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">Mercury Bridge &#8212; Test Email</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">This is a test email from the Mercury Bridge notification system.</p>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:16px 0;"><tr><td style="background-color:#f5f3ff; border:1px solid #ddd6fe; border-radius:6px; padding:16px;">
+      <p style="margin:4px 0; font-size:14px; color:#4338ca;"><strong>Timestamp:</strong> {{timestamp}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#4338ca;"><strong>Sent by:</strong> {{adminName}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#4338ca;"><strong>Environment:</strong> {{environment}}</p>
+    </td></tr></table>
+    <p style="font-size:13px; color:#6b7280; margin:16px 0 0;">If you received this email, the Mercury Bridge SMTP configuration is working correctly.</p>
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
     textTemplate: `Mercury Bridge — Test Email
 
 This is a test email from the Mercury Bridge notification system.

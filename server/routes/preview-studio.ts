@@ -40,6 +40,12 @@ import {
   type VirtualAgentSettings,
 } from "../services/virtual-agent-settings";
 import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
+import {
+  checkPreviewIntelligence,
+  enforcePreviewIntelligence,
+  intelligenceGateErrorResponse,
+  type IntelligenceStatus,
+} from "../services/preview-intelligence-gate";
 
 type AgentSettingsSource = 'agent' | 'default';
 
@@ -287,6 +293,47 @@ export interface PhoneTestStartResponse {
 // ==================== ENDPOINTS ====================
 
 /**
+ * GET /api/preview-studio/intelligence-status
+ * Check intelligence readiness for preview (account intelligence, org intelligence, solution mapping)
+ * Must be called before any preview operation to verify all intelligence gates pass.
+ */
+router.get("/intelligence-status", requireAuth, async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.query as { campaignId: string; accountId: string };
+    if (!campaignId || !accountId) {
+      return res.status(400).json({ message: "campaignId and accountId are required" });
+    }
+    const status = await checkPreviewIntelligence({ accountId, campaignId });
+    res.json(status);
+  } catch (error) {
+    console.error("[Preview Studio] Intelligence status check error:", error);
+    res.status(500).json({ message: "Failed to check intelligence status" });
+  }
+});
+
+/**
+ * POST /api/preview-studio/intelligence-generate
+ * Auto-generate missing account intelligence for a preview target.
+ * Org intelligence and solution mapping must be pre-configured.
+ */
+router.post("/intelligence-generate", requireAuth, async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.body;
+    if (!campaignId || !accountId) {
+      return res.status(400).json({ message: "campaignId and accountId are required" });
+    }
+    const result = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    res.json({
+      success: result.passed,
+      status: result.status,
+    });
+  } catch (error) {
+    console.error("[Preview Studio] Intelligence generation error:", error);
+    res.status(500).json({ message: "Failed to generate intelligence" });
+  }
+});
+
+/**
  * GET /api/preview-studio/context
  * Fetch assembled context for preview (account intelligence, messaging brief, call brief)
  */
@@ -295,6 +342,13 @@ router.get("/context", requireAuth, async (req, res) => {
     const userId = (req as any).user?.id;
     const query = getContextSchema.parse(req.query);
     const { campaignId, accountId, contactId } = query;
+
+    // ── Intelligence Gate ── Enforce account intelligence + org intelligence + solution mapping
+    const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    if (!gateResult.passed) {
+      console.warn(`[Preview Studio] Intelligence gate BLOCKED context fetch for account ${accountId}:`, gateResult.status.missingComponents);
+      return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+    }
 
     // Get campaign
     const [campaign] = await db
@@ -454,6 +508,13 @@ router.post("/generate-call-plan", requireAuth, async (req, res) => {
     const body = generateCallPlanSchema.parse(req.body);
     const { campaignId, accountId, contactId, attemptNumber, regenerate } = body;
 
+    // ── Intelligence Gate ──
+    const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    if (!gateResult.passed) {
+      console.warn(`[Preview Studio] Intelligence gate BLOCKED call plan generation for account ${accountId}:`, gateResult.status.missingComponents);
+      return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+    }
+
     // Create preview session
     const [session] = await db.insert(previewStudioSessions).values({
       campaignId,
@@ -532,6 +593,13 @@ router.get("/assembled-prompt", requireAuth, async (req, res) => {
   try {
     const query = getAssembledPromptSchema.parse(req.query);
     const { campaignId, accountId, contactId, virtualAgentId } = query;
+
+    // ── Intelligence Gate ──
+    const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    if (!gateResult.passed) {
+      console.warn(`[Preview Studio] Intelligence gate BLOCKED assembled-prompt for account ${accountId}:`, gateResult.status.missingComponents);
+      return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+    }
 
     // Get campaign with agent settings
     const [campaign] = await db
@@ -692,6 +760,13 @@ router.post("/simulation/chat", requireAuth, async (req, res) => {
     const body = simulationChatSchema.parse(req.body);
     const { sessionId, campaignId, accountId, contactId, messages, userMessage, provider } = body;
 
+    // ── Intelligence Gate ──
+    const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    if (!gateResult.passed) {
+      console.warn(`[Preview Studio] Intelligence gate BLOCKED simulation chat for account ${accountId}:`, gateResult.status.missingComponents);
+      return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+    }
+
     const historyLimit = 16;
     const maxTokens = 320;
     const temperature = 0.2;
@@ -813,6 +888,13 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
     const body = startSimulationSchema.parse(req.body);
     const { campaignId, accountId, contactId, virtualAgentId, voice, provider } = body;
 
+    // ── Intelligence Gate ──
+    const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    if (!gateResult.passed) {
+      console.warn(`[Preview Studio] Intelligence gate BLOCKED simulation start for account ${accountId}:`, gateResult.status.missingComponents);
+      return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+    }
+
     const resolvedVirtualAgentId = await resolveVirtualAgentId({
       campaignId,
       virtualAgentId,
@@ -910,6 +992,13 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       customSystemPrompt,
       customFirstMessage,
     } = body;
+
+    // ── Intelligence Gate ──
+    const gateResult = await enforcePreviewIntelligence({ accountId, campaignId, autoGenerate: true });
+    if (!gateResult.passed) {
+      console.warn(`[Preview Studio] Intelligence gate BLOCKED phone test for account ${accountId}:`, gateResult.status.missingComponents);
+      return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
+    }
 
     console.log("[Preview Studio Phone Test] Request received:", {
       campaignId,

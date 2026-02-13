@@ -47,6 +47,10 @@ import {
   Zap,
   MessageSquare,
   Loader2,
+  Brain,
+  ShieldCheck,
+  ShieldAlert,
+  Target,
 } from "lucide-react";
 import { PageLayout, PageHeader, PageContent } from "@/components/layout/page-layout";
 import { cn } from "@/lib/utils";
@@ -123,13 +127,6 @@ const VOICE_TONES = [
   { value: 'empathetic', label: 'Empathetic', description: 'Understanding and supportive' },
 ];
 
-const SCENARIOS = [
-  { value: 'cold_outreach', label: 'Cold Outreach' },
-  { value: 'follow_up', label: 'Follow Up' },
-  { value: 'demo_request', label: 'Demo Request' },
-  { value: 'objection_handling', label: 'Objection Handling' },
-];
-
 // ============== MAIN COMPONENT ==============
 
 export default function PreviewStudioPage() {
@@ -137,9 +134,6 @@ export default function PreviewStudioPage() {
   const urlParams = new URLSearchParams(searchString);
   const campaignIdFromUrl = urlParams.get('campaignId');
   const { toast } = useToast();
-
-  // Tab state
-  const [activeSection, setActiveSection] = useState<'voice' | 'email'>('voice');
 
   // Context selection
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(campaignIdFromUrl);
@@ -149,16 +143,9 @@ export default function PreviewStudioPage() {
   // Voice settings
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
   const [voiceTone, setVoiceTone] = useState<string>('professional');
-  const [scenario, setScenario] = useState<string>('cold_outreach');
   const [voiceSimStatus, setVoiceSimStatus] = useState<'idle' | 'connecting' | 'active' | 'completed'>('idle');
   const [isMuted, setIsMuted] = useState(false);
   const [voiceTranscripts, setVoiceTranscripts] = useState<Array<{ role: string; content: string; timestamp: Date }>>([]);
-
-  // Email settings
-  const [emailType, setEmailType] = useState<string>('cold_outreach');
-  const [generatedEmail, setGeneratedEmail] = useState<any>(null);
-  const [emailPreviewMode, setEmailPreviewMode] = useState<'preview' | 'html'>('preview');
-  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Voice preview state
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
@@ -247,35 +234,47 @@ export default function PreviewStudioPage() {
     }
   };
 
-  // Email generation mutation
-  const generateEmailMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest('POST', '/api/preview-studio/generate-email', {
-        campaignId: selectedCampaignId,
-        accountId: selectedAccountId,
-        contactId: selectedContactId,
-        emailType,
-      });
-      if (!res.ok) throw new Error('Failed to generate email');
+  // Intelligence status check — gate ALL previews on account + org + solution intelligence
+  const { data: intelligenceStatus, isLoading: intelligenceLoading, refetch: refetchIntelligence } = useQuery<{
+    ready: boolean;
+    accountIntelligence: { available: boolean; confidence: number | null; problemHypothesis: string | null; recommendedAngle: string | null };
+    organizationIntelligence: { available: boolean; hasOfferings: boolean; hasIcp: boolean; hasPositioning: boolean; orgName: string | null };
+    solutionMapping: { available: boolean; hasProductInfo: boolean; hasProblemDefinitions: boolean; hasServiceCatalog: boolean };
+    missingComponents: string[];
+    message: string;
+  }>({
+    queryKey: ['/api/preview-studio/intelligence-status', selectedCampaignId, selectedAccountId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/preview-studio/intelligence-status?campaignId=${selectedCampaignId}&accountId=${selectedAccountId}`);
+      if (!res.ok) throw new Error('Failed to check intelligence status');
       return res.json();
     },
-    onSuccess: (data) => {
-      setGeneratedEmail(data);
-      toast({ title: 'Email Generated', description: 'Preview ready with account context' });
+    enabled: !!(selectedCampaignId && selectedAccountId),
+    staleTime: 30000,
+  });
+
+  // Auto-generate intelligence mutation
+  const generateIntelligenceMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/preview-studio/intelligence-generate', {
+        campaignId: selectedCampaignId,
+        accountId: selectedAccountId,
+      });
+      if (!res.ok) throw new Error('Failed to generate intelligence');
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchIntelligence();
+      toast({ title: 'Intelligence Generated', description: 'Account intelligence has been generated. Check status for remaining components.' });
     },
     onError: (error: Error) => {
       toast({ variant: 'destructive', title: 'Generation Failed', description: error.message });
     },
   });
 
-  // Copy handler
-  const handleCopy = async (text: string, field: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
-
-  const hasRequiredContext = !!(selectedCampaignId && selectedAccountId);
+  const intelligenceReady = intelligenceStatus?.ready ?? false;
+  const hasBasicContext = !!(selectedCampaignId && selectedAccountId);
+  const hasRequiredContext = hasBasicContext && intelligenceReady;
   const [, setLocation] = useLocation();
 
   return (
@@ -327,37 +326,10 @@ export default function PreviewStudioPage() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white">Preview Studio</h1>
-                <p className="text-xs text-white/50">Test voice and email experiences</p>
+                <p className="text-xs text-white/50">Test voice experiences</p>
               </div>
             </div>
 
-            {/* Section Switcher */}
-            <div className="flex items-center bg-white/5 rounded-2xl p-1.5 border border-white/10">
-              <button
-                onClick={() => setActiveSection('voice')}
-                className={cn(
-                  "flex items-center gap-2.5 px-6 py-2.5 rounded-xl font-medium transition-all duration-200",
-                  activeSection === 'voice'
-                    ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg shadow-purple-500/25"
-                    : "text-white/60 hover:text-white hover:bg-white/5"
-                )}
-              >
-                <Phone className="h-4 w-4" />
-                Voice
-              </button>
-              <button
-                onClick={() => setActiveSection('email')}
-                className={cn(
-                  "flex items-center gap-2.5 px-6 py-2.5 rounded-xl font-medium transition-all duration-200",
-                  activeSection === 'email'
-                    ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-lg shadow-blue-500/25"
-                    : "text-white/60 hover:text-white hover:bg-white/5"
-                )}
-              >
-                <Mail className="h-4 w-4" />
-                Email
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -441,76 +413,108 @@ export default function PreviewStudioPage() {
               </Select>
             </div>
 
-            {/* Scenario (compact) */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Scenario</Label>
-              <Select value={scenario} onValueChange={setScenario}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white h-9 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-[#1a1a2e] border-white/10 text-white">
-                  {SCENARIOS.map(s => (
-                    <SelectItem key={s.value} value={s.value} className="text-white focus:bg-white/10 focus:text-white">
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
-          {/* Context Summary */}
-          {hasRequiredContext && (
-            <div className="p-3 border-t border-white/5 bg-gradient-to-r from-green-500/10 to-emerald-500/10">
-              <div className="flex items-center gap-2 text-green-400 text-sm">
-                <CheckCircle2 className="h-4 w-4" />
-                <span>Context Ready</span>
-              </div>
-              <p className="text-xs text-white/40 mt-1 truncate">
-                {selectedAccount?.name} {selectedContact && `• ${selectedContact.fullName}`}
-              </p>
+          {/* Context Summary + Intelligence Status */}
+          {hasBasicContext && (
+            <div className="border-t border-white/5">
+              {/* Intelligence Gate Status */}
+              {intelligenceLoading ? (
+                <div className="p-3 bg-white/5">
+                  <div className="flex items-center gap-2 text-white/50 text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Checking intelligence...</span>
+                  </div>
+                </div>
+              ) : intelligenceReady ? (
+                <div className="p-3 bg-gradient-to-r from-green-500/10 to-emerald-500/10">
+                  <div className="flex items-center gap-2 text-green-400 text-sm">
+                    <ShieldCheck className="h-4 w-4" />
+                    <span>Intelligence Ready</span>
+                  </div>
+                  <div className="mt-1.5 space-y-1">
+                    <div className="flex items-center gap-1.5 text-xs text-green-300/70">
+                      <Brain className="h-3 w-3" />
+                      <span>Account Intelligence</span>
+                      {intelligenceStatus?.accountIntelligence?.confidence && (
+                        <span className="text-green-400 ml-auto">{Math.round(intelligenceStatus.accountIntelligence.confidence * 100)}%</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-green-300/70">
+                      <Building2 className="h-3 w-3" />
+                      <span>Org Intelligence</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-green-300/70">
+                      <Target className="h-3 w-3" />
+                      <span>Solution Mapping</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-white/40 mt-1.5 truncate">
+                    {selectedAccount?.name} {selectedContact && `• ${selectedContact.fullName}`}
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10">
+                  <div className="flex items-center gap-2 text-amber-400 text-sm">
+                    <ShieldAlert className="h-4 w-4" />
+                    <span>Intelligence Required</span>
+                  </div>
+                  <div className="mt-1.5 space-y-1">
+                    {[
+                      { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain },
+                      { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2 },
+                      { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target },
+                    ].map(item => (
+                      <div key={item.key} className={cn("flex items-center gap-1.5 text-xs", item.available ? "text-green-300/70" : "text-amber-300/70")}>
+                        {item.available ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <AlertCircle className="h-3 w-3 text-amber-400" />}
+                        <span>{item.key}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {intelligenceStatus?.missingComponents?.includes('Account Intelligence') && (
+                    <Button
+                      size="sm"
+                      onClick={() => generateIntelligenceMutation.mutate()}
+                      disabled={generateIntelligenceMutation.isPending}
+                      className="w-full mt-2 h-7 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30"
+                    >
+                      {generateIntelligenceMutation.isPending ? (
+                        <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Generating...</>
+                      ) : (
+                        <><Brain className="h-3 w-3 mr-1" />Generate Account Intelligence</>
+                      )}
+                    </Button>
+                  )}
+                  <p className="text-xs text-amber-200/50 mt-1.5">
+                    All intelligence components must be available before running any preview or test.
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Main Preview Area */}
         <div className="flex-1 overflow-hidden">
-          {activeSection === 'voice' ? (
-            <VoicePreviewSection
-              hasContext={hasRequiredContext}
-              selectedVoice={selectedVoice}
-              setSelectedVoice={setSelectedVoice}
-              voiceTone={voiceTone}
-              setVoiceTone={setVoiceTone}
-              selectedVoiceInfo={selectedVoiceInfo}
-              onPreviewVoice={handlePreviewVoice}
-              previewingVoiceId={previewingVoiceId}
-              voiceSimStatus={voiceSimStatus}
-              setVoiceSimStatus={setVoiceSimStatus}
-              isMuted={isMuted}
-              setIsMuted={setIsMuted}
-              voiceTranscripts={voiceTranscripts}
-              setVoiceTranscripts={setVoiceTranscripts}
-              campaignId={selectedCampaignId}
-              accountId={selectedAccountId}
-              contactId={selectedContactId}
-            />
-          ) : (
-            <EmailPreviewSection
-              hasContext={hasRequiredContext}
-              emailType={emailType}
-              setEmailType={setEmailType}
-              generatedEmail={generatedEmail}
-              emailPreviewMode={emailPreviewMode}
-              setEmailPreviewMode={setEmailPreviewMode}
-              onGenerate={() => generateEmailMutation.mutate()}
-              isGenerating={generateEmailMutation.isPending}
-              copiedField={copiedField}
-              onCopy={handleCopy}
-              selectedAccount={selectedAccount}
-              selectedContact={selectedContact}
-            />
-          )}
+          <VoicePreviewSection
+            hasContext={hasRequiredContext}
+            selectedVoice={selectedVoice}
+            setSelectedVoice={setSelectedVoice}
+            voiceTone={voiceTone}
+            setVoiceTone={setVoiceTone}
+            selectedVoiceInfo={selectedVoiceInfo}
+            onPreviewVoice={handlePreviewVoice}
+            previewingVoiceId={previewingVoiceId}
+            voiceSimStatus={voiceSimStatus}
+            setVoiceSimStatus={setVoiceSimStatus}
+            isMuted={isMuted}
+            setIsMuted={setIsMuted}
+            voiceTranscripts={voiceTranscripts}
+            setVoiceTranscripts={setVoiceTranscripts}
+            campaignId={selectedCampaignId}
+            accountId={selectedAccountId}
+            contactId={selectedContactId}
+          />
         </div>
       </div>
     </PageLayout>
@@ -908,303 +912,6 @@ function VoicePreviewSection({
                   )}
                 </ScrollArea>
               </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============== EMAIL PREVIEW SECTION ==============
-
-interface EmailPreviewSectionProps {
-  hasContext: boolean;
-  emailType: string;
-  setEmailType: (t: string) => void;
-  generatedEmail: any;
-  emailPreviewMode: 'preview' | 'html';
-  setEmailPreviewMode: (m: 'preview' | 'html') => void;
-  onGenerate: () => void;
-  isGenerating: boolean;
-  copiedField: string | null;
-  onCopy: (text: string, field: string) => void;
-  selectedAccount: Account | undefined;
-  selectedContact: Contact | undefined;
-}
-
-const EMAIL_TYPES = [
-  { value: 'cold_outreach', label: 'Cold Outreach', description: 'First touch to prospects' },
-  { value: 'follow_up', label: 'Follow Up', description: 'After initial contact' },
-  { value: 'meeting_request', label: 'Meeting Request', description: 'Request for a call' },
-  { value: 'nurture', label: 'Nurture', description: 'Value-add content' },
-  { value: 'breakup', label: 'Breakup', description: 'Final outreach' },
-];
-
-function EmailPreviewSection({
-  hasContext,
-  emailType,
-  setEmailType,
-  generatedEmail,
-  emailPreviewMode,
-  setEmailPreviewMode,
-  onGenerate,
-  isGenerating,
-  copiedField,
-  onCopy,
-  selectedAccount,
-  selectedContact,
-}: EmailPreviewSectionProps) {
-  return (
-    <div className="h-full flex">
-      {/* Email Configuration Panel */}
-      <div className="w-80 border-r border-white/5 bg-black/10 p-6 overflow-y-auto">
-        <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-xl bg-blue-500/20 flex items-center justify-center">
-            <Mail className="h-4 w-4 text-blue-400" />
-          </div>
-          Email Configuration
-        </h3>
-
-        {/* Email Type Selection */}
-        <div className="space-y-4 mb-6">
-          <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Email Type</Label>
-          <div className="space-y-2">
-            {EMAIL_TYPES.map(type => (
-              <button
-                key={type.value}
-                onClick={() => setEmailType(type.value)}
-                className={cn(
-                  "w-full p-3 rounded-xl border text-left transition-all duration-200",
-                  emailType === type.value
-                    ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border-blue-500/50"
-                    : "bg-white/5 border-white/10 hover:bg-white/10"
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-white">{type.label}</span>
-                  {emailType === type.value && <CheckCircle2 className="h-4 w-4 text-blue-400" />}
-                </div>
-                <p className="text-xs text-white/40 mt-0.5">{type.description}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <Separator className="bg-white/10 mb-6" />
-
-        {/* Context Variables Preview */}
-        {hasContext && (
-          <div className="space-y-3 mb-6">
-            <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Applied Variables</Label>
-            <div className="space-y-2 text-sm">
-              {selectedAccount && (
-                <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
-                  <Building2 className="h-4 w-4 text-blue-400" />
-                  <span className="text-white/70">{`{{company}}`}</span>
-                  <ChevronRight className="h-3 w-3 text-white/30" />
-                  <span className="text-white">{selectedAccount.name}</span>
-                </div>
-              )}
-              {selectedContact && (
-                <>
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
-                    <User className="h-4 w-4 text-cyan-400" />
-                    <span className="text-white/70">{`{{first_name}}`}</span>
-                    <ChevronRight className="h-3 w-3 text-white/30" />
-                    <span className="text-white">{selectedContact.fullName?.split(' ')[0] || 'Contact'}</span>
-                  </div>
-                  {selectedContact.jobTitle && (
-                    <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
-                      <Zap className="h-4 w-4 text-yellow-400" />
-                      <span className="text-white/70">{`{{title}}`}</span>
-                      <ChevronRight className="h-3 w-3 text-white/30" />
-                      <span className="text-white truncate">{selectedContact.jobTitle}</span>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Generate Button */}
-        <Button
-          onClick={onGenerate}
-          disabled={!hasContext || isGenerating}
-          className="w-full h-12 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white shadow-lg shadow-blue-500/25"
-        >
-          {isGenerating ? (
-            <>
-              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-              Generating...
-            </>
-          ) : (
-            <>
-              <Wand2 className="h-4 w-4 mr-2" />
-              Generate Email
-            </>
-          )}
-        </Button>
-      </div>
-
-      {/* Email Preview Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {!hasContext ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center max-w-md">
-              <div className="h-20 w-20 rounded-3xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center mx-auto mb-6 border border-white/10">
-                <Mail className="h-10 w-10 text-blue-400" />
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-3">Email Preview</h2>
-              <p className="text-white/50 mb-6">
-                Select a campaign and account to generate personalized email previews
-              </p>
-              <div className="flex items-center justify-center gap-2 text-yellow-400 text-sm">
-                <AlertCircle className="h-4 w-4" />
-                <span>Campaign and Account required</span>
-              </div>
-            </div>
-          </div>
-        ) : !generatedEmail ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center max-w-md">
-              <div className="h-20 w-20 rounded-3xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center mx-auto mb-6 border border-white/10">
-                <Sparkles className="h-10 w-10 text-blue-400" />
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-3">Ready to Generate</h2>
-              <p className="text-white/50">
-                Click "Generate Email" to create a personalized email with account context
-              </p>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Preview Mode Toggle */}
-            <div className="p-4 border-b border-white/5 flex items-center justify-between">
-              <div className="flex items-center bg-white/5 rounded-xl p-1 border border-white/10">
-                <button
-                  onClick={() => setEmailPreviewMode('preview')}
-                  className={cn(
-                    "px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                    emailPreviewMode === 'preview'
-                      ? "bg-blue-500 text-white"
-                      : "text-white/60 hover:text-white"
-                  )}
-                >
-                  <Eye className="h-4 w-4 inline mr-2" />
-                  Preview
-                </button>
-                <button
-                  onClick={() => setEmailPreviewMode('html')}
-                  className={cn(
-                    "px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                    emailPreviewMode === 'html'
-                      ? "bg-blue-500 text-white"
-                      : "text-white/60 hover:text-white"
-                  )}
-                >
-                  {"</>"}
-                  <span className="ml-2">HTML</span>
-                </button>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onGenerate}
-                disabled={isGenerating}
-                className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-              >
-                <RefreshCw className={cn("h-4 w-4 mr-2", isGenerating && "animate-spin")} />
-                Regenerate
-              </Button>
-            </div>
-
-            {/* Email Content - LARGER PREVIEW */}
-            <div className="flex-1 p-6 overflow-auto">
-              {emailPreviewMode === 'preview' ? (
-                <div className="max-w-4xl mx-auto space-y-4">
-                  {/* Subject Line */}
-                  <div className="bg-white/5 rounded-2xl border border-white/10 p-5">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Subject Line</Label>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onCopy(generatedEmail.subject, 'subject')}
-                        className="h-8 text-white/50 hover:text-white"
-                      >
-                        {copiedField === 'subject' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                    <p className="text-lg font-medium text-white">{generatedEmail.subject}</p>
-                    {generatedEmail.preheader && (
-                      <p className="text-sm text-white/50 mt-2">{generatedEmail.preheader}</p>
-                    )}
-                  </div>
-
-                  {/* Email Body Preview */}
-                  <div className="bg-white rounded-2xl overflow-hidden shadow-2xl">
-                    {generatedEmail.html ? (
-                      <iframe
-                        srcDoc={sanitizeHtmlForIframePreview(generatedEmail.html)}
-                        className="w-full h-[600px] border-0"
-                        title="Email Preview"
-                      />
-                    ) : (
-                      <div className="p-8">
-                        {generatedEmail.heroTitle && (
-                          <h2 className="text-2xl font-bold text-gray-900 mb-2">{generatedEmail.heroTitle}</h2>
-                        )}
-                        {generatedEmail.heroSubtitle && (
-                          <p className="text-gray-600 mb-6">{generatedEmail.heroSubtitle}</p>
-                        )}
-                        {generatedEmail.intro && (
-                          <p className="text-gray-700 mb-6 leading-relaxed">{generatedEmail.intro}</p>
-                        )}
-                        {generatedEmail.valueBullets && (
-                          <ul className="list-disc list-inside space-y-2 mb-6 text-gray-700">
-                            {generatedEmail.valueBullets.map((bullet: string, i: number) => (
-                              <li key={i}>{bullet}</li>
-                            ))}
-                          </ul>
-                        )}
-                        {generatedEmail.ctaLabel && (
-                          <button className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium">
-                            {generatedEmail.ctaLabel}
-                          </button>
-                        )}
-                        {generatedEmail.closingLine && (
-                          <p className="text-gray-600 mt-6 italic">{generatedEmail.closingLine}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="max-w-4xl mx-auto">
-                  <div className="bg-[#1e1e2e] rounded-2xl border border-white/10 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                      <span className="text-sm text-white/50">HTML Source</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onCopy(generatedEmail.html || '', 'html')}
-                        className="h-8 text-white/50 hover:text-white"
-                      >
-                        {copiedField === 'html' ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
-                        Copy HTML
-                      </Button>
-                    </div>
-                    <ScrollArea className="h-[600px]">
-                      <pre className="p-4 text-sm text-white/80 font-mono whitespace-pre-wrap">
-                        {generatedEmail.html || 'No HTML content available'}
-                      </pre>
-                    </ScrollArea>
-                  </div>
-                </div>
-              )}
             </div>
           </>
         )}

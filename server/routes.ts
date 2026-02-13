@@ -900,6 +900,44 @@ export function registerRoutes(app: Express) {
 
   // Note: The public audio endpoint is defined in ai-calls.ts router at /audio/:audioId
 
+  // ==================== PUBLIC IMAGE SERVE (No Auth) ====================
+  // Must be before the catch-all requireAuth on /api so <img src="..."> works without cookies/headers
+  app.get('/api/email-builder/images/serve/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { emailBuilderImages } = await import('@shared/schema');
+      const [image] = await db
+        .select()
+        .from(emailBuilderImages)
+        .where(eq(emailBuilderImages.id, id))
+        .limit(1);
+
+      if (!image) return res.status(404).json({ error: 'Image not found' });
+
+      if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
+        const gcsMatch = image.storedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
+        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${process.env.GCS_BUCKET || 'demandgentic-storage'}/`, '');
+
+        res.setHeader('Content-Type', image.mimeType || 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+        const { getFromS3 } = await import('./lib/storage');
+        const stream = await getFromS3(key);
+        stream.on('error', (err: any) => {
+          if (!res.headersSent) res.status(500).json({ error: 'Storage error' });
+        });
+        stream.pipe(res);
+      } else if (image.storedUrl) {
+        res.redirect(image.storedUrl);
+      } else {
+        res.status(404).json({ error: 'Image file not found' });
+      }
+    } catch (error: any) {
+      console.error('[ImageServe:Public] Error:', error.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Failed to serve image' });
+    }
+  });
+
   // ==================== AUTH ====================
 
   // ==================== USERS (Admin Only) ====================
@@ -7164,8 +7202,16 @@ export function registerRoutes(app: Express) {
               accountName: item.accountName,
               priority: item.priority,
               status: item.status,
+              queuedAt: item.createdAt,
               createdAt: item.createdAt,
               updatedAt: item.updatedAt,
+              contact: item.contactName ? {
+                firstName: item.contactName.split(' ')[0] || '',
+                lastName: item.contactName.split(' ').slice(1).join(' ') || '',
+                email: item.contactEmail,
+                phoneNumber: bestPhone.phone,
+              } : null,
+              account: item.accountName ? { name: item.accountName } : null,
             };
           });
 
@@ -7237,8 +7283,16 @@ export function registerRoutes(app: Express) {
               accountName: item.accountName,
               priority: item.priority,
               status: item.status,
+              queuedAt: item.createdAt,
               createdAt: item.createdAt,
               updatedAt: item.updatedAt,
+              contact: item.contactName ? {
+                firstName: item.contactName.split(' ')[0] || '',
+                lastName: item.contactName.split(' ').slice(1).join(' ') || '',
+                email: item.contactEmail,
+                phoneNumber: bestPhone.phone,
+              } : null,
+              account: item.accountName ? { name: item.accountName } : null,
             };
           });
 
@@ -14756,13 +14810,14 @@ Provide JSON response with:
   app.use('/api/merge-tags', requireAuth, mergeTagsRouter);
 
   // ==================== UNIFIED COMMUNICATIONS SYSTEM ====================
-  // Primary mount — SMTP providers, Mercury notifications, transactional templates,
-  // and client invitation routes under a single /api/communications prefix.
+  // Single entry point for ALL email operations: SMTP providers, Mercury notifications,
+  // transactional templates, client invitations (public + authenticated), and outbox management.
+  // Public routes (token validation, invite acceptance) are defined BEFORE requireAuth middleware.
   app.use('/api/communications', unifiedEmailSystemRouter);
 
-  // ==================== BACKWARD COMPATIBILITY (DEPRECATED) ====================
-  // These legacy routes remain for backward compatibility and OAuth callbacks.
-  // Frontend uses /api/communications/* paths instead.
+  // ==================== BACKWARD COMPATIBILITY ====================
+  // Legacy route mounts kept for OAuth callbacks and existing frontend references.
+  // New features should use /api/communications/* exclusively.
   app.use('/api/smtp-providers', smtpOAuthCallbackRouter); // OAuth callbacks (public — Google/Microsoft redirect here)
   app.use('/api/smtp-providers', requireAuth, smtpProvidersRouter);
   app.use('/api/transactional-templates', requireAuth, transactionalTemplatesRouter);

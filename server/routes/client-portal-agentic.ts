@@ -749,6 +749,8 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Campaign is required" });
     }
 
+    console.log("[Client Agentic] Campaign ID:", campaignId, "Client Account:", clientUser.clientAccountId);
+
     const numVariants = Math.min(Math.max(parseInt(variants) || 1, 1), 3);
     const palette: BrandPaletteKey = brandPalette || 'indigo';
 
