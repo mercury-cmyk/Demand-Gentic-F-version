@@ -3,17 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   MessageSquareText,
   Loader2,
@@ -24,6 +17,10 @@ import {
   ChevronUp,
   CheckCircle,
   XCircle,
+  AlertTriangle,
+  Lightbulb,
+  BarChart3,
+  Mic,
 } from "lucide-react";
 
 const getToken = () => localStorage.getItem('clientPortalToken');
@@ -32,6 +29,26 @@ const formatDuration = (seconds: number) => {
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
+};
+
+const getScoreColor = (score: number) => {
+  if (score >= 80) return 'text-green-600';
+  if (score >= 60) return 'text-amber-600';
+  return 'text-red-600';
+};
+
+const getScoreBarColor = (score: number) => {
+  if (score >= 80) return '[&>div]:bg-green-500';
+  if (score >= 60) return '[&>div]:bg-amber-500';
+  return '[&>div]:bg-red-500';
+};
+
+const getSentimentBadge = (sentiment: string | null) => {
+  if (!sentiment) return null;
+  const s = sentiment.toLowerCase();
+  if (s === 'positive') return <Badge className="bg-green-100 text-green-700 border-green-200">Positive</Badge>;
+  if (s === 'negative') return <Badge className="bg-red-100 text-red-700 border-red-200">Negative</Badge>;
+  return <Badge className="bg-gray-100 text-gray-700 border-gray-200">Neutral</Badge>;
 };
 
 interface Conversation {
@@ -47,6 +64,43 @@ interface Conversation {
   transcript: string | null;
   analysis: any | null;
   createdAt: string;
+  // Post-call quality dimensions
+  engagementScore: number | null;
+  clarityScore: number | null;
+  empathyScore: number | null;
+  objectionHandlingScore: number | null;
+  qualificationScore: number | null;
+  closingScore: number | null;
+  flowComplianceScore: number | null;
+  campaignAlignmentScore: number | null;
+  sentiment: string | null;
+  engagementLevel: string | null;
+  issues: string[] | null;
+  recommendations: string[] | null;
+  hasRecording: boolean;
+  recordingS3Key: string | null;
+}
+
+function QualityDimensionBar({ label, score }: { label: string; score: number | null }) {
+  if (score === null || score === undefined) return null;
+  const pct = Math.round(score);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-foreground/80">{label}</span>
+        <span className={`text-xs font-bold ${getScoreColor(pct)}`}>{pct}%</span>
+      </div>
+      <Progress value={pct} className={`h-2 ${getScoreBarColor(pct)}`} />
+    </div>
+  );
+}
+
+function hasAnyQualityDimension(conv: Conversation): boolean {
+  return [
+    conv.engagementScore, conv.clarityScore, conv.empathyScore,
+    conv.objectionHandlingScore, conv.qualificationScore, conv.closingScore,
+    conv.flowComplianceScore, conv.campaignAlignmentScore,
+  ].some(s => s !== null && s !== undefined);
 }
 
 export default function ClientPortalConversationQuality() {
@@ -85,7 +139,7 @@ export default function ClientPortalConversationQuality() {
   });
 
   const avgQuality = conversations.length > 0
-    ? Math.round(conversations.reduce((sum, c) => sum + (c.qualityScore || 0), 0) / conversations.filter(c => c.qualityScore).length)
+    ? Math.round(conversations.reduce((sum, c) => sum + (c.qualityScore || 0), 0) / (conversations.filter(c => c.qualityScore).length || 1))
     : 0;
 
   const qaApproved = conversations.filter(c => c.qaStatus === 'approved').length;
@@ -104,20 +158,20 @@ export default function ClientPortalConversationQuality() {
               </div>
               <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Conversation Quality</h1>
             </div>
-            <p className="text-foreground/70 mt-2">Review call transcripts and quality analysis</p>
+            <p className="text-foreground/70 mt-2">Review call transcripts, quality scores, and AI-powered analysis</p>
           </div>
         </div>
 
         {/* Filter */}
-        <Card>
+        <Card className="bg-card text-card-foreground">
           <CardContent className="pt-6">
             <div className="max-w-sm">
-              <label className="text-sm font-medium mb-2 block">Campaign</label>
+              <label className="text-sm font-medium mb-2 block text-foreground">Campaign</label>
               <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-                <SelectTrigger>
+                <SelectTrigger className="bg-background border-input text-foreground">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-popover text-popover-foreground border-border">
                   <SelectItem value="all">All Campaigns</SelectItem>
                   {campaigns.map((c: any) => (
                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
@@ -178,7 +232,7 @@ export default function ClientPortalConversationQuality() {
             <Card>
               <CardHeader>
                 <CardTitle>Conversations</CardTitle>
-                <CardDescription>Click on a row to view the transcript</CardDescription>
+                <CardDescription>Click on a row to view quality analysis and transcript</CardDescription>
               </CardHeader>
               <CardContent>
                 {conversations.length === 0 ? (
@@ -192,18 +246,19 @@ export default function ClientPortalConversationQuality() {
                 ) : (
                   <div className="space-y-2">
                     {conversations.map((conv) => (
-                      <div key={conv.id} className="border rounded-lg">
+                      <div key={conv.id} className="border border-border rounded-lg overflow-hidden">
+                        {/* Row header */}
                         <div
-                          className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                          className="flex items-center justify-between p-4 cursor-pointer hover:bg-accent/50 transition-colors bg-card text-card-foreground"
                           onClick={() => setExpandedId(expandedId === conv.id ? null : conv.id)}
                         >
-                          <div className="flex items-center gap-4">
-                            <div>
-                              <p className="font-medium">{conv.contactName}</p>
-                              <p className="text-sm text-muted-foreground">{conv.accountName} - {conv.campaignName}</p>
+                          <div className="flex items-center gap-4 min-w-0">
+                            <div className="min-w-0">
+                              <p className="font-medium truncate">{conv.contactName}</p>
+                              <p className="text-sm text-muted-foreground truncate">{conv.accountName} - {conv.campaignName}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 flex-shrink-0">
                             <Badge variant="outline" className="capitalize">
                               {conv.disposition?.replace(/_/g, ' ') || 'N/A'}
                             </Badge>
@@ -217,6 +272,9 @@ export default function ClientPortalConversationQuality() {
                                 {conv.qaStatus}
                               </Badge>
                             )}
+                            {conv.hasRecording && (
+                              <Mic className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
                             <div className="flex items-center gap-1 text-sm text-muted-foreground">
                               <Clock className="h-3 w-3" />
                               {formatDuration(conv.duration || 0)}
@@ -225,49 +283,161 @@ export default function ClientPortalConversationQuality() {
                               {new Date(conv.createdAt).toLocaleDateString()}
                             </span>
                             {expandedId === conv.id ? (
-                              <ChevronUp className="h-4 w-4" />
+                              <ChevronUp className="h-4 w-4 text-muted-foreground" />
                             ) : (
-                              <ChevronDown className="h-4 w-4" />
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
                             )}
                           </div>
                         </div>
 
+                        {/* Expanded content */}
                         {expandedId === conv.id && (
-                          <div className="border-t px-4 py-4 bg-muted/20">
-                            {conv.transcript ? (
-                              <ScrollArea className="h-[300px]">
-                                <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed">
-                                  {conv.transcript}
-                                </pre>
-                              </ScrollArea>
+                          <div className="border-t border-border bg-card text-card-foreground">
+                            {hasAnyQualityDimension(conv) || conv.sentiment || conv.issues?.length || conv.recommendations?.length ? (
+                              <Tabs defaultValue="analysis" className="w-full">
+                                <div className="px-4 pt-3 border-b border-border">
+                                  <TabsList className="bg-muted">
+                                    <TabsTrigger value="analysis" className="data-[state=active]:bg-background">
+                                      <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
+                                      Analysis
+                                    </TabsTrigger>
+                                    <TabsTrigger value="transcript" className="data-[state=active]:bg-background">
+                                      <MessageSquareText className="h-3.5 w-3.5 mr-1.5" />
+                                      Transcript
+                                    </TabsTrigger>
+                                  </TabsList>
+                                </div>
+
+                                {/* Analysis Tab */}
+                                <TabsContent value="analysis" className="mt-0 p-4">
+                                  <div className="space-y-5">
+                                    {/* Overall Score + Sentiment */}
+                                    <div className="flex items-center gap-4 flex-wrap">
+                                      {conv.qualityScore !== null && (
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-medium text-muted-foreground">Overall:</span>
+                                          <span className={`text-2xl font-bold ${getScoreColor(conv.qualityScore)}`}>
+                                            {conv.qualityScore}%
+                                          </span>
+                                        </div>
+                                      )}
+                                      {getSentimentBadge(conv.sentiment)}
+                                      {conv.engagementLevel && (
+                                        <Badge variant="outline" className="capitalize">
+                                          {conv.engagementLevel} Engagement
+                                        </Badge>
+                                      )}
+                                    </div>
+
+                                    {/* Quality Dimensions */}
+                                    {hasAnyQualityDimension(conv) && (
+                                      <div>
+                                        <h4 className="text-sm font-semibold mb-3 text-foreground">Quality Dimensions</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+                                          <QualityDimensionBar label="Engagement" score={conv.engagementScore} />
+                                          <QualityDimensionBar label="Clarity" score={conv.clarityScore} />
+                                          <QualityDimensionBar label="Empathy" score={conv.empathyScore} />
+                                          <QualityDimensionBar label="Objection Handling" score={conv.objectionHandlingScore} />
+                                          <QualityDimensionBar label="Qualification" score={conv.qualificationScore} />
+                                          <QualityDimensionBar label="Closing" score={conv.closingScore} />
+                                          <QualityDimensionBar label="Flow Compliance" score={conv.flowComplianceScore} />
+                                          <QualityDimensionBar label="Campaign Alignment" score={conv.campaignAlignmentScore} />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Issues */}
+                                    {conv.issues && conv.issues.length > 0 && (
+                                      <div>
+                                        <h4 className="text-sm font-semibold mb-2 flex items-center gap-1.5 text-foreground">
+                                          <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                                          Issues Identified
+                                        </h4>
+                                        <ul className="space-y-1">
+                                          {conv.issues.map((issue, i) => (
+                                            <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                                              <span className="text-amber-500 mt-1.5 shrink-0">&#8226;</span>
+                                              {issue}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+
+                                    {/* Recommendations */}
+                                    {conv.recommendations && conv.recommendations.length > 0 && (
+                                      <div>
+                                        <h4 className="text-sm font-semibold mb-2 flex items-center gap-1.5 text-foreground">
+                                          <Lightbulb className="h-3.5 w-3.5 text-blue-500" />
+                                          Recommendations
+                                        </h4>
+                                        <ul className="space-y-1">
+                                          {conv.recommendations.map((rec, i) => (
+                                            <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                                              <span className="text-blue-500 mt-1.5 shrink-0">&#8226;</span>
+                                              {rec}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+
+                                    {/* Fallback to legacy analysis if no quality dimensions */}
+                                    {!hasAnyQualityDimension(conv) && conv.analysis && (
+                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                        {conv.analysis.identityConfirmation !== undefined && (
+                                          <div className="p-3 bg-muted rounded-lg">
+                                            <p className="text-xs text-muted-foreground">Identity Confirmation</p>
+                                            <p className="font-semibold text-foreground">{conv.analysis.identityConfirmation ? 'Yes' : 'No'}</p>
+                                          </div>
+                                        )}
+                                        {conv.analysis.pitchDelivery !== undefined && (
+                                          <div className="p-3 bg-muted rounded-lg">
+                                            <p className="text-xs text-muted-foreground">Pitch Delivery</p>
+                                            <p className="font-semibold text-foreground">{conv.analysis.pitchDelivery}/10</p>
+                                          </div>
+                                        )}
+                                        {conv.analysis.objectionHandling !== undefined && (
+                                          <div className="p-3 bg-muted rounded-lg">
+                                            <p className="text-xs text-muted-foreground">Objection Handling</p>
+                                            <p className="font-semibold text-foreground">{conv.analysis.objectionHandling}/10</p>
+                                          </div>
+                                        )}
+                                        {conv.analysis.closingAttempt !== undefined && (
+                                          <div className="p-3 bg-muted rounded-lg">
+                                            <p className="text-xs text-muted-foreground">Closing Attempt</p>
+                                            <p className="font-semibold text-foreground">{conv.analysis.closingAttempt ? 'Yes' : 'No'}</p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </TabsContent>
+
+                                {/* Transcript Tab */}
+                                <TabsContent value="transcript" className="mt-0 p-4">
+                                  {conv.transcript ? (
+                                    <ScrollArea className="h-[300px]">
+                                      <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed text-foreground">
+                                        {conv.transcript}
+                                      </pre>
+                                    </ScrollArea>
+                                  ) : (
+                                    <p className="text-sm text-muted-foreground italic py-4">No transcript available</p>
+                                  )}
+                                </TabsContent>
+                              </Tabs>
                             ) : (
-                              <p className="text-sm text-muted-foreground italic">No transcript available</p>
-                            )}
-                            {conv.analysis && (
-                              <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-                                {conv.analysis.identityConfirmation !== undefined && (
-                                  <div className="p-3 bg-muted/50 rounded-lg">
-                                    <p className="text-xs text-muted-foreground">Identity Confirmation</p>
-                                    <p className="font-semibold">{conv.analysis.identityConfirmation ? 'Yes' : 'No'}</p>
-                                  </div>
-                                )}
-                                {conv.analysis.pitchDelivery !== undefined && (
-                                  <div className="p-3 bg-muted/50 rounded-lg">
-                                    <p className="text-xs text-muted-foreground">Pitch Delivery</p>
-                                    <p className="font-semibold">{conv.analysis.pitchDelivery}/10</p>
-                                  </div>
-                                )}
-                                {conv.analysis.objectionHandling !== undefined && (
-                                  <div className="p-3 bg-muted/50 rounded-lg">
-                                    <p className="text-xs text-muted-foreground">Objection Handling</p>
-                                    <p className="font-semibold">{conv.analysis.objectionHandling}/10</p>
-                                  </div>
-                                )}
-                                {conv.analysis.closingAttempt !== undefined && (
-                                  <div className="p-3 bg-muted/50 rounded-lg">
-                                    <p className="text-xs text-muted-foreground">Closing Attempt</p>
-                                    <p className="font-semibold">{conv.analysis.closingAttempt ? 'Yes' : 'No'}</p>
-                                  </div>
+                              /* No analysis data — just show transcript */
+                              <div className="p-4">
+                                {conv.transcript ? (
+                                  <ScrollArea className="h-[300px]">
+                                    <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed text-foreground">
+                                      {conv.transcript}
+                                    </pre>
+                                  </ScrollArea>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground italic">No transcript available</p>
                                 )}
                               </div>
                             )}

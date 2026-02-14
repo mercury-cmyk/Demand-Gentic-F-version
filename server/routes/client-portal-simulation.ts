@@ -32,6 +32,11 @@ import {
   intelligenceGateErrorResponse,
 } from '../services/preview-intelligence-gate';
 import {
+  getOrBuildAccountIntelligence,
+  getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
+} from '../services/account-messaging-service';
+import {
   getVirtualAgentConfig,
   mergeAgentSettings,
 } from '../services/virtual-agent-settings';
@@ -1185,6 +1190,50 @@ router.post('/generate-email', async (req: Request, res: Response) => {
       }
     }
 
+    // ── Context Gathering ── Collect all intelligence for the AI
+    let accountContext = null;
+    let messagingBrief = null;
+    let contactContext = null;
+
+    if (accountId) {
+      try {
+        const aiRecord = await getOrBuildAccountIntelligence(accountId);
+        if (aiRecord) {
+          accountContext = aiRecord.payloadJson;
+        }
+        
+        const ambRecord = await getOrBuildAccountMessagingBrief({ accountId, campaignId });
+        if (ambRecord) {
+          messagingBrief = ambRecord.payloadJson;
+        }
+      } catch (e) {
+        console.warn('[Preview Studio] Failed to fetch intelligence context:', e);
+      }
+    }
+
+    if (contactId) {
+       try {
+        const [contact] = await db
+          .select()
+          .from(contacts)
+          .where(eq(contacts.id, contactId))
+          .limit(1);
+          
+        if (contact) {
+           contactContext = {
+             name: contact.fullName,
+             firstName: contact.firstName, // Ensure firstName is available
+             title: contact.jobTitle,
+             email: contact.email,
+             linkedin: contact.linkedinUrl,
+             // Add any other relevant contact fields
+           };
+        }
+       } catch (e) {
+         console.warn('[Preview Studio] Failed to fetch contact context:', e);
+       }
+    }
+
     // Map emailType to variant spec for differentiated output
     const emailTypeToVariant: Record<string, number> = {
       cold_outreach: 1,   // branded
@@ -1214,6 +1263,14 @@ router.post('/generate-email', async (req: Request, res: Response) => {
       businessProfile?.legalBusinessName ||
       clientAccount?.name ||
       '';
+      
+    const organizationContext = {
+      name: companyName,
+      website: businessProfile?.website,
+      industry: businessProfile?.industry,
+      description: businessProfile?.description,
+      proposition: businessProfile?.valueProposition
+    };
 
     const companyAddress = (() => {
       if (!businessProfile?.addressLine1 || !businessProfile?.city || !businessProfile?.state || !businessProfile?.postalCode) return undefined;
@@ -1230,6 +1287,11 @@ router.post('/generate-email', async (req: Request, res: Response) => {
       emailType: emailType || 'cold_outreach',
       tone: 'professional',
       variantSpec,
+      // Inject Enhanced Intelligence
+      accountContext,
+      messagingBrief,
+      contactContext,
+      organizationContext
     });
 
     const palette: BrandPaletteKey = brandPalette || 'indigo';

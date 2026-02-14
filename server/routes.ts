@@ -105,7 +105,7 @@ import campaignOpsRouter from './routes/campaign-ops-routes';
 import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import adminAgenticCampaignsRouter from './routes/admin-agentic-campaigns';
-import { getCallSessionRecordingUrl } from "./services/recording-storage";
+// recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
 import {
   apiLimiter,
@@ -8896,20 +8896,31 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Sender profile not found" });
       }
 
-      const { sendTestEmail } = await import("./services/bulk-email-service");
-      const result = await sendTestEmail({
-        to: Array.isArray(to) ? to : [to],
-        subject,
-        html,
-        from: profile.fromEmail,
-        fromName: profile.fromName,
-        replyTo: profile.replyTo || profile.replyToEmail || profile.fromEmail
-      });
+      const { mercuryEmailService } = await import("./services/mercury");
+      const toEmails = Array.isArray(to) ? to : [to];
+
+      let sent = 0;
+      let lastError: string | undefined;
+      for (const recipient of toEmails) {
+        const result = await mercuryEmailService.sendDirect({
+          to: recipient,
+          subject,
+          html,
+          fromEmail: profile.fromEmail,
+          fromName: profile.fromName || undefined,
+          replyTo: profile.replyTo || profile.replyToEmail || profile.fromEmail
+        });
+        if (result.success) {
+          sent++;
+        } else {
+          lastError = result.error;
+        }
+      }
 
       res.json({
-        success: result.success,
-        sent: result.sent,
-        message: `Test email sent to ${result.sent} recipient(s)`
+        success: sent > 0,
+        sent,
+        message: sent > 0 ? `Test email sent to ${sent} recipient(s)` : (lastError || "Failed to send test email")
       });
     } catch (error: any) {
       console.error("Failed to send test email:", error);
@@ -9067,35 +9078,35 @@ export function registerRoutes(app: Express) {
         }
       }
 
-      // Fallback to mailgun domain if no from address configured
-      if (!from && process.env.MAILGUN_DOMAIN) {
-        from = `noreply@${process.env.MAILGUN_DOMAIN}`;
-      }
+      // Use Mercury email service (same SMTP provider as admin)
+      const { mercuryEmailService } = await import("./services/mercury");
 
-      if (!from) {
-        return res.status(400).json({ 
-          message: "No sender email configured. Please set DEFAULT_FROM_EMAIL or configure a sender profile." 
+      let sent = 0;
+      let lastError: string | undefined;
+      for (const recipient of toEmails) {
+        const result = await mercuryEmailService.sendDirect({
+          to: recipient,
+          subject,
+          html,
+          fromEmail: from || undefined,
+          fromName,
+          replyTo
         });
+        if (result.success) {
+          sent++;
+        } else {
+          lastError = result.error;
+        }
       }
 
-      const { sendTestEmail } = await import("./services/bulk-email-service");
-      const result = await sendTestEmail({
-        to: toEmails,
-        subject,
-        html,
-        from,
-        fromName,
-        replyTo
-      });
-
-      console.log(`[Test Email] Sent to ${toEmails.join(", ")} - Success: ${result.success}, Sent: ${result.sent}`);
+      console.log(`[Test Email] Sent to ${toEmails.join(", ")} - Success: ${sent > 0}, Sent: ${sent}`);
 
       res.json({
-        success: result.success,
-        sent: result.sent,
-        message: result.success 
-          ? `Test email sent to ${result.sent} recipient(s)` 
-          : "Failed to send test email"
+        success: sent > 0,
+        sent,
+        message: sent > 0
+          ? `Test email sent to ${sent} recipient(s)`
+          : (lastError || "Failed to send test email")
       });
     } catch (error: any) {
       console.error("[Test Email] Failed to send:", error);
@@ -15646,8 +15657,9 @@ Provide JSON response with:
   // Get all conversations for QA review (call sessions AND test calls with transcripts)
   app.get("/api/qa/conversations", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { campaignId, type, search, source, limit = '100', dateFrom, dateTo } = req.query;
+      const { campaignId, type, search, source, limit = '100', dateFrom, dateTo, sortBy } = req.query;
       const limitNum = Math.min(500, Math.max(1, parseInt(limit as string, 10)));
+      const sortMode = (sortBy as string) || 'date'; // 'date' | 'score'
 
       // We'll fetch both call_sessions and test_calls, then combine
       const conversations: any[] = [];
@@ -15716,20 +15728,8 @@ Provide JSON response with:
           .orderBy(desc(callSessions.startedAt))
           .limit(limitNum);
 
-        // Enhance with signed recording URLs (using sessionsQuery)
-        const sessions = await Promise.all(sessionsQuery.map(async (s) => {
-          let recordingUrl = s.recordingUrl;
-          // Always try to refresh URL if S3 Key exists OR if we have a recordingUrl (it might be expired Telnyx URL)
-          if (s.recordingS3Key || s.recordingUrl) {
-            try {
-              const result = await getCallSessionRecordingUrl(s.id, s.recordingUrl);
-              recordingUrl = result.url;
-            } catch (e) {
-              // silent fail, keep original
-            }
-          }
-          return { ...s, recordingUrl };
-        }));
+        // Use sessions directly — RecordingPlayer resolves fresh GCS/Telnyx URLs on-demand per call
+        const sessions = sessionsQuery;
 
         // Fetch quality records for sessions that lack aiAnalysis (fallback enrichment)
         const sessionsWithoutAnalysis = sessions.filter(s => !s.analysis).map(s => s.id);
@@ -15866,56 +15866,9 @@ Provide JSON response with:
           };
         };
 
-        // ===== CONSOLIDATE: Deduplicate by contact — one entry per contact (latest call) =====
-        // Group sessions by contactId (or by id if no contactId, to avoid merging unrelated unknowns)
-        const contactGroups = new Map<string, typeof sessions>();
+        // Transform each session into conversation format (no deduplication — show every call)
         for (const session of sessions) {
-          // Group by contactId when available; otherwise each session stays separate
-          const groupKey = session.contactId || `__solo__${session.id}`;
-          const existing = contactGroups.get(groupKey);
-          if (!existing) {
-            contactGroups.set(groupKey, [session]);
-          } else {
-            existing.push(session);
-          }
-        }
-
-        // For each contact group, use the most recent session as primary,
-        // attach call history (all session IDs + summaries)
-        for (const [, group] of contactGroups) {
-          // Already sorted by startedAt DESC from the query, so first is latest
-          const primary = group[0];
-          const conv = transformSession(primary);
-
-          // Attach call history for contacts with multiple calls
-          if (group.length > 1) {
-            (conv as any).callCount = group.length;
-            (conv as any).callHistory = group.map(s => ({
-              id: s.id,
-              status: s.status,
-              disposition: s.disposition || undefined,
-              duration: s.duration || undefined,
-              hasTranscript: !!(s.transcript),
-              hasRecording: !!(s.recordingS3Key || s.recordingUrl),
-              hasAnalysis: !!(s.analysis),
-              createdAt: s.createdAt?.toISOString() || new Date().toISOString(),
-            }));
-            // Aggregate issues from ALL calls for this contact
-            const allIssues: any[] = [];
-            for (const s of group) {
-              const aObj = s.analysis as any;
-              const qd = aObj?.conversationQuality || aObj;
-              const issues = qd?.detectedIssues || qd?.issues || aObj?.issues || [];
-              allIssues.push(...issues);
-            }
-            if (allIssues.length > 0) {
-              (conv as any).allDetectedIssues = allIssues;
-            }
-          } else {
-            (conv as any).callCount = 1;
-          }
-
-          conversations.push(conv);
+          conversations.push(transformSession(session));
         }
       }
 
@@ -16089,10 +16042,21 @@ Provide JSON response with:
         withTranscripts: totalTranscriptsCount
       };
 
-      // Sort all conversations by date descending
-      conversations.sort((a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
+      // Sort conversations based on requested sort mode
+      if (sortMode === 'score') {
+        // Sort by quality score descending (best first), then by date for ties
+        conversations.sort((a, b) => {
+          const scoreA = (a.analysis as any)?.overallScore || 0;
+          const scoreB = (b.analysis as any)?.overallScore || 0;
+          if (scoreB !== scoreA) return scoreB - scoreA;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+      } else {
+        // Default: sort by date descending
+        conversations.sort((a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
 
       const withAnalysis = conversations.filter(c => c.analysis).length;
       console.log(`[QA] Returning ${conversations.length} conversations (${withAnalysis} with analysis), counts: calls=${globalCounts.calls}, testCalls=${globalCounts.testCalls}`);
@@ -16104,7 +16068,7 @@ Provide JSON response with:
       // Aggregate top challenges across all conversations for the challenges summary
       const allIssuesAcrossConversations: any[] = [];
       for (const c of limitedConversations) {
-        const issues = c.allDetectedIssues || c.detectedIssues || c.analysis?.issues || [];
+        const issues = c.detectedIssues || c.analysis?.issues || [];
         allIssuesAcrossConversations.push(...issues);
       }
       // Count issues by type and sort by frequency

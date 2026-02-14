@@ -181,10 +181,15 @@ export async function getPlayableRecordingLink(
       try {
         const result = await getCallSessionRecordingUrl(conversationId);
         if (result.url) {
+          // If signBlob is unavailable, GCS returns gcs-internal:// which browsers can't play.
+          // In that case, use the server-side stream proxy endpoint instead.
+          const finalUrl = result.url.startsWith('gcs-internal://')
+            ? `/api/recordings/${conversationId}/stream`
+            : result.url;
           return {
-            url: result.url,
+            url: finalUrl,
             source: 'gcs',
-            expiresInSeconds: 604_800, // 7 days
+            expiresInSeconds: result.url.startsWith('gcs-internal://') ? 3600 : 604_800,
             mimeType: 'audio/mpeg',
             telnyxRecordingId: session.telnyxRecordingId || undefined,
           };
@@ -252,10 +257,13 @@ export async function getPlayableRecordingLink(
       try {
         const result = await getRecordingUrl(conversationId);
         if (result.url) {
+          const finalUrl = result.url.startsWith('gcs-internal://')
+            ? `/api/recordings/${conversationId}/stream`
+            : result.url;
           return {
-            url: result.url,
+            url: finalUrl,
             source: 'gcs',
-            expiresInSeconds: 604_800,
+            expiresInSeconds: result.url.startsWith('gcs-internal://') ? 3600 : 604_800,
             mimeType: 'audio/mpeg',
             telnyxRecordingId: lead.telnyxRecordingId || undefined,
           };

@@ -1246,57 +1246,57 @@ export default function PromptManagementPage() {
           <Card>
             <CardContent className="pt-4 pb-4">
               <div className="flex items-center gap-3 flex-wrap">
-                <Select value={filterDepartment} onValueChange={setFilterDepartment}>
+                <Select value={filterDepartment || "__all__"} onValueChange={(v) => setFilterDepartment(v === "__all__" ? "" : v)}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="Department" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Departments</SelectItem>
+                    <SelectItem value="__all__">All Departments</SelectItem>
                     {departmentCounts && Object.entries(departmentCounts).map(([dept, cnt]) => (
                       <SelectItem key={dept} value={dept}>{dept.replace(/_/g, ' ')} ({cnt})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={filterFunction} onValueChange={setFilterFunction}>
+                <Select value={filterFunction || "__all__"} onValueChange={(v) => setFilterFunction(v === "__all__" ? "" : v)}>
                   <SelectTrigger className="w-[170px]">
                     <SelectValue placeholder="Function" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Functions</SelectItem>
+                    <SelectItem value="__all__">All Functions</SelectItem>
                     {functionCounts && Object.entries(functionCounts).map(([fn, cnt]) => (
                       <SelectItem key={fn} value={fn}>{fn.replace(/_/g, ' ')} ({cnt})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={filterModel} onValueChange={setFilterModel}>
+                <Select value={filterModel || "__all__"} onValueChange={(v) => setFilterModel(v === "__all__" ? "" : v)}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="AI Model" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Models</SelectItem>
+                    <SelectItem value="__all__">All Models</SelectItem>
                     {modelCounts && Object.entries(modelCounts).map(([model, cnt]) => (
                       <SelectItem key={model} value={model}>{model} ({cnt})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <Select value={filterStatus || "__all__"} onValueChange={(v) => setFilterStatus(v === "__all__" ? "" : v)}>
                   <SelectTrigger className="w-[130px]">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Status</SelectItem>
+                    <SelectItem value="__all__">All Status</SelectItem>
                     <SelectItem value="live">Live</SelectItem>
                     <SelectItem value="draft">Draft</SelectItem>
                     <SelectItem value="archived">Archived</SelectItem>
                     <SelectItem value="deprecated">Deprecated</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={filterPurpose} onValueChange={setFilterPurpose}>
+                <Select value={filterPurpose || "__all__"} onValueChange={(v) => setFilterPurpose(v === "__all__" ? "" : v)}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="Purpose" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Purposes</SelectItem>
+                    <SelectItem value="__all__">All Purposes</SelectItem>
                     <SelectItem value="generation">Generation</SelectItem>
                     <SelectItem value="classification">Classification</SelectItem>
                     <SelectItem value="analysis">Analysis</SelectItem>

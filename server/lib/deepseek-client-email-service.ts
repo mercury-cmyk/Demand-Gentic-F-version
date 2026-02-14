@@ -15,6 +15,11 @@ export interface ClientEmailGenerationRequest {
   tone: string;
   variants?: number;
   variantSpec?: VariantSpec;
+  // Enhanced Context
+  accountContext?: any;
+  organizationContext?: any;
+  contactContext?: any;
+  messagingBrief?: any;
 }
 
 // Variant specifications for distinct email styles
@@ -283,18 +288,41 @@ export async function generateClientEmailContent(
   const variantSpec = request.variantSpec;
   const variantInstructions = getVariantInstructions(variantSpec);
 
+  // Build enhanced context string
+  let enhancedContext = '';
+  
+  if (request.organizationContext) {
+    enhancedContext += `\nORGANIZATION INTELLIGENCE:\n${typeof request.organizationContext === 'string' ? request.organizationContext : JSON.stringify(request.organizationContext, null, 2)}\n`;
+  }
+
+  if (request.accountContext) {
+    enhancedContext += `\nACCOUNT INTELLIGENCE:\n${typeof request.accountContext === 'string' ? request.accountContext : JSON.stringify(request.accountContext, null, 2)}\n`;
+  }
+
+  if (request.messagingBrief) {
+    enhancedContext += `\nMESSAGING BRIEF:\n${typeof request.messagingBrief === 'string' ? request.messagingBrief : JSON.stringify(request.messagingBrief, null, 2)}\n`;
+  }
+
+  if (request.contactContext) {
+    enhancedContext += `\nCONTACT CONTEXT:\n${typeof request.contactContext === 'string' ? request.contactContext : JSON.stringify(request.contactContext, null, 2)}\n`;
+  }
+
   const systemPrompt = `You are an expert B2B demand generation strategist and copywriter.
 Your task is to generate email content that is:
 - Problem-led: Start with a real, account-relevant challenge or friction point.
 - Insight-driven: Offer a unique, non-obvious perspective that demonstrates deep understanding.
 - Grounded in real demand-gen challenges: Address pipeline gaps, conversion friction, market shifts, or operational realities.
 - Campaign-aware: Adapt tone, framing, and value to the specific campaign context provided.
+- Personalization-first: Use the provided account and contact intelligence to make the email feel bespoke.
+- Address the recipient: If 'contactContext' is provided, address the person by name in the intro. If not, use '{{first_name}}'.
 - Never promotional or pitch-oriented: Do NOT mention product features, company superiority, or calls to buy.
 - Written as if by someone who deeply understands the target's world.
 
 ${variantInstructions}
 
 ${campaignData.context}
+
+${enhancedContext}
 
 Respond ONLY with valid JSON.`;
 

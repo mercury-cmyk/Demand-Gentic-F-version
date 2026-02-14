@@ -299,41 +299,64 @@ function RecordingPlayer({
   reanalyzeMutation: any;
 }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioSource, setAudioSource] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [loadingUrl, setLoadingUrl] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const fetchRecordingUrl = async (conversationId: string) => {
     setAudioUrl(null);
     setAudioError(null);
     setLoadingUrl(true);
 
-    // Try the dedicated recording URL endpoint first (resolves GCS presigned URL or Telnyx)
-    apiRequest('GET', `/api/qa/recording-url/${conversation.id}`)
-      .then(res => res.json())
-      .then(data => {
-        if (cancelled) return;
+    try {
+      // Try the dedicated recording URL endpoint (resolves GCS presigned URL or Telnyx)
+      const token = localStorage.getItem('authToken');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`/api/qa/recording-url/${conversationId}`, { headers, credentials: 'include' });
+
+      if (res.ok) {
+        const data = await res.json();
         if (data.url) {
           setAudioUrl(data.url);
+          setAudioSource(data.source || null);
           setLoadingUrl(false);
-        } else {
-          throw new Error('No URL in response');
+          return;
         }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        // Fallback: use the recordingUrl already resolved by the conversations endpoint
-        if (conversation.recordingUrl) {
-          setAudioUrl(conversation.recordingUrl);
-          setLoadingUrl(false);
-        } else {
-          setAudioError('No recording found for this call');
-          setLoadingUrl(false);
-        }
-      });
+      }
 
-    return () => { cancelled = true; };
-  }, [conversation.id, conversation.recordingUrl]);
+      // Fallback: use the server-side stream proxy which reads directly from GCS
+      // This works even when signed URLs can't be generated
+      setAudioUrl(`/api/recordings/${conversationId}/stream`);
+      setAudioSource('stream');
+      setLoadingUrl(false);
+    } catch {
+      // Final fallback: stream proxy
+      setAudioUrl(`/api/recordings/${conversationId}/stream`);
+      setAudioSource('stream');
+      setLoadingUrl(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecordingUrl(conversation.id);
+  }, [conversation.id]);
+
+  const handleRetrySync = async () => {
+    setRetrying(true);
+    setAudioError(null);
+    try {
+      // First trigger a server-side resync (downloads from Telnyx → stores in GCS)
+      await apiRequest('POST', `/api/recordings/${conversation.id}/retry-sync`, { transcribe: false });
+    } catch {
+      // Resync may fail if already stored or no Telnyx URL — still try to fetch URL
+    }
+    // Then fetch a fresh playback URL
+    fetchRecordingUrl(conversation.id);
+    setRetrying(false);
+  };
 
   const showTranscribe = !conversation.isTestCall && (
     !conversation.transcript ||
@@ -350,8 +373,11 @@ function RecordingPlayer({
         <h4 className="text-sm font-medium flex items-center gap-2">
           <Phone className="h-4 w-4" />
           Call Recording
-          {conversation.recordingS3Key && (
+          {audioSource === 'gcs' && (
             <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">GCS Stored</Badge>
+          )}
+          {audioSource && audioSource !== 'gcs' && (
+            <Badge variant="outline" className="text-xs">{audioSource}</Badge>
           )}
         </h4>
         <div className="flex items-center gap-2">
@@ -390,22 +416,37 @@ function RecordingPlayer({
       {loadingUrl ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground p-2">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading recording...
+          Loading recording from storage...
         </div>
       ) : audioError ? (
-        <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted rounded">
-          <AlertTriangle className="h-4 w-4" />
-          <span>{audioError}</span>
+        <div className="p-2 bg-muted rounded space-y-2">
+          <div className="text-sm text-muted-foreground flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            <span>{audioError}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRetrySync}
+            disabled={retrying}
+          >
+            {retrying ? (
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3 mr-1" />
+            )}
+            Retry Sync
+          </Button>
         </div>
       ) : audioUrl ? (
         <audio
-          key={conversation.id}
+          key={`${conversation.id}-${audioUrl}`}
           controls
           className="w-full"
           src={audioUrl}
           onError={() => {
             setAudioUrl(null);
-            setAudioError('Recording playback failed - audio file may be corrupted or expired');
+            setAudioError('Recording playback failed - click Retry Sync to fetch a fresh URL from storage');
           }}
         >
           Your browser does not support the audio element.
@@ -420,6 +461,7 @@ export default function ConversationQualityPage() {
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedDisposition, setSelectedDisposition] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<string>('date');
   const [showOnlyWithTranscripts, setShowOnlyWithTranscripts] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFrom, setDateFrom] = useState<string>('');
@@ -440,10 +482,11 @@ export default function ConversationQualityPage() {
   if (searchQuery) qaParams.append('search', searchQuery);
   if (dateFrom) qaParams.append('dateFrom', dateFrom);
   if (dateTo) qaParams.append('dateTo', dateTo);
+  if (sortBy !== 'date') qaParams.append('sortBy', sortBy);
   qaParams.append('limit', '200');
 
   const { data: qaData, isLoading: qaLoading, refetch } = useQuery<any>({
-    queryKey: ['/api/qa/conversations', selectedCampaign, selectedType, searchQuery, dateFrom, dateTo],
+    queryKey: ['/api/qa/conversations', selectedCampaign, selectedType, searchQuery, dateFrom, dateTo, sortBy],
     queryFn: async () => {
       const response = await apiRequest('GET', `/api/qa/conversations?${qaParams.toString()}`);
       return response.json();
@@ -772,6 +815,18 @@ export default function ConversationQualityPage() {
                   <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
                   <SelectItem value="voicemail">Voicemail</SelectItem>
                   <SelectItem value="no_answer">No Answer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-[140px]">
+              <Label htmlFor="sortBy">Sort By</Label>
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger id="sortBy">
+                  <SelectValue placeholder="Sort By" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="date">Latest First</SelectItem>
+                  <SelectItem value="score">Best Score</SelectItem>
                 </SelectContent>
               </Select>
             </div>

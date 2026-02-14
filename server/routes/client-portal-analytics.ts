@@ -535,7 +535,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
 
     if (targetIds.length === 0) return res.json([]);
 
-    const conversations = await db
+    const rawConversations = await db
       .select({
         id: callSessions.id,
         campaignId: callSessions.campaignId,
@@ -549,6 +549,22 @@ router.get('/conversations', async (req: Request, res: Response) => {
         transcript: callSessions.aiTranscript,
         analysis: callSessions.aiAnalysis,
         createdAt: callSessions.createdAt,
+        // Post-call quality dimensions from callQualityRecords
+        engagementScore: callQualityRecords.engagementScore,
+        clarityScore: callQualityRecords.clarityScore,
+        empathyScore: callQualityRecords.empathyScore,
+        objectionHandlingScore: callQualityRecords.objectionHandlingScore,
+        qualificationScore: callQualityRecords.qualificationScore,
+        closingScore: callQualityRecords.closingScore,
+        flowComplianceScore: callQualityRecords.flowComplianceScore,
+        campaignAlignmentScore: callQualityRecords.campaignAlignmentScore,
+        sentiment: callQualityRecords.sentiment,
+        engagementLevel: callQualityRecords.engagementLevel,
+        issues: callQualityRecords.issues,
+        recommendations: callQualityRecords.recommendations,
+        // Recording info
+        hasRecording: sql<boolean>`(${callSessions.recordingS3Key} IS NOT NULL)`,
+        recordingS3Key: callSessions.recordingS3Key,
       })
       .from(callSessions)
       .innerJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
@@ -563,11 +579,18 @@ router.get('/conversations', async (req: Request, res: Response) => {
         and(
           inArray(callSessions.campaignId, targetIds),
           eq(callSessions.status, 'completed'),
-          isNotNull(callSessions.aiTranscript)
         )
       )
       .orderBy(desc(callSessions.createdAt))
-      .limit(100);
+      .limit(200);
+
+    // Deduplicate by callSession id (left join on leads can produce duplicates)
+    const seen = new Set<string>();
+    const conversations = rawConversations.filter(c => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
 
     res.json(conversations);
   } catch (error) {

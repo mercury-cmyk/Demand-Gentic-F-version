@@ -11,17 +11,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
@@ -39,7 +30,7 @@ import {
   Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingUp, TrendingDown, Brain,
   FileDown, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
-  ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot, X,
+  Filter, Search, RefreshCw, ExternalLink, Zap, Bot, X,
   Link as LinkIcon, Upload, Trash2, Mic, ShoppingCart, FileEdit, TestTube,
   ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
@@ -210,19 +201,6 @@ interface Project {
   totalCost: number;
 }
 
-interface ArgyleEvent {
-  id: string;
-  title: string;
-  startAtHuman: string | null;
-  draft: {
-    id: string;
-    status: string;
-    leadCount?: number;
-    draftFields?: any;
-    sourceFields?: any;
-  } | null;
-}
-
 interface Lead {
   id: number; // verificationContactId
   firstName: string | null;
@@ -314,142 +292,6 @@ export default function ClientPortalDashboard() {
   const [showEmailTestDialog, setShowEmailTestDialog] = useState(false);
   const [testEmailCampaignId, setTestEmailCampaignId] = useState<string | null>(null);
 
-  // Work Order Request State (managed campaigns by Pivotal team)
-  const [showWorkOrderDialog, setShowWorkOrderDialog] = useState(false);
-  const [workOrderStep, setWorkOrderStep] = useState(1);
-  
-  // Temp inputs for tag fields
-  const [geoInput, setGeoInput] = useState('');
-  const [titleInput, setTitleInput] = useState('');
-  const [industryInput, setIndustryInput] = useState('');
-
-  const [newWorkOrder, setNewWorkOrder] = useState({
-    campaignType: '' as string,
-    campaignGoals: '',
-    productServices: '',
-    talkingPoints: '',
-    qualifications: '',
-    successCriteria: '',
-    requiredLeads: '',
-    desiredTimeline: '',
-    deadline: '',
-    additionalInstructions: '',
-    priority: 'normal' as 'low' | 'normal' | 'high' | 'urgent',
-    landingPageUrl: '',
-    projectFileUrl: '',
-    fileName: '',
-    // Audience Targeting
-    targetGeo: [] as string[],
-    targetTitles: [] as string[],
-    targetIndustries: [] as string[],
-    targetRevenue: [] as string[],
-    targetEmployeeSize: [] as string[],
-  });
-
-  // Argyle Event Selection (Link Drafts)
-  const [selectedArgyleEventId, setSelectedArgyleEventId] = useState<string>('none');
-
-  // Fetch Argyle Events (if feature enabled/client authorized)
-  const { data: argyleEventsData } = useQuery<{ events: ArgyleEvent[] }>({
-    queryKey: ['argyle-events'],
-    queryFn: async () => {
-      try {
-        const res = await apiRequest('GET', '/api/client-portal/argyle-events/events');
-        return await res.json();
-      } catch (e) {
-        return { events: [] };
-      }
-    },
-    retry: false,
-    staleTime: 5 * 60 * 1000,
-  });
-  
-  const argyleEvents = argyleEventsData?.events || [];
-  const hasDrafts = argyleEvents.some(e => e.draft && e.draft.status !== 'submitted');
-
-  // Create Project Mutation (Work Order)
-  const createWorkOrderMutation = useMutation({
-    mutationFn: async (data: typeof newWorkOrder) => {
-      // Format description with all targeting details
-      const targetingDetails = [
-        `GEO: ${data.targetGeo.join(', ')}`,
-        `TITLES: ${data.targetTitles.join(', ')}`,
-        `INDUSTRIES: ${data.targetIndustries.join(', ')}`,
-        `REVENUE: ${data.targetRevenue.join(', ')}`,
-        `EMPLOYEE SIZE: ${data.targetEmployeeSize.join(', ')}`
-      ].join('\n');
-
-      const fullDescription = `CAMPAIGN OBJECTIVE/CONTEXT:\n${data.campaignGoals}\n\nPRODUCT/SERVICES:\n${data.productServices}\n\nKEY TALKING POINTS:\n${data.talkingPoints}\n\nQUALIFICATIONS:\n${data.qualifications}\n\nSUCCESS CRITERIA:\n${data.successCriteria}\n\nTARGET AUDIENCE:\n${targetingDetails}\n\nTIMELINE:\n${data.desiredTimeline}\n\nPRIORITY:\n${data.priority}\n\nINSTRUCTIONS:\n${data.additionalInstructions}`;
-
-      // Map Work Order fields to Project Request schema
-      return apiRequest('POST', '/api/client-portal/projects', {
-        name: `${getProgramTypeLabel(data.campaignType)} Request`,
-        description: fullDescription,
-        requestedLeadCount: parseInt(data.requiredLeads.replace(/\D/g, '') || '0'),
-        endDate: data.deadline || undefined,
-        startDate: new Date().toISOString(),
-        budgetCurrency: 'USD',
-        landingPageUrl: data.landingPageUrl || undefined,
-        projectFileUrl: data.projectFileUrl || undefined,
-      });
-    },
-    onSuccess: () => {
-      toast({ 
-        title: 'Work Order Submitted', 
-        description: 'Your project request has been submitted for review.' 
-      });
-      setShowWorkOrderDialog(false);
-      setWorkOrderStep(1);
-      
-      // Reset form
-      setNewWorkOrder({
-        campaignType: '',
-        campaignGoals: '',
-        productServices: '',
-        talkingPoints: '',
-        qualifications: '',
-        successCriteria: '',
-        requiredLeads: '',
-        desiredTimeline: '',
-        deadline: '',
-        additionalInstructions: '',
-        priority: 'normal',
-        landingPageUrl: '',
-        projectFileUrl: '',
-        fileName: '',
-        targetGeo: [],
-        targetTitles: [],
-        targetIndustries: [],
-        targetRevenue: [],
-        targetEmployeeSize: [],
-      });
-
-      // Refresh projects list to show the new order
-      queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
-    },
-    onError: (error: any) => {
-      toast({ 
-        title: 'Submission Failed', 
-        description: error.message || 'Failed to submit work order.',
-        variant: 'destructive',
-      });
-    }
-  });
-
-  const getProgramTypeLabel = (type: string) => {
-    switch (type) {
-      case 'appointment_setting': return 'Appointment Setting';
-      case 'event_reg_digital_ungated': return 'Event Reg - Digital (Ungated)';
-      case 'event_reg_digital_gated': return 'Event Reg - Digital (Gated)';
-      case 'in_person_events': return 'In-Person Events';
-      case 'data_hygiene_enrichment': return 'Data Hygiene';
-      case 'call_campaign': return 'Call Campaign';
-      case 'email_campaign': return 'Email Campaign';
-      case 'combined': return 'Combined';
-      case 'data_enrichment': return 'Data Enrichment';
-      default: return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    }
-  };
 
   // Self-Service Campaign Creation State
   const [showCampaignCreator, setShowCampaignCreator] = useState(false);
@@ -826,7 +668,7 @@ export default function ClientPortalDashboard() {
     staleTime: 10 * 60 * 1000,
   });
 
-  // Argyle events feature status check — key includes tenant for cache isolation
+  // Argyle events feature status check ï¿½ key includes tenant for cache isolation
   const { data: argyleFeatureStatus } = useQuery<{ enabled: boolean }>({
     queryKey: ['argyle-events-feature-status', user?.clientAccountId],
     queryFn: async () => {
@@ -1387,52 +1229,6 @@ export default function ClientPortalDashboard() {
       if (!uploadRes.ok) throw new Error('Failed to upload file');
 
       setNewProject(prev => ({ 
-        ...prev, 
-        projectFileUrl: key,
-        fileName: file.name
-      }));
-      toast({ title: 'File uploaded successfully' });
-    } catch (error) {
-      console.error(error);
-      toast({ title: 'Upload failed', variant: 'destructive' });
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleWorkOrderFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    try {
-      // Get presigned URL
-      const res = await fetch('/api/s3/upload-url', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}` 
-        },
-        body: JSON.stringify({ 
-          filename: file.name, 
-          contentType: file.type,
-          folder: 'uploads' 
-        }),
-      });
-      
-      if (!res.ok) throw new Error('Failed to get upload URL');
-      const { url, key } = await res.json();
-
-      // Upload to S3
-      const uploadRes = await fetch(url, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
-
-      if (!uploadRes.ok) throw new Error('Failed to upload file');
-
-      setNewWorkOrder(prev => ({ 
         ...prev, 
         projectFileUrl: key,
         fileName: file.name
@@ -3271,23 +3067,23 @@ export default function ClientPortalDashboard() {
                 <h2 className="text-2xl font-bold">Direct Agentic Orders</h2>
                 <p className="text-muted-foreground">Request campaigns to be managed and executed by our team</p>
               </div>
-              <Button onClick={() => setShowWorkOrderDialog(true)} className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600">
+              <Button onClick={() => setLocation('/client-portal/create-campaign')} className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600">
                 <Plus className="h-4 w-4 mr-2" />
-                Submit New Direct Agentic Order
+                Create New Campaign
               </Button>
             </div>
 
             {/* Info Banner */}
-            <Card className="border-orange-200 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/20 dark:to-amber-950/20 dark:border-orange-800">
+            <Card className="border-purple-200 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20 dark:border-purple-800">
               <CardContent className="p-4">
                 <div className="flex items-start gap-4">
-                  <div className="h-10 w-10 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
-                    <ClipboardList className="h-5 w-5 text-orange-600" />
+                  <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center shrink-0">
+                    <Sparkles className="h-5 w-5 text-purple-600" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-orange-800 dark:text-orange-300">What are Direct Agentic Orders?</h4>
-                    <p className="text-sm text-orange-700 dark:text-orange-400 mt-1">
-                      Direct Agentic Orders allow you to request that our team runs campaigns on your behalf. You specify the campaign type, goals, lead requirements, and timeline â€” and our team handles execution from start to finish.
+                    <h4 className="font-semibold text-purple-800 dark:text-purple-300">How Campaign Requests Work</h4>
+                    <p className="text-sm text-purple-700 dark:text-purple-400 mt-1">
+                      Create a new campaign to request that our team runs it on your behalf. Select your program type, set goals and targeting, and our team handles execution from start to finish.
                     </p>
                   </div>
                 </div>
@@ -5119,485 +4915,6 @@ export default function ClientPortalDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Work Order Request Sheet (Step-based) */}
-      <Sheet open={showWorkOrderDialog} onOpenChange={setShowWorkOrderDialog}>
-        <SheetContent side="right" className="sm:max-w-xl w-full overflow-y-auto">
-          <SheetHeader className="mb-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 flex items-center justify-center shadow-md">
-                <ClipboardList className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <SheetTitle>Submit Work Order</SheetTitle>
-                <SheetDescription>
-                  Request our team to run a campaign ({workOrderStep} of 3)
-                </SheetDescription>
-              </div>
-            </div>
-            {/* Stepper Indicator */}
-            <div className="flex gap-2 mt-4 px-1">
-              {[1, 2, 3].map((step) => (
-                <div 
-                  key={step} 
-                  className={`h-1.5 flex-1 rounded-full transition-colors ${
-                    step <= workOrderStep ? 'bg-orange-500' : 'bg-slate-200 dark:bg-slate-800'
-                  }`}
-                />
-              ))}
-            </div>
-          </SheetHeader>
-
-          <div className="space-y-6 py-2 pb-20 overflow-y-auto max-h-[calc(100vh-200px)] pr-2">
-            
-            {/* STEP 1: CAMPAIGN BASICS */}
-            {workOrderStep === 1 && (
-              <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
-                
-                {/* Argyle Event Selector (Filtered to show only valid drafts) */}
-                {hasDrafts && (
-                  <div className="space-y-2 p-4 bg-muted/30 rounded-lg border border-dashed border-orange-200">
-                    <Label className="flex items-center gap-2 text-orange-700 font-semibold">
-                      <Sparkles className="h-4 w-4" />
-                      Start from Argyle Event Draft?
-                    </Label>
-                    <Select
-                      value={selectedArgyleEventId}
-                      onValueChange={(val) => {
-                        setSelectedArgyleEventId(val);
-                        if (val !== 'none') {
-                          const event = argyleEvents.find(e => e.id === val);
-                          if (event && event.draft) {
-                             setNewWorkOrder(prev => ({
-                               ...prev,
-                               campaignGoals: event.draft?.draftFields?.objective || event.draft?.draftFields?.description || prev.campaignGoals,
-                               requiredLeads: event.draft?.leadCount?.toString() || prev.requiredLeads,
-                               additionalInstructions: [
-                                 `Event: ${event.title}`, 
-                                 event.startAtHuman ? `Date: ${event.startAtHuman}` : '',
-                                 `Source ID: ${event.id}`,
-                                 event.draft ? `(Draft ID: ${event.draft.id})` : '',
-                                 event.draft?.draftFields?.targetingNotes ? `Targeting Notes: ${event.draft.draftFields.targetingNotes}` : '',
-                                 event.draft?.draftFields?.context ? `Context: ${event.draft.draftFields.context}` : '',
-                               ].filter(Boolean).join('\n\n')
-                             }));
-                          }
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="bg-white dark:bg-slate-950">
-                        <SelectValue placeholder="No, I'll start from scratch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No, Start New Request</SelectItem>
-                        {argyleEvents
-                          .filter(e => e.draft && e.draft.status !== 'submitted')
-                          .map(e => (
-                            <SelectItem key={e.id} value={e.id}>
-                              {e.title} ({e.startAtHuman || 'TBD'})
-                            </SelectItem>
-                          ))
-                        } 
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-campaignType">Program Type *</Label>
-                  <Select
-                    value={newWorkOrder.campaignType}
-                    onValueChange={(val: string) =>
-                      setNewWorkOrder(prev => ({ ...prev, campaignType: val }))
-                    }
-                  >
-                    <SelectTrigger className="h-11">
-                      <SelectValue placeholder="Select program type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="appointment_setting">Appointment Setting ($500.00)</SelectItem>
-                      <SelectItem value="event_reg_digital_ungated">Event Registration - Digital (Ungated) ($10.00)</SelectItem>
-                      <SelectItem value="event_reg_digital_gated">Event Registration - Digital (Gated) ($40.00)</SelectItem>
-                      <SelectItem value="in_person_events">In-Person Events Program ($80.00)</SelectItem>
-                      <SelectItem value="data_hygiene_enrichment">Data Hygiene and Enrichment ($0.35/Record)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-goals">Campaign Objective or Context *</Label>
-                  <Textarea
-                    id="wo-goals"
-                    placeholder="Describe the campaign objectives and context..."
-                    value={newWorkOrder.campaignGoals}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, campaignGoals: e.target.value }))}
-                    className="min-h-[100px]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-productServices">Product Services</Label>
-                  <Textarea
-                    id="wo-productServices"
-                    placeholder="Describe the products or services being promoted..."
-                    value={newWorkOrder.productServices}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, productServices: e.target.value }))}
-                    className="min-h-[80px]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-talkingPoints">Key Talking Points</Label>
-                  <Textarea
-                    id="wo-talkingPoints"
-                    placeholder="List the key talking points..."
-                    value={newWorkOrder.talkingPoints}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, talkingPoints: e.target.value }))}
-                    className="min-h-[80px]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-successCriteria">Success Criteria</Label>
-                  <Textarea
-                    id="wo-successCriteria"
-                    placeholder="Define what success looks like..."
-                    value={newWorkOrder.successCriteria}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, successCriteria: e.target.value }))}
-                    className="min-h-[80px]"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="wo-leads">Number of lead</Label>
-                    <div className="relative">
-                      <Users className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="wo-leads"
-                        className="pl-9 h-11"
-                        placeholder="e.g. 500"
-                        value={newWorkOrder.requiredLeads}
-                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, requiredLeads: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="wo-priority">Priority</Label>
-                    <Select
-                      value={newWorkOrder.priority}
-                      onValueChange={(val: 'low' | 'normal' | 'high' | 'urgent') =>
-                        setNewWorkOrder(prev => ({ ...prev, priority: val }))
-                      }
-                    >
-                      <SelectTrigger className="h-11">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="normal">Normal</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                        <SelectItem value="urgent">Urgent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 2: TARGETING */}
-            {workOrderStep === 2 && (
-              <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
-                <div className="bg-muted/30 border rounded-lg p-4 space-y-4">
-                  <h4 className="font-semibold text-sm flex items-center gap-2 text-primary">
-                    <Target className="h-4 w-4" />
-                    Audience specs
-                  </h4>
-
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Geography</Label>
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {newWorkOrder.targetGeo.map((tag, i) => (
-                          <Badge key={i} variant="secondary" className="gap-1 pr-1">
-                            {tag} <X className="h-3 w-3 cursor-pointer hover:text-destructive" onClick={() => setNewWorkOrder(prev => ({ ...prev, targetGeo: prev.targetGeo.filter((_, idx) => idx !== i) }))} />
-                          </Badge>
-                        ))}
-                      </div>
-                      <Input
-                        placeholder="Type & Enter (e.g. US, Canada)"
-                        value={geoInput}
-                        onChange={(e) => setGeoInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ',') {
-                            e.preventDefault();
-                            if (geoInput.trim()) {
-                              setNewWorkOrder(prev => ({ ...prev, targetGeo: [...prev.targetGeo, geoInput.trim()] }));
-                              setGeoInput('');
-                            }
-                          }
-                        }}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Job Titles</Label>
-                      <div className="flex flex-wrap gap-2 mb-2">
-                         {newWorkOrder.targetTitles.map((tag, i) => (
-                          <Badge key={i} variant="secondary" className="gap-1 pr-1">
-                            {tag} <X className="h-3 w-3 cursor-pointer hover:text-destructive" onClick={() => setNewWorkOrder(prev => ({ ...prev, targetTitles: prev.targetTitles.filter((_, idx) => idx !== i) }))} />
-                          </Badge>
-                        ))}
-                      </div>
-                      <Input
-                        placeholder="Type & Enter (e.g. CEO, VP Sales)"
-                        value={titleInput}
-                        onChange={(e) => setTitleInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ',') {
-                            e.preventDefault();
-                            if (titleInput.trim()) {
-                              setNewWorkOrder(prev => ({ ...prev, targetTitles: [...prev.targetTitles, titleInput.trim()] }));
-                              setTitleInput('');
-                            }
-                          }
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase text-muted-foreground">Industries</Label>
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {newWorkOrder.targetIndustries.map((tag, i) => (
-                        <Badge key={i} variant="secondary" className="gap-1 pr-1">
-                          {tag} <X className="h-3 w-3 cursor-pointer hover:text-destructive" onClick={() => setNewWorkOrder(prev => ({ ...prev, targetIndustries: prev.targetIndustries.filter((_, idx) => idx !== i) }))} />
-                        </Badge>
-                      ))}
-                    </div>
-                    <Input
-                      placeholder="Type & Enter (e.g. SaaS, Fintech)"
-                      value={industryInput}
-                      onChange={(e) => setIndustryInput(e.target.value)}
-                      onKeyDown={(e) => {
-                         if (e.key === 'Enter' || e.key === ',') {
-                          e.preventDefault();
-                          if (industryInput.trim()) {
-                            setNewWorkOrder(prev => ({ ...prev, targetIndustries: [...prev.targetIndustries, industryInput.trim()] }));
-                            setIndustryInput('');
-                          }
-                        }
-                      }}
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div className="space-y-2">
-                      <Label>Revenue</Label>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="outline" className="w-full justify-between font-normal">
-                            {newWorkOrder.targetRevenue.length > 0 
-                              ? `${newWorkOrder.targetRevenue.length} selected` 
-                              : "Select"}
-                            <ChevronDown className="h-4 w-4 opacity-50" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-[200px]">
-                          {['$0 - $1M', '$1M - $10M', '$10M - $50M', '$50M - $100M', '$100M - $500M', '$500M - $1B', '$1B+'].map((opt) => (
-                            <DropdownMenuCheckboxItem
-                              key={opt}
-                              checked={newWorkOrder.targetRevenue.includes(opt)}
-                              onCheckedChange={(checked) => {
-                                setNewWorkOrder(prev => ({
-                                  ...prev,
-                                  targetRevenue: checked 
-                                    ? [...prev.targetRevenue, opt]
-                                    : prev.targetRevenue.filter(v => v !== opt)
-                                }));
-                              }}
-                            >
-                              {opt}
-                            </DropdownMenuCheckboxItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Employees</Label>
-                      <DropdownMenu>
-                         <DropdownMenuTrigger asChild>
-                          <Button variant="outline" className="w-full justify-between font-normal">
-                            {newWorkOrder.targetEmployeeSize.length > 0 
-                              ? `${newWorkOrder.targetEmployeeSize.length} selected` 
-                              : "Select"}
-                            <ChevronDown className="h-4 w-4 opacity-50" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-[200px]">
-                          {['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5000+'].map((opt) => (
-                             <DropdownMenuCheckboxItem
-                              key={opt}
-                              checked={newWorkOrder.targetEmployeeSize.includes(opt)}
-                              onCheckedChange={(checked) => {
-                                setNewWorkOrder(prev => ({
-                                  ...prev,
-                                  targetEmployeeSize: checked 
-                                    ? [...prev.targetEmployeeSize, opt]
-                                    : prev.targetEmployeeSize.filter(v => v !== opt)
-                                }));
-                              }}
-                            >
-                              {opt}
-                            </DropdownMenuCheckboxItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 3: DETAILS & REVIEW */}
-            {workOrderStep === 3 && (
-              <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="wo-timeline">Desired Timeline</Label>
-                    <div className="relative">
-                      <Clock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="wo-timeline"
-                        className="pl-9 h-11"
-                        placeholder="e.g. 2 weeks"
-                        value={newWorkOrder.desiredTimeline}
-                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, desiredTimeline: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="wo-deadline">Hard Deadline</Label>
-                    <div className="relative">
-                      <Calendar className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="wo-deadline"
-                        type="date"
-                        className="pl-9 h-11"
-                        value={newWorkOrder.deadline}
-                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, deadline: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-landingPage">Landing Page / URL</Label>
-                  <div className="relative">
-                     <LinkIcon className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                     <Input 
-                        id="wo-landingPage" 
-                        className="pl-9 h-11"
-                        placeholder="https://example.com"
-                        value={newWorkOrder.landingPageUrl} 
-                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, landingPageUrl: e.target.value }))}
-                     />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Project Files</Label>
-                   <div className="border border-dashed rounded-lg p-4 flex flex-col items-center justify-center gap-3 bg-muted/20">
-                      <FileText className="h-8 w-8 text-muted-foreground/50" />
-                      <div className="text-center">
-                        <p className="text-sm font-medium">Upload Briefs or Suppression Lists</p>
-                        <p className="text-xs text-muted-foreground">CSV, PDF, DOCX up to 10MB</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="relative" disabled={isUploading}>
-                          {isUploading ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <Upload className="h-3 w-3 mr-2" />}
-                          Select File
-                          <input 
-                            type="file" 
-                            className="absolute inset-0 opacity-0 cursor-pointer" 
-                            onChange={handleWorkOrderFileUpload}
-                            disabled={isUploading}
-                          />
-                        </Button>
-                      </div>
-                      {newWorkOrder.fileName && (
-                        <div className="flex items-center gap-2 mt-2 bg-green-50 text-green-700 px-3 py-1 rounded-sm text-xs">
-                          <CheckCircle className="h-3 w-3" />
-                          {newWorkOrder.fileName}
-                          <X 
-                            className="h-3 w-3 ml-2 cursor-pointer" 
-                            onClick={() => setNewWorkOrder(prev => ({ ...prev, projectFileUrl: '', fileName: '' }))}
-                          />
-                        </div>
-                      )}
-                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-instructions">Additional Instructions</Label>
-                  <Textarea
-                    id="wo-instructions"
-                    placeholder="Any specific exclusions or notes..."
-                    value={newWorkOrder.additionalInstructions}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, additionalInstructions: e.target.value }))}
-                    className="min-h-[100px]"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <SheetFooter className="absolute bottom-0 left-0 right-0 p-6 bg-background border-t flex flex-row gap-2 sm:justify-between items-center z-10">
-             <Button 
-                variant="ghost" 
-                onClick={() => workOrderStep === 1 ? setShowWorkOrderDialog(false) : setWorkOrderStep(prev => prev - 1)}
-              >
-                {workOrderStep === 1 ? 'Cancel' : 'Back'}
-              </Button>
-            
-            <Button 
-              onClick={() => {
-                if (workOrderStep < 3) {
-                  setWorkOrderStep(prev => prev + 1);
-                } else {
-                  // Submit - projects query will be invalidated on success
-                  createWorkOrderMutation.mutate(newWorkOrder);
-                }
-              }}
-              disabled={
-                (workOrderStep === 1 && (!newWorkOrder.campaignType || !newWorkOrder.campaignGoals)) || 
-                createWorkOrderMutation.isPending
-              }
-              className={`min-w-[120px] ${workOrderStep === 3 ? 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600' : ''}`}
-            >
-              {createWorkOrderMutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Submitting
-                </>
-              ) : (
-                <>
-                  {workOrderStep === 3 ? (
-                    <>
-                      <Send className="h-4 w-4 mr-2" />
-                      Submit Order
-                    </>
-                  ) : (
-                    <>
-                      Next Step
-                      <ChevronRight className="h-4 w-4 ml-2" />
-                    </>
-                  )}
-                </>
-              )}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
 
       {/* Self-Service Campaign Creator Wizard */}
       <Dialog open={showCampaignCreator} onOpenChange={(open) => { setShowCampaignCreator(open); if (!open) setCampaignCreatorStep(1); }}>

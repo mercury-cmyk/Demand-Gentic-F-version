@@ -44,9 +44,12 @@ import {
   Shield,
   Image,
   Paintbrush,
+  Trash2,
+  Crown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { extractColorsFromImage } from '@/lib/color-extractor';
 
 const getToken = () => localStorage.getItem('clientPortalToken');
 
@@ -320,6 +323,13 @@ export default function ClientPortalIntelligence() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgDomain, setNewOrgDomain] = useState('');
+  // Brand identity state
+  const [brandLogoUrl, setBrandLogoUrl] = useState('');
+  const [brandPrimaryColor, setBrandPrimaryColor] = useState('');
+  const [brandSecondaryColor, setBrandSecondaryColor] = useState('');
+  const [extractedColors, setExtractedColors] = useState<{ hex: string; percentage: number }[]>([]);
+  const [isExtractingColors, setIsExtractingColors] = useState(false);
+  const [brandDirty, setBrandDirty] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['client-org-intelligence'],
@@ -432,6 +442,47 @@ export default function ClientPortalIntelligence() {
   }, [domain, data?.organization?.domain, queryClient, toast]);
 
   const org = data?.organization;
+
+  // Sync brand state from org data when it loads/changes
+  React.useEffect(() => {
+    if (org) {
+      setBrandLogoUrl(resolveFieldValue(org.logoUrl) || '');
+      setBrandPrimaryColor(resolveFieldValue(org.branding?.primaryColor) || '');
+      setBrandSecondaryColor(resolveFieldValue(org.branding?.secondaryColor) || '');
+      setBrandDirty(false);
+    }
+  }, [org?.logoUrl, org?.branding?.primaryColor, org?.branding?.secondaryColor]);
+
+  const handleExtractColorsFromLogo = async () => {
+    if (!brandLogoUrl) return;
+    setIsExtractingColors(true);
+    setExtractedColors([]);
+    try {
+      const colors = await extractColorsFromImage(brandLogoUrl, 6);
+      setExtractedColors(colors.map((c) => ({ hex: c.hex, percentage: c.percentage })));
+      if (colors.length > 0) {
+        setBrandPrimaryColor(colors[0].hex);
+        if (colors.length > 1) setBrandSecondaryColor(colors[1].hex);
+        setBrandDirty(true);
+      }
+    } catch {
+      toast({ title: 'Could not extract colors', description: 'Make sure the logo URL is accessible and points to an image (PNG, JPG, SVG).', variant: 'destructive' });
+    } finally {
+      setIsExtractingColors(false);
+    }
+  };
+
+  const handleSaveBrandIdentity = () => {
+    updateMutation.mutate({
+      logoUrl: brandLogoUrl,
+      branding: {
+        ...(org?.branding || {}),
+        primaryColor: brandPrimaryColor,
+        secondaryColor: brandSecondaryColor,
+      },
+    } as any);
+    setBrandDirty(false);
+  };
 
   if (isLoading) {
     return (
@@ -630,7 +681,7 @@ export default function ClientPortalIntelligence() {
                   <Card className="lg:col-span-1 border-primary/10 bg-gradient-to-b from-primary/[0.02] to-transparent">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Image className="h-5 w-5 text-primary" />
+                        <Palette className="h-5 w-5 text-primary" />
                         Brand Identity
                       </CardTitle>
                       <CardDescription>
@@ -638,81 +689,234 @@ export default function ClientPortalIntelligence() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                      {/* Logo Preview */}
+                      {/* Logo Section */}
                       <div className="space-y-3">
-                        <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                          <Image className="h-3 w-3" />
-                          Brand Logo
-                        </Label>
-                        <div className="flex flex-col items-center gap-3 p-6 rounded-xl border-2 border-dashed border-muted-foreground/20 bg-muted/30 min-h-[120px] justify-center">
-                          {org.logoUrl ? (
-                            <img
-                              src={org.logoUrl}
-                              alt={`${org.name} logo`}
-                              className="max-h-20 max-w-full object-contain rounded-md"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          ) : (
-                            <div className="text-center">
-                              <Image className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                              <p className="text-xs text-muted-foreground italic">No logo uploaded</p>
+                        <Label className="text-sm font-medium">Brand Logo</Label>
+                        <div className="flex items-start gap-4">
+                          <div className="shrink-0">
+                            <div
+                              className="h-20 w-20 rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden"
+                              style={{ borderColor: brandPrimaryColor || '#e2e8f0' }}
+                            >
+                              {brandLogoUrl ? (
+                                <img
+                                  src={brandLogoUrl}
+                                  alt="Company logo"
+                                  className="h-full w-full object-contain p-1"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                              ) : (
+                                <div className="text-center">
+                                  <Building2 className="h-6 w-6 text-muted-foreground/40 mx-auto" />
+                                  <span className="text-[9px] text-muted-foreground">No logo</span>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <Label className="text-xs">Logo URL</Label>
+                            <Input
+                              placeholder="https://yourcompany.com/logo.png"
+                              value={brandLogoUrl}
+                              onChange={(e) => {
+                                setBrandLogoUrl(e.target.value);
+                                setExtractedColors([]);
+                                setBrandDirty(true);
+                              }}
+                              className="text-xs h-8"
+                            />
+                            <div className="flex gap-1.5 flex-wrap">
+                              {brandLogoUrl && (
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-[10px] h-6 px-2"
+                                    onClick={handleExtractColorsFromLogo}
+                                    disabled={isExtractingColors}
+                                  >
+                                    {isExtractingColors ? (
+                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    ) : (
+                                      <Sparkles className="h-3 w-3 mr-1" />
+                                    )}
+                                    Extract Colors
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-[10px] text-red-600 hover:text-red-700 hover:bg-red-50 h-6 px-2"
+                                    onClick={() => {
+                                      setBrandLogoUrl('');
+                                      setExtractedColors([]);
+                                      setBrandDirty(true);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3 w-3 mr-1" />
+                                    Remove
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <IntelligenceField
-                          label="Logo URL"
-                          value={org.logoUrl}
-                          placeholder="https://example.com/logo.png"
-                          icon={Globe}
-                          onSave={(value) => updateMutation.mutate({ logoUrl: value } as any)}
-                        />
                       </div>
 
-                      {/* Color Swatches */}
-                      <div className="space-y-3">
-                        <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                          <Paintbrush className="h-3 w-3" />
-                          Brand Colors
-                        </Label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-2">
-                            <div
-                              className="h-16 rounded-lg border shadow-inner flex items-end justify-center pb-1"
-                              style={{ backgroundColor: resolveFieldValue(org.branding?.primaryColor) || '#3B82F6' }}
-                            >
-                              <span className="text-[10px] font-mono text-white/80 bg-black/30 px-1.5 rounded">
-                                {resolveFieldValue(org.branding?.primaryColor) || '#3B82F6'}
-                              </span>
+                      {/* Extracted Colors */}
+                      {extractedColors.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Colors from Logo</Label>
+                          <div className="rounded-lg border bg-muted/30 p-2.5">
+                            <div className="flex flex-wrap gap-1.5">
+                              {extractedColors.map((color, idx) => (
+                                <button
+                                  key={color.hex}
+                                  className={`group relative h-8 w-8 rounded-lg border-2 transition-all hover:scale-110 ${
+                                    brandPrimaryColor === color.hex ? 'ring-2 ring-offset-1 ring-primary border-primary' : 'border-transparent'
+                                  }`}
+                                  style={{ backgroundColor: color.hex }}
+                                  onClick={() => {
+                                    setBrandPrimaryColor(color.hex);
+                                    setBrandDirty(true);
+                                  }}
+                                  title={`${color.hex} (${color.percentage}%)`}
+                                >
+                                  {idx === 0 && (
+                                    <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-primary flex items-center justify-center">
+                                      <Crown className="h-2 w-2 text-white" />
+                                    </span>
+                                  )}
+                                </button>
+                              ))}
                             </div>
-                            <IntelligenceField
-                              label="Primary Color"
-                              value={org.branding?.primaryColor}
-                              placeholder="#3B82F6"
-                              icon={Paintbrush}
-                              onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, primaryColor: value } })}
-                            />
+                            <p className="text-[9px] text-muted-foreground mt-1.5">
+                              Click to set as primary color
+                            </p>
                           </div>
-                          <div className="space-y-2">
-                            <div
-                              className="h-16 rounded-lg border shadow-inner flex items-end justify-center pb-1"
-                              style={{ backgroundColor: resolveFieldValue(org.branding?.secondaryColor) || '#8B5CF6' }}
-                            >
-                              <span className="text-[10px] font-mono text-white/80 bg-black/30 px-1.5 rounded">
-                                {resolveFieldValue(org.branding?.secondaryColor) || '#8B5CF6'}
-                              </span>
-                            </div>
-                            <IntelligenceField
-                              label="Secondary Color"
-                              value={org.branding?.secondaryColor}
-                              placeholder="#8B5CF6"
-                              icon={Paintbrush}
-                              onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, secondaryColor: value } })}
+                        </div>
+                      )}
+
+                      <Separator />
+
+                      {/* Color Pickers */}
+                      <div className="space-y-3">
+                        <Label className="text-sm font-medium">Brand Colors</Label>
+
+                        {/* Primary Color */}
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Primary Color</Label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={brandPrimaryColor || '#3B82F6'}
+                              onChange={(e) => { setBrandPrimaryColor(e.target.value); setBrandDirty(true); }}
+                              className="h-9 w-12 rounded-lg border cursor-pointer"
+                            />
+                            <Input
+                              value={brandPrimaryColor}
+                              onChange={(e) => { setBrandPrimaryColor(e.target.value); setBrandDirty(true); }}
+                              placeholder="#3B82F6"
+                              className="font-mono text-xs h-8 max-w-[120px]"
                             />
                           </div>
                         </div>
+
+                        {/* Secondary Color */}
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Secondary Color</Label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={brandSecondaryColor || '#8B5CF6'}
+                              onChange={(e) => { setBrandSecondaryColor(e.target.value); setBrandDirty(true); }}
+                              className="h-9 w-12 rounded-lg border cursor-pointer"
+                            />
+                            <Input
+                              value={brandSecondaryColor}
+                              onChange={(e) => { setBrandSecondaryColor(e.target.value); setBrandDirty(true); }}
+                              placeholder="#8B5CF6"
+                              className="font-mono text-xs h-8 max-w-[120px]"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Quick Presets */}
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Quick Presets</Label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              { color: '#3B82F6', name: 'Blue' },
+                              { color: '#8B5CF6', name: 'Purple' },
+                              { color: '#EC4899', name: 'Pink' },
+                              { color: '#EF4444', name: 'Red' },
+                              { color: '#F97316', name: 'Orange' },
+                              { color: '#22C55E', name: 'Green' },
+                              { color: '#14B8A6', name: 'Teal' },
+                              { color: '#06B6D4', name: 'Cyan' },
+                              { color: '#6366F1', name: 'Indigo' },
+                              { color: '#1E293B', name: 'Dark' },
+                            ].map((preset) => (
+                              <button
+                                key={preset.color}
+                                className={`h-6 w-6 rounded-full border-2 transition-all hover:scale-110 ${
+                                  brandPrimaryColor === preset.color ? 'ring-2 ring-offset-1 ring-primary' : 'border-transparent'
+                                }`}
+                                style={{ backgroundColor: preset.color }}
+                                onClick={() => { setBrandPrimaryColor(preset.color); setBrandDirty(true); }}
+                                title={preset.name}
+                              />
+                            ))}
+                          </div>
+                        </div>
                       </div>
+
+                      <Separator />
+
+                      {/* Preview */}
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">Preview</Label>
+                        <div className="rounded-lg border p-3 space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            {brandLogoUrl ? (
+                              <img src={brandLogoUrl} alt="Logo" className="h-6 w-6 object-contain" />
+                            ) : (
+                              <div className="h-6 w-6 rounded-md flex items-center justify-center" style={{ backgroundColor: brandPrimaryColor || '#3B82F6' }}>
+                                <span className="text-white font-bold text-[9px]">
+                                  {(org.name || 'Co')[0]?.toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                            <span className="font-semibold text-xs">{org.name || 'Your Company'}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <div
+                              className="h-6 px-3 rounded-md flex items-center justify-center text-white text-[10px] font-medium"
+                              style={{ backgroundColor: brandPrimaryColor || '#3B82F6' }}
+                            >
+                              Primary
+                            </div>
+                            <div
+                              className="h-6 px-3 rounded-md flex items-center justify-center text-white text-[10px] font-medium"
+                              style={{ backgroundColor: brandSecondaryColor || '#8B5CF6' }}
+                            >
+                              Secondary
+                            </div>
+                          </div>
+                          <div className="flex gap-1">
+                            <div className="h-1 flex-1 rounded-full" style={{ backgroundColor: brandPrimaryColor || '#3B82F6' }} />
+                            <div className="h-1 flex-1 rounded-full" style={{ backgroundColor: brandSecondaryColor || '#8B5CF6' }} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        className="w-full"
+                        onClick={handleSaveBrandIdentity}
+                        disabled={updateMutation.isPending || !brandDirty}
+                      >
+                        {updateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        Save Brand Identity
+                      </Button>
                     </CardContent>
                   </Card>
 

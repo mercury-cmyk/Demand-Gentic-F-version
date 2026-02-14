@@ -155,7 +155,7 @@ export default function ShowcaseCallsPage() {
   const buildParams = () => {
     const params = new URLSearchParams();
     params.append("page", page.toString());
-    params.append("limit", "20");
+    params.append("limit", "200");
     if (selectedCampaign !== "all") params.append("campaignId", selectedCampaign);
     if (selectedCategory !== "all") params.append("category", selectedCategory);
     if (minScore) params.append("minScore", minScore);

@@ -26,11 +26,22 @@ import {
   Phone, Mail, Layers, ArrowLeft, ArrowRight, Send, Loader2,
   CheckCircle2, AlertCircle, Target, Megaphone, Info, Sparkles,
   Building2, Users, Calendar, DollarSign, FileText, Plus, X,
-  Upload, File, Trash2, Link as LinkIcon, ShieldBan, Database, Paperclip
+  Upload, File, Trash2, Link as LinkIcon, ShieldBan, Database, Paperclip,
+  Tag, Handshake, MousePointerClick, ClipboardCheck
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const getToken = () => localStorage.getItem('clientPortalToken');
+
+// ── Program Type Pricing Defaults ─────────────────────────────────────────
+
+const DEFAULT_PROGRAM_TYPES = [
+  { key: 'appointment_setting', label: 'Appointment Setting', price: 500.00, unit: 'per lead', icon: Handshake, colorClass: 'text-emerald-600 bg-emerald-50 border-emerald-100' },
+  { key: 'event_registration_digital_ungated', label: 'Event Registration - Digital (Ungated)', price: 10.00, unit: 'per lead', icon: MousePointerClick, colorClass: 'text-blue-600 bg-blue-50 border-blue-100' },
+  { key: 'event_registration_digital_gated', label: 'Event Registration - Digital (Gated)', price: 40.00, unit: 'per lead', icon: ClipboardCheck, colorClass: 'text-violet-600 bg-violet-50 border-violet-100' },
+  { key: 'in_person_event', label: 'In-Person Events Program', price: 80.00, unit: 'per lead', icon: Users, colorClass: 'text-amber-600 bg-amber-50 border-amber-100' },
+  { key: 'data_hygiene_enrichment', label: 'Data Hygiene & Enrichment', price: 0.35, unit: 'per record', icon: Database, colorClass: 'text-slate-600 bg-slate-50 border-slate-200' },
+] as const;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +70,7 @@ interface FormData {
   // Optional
   description: string;
   campaignType: string;
+  programType: string;
   targetAudience: string;
   targetLeadCount: number | undefined;
   targetIndustries: string[];
@@ -100,6 +112,7 @@ const DEFAULT_FORM: FormData = {
   objective: '',
   description: '',
   campaignType: '',
+  programType: '',
   targetAudience: '',
   targetLeadCount: undefined,
   targetIndustries: [],
@@ -144,6 +157,38 @@ export default function ClientPortalCampaignCreate() {
   const [regionInput, setRegionInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
 
+  // Fetch campaign pricing data
+  const { data: pricingData } = useQuery<{
+    pricing: Record<string, { pricePerLead: number; isEnabled: boolean; label: string }>;
+    hasCustomPricing: boolean;
+  }>({
+    queryKey: ['client-portal-campaign-pricing'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/billing/campaign-pricing', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+  });
+
+  // Build program types list — use custom pricing if available, else defaults
+  const programTypes = pricingData?.hasCustomPricing
+    ? Object.entries(pricingData.pricing)
+        .filter(([, config]) => config.isEnabled)
+        .map(([key, config]) => {
+          const defaultType = DEFAULT_PROGRAM_TYPES.find(d => d.key === key);
+          return {
+            key,
+            label: config.label,
+            price: config.pricePerLead,
+            unit: key === 'data_hygiene_enrichment' ? 'per record' : 'per lead',
+            icon: defaultType?.icon || Tag,
+            colorClass: defaultType?.colorClass || 'text-slate-600 bg-slate-50 border-slate-200',
+          };
+        })
+    : DEFAULT_PROGRAM_TYPES.map(d => ({ ...d, icon: d.icon }));
+
   // Fetch existing projects for linking
   const { data: projects } = useQuery<Project[]>({
     queryKey: ['client-portal-projects-for-campaign'],
@@ -167,6 +212,7 @@ export default function ClientPortalCampaignCreate() {
       // Optional fields — only include if provided
       if (data.description) payload.description = data.description;
       if (data.campaignType) payload.campaignType = data.campaignType;
+      if (data.programType) payload.programType = data.programType;
       if (data.targetAudience) payload.targetAudience = data.targetAudience;
       if (data.targetLeadCount) payload.targetLeadCount = data.targetLeadCount;
       if (data.targetIndustries.length) payload.targetIndustries = data.targetIndustries;
@@ -471,6 +517,46 @@ export default function ClientPortalCampaignCreate() {
           rows={2}
           className="max-w-lg"
         />
+      </div>
+
+      {/* Program Type & Pricing (optional) */}
+      <div className="space-y-3">
+        <Label className="font-medium flex items-center gap-1.5">
+          <Tag className="h-3.5 w-3.5" /> Campaign Program & Pricing <span className="text-muted-foreground text-xs ml-1">(optional)</span>
+        </Label>
+        <p className="text-xs text-muted-foreground -mt-1">
+          Select a program type to see per-lead pricing. Our team can help configure this later if needed.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+          {programTypes.map((pt) => {
+            const PtIcon = pt.icon;
+            const isSelected = form.programType === pt.key;
+            return (
+              <button
+                key={pt.key}
+                type="button"
+                onClick={() => setForm({ ...form, programType: isSelected ? '' : pt.key })}
+                className={cn(
+                  'flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all hover:shadow-sm group',
+                  isSelected
+                    ? 'border-primary bg-primary/5 shadow-sm'
+                    : 'border-muted hover:border-primary/30'
+                )}
+              >
+                <div className={`p-2 rounded-lg border ${pt.colorClass} group-hover:scale-105 transition-transform shrink-0`}>
+                  <PtIcon className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{pt.label}</p>
+                  <p className="text-xs text-muted-foreground">{pt.unit}</p>
+                </div>
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                  ${pt.price < 1 ? pt.price.toFixed(2) : pt.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Link to existing project (optional) */}
@@ -982,6 +1068,17 @@ export default function ClientPortalCampaignCreate() {
                 <span className="text-muted-foreground">Channel</span>
                 <Badge variant="outline">{channelLabel}</Badge>
               </div>
+              {form.programType && (() => {
+                const pt = programTypes.find(p => p.key === form.programType);
+                return pt ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Program</span>
+                    <span className="font-medium text-xs text-right">
+                      {pt.label} — ${pt.price < 1 ? pt.price.toFixed(2) : pt.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/{pt.unit.replace('per ', '')}
+                    </span>
+                  </div>
+                ) : null;
+              })()}
               {form.priority !== 'normal' && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Priority</span>

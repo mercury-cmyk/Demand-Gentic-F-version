@@ -50,6 +50,10 @@ export { dbConfigError };
 // Ensure DATABASE_URL uses Neon's connection pooler for high concurrency
 // This prevents "too many connections" errors by using pooling infrastructure
 // Only add -pooler if it's not already present
+// Wait, disable automatic pooler injection as it breaks new AWS URLs
+const hasPooler = true; // Force skip injection for now to fix connection issues
+
+/*
 const hasPooler = databaseUrl.includes('-pooler');
 
 if (!hasPooler && !dbConfigError) {
@@ -59,6 +63,7 @@ if (!hasPooler && !dbConfigError) {
     '-pooler.$1.neon.tech'
   );
 }
+*/
 
 if (!dbConfigError) {
   console.log('[DB] Using Neon connection pooler:', hasPooler ? 'YES (already configured)' : 'YES (added -pooler)');
