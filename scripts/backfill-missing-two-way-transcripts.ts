@@ -40,6 +40,8 @@ interface DiarizedUtterance {
 
 interface StructuredTranscript {
   text: string;
+  speakerCount: number;
+  strictSatisfied: boolean;
   utterances: Array<{
     speaker: string;
     text: string;
@@ -75,6 +77,8 @@ const MIN_DURATION_SEC = Math.max(1, parseInt(readArg("min-duration", "10") || "
 const MODEL = readArg("model", "distil-whisper/distil-large-v2") || "distil-whisper/distil-large-v2";
 const VERBOSE = process.argv.includes("--verbose");
 const EXECUTE = process.argv.includes("--execute") && !process.argv.includes("--dry-run");
+const NON_STRICT = process.argv.includes("--non-strict");
+const STRICT_MODE = !NON_STRICT;
 
 const stats = {
   candidates: 0,
@@ -85,6 +89,7 @@ const stats = {
   noAudio: 0,
   notTwoWay: 0,
   googleFallbackUsed: 0,
+  singleSpeakerCaptured: 0,
 };
 
 const telnyxAiClient = new OpenAI({
@@ -471,23 +476,47 @@ async function transcribeStrictTwoWay(
       throwOnError: true,
     });
     if (!fallback) {
-      throw new Error("strict two-way check failed: no diarized utterances from fallback");
+      if (STRICT_MODE) throw new Error("strict two-way check failed: no diarized utterances from fallback");
+      diarized = [
+        {
+          speaker: "Speaker 1",
+          text,
+          start: 0,
+          end: Math.max(0, Number(candidate.durationSec || 0)),
+        },
+      ];
+    } else {
+      stats.googleFallbackUsed++;
+      diarized = fallback.utterances.map((u) => ({
+        speaker: u.speaker || "Speaker 1",
+        text: u.text,
+        start: Number(u.start || 0),
+        end: Number(u.end || 0),
+      }));
     }
+  }
 
-    stats.googleFallbackUsed++;
-    diarized = fallback.utterances.map((u) => ({
-      speaker: u.speaker || "Speaker 1",
-      text: u.text,
-      start: Number(u.start || 0),
-      end: Number(u.end || 0),
-    }));
+  if (diarized.length === 0) {
+    if (STRICT_MODE) throw new Error("strict two-way check failed: no diarized utterances");
+    diarized = [
+      {
+        speaker: "Speaker 1",
+        text,
+        start: 0,
+        end: Math.max(0, Number(candidate.durationSec || 0)),
+      },
+    ];
   }
 
   const speakers = new Set(diarized.map((u) => u.speaker));
-  if (speakers.size < 2) throw new Error("strict two-way check failed: <2 speakers detected");
+  const strictSatisfied = speakers.size >= 2;
+  if (!strictSatisfied && STRICT_MODE) throw new Error("strict two-way check failed: <2 speakers detected");
+  if (!strictSatisfied && !STRICT_MODE) stats.singleSpeakerCaptured++;
 
   return {
     text,
+    speakerCount: speakers.size,
+    strictSatisfied,
     utterances: diarized,
   };
 }
@@ -510,6 +539,9 @@ async function updateLead(candidate: Candidate, structured: StructuredTranscript
         agentLines: formatted.agentLines,
         prospectLines: formatted.prospectLines,
         provider: "telnyx-ai",
+        mode: STRICT_MODE ? "strict" : "non-strict",
+        strictTwoWay: structured.strictSatisfied,
+        speakerCount: structured.speakerCount,
         model: MODEL,
         transcribedAt: new Date().toISOString(),
       }),
@@ -533,6 +565,9 @@ async function updateCallSession(candidate: Candidate, structured: StructuredTra
         agentLines: formatted.agentLines,
         prospectLines: formatted.prospectLines,
         provider: "telnyx-ai",
+        mode: STRICT_MODE ? "strict" : "non-strict",
+        strictTwoWay: structured.strictSatisfied,
+        speakerCount: structured.speakerCount,
         model: MODEL,
         transcribedAt: new Date().toISOString(),
       }),
@@ -608,6 +643,7 @@ async function main(): Promise<void> {
   console.log(`Concurrency  : ${CONCURRENCY}`);
   console.log(`Min duration : ${MIN_DURATION_SEC}s`);
   console.log(`Model        : ${MODEL}`);
+  console.log(`Policy       : ${STRICT_MODE ? "STRICT (2 speakers required)" : "NON-STRICT (single speaker allowed)"}`);
   console.log(`Mode         : ${EXECUTE ? "EXECUTE" : "DRY-RUN"}`);
   console.log("=".repeat(88));
 
@@ -645,6 +681,7 @@ async function main(): Promise<void> {
   console.log(`  - Not two-way : ${stats.notTwoWay}`);
   console.log(`Failed          : ${stats.failed}`);
   console.log(`Google fallback : ${stats.googleFallbackUsed}`);
+  console.log(`Single speaker  : ${stats.singleSpeakerCaptured}`);
   console.log("=".repeat(88));
 }
 

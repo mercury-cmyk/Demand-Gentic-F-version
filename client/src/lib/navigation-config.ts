@@ -14,6 +14,7 @@ export const NAVIGATION_DOMAINS = {
   ANALYTICS: 'analytics',
   OPERATIONS: 'operations',
   IAM: 'iam',
+  UNLICENSED: 'unlicensed',
   SETTINGS: 'settings',
 } as const;
 
@@ -130,7 +131,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           },
           {
             id: 'agentic-operator',
-            title: 'AgentX',
+            title: 'Agentic Demand Council',
             url: '/ai-studio/operator',
             roles: MANAGEMENT_ROLES,
             description: 'Unified agentic operations panel',
@@ -413,6 +414,28 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'RefreshCw',
         roles: QA_ROLES,
         description: 'Analyze calls, detect misclassified dispositions, and re-route leads',
+      },
+    ],
+  },
+
+  // ============================================
+  // UNLICENSED DEPARTMENT
+  // ============================================
+  {
+    id: 'unlicensed',
+    label: 'Unlicensed',
+    domain: NAVIGATION_DOMAINS.UNLICENSED,
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
+    description: 'Conversation quality and lead quality analysis departments',
+    items: [
+      {
+        id: 'unlicensed-departments',
+        title: 'Unlicensed Departments',
+        url: '/unlicensed-departments',
+        icon: 'Building',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
+        description: 'Conversation quality and lead quality departments',
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
       },
     ],
   },

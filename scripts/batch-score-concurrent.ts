@@ -8,7 +8,7 @@
 import { pool } from '../server/db';
 import { analyzeConversationQuality } from '../server/services/conversation-quality-analyzer';
 
-const CONCURRENCY = 5;
+const CONCURRENCY = 1;
 const MAX_RETRIES = 2;
 const QUALIFY_THRESHOLD = 70;
 

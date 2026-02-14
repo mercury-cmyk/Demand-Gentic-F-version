@@ -28,6 +28,7 @@ import {
   Play,
   ChevronRight,
 } from "lucide-react";
+import { BRAND, TAGLINE, STATS, FOOTER } from "@shared/brand-messaging";
 
 export default function AboutPage() {
   const [, setLocation] = useLocation();
@@ -40,13 +41,13 @@ export default function AboutPage() {
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setLocation("/welcome")}>
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
               <div className="relative flex items-center justify-center">
-                <span className="font-bold text-sm text-violet-700 tracking-tighter">DG</span>
+                <span className="font-bold text-sm text-violet-700 tracking-tighter">{BRAND.company.logoInitials}</span>
                 <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human-Led Strategy. AI-Powered Execution.</span>
+              <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
+              <span className="text-[10px] text-muted-foreground font-medium">{TAGLINE.full}</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -133,7 +134,7 @@ export default function AboutPage() {
                         </div>
                         <div>
                           <h3 className="text-xl font-bold">Zahid Mohammadi</h3>
-                          <p className="text-slate-400">Founder & Chief AI Architect</p>
+                          <p className="text-slate-400">CEO & The Architect</p>
                         </div>
                       </div>
 
@@ -162,7 +163,7 @@ export default function AboutPage() {
                           </div>
                           <div>
                             <p className="font-medium">Role</p>
-                            <p className="text-sm text-slate-400">Chief AI Architect</p>
+                            <p className="text-sm text-slate-400">The Architect</p>
                           </div>
                         </div>
                       </div>
@@ -170,15 +171,15 @@ export default function AboutPage() {
                       <div className="pt-6 border-t border-slate-700">
                         <div className="grid grid-cols-3 gap-4 text-center">
                           <div>
-                            <p className="text-2xl font-bold text-violet-400">10+</p>
+                            <p className="text-2xl font-bold text-violet-400">{STATS.yearsExperience}</p>
                             <p className="text-xs text-slate-400">Years B2B</p>
                           </div>
                           <div>
-                            <p className="text-2xl font-bold text-amber-400">100+</p>
+                            <p className="text-2xl font-bold text-amber-400">{STATS.globalCampaigns}</p>
                             <p className="text-xs text-slate-400">Global Campaigns</p>
                           </div>
                           <div>
-                            <p className="text-2xl font-bold text-blue-400">2M+</p>
+                            <p className="text-2xl font-bold text-blue-400">{STATS.leadsGenerated}</p>
                             <p className="text-xs text-slate-400">Leads Generated</p>
                           </div>
                         </div>
@@ -219,7 +220,7 @@ export default function AboutPage() {
                 <p className="text-lg leading-relaxed mb-6">
                   In the physical world, I watched as resources were seized and communities were
                   marginalized because systems lacked a human-centric "Why." When I transitioned
-                  into the role of Chief AI Architect, I saw the same patterns emerging in the
+                  into the role of The Architect, I saw the same patterns emerging in the
                   digital landscape:
                 </p>
 
@@ -302,7 +303,7 @@ export default function AboutPage() {
                 </div>
                 <h3 className="text-2xl font-bold mb-4">The Solution We Built</h3>
                 <p className="text-muted-foreground mb-6">
-                  DemandGentic is my commitment to reversing that trend. We have taken 10+ years
+                  DemandGentic is my commitment to reversing that trend. We have taken {STATS.yearsExperience} years
                   of frontline demand generation experience and distilled it into:
                 </p>
                 <ul className="space-y-3">
@@ -410,7 +411,7 @@ export default function AboutPage() {
                 </div>
                 <div className="text-left">
                   <p className="font-bold">Zahid Mohammadi</p>
-                  <p className="text-white/70 text-sm">Founder & Chief AI Architect</p>
+                  <p className="text-white/70 text-sm">CEO & The Architect</p>
                 </div>
               </div>
             </div>
@@ -606,18 +607,18 @@ export default function AboutPage() {
                   </div>
                 </div>
                 <div className="flex flex-col">
-                  <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
-                  <span className="text-[10px] text-slate-400 font-medium">Human-Led Strategy. AI-Powered Execution.</span>
+                  <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">{TAGLINE.full}</span>
                 </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">
                 Technology as a steward of progress — using data to solve problems, not create noise.
               </p>
               <div className="text-slate-500 text-xs space-y-1">
-                <p className="font-medium text-slate-400">Pivotal B2B LLC</p>
-                <p>Lewes, Delaware</p>
-                <p><a href="tel:+14179003844" className="hover:text-white transition-colors">(417) 900-3844</a></p>
-                <p><a href="https://pivotal-b2b.com/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">pivotal-b2b.com</a></p>
+                <p className="font-medium text-slate-400">{BRAND.company.legalName}</p>
+                <p>{BRAND.company.location}</p>
+                <p><a href="tel:+14179003844" className="hover:text-white transition-colors">{BRAND.company.phone}</a></p>
+                <p><a href={`https://${BRAND.domains.primary}/`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">{BRAND.domains.primary}</a></p>
               </div>
             </div>
 
@@ -655,14 +656,14 @@ export default function AboutPage() {
               <ul className="space-y-2 text-slate-400 text-sm">
                 <li><a href="/login" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
                 <li><a href="/login" className="hover:text-white transition-colors">Request a Proposal</a></li>
-                <li><a href="mailto:contact@pivotal-b2b.com" className="hover:text-white transition-colors">Contact Us</a></li>
+                <li><a href={`mailto:${BRAND.domains.email.contact}`} className="hover:text-white transition-colors">Contact Us</a></li>
               </ul>
             </div>
           </div>
 
           <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-slate-500 text-sm">
-              © 2024 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
+              {FOOTER.copyright}
             </p>
             <div className="flex gap-6 text-slate-500 text-sm">
               <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>

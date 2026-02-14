@@ -686,6 +686,7 @@ CRITICAL RULES FOR ANALYSIS — DO NOT VIOLATE:
 4. Focus recommendations ONLY on: conversation strategy, objection handling, qualification flow, pitch effectiveness, closing technique, and campaign alignment.
 5. NEVER suggest "bundled openings" or combining the greeting and introduction into one sentence. The agent's opening flow is intentionally two-step by design: (1) first confirm identity by asking for the contact by name, (2) THEN introduce the purpose after confirmation. This is the correct sales methodology — do NOT recommend changing it.
 6. The agent says "calling on behalf of [Organization]" — this is intentional. NEVER suggest changing to "calling from [Organization]". The agent represents the organization, it is not an employee of the organization.
+7. ALWAYS score ALL 6 quality dimensions (engagement, clarity, empathy, objectionHandling, qualification, closing) for EVERY conversation. NEVER return 0 for any dimension. Even if the call was too short for qualification or closing to occur, evaluate based on what the agent attempted or how they handled the available opportunity. For qualification: score the agent's effort to gather qualifying information or set up qualification — minimum 20 if the call had any meaningful exchange. For closing: score the agent's attempt to advance the conversation toward a next step or conclusion — minimum 20 if the agent made any effort to direct the call. A score of 0 should ONLY be used if the agent actively failed or did the opposite of what was expected in that dimension.
 
 Context:
 ${contextLines.join("\n")}
@@ -781,6 +782,7 @@ Return JSON with this exact shape and no extra keys:
       raw = await deepAnalyzeJSON(prompt, { temperature: 0.3, maxTokens: 8192 });
     } catch (vertexError: any) {
       console.warn(`[ConversationQuality] Vertex AI analysis failed: ${vertexError.message}`);
+      // Fallback analysis will be returned
       return buildFallbackAnalysis(input, "analysis_failed", `Vertex AI failed: ${vertexError.message}`);
     }
     const qualityDimensions = raw.qualityDimensions || {};

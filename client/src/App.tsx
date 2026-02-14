@@ -74,6 +74,7 @@ import ShowcaseCallsPage from "@/pages/showcase-calls";
 const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
 import ConversationQualityPage from "@/pages/conversation-quality";
+import UnlicensedDepartmentsPage from "@/pages/unlicensed-departments";
 import EngagementAnalyticsPage from "@/pages/engagement-analytics";
 import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
@@ -390,6 +391,7 @@ function AuthenticatedApp() {
               <Route path="/leads/:id" component={LeadDetailPage} />
               <Route path="/lead-forms" component={LeadFormsPage} />
               <Route path="/conversation-quality" component={ConversationQualityPage} />
+              <Route path="/unlicensed-departments" component={UnlicensedDepartmentsPage} />
 
               {/* Content & Marketing */}
               <Route path="/content-studio" component={ContentStudioPage} />

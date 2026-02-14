@@ -19,7 +19,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";  // ...existing code...
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -80,6 +81,15 @@ import { buildBrandedEmailHtml, type BrandPaletteKey, type BrandPaletteOverrides
 // Content Block Types for Visual Editor
 type BlockType = 'text' | 'button' | 'image' | 'divider' | 'spacer' | 'heading' | 'list';
 
+// Prefill merge tags for tracking URLs
+const PREFILL_QUERY = [
+  'email={{contact.email}}',
+  'firstName={{contact.firstName}}',
+  'lastName={{contact.lastName}}',
+  'company={{account.name}}',
+  'phone={{contact.phone}}'
+].join('&');
+
 interface ContentBlock {
   id: string;
   type: BlockType;
@@ -88,6 +98,7 @@ interface ContentBlock {
     align?: 'left' | 'center' | 'right';
     buttonUrl?: string;
     buttonColor?: string;
+    prefillEnabled?: boolean;
     imageUrl?: string;
     imageAlt?: string;
     headingLevel?: 1 | 2 | 3;
@@ -314,13 +325,23 @@ const parseHtmlToBlocks = (html: string): ContentBlock[] => {
     if (tagName === 'table' && el.querySelector('a[href]')) {
       // It's likely a button
       const link = el.querySelector('a');
+      let href = link?.getAttribute('href') || '#';
+      let prefillEnabled = false;
+
+      if (href.includes(PREFILL_QUERY)) {
+        prefillEnabled = true;
+        // Try to remove with preceding ? or &
+        href = href.replace(`&${PREFILL_QUERY}`, '').replace(`?${PREFILL_QUERY}`, '');
+      }
+
       blocks.push({
         id: generateBlockId(),
         type: 'button',
         content: link?.textContent || 'Click Here',
         settings: {
-          buttonUrl: link?.getAttribute('href') || '#',
-          buttonColor: '#2563eb'
+          buttonUrl: href,
+          buttonColor: '#2563eb',
+          prefillEnabled
         }
       });
     } else if (tagName === 'hr' || el.innerHTML.includes('border-top:')) {
@@ -382,11 +403,16 @@ const blocksToHtml = (blocks: ContentBlock[]): string => {
           ${block.content}
         </h${level}>`;
       case 'button':
+        let btnUrl = block.settings?.buttonUrl || '#';
+        if (block.settings?.prefillEnabled && btnUrl !== '#') {
+          const separator = btnUrl.includes('?') ? '&' : '?';
+          btnUrl = `${btnUrl}${separator}${PREFILL_QUERY}`;
+        }
         return `
 <table role="presentation" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
   <tr>
     <td style="background-color: ${block.settings?.buttonColor || '#2563eb'}; border-radius: 6px;">
-      <a href="${block.settings?.buttonUrl || '#'}" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px;">
+      <a href="${btnUrl}" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px;">
         ${block.content}
       </a>
     </td>
@@ -1564,7 +1590,14 @@ export function SimpleTemplateBuilder({
                               {block.type === 'button' && (
                                 <div className="py-2">
                                   {editingBlockId === block.id ? (
-                                    <div className="space-y-2">
+                                    <div 
+                                      className="space-y-2"
+                                      onBlur={(e) => {
+                                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                          setEditingBlockId(null);
+                                        }
+                                      }}
+                                    >
                                       <Input
                                         autoFocus
                                         value={block.content}
@@ -1581,10 +1614,19 @@ export function SimpleTemplateBuilder({
                                         onFocus={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "buttonUrl" }, e.currentTarget)}
                                         onClick={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "buttonUrl" }, e.currentTarget)}
                                         onKeyUp={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "buttonUrl" }, e.currentTarget)}
-                                        onBlur={() => setEditingBlockId(null)}
                                         placeholder="https://..."
                                         className="text-sm"
                                       />
+                                      <div className="flex items-center space-x-2 pt-1 px-1">
+                                        <Checkbox 
+                                          id={`prefill-${block.id}`}
+                                          checked={block.settings?.prefillEnabled || false}
+                                          onCheckedChange={(checked) => updateBlock(block.id, { settings: { ...block.settings, prefillEnabled: checked === true } })}
+                                        />
+                                        <Label htmlFor={`prefill-${block.id}`} className="text-xs text-slate-500 font-normal cursor-pointer select-none">
+                                          Pre-fill landing page fields
+                                        </Label>
+                                      </div>
                                     </div>
                                   ) : (
                                     <div

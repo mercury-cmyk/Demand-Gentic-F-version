@@ -1,4 +1,5 @@
-import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request, Response, NextFunction } from 'express';
 import { ZodSchema, ZodError } from 'zod';
 
@@ -19,12 +20,25 @@ const RATE_LIMIT_EXEMPT_PREFIXES = [
   '/api/recordings/',         // Recording access during/after calls
 ];
 
+function getRateLimitKey(req: Request): string {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (token.length > 0) {
+      const digest = crypto.createHash('sha256').update(token).digest('hex').slice(0, 24);
+      return `token:${digest}`;
+    }
+  }
+  return ipKeyGenerator(req.ip || req.socket.remoteAddress || '');
+}
+
 // General API rate limiter: 50000 requests per 15 minutes per IP (scaled for 50+ concurrent calls)
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50000, // limit each IP to 50000 requests per windowMs
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  keyGenerator: getRateLimitKey,
   skip: (req) => RATE_LIMIT_EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix)),
   handler: (_req, res) => {
     res.status(429).json({
@@ -56,6 +70,7 @@ export const writeLimiter = rateLimit({
   max: 1000, // limit each IP to 1000 write requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   handler: (_req, res) => {
     res.status(429).json({
       message: 'Too many write operations, please slow down.',
@@ -70,6 +85,7 @@ export const expensiveOperationLimiter = rateLimit({
   max: 100, // limit each IP to 100 expensive operations per hour
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
   handler: (_req, res) => {
     res.status(429).json({
       message: 'Too many expensive operations, please try again later.',

@@ -65,6 +65,8 @@ import emailBuilderRouter from './routes/email-builder';
 import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
+import unlicensedConvQualityRouter from './routes/unlicensed-conversation-quality-routes';
+import unlicensedLeadQualityRouter from './routes/unlicensed-lead-quality-routes';
 import virtualAgentsRouter from './routes/virtual-agents';
 import cloudLogsRouter from './routes/cloud-logs-routes';
 import numberPoolRouter from './routes/number-pool';
@@ -14922,6 +14924,10 @@ Provide JSON response with:
   app.use('/api/disposition-deep-reanalysis', dispositionDeepReanalysisRouter);
   app.use(queueIntelligenceRouter);
 
+  // ==================== UNLICENSED DEPARTMENTS ====================
+  app.use('/api/unlicensed', unlicensedConvQualityRouter);
+  app.use('/api/unlicensed', unlicensedLeadQualityRouter);
+
   // AI Project Creation
   app.use('/api/ai', aiProjectRouter);
 
@@ -15620,7 +15626,7 @@ Provide JSON response with:
   // Get all conversations for QA review (call sessions AND test calls with transcripts)
   app.get("/api/qa/conversations", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { campaignId, type, search, source, limit = '100' } = req.query;
+      const { campaignId, type, search, source, limit = '100', dateFrom, dateTo } = req.query;
       const limitNum = Math.min(500, Math.max(1, parseInt(limit as string, 10)));
 
       // We'll fetch both call_sessions and test_calls, then combine
@@ -15630,6 +15636,15 @@ Provide JSON response with:
       const sessionConditions: any[] = [];
       if (campaignId && campaignId !== 'all') {
         sessionConditions.push(eq(callSessions.campaignId, campaignId as string));
+      }
+      if (dateFrom) {
+        sessionConditions.push(gte(callSessions.startedAt, new Date(dateFrom as string)));
+      }
+      if (dateTo) {
+        // End of the selected day
+        const endDate = new Date(dateTo as string);
+        endDate.setHours(23, 59, 59, 999);
+        sessionConditions.push(lte(callSessions.startedAt, endDate));
       }
       if (search) {
         const searchPattern = `%${search}%`;
@@ -15889,6 +15904,14 @@ Provide JSON response with:
       if (campaignId && campaignId !== 'all') {
         testConditions.push(eq(campaignTestCalls.campaignId, campaignId as string));
       }
+      if (dateFrom) {
+        testConditions.push(gte(campaignTestCalls.createdAt, new Date(dateFrom as string)));
+      }
+      if (dateTo) {
+        const endDateTest = new Date(dateTo as string);
+        endDateTest.setHours(23, 59, 59, 999);
+        testConditions.push(lte(campaignTestCalls.createdAt, endDateTest));
+      }
       testConditions.push(eq(campaignTestCalls.status, 'completed'));
       if (search) {
         const searchPattern2 = `%${search}%`;
@@ -16094,6 +16117,30 @@ Provide JSON response with:
         ? Math.round(analyzedConversations.reduce((sum: number, c: any) => sum + (c.analysis?.overallScore || 0), 0) / analyzedConversations.length)
         : undefined;
 
+      // Compute average quality dimension scores across all analyzed conversations
+      const dimensionSums = { engagement: 0, clarity: 0, empathy: 0, objectionHandling: 0, qualification: 0, closing: 0 };
+      let dimensionCount = 0;
+      for (const c of analyzedConversations) {
+        const dims = (c as any).analysis?.qualityDimensions;
+        if (dims) {
+          dimensionSums.engagement += dims.engagement || 0;
+          dimensionSums.clarity += dims.clarity || 0;
+          dimensionSums.empathy += dims.empathy || 0;
+          dimensionSums.objectionHandling += dims.objectionHandling || 0;
+          dimensionSums.qualification += dims.qualification || 0;
+          dimensionSums.closing += dims.closing || 0;
+          dimensionCount++;
+        }
+      }
+      const avgDimensions = dimensionCount > 0 ? {
+        engagement: Math.round(dimensionSums.engagement / dimensionCount),
+        clarity: Math.round(dimensionSums.clarity / dimensionCount),
+        empathy: Math.round(dimensionSums.empathy / dimensionCount),
+        objectionHandling: Math.round(dimensionSums.objectionHandling / dimensionCount),
+        qualification: Math.round(dimensionSums.qualification / dimensionCount),
+        closing: Math.round(dimensionSums.closing / dimensionCount),
+      } : undefined;
+
       res.json({
         conversations: limitedConversations,
         total: globalCounts.total,
@@ -16109,6 +16156,7 @@ Provide JSON response with:
           realConversations: realConversations.length,
           analyzedWithScores: analyzedConversations.length,
           avgQualityScore,
+          avgDimensions,
         },
         topChallenges,
       });
@@ -16776,6 +16824,178 @@ Provide JSON response with:
     } catch (error: any) {
       console.error('[QA Bulk] Error:', error?.message || error);
       res.status(500).json({ error: 'Bulk analysis failed', message: error?.message });
+    }
+  });
+
+  // ==================== QA SINGLE-CALL TRANSCRIBE + ANALYZE ====================
+
+  /**
+   * POST /api/qa/transcribe/:callSessionId
+   * Transcribe a single call session using Google Speech-to-Text,
+   * then optionally run conversation quality analysis on the transcript.
+   */
+  app.post("/api/qa/transcribe/:callSessionId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { callSessionId } = req.params;
+      const { analyze = true } = req.body as { analyze?: boolean };
+
+      // Get session info
+      const [session] = await db
+        .select({
+          id: callSessions.id,
+          aiTranscript: callSessions.aiTranscript,
+          aiDisposition: callSessions.aiDisposition,
+          campaignId: callSessions.campaignId,
+          contactId: callSessions.contactId,
+          durationSec: callSessions.durationSec,
+          recordingS3Key: callSessions.recordingS3Key,
+          recordingUrl: callSessions.recordingUrl,
+          telnyxRecordingId: callSessions.telnyxRecordingId,
+          campaignName: campaigns.name,
+          campaignObjective: campaigns.campaignObjective,
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          accountName: accounts.name,
+        })
+        .from(callSessions)
+        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(eq(callSessions.id, callSessionId));
+
+      if (!session) {
+        return res.status(404).json({ error: 'Call session not found' });
+      }
+
+      let transcript = session.aiTranscript;
+
+      // Step 1: Transcribe if no transcript exists
+      if (!transcript || transcript.trim().length < 50) {
+        // Resolve a playable recording URL
+        const { getPlayableRecordingLink } = await import('./services/recording-link-resolver');
+        const recordingLink = await getPlayableRecordingLink(callSessionId);
+
+        if (!recordingLink || !recordingLink.url) {
+          return res.status(400).json({ error: 'No recording available for transcription' });
+        }
+
+        console.log(`[QA Transcribe] Starting transcription for ${callSessionId} from ${recordingLink.source}`);
+
+        const { submitTranscription } = await import('./services/google-transcription');
+        transcript = await submitTranscription(recordingLink.url);
+
+        if (!transcript || transcript.trim().length === 0) {
+          return res.status(500).json({ error: 'Transcription returned empty result' });
+        }
+
+        // Store transcript in call session
+        await db.update(callSessions).set({
+          aiTranscript: transcript,
+        }).where(eq(callSessions.id, callSessionId));
+
+        console.log(`[QA Transcribe] Transcription complete for ${callSessionId}: ${transcript.length} chars`);
+      }
+
+      // Step 2: Optionally run quality analysis
+      let analysisResult: any = null;
+      if (analyze && transcript) {
+        const { analyzeConversationQuality } = await import("./services/conversation-quality-analyzer");
+        const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || undefined;
+
+        const analysis = await analyzeConversationQuality({
+          transcript,
+          interactionType: 'live_call',
+          analysisStage: 'post_call',
+          callDurationSeconds: session.durationSec || undefined,
+          disposition: session.aiDisposition || undefined,
+          campaignId: session.campaignId || undefined,
+          campaignName: session.campaignName || undefined,
+          campaignObjective: session.campaignObjective || undefined,
+          contactName,
+          accountName: session.accountName || undefined,
+        });
+
+        if (analysis.status === 'ok') {
+          // Store in callQualityRecords
+          await db.insert(callQualityRecords).values({
+            callSessionId: session.id,
+            campaignId: session.campaignId,
+            contactId: session.contactId,
+            overallQualityScore: analysis.overallScore,
+            engagementScore: analysis.qualityDimensions?.engagement,
+            clarityScore: analysis.qualityDimensions?.clarity,
+            empathyScore: analysis.qualityDimensions?.empathy,
+            objectionHandlingScore: analysis.qualityDimensions?.objectionHandling,
+            qualificationScore: analysis.qualityDimensions?.qualification,
+            closingScore: analysis.qualityDimensions?.closing,
+            sentiment: analysis.learningSignals?.sentiment,
+            engagementLevel: analysis.learningSignals?.engagementLevel,
+            issues: analysis.issues,
+            recommendations: analysis.recommendations,
+            breakdowns: analysis.breakdowns,
+            promptUpdates: analysis.promptUpdates,
+            nextBestActions: analysis.nextBestActions,
+            campaignAlignmentScore: analysis.campaignAlignment?.objectiveAdherence,
+            contextUsageScore: analysis.campaignAlignment?.contextUsage,
+            talkingPointsCoverageScore: analysis.campaignAlignment?.talkingPointsCoverage,
+            missedTalkingPoints: analysis.campaignAlignment?.missedTalkingPoints,
+            flowComplianceScore: analysis.flowCompliance?.score,
+            missedSteps: analysis.flowCompliance?.missedSteps,
+            flowDeviations: analysis.flowCompliance?.deviations,
+            assignedDisposition: analysis.dispositionReview?.assignedDisposition,
+            expectedDisposition: analysis.dispositionReview?.expectedDisposition,
+            dispositionAccurate: analysis.dispositionReview?.isAccurate,
+            dispositionNotes: analysis.dispositionReview?.notes,
+            transcriptLength: transcript.length,
+            transcriptTruncated: analysis.metadata?.truncated || false,
+            fullTranscript: transcript.substring(0, 12000),
+            analysisModel: analysis.metadata?.model || 'vertex-ai-gemini',
+            analysisStage: 'post_call',
+            interactionType: 'live_call',
+            analyzedAt: new Date(),
+          } as any);
+
+          // Also store in callSessions.aiAnalysis
+          await db.update(callSessions).set({
+            aiAnalysis: {
+              conversationQuality: {
+                overallScore: analysis.overallScore,
+                summary: analysis.summary,
+                qualityDimensions: analysis.qualityDimensions,
+                campaignAlignment: analysis.campaignAlignment,
+                dispositionReview: analysis.dispositionReview,
+                issues: analysis.issues,
+                recommendations: analysis.recommendations,
+                breakdowns: analysis.breakdowns,
+                performanceGaps: analysis.performanceGaps,
+                flowCompliance: analysis.flowCompliance,
+                learningSignals: analysis.learningSignals,
+                nextBestActions: analysis.nextBestActions,
+                promptUpdates: analysis.promptUpdates,
+                metadata: analysis.metadata,
+              },
+            } as any,
+          }).where(eq(callSessions.id, session.id));
+
+          analysisResult = {
+            overallScore: analysis.overallScore,
+            qualityDimensions: analysis.qualityDimensions,
+            summary: analysis.summary,
+          };
+        }
+      }
+
+      res.json({
+        success: true,
+        callSessionId,
+        transcribed: true,
+        transcriptLength: transcript?.length || 0,
+        analyzed: !!analysisResult,
+        analysis: analysisResult,
+      });
+    } catch (error: any) {
+      console.error('[QA Transcribe] Error:', error?.message || error);
+      res.status(500).json({ error: 'Transcribe/analyze failed', message: error?.message });
     }
   });
 

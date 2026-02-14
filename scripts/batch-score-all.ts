@@ -9,7 +9,7 @@
 import { pool } from '../server/db';
 import { analyzeConversationQuality } from '../server/services/conversation-quality-analyzer';
 
-const CONCURRENCY = 3;
+const CONCURRENCY = 1;
 const BATCH_SIZE = 50;
 const MAX_RETRIES = 2;
 const QUALIFY_THRESHOLD = 70;
@@ -275,6 +275,8 @@ async function main() {
         const idx = nextIndex++;
         const result = await scoreOneLead(batch[idx], idx, allResults.length, grandTotal);
         batchResults.push(result);
+        // Rate limit protection
+        await sleep(2000);
       }
     }
 

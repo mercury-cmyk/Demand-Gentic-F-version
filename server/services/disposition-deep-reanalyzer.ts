@@ -979,8 +979,8 @@ export async function deepReanalyzeBatch(
   const missedTPFreq = new Map<string, number>();
   let analyzedWithScores = 0;
 
-  // Process sessions in parallel chunks of 5 to avoid HTTP timeout
-  const CONCURRENCY = 5;
+  // Process sessions in parallel chunks of 1 to avoid HTTP timeout/rate limits
+  const CONCURRENCY = 1;
   for (let chunkStart = 0; chunkStart < sessions.length; chunkStart += CONCURRENCY) {
     const chunk = sessions.slice(chunkStart, chunkStart + CONCURRENCY);
     console.log(`${LOG_PREFIX} Processing chunk ${Math.floor(chunkStart / CONCURRENCY) + 1}/${Math.ceil(sessions.length / CONCURRENCY)} (${chunk.length} calls)`);

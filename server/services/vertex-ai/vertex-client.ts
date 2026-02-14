@@ -222,7 +222,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
         throw error;
       }
 
-      const backoffMs = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 1000, 30000);
+      const backoffMs = Math.min(2000 * Math.pow(2, attempt) + Math.random() * 1000, 60000);
       console.warn(`[VertexAI] Rate limited (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${Math.round(backoffMs)}ms...`);
       await new Promise((r) => setTimeout(r, backoffMs));
     }

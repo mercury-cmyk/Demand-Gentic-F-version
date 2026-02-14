@@ -1,6 +1,7 @@
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
+import { BRAND, FOOTER } from "@shared/brand-messaging";
 
 export default function TermsOfServicePage() {
   const [, setLocation] = useLocation();
@@ -55,7 +56,7 @@ export default function TermsOfServicePage() {
                 Pivotal B2B LLC<br />
                 Lewes, Delaware, United States<br />
                 Phone: (417) 900-3844<br />
-                Website: <a href="https://pivotal-b2b.com/" className="text-violet-600 hover:underline">pivotal-b2b.com</a>
+                Website: <a href={`https://${BRAND.domains.primary}/`} className="text-violet-600 hover:underline">{BRAND.domains.primary}</a>
               </p>
             </section>
 
@@ -236,8 +237,8 @@ export default function TermsOfServicePage() {
                 <strong>Pivotal B2B LLC</strong><br />
                 Lewes, Delaware, United States<br />
                 Phone: <a href="tel:+14179003844" className="text-violet-600 hover:underline">(417) 900-3844</a><br />
-                Email: <a href="mailto:legal@pivotal-b2b.com" className="text-violet-600 hover:underline">legal@pivotal-b2b.com</a><br />
-                Website: <a href="https://pivotal-b2b.com/" className="text-violet-600 hover:underline">pivotal-b2b.com</a>
+                Email: <a href={`mailto:legal@${BRAND.domains.primary}`} className="text-violet-600 hover:underline">legal@{BRAND.domains.primary}</a><br />
+                Website: <a href={`https://${BRAND.domains.primary}/`} className="text-violet-600 hover:underline">{BRAND.domains.primary}</a>
               </p>
             </section>
           </div>
@@ -248,7 +249,7 @@ export default function TermsOfServicePage() {
       <footer className="py-8 px-6 bg-slate-900 text-white">
         <div className="max-w-4xl mx-auto text-center">
           <p className="text-slate-500 text-sm">
-            © 2024 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
+            {FOOTER.copyright}
           </p>
           <div className="flex justify-center gap-6 mt-4 text-slate-500 text-sm">
             <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>

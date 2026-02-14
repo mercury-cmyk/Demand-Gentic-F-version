@@ -28,7 +28,8 @@ import {
   BarChart3,
   RefreshCw,
   Loader2,
-  Zap
+  Zap,
+  Sparkles
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -96,7 +97,6 @@ interface ConversationRecord {
   recordingStatus?: string;
   telnyxRecordingId?: string;
   hasRecording?: boolean;
-  source?: string;
   createdAt: string;
   isTestCall: boolean;
 }
@@ -296,6 +296,8 @@ export default function ConversationQualityPage() {
   const [selectedDisposition, setSelectedDisposition] = useState<string>('all');
   const [showOnlyWithTranscripts, setShowOnlyWithTranscripts] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
   const [selectedConversation, setSelectedConversation] = useState<ConversationRecord | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -310,10 +312,12 @@ export default function ConversationQualityPage() {
   if (selectedCampaign !== 'all') qaParams.append('campaignId', selectedCampaign);
   if (selectedType !== 'all') qaParams.append('type', selectedType);
   if (searchQuery) qaParams.append('search', searchQuery);
+  if (dateFrom) qaParams.append('dateFrom', dateFrom);
+  if (dateTo) qaParams.append('dateTo', dateTo);
   qaParams.append('limit', '200');
 
   const { data: qaData, isLoading: qaLoading, refetch } = useQuery<any>({
-    queryKey: ['/api/qa/conversations', selectedCampaign, selectedType, searchQuery],
+    queryKey: ['/api/qa/conversations', selectedCampaign, selectedType, searchQuery, dateFrom, dateTo],
     queryFn: async () => {
       const response = await apiRequest('GET', `/api/qa/conversations?${qaParams.toString()}`);
       return response.json();
@@ -353,6 +357,7 @@ export default function ConversationQualityPage() {
     analyzed: backendStats?.analyzedWithScores ?? conversations.filter(c => c.analysis?.overallScore && c.analysis.overallScore > 0).length,
     testCalls: backendStats?.testCalls ?? conversations.filter(c => c.isTestCall).length,
     avgScore: backendStats?.avgQualityScore ?? null,
+    avgDimensions: backendStats?.avgDimensions as { engagement: number; clarity: number; empathy: number; objectionHandling: number; qualification: number; closing: number } | undefined,
   };
 
   // Count calls with transcript but no analysis (eligible for bulk analyze)
@@ -361,6 +366,52 @@ export default function ConversationQualityPage() {
     (c.transcript || (c.transcriptTurns && c.transcriptTurns.length > 0)) &&
     (!c.analysis?.overallScore || c.analysis.overallScore === 0)
   ).length;
+
+  // Transcribe & analyze a single call
+  const transcribeMutation = useMutation({
+    mutationFn: async (callSessionId: string) => {
+      const response = await apiRequest('POST', `/api/qa/transcribe/${callSessionId}`, { analyze: true });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: 'Transcription Complete',
+        description: data.analyzed
+          ? `Transcribed (${data.transcriptLength} chars) and analyzed (Score: ${data.analysis?.overallScore}/100)`
+          : `Transcribed successfully (${data.transcriptLength} chars)`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/qa/conversations'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Transcription Failed',
+        description: error?.message || 'Failed to transcribe recording',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Re-analyze a call that already has a transcript
+  const reanalyzeMutation = useMutation({
+    mutationFn: async (callSessionId: string) => {
+      const response = await apiRequest('POST', `/api/qa/transcribe/${callSessionId}`, { analyze: true });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: 'Analysis Complete',
+        description: `Quality Score: ${data.analysis?.overallScore}/100`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/qa/conversations'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Analysis Failed',
+        description: error?.message || 'Failed to analyze conversation',
+        variant: 'destructive',
+      });
+    },
+  });
 
   const bulkAnalyzeMutation = useMutation({
     mutationFn: async () => {
@@ -479,6 +530,47 @@ export default function ConversationQualityPage() {
         </Card>
       </div>
 
+      {/* Quality Dimension Averages */}
+      {stats.avgDimensions && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-blue-500" />
+              Quality Dimensions (Avg across {stats.analyzed} analyzed)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+              {[
+                { key: 'engagement', label: 'Engagement', color: 'text-blue-600' },
+                { key: 'clarity', label: 'Clarity', color: 'text-purple-600' },
+                { key: 'empathy', label: 'Empathy', color: 'text-pink-600' },
+                { key: 'objectionHandling', label: 'Objection Handling', color: 'text-orange-600' },
+                { key: 'qualification', label: 'Qualification', color: 'text-teal-600' },
+                { key: 'closing', label: 'Closing', color: 'text-green-600' },
+              ].map(dim => {
+                const value = stats.avgDimensions![dim.key as keyof typeof stats.avgDimensions];
+                return (
+                  <div key={dim.key} className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className={cn("text-2xl font-bold", dim.color)}>{value}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{dim.label}</div>
+                    <div className="w-full bg-muted rounded-full h-1.5 mt-2">
+                      <div
+                        className={cn(
+                          "h-1.5 rounded-full",
+                          value >= 70 ? "bg-green-500" : value >= 50 ? "bg-yellow-500" : "bg-red-500"
+                        )}
+                        style={{ width: `${value}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
@@ -556,6 +648,24 @@ export default function ConversationQualityPage() {
                   <SelectItem value="no_answer">No Answer</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="w-[150px]">
+              <Label htmlFor="dateFrom">From Date</Label>
+              <Input
+                id="dateFrom"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+            </div>
+            <div className="w-[150px]">
+              <Label htmlFor="dateTo">To Date</Label>
+              <Input
+                id="dateTo"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
             </div>
             <div className="flex items-center space-x-2 pt-6">
               <Checkbox 
@@ -772,13 +882,57 @@ export default function ConversationQualityPage() {
                     </div>
                   )}
 
-                  {/* Recording Playback - uses stream endpoint for reliable playback */}
+                  {/* Recording Playback - uses stream endpoint for reliable GCS playback */}
                   {(selectedConversation.hasRecording || selectedConversation.recordingUrl || selectedConversation.recordingS3Key || selectedConversation.telnyxRecordingId || selectedConversation.source === 'call_session') && (
                     <div className="bg-muted/50 p-3 rounded-lg">
-                      <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                        <Phone className="h-4 w-4" />
-                        Call Recording
-                      </h4>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-medium flex items-center gap-2">
+                          <Phone className="h-4 w-4" />
+                          Call Recording
+                          {selectedConversation.recordingS3Key && (
+                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">GCS Stored</Badge>
+                          )}
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          {/* Transcribe button: show if no transcript or very short */}
+                          {!selectedConversation.isTestCall && (
+                            !selectedConversation.transcript ||
+                            (selectedConversation.transcript.length < 50 && (!selectedConversation.transcriptTurns || selectedConversation.transcriptTurns.length === 0))
+                          ) && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={() => transcribeMutation.mutate(selectedConversation.id)}
+                              disabled={transcribeMutation.isPending}
+                            >
+                              {transcribeMutation.isPending ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <MessageSquare className="h-3 w-3 mr-1" />
+                              )}
+                              {transcribeMutation.isPending ? 'Transcribing...' : 'Transcribe & Analyze'}
+                            </Button>
+                          )}
+                          {/* Re-analyze button: show if has transcript but no analysis */}
+                          {!selectedConversation.isTestCall &&
+                            (selectedConversation.transcript && selectedConversation.transcript.length >= 50) &&
+                            (!selectedConversation.analysis?.overallScore || selectedConversation.analysis.overallScore === 0) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => reanalyzeMutation.mutate(selectedConversation.id)}
+                              disabled={reanalyzeMutation.isPending}
+                            >
+                              {reanalyzeMutation.isPending ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <BarChart3 className="h-3 w-3 mr-1" />
+                              )}
+                              {reanalyzeMutation.isPending ? 'Analyzing...' : 'Analyze Quality'}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
                       <audio
                         key={selectedConversation.id}
                         controls

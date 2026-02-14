@@ -835,6 +835,76 @@ export const promptCategoryEnum = pgEnum('prompt_category', [
   'system'         // System prompts
 ]);
 
+// Prompt Department Enum
+export const promptDepartmentEnum = pgEnum('prompt_department', [
+  'sales',           // Sales operations and outreach
+  'marketing',       // Marketing content and campaigns
+  'operations',      // Operational processes and analysis
+  'ai_engineering',  // AI infrastructure and tooling
+  'crm',             // CRM data management
+  'compliance',      // Compliance and governance
+  'intelligence',    // Research and intelligence
+  'content'          // Content creation and generation
+]);
+
+// Prompt Function Enum
+export const promptFunctionEnum = pgEnum('prompt_function', [
+  'email_drafting',            // Email content generation
+  'call_script',               // Voice call scripts and instructions
+  'lead_scoring',              // Lead quality scoring
+  'enrichment',                // Data enrichment
+  'campaign_personalization',  // Personalization for campaigns
+  'classification',            // Data classification
+  'summarization',             // Content summarization
+  'reasoning',                 // Complex reasoning tasks
+  'routing',                   // Routing and escalation logic
+  'research',                  // Research and analysis
+  'content_generation',        // General content creation
+  'quality_analysis',          // Quality assessment
+  'disposition',               // Call disposition analysis
+  'mapping',                   // Data mapping and matching
+  'simulation',                // Simulation and testing
+  'image_generation'           // Image/visual generation
+]);
+
+// Prompt Purpose Enum
+export const promptPurposeEnum = pgEnum('prompt_purpose', [
+  'generation',        // Generates new content
+  'classification',    // Classifies or categorizes data
+  'summarization',     // Summarizes information
+  'reasoning',         // Complex reasoning/analysis
+  'scoring',           // Produces numerical scores
+  'routing',           // Routes or directs flow
+  'extraction',        // Extracts structured data
+  'analysis',          // Analyzes and provides insights
+  'enrichment',        // Enriches existing data
+  'personalization',   // Personalizes content
+  'compliance_check',  // Validates compliance
+  'orchestration'      // Orchestrates multi-step processes
+]);
+
+// Prompt Status Enum
+export const promptStatusEnum = pgEnum('prompt_status', [
+  'draft',       // Draft version, not yet live
+  'live',        // Active and in production
+  'archived',    // Archived, no longer active
+  'deprecated'   // Marked for removal
+]);
+
+// Prompt Dependency Entity Type Enum
+export const promptDependencyEntityTypeEnum = pgEnum('prompt_dependency_entity_type', [
+  'service',   // Backend service file
+  'route',     // API route handler
+  'script',    // Background script
+  'agent'      // Agent system
+]);
+
+// Prompt Dependency Direction Enum
+export const promptDependencyDirectionEnum = pgEnum('prompt_dependency_direction', [
+  'produces',  // This entity produces/creates the prompt
+  'consumes'   // This entity uses/consumes the prompt
+]);
+
 // Prompt Registry table - stores all AI prompts
 export const promptRegistry = pgTable("prompt_registry", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -854,6 +924,23 @@ export const promptRegistry = pgTable("prompt_registry", {
   sourceFile: text("source_file"), // Where the prompt came from
   sourceLine: integer("source_line"),
   sourceExport: text("source_export"), // Export name from source file
+  // Enhanced governance fields
+  department: promptDepartmentEnum("department"),
+  promptFunction: promptFunctionEnum("prompt_function"),
+  purpose: promptPurposeEnum("purpose"),
+  aiModel: text("ai_model"), // e.g., 'gpt-4o', 'gpt-4o-mini', 'deepseek', 'gemini-2.0-flash'
+  status: promptStatusEnum("status").notNull().default('live'),
+  ownerId: varchar("owner_id").references(() => users.id, { onDelete: 'set null' }),
+  ownerDepartment: text("owner_department"),
+  // Invocation and dependency tracking
+  invocationPoint: jsonb("invocation_point").$type<{
+    entity: string;
+    endpoint?: string;
+    serviceLayer: string;
+    httpMethod?: string;
+  }>(),
+  inputDependencies: jsonb("input_dependencies").$type<string[]>(), // data sources, context layers
+  outputDestination: jsonb("output_destination").$type<string[]>(), // which entities consume the result
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
@@ -864,6 +951,12 @@ export const promptRegistry = pgTable("prompt_registry", {
   categoryIdx: index("prompt_registry_category_idx").on(table.category),
   agentTypeIdx: index("prompt_registry_agent_type_idx").on(table.agentType),
   activeIdx: index("prompt_registry_active_idx").on(table.isActive),
+  departmentIdx: index("prompt_registry_department_idx").on(table.department),
+  functionIdx: index("prompt_registry_function_idx").on(table.promptFunction),
+  purposeIdx: index("prompt_registry_purpose_idx").on(table.purpose),
+  statusIdx: index("prompt_registry_status_idx").on(table.status),
+  ownerIdx: index("prompt_registry_owner_idx").on(table.ownerId),
+  modelIdx: index("prompt_registry_model_idx").on(table.aiModel),
 }));
 
 // Prompt Versions table - tracks version history
@@ -892,6 +985,31 @@ export type InsertPromptRegistry = z.infer<typeof insertPromptRegistrySchema>;
 export type InsertPromptVersions = z.infer<typeof insertPromptVersionsSchema>;
 export type PromptRegistry = typeof promptRegistry.$inferSelect;
 export type PromptVersion = typeof promptVersions.$inferSelect;
+
+// Prompt Dependency Map table - tracks which entities produce/consume prompts
+export const promptDependencyMap = pgTable("prompt_dependency_map", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  promptId: varchar("prompt_id").notNull().references(() => promptRegistry.id, { onDelete: 'cascade' }),
+  entityType: promptDependencyEntityTypeEnum("entity_type").notNull(),
+  entityName: text("entity_name").notNull(), // e.g., 'ai-generative-studio'
+  endpointPath: text("endpoint_path"), // e.g., '/api/generative-studio/generate-email'
+  httpMethod: text("http_method"), // 'GET', 'POST', 'PUT'
+  serviceFunction: text("service_function"), // e.g., 'generateEmail'
+  direction: promptDependencyDirectionEnum("direction").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  promptIdIdx: index("prompt_dep_map_prompt_id_idx").on(table.promptId),
+  entityIdx: index("prompt_dep_map_entity_idx").on(table.entityName),
+  endpointIdx: index("prompt_dep_map_endpoint_idx").on(table.endpointPath),
+  directionIdx: index("prompt_dep_map_direction_idx").on(table.direction),
+}));
+
+export const insertPromptDependencyMapSchema = createInsertSchema(promptDependencyMap).omit({
+  id: true,
+  createdAt: true,
+});
+export type PromptDependencyMap = typeof promptDependencyMap.$inferSelect;
+export type InsertPromptDependencyMap = z.infer<typeof insertPromptDependencyMapSchema>;
 
 // ==================== CUSTOM CALL FLOWS ====================
 // Updated types to match actual call flow step structure
@@ -3254,6 +3372,162 @@ export const callQualityRecords = pgTable("call_quality_records", {
   scoreIdx: index("call_quality_records_score_idx").on(table.overallQualityScore),
   createdAtIdx: index("call_quality_records_created_at_idx").on(table.createdAt),
   showcaseIdx: index("call_quality_records_showcase_idx").on(table.isShowcase),
+}));
+
+// ============================================
+// UNLICENSED DEPARTMENT ENUMS
+// ============================================
+
+export const conversationQualityStatusEnum = pgEnum("conversation_quality_status", [
+  "pending", "analyzed", "flagged", "reviewed"
+]);
+
+export const leadQualityStatusEnum = pgEnum("lead_quality_status", [
+  "pending", "analyzed", "qualified", "not_qualified", "needs_review"
+]);
+
+export const intentStrengthEnum = pgEnum("intent_strength", [
+  "strong", "moderate", "weak", "none", "ambiguous"
+]);
+
+export const crmActionEnum = pgEnum("crm_action", [
+  "create_lead", "send_to_review", "push_to_crm", "suppress", "mark_dnc", "schedule_callback", "no_action"
+]);
+
+// ============================================
+// UNLICENSED DEPARTMENT: CONVERSATION QUALITY ASSESSMENTS
+// Evaluates HOW the call was conducted — process & communication integrity
+// ============================================
+export const conversationQualityAssessments = pgTable("conversation_quality_assessments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callSessionId: varchar("call_session_id").references(() => callSessions.id, { onDelete: 'cascade' }).notNull(),
+  dialerCallAttemptId: varchar("dialer_call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+  tenantId: varchar("tenant_id"),
+  status: conversationQualityStatusEnum("status").default("pending"),
+
+  // Composite Scores
+  conversationQualityScore: integer("conversation_quality_score"), // CQS 0-100
+  technicalIntegrityScore: integer("technical_integrity_score"),   // 0-100
+  complianceScore: integer("compliance_score"),                     // 0-100
+  behavioralScore: integer("behavioral_score"),                     // 0-100
+
+  // Communication Behavior (Section A)
+  toneScore: integer("tone_score"),                     // 0-100
+  naturalnessScore: integer("naturalness_score"),       // 0-100
+  confidenceScore: integer("confidence_score"),         // 0-100
+  openingProtocolScore: integer("opening_protocol_score"), // 0-100
+  roboticRepetitionFlag: boolean("robotic_repetition_flag").default(false),
+
+  // Script & Instruction Compliance (Section B)
+  scriptAdherenceScore: integer("script_adherence_score"),       // 0-100
+  gatekeeperProtocolScore: integer("gatekeeper_protocol_score"), // 0-100
+  objectionHandlingLogicScore: integer("objection_handling_logic_score"), // 0-100
+  unauthorizedImprovisationFlag: boolean("unauthorized_improvisation_flag").default(false),
+
+  // Technical Execution (Section C)
+  voicemailDetectionAccurate: boolean("voicemail_detection_accurate"),
+  silenceDetectionAccurate: boolean("silence_detection_accurate"),
+  transferHandlingCorrect: boolean("transfer_handling_correct"),
+  directoryNavigationCorrect: boolean("directory_navigation_correct"),
+  interruptionHandlingCorrect: boolean("interruption_handling_correct"),
+  technicalIssues: jsonb("technical_issues"), // [{type, description, severity, timestamp}]
+
+  // Call Handling Logic (Section D)
+  dispositionCorrect: boolean("disposition_correct"),
+  dncTriggeredCorrectly: boolean("dnc_triggered_correctly"),
+  callbackHandledCorrectly: boolean("callback_handled_correctly"),
+  stateLogicRespected: boolean("state_logic_respected"),
+
+  // Detailed Assessment
+  behavioralAssessment: jsonb("behavioral_assessment"),   // {strengths[], weaknesses[], flags[]}
+  issueFlags: jsonb("issue_flags"),                       // [{type, severity, description, evidence, transcriptMoment}]
+  transcriptAnnotations: jsonb("transcript_annotations"), // [{turnIndex, annotation, category}]
+  summary: text("summary"),
+
+  // Metadata
+  analysisModel: text("analysis_model"),
+  analyzedAt: timestamp("analyzed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  callSessionIdx: index("cqa_call_session_idx").on(table.callSessionId),
+  campaignIdx: index("cqa_campaign_idx").on(table.campaignId),
+  cqsIdx: index("cqa_cqs_idx").on(table.conversationQualityScore),
+  statusIdx: index("cqa_status_idx").on(table.status),
+  createdAtIdx: index("cqa_created_at_idx").on(table.createdAt),
+}));
+
+// ============================================
+// UNLICENSED DEPARTMENT: LEAD QUALITY ASSESSMENTS
+// Evaluates the RESULT of the conversation — campaign & qualification integrity
+// ============================================
+export const leadQualityAssessments = pgTable("lead_quality_assessments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callSessionId: varchar("call_session_id").references(() => callSessions.id, { onDelete: 'cascade' }).notNull(),
+  dialerCallAttemptId: varchar("dialer_call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+  leadId: varchar("lead_id").references(() => leads.id, { onDelete: 'set null' }),
+  tenantId: varchar("tenant_id"),
+  status: leadQualityStatusEnum("status").default("pending"),
+
+  // Composite Scores
+  leadQualificationScore: integer("lead_qualification_score"),   // 0-100
+  campaignFitScore: integer("campaign_fit_score"),               // 0-100
+  intentStrength: intentStrengthEnum("intent_strength"),
+
+  // Interest Identification (Section A)
+  prospectInterested: boolean("prospect_interested"),
+  explicitBuyingIntent: boolean("explicit_buying_intent"),
+  implicitBuyingIntent: boolean("implicit_buying_intent"),
+  interestMisinterpreted: boolean("interest_misinterpreted"),
+  interestEvidence: jsonb("interest_evidence"), // [{signal, type: 'explicit'|'implicit', quote}]
+
+  // Qualification Analysis (Section B)
+  jobTitleAlignment: integer("job_title_alignment"),       // 0-100
+  industryAlignment: integer("industry_alignment"),         // 0-100
+  companySizeFit: integer("company_size_fit"),             // 0-100
+  budgetIndicators: integer("budget_indicators"),           // 0-100
+  authorityLevel: integer("authority_level"),               // 0-100
+  timelineSignals: integer("timeline_signals"),             // 0-100
+  painPointAlignment: integer("pain_point_alignment"),     // 0-100
+  qualificationCriteria: jsonb("qualification_criteria"),   // [{criterion, met, evidence, score}]
+
+  // Outcome Categorization (Section C)
+  outcomeCategory: text("outcome_category"), // qualified_lead, mql, sql, follow_up, not_interested, not_a_fit, dnc, callback, voicemail, invalid
+  dispositionAccurate: boolean("disposition_accurate"),
+  suggestedDisposition: text("suggested_disposition"),
+  dispositionConfidence: numeric("disposition_confidence", { precision: 3, scale: 2 }),
+
+  // Lead Routing (Section D)
+  recommendedCrmAction: crmActionEnum("recommended_crm_action"),
+  shouldCreateLead: boolean("should_create_lead"),
+  shouldSendToReview: boolean("should_send_to_review"),
+  shouldPushToCrm: boolean("should_push_to_crm"),
+  shouldSuppress: boolean("should_suppress"),
+  shouldMarkDnc: boolean("should_mark_dnc"),
+
+  // Detailed Analysis
+  qualificationReport: jsonb("qualification_report"),       // Full analysis object
+  campaignAlignmentNotes: jsonb("campaign_alignment_notes"),// [{aspect, score, evidence}]
+  routingRationale: text("routing_rationale"),
+  summary: text("summary"),
+
+  // Metadata
+  analysisModel: text("analysis_model"),
+  analyzedAt: timestamp("analyzed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  callSessionIdx: index("lqa_call_session_idx").on(table.callSessionId),
+  campaignIdx: index("lqa_campaign_idx").on(table.campaignId),
+  leadIdx: index("lqa_lead_idx").on(table.leadId),
+  qualScoreIdx: index("lqa_qual_score_idx").on(table.leadQualificationScore),
+  outcomeIdx: index("lqa_outcome_idx").on(table.outcomeCategory),
+  statusIdx: index("lqa_status_idx").on(table.status),
+  createdAtIdx: index("lqa_created_at_idx").on(table.createdAt),
 }));
 
 // Call Dispositions - Links call sessions to dispositions with notes
@@ -11740,6 +12014,24 @@ export type InsertCallQualityRecord = z.infer<typeof insertCallQualityRecordsSch
 
 export type SmiAuditLog = typeof smiAuditLog.$inferSelect;
 export type InsertSmiAuditLog = z.infer<typeof insertSmiAuditLogSchema>;
+
+// Unlicensed Department - Conversation Quality Assessments
+export const insertConversationQualityAssessmentSchema = createInsertSchema(conversationQualityAssessments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ConversationQualityAssessment = typeof conversationQualityAssessments.$inferSelect;
+export type InsertConversationQualityAssessment = z.infer<typeof insertConversationQualityAssessmentSchema>;
+
+// Unlicensed Department - Lead Quality Assessments
+export const insertLeadQualityAssessmentSchema = createInsertSchema(leadQualityAssessments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type LeadQualityAssessment = typeof leadQualityAssessments.$inferSelect;
+export type InsertLeadQualityAssessment = z.infer<typeof insertLeadQualityAssessmentSchema>;
 
 // SMI Enum Types
 export type DecisionAuthority = 'decision_maker' | 'influencer' | 'user' | 'gatekeeper';

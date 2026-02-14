@@ -15,6 +15,7 @@ import { eq, and, desc, asc, sql, isNull, or, gte, lte, inArray, count } from 'd
 import {
   promptRegistry,
   promptVersions,
+  promptDependencyMap,
   agentPrompts,
   agentPromptHistory,
   promptVariants,
@@ -25,6 +26,7 @@ import {
   campaigns,
   type PromptRegistry,
   type PromptVersion,
+  type PromptDependencyMap,
   type AgentPrompt,
 } from '@shared/schema';
 import { createHash } from 'crypto';
@@ -250,13 +252,20 @@ class UnifiedPromptService {
     isActive?: boolean;
     search?: string;
     tags?: string[];
+    department?: string;
+    promptFunction?: string;
+    purpose?: string;
+    aiModel?: string;
+    status?: string;
+    owner?: string;
+    entity?: string;
     limit?: number;
     offset?: number;
     orderBy?: 'name' | 'priority' | 'updatedAt' | 'version';
     orderDir?: 'asc' | 'desc';
   } = {}): Promise<{ prompts: UnifiedPrompt[]; total: number }> {
     const prompts: UnifiedPrompt[] = [];
-    const { source, category, agentType, isActive, search, tags, limit = 50, offset = 0, orderBy = 'priority', orderDir = 'desc' } = options;
+    const { source, category, agentType, isActive, search, tags, department, promptFunction, purpose, aiModel, status, owner, entity, limit = 50, offset = 0, orderBy = 'priority', orderDir = 'desc' } = options;
 
     // 1. Fetch from prompt_registry
     if (!source || source === 'registry') {
@@ -265,6 +274,14 @@ class UnifiedPromptService {
       if (agentType) conditions.push(eq(promptRegistry.agentType, agentType));
       if (isActive !== undefined) conditions.push(eq(promptRegistry.isActive, isActive));
       if (search) conditions.push(sql`${promptRegistry.name} ILIKE ${'%' + search + '%'} OR ${promptRegistry.content} ILIKE ${'%' + search + '%'}`);
+      // Enhanced filters
+      if (department) conditions.push(eq(promptRegistry.department, department as any));
+      if (promptFunction) conditions.push(eq(promptRegistry.promptFunction, promptFunction as any));
+      if (purpose) conditions.push(eq(promptRegistry.purpose, purpose as any));
+      if (aiModel) conditions.push(eq(promptRegistry.aiModel, aiModel));
+      if (status) conditions.push(eq(promptRegistry.status, status as any));
+      if (owner) conditions.push(eq(promptRegistry.ownerId, owner));
+      if (entity) conditions.push(sql`${promptRegistry.invocationPoint}->>'entity' = ${entity}`);
 
       const registryPrompts = await db.select()
         .from(promptRegistry)
@@ -1116,6 +1133,283 @@ class UnifiedPromptService {
     });
 
     return counts;
+  }
+
+  // ==================== ENHANCED GOVERNANCE METHODS ====================
+
+  /**
+   * Get department-level counts for all prompts
+   */
+  async getDepartmentCounts(): Promise<Record<string, number>> {
+    const rows = await db.select({
+      department: promptRegistry.department,
+      count: count(),
+    })
+      .from(promptRegistry)
+      .where(eq(promptRegistry.isActive, true))
+      .groupBy(promptRegistry.department);
+
+    const counts: Record<string, number> = {};
+    rows.forEach(r => {
+      if (r.department) counts[r.department] = Number(r.count);
+    });
+    return counts;
+  }
+
+  /**
+   * Get function-level counts for all prompts
+   */
+  async getFunctionCounts(): Promise<Record<string, number>> {
+    const rows = await db.select({
+      fn: promptRegistry.promptFunction,
+      count: count(),
+    })
+      .from(promptRegistry)
+      .where(eq(promptRegistry.isActive, true))
+      .groupBy(promptRegistry.promptFunction);
+
+    const counts: Record<string, number> = {};
+    rows.forEach(r => {
+      if (r.fn) counts[r.fn] = Number(r.count);
+    });
+    return counts;
+  }
+
+  /**
+   * Get AI model counts
+   */
+  async getModelCounts(): Promise<Record<string, number>> {
+    const rows = await db.select({
+      model: promptRegistry.aiModel,
+      count: count(),
+    })
+      .from(promptRegistry)
+      .where(eq(promptRegistry.isActive, true))
+      .groupBy(promptRegistry.aiModel);
+
+    const counts: Record<string, number> = {};
+    rows.forEach(r => {
+      if (r.model) counts[r.model] = Number(r.count);
+    });
+    return counts;
+  }
+
+  /**
+   * Get dependency graph for a specific prompt
+   */
+  async getDependencies(promptId: string): Promise<PromptDependencyMap[]> {
+    return db.select()
+      .from(promptDependencyMap)
+      .where(eq(promptDependencyMap.promptId, promptId));
+  }
+
+  /**
+   * Get full system audit data
+   */
+  async getSystemAudit(): Promise<{
+    totalPrompts: number;
+    byDepartment: Record<string, number>;
+    byFunction: Record<string, number>;
+    byModel: Record<string, number>;
+    byCategory: Record<string, number>;
+    byStatus: Record<string, number>;
+    byPurpose: Record<string, number>;
+    unownedPrompts: number;
+    draftPrompts: number;
+    totalDependencies: number;
+  }> {
+    const [totalResult] = await db.select({ count: count() }).from(promptRegistry).where(eq(promptRegistry.isActive, true));
+    const byDepartment = await this.getDepartmentCounts();
+    const byFunction = await this.getFunctionCounts();
+    const byModel = await this.getModelCounts();
+    const byCategory = await this.getCategoryCounts();
+
+    // Status counts
+    const statusRows = await db.select({
+      status: promptRegistry.status,
+      count: count(),
+    }).from(promptRegistry).groupBy(promptRegistry.status);
+    const byStatus: Record<string, number> = {};
+    statusRows.forEach(r => { if (r.status) byStatus[r.status] = Number(r.count); });
+
+    // Purpose counts
+    const purposeRows = await db.select({
+      purpose: promptRegistry.purpose,
+      count: count(),
+    }).from(promptRegistry).where(eq(promptRegistry.isActive, true)).groupBy(promptRegistry.purpose);
+    const byPurpose: Record<string, number> = {};
+    purposeRows.forEach(r => { if (r.purpose) byPurpose[r.purpose] = Number(r.count); });
+
+    // Unowned
+    const [unownedResult] = await db.select({ count: count() })
+      .from(promptRegistry)
+      .where(and(eq(promptRegistry.isActive, true), isNull(promptRegistry.ownerId)));
+
+    // Draft
+    const [draftResult] = await db.select({ count: count() })
+      .from(promptRegistry)
+      .where(eq(promptRegistry.status, 'draft'));
+
+    // Dependencies
+    const [depResult] = await db.select({ count: count() }).from(promptDependencyMap);
+
+    return {
+      totalPrompts: Number(totalResult?.count || 0),
+      byDepartment,
+      byFunction,
+      byModel,
+      byCategory,
+      byStatus,
+      byPurpose,
+      unownedPrompts: Number(unownedResult?.count || 0),
+      draftPrompts: Number(draftResult?.count || 0),
+      totalDependencies: Number(depResult?.count || 0),
+    };
+  }
+
+  /**
+   * Update prompt ownership
+   */
+  async setOwnership(promptId: string, ownerId: string, ownerDepartment?: string): Promise<void> {
+    await db.update(promptRegistry)
+      .set({
+        ownerId,
+        ownerDepartment: ownerDepartment || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(promptRegistry.id, promptId));
+  }
+
+  /**
+   * Update prompt status (draft/live/archived/deprecated)
+   */
+  async setStatus(promptId: string, status: 'draft' | 'live' | 'archived' | 'deprecated', userId?: string): Promise<void> {
+    await db.update(promptRegistry)
+      .set({
+        status,
+        updatedBy: userId || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(promptRegistry.id, promptId));
+  }
+
+  /**
+   * Get governance dashboard data
+   */
+  async getGovernanceData(): Promise<{
+    pendingDrafts: Array<{ id: string; name: string; promptKey: string; updatedAt: Date }>;
+    recentChanges: Array<{ id: string; promptId: string; version: number; changeDescription: string | null; changedAt: Date; changedByName: string | null }>;
+    ownershipGaps: Array<{ id: string; name: string; promptKey: string; department: string | null }>;
+    deprecatedPrompts: Array<{ id: string; name: string; promptKey: string }>;
+  }> {
+    // Pending drafts
+    const pendingDrafts = await db.select({
+      id: promptRegistry.id,
+      name: promptRegistry.name,
+      promptKey: promptRegistry.promptKey,
+      updatedAt: promptRegistry.updatedAt,
+    })
+      .from(promptRegistry)
+      .where(eq(promptRegistry.status, 'draft'))
+      .orderBy(desc(promptRegistry.updatedAt))
+      .limit(20);
+
+    // Recent changes (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentChanges = await db.select({
+      id: promptVersions.id,
+      promptId: promptVersions.promptId,
+      version: promptVersions.version,
+      changeDescription: promptVersions.changeDescription,
+      changedAt: promptVersions.changedAt,
+      changedByName: users.fullName,
+    })
+      .from(promptVersions)
+      .leftJoin(users, eq(promptVersions.changedBy, users.id))
+      .where(gte(promptVersions.changedAt, thirtyDaysAgo))
+      .orderBy(desc(promptVersions.changedAt))
+      .limit(50);
+
+    // Ownership gaps
+    const ownershipGaps = await db.select({
+      id: promptRegistry.id,
+      name: promptRegistry.name,
+      promptKey: promptRegistry.promptKey,
+      department: promptRegistry.department,
+    })
+      .from(promptRegistry)
+      .where(and(eq(promptRegistry.isActive, true), isNull(promptRegistry.ownerId)))
+      .orderBy(promptRegistry.name)
+      .limit(50);
+
+    // Deprecated prompts
+    const deprecatedPrompts = await db.select({
+      id: promptRegistry.id,
+      name: promptRegistry.name,
+      promptKey: promptRegistry.promptKey,
+    })
+      .from(promptRegistry)
+      .where(eq(promptRegistry.status, 'deprecated'))
+      .limit(20);
+
+    return { pendingDrafts, recentChanges, ownershipGaps, deprecatedPrompts };
+  }
+
+  /**
+   * Get intelligence flow map data showing how prompts connect across the system
+   */
+  async getFlowMap(): Promise<{
+    nodes: Array<{ id: string; type: string; name: string; department: string | null; category: string | null }>;
+    edges: Array<{ source: string; target: string; type: string; label: string }>;
+  }> {
+    // Get all active prompts with their dependencies
+    const allPrompts = await db.select({
+      id: promptRegistry.id,
+      name: promptRegistry.name,
+      promptKey: promptRegistry.promptKey,
+      department: promptRegistry.department,
+      category: promptRegistry.category,
+    })
+      .from(promptRegistry)
+      .where(eq(promptRegistry.isActive, true));
+
+    const allDeps = await db.select()
+      .from(promptDependencyMap);
+
+    const nodes = allPrompts.map(p => ({
+      id: p.id,
+      type: 'prompt',
+      name: p.name,
+      department: p.department,
+      category: p.category,
+    }));
+
+    // Add service/route nodes from dependencies
+    const entityNodes = new Map<string, { id: string; type: string; name: string }>();
+    allDeps.forEach(dep => {
+      const key = `${dep.entityType}_${dep.entityName}`;
+      if (!entityNodes.has(key)) {
+        entityNodes.set(key, {
+          id: key,
+          type: dep.entityType,
+          name: dep.entityName,
+        });
+      }
+    });
+
+    entityNodes.forEach(node => {
+      nodes.push({ ...node, department: null, category: null });
+    });
+
+    const edges = allDeps.map(dep => ({
+      source: dep.direction === 'produces' ? `${dep.entityType}_${dep.entityName}` : dep.promptId,
+      target: dep.direction === 'produces' ? dep.promptId : `${dep.entityType}_${dep.entityName}`,
+      type: dep.direction,
+      label: dep.serviceFunction,
+    }));
+
+    return { nodes, edges };
   }
 }
 

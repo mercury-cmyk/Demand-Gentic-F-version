@@ -277,6 +277,7 @@ CRITICAL RULES:
       raw = await deepAnalyzeJSON(prompt, { temperature: 0.2, maxTokens: 4096 });
     } catch (vertexError: any) {
       console.warn(`${LOG_PREFIX} Vertex AI evaluation failed: ${vertexError.message}`);
+      // Fallback or return partial data? returning null for now to indicate failure to process this step
       return null;
     }
 
@@ -536,6 +537,46 @@ export async function runPostCallAnalysis(
       } catch (outcomeError: any) {
         console.error(`${LOG_PREFIX} Campaign outcome evaluation failed: ${outcomeError.message}`);
       }
+    }
+
+    // 8b. Run Unlicensed Department analyses in parallel (independent of each other)
+    try {
+      const [{ analyzeConversationQualityDepartment }, { analyzeLeadQualityDepartment }] =
+        await Promise.all([
+          import("./ai-conversation-quality-department"),
+          import("./ai-lead-quality-department"),
+        ]);
+
+      const departmentInput = {
+        transcript: result.fullTranscript,
+        callSessionId,
+        campaignId: campaignId || undefined,
+        contactId: contactId || undefined,
+        dialerCallAttemptId: options?.callAttemptId,
+        disposition: disposition || undefined,
+        callDurationSec,
+      };
+
+      const [convQualityResult, leadQualityResult] = await Promise.allSettled([
+        analyzeConversationQualityDepartment(departmentInput),
+        analyzeLeadQualityDepartment(departmentInput),
+      ]);
+
+      if (convQualityResult.status === "fulfilled" && convQualityResult.value.success) {
+        console.log(`${LOG_PREFIX} ✅ Conversation Quality Dept: CQS=${convQualityResult.value.conversationQualityScore}`);
+      } else {
+        const reason = convQualityResult.status === "rejected" ? convQualityResult.reason?.message : "Analysis returned failure";
+        console.warn(`${LOG_PREFIX} ⚠️ Conversation Quality Dept failed: ${reason}`);
+      }
+
+      if (leadQualityResult.status === "fulfilled" && leadQualityResult.value.success) {
+        console.log(`${LOG_PREFIX} ✅ Lead Quality Dept: Score=${leadQualityResult.value.leadQualificationScore}, Intent=${leadQualityResult.value.intentStrength}`);
+      } else {
+        const reason = leadQualityResult.status === "rejected" ? leadQualityResult.reason?.message : "Analysis returned failure";
+        console.warn(`${LOG_PREFIX} ⚠️ Lead Quality Dept failed: ${reason}`);
+      }
+    } catch (deptError: any) {
+      console.error(`${LOG_PREFIX} Unlicensed department analyses failed: ${deptError.message}`);
     }
 
     // 9. Persist full analysis to call session

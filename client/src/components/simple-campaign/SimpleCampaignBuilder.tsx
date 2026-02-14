@@ -189,8 +189,9 @@ export function SimpleCampaignBuilder({
         audienceRefs.lists = [launchData.audienceId];
       } else if (launchData.audienceType === "filters" && launchData.filterGroup) {
         audienceRefs.filterGroup = launchData.filterGroup;
+      } else if (launchData.audienceType === "all") {
+        audienceRefs.allContacts = true;
       }
-      // For "all", audienceRefs stays empty (will select all contacts)
       
       // Build schedule config
       const scheduleJson = launchData.sendType === "scheduled" ? {
