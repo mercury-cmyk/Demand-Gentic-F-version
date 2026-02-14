@@ -5095,6 +5095,106 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // Batch stats for all campaigns (prevents 429 rate limiting from N parallel requests)
+  app.post("/api/campaigns/batch-stats", requireAuth, async (req, res) => {
+    try {
+      const { campaignIds, types } = req.body as { campaignIds: string[]; types: Record<string, { isCall: boolean; isEmail: boolean }> };
+      if (!campaignIds?.length) return res.json({});
+
+      const results: Record<string, any> = {};
+
+      // Process campaigns in parallel (server-side, single request from client)
+      await Promise.all(campaignIds.map(async (campaignId) => {
+        const entry: any = { call: null, email: null };
+        const info = types?.[campaignId] || { isCall: false, isEmail: false };
+
+        try {
+          if (info.isEmail) {
+            const [sentResult] = await db
+              .select({ count: sql<number>`COUNT(*)::int` })
+              .from(campaignQueue)
+              .where(eq(campaignQueue.campaignId, campaignId));
+            const totalSent = sentResult?.count || 0;
+
+            const sendIdSubquery = sql`(SELECT id FROM email_sends WHERE campaign_id = ${campaignId})`;
+            const [opensResult] = await db.execute(sql`
+              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
+              FROM email_opens WHERE message_id IN ${sendIdSubquery}
+            `).then(r => r.rows as any[]);
+            const [clicksResult] = await db.execute(sql`
+              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
+              FROM email_link_clicks WHERE message_id IN ${sendIdSubquery}
+            `).then(r => r.rows as any[]);
+
+            entry.email = {
+              totalRecipients: totalSent,
+              delivered: totalSent,
+              opens: opensResult?.unique || 0,
+              clicks: clicksResult?.unique || 0,
+              unsubscribes: 0,
+              spamComplaints: 0,
+            };
+          }
+
+          if (info.isCall) {
+            const queueStats = await storage.getCampaignQueueStats(campaignId);
+
+            const connectedDispositions = [
+              'connected', 'qualified', 'callback-requested', 'not_interested',
+              'dnc-request', 'meeting_booked', 'interested', 'do_not_call', 'wrong_number'
+            ];
+            const [humanCallStats] = await db
+              .select({
+                callsMade: sql<number>`COUNT(*)::int`,
+                callsConnected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text IN (${sql.join(connectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
+                leadsQualified: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'qualified' THEN 1 END)::int`,
+                dncRequests: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'dnc-request' THEN 1 END)::int`,
+                notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'not_interested' THEN 1 END)::int`,
+                noAnswer: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'no-answer' THEN 1 END)::int`,
+                voicemail: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'voicemail' THEN 1 END)::int`,
+              })
+              .from(callAttempts)
+              .where(eq(callAttempts.campaignId, campaignId));
+
+            const aiConnectedDispositions = ['qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review'];
+            const [aiCallStats] = await db
+              .select({
+                callsMade: sql<number>`COUNT(*)::int`,
+                callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(aiConnectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
+                leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'qualified_lead' THEN 1 END)::int`,
+                dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'do_not_call' THEN 1 END)::int`,
+                notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
+                noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' OR ${callSessions.status} IN ('no_answer', 'failed', 'busy') THEN 1 END)::int`,
+                voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
+              })
+              .from(callSessions)
+              .where(eq(callSessions.campaignId, campaignId));
+
+            entry.call = {
+              contactsInQueue: queueStats.queued,
+              callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
+              callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
+              leadsQualified: (humanCallStats?.leadsQualified || 0) + (aiCallStats?.leadsQualified || 0),
+              dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
+              notInterested: (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0),
+              noAnswer: (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0),
+              voicemail: (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0),
+            };
+          }
+        } catch (err) {
+          console.error(`[BATCH-STATS] Error for campaign ${campaignId}:`, err);
+        }
+
+        results[campaignId] = entry;
+      }));
+
+      res.json(results);
+    } catch (error) {
+      console.error('[BATCH-STATS] Error:', error);
+      res.status(500).json({ message: "Failed to fetch batch stats" });
+    }
+  });
+
   // Get email campaign events (contact-level log)
   app.get("/api/campaigns/:id/email-events", requireAuth, async (req, res) => {
     try {

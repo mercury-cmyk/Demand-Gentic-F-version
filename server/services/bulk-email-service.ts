@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { emailSends, contacts, campaigns, lists, segments } from '@shared/schema';
+import { emailSends, contacts, accounts, campaigns, lists, segments } from '@shared/schema';
 import { eq, inArray, and, isNull, or } from 'drizzle-orm';
 import { emailTrackingService } from '../lib/email-tracking-service';
 import { initializeEmailQueue, type EmailJobData } from '../workers/email-worker';
@@ -105,9 +105,26 @@ export async function queueBulkEmails(options: BulkEmailOptions): Promise<BulkEm
       const unsubscribeUrl = `${process.env.BASE_URL || 'http://localhost:5000'}/unsubscribe/${emailSendRecord.id}`;
       const htmlWithPreheader = injectPreheader(html, preheader);
       
-      const renderedHtml = htmlWithPreheader
+      // Replace merge tags with contact variables before tracking
+      let renderedHtml = htmlWithPreheader
         .replace(/\[UNSUBSCRIBE_LINK\]/g, unsubscribeUrl)
         .replace(/\{\{\s*unsubscribeUrl\s*\}\}/gi, unsubscribeUrl);
+
+      if (recipient.customVariables) {
+        for (const [key, value] of Object.entries(recipient.customVariables)) {
+          const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi');
+          renderedHtml = renderedHtml.replace(pattern, value);
+        }
+      }
+
+      // Also replace subject merge tags
+      let personalizedSubject = subject;
+      if (recipient.customVariables) {
+        for (const [key, value] of Object.entries(recipient.customVariables)) {
+          const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi');
+          personalizedSubject = personalizedSubject.replace(pattern, value);
+        }
+      }
 
       const finalHtml = emailTrackingService.applyTracking(renderedHtml, {
         messageId: emailSendRecord.id,
@@ -123,7 +140,7 @@ export async function queueBulkEmails(options: BulkEmailOptions): Promise<BulkEm
           from,
           fromName,
           replyTo,
-          subject,
+          subject: personalizedSubject,
           html: finalHtml,
           text,
           espAdapter,
@@ -232,8 +249,18 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
 
     for (let i = 0; i < contactIdsArray.length; i += batchSize) {
       const batch = contactIdsArray.slice(i, i + batchSize);
-      const batchContacts = await db.select()
+      const batchContacts = await db.select({
+        id: contacts.id,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        fullName: contacts.fullName,
+        email: contacts.email,
+        jobTitle: contacts.jobTitle,
+        accountId: contacts.accountId,
+        company: accounts.name,
+      })
         .from(contacts)
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
         .where(inArray(contacts.id, batch));
       campaignContacts.push(...batchContacts);
     }
@@ -256,7 +283,14 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
         firstName: contact.firstName || '',
         last_name: contact.lastName || '',
         lastName: contact.lastName || '',
+        full_name: contact.fullName || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+        fullName: contact.fullName || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+        name: contact.firstName || contact.fullName || '',
         company: contact.company || '',
+        company_name: contact.company || '',
+        companyName: contact.company || '',
+        job_title: contact.jobTitle || '',
+        jobTitle: contact.jobTitle || '',
       },
     }));
 

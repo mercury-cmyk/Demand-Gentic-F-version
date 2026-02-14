@@ -13,9 +13,9 @@ export class EmailTrackingService {
   private secret: string;
 
   constructor() {
-    this.trackingBaseUrl = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : 'http://localhost:5000';
+    this.trackingBaseUrl = process.env.APP_BASE_URL
+      || (process.env.REPLIT_DEPLOYMENT === '1' ? 'https://demandgentic.ai' : null)
+      || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5000');
     
     // Use environment secret or generate one (should be set in production)
     this.secret = process.env.EMAIL_TRACKING_SECRET || crypto.randomBytes(32).toString('hex');

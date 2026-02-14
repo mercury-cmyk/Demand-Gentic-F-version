@@ -1,17 +1,21 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth';
 import { db } from '../db';
-import { 
-  campaigns, 
-  emailOpens, 
+import {
+  campaigns,
+  emailOpens,
   emailLinkClicks,
+  emailSends,
   campaignQueue,
-  contacts,
-  accounts
 } from '@shared/schema';
-import { eq, sql, and, desc, gte, count, countDistinct } from 'drizzle-orm';
+import { eq, sql, desc, count, countDistinct, inArray } from 'drizzle-orm';
 
 const router = Router();
+
+// Subquery: all email_send IDs for a given campaign
+function campaignSendIds(campaignId: string) {
+  return db.select({ id: emailSends.id }).from(emailSends).where(eq(emailSends.campaignId, campaignId));
+}
 
 /**
  * Get email campaign statistics
@@ -35,34 +39,34 @@ router.get('/:campaignId/email-stats', requireAuth, async (req, res) => {
       .select({ count: count() })
       .from(campaignQueue)
       .where(eq(campaignQueue.campaignId, campaignId));
-    
+
     const totalSent = sentResult?.count || 0;
 
     // Get delivered count (sent - bounced)
     // For now, assume all sent are delivered unless marked as bounced
-    const delivered = totalSent; // This should be updated with actual delivery tracking
+    const delivered = totalSent;
 
-    // Get unique opens
+    // Get unique opens - join through email_sends to match by campaign
     const [opensResult] = await db
-      .select({ 
+      .select({
         total: count(),
         unique: countDistinct(emailOpens.recipientEmail)
       })
       .from(emailOpens)
-      .where(eq(emailOpens.messageId, campaignId));
-    
+      .where(inArray(emailOpens.messageId, campaignSendIds(campaignId)));
+
     const totalOpens = opensResult?.total || 0;
     const uniqueOpens = opensResult?.unique || 0;
 
-    // Get unique clicks
+    // Get unique clicks - join through email_sends to match by campaign
     const [clicksResult] = await db
-      .select({ 
+      .select({
         total: count(),
         unique: countDistinct(emailLinkClicks.recipientEmail)
       })
       .from(emailLinkClicks)
-      .where(eq(emailLinkClicks.messageId, campaignId));
-    
+      .where(inArray(emailLinkClicks.messageId, campaignSendIds(campaignId)));
+
     const totalClicks = clicksResult?.total || 0;
     const uniqueClicks = clicksResult?.unique || 0;
 
@@ -118,7 +122,7 @@ router.get('/:campaignId/link-stats', requireAuth, async (req, res) => {
   try {
     const { campaignId } = req.params;
 
-    // Get click counts by URL
+    // Get click counts by URL - join through email_sends
     const linkStats = await db
       .select({
         url: emailLinkClicks.linkUrl,
@@ -126,7 +130,7 @@ router.get('/:campaignId/link-stats', requireAuth, async (req, res) => {
         uniqueClicks: countDistinct(emailLinkClicks.recipientEmail),
       })
       .from(emailLinkClicks)
-      .where(eq(emailLinkClicks.messageId, campaignId))
+      .where(inArray(emailLinkClicks.messageId, campaignSendIds(campaignId)))
       .groupBy(emailLinkClicks.linkUrl)
       .orderBy(desc(count()));
 
@@ -155,14 +159,14 @@ router.get('/:campaignId/device-stats', requireAuth, async (req, res) => {
   try {
     const { campaignId } = req.params;
 
-    // Get opens by device type
+    // Get opens by device type - join through email_sends
     const deviceStats = await db
       .select({
         device: emailOpens.deviceType,
         count: count(),
       })
       .from(emailOpens)
-      .where(eq(emailOpens.messageId, campaignId))
+      .where(inArray(emailOpens.messageId, campaignSendIds(campaignId)))
       .groupBy(emailOpens.deviceType);
 
     // Calculate total for percentage
@@ -209,41 +213,41 @@ router.get('/:campaignId/engagement-timeline', requireAuth, async (req, res) => 
 
     // Get opens over time (grouped by hour/day depending on range)
     const groupByInterval = range === '24h' ? 'hour' : 'day';
-    
-    // Get opens by time interval
+
+    // Get opens by time interval - join through email_sends
     const opensTimeline = await db.execute(sql`
-      SELECT 
-        date_trunc(${groupByInterval}, opened_at) as timestamp,
+      SELECT
+        date_trunc(${groupByInterval}, eo.opened_at) as timestamp,
         COUNT(*) as opens
-      FROM email_opens
-      WHERE message_id = ${campaignId}
-        AND opened_at >= ${startDate.toISOString()}
-      GROUP BY date_trunc(${groupByInterval}, opened_at)
+      FROM email_opens eo
+      WHERE eo.message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId})
+        AND eo.opened_at >= ${startDate.toISOString()}
+      GROUP BY date_trunc(${groupByInterval}, eo.opened_at)
       ORDER BY timestamp
     `);
 
-    // Get clicks by time interval
+    // Get clicks by time interval - join through email_sends
     const clicksTimeline = await db.execute(sql`
-      SELECT 
-        date_trunc(${groupByInterval}, clicked_at) as timestamp,
+      SELECT
+        date_trunc(${groupByInterval}, elc.clicked_at) as timestamp,
         COUNT(*) as clicks
-      FROM email_link_clicks
-      WHERE message_id = ${campaignId}
-        AND clicked_at >= ${startDate.toISOString()}
-      GROUP BY date_trunc(${groupByInterval}, clicked_at)
+      FROM email_link_clicks elc
+      WHERE elc.message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId})
+        AND elc.clicked_at >= ${startDate.toISOString()}
+      GROUP BY date_trunc(${groupByInterval}, elc.clicked_at)
       ORDER BY timestamp
     `);
 
     // Merge opens and clicks into timeline
     const timelineMap = new Map<string, { opens: number; clicks: number }>();
-    
+
     for (const row of opensTimeline.rows as any[]) {
       const ts = row.timestamp?.toISOString() || row.timestamp;
       if (ts) {
         timelineMap.set(ts, { opens: Number(row.opens), clicks: 0 });
       }
     }
-    
+
     for (const row of clicksTimeline.rows as any[]) {
       const ts = row.timestamp?.toISOString() || row.timestamp;
       if (ts) {
@@ -286,35 +290,36 @@ router.get('/:campaignId/recipient-activity', requireAuth, async (req, res) => {
     const { limit = '100' } = req.query;
 
     // Get all recipients from campaign queue with their engagement
+    // Join through email_sends to correctly match tracking data
     const recipients = await db.execute(sql`
-      SELECT 
+      SELECT
         cq.contact_id,
         c.first_name,
         c.last_name,
         c.email,
         a.name as company,
-        CASE 
+        CASE
           WHEN elc.id IS NOT NULL THEN 'clicked'
           WHEN eo.id IS NOT NULL THEN 'opened'
           ELSE 'delivered'
         END as status,
         eo.opened_at,
         elc.clicked_at,
-        (SELECT COUNT(*) FROM email_link_clicks WHERE message_id = ${campaignId} AND recipient_email = c.email) as click_count,
+        (SELECT COUNT(*) FROM email_link_clicks WHERE message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId}) AND recipient_email = c.email) as click_count,
         eo.device_type
       FROM campaign_queue cq
       JOIN contacts c ON cq.contact_id = c.id
       LEFT JOIN accounts a ON c.account_id = a.id
       LEFT JOIN LATERAL (
-        SELECT id, opened_at, device_type 
-        FROM email_opens 
-        WHERE message_id = ${campaignId} AND recipient_email = c.email 
+        SELECT id, opened_at, device_type
+        FROM email_opens
+        WHERE message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId}) AND recipient_email = c.email
         ORDER BY opened_at DESC LIMIT 1
       ) eo ON true
       LEFT JOIN LATERAL (
-        SELECT id, clicked_at 
-        FROM email_link_clicks 
-        WHERE message_id = ${campaignId} AND recipient_email = c.email 
+        SELECT id, clicked_at
+        FROM email_link_clicks
+        WHERE message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId}) AND recipient_email = c.email
         ORDER BY clicked_at DESC LIMIT 1
       ) elc ON true
       WHERE cq.campaign_id = ${campaignId}

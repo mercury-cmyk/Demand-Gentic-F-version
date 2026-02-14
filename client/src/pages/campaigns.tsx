@@ -43,28 +43,6 @@ import { VoiceSelectionDialog } from "@/components/campaigns/voice-selection-dia
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 // CampaignCreationWizard removed - now using telemarketing wizard page
 
-type EmailStatsResponse = {
-  totalSent: number;
-  delivered: number;
-  opened: number;
-  uniqueOpens: number;
-  clicked: number;
-  uniqueClicks: number;
-  unsubscribed: number;
-  spamComplaints: number;
-};
-
-type CallStatsResponse = {
-  contactsInQueue: number;
-  callsMade: number;
-  callsConnected: number;
-  leadsQualified: number;
-  dncRequests: number;
-  notInterested: number;
-  noAnswer: number;
-  voicemail: number;
-};
-
 export default function CampaignsPage() {
   const searchString = useSearch();
   const searchParams = new URLSearchParams(searchString);
@@ -116,66 +94,72 @@ export default function CampaignsPage() {
     },
   });
 
+  const phoneCampaignTypesForSnapshot = [
+    'call', 'telemarketing', 'combo', 'sql',
+    'content_syndication', 'appointment_generation', 'high_quality_leads',
+    'live_webinar', 'on_demand_webinar', 'executive_dinner',
+    'leadership_forum', 'conference'
+  ];
+
   const { data: campaignSnapshots = {}, isLoading: snapshotsLoading } = useQuery<Record<string, CampaignPerformanceSnapshotData>>({
-    queryKey: ["/api/campaigns", "performance-snapshots", campaigns.map((campaign: any) => campaign.id).join(",")],
+    queryKey: ["/api/campaigns", "batch-stats", campaigns.map((campaign: any) => campaign.id).join(",")],
     queryFn: async () => {
       const token = getToken();
-      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
 
-      const snapshots = await Promise.all(
-        campaigns.map(async (campaign: any) => {
-          const snapshot: CampaignPerformanceSnapshotData = { email: null, call: null };
-          const isEmail = campaign.type === "email" || campaign.type === "combo";
-          // All phone-based campaign types
-          const phoneCampaignTypesForSnapshot = [
-            'call', 'telemarketing', 'combo', 'sql',
-            'content_syndication', 'appointment_generation', 'high_quality_leads',
-            'live_webinar', 'on_demand_webinar', 'executive_dinner',
-            'leadership_forum', 'conference'
-          ];
-          const isCall = phoneCampaignTypesForSnapshot.includes(campaign.type) || campaign.dialMode === 'ai_agent';
+      // Build type map for each campaign
+      const types: Record<string, { isCall: boolean; isEmail: boolean }> = {};
+      const campaignIds: string[] = [];
+      for (const campaign of campaigns as any[]) {
+        campaignIds.push(campaign.id);
+        types[campaign.id] = {
+          isEmail: campaign.type === "email" || campaign.type === "combo",
+          isCall: phoneCampaignTypesForSnapshot.includes(campaign.type) || campaign.dialMode === 'ai_agent',
+        };
+      }
 
-          if (isEmail) {
-            const response = await fetch(`/api/campaigns/${campaign.id}/email-stats`, { headers });
-            if (response.ok) {
-              const emailStats: EmailStatsResponse = await response.json();
-              snapshot.email = {
-                totalRecipients: emailStats.totalSent || 0,
-                delivered: emailStats.delivered || 0,
-                opens: emailStats.uniqueOpens ?? emailStats.opened ?? 0,
-                clicks: emailStats.uniqueClicks ?? emailStats.clicked ?? 0,
-                unsubscribes: emailStats.unsubscribed || 0,
-                spamComplaints: emailStats.spamComplaints || 0,
-              };
-            }
-          }
+      // Single batch request instead of N parallel requests
+      const response = await fetch('/api/campaigns/batch-stats', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({ campaignIds, types }),
+      });
 
-          if (isCall) {
-            const response = await fetch(`/api/campaigns/${campaign.id}/call-stats`, { headers });
-            if (response.ok) {
-              const callStats: CallStatsResponse = await response.json();
-              snapshot.call = {
-                contactsInQueue: callStats.contactsInQueue || 0,
-                callsMade: callStats.callsMade || 0,
-                callsConnected: callStats.callsConnected || 0,
-                leadsQualified: callStats.leadsQualified || 0,
-                dncRequests: callStats.dncRequests || 0,
-                notInterested: callStats.notInterested || 0,
-                noAnswer: callStats.noAnswer || 0,
-                voicemail: callStats.voicemail || 0,
-              };
-            }
-          }
+      if (!response.ok) throw new Error('Failed to fetch batch stats');
+      const batchData = await response.json();
 
-          return [campaign.id, snapshot] as const;
-        })
-      );
-
-      return Object.fromEntries(snapshots);
+      // Transform batch response into snapshot format
+      const snapshots: Record<string, CampaignPerformanceSnapshotData> = {};
+      for (const id of campaignIds) {
+        const data = batchData[id] || { call: null, email: null };
+        snapshots[id] = {
+          email: data.email ? {
+            totalRecipients: data.email.totalRecipients || 0,
+            delivered: data.email.delivered || 0,
+            opens: data.email.opens || 0,
+            clicks: data.email.clicks || 0,
+            unsubscribes: data.email.unsubscribes || 0,
+            spamComplaints: data.email.spamComplaints || 0,
+          } : null,
+          call: data.call ? {
+            contactsInQueue: data.call.contactsInQueue || 0,
+            callsMade: data.call.callsMade || 0,
+            callsConnected: data.call.callsConnected || 0,
+            leadsQualified: data.call.leadsQualified || 0,
+            dncRequests: data.call.dncRequests || 0,
+            notInterested: data.call.notInterested || 0,
+            noAnswer: data.call.noAnswer || 0,
+            voicemail: data.call.voicemail || 0,
+          } : null,
+        };
+      }
+      return snapshots;
     },
     enabled: campaigns.length > 0,
-    refetchInterval: 10000, // Refresh every 10 seconds (reduced from 2s to prevent server overload)
-    staleTime: 5000,
+    refetchInterval: 15000,
+    staleTime: 10000,
   });
 
   // Fetch queue stats for phone campaigns (all types that support phone/AI calling)
