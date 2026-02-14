@@ -38,6 +38,7 @@ import {
   ArrowLeft, ArrowRight, Eye, Tag, Layers, AlertTriangle, Crosshair, MessageSquareText, List, FileBarChart2, ShieldCheck,
   MousePointerClick, ClipboardCheck, Handshake
 } from 'lucide-react';
+import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram';
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
   QualifiedLeadsTable,
@@ -2117,6 +2118,9 @@ export default function ClientPortalDashboard() {
 
 
 
+            {/* How Our AI Engages Your Prospects */}
+            <IntelligenceFlowDiagram variant="full" className="mb-2" />
+
             {/* Recent Activity */}
             <div className="grid lg:grid-cols-2 gap-6">
               <Card className="rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm bg-white/90 dark:bg-slate-900/70">
@@ -3631,6 +3635,9 @@ export default function ClientPortalDashboard() {
                 </p>
               </div>
             </div>
+
+            {/* 3-Pillar Intelligence Visualization */}
+            <IntelligenceFlowDiagram variant="full" className="mb-6" />
 
             <Card className="border-dashed border-2">
               <CardContent className="flex flex-col items-center justify-center p-12 text-center">

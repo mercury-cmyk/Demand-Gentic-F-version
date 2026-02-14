@@ -13,14 +13,15 @@
  * Route: /unified-intelligence
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, Brain, MessageSquare, BarChart3, Target } from 'lucide-react';
+import { RefreshCw, Brain, MessageSquare, BarChart3, Target, Headphones, FileText, Trophy } from 'lucide-react';
+import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -38,6 +39,11 @@ import {
   buildUnifiedQueryParams,
 } from '@/components/unified-intelligence';
 import { DispositionIntelligenceView } from '@/components/disposition-intelligence';
+
+const CallRecordingsPage = lazy(() => import('@/pages/call-recordings'));
+const ReportsPage = lazy(() => import('@/pages/reports'));
+const ShowcaseCallsPage = lazy(() => import('@/pages/showcase-calls'));
+const DispositionReanalysisPage = lazy(() => import('@/pages/disposition-reanalysis'));
 
 interface Campaign {
   id: string;
@@ -191,7 +197,7 @@ function normalizeSpeaker(role: string): 'agent' | 'prospect' | 'system' {
 export default function UnifiedIntelligencePage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [pageTab, setPageTab] = useState<'conversations' | 'disposition-intelligence'>('conversations');
+  const [pageTab, setPageTab] = useState<'conversations' | 'disposition-intelligence' | 'call-recordings' | 'reports' | 'showcase-calls' | 'disposition-reanalysis'>('conversations');
   const [filters, setFilters] = useState<UnifiedIntelligenceFilters>(defaultUnifiedFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
@@ -379,7 +385,7 @@ export default function UnifiedIntelligencePage() {
               Unified Intelligence
             </h1>
             <p className="text-sm text-muted-foreground">
-              Complete conversation analysis: recordings, transcripts, and quality insights
+              Complete conversation analysis, recordings, reports, and quality insights
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -409,14 +415,30 @@ export default function UnifiedIntelligencePage() {
         {/* Page-Level Tabs */}
         <div className="px-4 pb-2">
           <Tabs value={pageTab} onValueChange={(v) => setPageTab(v as any)}>
-            <TabsList className="grid w-full max-w-md grid-cols-2">
-              <TabsTrigger value="conversations" className="gap-1.5">
+            <TabsList className="w-full max-w-4xl flex">
+              <TabsTrigger value="conversations" className="gap-1.5 flex-1">
                 <MessageSquare className="h-4 w-4" />
                 Conversations
               </TabsTrigger>
-              <TabsTrigger value="disposition-intelligence" className="gap-1.5">
+              <TabsTrigger value="disposition-intelligence" className="gap-1.5 flex-1">
                 <BarChart3 className="h-4 w-4" />
                 Disposition Intelligence
+              </TabsTrigger>
+              <TabsTrigger value="call-recordings" className="gap-1.5 flex-1">
+                <Headphones className="h-4 w-4" />
+                Call Recordings
+              </TabsTrigger>
+              <TabsTrigger value="reports" className="gap-1.5 flex-1">
+                <FileText className="h-4 w-4" />
+                Reports
+              </TabsTrigger>
+              <TabsTrigger value="showcase-calls" className="gap-1.5 flex-1">
+                <Trophy className="h-4 w-4" />
+                Showcase Calls
+              </TabsTrigger>
+              <TabsTrigger value="disposition-reanalysis" className="gap-1.5 flex-1">
+                <RefreshCw className="h-4 w-4" />
+                Reanalysis
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -427,6 +449,30 @@ export default function UnifiedIntelligencePage() {
       {pageTab === 'disposition-intelligence' ? (
         <div className="flex-1 overflow-hidden">
           <DispositionIntelligenceView campaigns={campaigns} />
+        </div>
+      ) : pageTab === 'call-recordings' ? (
+        <div className="flex-1 overflow-auto">
+          <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
+            <CallRecordingsPage />
+          </Suspense>
+        </div>
+      ) : pageTab === 'reports' ? (
+        <div className="flex-1 overflow-auto p-6">
+          <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
+            <ReportsPage />
+          </Suspense>
+        </div>
+      ) : pageTab === 'showcase-calls' ? (
+        <div className="flex-1 overflow-hidden">
+          <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
+            <ShowcaseCallsPage />
+          </Suspense>
+        </div>
+      ) : pageTab === 'disposition-reanalysis' ? (
+        <div className="flex-1 overflow-auto">
+          <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
+            <DispositionReanalysisPage />
+          </Suspense>
         </div>
       ) : (
       <div className="flex-1 overflow-hidden p-4 pt-3">
@@ -459,6 +505,15 @@ export default function UnifiedIntelligencePage() {
           {/* Right Panel - Detail */}
           <ResizablePanel defaultSize={60} minSize={40}>
             <div className="h-full overflow-auto p-4">
+              {selectedConversation && (
+                <IntelligenceFlowDiagram
+                  accountId={selectedRaw?.accountId || null}
+                  campaignId={selectedConversation.campaign?.id || null}
+                  contactId={selectedConversation.contact?.id || null}
+                  variant="compact"
+                  className="mb-4"
+                />
+              )}
               <UnifiedDetailPanel
                 conversation={selectedConversation}
                 isLoading={conversationsLoading && !!selectedId}

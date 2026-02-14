@@ -446,9 +446,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                 <div className="flex-1 text-left">
                   <span className="block flex items-center gap-2">
                     {agenticOperator.name}
-                    <Badge className="h-4 px-1 text-[9px] bg-red-500 hover:bg-red-600 text-white border-0 shadow-sm animate-pulse">
-                      HOT
-                    </Badge>
+                    <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
                   </span>
                   <span className="text-xs font-normal text-muted-foreground">{agenticOperator.description}</span>
                 </div>

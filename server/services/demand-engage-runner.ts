@@ -305,9 +305,44 @@ export async function generatePersonalizedEmail(
   // Step 3: Get sequence strategy
   const sequenceStrategy = getSequenceStrategy(sequenceType, request.sequencePosition || 1);
 
-  const contentEmailContext = request.campaignId
+  let contentEmailContext = request.campaignId
     ? await resolveCampaignContentEmailContext(request.campaignId, accountMessagingBriefPayload)
     : null;
+
+  // Fallback: if no campaign content link, try dynamic product intelligence matching
+  if (!contentEmailContext && request.campaignId && accountId) {
+    try {
+      const { resolveProductForAccount, formatProductContextForEmail } =
+        await import('./product-intelligence');
+      const productMatch = await resolveProductForAccount({
+        contactId,
+        accountId,
+        campaignId: request.campaignId,
+      });
+      if (productMatch.matched) {
+        const emailContext = formatProductContextForEmail(productMatch);
+        contentEmailContext = {
+          contentContext: {
+            asset_type: emailContext.asset_type,
+            asset_title: emailContext.asset_title,
+            asset_format: emailContext.asset_format,
+            primary_theme: emailContext.primary_theme,
+            who_it_is_for: emailContext.who_it_is_for,
+            what_problem_it_helps_explore: emailContext.what_problem_it_helps_explore,
+            what_it_does_not_claim: DEFAULT_CONTENT_DO_NOT_CLAIM,
+          },
+          assetMetadata: {
+            title: emailContext.asset_title,
+            format: emailContext.asset_format,
+            cta_url: emailContext.content_url,
+          },
+        };
+        console.log(`[Demand Engage] 🎯 Product matched for email: "${productMatch.eventTitle}"`);
+      }
+    } catch (piErr) {
+      console.warn('[Demand Engage] Product intelligence fallback failed:', piErr);
+    }
+  }
 
   if (contentEmailContext) {
     const contentEmail = buildContentPromotionEmail({

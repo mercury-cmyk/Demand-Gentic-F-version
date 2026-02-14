@@ -79,6 +79,7 @@ import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
 import problemIntelligenceRouter from './routes/problem-intelligence-routes';
+import productIntelligenceRouter from './routes/product-intelligence-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
 import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
@@ -14561,7 +14562,8 @@ Provide JSON response with:
   // ==================== PROBLEM INTELLIGENCE & ORGANIZATIONS ====================
 
   app.use("/api", problemIntelligenceRouter);
-  
+  app.use("/api", productIntelligenceRouter);
+
   // ==================== ORGANIZATION INTELLIGENCE INJECTION MODEL ====================
   // Voice Agent OI Modes: use_existing | fresh_research | none
   app.use("/api/org-intelligence-injection", orgIntelligenceInjectionRouter);

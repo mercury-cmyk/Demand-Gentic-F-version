@@ -472,6 +472,8 @@ When explaining what you do, say something like:
 These are the main points to cover during the call:
 ${talkingPointsStr}
 
+` : ''}${(context as any).productIntelligence ? `${(context as any).productIntelligence}
+
 ` : ''}## CRITICAL: YOUR FIRST RESPONSE
 
 When you hear the first human voice, you MUST determine if they have ALREADY identified themselves:
@@ -1254,7 +1256,28 @@ Instructions:
                   console.warn('[Gemini Live] Failed to load campaign data:', dbErr);
                 }
               }
-              
+
+              // === PRODUCT INTELLIGENCE: Dynamic event matching for this prospect ===
+              if (callContext.campaignId) {
+                try {
+                  const { resolveProductForAccount, formatProductContextForPrompt } =
+                    await import('./product-intelligence');
+                  const productMatch = await resolveProductForAccount({
+                    contactId: (callContext as any).contactId,
+                    accountId: (callContext as any).accountId,
+                    campaignId: callContext.campaignId,
+                  });
+                  if (productMatch.matched) {
+                    (callContext as any).productIntelligence = formatProductContextForPrompt(productMatch);
+                    console.log(`[Gemini Live] 🎯 Product matched: "${productMatch.eventTitle}" (community: ${productMatch.community}, confidence: ${productMatch.matchConfidence})`);
+                  } else {
+                    console.log(`[Gemini Live] ℹ️ No product match: ${productMatch.reason}`);
+                  }
+                } catch (piErr) {
+                  console.warn('[Gemini Live] Product intelligence resolution failed:', piErr);
+                }
+              }
+
               // Build the final system prompt with DemandGentic identity and substitutions
               const identityPreamble = buildDemandGenticIdentityPreamble(callContext);
               let basePrompt = config.system_prompt || systemPrompt;

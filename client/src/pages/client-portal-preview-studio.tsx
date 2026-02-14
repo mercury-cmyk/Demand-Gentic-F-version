@@ -18,6 +18,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
 import {
   Phone,
@@ -50,6 +59,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Target,
+  Send,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -518,6 +528,27 @@ export default function ClientPortalPreviewStudioPage() {
     }
   }, [selectedCampaignId, selectedAccountId, selectedContactId, emailType, toast]);
 
+  const sendTestEmailMutation = useMutation({
+    mutationFn: async ({ to, subject, html }: { to: string; subject: string; html: string }) => {
+      const res = await fetch('/api/client-portal/agentic/emails/send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ to, subject, html }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed' }));
+        throw new Error(err.error || 'Failed to send test email');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Email Sent', description: 'Test email successfully sent.' });
+    },
+    onError: (error: Error) => {
+      toast({ variant: 'destructive', title: 'Send Failed', description: error.message });
+    },
+  });
+
   // ── Phone Test Call: Start ──
   const startPhoneTestMutation = useMutation({
     mutationFn: async () => {
@@ -970,6 +1001,14 @@ export default function ClientPortalPreviewStudioPage() {
                 onGenerateEmail={handleGenerateEmail}
                 selectedAccount={selectedAccount}
                 selectedContact={selectedContact}
+                onSendTest={async (to) => {
+                  if (!emailHtml) return;
+                  await sendTestEmailMutation.mutateAsync({
+                    to,
+                    subject: emailSubject || 'Test Email',
+                    html: emailHtml
+                  });
+                }}
               />
             )}
           </div>
@@ -1316,6 +1355,7 @@ interface EmailPreviewSectionProps {
   emailSubject: string;
   emailGenerating: boolean;
   onGenerateEmail: () => void;
+  onSendTest?: (to: string) => Promise<void>;
   selectedAccount: Account | undefined;
   selectedContact: Contact | undefined;
 }
@@ -1328,10 +1368,21 @@ function EmailPreviewSection({
   emailSubject,
   emailGenerating,
   onGenerateEmail,
+  onSendTest,
   selectedAccount,
   selectedContact,
 }: EmailPreviewSectionProps) {
   const [copied, setCopied] = useState(false);
+  const [testEmailOpen, setTestEmailOpen] = useState(false);
+  const [testEmailTo, setTestEmailTo] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
+
+  // Initialize test email with contact email if available
+  useEffect(() => {
+    if (selectedContact?.email) {
+      setTestEmailTo(selectedContact.email);
+    }
+  }, [selectedContact, testEmailOpen]);
 
   const handleCopyHtml = useCallback(() => {
     if (!emailHtml) return;
@@ -1339,6 +1390,19 @@ function EmailPreviewSection({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [emailHtml]);
+
+  const handleSendTest = async () => {
+    if (!onSendTest || !testEmailTo) return;
+    setSendingTest(true);
+    try {
+      await onSendTest(testEmailTo);
+      setTestEmailOpen(false);
+    } catch (error) {
+      // Error handling is done in parent
+    } finally {
+      setSendingTest(false);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -1386,15 +1450,55 @@ function EmailPreviewSection({
 
             <div className="ml-auto flex items-center gap-2">
               {emailHtml && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleCopyHtml}
-                  className="h-8 text-xs border-white/10 text-white/60 hover:text-white"
-                >
-                  {copied ? <Check className="h-3 w-3 mr-1.5 text-green-400" /> : <Copy className="h-3 w-3 mr-1.5" />}
-                  {copied ? 'Copied' : 'Copy HTML'}
-                </Button>
+                <>
+                  <Dialog open={testEmailOpen} onOpenChange={setTestEmailOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs border-white/10 text-white/60 hover:text-white"
+                      >
+                        <Send className="h-3 w-3 mr-1.5" />
+                        Send Test
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Send Test Email</DialogTitle>
+                        <DialogDescription>
+                          Send this preview to yourself or a colleague.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label>Recipient Email</Label>
+                          <Input
+                            placeholder="name@example.com"
+                            value={testEmailTo}
+                            onChange={(e) => setTestEmailTo(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setTestEmailOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSendTest} disabled={!testEmailTo || sendingTest}>
+                          {sendingTest && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Send Email
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCopyHtml}
+                    className="h-8 text-xs border-white/10 text-white/60 hover:text-white"
+                  >
+                    {copied ? <Check className="h-3 w-3 mr-1.5 text-green-400" /> : <Copy className="h-3 w-3 mr-1.5" />}
+                    {copied ? 'Copied' : 'Copy HTML'}
+                  </Button>
+                </>
               )}
               <Button
                 size="sm"

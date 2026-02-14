@@ -118,12 +118,32 @@ export async function generateEmailContent(
     templateType?: string;
     accountId?: string;
     campaignId?: string;
+    // Enhanced Context options
+    organizationContext?: any;
+    contactContext?: any;
+    messagingBrief?: any;
   } = {}
 ): Promise<GeneratedEmailContent> {
   const accountContextSection = await resolveAccountContext(
     options.accountId,
     options.campaignId || null
   );
+
+  // Build enhanced context string (similar to client email service)
+  let enhancedContext = '';
+  
+  if (options.organizationContext) {
+    enhancedContext += `\nORGANIZATION INTELLIGENCE:\n${typeof options.organizationContext === 'string' ? options.organizationContext : JSON.stringify(options.organizationContext, null, 2)}\n`;
+  }
+
+  if (options.messagingBrief) {
+    enhancedContext += `\nMESSAGING BRIEF:\n${typeof options.messagingBrief === 'string' ? options.messagingBrief : JSON.stringify(options.messagingBrief, null, 2)}\n`;
+  }
+
+  if (options.contactContext) {
+    enhancedContext += `\nCONTACT CONTEXT:\n${typeof options.contactContext === 'string' ? options.contactContext : JSON.stringify(options.contactContext, null, 2)}\n`;
+  }
+
   const systemPrompt = `You are an expert B2B demand generation strategist and copywriter.
 Your task is to generate email content that is:
 - Problem-led: Start with a real, account-relevant challenge or friction point.
@@ -144,6 +164,7 @@ You will generate content for a structured email template. Keep each section app
 - Closing Line: 1 sentence, professional, thoughtful sign-off
 
 ${accountContextSection ? `${accountContextSection}\n` : ''}
+${enhancedContext ? `${enhancedContext}\n` : ''}
 
 Respond ONLY with valid JSON.`;
 
