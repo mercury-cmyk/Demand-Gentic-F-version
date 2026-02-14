@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -289,6 +289,132 @@ function ConversationCard({
   );
 }
 
+function RecordingPlayer({
+  conversation,
+  transcribeMutation,
+  reanalyzeMutation,
+}: {
+  conversation: ConversationRecord;
+  transcribeMutation: any;
+  reanalyzeMutation: any;
+}) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [loadingUrl, setLoadingUrl] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAudioUrl(null);
+    setAudioError(null);
+    setLoadingUrl(true);
+
+    // Try the dedicated recording URL endpoint first (resolves GCS presigned URL or Telnyx)
+    apiRequest('GET', `/api/qa/recording-url/${conversation.id}`)
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return;
+        if (data.url) {
+          setAudioUrl(data.url);
+          setLoadingUrl(false);
+        } else {
+          throw new Error('No URL in response');
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Fallback: use the recordingUrl already resolved by the conversations endpoint
+        if (conversation.recordingUrl) {
+          setAudioUrl(conversation.recordingUrl);
+          setLoadingUrl(false);
+        } else {
+          setAudioError('No recording found for this call');
+          setLoadingUrl(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [conversation.id, conversation.recordingUrl]);
+
+  const showTranscribe = !conversation.isTestCall && (
+    !conversation.transcript ||
+    (conversation.transcript.length < 50 && (!conversation.transcriptTurns || conversation.transcriptTurns.length === 0))
+  );
+
+  const showReanalyze = !conversation.isTestCall &&
+    (conversation.transcript && conversation.transcript.length >= 50) &&
+    (!conversation.analysis?.overallScore || conversation.analysis.overallScore === 0);
+
+  return (
+    <div className="bg-muted/50 p-3 rounded-lg">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-sm font-medium flex items-center gap-2">
+          <Phone className="h-4 w-4" />
+          Call Recording
+          {conversation.recordingS3Key && (
+            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">GCS Stored</Badge>
+          )}
+        </h4>
+        <div className="flex items-center gap-2">
+          {showTranscribe && (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => transcribeMutation.mutate(conversation.id)}
+              disabled={transcribeMutation.isPending}
+            >
+              {transcribeMutation.isPending ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <MessageSquare className="h-3 w-3 mr-1" />
+              )}
+              {transcribeMutation.isPending ? 'Transcribing...' : 'Transcribe & Analyze'}
+            </Button>
+          )}
+          {showReanalyze && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => reanalyzeMutation.mutate(conversation.id)}
+              disabled={reanalyzeMutation.isPending}
+            >
+              {reanalyzeMutation.isPending ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <BarChart3 className="h-3 w-3 mr-1" />
+              )}
+              {reanalyzeMutation.isPending ? 'Analyzing...' : 'Analyze Quality'}
+            </Button>
+          )}
+        </div>
+      </div>
+      {loadingUrl ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground p-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading recording...
+        </div>
+      ) : audioError ? (
+        <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted rounded">
+          <AlertTriangle className="h-4 w-4" />
+          <span>{audioError}</span>
+        </div>
+      ) : audioUrl ? (
+        <audio
+          key={conversation.id}
+          controls
+          className="w-full"
+          src={audioUrl}
+          onError={() => {
+            setAudioUrl(null);
+            setAudioError('Recording playback failed - audio file may be corrupted or expired');
+          }}
+        >
+          Your browser does not support the audio element.
+        </audio>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ConversationQualityPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
@@ -367,10 +493,10 @@ export default function ConversationQualityPage() {
     (!c.analysis?.overallScore || c.analysis.overallScore === 0)
   ).length;
 
-  // Transcribe & analyze a single call
+  // Transcribe & analyze a single call (longer timeout for Google STT + AI analysis)
   const transcribeMutation = useMutation({
     mutationFn: async (callSessionId: string) => {
-      const response = await apiRequest('POST', `/api/qa/transcribe/${callSessionId}`, { analyze: true });
+      const response = await apiRequest('POST', `/api/qa/transcribe/${callSessionId}`, { analyze: true }, { timeout: 120000 });
       return response.json();
     },
     onSuccess: (data: any) => {
@@ -394,7 +520,7 @@ export default function ConversationQualityPage() {
   // Re-analyze a call that already has a transcript
   const reanalyzeMutation = useMutation({
     mutationFn: async (callSessionId: string) => {
-      const response = await apiRequest('POST', `/api/qa/transcribe/${callSessionId}`, { analyze: true });
+      const response = await apiRequest('POST', `/api/qa/transcribe/${callSessionId}`, { analyze: true }, { timeout: 120000 });
       return response.json();
     },
     onSuccess: (data: any) => {
@@ -882,77 +1008,13 @@ export default function ConversationQualityPage() {
                     </div>
                   )}
 
-                  {/* Recording Playback - uses stream endpoint for reliable GCS playback */}
+                  {/* Recording Playback - fetches GCS/Telnyx URL via dedicated endpoint */}
                   {(selectedConversation.hasRecording || selectedConversation.recordingUrl || selectedConversation.recordingS3Key || selectedConversation.telnyxRecordingId || selectedConversation.source === 'call_session') && (
-                    <div className="bg-muted/50 p-3 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-medium flex items-center gap-2">
-                          <Phone className="h-4 w-4" />
-                          Call Recording
-                          {selectedConversation.recordingS3Key && (
-                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">GCS Stored</Badge>
-                          )}
-                        </h4>
-                        <div className="flex items-center gap-2">
-                          {/* Transcribe button: show if no transcript or very short */}
-                          {!selectedConversation.isTestCall && (
-                            !selectedConversation.transcript ||
-                            (selectedConversation.transcript.length < 50 && (!selectedConversation.transcriptTurns || selectedConversation.transcriptTurns.length === 0))
-                          ) && (
-                            <Button
-                              size="sm"
-                              variant="default"
-                              onClick={() => transcribeMutation.mutate(selectedConversation.id)}
-                              disabled={transcribeMutation.isPending}
-                            >
-                              {transcribeMutation.isPending ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                              ) : (
-                                <MessageSquare className="h-3 w-3 mr-1" />
-                              )}
-                              {transcribeMutation.isPending ? 'Transcribing...' : 'Transcribe & Analyze'}
-                            </Button>
-                          )}
-                          {/* Re-analyze button: show if has transcript but no analysis */}
-                          {!selectedConversation.isTestCall &&
-                            (selectedConversation.transcript && selectedConversation.transcript.length >= 50) &&
-                            (!selectedConversation.analysis?.overallScore || selectedConversation.analysis.overallScore === 0) && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => reanalyzeMutation.mutate(selectedConversation.id)}
-                              disabled={reanalyzeMutation.isPending}
-                            >
-                              {reanalyzeMutation.isPending ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                              ) : (
-                                <BarChart3 className="h-3 w-3 mr-1" />
-                              )}
-                              {reanalyzeMutation.isPending ? 'Analyzing...' : 'Analyze Quality'}
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                      <audio
-                        key={selectedConversation.id}
-                        controls
-                        className="w-full"
-                        src={`/api/recordings/${selectedConversation.id}/stream`}
-                        onError={(e) => {
-                          const target = e.target as HTMLAudioElement;
-                          target.style.display = 'none';
-                          const parent = target.parentElement;
-                          if (parent && !parent.querySelector('.audio-error')) {
-                            const errorDiv = document.createElement('div');
-                            errorDiv.className = 'audio-error text-sm text-destructive flex items-center gap-2 p-2 bg-destructive/10 rounded';
-                            errorDiv.innerHTML = '<span>Recording unavailable - may have expired or failed to upload</span>';
-                            parent.appendChild(errorDiv);
-                          }
-                        }}
-                      >
-                        Your browser does not support the audio element.
-                      </audio>
-                    </div>
+                    <RecordingPlayer
+                      conversation={selectedConversation}
+                      transcribeMutation={transcribeMutation}
+                      reanalyzeMutation={reanalyzeMutation}
+                    />
                   )}
 
                   {/* Transcript */}

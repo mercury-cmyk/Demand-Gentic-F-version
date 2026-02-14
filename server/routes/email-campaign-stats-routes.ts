@@ -6,9 +6,9 @@ import {
   emailOpens,
   emailLinkClicks,
   emailSends,
-  campaignQueue,
+  emailEvents,
 } from '@shared/schema';
-import { eq, sql, desc, count, countDistinct, inArray } from 'drizzle-orm';
+import { eq, sql, desc, count, countDistinct, inArray, and } from 'drizzle-orm';
 
 const router = Router();
 
@@ -34,17 +34,37 @@ router.get('/:campaignId/email-stats', requireAuth, async (req, res) => {
       return res.status(404).json({ message: 'Campaign not found' });
     }
 
-    // Get total sent count from campaign queue
+    // Get total sent count from emailSends table (actual email delivery records)
     const [sentResult] = await db
       .select({ count: count() })
-      .from(campaignQueue)
-      .where(eq(campaignQueue.campaignId, campaignId));
+      .from(emailSends)
+      .where(eq(emailSends.campaignId, campaignId));
 
     const totalSent = sentResult?.count || 0;
 
-    // Get delivered count (sent - bounced)
-    // For now, assume all sent are delivered unless marked as bounced
-    const delivered = totalSent;
+    // Get delivered count (status = 'sent' means successfully delivered)
+    const [deliveredResult] = await db
+      .select({ count: count() })
+      .from(emailSends)
+      .where(and(eq(emailSends.campaignId, campaignId), eq(emailSends.status, 'sent')));
+
+    const delivered = deliveredResult?.count || 0;
+
+    // Get bounced count (status = 'bounced')
+    const [bouncedResult] = await db
+      .select({ count: count() })
+      .from(emailSends)
+      .where(and(eq(emailSends.campaignId, campaignId), eq(emailSends.status, 'bounced')));
+
+    const bounced = bouncedResult?.count || 0;
+
+    // Get failed count (status = 'failed')
+    const [failedResult] = await db
+      .select({ count: count() })
+      .from(emailSends)
+      .where(and(eq(emailSends.campaignId, campaignId), eq(emailSends.status, 'failed')));
+
+    const failed = failedResult?.count || 0;
 
     // Get unique opens - join through email_sends to match by campaign
     const [opensResult] = await db
@@ -76,14 +96,26 @@ router.get('/:campaignId/email-stats', requireAuth, async (req, res) => {
     const clickRate = delivered > 0 ? uniqueClicks / delivered : 0;
     const clickToOpenRate = uniqueOpens > 0 ? uniqueClicks / uniqueOpens : 0;
 
-    // TODO: Implement bounce and unsubscribe tracking
-    const bounced = 0;
-    const hardBounces = 0;
+    // Bounce and failure stats from emailEvents (populated by Mailgun webhooks)
+    const hardBounces = bounced;
     const softBounces = 0;
-    const unsubscribed = 0;
-    const spamComplaints = 0;
-    const bounceRate = 0;
-    const unsubscribeRate = 0;
+
+    // Unsubscribe count from emailEvents for this campaign
+    const [unsubResult] = await db
+      .select({ count: count() })
+      .from(emailEvents)
+      .where(and(eq(emailEvents.campaignId, campaignId), eq(emailEvents.type, 'unsubscribed')));
+    const unsubscribed = unsubResult?.count || 0;
+
+    // Spam complaint count from emailEvents for this campaign
+    const [spamResult] = await db
+      .select({ count: count() })
+      .from(emailEvents)
+      .where(and(eq(emailEvents.campaignId, campaignId), eq(emailEvents.type, 'complained')));
+    const spamComplaints = spamResult?.count || 0;
+
+    const bounceRate = totalSent > 0 ? bounced / totalSent : 0;
+    const unsubscribeRate = delivered > 0 ? unsubscribed / delivered : 0;
 
     res.json({
       campaignId,
@@ -289,11 +321,10 @@ router.get('/:campaignId/recipient-activity', requireAuth, async (req, res) => {
     const { campaignId } = req.params;
     const { limit = '100' } = req.query;
 
-    // Get all recipients from campaign queue with their engagement
-    // Join through email_sends to correctly match tracking data
+    // Get all recipients from emailSends with their engagement
     const recipients = await db.execute(sql`
       SELECT
-        cq.contact_id,
+        es.contact_id,
         c.first_name,
         c.last_name,
         c.email,
@@ -301,29 +332,32 @@ router.get('/:campaignId/recipient-activity', requireAuth, async (req, res) => {
         CASE
           WHEN elc.id IS NOT NULL THEN 'clicked'
           WHEN eo.id IS NOT NULL THEN 'opened'
-          ELSE 'delivered'
+          WHEN es.status = 'bounced' THEN 'bounced'
+          WHEN es.status = 'failed' THEN 'bounced'
+          WHEN es.status = 'sent' THEN 'delivered'
+          ELSE 'pending'
         END as status,
         eo.opened_at,
         elc.clicked_at,
-        (SELECT COUNT(*) FROM email_link_clicks WHERE message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId}) AND recipient_email = c.email) as click_count,
+        (SELECT COUNT(*) FROM email_link_clicks WHERE message_id = es.id AND recipient_email = c.email) as click_count,
         eo.device_type
-      FROM campaign_queue cq
-      JOIN contacts c ON cq.contact_id = c.id
+      FROM email_sends es
+      JOIN contacts c ON es.contact_id = c.id
       LEFT JOIN accounts a ON c.account_id = a.id
       LEFT JOIN LATERAL (
         SELECT id, opened_at, device_type
         FROM email_opens
-        WHERE message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId}) AND recipient_email = c.email
+        WHERE message_id = es.id AND recipient_email = c.email
         ORDER BY opened_at DESC LIMIT 1
       ) eo ON true
       LEFT JOIN LATERAL (
         SELECT id, clicked_at
         FROM email_link_clicks
-        WHERE message_id IN (SELECT id FROM email_sends WHERE campaign_id = ${campaignId}) AND recipient_email = c.email
+        WHERE message_id = es.id AND recipient_email = c.email
         ORDER BY clicked_at DESC LIMIT 1
       ) elc ON true
-      WHERE cq.campaign_id = ${campaignId}
-      ORDER BY COALESCE(elc.clicked_at, eo.opened_at, cq.created_at) DESC
+      WHERE es.campaign_id = ${campaignId}
+      ORDER BY COALESCE(elc.clicked_at, eo.opened_at, es.sent_at, es.created_at) DESC
       LIMIT ${parseInt(limit as string)}
     `);
 

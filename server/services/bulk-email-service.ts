@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { emailSends, contacts, accounts, campaigns, lists, segments } from '@shared/schema';
+import { emailSends, contacts, accounts, campaigns, lists, segments, senderProfiles } from '@shared/schema';
 import { eq, inArray, and, isNull, or } from 'drizzle-orm';
 import { emailTrackingService } from '../lib/email-tracking-service';
 import { initializeEmailQueue, type EmailJobData } from '../workers/email-worker';
@@ -242,6 +242,14 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
     }
   }
 
+  // Resolve "All Contacts" audience
+  if (audienceRefs?.allContacts === true) {
+    console.log(`[sendCampaignEmails] Resolving ALL contacts for campaign ${campaignId}`);
+    const allContacts = await db.select({ id: contacts.id }).from(contacts);
+    allContacts.forEach(c => uniqueContactIds.add(c.id));
+    console.log(`[sendCampaignEmails] All contacts resolved: ${allContacts.length}`);
+  }
+
   // Convert contact IDs to full contact objects (with batching)
   if (uniqueContactIds.size > 0) {
     const contactIdsArray = Array.from(uniqueContactIds);
@@ -294,13 +302,48 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
       },
     }));
 
+  // Resolve sender profile for proper from/replyTo
+  let fromEmail = process.env.DEFAULT_FROM_EMAIL || 'noreply@example.com';
+  let fromName: string | undefined;
+  let replyTo: string | undefined;
+  let espAdapter = 'mailgun';
+
+  // @ts-ignore - senderProfileId may not be typed on campaign
+  const senderProfileId = campaign.senderProfileId;
+  if (senderProfileId) {
+    const [profile] = await db.select().from(senderProfiles).where(eq(senderProfiles.id, senderProfileId)).limit(1);
+    if (profile) {
+      fromEmail = profile.fromEmail;
+      fromName = profile.fromName || undefined;
+      replyTo = profile.replyToEmail || profile.fromEmail;
+      espAdapter = profile.espAdapter || 'mailgun';
+    }
+  } else {
+    // Fallback: find default mailgun sender profile
+    const profiles = await db.select().from(senderProfiles).limit(10);
+    const defaultProfile = profiles.find(p => p.espAdapter === 'mailgun') || profiles[0];
+    if (defaultProfile) {
+      fromEmail = defaultProfile.fromEmail;
+      fromName = defaultProfile.fromName || undefined;
+      replyTo = defaultProfile.replyToEmail || defaultProfile.fromEmail;
+      espAdapter = defaultProfile.espAdapter || 'mailgun';
+    }
+  }
+
+  console.log(`[sendCampaignEmails] Sending from ${fromName ? `${fromName} <${fromEmail}>` : fromEmail}`);
+
   return queueBulkEmails({
     campaignId,
-    from: process.env.DEFAULT_FROM_EMAIL || 'noreply@example.com',
+    from: fromEmail,
+    fromName,
+    replyTo,
     subject: campaign.emailSubject,
     html: campaign.emailHtmlContent,
+    // @ts-ignore - emailPreheader may not be typed
+    preheader: campaign.emailPreheader || undefined,
     recipients,
     tags: ['campaign', `campaign-${campaignId}`],
+    espAdapter,
   });
 }
 

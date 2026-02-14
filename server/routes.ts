@@ -6170,6 +6170,26 @@ export function registerRoutes(app: Express) {
         }
       }
 
+      // === TRIGGER EMAIL SEND FOR EMAIL CAMPAIGNS ===
+      if (updated.type === 'email' && updated.emailSubject && updated.emailHtmlContent) {
+        try {
+          console.log(`[LAUNCH CAMPAIGN] Email campaign detected — triggering bulk email send`);
+          const { sendCampaignEmails } = await import("./services/bulk-email-service");
+          const sendResult = await sendCampaignEmails(req.params.id);
+          console.log(`[LAUNCH CAMPAIGN] Email send result: ${sendResult.sent} sent, ${sendResult.failed} failed, ${sendResult.suppressed} suppressed`);
+
+          // Mark as completed if all sent successfully
+          if (sendResult.failed === 0 && sendResult.sent > 0) {
+            await db
+              .update(campaigns)
+              .set({ status: 'completed', updatedAt: new Date() })
+              .where(eq(campaigns.id, req.params.id));
+          }
+        } catch (sendErr) {
+          console.error(`[LAUNCH CAMPAIGN] Email send error (non-fatal, campaign is active):`, sendErr);
+        }
+      }
+
       invalidateDashboardCache();
       res.json(updated);
     } catch (error) {
@@ -16014,6 +16034,7 @@ Provide JSON response with:
       let totalCallsCount = 0;
       let totalTestCallsCount = 0;
       let totalTranscriptsCount = 0;
+      let totalAnalyzedCount = 0;
       
       // Count Production Calls
       if (!source || source === 'all' || source === 'call_session') {
@@ -16037,6 +16058,16 @@ Provide JSON response with:
             // Only count if transcript is present and not empty
             .where(and(sessionWhereClause, isNotNull(callSessions.aiTranscript), sql`length(${callSessions.aiTranscript}) > 0`));
            totalTranscriptsCount = Number(transcriptsResult?.count || 0);
+
+           // Count analyzed calls (GLOBAL count, ignoring limit)
+           const [analyzedResult] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(callSessions)
+            .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+            .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+            .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+            .where(and(sessionWhereClause, isNotNull(callSessions.aiAnalysis)));
+           totalAnalyzedCount = Number(analyzedResult?.count || 0);
         }
       }
 
@@ -16154,7 +16185,7 @@ Provide JSON response with:
           counts: globalCounts,
           // Quality-specific stats
           realConversations: realConversations.length,
-          analyzedWithScores: analyzedConversations.length,
+          analyzedWithScores: totalAnalyzedCount, // Use true global count instead of paginated count
           avgQualityScore,
           avgDimensions,
         },
@@ -16824,6 +16855,35 @@ Provide JSON response with:
     } catch (error: any) {
       console.error('[QA Bulk] Error:', error?.message || error);
       res.status(500).json({ error: 'Bulk analysis failed', message: error?.message });
+    }
+  });
+
+  // ==================== QA RECORDING URL (for playback in browser) ====================
+
+  /**
+   * GET /api/qa/recording-url/:callSessionId
+   * Resolves a playable recording URL from GCS or Telnyx for browser playback.
+   * Returns the direct audio URL so the frontend can use it in an <audio> element.
+   */
+  app.get("/api/qa/recording-url/:callSessionId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { callSessionId } = req.params;
+      const { getPlayableRecordingLink } = await import('./services/recording-link-resolver');
+      const result = await getPlayableRecordingLink(callSessionId);
+
+      if (!result || !result.url) {
+        return res.status(404).json({ error: 'No recording found', url: null });
+      }
+
+      res.json({
+        url: result.url,
+        source: result.source,
+        mimeType: result.mimeType,
+        expiresInSeconds: result.expiresInSeconds,
+      });
+    } catch (error: any) {
+      console.error('[QA Recording URL] Error:', error?.message || error);
+      res.status(500).json({ error: 'Failed to resolve recording URL', message: error?.message });
     }
   });
 

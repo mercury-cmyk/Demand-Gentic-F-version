@@ -168,6 +168,15 @@ router.post("/:id/send", async (req: Request, res: Response) => {
       }
     }
 
+    // Resolve "All Contacts" audience
+    if (audienceRefs?.allContacts === true) {
+      console.log(`[Campaign Send] Resolving ALL contacts for campaign ${campaignId}`);
+      const allContacts = await db.select({ id: contacts.id })
+        .from(contacts);
+      allContacts.forEach(c => uniqueContactIds.add(c.id));
+      console.log(`[Campaign Send] All contacts resolved: ${allContacts.length} contacts`);
+    }
+
     // Convert contact IDs to full contact objects (with batching for large datasets)
     if (uniqueContactIds.size > 0) {
       const contactIdsArray = Array.from(uniqueContactIds);
