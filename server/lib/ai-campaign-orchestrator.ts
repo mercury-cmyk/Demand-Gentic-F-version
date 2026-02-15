@@ -15,6 +15,7 @@ import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
 import { db } from '../db';
 import { campaigns, campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents, dialerCallAttempts, dialerRuns, agentDefaults } from '@shared/schema';
+import { telnyxNumbers } from '@shared/number-pool-schema';
 import { eq, sql, inArray, and } from 'drizzle-orm';
 import { checkSuppressionBulk } from './suppression.service';
 import { getBestPhoneForContact } from './phone-utils';
@@ -49,12 +50,18 @@ const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRE
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches (prevents burst overload)
 const PARALLEL_CALL_BATCH_SIZE = 10; // Smaller batches to avoid DB pool exhaustion
 const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
+const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_EMPTY_RECHECK_SECONDS || 60));
+const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
+const ACTIVE_POOL_CACHE_TTL_MS = 30000;
 
 // Cached concurrency limits from DB (refreshed every 60s)
 let _cachedDefaultMaxConcurrent = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
 let _cachedGlobalMaxConcurrent = ENV_GLOBAL_MAX_CONCURRENT_CALLS;
 let _concurrencyLastFetched = 0;
 const CONCURRENCY_CACHE_TTL_MS = 60000; // 1 minute
+let _cachedHasActivePoolNumbers: boolean | null = null;
+let _activePoolLastFetched = 0;
+const campaignEmptyPoolBackoffUntil = new Map<string, number>();
 
 async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: number }> {
   const now = Date.now();
@@ -75,6 +82,27 @@ async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: 
     console.warn('[AI Orchestrator] Failed to load concurrency limits from DB, using env/cached values');
   }
   return { defaultMax: _cachedDefaultMaxConcurrent, globalMax: _cachedGlobalMaxConcurrent };
+}
+
+async function hasActivePoolNumbers(): Promise<boolean> {
+  const now = Date.now();
+  if (_cachedHasActivePoolNumbers !== null && now - _activePoolLastFetched < ACTIVE_POOL_CACHE_TTL_MS) {
+    return _cachedHasActivePoolNumbers;
+  }
+
+  try {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(telnyxNumbers)
+      .where(eq(telnyxNumbers.status, 'active'));
+
+    _cachedHasActivePoolNumbers = (result?.count || 0) > 0;
+    _activePoolLastFetched = now;
+    return _cachedHasActivePoolNumbers;
+  } catch (error) {
+    console.warn('[AI Orchestrator] Failed to check active number pool size; assuming numbers are available');
+    return true;
+  }
 }
 
 // Legacy constants for backward compat (now dynamically loaded)
@@ -791,6 +819,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     await setOrchestratorStallReason(campaignId, 'No AI agent settings configured for this campaign.');
     return { initiated: 0, skipped: 0 };
   }
+  const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
   
   // Log Gemini-only mode and voice configuration
   const configuredVoice = aiSettings.persona?.voice || 'Puck';
@@ -850,6 +879,35 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   if (queueItems.length === 0) {
     await setOrchestratorStallReason(campaignId, 'No contacts remaining in the queue.');
     return { initiated: 0, skipped: 0 };
+  }
+
+  // Fast-fail when pool routing is enabled but there are no active numbers.
+  // This avoids per-item requeue loops and noisy "No numbers in eligible pool" logs.
+  const poolRoutingEnabledForCampaign = isNumberPoolEnabled() && (numberPoolConfig?.enabled ?? true);
+  if (poolRoutingEnabledForCampaign) {
+    const retryAt = campaignEmptyPoolBackoffUntil.get(campaignId) || 0;
+    if (retryAt > Date.now()) {
+      const waitSeconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+      await setOrchestratorStallReason(campaignId, `Number pool has no active numbers. Rechecking in ${waitSeconds}s.`);
+      return { initiated: 0, skipped: 0 };
+    }
+
+    const hasActiveNumbers = await hasActivePoolNumbers();
+    if (!hasActiveNumbers) {
+      campaignEmptyPoolBackoffUntil.set(campaignId, Date.now() + EMPTY_POOL_RECHECK_MS);
+      console.warn(
+        `[AI Orchestrator] Number pool is empty - delaying campaign ${campaignId} for ${EMPTY_POOL_RECHECK_SECONDS}s before retry`
+      );
+      await setOrchestratorStallReason(
+        campaignId,
+        `Number pool has no active numbers. Rechecking in ${EMPTY_POOL_RECHECK_SECONDS}s.`
+      );
+      return { initiated: 0, skipped: 0 };
+    }
+
+    campaignEmptyPoolBackoffUntil.delete(campaignId);
+  } else {
+    campaignEmptyPoolBackoffUntil.delete(campaignId);
   }
 
   // === COMPLIANCE CHECKS (same as batch-start) ===
@@ -1306,7 +1364,6 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // === NUMBER POOL ROTATION ===
         // Select caller ID from number pool for spam prevention
         // Use campaign-level number pool config if available
-        const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
         // callerIdResult already declared at outer scope for catch-block visibility
         try {
           callerIdResult = await getCallerIdForCall({

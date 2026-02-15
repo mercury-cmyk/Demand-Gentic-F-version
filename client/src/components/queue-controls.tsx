@@ -15,11 +15,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw, Trash2, Replace, Info, Briefcase, Target, Building2, ChevronRight, Lightbulb, Settings } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Replace, Info, Briefcase, Target, Building2, ChevronRight, Lightbulb, Settings, Globe, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
 import type { FilterGroup } from "@shared/filter-types";
 import { motion, AnimatePresence } from "framer-motion";
@@ -56,6 +57,7 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
   // State for replace queue options
   const [filterGroup, setFilterGroup] = useState<FilterGroup | undefined>();
   const [maxQueueSize, setMaxQueueSize] = useState<number | ''>(5000);
+  const [scopeByTimezone, setScopeByTimezone] = useState(false);
 
   // Check if user has admin or manager role
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'campaign_manager';
@@ -77,6 +79,7 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
     if (showReplaceDialog) {
       setFilterGroup(undefined);
       setMaxQueueSize(5000);
+      setScopeByTimezone(false);
     }
   }, [showReplaceDialog]);
 
@@ -86,22 +89,51 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
     filter_match_count: number;
     eligible_count: number;
     is_upper_bound?: boolean;
+    scope_by_timezone?: boolean;
     breakdown?: {
       no_phone?: number;
+      estimated_in_business_hours?: number;
+      estimated_outside_business_hours?: number;
+      sample_biz_hours_rate?: number;
       note?: string;
     };
   }>({
-    queryKey: ['/api/campaigns', campaignId, 'queues/preview', JSON.stringify(filterGroup), effectiveAgentId],
+    queryKey: ['/api/campaigns', campaignId, 'queues/preview', JSON.stringify(filterGroup), effectiveAgentId, scopeByTimezone],
     queryFn: async () => {
       const response = await apiRequest('POST', `/api/campaigns/${campaignId}/queues/preview`, {
         agent_id: effectiveAgentId,
         filters: filterGroup || undefined,
+        scope_by_timezone: scopeByTimezone,
       });
       return response.json();
     },
     enabled: !!campaignId && !!effectiveAgentId && showReplaceDialog,
     refetchOnWindowFocus: false,
     staleTime: 10000,
+  });
+
+  // Fetch timezone analysis when scoping is enabled
+  const { data: timezoneAnalysis } = useQuery<{
+    totalQueued: number;
+    totalCallableNow: number;
+    totalSleeping: number;
+    totalUnknownTimezone: number;
+    timezoneGroups: Array<{
+      timezone: string;
+      contactCount: number;
+      isCurrentlyOpen: boolean;
+      opensAt: string | null;
+      suggestedPriority: number;
+    }>;
+  }>({
+    queryKey: ['/api/campaigns', campaignId, 'ops/timezone-analysis'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/campaigns/${campaignId}/ops/timezone-analysis`);
+      return response.json();
+    },
+    enabled: !!campaignId && scopeByTimezone && showReplaceDialog,
+    refetchOnWindowFocus: false,
+    staleTime: 30000,
   });
 
   // Set Queue (Replace) mutation
@@ -117,6 +149,7 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
           max_queue_size: maxQueueSize || null,
           keep_in_progress: true,
           allow_sharing: true,
+          scope_by_timezone: scopeByTimezone,
         }
       );
       return response.json();
@@ -148,6 +181,9 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
         if (data.skipped_account_cap > 0) {
           descriptionParts.push(`  - Account cap reached: ${data.skipped_account_cap}`);
         }
+        if (data.skipped_outside_business_hours > 0) {
+          descriptionParts.push(`  - Outside business hours: ${data.skipped_outside_business_hours}`);
+        }
         if (data.skipped_scheduled_retry > 0) {
           descriptionParts.push(`  - Scheduled for retry: ${data.skipped_scheduled_retry}`);
         }
@@ -169,6 +205,7 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
       // Reset form
       setFilterGroup(undefined);
       setMaxQueueSize(5000);
+      setScopeByTimezone(false);
     },
     onError: (error: any) => {
       if (error.message === 'not_found') {
@@ -340,6 +377,21 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
                             <span>{queuePreview.breakdown.no_phone.toLocaleString()}</span>
                           </div>
                         )}
+                        {queuePreview.scope_by_timezone && queuePreview.breakdown?.estimated_outside_business_hours != null && queuePreview.breakdown.estimated_outside_business_hours > 0 && (
+                          <div className="flex justify-between text-xs text-amber-600 dark:text-amber-400">
+                            <span className="flex items-center gap-1">
+                              <Globe className="h-3 w-3" />
+                              Outside business hours:
+                            </span>
+                            <span>~{queuePreview.breakdown.estimated_outside_business_hours.toLocaleString()}</span>
+                          </div>
+                        )}
+                        {queuePreview.scope_by_timezone && queuePreview.breakdown?.sample_biz_hours_rate != null && (
+                          <div className="flex justify-between text-xs text-green-600 dark:text-green-400">
+                            <span>In business hours rate:</span>
+                            <span>{queuePreview.breakdown.sample_biz_hours_rate}%</span>
+                          </div>
+                        )}
                       </div>
                       {queuePreview.breakdown?.note && (
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 italic">
@@ -390,6 +442,65 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
                       <p className="text-xs text-muted-foreground">
                         Maximum contacts to queue. Set higher for large campaigns (e.g., 10000+)
                       </p>
+                    </div>
+
+                    <Separator />
+
+                    {/* Scope by Timezone Toggle */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="scopeByTimezone" className="text-sm font-medium flex items-center gap-1.5">
+                            <Globe className="h-3.5 w-3.5 text-blue-500" />
+                            Scope by Timezone
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            Only queue contacts within business hours
+                          </p>
+                        </div>
+                        <Switch
+                          id="scopeByTimezone"
+                          checked={scopeByTimezone}
+                          onCheckedChange={setScopeByTimezone}
+                        />
+                      </div>
+
+                      {/* Timezone Analysis Summary */}
+                      {scopeByTimezone && timezoneAnalysis && (
+                        <div className="p-3 rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 space-y-2">
+                          <p className="text-xs font-semibold text-blue-800 dark:text-blue-200 flex items-center gap-1.5">
+                            <Clock className="h-3 w-3" />
+                            Timezone Analysis
+                          </p>
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="p-1.5 rounded bg-green-100 dark:bg-green-900/30">
+                              <p className="text-lg font-bold text-green-700 dark:text-green-400">{timezoneAnalysis.totalCallableNow}</p>
+                              <p className="text-[10px] text-green-600 dark:text-green-500">Callable Now</p>
+                            </div>
+                            <div className="p-1.5 rounded bg-amber-100 dark:bg-amber-900/30">
+                              <p className="text-lg font-bold text-amber-700 dark:text-amber-400">{timezoneAnalysis.totalSleeping}</p>
+                              <p className="text-[10px] text-amber-600 dark:text-amber-500">Sleeping</p>
+                            </div>
+                            <div className="p-1.5 rounded bg-slate-100 dark:bg-slate-800">
+                              <p className="text-lg font-bold text-slate-600 dark:text-slate-400">{timezoneAnalysis.totalUnknownTimezone}</p>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-500">Unknown TZ</p>
+                            </div>
+                          </div>
+                          {timezoneAnalysis.timezoneGroups.length > 0 && (
+                            <div className="space-y-1 mt-2">
+                              {timezoneAnalysis.timezoneGroups.slice(0, 5).map((group) => (
+                                <div key={group.timezone} className="flex items-center justify-between text-[11px]">
+                                  <span className="text-slate-600 dark:text-slate-400 truncate max-w-[120px]">{group.timezone}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-medium">{group.contactCount}</span>
+                                    <span className={`w-2 h-2 rounded-full ${group.isCurrentlyOpen ? 'bg-green-500' : 'bg-amber-500'}`} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 

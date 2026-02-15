@@ -9,6 +9,8 @@ import { contacts, accounts, campaigns, agentQueue, campaignAudienceSnapshots, l
 import type { FilterGroup } from '@shared/filter-types';
 import { getBestPhoneForContact } from '../lib/phone-utils';
 import { batchCheckCampaignSuppression, batchCheckAccountCaps } from '../lib/campaign-suppression';
+import { detectContactTimezone, isWithinBusinessHours, getBusinessHoursForCountry, type BusinessHoursConfig } from '../utils/business-hours';
+import { analyzeCampaignTimezones } from '../services/campaign-timezone-analyzer';
 
 const router = Router();
 
@@ -62,6 +64,7 @@ const queueSetSchema = z.object({
   keep_in_progress: z.boolean().optional().default(false),
   dry_run: z.boolean().optional().default(false),
   allow_sharing: z.boolean().optional().default(false), // Allow multiple agents to queue same contacts
+  scope_by_timezone: z.boolean().optional().default(false), // Only queue contacts currently within business hours
 });
 
 // Schema for queue clear request
@@ -117,6 +120,7 @@ router.post(
         keep_in_progress = true,
         dry_run = false,
         allow_sharing = false,
+        scope_by_timezone = false,
       } = validation.data;
 
       // RBAC: Agents can only manage their own queue, Managers/Admins can manage any agent's queue
@@ -484,6 +488,7 @@ router.post(
             skipped_campaign_suppression: 0,
             skipped_global_dnc: 0,
             skipped_account_cap: 0,
+            skipped_outside_business_hours: 0,
             skipped_scheduled_retry: 0,
             skipped_due_to_collision: 0,
             total_skipped: skippedNoPhone + skippedInvalid,
@@ -522,6 +527,8 @@ router.post(
             skipped_invalid: skippedInvalid,
             skipped_campaign_suppression: skippedSuppression,
             skipped_global_dnc: 0,
+            skipped_account_cap: 0,
+            skipped_outside_business_hours: 0,
             skipped_scheduled_retry: 0,
             skipped_due_to_collision: 0,
             total_skipped: skippedNoPhone + skippedInvalid + skippedSuppression,
@@ -558,6 +565,7 @@ router.post(
             skipped_campaign_suppression: skippedSuppression,
             skipped_global_dnc: skippedGlobalDnc,
             skipped_account_cap: 0,
+            skipped_outside_business_hours: 0,
             skipped_scheduled_retry: 0,
             skipped_due_to_collision: 0,
             total_skipped: skippedNoPhone + skippedInvalid + skippedSuppression + skippedGlobalDnc,
@@ -601,7 +609,7 @@ router.post(
         
         const skippedAccountCap = nonDncContactIds.length - finalContactIds.length;
         console.log(`[queues:set] Account cap check: ${skippedAccountCap} contacts filtered (account cap reached)`);
-        
+
         if (finalContactIds.length === 0) {
           return {
             released,
@@ -611,15 +619,96 @@ router.post(
             skipped_campaign_suppression: skippedSuppression,
             skipped_global_dnc: skippedGlobalDnc,
             skipped_account_cap: skippedAccountCap,
+            skipped_outside_business_hours: 0,
             skipped_scheduled_retry: 0,
             skipped_due_to_collision: 0,
             total_skipped: skippedNoPhone + skippedInvalid + skippedSuppression + skippedGlobalDnc + skippedAccountCap,
             filtered_contacts: filteredContacts,
           };
         }
-        
+
+        // 5e. TIMEZONE BUSINESS HOURS FILTER - Only queue contacts within business hours
+        let timezoneFilteredContactIds = finalContactIds;
+        let skippedOutsideBusinessHours = 0;
+
+        if (scope_by_timezone) {
+          console.log('[queues:set] Timezone scoping enabled - filtering contacts outside business hours');
+
+          // Get campaign's business hours config (or use defaults)
+          const campaignBizHours = campaign.businessHoursConfig as BusinessHoursConfig | null;
+          const now = new Date();
+
+          timezoneFilteredContactIds = finalContactIds.filter(contactId => {
+            const fullContactRow = fullContactMap.get(contactId);
+            const fullContact = fullContactRow?.contacts;
+
+            if (!fullContact) return true; // Allow through if no data
+
+            const contactTimezoneInfo = {
+              timezone: fullContact.timezone || undefined,
+              state: fullContact.state || fullContact.stateAbbr || undefined,
+              country: fullContact.country || undefined,
+            };
+
+            // Determine business hours config: campaign config or country-specific default
+            let bizConfig: BusinessHoursConfig;
+            if (campaignBizHours && campaignBizHours.enabled) {
+              bizConfig = { ...campaignBizHours };
+              // If campaign respects contact timezone, detect it
+              if (bizConfig.respectContactTimezone) {
+                const contactTz = detectContactTimezone(contactTimezoneInfo);
+                if (contactTz) {
+                  bizConfig.timezone = contactTz;
+                  bizConfig.respectContactTimezone = false; // We already resolved it
+                }
+              }
+            } else {
+              // No campaign config - use country-specific defaults
+              bizConfig = getBusinessHoursForCountry(fullContact.country);
+              const contactTz = detectContactTimezone(contactTimezoneInfo);
+              if (contactTz) {
+                bizConfig.timezone = contactTz;
+                bizConfig.respectContactTimezone = false;
+              }
+            }
+
+            const canCall = isWithinBusinessHours(bizConfig, undefined, now);
+
+            if (!canCall) {
+              const detectedTz = detectContactTimezone(contactTimezoneInfo) || 'unknown';
+              filteredContacts.push({
+                contactId,
+                reason: `Outside business hours (${bizConfig.startTime}-${bizConfig.endTime} ${detectedTz})`
+              });
+              return false;
+            }
+
+            return true;
+          });
+
+          skippedOutsideBusinessHours = finalContactIds.length - timezoneFilteredContactIds.length;
+          console.log(`[queues:set] Timezone scoping: ${skippedOutsideBusinessHours} contacts filtered (outside business hours)`);
+
+          if (timezoneFilteredContactIds.length === 0) {
+            return {
+              released,
+              assigned: 0,
+              skipped_no_phone: skippedNoPhone,
+              skipped_invalid: skippedInvalid,
+              skipped_campaign_suppression: skippedSuppression,
+              skipped_global_dnc: skippedGlobalDnc,
+              skipped_account_cap: skippedAccountCap,
+              skipped_outside_business_hours: skippedOutsideBusinessHours,
+              skipped_scheduled_retry: 0,
+              skipped_due_to_collision: 0,
+              total_skipped: skippedNoPhone + skippedInvalid + skippedSuppression + skippedGlobalDnc + skippedAccountCap + skippedOutsideBusinessHours,
+              filtered_contacts: filteredContacts,
+            };
+          }
+        }
+
         // Map final contact IDs back to contact objects for downstream processing
-        const finalContactIdSet = new Set(finalContactIds);
+        const finalContactIdSet = new Set(timezoneFilteredContactIds);
         let availableContacts = contactsWithCallablePhones.filter(c => finalContactIdSet.has(c.id));
         let skippedCollision = 0;
         let skippedScheduled = 0;
@@ -699,14 +788,15 @@ router.post(
           console.log('[queues:set] Contact sharing enabled - allowing duplicates across agents');
         }
 
-        const totalSkipped = skippedNoPhone + skippedInvalid + skippedSuppression + skippedGlobalDnc + skippedAccountCap + skippedScheduled + skippedCollision;
-        console.log('[queues:set] Total skipped:', totalSkipped, 
-          '(no phone:', skippedNoPhone, 
+        const totalSkipped = skippedNoPhone + skippedInvalid + skippedSuppression + skippedGlobalDnc + skippedAccountCap + skippedOutsideBusinessHours + skippedScheduled + skippedCollision;
+        console.log('[queues:set] Total skipped:', totalSkipped,
+          '(no phone:', skippedNoPhone,
           ', invalid:', skippedInvalid,
           ', suppressed:', skippedSuppression,
           ', global DNC:', skippedGlobalDnc,
           ', account cap:', skippedAccountCap,
-          ', scheduled:', skippedScheduled, 
+          ', outside biz hours:', skippedOutsideBusinessHours,
+          ', scheduled:', skippedScheduled,
           ', collision:', skippedCollision, ')');
 
         // Step 8: Delete existing entries for this agent + contacts (to avoid unique constraint violation)
@@ -770,6 +860,7 @@ router.post(
           skipped_campaign_suppression: skippedSuppression,
           skipped_global_dnc: skippedGlobalDnc,
           skipped_account_cap: skippedAccountCap,
+          skipped_outside_business_hours: skippedOutsideBusinessHours,
           skipped_scheduled_retry: skippedScheduled,
           skipped_due_to_collision: skippedCollision,
           total_skipped: totalSkipped,
@@ -818,7 +909,7 @@ router.post(
         return res.status(401).json({ error: 'unauthorized', message: 'User not authenticated' });
       }
 
-      const { agent_id, filters } = req.body;
+      const { agent_id, filters, scope_by_timezone = false } = req.body;
 
       if (!agent_id) {
         return res.status(400).json({ error: 'validation_error', message: 'agent_id is required' });
@@ -998,14 +1089,80 @@ router.post(
       const estimatedWithPhone = Math.round(filterMatchCount * phoneRate);
       const estimatedNoPhone = filterMatchCount - estimatedWithPhone;
 
+      // Step 4: Timezone estimation (sample-based) when scope_by_timezone is enabled
+      let timezoneBreakdown: any = undefined;
+      let estimatedEligible = estimatedWithPhone;
+
+      if (scope_by_timezone && sampleIds.length > 0) {
+        const sampleContacts = await db
+          .select({
+            timezone: contacts.timezone,
+            state: contacts.state,
+            stateAbbr: contacts.stateAbbr,
+            country: contacts.country,
+          })
+          .from(contacts)
+          .where(inArray(contacts.id, sampleIds));
+
+        const campaignBizHours = campaign.businessHoursConfig as BusinessHoursConfig | null;
+        const now = new Date();
+        let inBusinessHoursCount = 0;
+
+        for (const contact of sampleContacts) {
+          const contactTimezoneInfo = {
+            timezone: contact.timezone || undefined,
+            state: contact.state || contact.stateAbbr || undefined,
+            country: contact.country || undefined,
+          };
+
+          let bizConfig: BusinessHoursConfig;
+          if (campaignBizHours && campaignBizHours.enabled) {
+            bizConfig = { ...campaignBizHours };
+            if (bizConfig.respectContactTimezone) {
+              const contactTz = detectContactTimezone(contactTimezoneInfo);
+              if (contactTz) {
+                bizConfig.timezone = contactTz;
+                bizConfig.respectContactTimezone = false;
+              }
+            }
+          } else {
+            bizConfig = getBusinessHoursForCountry(contact.country);
+            const contactTz = detectContactTimezone(contactTimezoneInfo);
+            if (contactTz) {
+              bizConfig.timezone = contactTz;
+              bizConfig.respectContactTimezone = false;
+            }
+          }
+
+          if (isWithinBusinessHours(bizConfig, undefined, now)) {
+            inBusinessHoursCount++;
+          }
+        }
+
+        const bizHoursRate = sampleContacts.length > 0 ? inBusinessHoursCount / sampleContacts.length : 0;
+        const estimatedInBusinessHours = Math.round(estimatedWithPhone * bizHoursRate);
+        const estimatedOutsideBusinessHours = estimatedWithPhone - estimatedInBusinessHours;
+        estimatedEligible = estimatedInBusinessHours;
+
+        timezoneBreakdown = {
+          estimated_in_business_hours: estimatedInBusinessHours,
+          estimated_outside_business_hours: estimatedOutsideBusinessHours,
+          sample_biz_hours_rate: Math.round(bizHoursRate * 100),
+        };
+      }
+
       return res.json({
         campaign_audience_count: campaignAudienceCount,
         filter_match_count: filterMatchCount,
-        eligible_count: estimatedWithPhone,
+        eligible_count: estimatedEligible,
         is_upper_bound: true,
+        scope_by_timezone,
         breakdown: {
           no_phone: estimatedNoPhone,
-          note: 'Upper bound estimate. Actual count may be lower due to: suppression lists, Do Not Call registry, account caps, scheduled retries, and contacts already assigned to other agents.',
+          ...(timezoneBreakdown || {}),
+          note: scope_by_timezone
+            ? 'Upper bound estimate. Contacts outside business hours in their local timezone will be excluded.'
+            : 'Upper bound estimate. Actual count may be lower due to: suppression lists, Do Not Call registry, account caps, scheduled retries, and contacts already assigned to other agents.',
         },
       });
     } catch (error: any) {
