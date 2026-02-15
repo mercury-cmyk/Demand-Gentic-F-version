@@ -5,11 +5,15 @@
  *
  * Features:
  * - Browse by category (Voice, Email, Intelligence, Compliance, System)
+ * - Filter by department, function, purpose, AI model, entity, status
  * - Search and filter prompts
  * - Edit with rich markdown preview
  * - Version history with diff view
  * - Sync from codebase defaults
  * - Preview compiled prompts with context
+ * - Governance: draft/live management, ownership, change control
+ * - Dependency mapping: see how prompts connect to endpoints/services
+ * - System audit: full transparency into all AI prompts
  */
 
 import { useState } from 'react';
@@ -27,6 +31,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Loader2,
   Save,
@@ -51,6 +56,17 @@ import {
   Copy,
   Undo2,
   X,
+  Network,
+  ShieldCheck,
+  BarChart3,
+  ClipboardList,
+  Building2,
+  Cpu,
+  GitBranch,
+  Users,
+  AlertTriangle,
+  Archive,
+  ArrowRight,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -139,6 +155,36 @@ interface PromptStats {
   recentlyUpdated: number;
 }
 
+interface SystemAudit {
+  totalPrompts: number;
+  byDepartment: Record<string, number>;
+  byFunction: Record<string, number>;
+  byModel: Record<string, number>;
+  byCategory: Record<string, number>;
+  byStatus: Record<string, number>;
+  byPurpose: Record<string, number>;
+  unownedPrompts: number;
+  draftPrompts: number;
+  totalDependencies: number;
+}
+
+interface GovernanceData {
+  pendingDrafts: Array<{ id: string; name: string; promptKey: string; updatedAt: string }>;
+  recentChanges: Array<{ id: string; promptId: string; version: number; changeDescription: string | null; changedAt: string; changedByName: string | null }>;
+  ownershipGaps: Array<{ id: string; name: string; promptKey: string; department: string | null }>;
+  deprecatedPrompts: Array<{ id: string; name: string; promptKey: string }>;
+}
+
+interface PromptDependency {
+  id: string;
+  entityType: string;
+  entityName: string;
+  endpointPath: string | null;
+  httpMethod: string | null;
+  serviceFunction: string;
+  direction: string;
+}
+
 // ==================== CATEGORY ICONS ====================
 
 const categoryIcons: Record<string, React.ReactNode> = {
@@ -165,6 +211,7 @@ export default function PromptManagementPage() {
   const queryClient = useQueryClient();
 
   // State
+  const [mainTab, setMainTab] = useState<string>('registry');
   const [selectedCategory, setSelectedCategory] = useState<string>('voice');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -172,6 +219,13 @@ export default function PromptManagementPage() {
   const [editContent, setEditContent] = useState('');
   const [changeDescription, setChangeDescription] = useState('');
   const [selectedVersion, setSelectedVersion] = useState<PromptVersionDetail | null>(null);
+  // Enhanced filters
+  const [filterDepartment, setFilterDepartment] = useState<string>('');
+  const [filterFunction, setFilterFunction] = useState<string>('');
+  const [filterPurpose, setFilterPurpose] = useState<string>('');
+  const [filterModel, setFilterModel] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterEntity, setFilterEntity] = useState<string>('');
 
   // Only allow admins
   if (!user || user.role !== 'admin') {
@@ -198,15 +252,79 @@ export default function PromptManagementPage() {
   });
 
   const { data: prompts, isLoading: isLoadingPrompts } = useQuery<PromptListItem[]>({
-    queryKey: ['/api/prompts', selectedCategory, searchQuery],
+    queryKey: ['/api/prompts', selectedCategory, searchQuery, filterDepartment, filterFunction, filterPurpose, filterModel, filterStatus, filterEntity],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (selectedCategory) params.set('category', selectedCategory);
       if (searchQuery) params.set('search', searchQuery);
+      if (filterDepartment) params.set('department', filterDepartment);
+      if (filterFunction) params.set('promptFunction', filterFunction);
+      if (filterPurpose) params.set('purpose', filterPurpose);
+      if (filterModel) params.set('aiModel', filterModel);
+      if (filterStatus) params.set('status', filterStatus);
+      if (filterEntity) params.set('entity', filterEntity);
+      params.set('limit', '200');
       const res = await apiRequest('GET', `/api/prompts?${params}`);
       const data = await res.json();
       return data.prompts || data;
     },
+  });
+
+  // Governance & Audit queries
+  const { data: auditData } = useQuery<SystemAudit>({
+    queryKey: ['/api/prompts/audit'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/prompts/audit');
+      const data = await res.json();
+      return data.audit;
+    },
+    enabled: mainTab === 'audit' || mainTab === 'registry',
+  });
+
+  const { data: governanceData } = useQuery<GovernanceData>({
+    queryKey: ['/api/prompts/governance'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/prompts/governance');
+      return res.json();
+    },
+    enabled: mainTab === 'governance',
+  });
+
+  const { data: departmentCounts } = useQuery<Record<string, number>>({
+    queryKey: ['/api/prompts/departments'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/prompts/departments');
+      const data = await res.json();
+      return data.departments;
+    },
+  });
+
+  const { data: functionCounts } = useQuery<Record<string, number>>({
+    queryKey: ['/api/prompts/functions'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/prompts/functions');
+      const data = await res.json();
+      return data.functions;
+    },
+  });
+
+  const { data: modelCounts } = useQuery<Record<string, number>>({
+    queryKey: ['/api/prompts/models'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/prompts/models');
+      const data = await res.json();
+      return data.models;
+    },
+  });
+
+  const { data: promptDependencies } = useQuery<PromptDependency[]>({
+    queryKey: ['/api/prompts/dependencies', selectedPromptId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/prompts/dependencies/${selectedPromptId}`);
+      const data = await res.json();
+      return data.dependencies;
+    },
+    enabled: !!selectedPromptId,
   });
 
   const { data: selectedPrompt, isLoading: isLoadingPrompt } = useQuery<PromptDetail>({
@@ -573,6 +691,33 @@ export default function PromptManagementPage() {
                 ))}
               </div>
 
+              {/* Dependencies section */}
+              {promptDependencies && promptDependencies.length > 0 && (
+                <div className="mb-4 p-3 rounded-lg border bg-muted/30">
+                  <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                    <Network className="h-4 w-4" />
+                    Dependencies ({promptDependencies.length})
+                  </div>
+                  <div className="space-y-1">
+                    {promptDependencies.map((dep) => (
+                      <div key={dep.id} className="flex items-center gap-2 text-xs">
+                        <Badge variant={dep.direction === 'produces' ? 'default' : 'secondary'} className="text-xs">
+                          {dep.direction}
+                        </Badge>
+                        <code className="bg-muted px-1 rounded">{dep.entityName}</code>
+                        {dep.endpointPath && (
+                          <>
+                            <ArrowRight className="h-3 w-3" />
+                            <code className="bg-muted px-1 rounded">{dep.httpMethod} {dep.endpointPath}</code>
+                          </>
+                        )}
+                        <span className="text-muted-foreground">({dep.serviceFunction})</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Content viewer */}
               <div className="flex-1 overflow-hidden">
                 <ScrollArea className="h-[500px] rounded-md border bg-muted/30">
@@ -715,6 +860,324 @@ export default function PromptManagementPage() {
     );
   };
 
+  // ==================== FILTER HELPERS ====================
+
+  const clearFilters = () => {
+    setFilterDepartment('');
+    setFilterFunction('');
+    setFilterPurpose('');
+    setFilterModel('');
+    setFilterStatus('');
+    setFilterEntity('');
+  };
+
+  const hasActiveFilters = filterDepartment || filterFunction || filterPurpose || filterModel || filterStatus || filterEntity;
+
+  // ==================== GOVERNANCE RENDER ====================
+
+  const renderGovernanceTab = () => {
+    if (!governanceData) {
+      return (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+    return (
+      <div className="grid grid-cols-2 gap-6">
+        {/* Pending Drafts */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Edit2 className="h-4 w-4 text-yellow-600" />
+              Pending Drafts ({governanceData.pendingDrafts.length})
+            </CardTitle>
+            <CardDescription>Prompts in draft status awaiting review</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[250px]">
+              {governanceData.pendingDrafts.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No pending drafts</p>
+              ) : (
+                <div className="space-y-2">
+                  {governanceData.pendingDrafts.map(d => (
+                    <div key={d.id} className="p-2 rounded border text-sm">
+                      <div className="font-medium">{d.name}</div>
+                      <div className="text-xs text-muted-foreground">{d.promptKey}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
+        {/* Ownership Gaps */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-orange-600" />
+              Ownership Gaps ({governanceData.ownershipGaps.length})
+            </CardTitle>
+            <CardDescription>Prompts without assigned owners</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[250px]">
+              {governanceData.ownershipGaps.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">All prompts have owners</p>
+              ) : (
+                <div className="space-y-2">
+                  {governanceData.ownershipGaps.map(g => (
+                    <div key={g.id} className="p-2 rounded border text-sm flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{g.name}</div>
+                        <div className="text-xs text-muted-foreground">{g.promptKey}</div>
+                      </div>
+                      {g.department && <Badge variant="outline" className="text-xs">{g.department}</Badge>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
+        {/* Recent Changes */}
+        <Card className="col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <History className="h-4 w-4 text-blue-600" />
+              Recent Changes (Last 30 Days)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[300px]">
+              {governanceData.recentChanges.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No recent changes</p>
+              ) : (
+                <div className="space-y-2">
+                  {governanceData.recentChanges.map(c => (
+                    <div key={c.id} className="p-3 rounded border text-sm flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Badge variant="outline" className="text-xs">v{c.version}</Badge>
+                        <span>{c.changeDescription || 'No description'}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-2">
+                        {c.changedByName && <span>{c.changedByName}</span>}
+                        <span>{new Date(c.changedAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
+        {/* Deprecated */}
+        {governanceData.deprecatedPrompts.length > 0 && (
+          <Card className="col-span-2">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Archive className="h-4 w-4 text-gray-500" />
+                Deprecated Prompts ({governanceData.deprecatedPrompts.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {governanceData.deprecatedPrompts.map(d => (
+                  <Badge key={d.id} variant="secondary" className="text-xs">{d.promptKey}</Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    );
+  };
+
+  // ==================== AUDIT RENDER ====================
+
+  const renderAuditTab = () => {
+    if (!auditData) {
+      return (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-6">
+        {/* Top stats */}
+        <div className="grid grid-cols-5 gap-4">
+          <Card>
+            <CardContent className="pt-4 text-center">
+              <div className="text-3xl font-bold text-primary">{auditData.totalPrompts}</div>
+              <div className="text-xs text-muted-foreground mt-1">Total Prompts</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 text-center">
+              <div className="text-3xl font-bold text-blue-600">{Object.keys(auditData.byDepartment).length}</div>
+              <div className="text-xs text-muted-foreground mt-1">Departments</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 text-center">
+              <div className="text-3xl font-bold text-green-600">{Object.keys(auditData.byModel).length}</div>
+              <div className="text-xs text-muted-foreground mt-1">AI Models</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 text-center">
+              <div className="text-3xl font-bold text-orange-600">{auditData.unownedPrompts}</div>
+              <div className="text-xs text-muted-foreground mt-1">Unowned</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 text-center">
+              <div className="text-3xl font-bold text-purple-600">{auditData.totalDependencies}</div>
+              <div className="text-xs text-muted-foreground mt-1">Dependencies</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Breakdown grids */}
+        <div className="grid grid-cols-3 gap-6">
+          {/* By Department */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Building2 className="h-4 w-4" />
+                By Department
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {Object.entries(auditData.byDepartment).sort((a, b) => b[1] - a[1]).map(([dept, cnt]) => (
+                  <div key={dept} className="flex items-center justify-between text-sm">
+                    <span className="capitalize">{dept.replace('_', ' ')}</span>
+                    <Badge variant="secondary">{cnt}</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* By Function */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Cpu className="h-4 w-4" />
+                By Function
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[250px]">
+                <div className="space-y-2">
+                  {Object.entries(auditData.byFunction).sort((a, b) => b[1] - a[1]).map(([fn, cnt]) => (
+                    <div key={fn} className="flex items-center justify-between text-sm">
+                      <span className="capitalize">{fn.replace(/_/g, ' ')}</span>
+                      <Badge variant="secondary">{cnt}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
+          {/* By AI Model */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                By AI Model
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {Object.entries(auditData.byModel).sort((a, b) => b[1] - a[1]).map(([model, cnt]) => (
+                  <div key={model} className="flex items-center justify-between text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{model}</code>
+                    <Badge variant="secondary">{cnt}</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* By Purpose */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                By Purpose
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[250px]">
+                <div className="space-y-2">
+                  {Object.entries(auditData.byPurpose).sort((a, b) => b[1] - a[1]).map(([purpose, cnt]) => (
+                    <div key={purpose} className="flex items-center justify-between text-sm">
+                      <span className="capitalize">{purpose.replace(/_/g, ' ')}</span>
+                      <Badge variant="secondary">{cnt}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
+          {/* By Status */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <GitBranch className="h-4 w-4" />
+                By Status
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {Object.entries(auditData.byStatus).map(([status, cnt]) => (
+                  <div key={status} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${status === 'live' ? 'bg-green-500' : status === 'draft' ? 'bg-yellow-500' : status === 'archived' ? 'bg-gray-400' : 'bg-red-400'}`} />
+                      <span className="capitalize">{status}</span>
+                    </div>
+                    <Badge variant="secondary">{cnt}</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* By Category */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ClipboardList className="h-4 w-4" />
+                By Category
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {Object.entries(auditData.byCategory).sort((a, b) => b[1] - a[1]).map(([cat, cnt]) => (
+                  <div key={cat} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      {categoryIcons[cat]}
+                      <span className="capitalize">{cat}</span>
+                    </div>
+                    <Badge variant="secondary">{cnt}</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  };
+
   // ==================== MAIN RENDER ====================
 
   return (
@@ -729,11 +1192,16 @@ export default function PromptManagementPage() {
                 Prompt Management System
               </CardTitle>
               <CardDescription>
-                Centralized management for all AI agent prompts. Edit, track versions, and deploy changes across the system.
+                Centralized management for all AI agent prompts. Full transparency into how intelligence flows across the system.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              {stats && (
+              {auditData && (
+                <Badge variant="outline" className="text-sm">
+                  {auditData.totalPrompts} prompts
+                </Badge>
+              )}
+              {stats && !auditData && (
                 <Badge variant="outline" className="text-sm">
                   {stats.total} prompts
                 </Badge>
@@ -755,52 +1223,162 @@ export default function PromptManagementPage() {
         </CardHeader>
       </Card>
 
-      {/* Category Tabs */}
-      <Tabs value={selectedCategory} onValueChange={setSelectedCategory} className="mb-6">
-        <TabsList className="w-full justify-start">
-          {(categories || []).map((cat) => (
-            <TabsTrigger key={cat.id} value={cat.id} className="gap-2">
-              {categoryIcons[cat.id]}
-              {cat.name}
-              {stats?.byCategory[cat.id] && (
-                <Badge variant="secondary" className="ml-1 text-xs">
-                  {stats.byCategory[cat.id]}
-                </Badge>
-              )}
-            </TabsTrigger>
-          ))}
+      {/* Main Tabs */}
+      <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-6">
+        <TabsList className="w-full justify-start bg-muted/50 p-1">
+          <TabsTrigger value="registry" className="gap-2">
+            <Code className="h-4 w-4" />
+            Registry
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="gap-2">
+            <ClipboardList className="h-4 w-4" />
+            System Audit
+          </TabsTrigger>
+          <TabsTrigger value="governance" className="gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            Governance
+          </TabsTrigger>
         </TabsList>
-      </Tabs>
 
-      {/* Main Content */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Prompt List */}
-        <div className="col-span-4">
+        {/* Registry Tab */}
+        <TabsContent value="registry" className="space-y-4">
+          {/* Enhanced Filter Bar */}
           <Card>
-            <CardHeader className="pb-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search prompts..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9"
-                />
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <Select value={filterDepartment || "__all__"} onValueChange={(v) => setFilterDepartment(v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Departments</SelectItem>
+                    {departmentCounts && Object.entries(departmentCounts).map(([dept, cnt]) => (
+                      <SelectItem key={dept} value={dept}>{dept.replace(/_/g, ' ')} ({cnt})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterFunction || "__all__"} onValueChange={(v) => setFilterFunction(v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="w-[170px]">
+                    <SelectValue placeholder="Function" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Functions</SelectItem>
+                    {functionCounts && Object.entries(functionCounts).map(([fn, cnt]) => (
+                      <SelectItem key={fn} value={fn}>{fn.replace(/_/g, ' ')} ({cnt})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterModel || "__all__"} onValueChange={(v) => setFilterModel(v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="AI Model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Models</SelectItem>
+                    {modelCounts && Object.entries(modelCounts).map(([model, cnt]) => (
+                      <SelectItem key={model} value={model}>{model} ({cnt})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterStatus || "__all__"} onValueChange={(v) => setFilterStatus(v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="w-[130px]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Status</SelectItem>
+                    <SelectItem value="live">Live</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="archived">Archived</SelectItem>
+                    <SelectItem value="deprecated">Deprecated</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterPurpose || "__all__"} onValueChange={(v) => setFilterPurpose(v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Purpose" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Purposes</SelectItem>
+                    <SelectItem value="generation">Generation</SelectItem>
+                    <SelectItem value="classification">Classification</SelectItem>
+                    <SelectItem value="analysis">Analysis</SelectItem>
+                    <SelectItem value="scoring">Scoring</SelectItem>
+                    <SelectItem value="routing">Routing</SelectItem>
+                    <SelectItem value="enrichment">Enrichment</SelectItem>
+                    <SelectItem value="orchestration">Orchestration</SelectItem>
+                    <SelectItem value="extraction">Extraction</SelectItem>
+                    <SelectItem value="personalization">Personalization</SelectItem>
+                    <SelectItem value="summarization">Summarization</SelectItem>
+                    <SelectItem value="reasoning">Reasoning</SelectItem>
+                    <SelectItem value="compliance_check">Compliance</SelectItem>
+                  </SelectContent>
+                </Select>
+                {hasActiveFilters && (
+                  <Button variant="ghost" size="sm" onClick={clearFilters} className="text-xs">
+                    <X className="h-3 w-3 mr-1" />
+                    Clear filters
+                  </Button>
+                )}
               </div>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[600px]">
-                {renderPromptList()}
-              </ScrollArea>
             </CardContent>
           </Card>
-        </div>
 
-        {/* Detail Panel */}
-        <div className="col-span-8">
-          {renderPromptDetail()}
-        </div>
-      </div>
+          {/* Category Tabs */}
+          <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
+            <TabsList className="w-full justify-start">
+              {(categories || []).map((cat) => (
+                <TabsTrigger key={cat.id} value={cat.id} className="gap-2">
+                  {categoryIcons[cat.id]}
+                  {cat.name}
+                  {stats?.byCategory[cat.id] && (
+                    <Badge variant="secondary" className="ml-1 text-xs">
+                      {stats.byCategory[cat.id]}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+
+          {/* Main Content */}
+          <div className="grid grid-cols-12 gap-6">
+            {/* Prompt List */}
+            <div className="col-span-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search prompts..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[600px]">
+                    {renderPromptList()}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Detail Panel */}
+            <div className="col-span-8">
+              {renderPromptDetail()}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* System Audit Tab */}
+        <TabsContent value="audit">
+          {renderAuditTab()}
+        </TabsContent>
+
+        {/* Governance Tab */}
+        <TabsContent value="governance">
+          {renderGovernanceTab()}
+        </TabsContent>
+      </Tabs>
 
       {/* Version Detail Dialog */}
       <Dialog open={!!selectedVersion} onOpenChange={() => setSelectedVersion(null)}>

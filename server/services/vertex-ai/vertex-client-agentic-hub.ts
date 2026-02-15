@@ -222,7 +222,7 @@ export class VertexClientAgenticHub extends EventEmitter {
   }
 
   private async assertCampaignAccess(campaignId: string) {
-    // 1. Try regular campaigns first
+    // 1. Try regular campaigns via clientCampaignAccess (both regularCampaignId and campaignId)
     const [regularRecord] = await db
       .select({ campaign: campaigns })
       .from(campaigns)
@@ -230,7 +230,10 @@ export class VertexClientAgenticHub extends EventEmitter {
         clientCampaignAccess,
         and(
           eq(clientCampaignAccess.clientAccountId, this.context.clientAccountId),
-          eq(clientCampaignAccess.regularCampaignId, campaigns.id)
+          or(
+            eq(clientCampaignAccess.regularCampaignId, campaigns.id),
+            eq(clientCampaignAccess.campaignId, campaigns.id)
+          )
         )
       )
       .where(eq(campaigns.id, campaignId))
@@ -240,7 +243,18 @@ export class VertexClientAgenticHub extends EventEmitter {
       return regularRecord.campaign;
     }
 
-    // 2. Try verification campaigns
+    // 2. Try direct campaign ownership (campaigns.clientAccountId)
+    const [directRecord] = await db
+      .select()
+      .from(campaigns)
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.clientAccountId, this.context.clientAccountId)))
+      .limit(1);
+
+    if (directRecord) {
+      return directRecord;
+    }
+
+    // 3. Try verification campaigns
     const [verificationRecord] = await db
       .select({ campaign: verificationCampaigns })
       .from(verificationCampaigns)

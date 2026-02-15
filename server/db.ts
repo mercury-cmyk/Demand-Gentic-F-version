@@ -50,6 +50,10 @@ export { dbConfigError };
 // Ensure DATABASE_URL uses Neon's connection pooler for high concurrency
 // This prevents "too many connections" errors by using pooling infrastructure
 // Only add -pooler if it's not already present
+// Wait, disable automatic pooler injection as it breaks new AWS URLs
+const hasPooler = true; // Force skip injection for now to fix connection issues
+
+/*
 const hasPooler = databaseUrl.includes('-pooler');
 
 if (!hasPooler && !dbConfigError) {
@@ -59,6 +63,7 @@ if (!hasPooler && !dbConfigError) {
     '-pooler.$1.neon.tech'
   );
 }
+*/
 
 if (!dbConfigError) {
   console.log('[DB] Using Neon connection pooler:', hasPooler ? 'YES (already configured)' : 'YES (added -pooler)');
@@ -78,16 +83,16 @@ const parseEnvInt = (value: string | undefined, fallback: number, allowZero = fa
   return parsed;
 };
 
-const DB_POOL_MAX = parseEnvInt(process.env.DB_POOL_MAX, 35);
-const DB_POOL_MIN = Math.min(parseEnvInt(process.env.DB_POOL_MIN, 4, true), DB_POOL_MAX);
-const DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_IDLE_TIMEOUT_MS, 90000);
-const DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_CONN_TIMEOUT_MS, 30000);
+const DB_POOL_MAX = parseEnvInt(process.env.DB_POOL_MAX, 60);
+const DB_POOL_MIN = Math.min(parseEnvInt(process.env.DB_POOL_MIN, 6, true), DB_POOL_MAX);
+const DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_IDLE_TIMEOUT_MS, 30000);
+const DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_CONN_TIMEOUT_MS, 45000);
 const DB_POOL_MAX_USES = parseEnvInt(process.env.DB_POOL_MAX_USES, 10000);
 const DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.DB_POOL_KEEP_ALIVE_MS, 10000);
 
-const WORKER_DB_POOL_MAX = parseEnvInt(process.env.WORKER_DB_POOL_MAX, 25);
-const WORKER_DB_POOL_MIN = Math.min(parseEnvInt(process.env.WORKER_DB_POOL_MIN, 2, true), WORKER_DB_POOL_MAX);
-const WORKER_DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_IDLE_TIMEOUT_MS, 90000);
+const WORKER_DB_POOL_MAX = parseEnvInt(process.env.WORKER_DB_POOL_MAX, 30);
+const WORKER_DB_POOL_MIN = Math.min(parseEnvInt(process.env.WORKER_DB_POOL_MIN, 3, true), WORKER_DB_POOL_MAX);
+const WORKER_DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_IDLE_TIMEOUT_MS, 30000);
 const WORKER_DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_CONN_TIMEOUT_MS, 30000);
 const WORKER_DB_POOL_MAX_USES = parseEnvInt(process.env.WORKER_DB_POOL_MAX_USES, 10000);
 const WORKER_DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.WORKER_DB_POOL_KEEP_ALIVE_MS, 10000);

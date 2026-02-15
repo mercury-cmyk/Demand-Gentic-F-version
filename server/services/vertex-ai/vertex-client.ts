@@ -11,6 +11,7 @@
  */
 
 import { VertexAI, HarmCategory, HarmBlockThreshold, GenerativeModel, Part, Content } from "@google-cloud/vertexai";
+import { GoogleAuth } from "google-auth-library";
 
 // ==================== CONFIGURATION ====================
 
@@ -23,6 +24,7 @@ export interface VertexAIConfig {
     reasoning: string;     // gemini-2.0-flash-thinking for complex reasoning
     embedding: string;     // text-embedding-004
     multimodal: string;    // gemini-1.5-pro-vision
+    image: string;         // imagen-3.0-generate-001
   };
   // Safety settings
   safetySettings: {
@@ -38,7 +40,7 @@ const defaultConfig: VertexAIConfig = {
   location: process.env.VERTEX_AI_LOCATION || "us-central1",
   models: {
     chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash-001",
-    reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-2.0-flash-thinking-exp-01-21",
+    reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-3-pro-preview",
     embedding: process.env.VERTEX_EMBEDDING_MODEL || "text-embedding-004",
     multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-2.0-flash-001",
     image: process.env.VERTEX_IMAGE_MODEL || "imagen-3.0-generate-001",
@@ -165,14 +167,16 @@ export async function generateImage(prompt: string, aspectRatio: string = "16:9"
   
   try {
     // Imagen 3 request format
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        // @ts-ignore - Vertex AI SDK types might not have implicit support for specific imagen params yet in basic config
-        sampleCount: 1,
-        aspectRatio: aspectRatio,
-      } as any
-    });
+    const result = await withRetry(() =>
+      model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          // @ts-ignore - Vertex AI SDK types might not have implicit support for specific imagen params yet in basic config
+          sampleCount: 1,
+          aspectRatio: aspectRatio,
+        } as any
+      })
+    );
 
     const response = result.response;
     // Imagen returns base64 string in the response candidates usually under a specific structure or directly as bytes
@@ -191,6 +195,39 @@ export async function generateImage(prompt: string, aspectRatio: string = "16:9"
     console.error(`[VertexAI] Image generation failed:`, error);
     return null;
   }
+}
+
+// ==================== RETRY HELPER ====================
+
+/**
+ * Retry with exponential backoff for Vertex AI rate limit / quota errors
+ */
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const msg = error?.message || error?.toString?.() || "";
+      const code = error?.code;
+      const isRetryable =
+        code === 8 ||
+        code === 429 ||
+        msg.includes("RESOURCE_EXHAUSTED") ||
+        msg.includes("Rate exceeded") ||
+        msg.includes("Quota exceeded") ||
+        msg.includes("429") ||
+        msg.includes("Too Many Requests");
+
+      if (!isRetryable || attempt === maxRetries) {
+        throw error;
+      }
+
+      const backoffMs = Math.min(2000 * Math.pow(2, attempt) + Math.random() * 1000, 60000);
+      console.warn(`[VertexAI] Rate limited (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${Math.round(backoffMs)}ms...`);
+      await new Promise((r) => setTimeout(r, backoffMs));
+    }
+  }
+  throw new Error("Unreachable");
 }
 
 // ==================== GENERATION UTILITIES ====================
@@ -231,10 +268,12 @@ export async function generateText(
     generationConfig.responseMimeType = "application/json";
   }
 
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig,
-  });
+  const result = await withRetry(() =>
+    model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig,
+    })
+  );
 
   const response = result.response;
   const text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -314,10 +353,12 @@ export async function chat(
     generationConfig.responseMimeType = "application/json";
   }
 
-  const result = await model.generateContent({
-    contents,
-    generationConfig,
-  });
+  const result = await withRetry(() =>
+    model.generateContent({
+      contents,
+      generationConfig,
+    })
+  );
 
   const response = result.response;
   const text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -361,10 +402,12 @@ export async function* streamChat(
     topP: options.topP ?? 0.95,
   };
 
-  const streamingResult = await model.generateContentStream({
-    contents,
-    generationConfig,
-  });
+  const streamingResult = await withRetry(() =>
+    model.generateContentStream({
+      contents,
+      generationConfig,
+    })
+  );
 
   for await (const chunk of streamingResult.stream) {
     const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -375,32 +418,183 @@ export async function* streamChat(
 }
 
 /**
- * Complex reasoning with thinking model
+ * Complex reasoning with Gemini 3 Deep Think (thinking_level: HIGH)
+ * Uses REST API directly since @google-cloud/vertexai SDK doesn't support thinkingConfig yet.
+ * Gemini 3 models require the global endpoint.
  */
+let _reasoningAuth: GoogleAuth | null = null;
+
 export async function reason(
   prompt: string,
   options: GenerationOptions = {}
 ): Promise<{ thinking: string; answer: string }> {
-  const model = getReasoningModel();
+  const modelId = currentConfig.models.reasoning;
+  const isGemini3 = modelId.includes("gemini-3");
 
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: options.temperature ?? 0.3,
-      maxOutputTokens: options.maxTokens ?? 16384,
-      topP: options.topP ?? 0.95,
-    },
+  // For older thinking models (gemini-2.x), use the SDK path
+  if (!isGemini3) {
+    const model = getReasoningModel();
+    const result = await withRetry(() =>
+      model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: options.temperature ?? 0.3,
+          maxOutputTokens: options.maxTokens ?? 16384,
+          topP: options.topP ?? 0.95,
+        },
+      })
+    );
+    const response = result.response;
+    const fullText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const thinkingMatch = fullText.match(/<thinking>([\s\S]*?)<\/thinking>/);
+    const thinking = thinkingMatch ? thinkingMatch[1].trim() : "";
+    const answer = fullText.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
+    return { thinking, answer };
+  }
+
+  // Gemini 3 Deep Think via REST API (global endpoint, thinkingConfig)
+  if (!_reasoningAuth) {
+    _reasoningAuth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+  }
+  const accessToken = await _reasoningAuth.getAccessToken();
+
+  // Gemini 3 requires the global endpoint
+  const endpoint = `https://aiplatform.googleapis.com/v1/projects/${currentConfig.projectId}/locations/global/publishers/google/models/${modelId}:generateContent`;
+
+  const data: any = await withRetry(async () => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: options.temperature ?? 0.3,
+          maxOutputTokens: options.maxTokens ?? 16384,
+          topP: options.topP ?? 0.95,
+          thinkingConfig: {
+            thinkingLevel: "HIGH",
+          },
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      const err: any = new Error(`Gemini 3 Deep Think request failed: ${res.status} ${res.statusText}`);
+      err.code = res.status;
+      throw err;
+    }
+
+    return res.json();
   });
 
-  const response = result.response;
-  const fullText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  // Gemini 3 returns thinking in separate parts with "thought" flag
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  let thinking = "";
+  let answer = "";
 
-  // Parse thinking and answer sections
-  const thinkingMatch = fullText.match(/<thinking>([\s\S]*?)<\/thinking>/);
-  const thinking = thinkingMatch ? thinkingMatch[1].trim() : "";
-  const answer = fullText.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
+  for (const part of parts) {
+    if (part.thought) {
+      thinking += (part.text || "") + "\n";
+    } else {
+      answer += (part.text || "");
+    }
+  }
 
-  return { thinking, answer };
+  // Fallback: if no thought parts, try legacy <thinking> tag parsing
+  if (!thinking && answer) {
+    const thinkingMatch = answer.match(/<thinking>([\s\S]*?)<\/thinking>/);
+    if (thinkingMatch) {
+      thinking = thinkingMatch[1].trim();
+      answer = answer.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
+    }
+  }
+
+  return { thinking: thinking.trim(), answer: answer.trim() };
+}
+
+/**
+ * Deep analysis with Gemini 3 Deep Think that returns structured JSON.
+ * Primary model for all deep reasoning/analysis endpoints.
+ * Falls back to generateJSON (Gemini Flash) if Deep Think is unavailable.
+ */
+export async function deepAnalyzeJSON<T>(
+  prompt: string,
+  options: GenerationOptions = {}
+): Promise<T> {
+  const modelId = currentConfig.models.reasoning;
+  const isGemini3 = modelId.includes("gemini-3");
+
+  // Fallback to standard generateJSON if not on Gemini 3
+  if (!isGemini3) {
+    return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
+  }
+
+  if (!_reasoningAuth) {
+    _reasoningAuth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+  }
+  const accessToken = await _reasoningAuth.getAccessToken();
+  const endpoint = `https://aiplatform.googleapis.com/v1/projects/${currentConfig.projectId}/locations/global/publishers/google/models/${modelId}:generateContent`;
+
+  let data: any;
+  try {
+    data = await withRetry(async () => {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: options.temperature ?? 0.2,
+            maxOutputTokens: options.maxTokens ?? 8192,
+            topP: options.topP ?? 0.95,
+            responseMimeType: "application/json",
+            thinkingConfig: {
+              thinkingLevel: "HIGH",
+            },
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const err: any = new Error(`Gemini 3 Deep Think JSON request failed: ${res.status} ${res.statusText}`);
+        err.code = res.status;
+        throw err;
+      }
+
+      return res.json();
+    });
+  } catch (error: any) {
+    console.warn(`[VertexAI] Deep Think request failed (${error.message}). Falling back to standard Gemini Flash model.`);
+    return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
+  }
+
+  // Extract the non-thought text part (the JSON answer)
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  let jsonText = "";
+  for (const part of parts) {
+    if (!part.thought && part.text) {
+      jsonText += part.text;
+    }
+  }
+
+  // Parse JSON
+  try {
+    let cleaned = jsonText.trim();
+    if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+    if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+    if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+    return JSON.parse(cleaned.trim());
+  } catch (error) {
+    console.error("[VertexAI] Deep Think JSON parse failed, falling back to generateJSON:", jsonText.substring(0, 200));
+    // Fallback to standard generateJSON
+    return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
+  }
 }
 
 // ==================== EMBEDDINGS ====================
@@ -422,20 +616,25 @@ export async function generateEmbeddings(
     task_type: taskType,
   }));
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // Auth handled by ADC in Cloud Run
-    },
-    body: JSON.stringify({ instances }),
+  const data = await withRetry(async () => {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Auth handled by ADC in Cloud Run
+      },
+      body: JSON.stringify({ instances }),
+    });
+
+    if (!response.ok) {
+      const err: any = new Error(`Embeddings request failed: ${response.statusText}`);
+      err.code = response.status;
+      throw err;
+    }
+
+    return response.json();
   });
 
-  if (!response.ok) {
-    throw new Error(`Embeddings request failed: ${response.statusText}`);
-  }
-
-  const data = await response.json();
   return data.predictions.map((p: any) => p.embeddings.values);
 }
 
@@ -484,7 +683,7 @@ export async function generateWithFunctions(
 
   const tools = [{
     functionDeclarations: functions,
-  }];
+  }] as any;
 
   const contents: Content[] = [];
 
@@ -504,14 +703,16 @@ export async function generateWithFunctions(
     parts: [{ text: userMessage }],
   });
 
-  const result = await model.generateContent({
-    contents,
-    tools,
-    generationConfig: {
-      temperature: options.temperature ?? 0.3,
-      maxOutputTokens: options.maxTokens ?? 4096,
-    },
-  });
+  const result = await withRetry(() =>
+    model.generateContent({
+      contents,
+      tools,
+      generationConfig: {
+        temperature: options.temperature ?? 0.3,
+        maxOutputTokens: options.maxTokens ?? 4096,
+      },
+    })
+  );
 
   const response = result.response;
   const candidate = response.candidates?.[0];
@@ -589,6 +790,7 @@ export default {
   getImageModel,
   generateText,
   generateJSON,
+  deepAnalyzeJSON,
   chat,
   streamChat,
   reason,

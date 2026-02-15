@@ -1,6 +1,7 @@
 /**
  * Extract dominant colors from an image URL using Canvas.
- * Runs entirely client-side — no server round-trip needed.
+ * Tries direct CORS loading first, then falls back to a server-side proxy
+ * for external images that don't send CORS headers.
  */
 
 interface ExtractedColor {
@@ -20,6 +21,35 @@ function loadImage(url: string): Promise<HTMLImageElement> {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Failed to load image. Ensure the URL is accessible.'));
     img.src = url;
+  });
+}
+
+/**
+ * Fetch the image via server-side proxy (bypasses CORS).
+ * Returns a data URI that can be loaded into an Image element.
+ */
+async function loadImageViaProxy(url: string): Promise<HTMLImageElement> {
+  const token = localStorage.getItem('clientPortalToken');
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const proxyUrl = `/api/client-portal/settings/image-proxy?url=${encodeURIComponent(url)}`;
+  const res = await fetch(proxyUrl, { headers });
+
+  if (!res.ok) {
+    throw new Error(`Proxy fetch failed: ${res.status}`);
+  }
+
+  const data = await res.json();
+  if (!data.dataUri) {
+    throw new Error('No data URI returned from proxy');
+  }
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to decode proxied image'));
+    img.src = data.dataUri;
   });
 }
 
@@ -66,15 +96,10 @@ function isNeutral(r: number, g: number, b: number): boolean {
 }
 
 /**
- * Extract the top N dominant colors from an image URL.
- * Returns sorted by frequency (most dominant first).
+ * Extract pixel colors from an image element using canvas.
+ * May throw SecurityError if the image is cross-origin and tainted.
  */
-export async function extractColorsFromImage(
-  imageUrl: string,
-  maxColors: number = 6,
-): Promise<ExtractedColor[]> {
-  const img = await loadImage(imageUrl);
-
+function extractPixelColors(img: HTMLImageElement, maxColors: number): ExtractedColor[] {
   // Scale down for performance (max 100px on longest side)
   const scale = Math.min(1, 100 / Math.max(img.width, img.height));
   const w = Math.round(img.width * scale);
@@ -86,6 +111,7 @@ export async function extractColorsFromImage(
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(img, 0, 0, w, h);
 
+  // This line throws SecurityError if the canvas is tainted by CORS
   const imageData = ctx.getImageData(0, 0, w, h);
   const pixels = imageData.data;
 
@@ -139,4 +165,29 @@ export async function extractColorsFromImage(
     count: c.count,
     percentage: Math.round((c.count / total) * 100),
   }));
+}
+
+/**
+ * Extract the top N dominant colors from an image URL.
+ * Returns sorted by frequency (most dominant first).
+ *
+ * Tries direct CORS loading first. If the image server doesn't allow
+ * cross-origin access (canvas becomes tainted), falls back to a
+ * server-side proxy that returns the image as a base64 data URI.
+ */
+export async function extractColorsFromImage(
+  imageUrl: string,
+  maxColors: number = 6,
+): Promise<ExtractedColor[]> {
+  // Attempt 1: Direct load with CORS
+  try {
+    const img = await loadImage(imageUrl);
+    return extractPixelColors(img, maxColors);
+  } catch {
+    // CORS blocked or image failed to load — try proxy
+  }
+
+  // Attempt 2: Server-side proxy (bypasses CORS)
+  const img = await loadImageViaProxy(imageUrl);
+  return extractPixelColors(img, maxColors);
 }

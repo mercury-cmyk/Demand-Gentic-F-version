@@ -23,6 +23,7 @@ import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
 import LandingPage from "@/pages/landing";
+import UkefLandingPage from "@/pages/ukef-landing";
 import AboutPage from "@/pages/about";
 import PrivacyPolicyPage from "@/pages/privacy-policy";
 import TermsOfServicePage from "@/pages/terms-of-service";
@@ -67,11 +68,13 @@ import UnifiedIntelligencePage from "@/pages/unified-intelligence";
 
 import PotentialLeadsPage from "@/pages/potential-leads";
 import DispositionReanalysisPage from "@/pages/disposition-reanalysis";
+import ShowcaseCallsPage from "@/pages/showcase-calls";
 
 // Lazy-loaded components
 const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
 import ConversationQualityPage from "@/pages/conversation-quality";
+import UnlicensedDepartmentsPage from "@/pages/unlicensed-departments";
 import EngagementAnalyticsPage from "@/pages/engagement-analytics";
 import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
@@ -388,6 +391,7 @@ function AuthenticatedApp() {
               <Route path="/leads/:id" component={LeadDetailPage} />
               <Route path="/lead-forms" component={LeadFormsPage} />
               <Route path="/conversation-quality" component={ConversationQualityPage} />
+              <Route path="/unlicensed-departments" component={UnlicensedDepartmentsPage} />
 
               {/* Content & Marketing */}
               <Route path="/content-studio" component={ContentStudioPage} />
@@ -414,6 +418,7 @@ function AuthenticatedApp() {
               <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
               <Route path="/unified-intelligence/potential-leads" component={PotentialLeadsPage} />
               <Route path="/disposition-reanalysis" component={DispositionReanalysisPage} />
+              <Route path="/showcase-calls" component={ShowcaseCallsPage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/ai-call-analytics">
                 <Redirect to="/call-reports?tab=ai" />
@@ -593,6 +598,11 @@ function Router() {
       </Route>
       <Route path="/welcome">
         <LandingPage />
+      </Route>
+      
+      {/* UK Export Finance Campaign */}
+      <Route path="/uk-export-finance/whitepaper">
+        <UkefLandingPage />
       </Route>
 
       {/* Static public pages */}

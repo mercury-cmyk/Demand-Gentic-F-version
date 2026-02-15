@@ -40,6 +40,7 @@ import pipelineRouter from './routes/pipeline-routes';
 import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
 import generativeStudioRouter from './routes/generative-studio-routes';
 import dispositionIntelligenceRouter from './routes/disposition-intelligence-routes';
+import showcaseCallsRouter from './routes/showcase-calls-routes';
 import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes';
 import dispositionDeepReanalysisRouter from './routes/disposition-deep-reanalysis-routes';
 import queueIntelligenceRouter from './routes/queue-intelligence-routes';
@@ -65,6 +66,8 @@ import clientPortalRouter from './routes/client-portal';
 import clientPortalQualifiedLeadsRouter from './routes/client-portal-qualified-leads';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
+import unlicensedConvQualityRouter from './routes/unlicensed-conversation-quality-routes';
+import unlicensedLeadQualityRouter from './routes/unlicensed-lead-quality-routes';
 import virtualAgentsRouter from './routes/virtual-agents';
 import cloudLogsRouter from './routes/cloud-logs-routes';
 import numberPoolRouter from './routes/number-pool';
@@ -77,6 +80,7 @@ import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
 import problemIntelligenceRouter from './routes/problem-intelligence-routes';
+import productIntelligenceRouter from './routes/product-intelligence-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
 import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
@@ -103,7 +107,7 @@ import campaignOpsRouter from './routes/campaign-ops-routes';
 import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import adminAgenticCampaignsRouter from './routes/admin-agentic-campaigns';
-import { getCallSessionRecordingUrl } from "./services/recording-storage";
+// recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
 import {
   apiLimiter,
@@ -667,12 +671,23 @@ async function ensureMailboxTokens(userId: string) {
  * Deduplicates, filters for accountId presence, validates callable phones,
  * and returns contacts ready to enqueue — excluding any already in the queue.
  */
+interface QueueResolveStats {
+  rawTotal: number;
+  unique: number;
+  droppedNoAccount: number;
+  droppedNoPhone: number;
+  alreadyQueued: number;
+  readyToEnqueue: number;
+  listBreakdown: Array<{ listId: string; listName: string; entityType: string; recordCount: number; contactsResolved: number }>;
+}
+
 async function resolveAudienceContactsForQueue(
   campaignId: string,
   audienceRefs: any,
   logPrefix: string = '[Queue Populate]'
-): Promise<Array<{ contactId: string; accountId: string; priority: number }>> {
+): Promise<{ contacts: Array<{ contactId: string; accountId: string; priority: number }>; stats: QueueResolveStats }> {
   let audienceContacts: any[] = [];
+  const listBreakdown: QueueResolveStats['listBreakdown'] = [];
 
   // 1. Resolve contacts from filterGroup (Advanced Filters)
   if (audienceRefs.filterGroup) {
@@ -692,6 +707,7 @@ async function resolveAudienceContactsForQueue(
       const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
       if (list && list.recordIds && list.recordIds.length > 0) {
         const batchSize = 1000;
+        const beforeCount = audienceContacts.length;
 
         if (list.entityType === 'account') {
           // Account-type list: recordIds are account IDs — resolve to contacts belonging to those accounts
@@ -703,7 +719,9 @@ async function resolveAudienceContactsForQueue(
               .where(inArray(contactsTable.accountId, batch));
             audienceContacts.push(...accountContacts);
           }
-          console.log(`${logPrefix} Resolved ${audienceContacts.length} contacts from account-type list ${listId}`);
+          const resolved = audienceContacts.length - beforeCount;
+          console.log(`${logPrefix} Resolved ${resolved} contacts from account-type list ${listId}`);
+          listBreakdown.push({ listId, listName: list.name || listId, entityType: 'account', recordCount: list.recordIds.length, contactsResolved: resolved });
         } else {
           // Contact-type list: recordIds are contact IDs
           for (let i = 0; i < list.recordIds.length; i += batchSize) {
@@ -711,8 +729,12 @@ async function resolveAudienceContactsForQueue(
             const listContacts = await storage.getContactsByIds(batch);
             audienceContacts.push(...listContacts);
           }
-          console.log(`${logPrefix} Resolved ${list.recordIds.length} contacts from contact-type list ${listId}`);
+          const resolved = audienceContacts.length - beforeCount;
+          console.log(`${logPrefix} Resolved ${resolved} contacts from contact-type list ${listId}`);
+          listBreakdown.push({ listId, listName: list.name || listId, entityType: 'contact', recordCount: list.recordIds.length, contactsResolved: resolved });
         }
+      } else {
+        listBreakdown.push({ listId, listName: list?.name || listId, entityType: list?.entityType || 'unknown', recordCount: list?.recordIds?.length || 0, contactsResolved: 0 });
       }
     }
   }
@@ -739,7 +761,10 @@ async function resolveAudienceContactsForQueue(
   console.log(`${logPrefix} Audience breakdown: ${audienceContacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${skippedNoAccount} dropped: no accountId)`);
 
   if (contactsWithAccount.length === 0) {
-    return [];
+    return {
+      contacts: [],
+      stats: { rawTotal: audienceContacts.length, unique: uniqueContacts.length, droppedNoAccount: skippedNoAccount, droppedNoPhone: 0, alreadyQueued: 0, readyToEnqueue: 0, listBreakdown },
+    };
   }
 
   // 5. Phone validation: batch-fetch with account data
@@ -788,11 +813,22 @@ async function resolveAudienceContactsForQueue(
 
   console.log(`${logPrefix} SUMMARY: ${uniqueContacts.length} audience -> ${skippedNoAccount} no account -> ${skippedNoPhone} no phone -> ${alreadyQueued} already queued -> ${newContacts.length} ready to enqueue`);
 
-  return newContacts.map(row => ({
-    contactId: row.contacts.id,
-    accountId: row.contacts.accountId!,
-    priority: 0,
-  }));
+  return {
+    contacts: newContacts.map(row => ({
+      contactId: row.contacts.id,
+      accountId: row.contacts.accountId!,
+      priority: 0,
+    })),
+    stats: {
+      rawTotal: audienceContacts.length,
+      unique: uniqueContacts.length,
+      droppedNoAccount: skippedNoAccount,
+      droppedNoPhone: skippedNoPhone,
+      alreadyQueued,
+      readyToEnqueue: newContacts.length,
+      listBreakdown,
+    },
+  };
 }
 
 export function registerRoutes(app: Express) {
@@ -5063,6 +5099,106 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // Batch stats for all campaigns (prevents 429 rate limiting from N parallel requests)
+  app.post("/api/campaigns/batch-stats", requireAuth, async (req, res) => {
+    try {
+      const { campaignIds, types } = req.body as { campaignIds: string[]; types: Record<string, { isCall: boolean; isEmail: boolean }> };
+      if (!campaignIds?.length) return res.json({});
+
+      const results: Record<string, any> = {};
+
+      // Process campaigns in parallel (server-side, single request from client)
+      await Promise.all(campaignIds.map(async (campaignId) => {
+        const entry: any = { call: null, email: null };
+        const info = types?.[campaignId] || { isCall: false, isEmail: false };
+
+        try {
+          if (info.isEmail) {
+            const [sentResult] = await db
+              .select({ count: sql<number>`COUNT(*)::int` })
+              .from(campaignQueue)
+              .where(eq(campaignQueue.campaignId, campaignId));
+            const totalSent = sentResult?.count || 0;
+
+            const sendIdSubquery = sql`(SELECT id FROM email_sends WHERE campaign_id = ${campaignId})`;
+            const [opensResult] = await db.execute(sql`
+              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
+              FROM email_opens WHERE message_id IN ${sendIdSubquery}
+            `).then(r => r.rows as any[]);
+            const [clicksResult] = await db.execute(sql`
+              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
+              FROM email_link_clicks WHERE message_id IN ${sendIdSubquery}
+            `).then(r => r.rows as any[]);
+
+            entry.email = {
+              totalRecipients: totalSent,
+              delivered: totalSent,
+              opens: opensResult?.unique || 0,
+              clicks: clicksResult?.unique || 0,
+              unsubscribes: 0,
+              spamComplaints: 0,
+            };
+          }
+
+          if (info.isCall) {
+            const queueStats = await storage.getCampaignQueueStats(campaignId);
+
+            const connectedDispositions = [
+              'connected', 'qualified', 'callback-requested', 'not_interested',
+              'dnc-request', 'meeting_booked', 'interested', 'do_not_call', 'wrong_number'
+            ];
+            const [humanCallStats] = await db
+              .select({
+                callsMade: sql<number>`COUNT(*)::int`,
+                callsConnected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text IN (${sql.join(connectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
+                leadsQualified: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'qualified' THEN 1 END)::int`,
+                dncRequests: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'dnc-request' THEN 1 END)::int`,
+                notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'not_interested' THEN 1 END)::int`,
+                noAnswer: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'no-answer' THEN 1 END)::int`,
+                voicemail: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'voicemail' THEN 1 END)::int`,
+              })
+              .from(callAttempts)
+              .where(eq(callAttempts.campaignId, campaignId));
+
+            const aiConnectedDispositions = ['qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review'];
+            const [aiCallStats] = await db
+              .select({
+                callsMade: sql<number>`COUNT(*)::int`,
+                callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(aiConnectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
+                leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'qualified_lead' THEN 1 END)::int`,
+                dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'do_not_call' THEN 1 END)::int`,
+                notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
+                noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' OR ${callSessions.status} IN ('no_answer', 'failed', 'busy') THEN 1 END)::int`,
+                voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
+              })
+              .from(callSessions)
+              .where(eq(callSessions.campaignId, campaignId));
+
+            entry.call = {
+              contactsInQueue: queueStats.queued,
+              callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
+              callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
+              leadsQualified: (humanCallStats?.leadsQualified || 0) + (aiCallStats?.leadsQualified || 0),
+              dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
+              notInterested: (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0),
+              noAnswer: (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0),
+              voicemail: (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0),
+            };
+          }
+        } catch (err) {
+          console.error(`[BATCH-STATS] Error for campaign ${campaignId}:`, err);
+        }
+
+        results[campaignId] = entry;
+      }));
+
+      res.json(results);
+    } catch (error) {
+      console.error('[BATCH-STATS] Error:', error);
+      res.status(500).json({ message: "Failed to fetch batch stats" });
+    }
+  });
+
   // Get email campaign events (contact-level log)
   app.get("/api/campaigns/:id/email-events", requireAuth, async (req, res) => {
     try {
@@ -5310,7 +5446,7 @@ export function registerRoutes(app: Express) {
       // Auto-populate queue from audience if defined (all campaign types with audience)
       if (campaign.audienceRefs) {
         try {
-          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+          const { contacts: contactsToEnqueue, stats: queueStats } = await resolveAudienceContactsForQueue(
             campaign.id,
             campaign.audienceRefs as any,
             '[Campaign Creation]'
@@ -5320,7 +5456,7 @@ export function registerRoutes(app: Express) {
             const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
             console.log(`[Campaign Creation] Auto-populated ${enqueued} contacts to queue for campaign ${campaign.id}`);
           } else {
-            console.log(`[Campaign Creation] No eligible contacts found for campaign ${campaign.id}`);
+            console.log(`[Campaign Creation] No eligible contacts found for campaign ${campaign.id} (stats: ${JSON.stringify(queueStats)})`);
           }
         } catch (queueErr) {
           console.error(`[Campaign Creation] Queue auto-populate error (non-fatal):`, queueErr);
@@ -5479,7 +5615,7 @@ export function registerRoutes(app: Express) {
           if (audienceChanged || (statusChangedToActive && queuedCount === 0)) {
             console.log(`[Campaign Update] Auto-populating queue (audienceChanged=${audienceChanged}, statusActive=${statusChangedToActive}, currentQueued=${queuedCount})`);
 
-            const contactsToEnqueue = await resolveAudienceContactsForQueue(
+            const { contacts: contactsToEnqueue } = await resolveAudienceContactsForQueue(
               req.params.id,
               campaign.audienceRefs as any,
               '[Campaign Update]'
@@ -5825,7 +5961,7 @@ export function registerRoutes(app: Express) {
       let agentQueueAdded = 0;
       if (updatedCampaign && updatedCampaign.status !== 'completed' && updatedCampaign.status !== 'cancelled') {
         try {
-          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+          const { contacts: contactsToEnqueue } = await resolveAudienceContactsForQueue(
             req.params.id,
             updatedAudienceRefs,
             '[Add Audience Lists]'
@@ -6018,7 +6154,7 @@ export function registerRoutes(app: Express) {
       // === AUTO-POPULATE QUEUE ON LAUNCH (all campaign types with audience) ===
       if (updated.audienceRefs) {
         try {
-          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+          const { contacts: contactsToEnqueue, stats: queueStats } = await resolveAudienceContactsForQueue(
             req.params.id,
             updated.audienceRefs as any,
             '[LAUNCH CAMPAIGN]'
@@ -6028,11 +6164,31 @@ export function registerRoutes(app: Express) {
             const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
             console.log(`[LAUNCH CAMPAIGN] Auto-populated ${enqueued} contacts to queue`);
           } else {
-            console.log(`[LAUNCH CAMPAIGN] No new contacts to enqueue (all already queued or no eligible contacts)`);
+            console.log(`[LAUNCH CAMPAIGN] No new contacts to enqueue — stats: ${JSON.stringify(queueStats)}`);
           }
         } catch (queueErr) {
           // Non-fatal: campaign is launched, queue population is best-effort
           console.error(`[LAUNCH CAMPAIGN] Queue auto-populate error (non-fatal):`, queueErr);
+        }
+      }
+
+      // === TRIGGER EMAIL SEND FOR EMAIL CAMPAIGNS ===
+      if (updated.type === 'email' && updated.emailSubject && updated.emailHtmlContent) {
+        try {
+          console.log(`[LAUNCH CAMPAIGN] Email campaign detected — triggering bulk email send`);
+          const { sendCampaignEmails } = await import("./services/bulk-email-service");
+          const sendResult = await sendCampaignEmails(req.params.id);
+          console.log(`[LAUNCH CAMPAIGN] Email send result: ${sendResult.sent} sent, ${sendResult.failed} failed, ${sendResult.suppressed} suppressed`);
+
+          // Mark as completed if all sent successfully
+          if (sendResult.failed === 0 && sendResult.sent > 0) {
+            await db
+              .update(campaigns)
+              .set({ status: 'completed', updatedAt: new Date() })
+              .where(eq(campaigns.id, req.params.id));
+          }
+        } catch (sendErr) {
+          console.error(`[LAUNCH CAMPAIGN] Email send error (non-fatal, campaign is active):`, sendErr);
         }
       }
 
@@ -6557,7 +6713,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Use shared helper: resolves audience, deduplicates, phone-validates, skips already-queued
-      const contactsToEnqueue = await resolveAudienceContactsForQueue(
+      const { contacts: contactsToEnqueue, stats } = await resolveAudienceContactsForQueue(
         req.params.id,
         audienceRefs,
         '[Queue Populate]'
@@ -6583,9 +6739,12 @@ export function registerRoutes(app: Express) {
       }
 
       res.json({
-        message: `Successfully enqueued ${enqueuedCount} contacts`,
+        message: enqueuedCount > 0
+          ? `Successfully enqueued ${enqueuedCount} contacts`
+          : `No contacts could be enqueued. ${stats.unique} contacts found in lists → ${stats.droppedNoAccount} dropped (no account linked), ${stats.droppedNoPhone} dropped (no phone number), ${stats.alreadyQueued} already in queue.`,
         enqueuedCount,
         queueItemsAssigned: assignResult.assigned,
+        stats,
       });
     } catch (error) {
       console.error('Queue population error:', error);
@@ -8739,20 +8898,31 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Sender profile not found" });
       }
 
-      const { sendTestEmail } = await import("./services/bulk-email-service");
-      const result = await sendTestEmail({
-        to: Array.isArray(to) ? to : [to],
-        subject,
-        html,
-        from: profile.fromEmail,
-        fromName: profile.fromName,
-        replyTo: profile.replyTo || profile.replyToEmail || profile.fromEmail
-      });
+      const { mercuryEmailService } = await import("./services/mercury");
+      const toEmails = Array.isArray(to) ? to : [to];
+
+      let sent = 0;
+      let lastError: string | undefined;
+      for (const recipient of toEmails) {
+        const result = await mercuryEmailService.sendDirect({
+          to: recipient,
+          subject,
+          html,
+          fromEmail: profile.fromEmail,
+          fromName: profile.fromName || undefined,
+          replyTo: profile.replyTo || profile.replyToEmail || profile.fromEmail
+        });
+        if (result.success) {
+          sent++;
+        } else {
+          lastError = result.error;
+        }
+      }
 
       res.json({
-        success: result.success,
-        sent: result.sent,
-        message: `Test email sent to ${result.sent} recipient(s)`
+        success: sent > 0,
+        sent,
+        message: sent > 0 ? `Test email sent to ${sent} recipient(s)` : (lastError || "Failed to send test email")
       });
     } catch (error: any) {
       console.error("Failed to send test email:", error);
@@ -8910,35 +9080,35 @@ export function registerRoutes(app: Express) {
         }
       }
 
-      // Fallback to mailgun domain if no from address configured
-      if (!from && process.env.MAILGUN_DOMAIN) {
-        from = `noreply@${process.env.MAILGUN_DOMAIN}`;
-      }
+      // Use Mercury email service (same SMTP provider as admin)
+      const { mercuryEmailService } = await import("./services/mercury");
 
-      if (!from) {
-        return res.status(400).json({ 
-          message: "No sender email configured. Please set DEFAULT_FROM_EMAIL or configure a sender profile." 
+      let sent = 0;
+      let lastError: string | undefined;
+      for (const recipient of toEmails) {
+        const result = await mercuryEmailService.sendDirect({
+          to: recipient,
+          subject,
+          html,
+          fromEmail: from || undefined,
+          fromName,
+          replyTo
         });
+        if (result.success) {
+          sent++;
+        } else {
+          lastError = result.error;
+        }
       }
 
-      const { sendTestEmail } = await import("./services/bulk-email-service");
-      const result = await sendTestEmail({
-        to: toEmails,
-        subject,
-        html,
-        from,
-        fromName,
-        replyTo
-      });
-
-      console.log(`[Test Email] Sent to ${toEmails.join(", ")} - Success: ${result.success}, Sent: ${result.sent}`);
+      console.log(`[Test Email] Sent to ${toEmails.join(", ")} - Success: ${sent > 0}, Sent: ${sent}`);
 
       res.json({
-        success: result.success,
-        sent: result.sent,
-        message: result.success 
-          ? `Test email sent to ${result.sent} recipient(s)` 
-          : "Failed to send test email"
+        success: sent > 0,
+        sent,
+        message: sent > 0
+          ? `Test email sent to ${sent} recipient(s)`
+          : (lastError || "Failed to send test email")
       });
     } catch (error: any) {
       console.error("[Test Email] Failed to send:", error);
@@ -14393,7 +14563,8 @@ Provide JSON response with:
   // ==================== PROBLEM INTELLIGENCE & ORGANIZATIONS ====================
 
   app.use("/api", problemIntelligenceRouter);
-  
+  app.use("/api", productIntelligenceRouter);
+
   // ==================== ORGANIZATION INTELLIGENCE INJECTION MODEL ====================
   // Voice Agent OI Modes: use_existing | fresh_research | none
   app.use("/api/org-intelligence-injection", orgIntelligenceInjectionRouter);
@@ -14783,9 +14954,14 @@ Provide JSON response with:
   app.use(pipelineIntelligenceRouter);
   app.use('/api/generative-studio', generativeStudioRouter);
   app.use('/api/disposition-intelligence', dispositionIntelligenceRouter);
+  app.use('/api/showcase-calls', showcaseCallsRouter);
   app.use('/api/disposition-reanalysis', dispositionReanalysisRouter);
   app.use('/api/disposition-deep-reanalysis', dispositionDeepReanalysisRouter);
   app.use(queueIntelligenceRouter);
+
+  // ==================== UNLICENSED DEPARTMENTS ====================
+  app.use('/api/unlicensed', unlicensedConvQualityRouter);
+  app.use('/api/unlicensed', unlicensedLeadQualityRouter);
 
   // AI Project Creation
   app.use('/api/ai', aiProjectRouter);
@@ -15485,8 +15661,9 @@ Provide JSON response with:
   // Get all conversations for QA review (call sessions AND test calls with transcripts)
   app.get("/api/qa/conversations", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { campaignId, type, search, source, limit = '100' } = req.query;
+      const { campaignId, type, search, source, limit = '100', dateFrom, dateTo, sortBy } = req.query;
       const limitNum = Math.min(500, Math.max(1, parseInt(limit as string, 10)));
+      const sortMode = (sortBy as string) || 'date'; // 'date' | 'score'
 
       // We'll fetch both call_sessions and test_calls, then combine
       const conversations: any[] = [];
@@ -15495,6 +15672,15 @@ Provide JSON response with:
       const sessionConditions: any[] = [];
       if (campaignId && campaignId !== 'all') {
         sessionConditions.push(eq(callSessions.campaignId, campaignId as string));
+      }
+      if (dateFrom) {
+        sessionConditions.push(gte(callSessions.startedAt, new Date(dateFrom as string)));
+      }
+      if (dateTo) {
+        // End of the selected day
+        const endDate = new Date(dateTo as string);
+        endDate.setHours(23, 59, 59, 999);
+        sessionConditions.push(lte(callSessions.startedAt, endDate));
       }
       if (search) {
         const searchPattern = `%${search}%`;
@@ -15546,20 +15732,8 @@ Provide JSON response with:
           .orderBy(desc(callSessions.startedAt))
           .limit(limitNum);
 
-        // Enhance with signed recording URLs (using sessionsQuery)
-        const sessions = await Promise.all(sessionsQuery.map(async (s) => {
-          let recordingUrl = s.recordingUrl;
-          // Always try to refresh URL if S3 Key exists OR if we have a recordingUrl (it might be expired Telnyx URL)
-          if (s.recordingS3Key || s.recordingUrl) {
-            try {
-              const result = await getCallSessionRecordingUrl(s.id, s.recordingUrl);
-              recordingUrl = result.url;
-            } catch (e) {
-              // silent fail, keep original
-            }
-          }
-          return { ...s, recordingUrl };
-        }));
+        // Use sessions directly — RecordingPlayer resolves fresh GCS/Telnyx URLs on-demand per call
+        const sessions = sessionsQuery;
 
         // Fetch quality records for sessions that lack aiAnalysis (fallback enrichment)
         const sessionsWithoutAnalysis = sessions.filter(s => !s.analysis).map(s => s.id);
@@ -15696,56 +15870,9 @@ Provide JSON response with:
           };
         };
 
-        // ===== CONSOLIDATE: Deduplicate by contact — one entry per contact (latest call) =====
-        // Group sessions by contactId (or by id if no contactId, to avoid merging unrelated unknowns)
-        const contactGroups = new Map<string, typeof sessions>();
+        // Transform each session into conversation format (no deduplication — show every call)
         for (const session of sessions) {
-          // Group by contactId when available; otherwise each session stays separate
-          const groupKey = session.contactId || `__solo__${session.id}`;
-          const existing = contactGroups.get(groupKey);
-          if (!existing) {
-            contactGroups.set(groupKey, [session]);
-          } else {
-            existing.push(session);
-          }
-        }
-
-        // For each contact group, use the most recent session as primary,
-        // attach call history (all session IDs + summaries)
-        for (const [, group] of contactGroups) {
-          // Already sorted by startedAt DESC from the query, so first is latest
-          const primary = group[0];
-          const conv = transformSession(primary);
-
-          // Attach call history for contacts with multiple calls
-          if (group.length > 1) {
-            (conv as any).callCount = group.length;
-            (conv as any).callHistory = group.map(s => ({
-              id: s.id,
-              status: s.status,
-              disposition: s.disposition || undefined,
-              duration: s.duration || undefined,
-              hasTranscript: !!(s.transcript),
-              hasRecording: !!(s.recordingS3Key || s.recordingUrl),
-              hasAnalysis: !!(s.analysis),
-              createdAt: s.createdAt?.toISOString() || new Date().toISOString(),
-            }));
-            // Aggregate issues from ALL calls for this contact
-            const allIssues: any[] = [];
-            for (const s of group) {
-              const aObj = s.analysis as any;
-              const qd = aObj?.conversationQuality || aObj;
-              const issues = qd?.detectedIssues || qd?.issues || aObj?.issues || [];
-              allIssues.push(...issues);
-            }
-            if (allIssues.length > 0) {
-              (conv as any).allDetectedIssues = allIssues;
-            }
-          } else {
-            (conv as any).callCount = 1;
-          }
-
-          conversations.push(conv);
+          conversations.push(transformSession(session));
         }
       }
 
@@ -15753,6 +15880,14 @@ Provide JSON response with:
       const testConditions: any[] = [];
       if (campaignId && campaignId !== 'all') {
         testConditions.push(eq(campaignTestCalls.campaignId, campaignId as string));
+      }
+      if (dateFrom) {
+        testConditions.push(gte(campaignTestCalls.createdAt, new Date(dateFrom as string)));
+      }
+      if (dateTo) {
+        const endDateTest = new Date(dateTo as string);
+        endDateTest.setHours(23, 59, 59, 999);
+        testConditions.push(lte(campaignTestCalls.createdAt, endDateTest));
       }
       testConditions.push(eq(campaignTestCalls.status, 'completed'));
       if (search) {
@@ -15856,6 +15991,7 @@ Provide JSON response with:
       let totalCallsCount = 0;
       let totalTestCallsCount = 0;
       let totalTranscriptsCount = 0;
+      let totalAnalyzedCount = 0;
       
       // Count Production Calls
       if (!source || source === 'all' || source === 'call_session') {
@@ -15879,6 +16015,16 @@ Provide JSON response with:
             // Only count if transcript is present and not empty
             .where(and(sessionWhereClause, isNotNull(callSessions.aiTranscript), sql`length(${callSessions.aiTranscript}) > 0`));
            totalTranscriptsCount = Number(transcriptsResult?.count || 0);
+
+           // Count analyzed calls (GLOBAL count, ignoring limit)
+           const [analyzedResult] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(callSessions)
+            .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+            .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+            .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+            .where(and(sessionWhereClause, isNotNull(callSessions.aiAnalysis)));
+           totalAnalyzedCount = Number(analyzedResult?.count || 0);
         }
       }
 
@@ -15900,10 +16046,21 @@ Provide JSON response with:
         withTranscripts: totalTranscriptsCount
       };
 
-      // Sort all conversations by date descending
-      conversations.sort((a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
+      // Sort conversations based on requested sort mode
+      if (sortMode === 'score') {
+        // Sort by quality score descending (best first), then by date for ties
+        conversations.sort((a, b) => {
+          const scoreA = (a.analysis as any)?.overallScore || 0;
+          const scoreB = (b.analysis as any)?.overallScore || 0;
+          if (scoreB !== scoreA) return scoreB - scoreA;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+      } else {
+        // Default: sort by date descending
+        conversations.sort((a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
 
       const withAnalysis = conversations.filter(c => c.analysis).length;
       console.log(`[QA] Returning ${conversations.length} conversations (${withAnalysis} with analysis), counts: calls=${globalCounts.calls}, testCalls=${globalCounts.testCalls}`);
@@ -15915,7 +16072,7 @@ Provide JSON response with:
       // Aggregate top challenges across all conversations for the challenges summary
       const allIssuesAcrossConversations: any[] = [];
       for (const c of limitedConversations) {
-        const issues = c.allDetectedIssues || c.detectedIssues || c.analysis?.issues || [];
+        const issues = c.detectedIssues || c.analysis?.issues || [];
         allIssuesAcrossConversations.push(...issues);
       }
       // Count issues by type and sort by frequency
@@ -15959,6 +16116,30 @@ Provide JSON response with:
         ? Math.round(analyzedConversations.reduce((sum: number, c: any) => sum + (c.analysis?.overallScore || 0), 0) / analyzedConversations.length)
         : undefined;
 
+      // Compute average quality dimension scores across all analyzed conversations
+      const dimensionSums = { engagement: 0, clarity: 0, empathy: 0, objectionHandling: 0, qualification: 0, closing: 0 };
+      let dimensionCount = 0;
+      for (const c of analyzedConversations) {
+        const dims = (c as any).analysis?.qualityDimensions;
+        if (dims) {
+          dimensionSums.engagement += dims.engagement || 0;
+          dimensionSums.clarity += dims.clarity || 0;
+          dimensionSums.empathy += dims.empathy || 0;
+          dimensionSums.objectionHandling += dims.objectionHandling || 0;
+          dimensionSums.qualification += dims.qualification || 0;
+          dimensionSums.closing += dims.closing || 0;
+          dimensionCount++;
+        }
+      }
+      const avgDimensions = dimensionCount > 0 ? {
+        engagement: Math.round(dimensionSums.engagement / dimensionCount),
+        clarity: Math.round(dimensionSums.clarity / dimensionCount),
+        empathy: Math.round(dimensionSums.empathy / dimensionCount),
+        objectionHandling: Math.round(dimensionSums.objectionHandling / dimensionCount),
+        qualification: Math.round(dimensionSums.qualification / dimensionCount),
+        closing: Math.round(dimensionSums.closing / dimensionCount),
+      } : undefined;
+
       res.json({
         conversations: limitedConversations,
         total: globalCounts.total,
@@ -15972,8 +16153,9 @@ Provide JSON response with:
           counts: globalCounts,
           // Quality-specific stats
           realConversations: realConversations.length,
-          analyzedWithScores: analyzedConversations.length,
+          analyzedWithScores: totalAnalyzedCount, // Use true global count instead of paginated count
           avgQualityScore,
+          avgDimensions,
         },
         topChallenges,
       });
@@ -16641,6 +16823,207 @@ Provide JSON response with:
     } catch (error: any) {
       console.error('[QA Bulk] Error:', error?.message || error);
       res.status(500).json({ error: 'Bulk analysis failed', message: error?.message });
+    }
+  });
+
+  // ==================== QA RECORDING URL (for playback in browser) ====================
+
+  /**
+   * GET /api/qa/recording-url/:callSessionId
+   * Resolves a playable recording URL from GCS or Telnyx for browser playback.
+   * Returns the direct audio URL so the frontend can use it in an <audio> element.
+   */
+  app.get("/api/qa/recording-url/:callSessionId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { callSessionId } = req.params;
+      const { getPlayableRecordingLink } = await import('./services/recording-link-resolver');
+      const result = await getPlayableRecordingLink(callSessionId);
+
+      if (!result || !result.url) {
+        return res.status(404).json({ error: 'No recording found', url: null });
+      }
+
+      res.json({
+        url: result.url,
+        source: result.source,
+        mimeType: result.mimeType,
+        expiresInSeconds: result.expiresInSeconds,
+      });
+    } catch (error: any) {
+      console.error('[QA Recording URL] Error:', error?.message || error);
+      res.status(500).json({ error: 'Failed to resolve recording URL', message: error?.message });
+    }
+  });
+
+  // ==================== QA SINGLE-CALL TRANSCRIBE + ANALYZE ====================
+
+  /**
+   * POST /api/qa/transcribe/:callSessionId
+   * Transcribe a single call session using Google Speech-to-Text,
+   * then optionally run conversation quality analysis on the transcript.
+   */
+  app.post("/api/qa/transcribe/:callSessionId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { callSessionId } = req.params;
+      const { analyze = true } = req.body as { analyze?: boolean };
+
+      // Get session info
+      const [session] = await db
+        .select({
+          id: callSessions.id,
+          aiTranscript: callSessions.aiTranscript,
+          aiDisposition: callSessions.aiDisposition,
+          campaignId: callSessions.campaignId,
+          contactId: callSessions.contactId,
+          durationSec: callSessions.durationSec,
+          recordingS3Key: callSessions.recordingS3Key,
+          recordingUrl: callSessions.recordingUrl,
+          telnyxRecordingId: callSessions.telnyxRecordingId,
+          campaignName: campaigns.name,
+          campaignObjective: campaigns.campaignObjective,
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          accountName: accounts.name,
+        })
+        .from(callSessions)
+        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(eq(callSessions.id, callSessionId));
+
+      if (!session) {
+        return res.status(404).json({ error: 'Call session not found' });
+      }
+
+      let transcript = session.aiTranscript;
+
+      // Step 1: Transcribe if no transcript exists
+      if (!transcript || transcript.trim().length < 50) {
+        // Resolve a playable recording URL
+        const { getPlayableRecordingLink } = await import('./services/recording-link-resolver');
+        const recordingLink = await getPlayableRecordingLink(callSessionId);
+
+        if (!recordingLink || !recordingLink.url) {
+          return res.status(400).json({ error: 'No recording available for transcription' });
+        }
+
+        console.log(`[QA Transcribe] Starting transcription for ${callSessionId} from ${recordingLink.source}`);
+
+        const { submitTranscription } = await import('./services/google-transcription');
+        transcript = await submitTranscription(recordingLink.url);
+
+        if (!transcript || transcript.trim().length === 0) {
+          return res.status(500).json({ error: 'Transcription returned empty result' });
+        }
+
+        // Store transcript in call session
+        await db.update(callSessions).set({
+          aiTranscript: transcript,
+        }).where(eq(callSessions.id, callSessionId));
+
+        console.log(`[QA Transcribe] Transcription complete for ${callSessionId}: ${transcript.length} chars`);
+      }
+
+      // Step 2: Optionally run quality analysis
+      let analysisResult: any = null;
+      if (analyze && transcript) {
+        const { analyzeConversationQuality } = await import("./services/conversation-quality-analyzer");
+        const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || undefined;
+
+        const analysis = await analyzeConversationQuality({
+          transcript,
+          interactionType: 'live_call',
+          analysisStage: 'post_call',
+          callDurationSeconds: session.durationSec || undefined,
+          disposition: session.aiDisposition || undefined,
+          campaignId: session.campaignId || undefined,
+          campaignName: session.campaignName || undefined,
+          campaignObjective: session.campaignObjective || undefined,
+          contactName,
+          accountName: session.accountName || undefined,
+        });
+
+        if (analysis.status === 'ok') {
+          // Store in callQualityRecords
+          await db.insert(callQualityRecords).values({
+            callSessionId: session.id,
+            campaignId: session.campaignId,
+            contactId: session.contactId,
+            overallQualityScore: analysis.overallScore,
+            engagementScore: analysis.qualityDimensions?.engagement,
+            clarityScore: analysis.qualityDimensions?.clarity,
+            empathyScore: analysis.qualityDimensions?.empathy,
+            objectionHandlingScore: analysis.qualityDimensions?.objectionHandling,
+            qualificationScore: analysis.qualityDimensions?.qualification,
+            closingScore: analysis.qualityDimensions?.closing,
+            sentiment: analysis.learningSignals?.sentiment,
+            engagementLevel: analysis.learningSignals?.engagementLevel,
+            issues: analysis.issues,
+            recommendations: analysis.recommendations,
+            breakdowns: analysis.breakdowns,
+            promptUpdates: analysis.promptUpdates,
+            nextBestActions: analysis.nextBestActions,
+            campaignAlignmentScore: analysis.campaignAlignment?.objectiveAdherence,
+            contextUsageScore: analysis.campaignAlignment?.contextUsage,
+            talkingPointsCoverageScore: analysis.campaignAlignment?.talkingPointsCoverage,
+            missedTalkingPoints: analysis.campaignAlignment?.missedTalkingPoints,
+            flowComplianceScore: analysis.flowCompliance?.score,
+            missedSteps: analysis.flowCompliance?.missedSteps,
+            flowDeviations: analysis.flowCompliance?.deviations,
+            assignedDisposition: analysis.dispositionReview?.assignedDisposition,
+            expectedDisposition: analysis.dispositionReview?.expectedDisposition,
+            dispositionAccurate: analysis.dispositionReview?.isAccurate,
+            dispositionNotes: analysis.dispositionReview?.notes,
+            transcriptLength: transcript.length,
+            transcriptTruncated: analysis.metadata?.truncated || false,
+            fullTranscript: transcript.substring(0, 12000),
+            analysisModel: analysis.metadata?.model || 'vertex-ai-gemini',
+            analysisStage: 'post_call',
+            interactionType: 'live_call',
+            analyzedAt: new Date(),
+          } as any);
+
+          // Also store in callSessions.aiAnalysis
+          await db.update(callSessions).set({
+            aiAnalysis: {
+              conversationQuality: {
+                overallScore: analysis.overallScore,
+                summary: analysis.summary,
+                qualityDimensions: analysis.qualityDimensions,
+                campaignAlignment: analysis.campaignAlignment,
+                dispositionReview: analysis.dispositionReview,
+                issues: analysis.issues,
+                recommendations: analysis.recommendations,
+                breakdowns: analysis.breakdowns,
+                performanceGaps: analysis.performanceGaps,
+                flowCompliance: analysis.flowCompliance,
+                learningSignals: analysis.learningSignals,
+                nextBestActions: analysis.nextBestActions,
+                promptUpdates: analysis.promptUpdates,
+                metadata: analysis.metadata,
+              },
+            } as any,
+          }).where(eq(callSessions.id, session.id));
+
+          analysisResult = {
+            overallScore: analysis.overallScore,
+            qualityDimensions: analysis.qualityDimensions,
+            summary: analysis.summary,
+          };
+        }
+      }
+
+      res.json({
+        success: true,
+        callSessionId,
+        transcribed: true,
+        transcriptLength: transcript?.length || 0,
+        analyzed: !!analysisResult,
+        analysis: analysisResult,
+      });
+    } catch (error: any) {
+      console.error('[QA Transcribe] Error:', error?.message || error);
+      res.status(500).json({ error: 'Transcribe/analyze failed', message: error?.message });
     }
   });
 

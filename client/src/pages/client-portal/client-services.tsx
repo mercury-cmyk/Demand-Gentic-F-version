@@ -347,7 +347,7 @@ export default function ClientServices() {
       </div>
 
       <div className="pt-8 border-t">
-        <h2 className="text-2xl font-bold tracking-tight mb-6">AgentX Suite</h2>
+        <h2 className="text-2xl font-bold tracking-tight mb-6">The Agentic Demand Council</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {agents.map((agent, i) => (
             <Card key={i} className="border hover:shadow-md transition-all">
@@ -381,11 +381,11 @@ export default function ClientServices() {
                 <div>
                   <div className="flex items-center gap-2 mb-4">
                     <Layers className="h-5 w-5 text-violet-400" />
-                    <span className="text-sm font-bold uppercase tracking-wider text-violet-400">The Agentic Steward — AgentX</span>
+                    <span className="text-sm font-bold uppercase tracking-wider text-violet-400">The Agentic Demand Council</span>
                   </div>
                   <h3 className="text-2xl font-bold mb-4">Reasoning First. Compliance First. Nothing Forgotten.</h3>
                   <p className="text-slate-400 mb-6">
-                    Every AgentX agent is powered by Organization Intelligence — your DNA, your rules, your truth.
+                    Every agent in The Agentic Demand Council is powered by Organization Intelligence — your DNA, your rules, your truth.
                     No interaction happens without reasoning first. No interaction is ever forgotten at the contact
                     or account level. Compliance isn't a checkbox — it's woven into every layer.
                   </p>

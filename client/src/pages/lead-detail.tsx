@@ -73,7 +73,7 @@ export default function LeadDetailPage() {
     return () => window.removeEventListener('unhandledrejection', handleUnhandledRejection);
   }, []);
 
-  const { data: lead, isLoading } = useQuery({
+  const { data: lead, isLoading, isError, error } = useQuery({
     queryKey: ['/api/leads', id],
     enabled: !!id,
   });
@@ -341,6 +341,31 @@ export default function LeadDetailPage() {
           <Skeleton className="h-64" />
           <Skeleton className="h-64" />
         </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    const message = error instanceof Error ? error.message : "Failed to load lead details.";
+    const isRateLimited = message.includes("429");
+    const isAuthIssue = message.includes("401") || message.toLowerCase().includes("session expired");
+
+    return (
+      <div className="flex flex-col items-center justify-center h-96">
+        <XCircle className="h-16 w-16 text-muted-foreground mb-4" />
+        <h2 className="text-2xl font-semibold">
+          {isRateLimited ? "Rate Limited" : isAuthIssue ? "Authentication Required" : "Lead Load Failed"}
+        </h2>
+        <p className="text-muted-foreground mt-2 max-w-xl text-center">
+          {isRateLimited
+            ? "Too many API requests right now. Please wait a moment and refresh."
+            : isAuthIssue
+              ? "Your session has expired or is invalid. Please log in again."
+              : message}
+        </p>
+        <Button onClick={() => navigate('/leads')} className="mt-4" data-testid="button-back-to-leads-on-error">
+          Back to Leads
+        </Button>
       </div>
     );
   }

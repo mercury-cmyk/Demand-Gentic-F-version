@@ -156,6 +156,9 @@ export function EmailBuilderBrevoStyle({
     // Extract specific keywords from prompt
     const companyMatch = prompt.match(/(?:for|from|about)\s+([A-Z][a-z\s]+?)(?:\s+to|\s+and|,|$)/);
     const companyName = companyMatch?.[1]?.trim() || "Your Company";
+    
+    // Store detected company name for reference/branding
+    const context = { companyName };
 
     return {
       ...template,
@@ -226,6 +229,11 @@ export function EmailBuilderBrevoStyle({
     if (!aiPrompt.trim()) return;
 
     setIsGenerating(true);
+    
+    // Extract company name for branding consistency
+    const companyMatch = aiPrompt.match(/(?:for|from|about)\s+([A-Z][a-z\s]+?)(?:\s+to|\s+and|,|$)/);
+    const companyName = companyMatch?.[1]?.trim() || "Your Company";
+
     try {
       // Try DeepSeek AI first for real content generation
       const response = await fetch('/api/email-ai/deepseek/generate', {
@@ -236,6 +244,7 @@ export function EmailBuilderBrevoStyle({
           prompt: aiPrompt,
           tone: 'professional',
           templateType: detectTemplateType(aiPrompt),
+          companyName,
         }),
       });
 
@@ -248,6 +257,8 @@ export function EmailBuilderBrevoStyle({
               ...data.content,
             },
             brandPalette: selectedBrand,
+            // Prefer API-returned company name (from DB intelligence) over regex match
+            companyName: data.content.companyName || companyName,
             includeFooter: true
           });
 

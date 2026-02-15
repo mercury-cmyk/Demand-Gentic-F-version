@@ -339,23 +339,26 @@ export function isWithinBusinessHours(
   }
 
   // Convert current time to target timezone
+  // IMPORTANT: toZonedTime already shifts the Date's internal time so that
+  // local methods (.getHours, .getDay, etc.) return values in the target timezone.
+  // Do NOT pass { timeZone } to format() after toZonedTime — that would double-convert.
   const zonedTime = toZonedTime(checkTime, targetTimezone);
 
   // Check if it's a working day
-  const dayOfWeek = format(zonedTime, 'EEEE', { timeZone: targetTimezone }).toLowerCase();
+  const dayOfWeek = format(zonedTime, 'EEEE').toLowerCase();
   if (!config.operatingDays.includes(dayOfWeek)) {
     return false; // Not an operating day
   }
 
   // Check if it's a holiday
-  const dateString = format(zonedTime, 'yyyy-MM-dd', { timeZone: targetTimezone });
+  const dateString = format(zonedTime, 'yyyy-MM-dd');
   if (config.excludedDates && config.excludedDates.includes(dateString)) {
     return false; // Holiday
   }
 
   // Check time range
-  const currentTimeStr = format(zonedTime, 'HH:mm', { timeZone: targetTimezone });
-  
+  const currentTimeStr = format(zonedTime, 'HH:mm');
+
   // Parse start and end times for comparison
   if (currentTimeStr < config.startTime || currentTimeStr >= config.endTime) {
     return false; // Outside operating hours
@@ -396,7 +399,7 @@ export function getNextAvailableTime(
     
     // If we're outside hours, jump to start of next business day
     const zonedTime = toZonedTime(checkTime, targetTimezone);
-    const currentTimeStr = format(zonedTime, 'HH:mm', { timeZone: targetTimezone });
+    const currentTimeStr = format(zonedTime, 'HH:mm');
     
     // If past end time, jump to start time next day
     if (currentTimeStr >= config.endTime) {

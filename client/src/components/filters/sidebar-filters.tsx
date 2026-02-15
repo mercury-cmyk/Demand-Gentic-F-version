@@ -107,12 +107,11 @@ export function SidebarFilters({
       const url = includeRelatedEntities 
         ? `/api/filters/fields/entity/${entityType}?includeRelated=true`
         : `/api/filters/fields/entity/${entityType}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to fetch filter fields');
+      const response = await apiRequest("GET", url);
       return response.json();
     },
     staleTime: 5 * 60 * 1000,
-    retry: 2,
+    retry: false,
   });
 
   // Use API fields if available, otherwise use fallback

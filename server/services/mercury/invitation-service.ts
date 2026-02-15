@@ -204,8 +204,8 @@ export class BulkInvitationService {
             continue;
           }
 
-          // Idempotency key: per-job + per-user — ensures retries don't duplicate
-          const idempotencyKey = `invite_${jobId}_${candidate.clientUserId}`;
+          // Idempotency key: per-user — prevents duplicate invites across jobs
+          const idempotencyKey = `invite_client_${candidate.clientUserId}`;
 
           // Queue email
           const { outboxId, skipped } = await mercuryEmailService.queueEmail({
@@ -309,6 +309,7 @@ export class BulkInvitationService {
     clientUserId?: string;
     clientAccountId?: string;
     reason?: string;
+    errorCode?: string;
   }> {
     const [record] = await db
       .select()
@@ -316,9 +317,18 @@ export class BulkInvitationService {
       .where(eq(mercuryInvitationTokens.token, token))
       .limit(1);
 
-    if (!record) return { valid: false, reason: 'Token not found' };
-    if (record.usedAt) return { valid: false, reason: 'Token already used' };
-    if (new Date(record.expiresAt) < new Date()) return { valid: false, reason: 'Token expired' };
+    if (!record) {
+      console.warn(`[Mercury/Invite] Token not found in DB (first 8 chars: ${token.slice(0, 8)}...)`);
+      return { valid: false, reason: 'This invitation link is not recognized. It may have been replaced by a newer invitation — please check for the most recent email from us.', errorCode: 'TOKEN_NOT_FOUND' };
+    }
+    if (record.usedAt) {
+      console.info(`[Mercury/Invite] Token already used (userId: ${record.clientUserId}, usedAt: ${record.usedAt})`);
+      return { valid: false, reason: 'This invitation has already been accepted. You can log in with the password you created during setup.', errorCode: 'TOKEN_USED' };
+    }
+    if (new Date(record.expiresAt) < new Date()) {
+      console.info(`[Mercury/Invite] Token expired (userId: ${record.clientUserId}, expiredAt: ${record.expiresAt})`);
+      return { valid: false, reason: 'This invitation has expired. Please contact your administrator to send a new invitation.', errorCode: 'TOKEN_EXPIRED' };
+    }
 
     return {
       valid: true,
@@ -369,6 +379,23 @@ export class BulkInvitationService {
     if (!user.email) return { success: false, error: 'Client user has no email address' };
     if (!user.isActive) return { success: false, error: 'Client user is inactive' };
 
+    // Guard: check for existing active (non-expired, non-used) invitation token
+    const [existingToken] = await db
+      .select({ id: mercuryInvitationTokens.id, expiresAt: mercuryInvitationTokens.expiresAt })
+      .from(mercuryInvitationTokens)
+      .where(
+        and(
+          eq(mercuryInvitationTokens.clientUserId, params.clientUserId),
+          isNull(mercuryInvitationTokens.usedAt),
+        )
+      )
+      .orderBy(desc(mercuryInvitationTokens.createdAt))
+      .limit(1);
+
+    if (existingToken && new Date(existingToken.expiresAt) > new Date()) {
+      return { success: false, error: 'This user already has an active pending invitation. Please wait for it to expire or be used before sending a new one.' };
+    }
+
     try {
       // Generate invitation token
       const token = mercuryEmailService.generateInviteToken();
@@ -394,7 +421,8 @@ export class BulkInvitationService {
       }
 
       const jobId = `single_invite_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-      const idempotencyKey = `invite_${jobId}_${user.id}`;
+      // Idempotency key: per-user — prevents duplicate invites across requests
+      const idempotencyKey = `invite_client_${user.id}`;
 
       // Queue email
       const { outboxId, skipped } = await mercuryEmailService.queueEmail({

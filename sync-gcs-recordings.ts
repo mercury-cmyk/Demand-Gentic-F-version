@@ -12,7 +12,7 @@
 import { Storage } from '@google-cloud/storage';
 import { db } from './server/db';
 import { callSessions, leads } from './shared/schema';
-import { eq, isNull, and, or, sql } from 'drizzle-orm';
+import { eq, isNull, and, or } from 'drizzle-orm';
 
 const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
 const GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-storage';
@@ -119,13 +119,9 @@ async function findOrphanedRecordings(gcsRecordings: GCSRecording[]) {
     })
     .from(callSessions)
     .where(
-      and(
+      or(
         isNull(callSessions.recordingS3Key),
-        or(
-          eq(callSessions.recordingStatus, 'stored'),
-          eq(callSessions.recordingStatus, 'pending'),
-          eq(callSessions.recordingStatus, 'failed')
-        )
+        eq(callSessions.recordingS3Key, '')
       )
     );
 
@@ -139,13 +135,9 @@ async function findOrphanedRecordings(gcsRecordings: GCSRecording[]) {
     })
     .from(leads)
     .where(
-      and(
+      or(
         isNull(leads.recordingS3Key),
-        or(
-          eq(leads.recordingStatus, 'stored'),
-          eq(leads.recordingStatus, 'pending'),
-          eq(leads.recordingStatus, 'failed')
-        )
+        eq(leads.recordingS3Key, '')
       )
     );
 

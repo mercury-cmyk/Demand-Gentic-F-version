@@ -303,7 +303,7 @@ export function StepContentContext({ data, onNext, onBack }: StepContentContextP
       const res = await apiRequest('POST', '/api/ai/generate-call-script', {
         campaignType: data?.type || 'call',
         objective: campaignObjective,
-        talkingPoints: talkingPoints.filter(tp => tp.trim()),
+        talkingPoints: talkingPoints.filter(tp => typeof tp === 'string' && tp.trim()),
         productServiceInfo,
         targetAudience: targetAudienceDescription,
       });
@@ -322,7 +322,7 @@ export function StepContentContext({ data, onNext, onBack }: StepContentContextP
       }
 
       // Also populate suggested talking points if returned
-      if (result.suggestedTalkingPoints?.length > 0 && talkingPoints.filter(tp => tp.trim()).length === 0) {
+      if (result.suggestedTalkingPoints?.length > 0 && talkingPoints.filter(tp => typeof tp === 'string' && tp.trim()).length === 0) {
         setTalkingPoints(result.suggestedTalkingPoints);
       }
     } catch (error) {
@@ -341,8 +341,8 @@ export function StepContentContext({ data, onNext, onBack }: StepContentContextP
 
   const handleNext = () => {
     // Filter out empty talking points
-    const validTalkingPoints = talkingPoints.filter((tp) => tp.trim().length > 0);
-    const validObjections = commonObjections.filter((o) => o.trim().length > 0);
+    const validTalkingPoints = talkingPoints.filter((tp) => typeof tp === 'string' && tp.trim().length > 0);
+    const validObjections = commonObjections.filter((o) => typeof o === 'string' && o.trim().length > 0);
 
     onNext({
       organizationId: selectedOrgId || null,

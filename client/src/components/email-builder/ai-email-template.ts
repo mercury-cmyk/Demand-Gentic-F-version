@@ -29,7 +29,11 @@ export interface EmailTemplateCopy {
   closingLine: string;
   ctaUrl?: string;
   subjectInsights?: SubjectVariantInsight[];
+  logoUrl?: string;
 }
+
+export const ARGYLE_LOGO_URL = "https://argyleforum.com/wp-content/themes/argyle-theme/assets/images/logo.png";
+export const DEFAULT_LOGO_URL = "";
 
 const paletteMap: Record<BrandPaletteKey, {
   heroGradient: string;
@@ -77,9 +81,10 @@ export function buildBrandedEmailHtml(args: {
   companyName?: string;
   companyAddress?: string;
   ctaUrl?: string;
+  logoUrl?: string;
   includeFooter?: boolean;
 }): string {
-  const { copy, brand, brandPalette, paletteOverrides, companyName, companyAddress, ctaUrl, includeFooter = true } = args;
+  const { copy, brand, brandPalette, paletteOverrides, companyName, companyAddress, ctaUrl, logoUrl, includeFooter = true } = args;
   // Support both 'brand' and 'brandPalette' params
   const basePalette = paletteMap[brandPalette || brand || 'indigo'] ?? paletteMap.indigo;
   const palette = { ...basePalette, ...paletteOverrides };
@@ -87,6 +92,11 @@ export function buildBrandedEmailHtml(args: {
   while (bullets.length < 3) bullets.push("Clear value tailored to your team.");
   const resolvedCompanyName = (companyName || "").trim();
   const resolvedAddress = (companyAddress || "").trim();
+  
+  // Use Argyle logo if company name matches, otherwise fallback
+  const isArgyleCompany = /argyle/i.test(resolvedCompanyName);
+  const resolvedLogoUrl = logoUrl || copy.logoUrl || (isArgyleCompany ? ARGYLE_LOGO_URL : DEFAULT_LOGO_URL);
+
   const footerRow = includeFooter
     ? `
         <tr>
@@ -137,7 +147,8 @@ export function buildBrandedEmailHtml(args: {
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 680px; margin: 0 auto; background: #ffffff; border-radius: 20px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12); overflow: hidden;">
         <tr>
           <td style="padding: 40px 32px; background: ${palette.heroGradient}; color: #ffffff;">
-            ${resolvedCompanyName ? `<div style="font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.95; font-weight: 700; margin-bottom: 12px;">${escapeHtml(resolvedCompanyName)}</div>` : ""}
+            ${resolvedLogoUrl ? `<div style="margin-bottom: 24px;"><img src="${resolvedLogoUrl}" alt="Logo" style="height: 32px; display: block; border: 0;" /></div>` : ""}
+            ${resolvedCompanyName && !resolvedLogoUrl ? `<div style="font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.95; font-weight: 700; margin-bottom: 12px;">${escapeHtml(resolvedCompanyName)}</div>` : ""}
             <div data-block="heading" style="font-size: 32px; font-weight: 800; line-height: 1.2; margin-bottom: 12px;">
               ${escapeHtml(copy.heroTitle)}
             </div>

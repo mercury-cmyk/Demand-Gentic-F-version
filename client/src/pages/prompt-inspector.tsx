@@ -94,28 +94,70 @@ interface UnifiedKnowledge {
   updatedAt: string;
 }
 
-// Layer configuration
-const LAYER_INFO = {
+// Layer configuration - Extended with full voice agent prompt layers
+const LAYER_INFO: Record<string, { icon: any; label: string; description: string; color: string; badgeColor: string }> = {
+  layer_0_foundation: {
+    icon: Layers,
+    label: "Layer 0: Foundation Knowledge",
+    description: "Base agent capabilities, persona definition, and core behavioral instructions",
+    color: "bg-indigo-500/10 text-indigo-700 border-indigo-200",
+    badgeColor: "bg-indigo-100 text-indigo-800",
+  },
   layer_1_universal: {
     icon: Shield,
-    label: "Layer 1: Universal (Voice Control)",
-    description: "Core compliance, safety rules, and voice control parameters",
+    label: "Layer 1: Universal Controls",
+    description: "Voice control parameters, compliance rules, safety guardrails, and turn management",
     color: "bg-blue-500/10 text-blue-700 border-blue-200",
     badgeColor: "bg-blue-100 text-blue-800",
   },
   layer_2_organization: {
     icon: Building2,
-    label: "Layer 2: Organization Knowledge",
-    description: "Org-level defaults, standards, and customizations",
+    label: "Layer 2: Organization Context",
+    description: "Organization defaults, brand standards, solution catalog, and competitive positioning",
     color: "bg-green-500/10 text-green-700 border-green-200",
     badgeColor: "bg-green-100 text-green-800",
   },
   layer_3_campaign: {
     icon: Target,
-    label: "Layer 3: Campaign Context",
-    description: "Campaign-specific instructions, scripts, and context",
+    label: "Layer 3: Campaign Knowledge",
+    description: "Campaign-specific scripts, objectives, target audience, and messaging framework",
     color: "bg-purple-500/10 text-purple-700 border-purple-200",
     badgeColor: "bg-purple-100 text-purple-800",
+  },
+  layer_3_5_callflow: {
+    icon: FileText,
+    label: "Layer 3.5: Call Flow",
+    description: "Deterministic call orchestration steps, state machine transitions, and conversation phases",
+    color: "bg-orange-500/10 text-orange-700 border-orange-200",
+    badgeColor: "bg-orange-100 text-orange-800",
+  },
+  layer_4_account: {
+    icon: Building2,
+    label: "Layer 4: Account Context",
+    description: "Account research, company intelligence, call history, and prior interactions",
+    color: "bg-cyan-500/10 text-cyan-700 border-cyan-200",
+    badgeColor: "bg-cyan-100 text-cyan-800",
+  },
+  layer_5_conversation: {
+    icon: FileText,
+    label: "Layer 5: Conversation State",
+    description: "Live conversation tracking, turn management, intent detection, and state transitions",
+    color: "bg-yellow-500/10 text-yellow-700 border-yellow-200",
+    badgeColor: "bg-yellow-100 text-yellow-800",
+  },
+  layer_6_objection: {
+    icon: Shield,
+    label: "Layer 6: Objection Handling",
+    description: "Objection detection patterns, response strategies, and counter-argument frameworks",
+    color: "bg-red-500/10 text-red-700 border-red-200",
+    badgeColor: "bg-red-100 text-red-800",
+  },
+  layer_7_routing: {
+    icon: Target,
+    label: "Layer 7: Routing & Escalation",
+    description: "Transfer logic, escalation criteria, handoff procedures, and routing decisions",
+    color: "bg-pink-500/10 text-pink-700 border-pink-200",
+    badgeColor: "bg-pink-100 text-pink-800",
   },
 };
 
@@ -217,10 +259,10 @@ export default function PromptInspectorPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Eye className="h-6 w-6" />
-            Prompt Inspector
+            Prompt Inspector - Voice Agent Layers
           </h1>
           <p className="text-muted-foreground mt-1">
-            View all knowledge layers being injected into AI agent prompts
+            Full transparency into all 8 knowledge layers injected into voice agent prompts at runtime
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -248,9 +290,9 @@ export default function PromptInspectorPage() {
       {/* Layer Hierarchy Overview */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Knowledge Layer Hierarchy</CardTitle>
+          <CardTitle className="text-lg">Voice Agent Prompt Layer Hierarchy</CardTitle>
           <CardDescription>
-            Higher layers override lower layers. Layer 1 is most authoritative.
+            8 layers compose the full voice agent prompt. Layer 0 (Foundation) through Layer 7 (Routing). Higher-numbered layers provide more specific context.
           </CardDescription>
         </CardHeader>
         <CardContent>

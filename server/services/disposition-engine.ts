@@ -35,6 +35,7 @@ import {
 } from "../lib/contact-suppression";
 import { transcribeLeadCall } from "./telnyx-transcription";
 import { analyzeCall } from "./call-quality-analyzer";
+import { analyzeLeadQualification } from "./ai-qa-analyzer";
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recording-storage";
 import callQualityTracker from "./call-quality-tracker";
 import { telnyxNumbers } from "@shared/number-pool-schema";
@@ -510,6 +511,31 @@ async function processQualifiedLead(
             // We need to ensure analyzeCall can work with existing transcript
             // calling analyzeCall will likely re-read the lead and find the transcript
             await analyzeCall(leadIdForAsync);
+        }
+
+        // Step 3: Run AI-powered lead quality analysis (same as agent console "Run AI Analysis")
+        // This evaluates: ICP fit, content interest, permission, compliance, qualification answers,
+        // data accuracy, email deliverability — using campaign QA parameters and Gemini AI.
+        // Ensures AI leads get the SAME lead quality analysis as agent console leads.
+        try {
+          // Re-check if transcript is now available (may have been transcribed in Step 2)
+          const [updatedLead] = await db
+            .select({ transcript: leads.transcript, aiScore: leads.aiScore })
+            .from(leads)
+            .where(eq(leads.id, leadIdForAsync))
+            .limit(1);
+
+          if (updatedLead?.transcript && !updatedLead.aiScore) {
+            console.log(`[DispositionEngine] 🔍 Auto-triggering lead quality analysis for lead ${leadIdForAsync}`);
+            const qaResult = await analyzeLeadQualification(leadIdForAsync);
+            if (qaResult) {
+              console.log(`[DispositionEngine] ✅ Lead quality analysis complete for lead ${leadIdForAsync}: score=${qaResult.score}, status=${qaResult.qualification_status}`);
+            } else {
+              console.log(`[DispositionEngine] ⚠️ Lead quality analysis returned null for lead ${leadIdForAsync} (may need transcript)`);
+            }
+          }
+        } catch (qaErr) {
+          console.error(`[DispositionEngine] Failed lead quality analysis for lead ${leadIdForAsync}:`, qaErr);
         }
       } catch (err) {
         console.error(`[DispositionEngine] Failed to auto-process lead ${leadIdForAsync}:`, err);

@@ -132,7 +132,7 @@ export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContex
 
   const handleNext = () => {
     // Filter out empty talking points
-    const validTalkingPoints = talkingPoints.filter((tp) => tp.trim().length > 0);
+    const validTalkingPoints = talkingPoints.filter((tp) => typeof tp === 'string' && tp.trim().length > 0);
 
     onNext({
       organizationId: selectedOrgId || null,

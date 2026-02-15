@@ -1205,4 +1205,66 @@ router.get('/available-voices', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /image-proxy
+ *
+ * Server-side proxy for fetching external images that may be blocked by CORS.
+ * Used by the brand color extractor when canvas can't read cross-origin images.
+ * Returns the image as base64 data URI so the client can draw it on canvas.
+ */
+router.get('/image-proxy', async (req: Request, res: Response) => {
+  try {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ message: 'Missing url parameter' });
+    }
+
+    // Basic URL validation
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return res.status(400).json({ message: 'Invalid URL' });
+    }
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return res.status(400).json({ message: 'Only HTTP/HTTPS URLs are allowed' });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BrandColorExtractor/1.0)' },
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return res.status(response.status).json({ message: `Image fetch failed: ${response.status}` });
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/png';
+    if (!contentType.startsWith('image/')) {
+      return res.status(400).json({ message: 'URL does not point to an image' });
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    // Size limit: 5MB
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(413).json({ message: 'Image too large (max 5MB)' });
+    }
+
+    const base64 = buffer.toString('base64');
+    res.json({ dataUri: `data:${contentType};base64,${base64}` });
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      return res.status(504).json({ message: 'Image fetch timed out' });
+    }
+    console.error('[CLIENT SETTINGS] Image proxy error:', error.message);
+    res.status(500).json({ message: 'Failed to fetch image' });
+  }
+});
+
 export default router;

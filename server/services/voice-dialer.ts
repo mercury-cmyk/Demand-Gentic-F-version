@@ -139,6 +139,17 @@ const REALTIME_QUALITY_DEBOUNCE_MS = 15000;
 const REALTIME_QUALITY_MIN_TURNS = 4;
 const REALTIME_QUALITY_MAX_CHARS = 6000;
 
+// State array size caps to prevent unbounded memory growth during long calls
+const MAX_TRANSCRIPTS = 200;
+const MAX_STATE_HISTORY = 50;
+const MAX_AUDIO_PATTERNS = 100;
+const MAX_RESPONSE_LATENCIES = 100;
+
+/** Trim array from the front if it exceeds maxLen. Call after pushing. */
+function trimArray<T>(arr: T[], maxLen: number): void {
+  if (arr.length > maxLen) arr.splice(0, arr.length - maxLen);
+}
+
 interface OpenAIRealtimeSession {
   callId: string;
   runId: string;
@@ -2625,6 +2636,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         type: audioType.type,
         confidence: audioType.confidence,
       });
+      trimArray(session.audioDetection.audioPatterns, MAX_AUDIO_PATTERNS);
       session.audioDetection.lastTranscriptCheckTime = new Date();
       // CRITICAL FIX: Update lastUserSpeechTime for Gemini calls
       // Previously only set for OpenAI speech events, leaving Gemini calls with null
@@ -2679,6 +2691,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         } else {
           // Start new user transcript
           session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
+          trimArray(session.transcripts, MAX_TRANSCRIPTS);
         }
         scheduleRealtimeQualityAnalysis(session);
 
@@ -2700,6 +2713,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           session.conversationState.identityConfirmedAt = new Date();
           session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
           session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
+          trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
           console.log(`${LOG_PREFIX} ✅ [Gemini] Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
 
           // CRITICAL: Inject identity lock reminder to force immediate AI response
@@ -2766,6 +2780,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         } else {
           // Start new assistant transcript
           session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
+          trimArray(session.transcripts, MAX_TRANSCRIPTS);
         }
         scheduleRealtimeQualityAnalysis(session);
 
@@ -2775,6 +2790,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         if (session.timingMetrics.lastProspectSpeechEndAt) {
           const responseLatencyMs = now.getTime() - session.timingMetrics.lastProspectSpeechEndAt.getTime();
           session.timingMetrics.responseLatencies.push(responseLatencyMs);
+          trimArray(session.timingMetrics.responseLatencies, MAX_RESPONSE_LATENCIES);
           // Calculate rolling average
           const latencies = session.timingMetrics.responseLatencies;
           session.timingMetrics.avgResponseLatencyMs = Math.round(
@@ -3882,6 +3898,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             text: message.delta,
             timestamp: new Date()
           });
+          trimArray(session.transcripts, MAX_TRANSCRIPTS);
         }
         scheduleRealtimeQualityAnalysis(session);
       }
@@ -3905,6 +3922,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             text: message.delta,
             timestamp: new Date()
           });
+          trimArray(session.transcripts, MAX_TRANSCRIPTS);
         }
         scheduleRealtimeQualityAnalysis(session);
       }
@@ -3972,6 +3990,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           type: audioType.type,
           confidence: audioType.confidence,
         });
+        trimArray(session.audioDetection.audioPatterns, MAX_AUDIO_PATTERNS);
         session.audioDetection.lastTranscriptCheckTime = new Date();
 
         // INTELLIGENT VOICEMAIL DETECTION - Check FIRST before anything else
@@ -4135,6 +4154,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             text: message.transcript,
             timestamp: new Date()
           });
+          trimArray(session.transcripts, MAX_TRANSCRIPTS);
           scheduleRealtimeQualityAnalysis(session);
 
           // CRITICAL: Check for audio quality complaints FIRST
@@ -4208,6 +4228,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             session.conversationState.identityConfirmedAt = new Date();
             session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
             session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
+            trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
             console.log(`${LOG_PREFIX} Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
 
             // CRITICAL FIX: Call injectIdentityLockReminder SYNCHRONOUSLY (no setImmediate)
@@ -5148,6 +5169,7 @@ function updateConversationState(
 
   session.conversationState.currentState = newState;
   session.conversationState.stateHistory.push(newState);
+  trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
   console.log(`${LOG_PREFIX} State transition: ${oldState} → ${newState} for call: ${session.callId}`);
 }
 
@@ -5717,6 +5739,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                   text: segment.text,
                   timestamp: new Date(segment.timestamp),
                 });
+                trimArray(session.transcripts, MAX_TRANSCRIPTS);
               } else if (segment.speaker === 'contact') {
                 // Store transcript for session records
                 session.transcripts.push({
@@ -5724,6 +5747,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                   text: segment.text,
                   timestamp: new Date(segment.timestamp),
                 });
+                trimArray(session.transcripts, MAX_TRANSCRIPTS);
 
                 // NOTE: Do NOT send Deepgram transcripts to Gemini via sendTextMessage!
                 // Gemini Live with native-audio already receives the raw audio via realtime_input
@@ -5757,6 +5781,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                     session.conversationState.identityConfirmedAt = new Date();
                     session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
                     session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
+                    trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
                     console.log(`${LOG_PREFIX} ✅ [Deepgram] Identity CONFIRMED for call: ${session.callId}`);
 
                     // Inject identity lock reminder
@@ -5911,9 +5936,25 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     console.warn(`${LOG_PREFIX} Failed to notify bridge of call end:`, err);
   }
 
+  // Clean up ALL active timers to prevent leaks
   if (session.realtimeQualityTimer) {
     clearTimeout(session.realtimeQualityTimer);
     session.realtimeQualityTimer = null;
+  }
+
+  if (session.responseTimeoutHandle) {
+    clearTimeout(session.responseTimeoutHandle);
+    session.responseTimeoutHandle = null;
+  }
+
+  // Clean up ad-hoc timers stored on session
+  if ((session as any).greetingRetryTimer) {
+    clearTimeout((session as any).greetingRetryTimer);
+    (session as any).greetingRetryTimer = null;
+  }
+  if ((session as any).fallbackGreetingTimer) {
+    clearTimeout((session as any).fallbackGreetingTimer);
+    (session as any).fallbackGreetingTimer = null;
   }
 
   stopTelnyxOutboundPacer(session);
@@ -8703,6 +8744,7 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
     text: transcript,
     timestamp: new Date(),
   });
+  trimArray(session.transcripts, MAX_TRANSCRIPTS);
 
   // NOTE: Do NOT send transcripts to Gemini via sendTextMessage!
   // Gemini Live with native-audio already receives the raw audio via realtime_input
@@ -8732,6 +8774,7 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
       session.conversationState.identityConfirmedAt = new Date();
       session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
       session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
+      trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
       console.log(`${LOG_PREFIX} ✅ [${source}] Identity CONFIRMED for call: ${callId}`);
 
       // Inject identity lock reminder

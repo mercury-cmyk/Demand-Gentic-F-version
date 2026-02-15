@@ -36,6 +36,10 @@ import {
   BookOpen,
   LayoutDashboard,
 } from "lucide-react";
+import {
+  BRAND, TAGLINE, STATS, PROBLEM_FRAMEWORK, PRINCIPLES,
+  FOOTER, DATA_SECTION, CONTENT_STUDIO, FOUNDER_QUOTES,
+} from "@shared/brand-messaging";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
@@ -53,8 +57,8 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
-              <span className="text-[10px] text-muted-foreground font-medium">DemandGentic---Human-Led Strategy. AI-Powered Execution.</span>
+              <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
+              <span className="text-[10px] text-muted-foreground font-medium">{TAGLINE.full}</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -90,7 +94,7 @@ export default function LandingPage() {
           <div className="text-center max-w-4xl mx-auto">
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
-              DemandGentic---Human-Led Strategy. AI-Powered Execution.
+              {TAGLINE.full}
             </Badge>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
@@ -145,27 +149,27 @@ export default function LandingPage() {
           <div className="mt-16 pt-8 border-t">
             <div className="flex flex-wrap justify-center items-center gap-8 md:gap-16">
               <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">2M+</p>
+                <p className="text-3xl font-bold text-slate-900">{STATS.leadsGenerated}</p>
                 <p className="text-sm text-muted-foreground">Leads Generated</p>
               </div>
               <div className="h-8 w-px bg-slate-200 hidden md:block" />
               <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">500+</p>
+                <p className="text-3xl font-bold text-slate-900">{STATS.enterpriseClients}</p>
                 <p className="text-sm text-muted-foreground">Enterprise Clients</p>
               </div>
               <div className="h-8 w-px bg-slate-200 hidden md:block" />
               <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">7</p>
+                <p className="text-3xl font-bold text-slate-900">{STATS.contentEngines}</p>
                 <p className="text-sm text-muted-foreground">Content Generation Engines</p>
               </div>
               <div className="h-8 w-px bg-slate-200 hidden md:block" />
               <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">11+</p>
+                <p className="text-3xl font-bold text-slate-900">{STATS.yearsExperience}</p>
                 <p className="text-sm text-muted-foreground">Years B2B Expertise</p>
               </div>
               <div className="h-8 w-px bg-slate-200 hidden md:block" />
               <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">40+</p>
+                <p className="text-3xl font-bold text-slate-900">{STATS.industriesServed}</p>
                 <p className="text-sm text-muted-foreground">Industries Served</p>
               </div>
             </div>
@@ -188,8 +192,7 @@ export default function LandingPage() {
               <span className="text-red-400">Unintelligent Outreach.</span>
             </h2>
             <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-              Traditional demand generation is broken. Buyers are overwhelmed,
-              trust is eroding, and real solutions never reach the right ears.
+              {PROBLEM_FRAMEWORK.subheadline}
             </p>
           </div>
 
@@ -289,8 +292,8 @@ export default function LandingPage() {
               </span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              We are not just a platform — we are The Problem Solvers.
-              DemandGentic---Human-Led Strategy, AI-Powered Execution: organization intelligence powers every agent,
+              We are not just a platform — we are {TAGLINE.identity}.
+              {TAGLINE.full}: organization intelligence powers every agent,
               every voice conversation, every piece of content, and every pipeline decision.
               Truth, human-to-human connection, and empathy are never optional — they're the foundation.
             </p>
@@ -326,7 +329,7 @@ export default function LandingPage() {
                 <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center mb-5 shadow-lg shadow-indigo-500/25">
                   <Brain className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">AgentX Suite</Badge>
+                <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">The Agentic Demand Council</Badge>
                 <h3 className="text-xl font-bold mb-2">Agentic Intelligence</h3>
                 <p className="text-muted-foreground text-sm mb-4">
                   Purpose-built agents powered by organization intelligence — reasoning first,
@@ -387,7 +390,7 @@ export default function LandingPage() {
           <div className="p-8 rounded-3xl bg-slate-900 text-white">
             <div className="text-center mb-8">
               <h3 className="text-2xl font-bold mb-2">How It Comes Together</h3>
-              <p className="text-slate-400">DemandGentic---Human-Led Strategy. AI-Powered Execution --- from reasoning to qualified pipeline</p>
+              <p className="text-slate-400">{TAGLINE.full} — from reasoning to qualified pipeline</p>
             </div>
             <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
               {[
@@ -519,22 +522,21 @@ export default function LandingPage() {
               Our Data Advantage
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              The Most Accurate B2B Data{" "}
+              {DATA_SECTION.headline.split(' on ')[0]}{" "}
               <span className="text-blue-400">on the Planet.</span>
             </h2>
             <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-              Your campaigns are only as good as your data. We invested in building
-              the most comprehensive, accurate, and actionable B2B database available.
+              {DATA_SECTION.subheadline}
             </p>
           </div>
 
           {/* Stats Grid */}
           <div className="grid md:grid-cols-4 gap-6 mb-16">
             {[
-              { number: "70M+", label: "Verified B2B Contacts", sublabel: "Decision-makers across every industry", icon: Users },
-              { number: "195+", label: "Countries Covered", sublabel: "True global reach for campaigns", icon: Globe },
-              { number: "98%", label: "Email Accuracy", sublabel: "Real-time verification before send", icon: Target },
-              { number: "Weekly", label: "Data Refresh", sublabel: "Continuous hygiene eliminates decay", icon: RefreshCw },
+              { number: STATS.verifiedContacts, label: "Verified B2B Contacts", sublabel: "Decision-makers across every industry", icon: Users },
+              { number: STATS.countriesCovered, label: "Countries Covered", sublabel: "True global reach for campaigns", icon: Globe },
+              { number: STATS.emailAccuracy, label: "Email Accuracy", sublabel: "Real-time verification before send", icon: Target },
+              { number: STATS.dataRefresh, label: "Data Refresh", sublabel: "Continuous hygiene eliminates decay", icon: RefreshCw },
             ].map((stat, i) => (
               <Card key={i} className="bg-white/5 border-white/10 backdrop-blur text-center">
                 <CardContent className="p-6">
@@ -630,11 +632,10 @@ export default function LandingPage() {
           {/* Data Promise */}
           <div className="mt-12 p-8 rounded-2xl bg-white/5 border border-white/10 text-center">
             <h3 className="text-2xl font-bold text-white mb-4">
-              No Hallucinations. No Guesswork. No Decay.
+              {DATA_SECTION.promise.headline}
             </h3>
             <p className="text-slate-400 max-w-2xl mx-auto">
-              Every fact in our database is tagged as verified, inferred, or unknown — with full source attribution.
-              We don't just collect data; we collect evidence.
+              {DATA_SECTION.promise.description}
             </p>
           </div>
         </div>
@@ -774,7 +775,7 @@ export default function LandingPage() {
           <div className="text-center mb-16">
             <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
               <Bot className="h-3.5 w-3.5 mr-2" />
-              AgentX Suite
+              The Agentic Demand Council
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
               Purpose-Built Agents.{" "}
@@ -867,11 +868,11 @@ export default function LandingPage() {
                 <div>
                   <div className="flex items-center gap-2 mb-4">
                     <Layers className="h-5 w-5 text-violet-400" />
-                    <span className="text-sm font-bold uppercase tracking-wider text-violet-400">The Agentic Steward — AgentX</span>
+                    <span className="text-sm font-bold uppercase tracking-wider text-violet-400">The Agentic Demand Council</span>
                   </div>
                   <h3 className="text-2xl font-bold mb-4">Reasoning First. Compliance First. Nothing Forgotten.</h3>
                   <p className="text-slate-400 mb-6">
-                    Every AgentX agent is powered by Organization Intelligence — your DNA, your rules, your truth.
+                    Every agent in The Agentic Demand Council is powered by Organization Intelligence — your DNA, your rules, your truth.
                     No interaction happens without reasoning first. No interaction is ever forgotten at the contact
                     or account level. Compliance isn't a checkbox — it's woven into every layer.
                   </p>
@@ -925,9 +926,7 @@ export default function LandingPage() {
               <span className="text-emerald-400">In Minutes, Not Months.</span>
             </h2>
             <p className="text-xl text-slate-400 max-w-3xl mx-auto">
-              Stop waiting weeks for content. Our AI-powered studio generates conversion-ready landing pages,
-              email campaigns, blog posts, eBooks, solution briefs, and images — all aligned to your brand,
-              your audience, and your campaign goals.
+              {CONTENT_STUDIO.subheadline}
             </p>
           </div>
 
@@ -1016,7 +1015,7 @@ export default function LandingPage() {
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
               The Principles of{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">The Problem Solvers.</span>
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">{TAGLINE.identity}.</span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
               These principles define who we are — not just what we build. They inform every agent we deploy,
@@ -1066,8 +1065,8 @@ export default function LandingPage() {
 
           <div className="text-center p-8 rounded-2xl bg-slate-900 text-white">
             <p className="text-2xl font-bold">
-              DemandGentic---Human-Led Strategy. AI-Powered Execution.{" "}
-              <span className="text-violet-400">We are The Problem Solvers.</span>
+              {TAGLINE.full}{" "}
+              <span className="text-violet-400">We are {TAGLINE.identity}.</span>
             </p>
           </div>
         </div>
@@ -1083,13 +1082,13 @@ export default function LandingPage() {
                 <div className="relative bg-slate-900 rounded-3xl p-8 text-white">
                   <Quote className="h-10 w-10 text-violet-400 mb-6" />
                   <div className="space-y-4">
-                    <div className="text-4xl font-bold">11+</div>
+                    <div className="text-4xl font-bold">{STATS.yearsExperience}</div>
                     <div className="text-slate-400">Years in B2B</div>
                     <div className="h-px bg-slate-700 my-4" />
-                    <div className="text-4xl font-bold">2M+</div>
+                    <div className="text-4xl font-bold">{STATS.leadsGenerated}</div>
                     <div className="text-slate-400">Leads Generated</div>
                     <div className="h-px bg-slate-700 my-4" />
-                    <div className="text-4xl font-bold">500+</div>
+                    <div className="text-4xl font-bold">{STATS.enterpriseClients}</div>
                     <div className="text-slate-400">Enterprise Clients</div>
                   </div>
                 </div>
@@ -1102,22 +1101,20 @@ export default function LandingPage() {
                 <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Built for Truth.</span>
               </h2>
               <blockquote className="text-xl text-muted-foreground mb-6 border-l-4 border-violet-500 pl-6 italic">
-                "Starting DemandGentic in Afghanistan in 2017 taught me that every interaction counts and every mistake is public.
-                We built DemandGentic.ai to be The Agentic Steward — a system that reasons before it acts, remembers every interaction,
-                and puts truth, human connection, and compliance above everything else."
+                "{FOUNDER_QUOTES.landing}"
               </blockquote>
               <div className="flex items-center gap-4">
                 <div className="h-14 w-14 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xl">
-                  ZM
+                  {BRAND.founder.initials}
                 </div>
                 <div>
-                  <p className="font-bold">Zahid Mohammadi</p>
-                  <p className="text-muted-foreground">Founder & Chief AI Architect</p>
+                  <p className="font-bold">{BRAND.founder.name}</p>
+                  <p className="text-muted-foreground">{BRAND.founder.title}</p>
                 </div>
               </div>
               <p className="mt-6 text-muted-foreground">
-                DemandGentic.ai is built by DemandGentic — a B2B marketing and demand team trained on 11+ years
-                of first-hand front-line experience. We love to be called The Problem Solvers.
+                {BRAND.company.productName} is built by {BRAND.company.shortName} — a B2B marketing and demand team trained on {STATS.yearsExperience} years
+                of first-hand front-line experience. We love to be called {TAGLINE.identity}.
                 From Afghanistan to enterprise clients worldwide, we didn't build theory. We built what actually works.
               </p>
             </div>
@@ -1188,18 +1185,18 @@ export default function LandingPage() {
                   </div>
                 </div>
                 <div className="flex flex-col">
-                  <span className="font-bold text-lg leading-tight">Pivotal B2B</span>
-                  <span className="text-[10px] text-slate-400 font-medium">DemandGentic---Human-Led Strategy. AI-Powered Execution.</span>
+                  <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">{TAGLINE.full}</span>
                 </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">
-                Your entire revenue engine. Voice, content, pipeline, data — one intelligent platform.
+                {TAGLINE.footerTagline}
               </p>
               <div className="text-slate-500 text-xs space-y-1">
-                <p className="font-medium text-slate-400">Pivotal B2B LLC</p>
-                <p>Lewes, Delaware</p>
-                <p><a href="tel:+14179003844" className="hover:text-white transition-colors">(417) 900-3844</a></p>
-                <p><a href="https://demandgentic.ai/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">demandgentic.ai</a></p>
+                <p className="font-medium text-slate-400">{BRAND.company.legalName}</p>
+                <p>{BRAND.company.location}</p>
+                <p><a href="tel:+14179003844" className="hover:text-white transition-colors">{BRAND.company.phone}</a></p>
+                <p><a href={`https://${BRAND.domains.primary}/`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">{BRAND.domains.primary}</a></p>
               </div>
             </div>
 
@@ -1240,14 +1237,14 @@ export default function LandingPage() {
               <ul className="space-y-2 text-slate-400 text-sm">
                 <li><a href="/login" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
                 <li><a href="/login" className="hover:text-white transition-colors">Request a Proposal</a></li>
-                <li><a href="mailto:contact@demandgentic.ai" className="hover:text-white transition-colors">Contact Us</a></li>
+                <li><a href={`mailto:${BRAND.domains.email.contact}`} className="hover:text-white transition-colors">Contact Us</a></li>
               </ul>
             </div>
           </div>
 
           <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-slate-500 text-sm">
-              © 2026 DemandGentic LLC. All rights reserved. DemandGentic.ai is a product of DemandGentic LLC.
+              {FOOTER.copyright}
             </p>
             <div className="flex gap-6 text-slate-500 text-sm">
               <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>

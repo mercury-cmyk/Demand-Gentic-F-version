@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth';
+import { db } from '../db';
+import { clientBusinessProfiles, clientUsers, clientAccounts } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   generateEmailContent,
@@ -55,6 +58,50 @@ const qualityAnalysisSchema = z.object({
 router.post('/generate', requireAuth, async (req, res) => {
   try {
     const data = generateContentSchema.parse(req.body);
+    const userId = (req.user as any)?.id;
+
+    let organizationContext = undefined;
+    let clientCompanyName = undefined;
+
+    if (userId) {
+       // Check if this is a client user to inject organization intelligence
+       const [clientUser] = await db
+         .select()
+         .from(clientUsers)
+         .where(eq(clientUsers.userId, userId))
+         .limit(1);
+
+       if (clientUser) {
+         // Get organization intelligence
+         const [businessProfile] = await db
+           .select()
+           .from(clientBusinessProfiles)
+           .where(eq(clientBusinessProfiles.clientAccountId, clientUser.clientAccountId))
+           .limit(1);
+           
+         const [clientAccount] = await db
+           .select()
+           .from(clientAccounts)
+           .where(eq(clientAccounts.id, clientUser.clientAccountId))
+           .limit(1);
+
+         const companyName = 
+           businessProfile?.dbaName || 
+           businessProfile?.legalBusinessName || 
+           clientAccount?.name;
+           
+         if (companyName) {
+            clientCompanyName = companyName;
+            organizationContext = {
+               name: companyName,
+               website: businessProfile?.website,
+               industry: businessProfile?.industry,
+               description: businessProfile?.description,
+               proposition: businessProfile?.valueProposition
+            };
+         }
+       }
+    }
     
     const content = await generateEmailContent(data.prompt, {
       companyName: data.companyName,
@@ -64,11 +111,25 @@ router.post('/generate', requireAuth, async (req, res) => {
       templateType: data.templateType,
       accountId: data.accountId,
       campaignId: data.campaignId,
+      organizationContext,
     });
+
+    // Inject company name into response if available (helps frontend with branding/logo)
+    if (clientCompanyName && !data.companyName) {
+       // Only valid if the email is FROM the client company
+       // Logic: if 'content.intro' or 'content.closingLine' is generic, we can't force it, 
+       // but we can hint to frontend that this belongs to 'Argyle' context.
+       // We'll pass it in the response content if not present.
+    }
 
     res.json({
       success: true,
-      content,
+      content: {
+        ...content,
+        // Ensure we pass the detected client company name if not explicitly set in content
+        // This helps the frontend detect the logo correctly
+        companyName: clientCompanyName || data.companyName
+      },
     });
   } catch (error: any) {
     console.error('[DEEPSEEK-AI] Generate error:', error);

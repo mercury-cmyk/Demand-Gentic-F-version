@@ -485,7 +485,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       talkingPoints: prev.talkingPoints.length > 0 ? prev.talkingPoints : [
         ...(orgIntelData.offerings?.coreProducts?.slice(0, 3) || []),
         ...(orgIntelData.positioning?.whyUs?.slice(0, 2) || []),
-      ],
+      ].map(p => typeof p === 'string' ? p : (p && typeof p === 'object' ? (p.name || p.title || p.content || JSON.stringify(p)) : String(p ?? ''))),
     }));
     toast({ title: 'Organization context applied', description: 'Fields pre-filled from your Organization Intelligence data.' });
   };
@@ -1476,9 +1476,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                       <MessageSquare className="h-4 w-4 text-primary" />
                                       Key Talking Points
                                     </Label>
-                                    {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                                    {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length > 0 && (
                                       <Badge variant="outline" className="text-xs">
-                                        {formData.talkingPoints.filter(p => p.trim()).length} added
+                                        {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length} added
                                       </Badge>
                                     )}
                                   </div>
@@ -1496,7 +1496,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                           if (talkingPointInput.trim()) {
                                             setFormData(prev => ({
                                               ...prev,
-                                              talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                              talkingPoints: [...prev.talkingPoints.filter(p => typeof p === 'string' && p.trim()), talkingPointInput.trim()],
                                             }));
                                             setTalkingPointInput('');
                                           }
@@ -1510,7 +1510,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                         if (talkingPointInput.trim()) {
                                           setFormData(prev => ({
                                             ...prev,
-                                            talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                            talkingPoints: [...prev.talkingPoints.filter(p => typeof p === 'string' && p.trim()), talkingPointInput.trim()],
                                           }));
                                           setTalkingPointInput('');
                                         }
@@ -1522,9 +1522,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                       Add
                                     </Button>
                                   </div>
-                                  {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                                  {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length > 0 && (
                                     <div className="flex flex-wrap gap-2 p-1">
-                                      {formData.talkingPoints.filter(p => p.trim()).map((point, idx) => (
+                                      {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).map((point, idx) => (
                                         <Badge
                                           key={idx}
                                           variant="secondary"
@@ -1638,9 +1638,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                 <MessageSquare className="h-4 w-4 text-primary" />
                                 Key Talking Points
                               </Label>
-                              {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                              {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length > 0 && (
                                 <Badge variant="outline" className="text-xs">
-                                  {formData.talkingPoints.filter(p => p.trim()).length} added
+                                  {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length} added
                                 </Badge>
                               )}
                             </div>
@@ -1658,7 +1658,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                     if (talkingPointInput.trim()) {
                                       setFormData(prev => ({
                                         ...prev,
-                                        talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                        talkingPoints: [...prev.talkingPoints.filter(p => typeof p === 'string' && p.trim()), talkingPointInput.trim()],
                                       }));
                                       setTalkingPointInput('');
                                     }
@@ -1672,7 +1672,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                   if (talkingPointInput.trim()) {
                                     setFormData(prev => ({
                                       ...prev,
-                                      talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                      talkingPoints: [...prev.talkingPoints.filter(p => typeof p === 'string' && p.trim()), talkingPointInput.trim()],
                                     }));
                                     setTalkingPointInput('');
                                   }
@@ -1684,10 +1684,10 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                 Add
                               </Button>
                             </div>
-                            {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                            {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length > 0 && (
                               <ScrollArea className="max-h-32">
                                 <div className="flex flex-wrap gap-2 p-1">
-                                  {formData.talkingPoints.filter(p => p.trim()).map((point, idx) => (
+                                  {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).map((point, idx) => (
                                     <Badge
                                       key={idx}
                                       variant="secondary"
@@ -1711,7 +1711,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                 </div>
                               </ScrollArea>
                             )}
-                            {formData.talkingPoints.filter(p => p.trim()).length === 0 && (
+                            {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length === 0 && (
                               <div className="text-center py-4 text-muted-foreground text-sm border border-dashed rounded-lg">
                                 <Lightbulb className="h-5 w-5 mx-auto mb-1 opacity-50" />
                                 No talking points yet. Add key messages for your AI agent.
@@ -2678,15 +2678,15 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                     <span className="font-medium">Intent:</span> {formData.voiceIntent}
                                   </p>
                                 )}
-                                {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                                {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length > 0 && (
                                   <div className="text-sm">
                                     <span className="font-medium text-muted-foreground">Talking Points:</span>
                                     <ul className="list-disc list-inside mt-1">
-                                      {formData.talkingPoints.filter(p => p.trim()).slice(0, 3).map((p, i) => (
+                                      {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).slice(0, 3).map((p, i) => (
                                         <li key={i} className="text-muted-foreground">{p}</li>
                                       ))}
-                                      {formData.talkingPoints.filter(p => p.trim()).length > 3 && (
-                                        <li className="text-muted-foreground">+{formData.talkingPoints.filter(p => p.trim()).length - 3} more</li>
+                                      {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length > 3 && (
+                                        <li className="text-muted-foreground">+{formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length - 3} more</li>
                                       )}
                                     </ul>
                                   </div>
@@ -2726,11 +2726,11 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                         )}
 
                         {/* Talking Points (Single Channel) */}
-                        {formData.channel !== 'combo' && formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                        {formData.channel !== 'combo' && formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).length > 0 && (
                           <div>
                             <h4 className="font-medium text-sm text-muted-foreground mb-2">Key Talking Points</h4>
                             <ul className="list-disc list-inside space-y-1">
-                              {formData.talkingPoints.filter(p => p.trim()).map((point, idx) => (
+                              {formData.talkingPoints.filter(p => typeof p === 'string' && p.trim()).map((point, idx) => (
                                 <li key={idx}>{point}</li>
                               ))}
                             </ul>

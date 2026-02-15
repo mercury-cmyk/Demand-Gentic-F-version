@@ -997,57 +997,28 @@ router.post("/emails/send-test", async (req: Request, res: Response) => {
       });
     }
 
-    // Check if Mailgun is configured
-    const mailgunApiKey = process.env.MAILGUN_API_KEY;
-    const mailgunDomain = process.env.MAILGUN_DOMAIN;
+    // Use Mercury email service (same SMTP provider as admin)
+    const { mercuryEmailService } = await import("../services/mercury");
 
-    if (!mailgunApiKey || !mailgunDomain) {
-      console.warn("[Client Portal] Mailgun not configured for test email");
-      return res.status(503).json({
-        success: false,
-        message: "Email service not configured. Contact support to enable email delivery.",
-        details: {
-          provider: "mailgun",
-          configured: false,
-          sandbox: false,
-        }
-      });
-    }
+    console.log(`[Client Portal] Sending test email to ${to} via Mercury SMTP`);
 
-    // Check if sandbox mode (domain starts with sandbox.)
-    const isSandbox = mailgunDomain.startsWith('sandbox.');
-
-    // Import and use the bulk email service
-    const { sendTestEmail } = await import("../services/bulk-email-service");
-    
-    console.log(`[Client Portal] Sending test email to ${to}, sandbox=${isSandbox}`);
-    
-    const result = await sendTestEmail({
-      to: [to],
+    const result = await mercuryEmailService.sendDirect({
+      to,
       subject,
       html,
     });
 
-    if (result.success && result.messageId) {
+    if (result.success) {
       console.log(`[Client Portal] Test email delivered to ${to}, messageId: ${result.messageId}`);
-      
-      // Return detailed success response
+
       res.json({
         success: true,
-        message: isSandbox 
-          ? `Test email queued (sandbox mode - verify recipient in Mailgun dashboard)`
-          : `Test email sent to ${to}`,
+        message: `Test email sent to ${to}`,
         details: {
           messageId: result.messageId,
-          provider: "mailgun",
-          sandbox: isSandbox,
-          recipientCount: result.sent,
+          provider: "smtp",
           timestamp: new Date().toISOString(),
         },
-        // Warning for sandbox mode
-        ...(isSandbox && {
-          warning: "Sandbox mode: Email will only be delivered to verified recipients in your Mailgun account. Add the recipient email to your Mailgun authorized recipients list."
-        })
       });
     } else {
       console.error(`[Client Portal] Test email failed for ${to}:`, result.error);
@@ -1055,10 +1026,8 @@ router.post("/emails/send-test", async (req: Request, res: Response) => {
         success: false,
         message: result.error || "Email delivery failed - provider rejected the request",
         details: {
-          provider: "mailgun",
-          sandbox: isSandbox,
+          provider: "smtp",
           error: result.error,
-          sent: result.sent,
         }
       });
     }

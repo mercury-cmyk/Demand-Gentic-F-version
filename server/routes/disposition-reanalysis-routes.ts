@@ -24,7 +24,10 @@ import {
   deepReanalyzeBatch,
   pushCallsToQA,
   pushCallsToClient,
+  pushCallsToDashboard,
   exportReanalysisData,
+  getContactsByDisposition,
+  validateCallsForClientSamples,
   type DeepReanalysisFilter,
 } from "../services/disposition-deep-reanalyzer";
 import type { CanonicalDisposition } from "@shared/schema";
@@ -268,6 +271,9 @@ router.post("/bulk-override", requireAuth, async (req: Request, res: Response) =
 
 // POST /deep/preview - Deep AI analysis preview (dry-run)
 router.post("/deep/preview", requireAuth, async (req: Request, res: Response) => {
+  // Extend timeout to 10 minutes for batch AI processing
+  req.setTimeout(600000);
+  res.setTimeout(600000);
   try {
     const filters: DeepReanalysisFilter = {
       campaignId: req.body.campaignId,
@@ -280,6 +286,8 @@ router.post("/deep/preview", requireAuth, async (req: Request, res: Response) =>
       hasRecording: req.body.hasRecording,
       agentType: req.body.agentType || "all",
       confidenceThreshold: req.body.confidenceThreshold,
+      minTurns: req.body.minTurns,
+      maxTurns: req.body.maxTurns,
       limit: Math.min(req.body.limit || 50, 200),
       offset: req.body.offset || 0,
     };
@@ -294,6 +302,9 @@ router.post("/deep/preview", requireAuth, async (req: Request, res: Response) =>
 
 // POST /deep/apply - Deep AI analysis with actual changes
 router.post("/deep/apply", requireAuth, async (req: Request, res: Response) => {
+  // Extend timeout to 10 minutes for batch AI processing
+  req.setTimeout(600000);
+  res.setTimeout(600000);
   try {
     const filters: DeepReanalysisFilter = {
       campaignId: req.body.campaignId,
@@ -306,6 +317,8 @@ router.post("/deep/apply", requireAuth, async (req: Request, res: Response) => {
       hasRecording: req.body.hasRecording,
       agentType: req.body.agentType || "all",
       confidenceThreshold: req.body.confidenceThreshold,
+      minTurns: req.body.minTurns,
+      maxTurns: req.body.maxTurns,
       limit: Math.min(req.body.limit || 30, 100),
       offset: req.body.offset || 0,
     };
@@ -320,6 +333,9 @@ router.post("/deep/apply", requireAuth, async (req: Request, res: Response) => {
 
 // GET /deep/analyze/:callSessionId - Deep single call analysis
 router.get("/deep/analyze/:callSessionId", requireAuth, async (req: Request, res: Response) => {
+  // Extend timeout to 2 minutes for single AI analysis
+  req.setTimeout(120000);
+  res.setTimeout(120000);
   try {
     const { callSessionId } = req.params;
     if (!callSessionId) {
@@ -361,7 +377,7 @@ router.post("/deep/push-to-qa", requireAuth, async (req: Request, res: Response)
 // POST /deep/push-to-client - Push selected calls to client
 router.post("/deep/push-to-client", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { callSessionIds, clientNotes } = req.body;
+    const { callSessionIds, clientNotes, samplePush } = req.body;
     if (!Array.isArray(callSessionIds) || callSessionIds.length === 0) {
       return res.status(400).json({ error: "callSessionIds array is required" });
     }
@@ -370,11 +386,30 @@ router.post("/deep/push-to-client", requireAuth, async (req: Request, res: Respo
     }
 
     const userId = (req as any).user?.id || "system";
-    const result = await pushCallsToClient(callSessionIds, clientNotes || "", userId);
+    const result = await pushCallsToClient(callSessionIds, clientNotes || "", userId, !!samplePush);
     res.json(result);
   } catch (error: any) {
     console.error("[DispositionReanalysis] Push to client error:", error);
     res.status(500).json({ error: `Push to client failed: ${error.message}` });
+  }
+});
+
+// POST /deep/validate-for-client - Validate calls before pushing as client samples
+router.post("/deep/validate-for-client", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { callSessionIds } = req.body;
+    if (!Array.isArray(callSessionIds) || callSessionIds.length === 0) {
+      return res.status(400).json({ error: "callSessionIds array is required" });
+    }
+    if (callSessionIds.length > 200) {
+      return res.status(400).json({ error: "Maximum 200 calls per validation request" });
+    }
+
+    const result = await validateCallsForClientSamples(callSessionIds);
+    res.json(result);
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Validate for client error:", error);
+    res.status(500).json({ error: `Validation failed: ${error.message}` });
   }
 });
 
@@ -401,6 +436,58 @@ router.post("/deep/export", requireAuth, async (req: Request, res: Response) => 
   } catch (error: any) {
     console.error("[DispositionReanalysis] Export error:", error);
     res.status(500).json({ error: `Export failed: ${error.message}` });
+  }
+});
+
+// ============================================================================
+// GET /contacts-by-disposition/:disposition - Get contacts filtered by disposition
+// ============================================================================
+
+router.get("/contacts-by-disposition/:disposition", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { disposition } = req.params;
+    const { campaignId, dateFrom, dateTo, limit, offset, search } = req.query;
+
+    if (!disposition) {
+      return res.status(400).json({ error: "disposition is required" });
+    }
+
+    const result = await getContactsByDisposition(disposition, {
+      campaignId: campaignId as string | undefined,
+      dateFrom: dateFrom as string | undefined,
+      dateTo: dateTo as string | undefined,
+      limit: limit ? parseInt(limit as string) : 50,
+      offset: offset ? parseInt(offset as string) : 0,
+      search: search as string | undefined,
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Contacts by disposition error:", error);
+    res.status(500).json({ error: `Failed to load contacts: ${error.message}` });
+  }
+});
+
+// ============================================================================
+// POST /deep/push-to-dashboard - Push selected calls to main dashboard
+// ============================================================================
+
+router.post("/deep/push-to-dashboard", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { callSessionIds, notes } = req.body;
+    if (!Array.isArray(callSessionIds) || callSessionIds.length === 0) {
+      return res.status(400).json({ error: "callSessionIds array is required" });
+    }
+    if (callSessionIds.length > 100) {
+      return res.status(400).json({ error: "Maximum 100 calls per request" });
+    }
+
+    const userId = (req as any).user?.id || "system";
+    const result = await pushCallsToDashboard(callSessionIds, userId, notes);
+    res.json(result);
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Push to dashboard error:", error);
+    res.status(500).json({ error: `Push to dashboard failed: ${error.message}` });
   }
 });
 

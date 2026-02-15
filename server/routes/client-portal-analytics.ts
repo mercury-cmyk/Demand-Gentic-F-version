@@ -15,6 +15,8 @@ import {
   campaigns,
   callSessions,
   callQualityRecords,
+  clientMockCalls,
+  qaGatedContent,
   contacts,
   accounts,
   leads,
@@ -234,24 +236,15 @@ router.get('/analytics/engagement', async (req: Request, res: Response) => {
     const { campaignId } = req.query;
     const campaignIds = await getClientCampaignIds(clientAccountId);
 
-    if (campaignIds.length === 0) {
-      return res.json({
-        totalCampaigns: 0,
-        calls: { total: 0 },
-        email: { total: 0 },
-        leads: { qualified: 0 },
-        timeline: [],
-        channelBreakdown: [],
-        dispositions: [],
-      });
-    }
-
-    const targetIds = campaignId && campaignId !== 'all'
+    const selectedTargetIds = campaignId && campaignId !== 'all'
       ? [campaignId as string].filter(id => campaignIds.includes(id))
       : campaignIds;
+    // Keep analytics operational even when no live campaign IDs are available
+    // so sample/mock calls can still appear for the client.
+    const targetIds = selectedTargetIds.length > 0 ? selectedTargetIds : ['__none__'];
 
     // Total campaigns
-    const totalCampaigns = targetIds.length;
+    const totalCampaigns = selectedTargetIds.length;
 
     // Call stats
     const [callStats] = await db
@@ -266,6 +259,29 @@ router.get('/analytics/engagement', async (req: Request, res: Response) => {
           eq(callSessions.status, 'completed')
         )
       );
+
+    // Sample/mock calls that were QA-approved for this client account
+    const sampleCallConditions = [
+      eq(clientMockCalls.clientAccountId, clientAccountId),
+      eq(clientMockCalls.callType, 'sample'),
+      inArray(qaGatedContent.qaStatus, ['approved', 'published']),
+      eq(qaGatedContent.clientVisible, true),
+    ];
+
+    if (campaignId && campaignId !== 'all') {
+      sampleCallConditions.push(eq(clientMockCalls.campaignId, campaignId as string));
+    }
+
+    const [sampleCallStats] = await db
+      .select({
+        total: sql<number>`COUNT(*)::int`,
+      })
+      .from(clientMockCalls)
+      .innerJoin(qaGatedContent, and(
+        eq(qaGatedContent.id, clientMockCalls.qaContentId),
+        eq(qaGatedContent.contentType, 'mock_call')
+      ))
+      .where(and(...sampleCallConditions));
 
     // Email stats
     const [emailStats] = await db
@@ -347,14 +363,150 @@ router.get('/analytics/engagement', async (req: Request, res: Response) => {
       .groupBy(sql`COALESCE(${callSessions.aiDisposition}, 'unknown')`)
       .orderBy(desc(sql`COUNT(*)`));
 
+    // Include dispositions from sample calls
+    const sampleDispositions = await db
+      .select({
+        disposition: sql<string>`COALESCE(${clientMockCalls.disposition}, 'sample_call')`,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(clientMockCalls)
+      .innerJoin(qaGatedContent, and(
+        eq(qaGatedContent.id, clientMockCalls.qaContentId),
+        eq(qaGatedContent.contentType, 'mock_call')
+      ))
+      .where(and(...sampleCallConditions))
+      .groupBy(sql`COALESCE(${clientMockCalls.disposition}, 'sample_call')`)
+      .orderBy(desc(sql`COUNT(*)`));
+
+    const dispositionMap = new Map<string, number>();
+    for (const row of dispositions) {
+      dispositionMap.set(row.disposition, Number(row.count) || 0);
+    }
+    for (const row of sampleDispositions) {
+      const prev = dispositionMap.get(row.disposition) || 0;
+      dispositionMap.set(row.disposition, prev + (Number(row.count) || 0));
+    }
+    const mergedDispositions = Array.from(dispositionMap.entries())
+      .map(([disposition, count]) => ({ disposition, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Agent behavior aggregate from call quality dimensions
+    const [agentBehavior] = await db
+      .select({
+        sampleSize: sql<number>`COUNT(*)::int`,
+        overall: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.overallQualityScore})), 0)::int`,
+        clarity: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.clarityScore})), 0)::int`,
+        engagement: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.engagementScore})), 0)::int`,
+        empathy: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.empathyScore})), 0)::int`,
+        objectionHandling: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.objectionHandlingScore})), 0)::int`,
+        qualification: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.qualificationScore})), 0)::int`,
+        closing: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.closingScore})), 0)::int`,
+        flowCompliance: sql<number>`COALESCE(ROUND(AVG(${callQualityRecords.flowComplianceScore})), 0)::int`,
+      })
+      .from(callQualityRecords)
+      .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed')
+        )
+      );
+
+    const [sampleBehavior] = await db
+      .select({
+        sampleSize: sql<number>`COUNT(*)::int`,
+        avgScore: sql<number>`COALESCE(ROUND(AVG(${clientMockCalls.aiScore})), 0)::int`,
+      })
+      .from(clientMockCalls)
+      .innerJoin(qaGatedContent, and(
+        eq(qaGatedContent.id, clientMockCalls.qaContentId),
+        eq(qaGatedContent.contentType, 'mock_call')
+      ))
+      .where(and(...sampleCallConditions));
+
+    // Recent calls: live calls + sample calls
+    const liveRecentCalls = await db
+      .select({
+        id: callSessions.id,
+        campaignName: campaigns.name,
+        contactName: sql<string>`COALESCE(CONCAT(${contacts.firstName}, ' ', ${contacts.lastName}), 'Unknown')`,
+        accountName: sql<string>`COALESCE(${accounts.name}, 'Unknown')`,
+        disposition: sql<string>`COALESCE(${callSessions.aiDisposition}, 'unknown')`,
+        duration: callSessions.durationSec,
+        behaviorScore: callQualityRecords.overallQualityScore,
+        createdAt: callSessions.createdAt,
+        source: sql<'live'>`'live'`,
+      })
+      .from(callSessions)
+      .innerJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+      .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .leftJoin(callQualityRecords, eq(callQualityRecords.callSessionId, callSessions.id))
+      .where(
+        and(
+          inArray(callSessions.campaignId, targetIds),
+          eq(callSessions.status, 'completed')
+        )
+      )
+      .orderBy(desc(callSessions.createdAt))
+      .limit(25);
+
+    const sampleRecentCalls = await db
+      .select({
+        id: clientMockCalls.id,
+        campaignName: campaigns.name,
+        contactName: sql<string>`COALESCE(${clientMockCalls.callName}, 'Sample Call')`,
+        accountName: sql<string>`'Sample'`,
+        disposition: sql<string>`COALESCE(${clientMockCalls.disposition}, 'sample_call')`,
+        duration: clientMockCalls.durationSeconds,
+        behaviorScore: clientMockCalls.aiScore,
+        createdAt: clientMockCalls.createdAt,
+        source: sql<'sample'>`'sample'`,
+      })
+      .from(clientMockCalls)
+      .leftJoin(campaigns, eq(clientMockCalls.campaignId, campaigns.id))
+      .innerJoin(qaGatedContent, and(
+        eq(qaGatedContent.id, clientMockCalls.qaContentId),
+        eq(qaGatedContent.contentType, 'mock_call')
+      ))
+      .where(and(...sampleCallConditions))
+      .orderBy(desc(clientMockCalls.createdAt))
+      .limit(25);
+
+    const recentCalls = [...liveRecentCalls, ...sampleRecentCalls]
+      .sort((a, b) => new Date(b.createdAt as Date | string).getTime() - new Date(a.createdAt as Date | string).getTime())
+      .slice(0, 30)
+      .map((call) => ({
+        ...call,
+        behaviorScore: call.behaviorScore == null ? null : Number(call.behaviorScore),
+      }));
+
     res.json({
       totalCampaigns,
-      calls: { total: callStats?.total || 0 },
+      calls: {
+        total: (callStats?.total || 0) + (sampleCallStats?.total || 0),
+        live: callStats?.total || 0,
+        sample: sampleCallStats?.total || 0,
+      },
       email: { total: emailStats?.total || 0 },
       leads: { qualified: leadStats?.qualified || 0 },
       timeline: mergedTimeline,
       channelBreakdown,
-      dispositions,
+      dispositions: mergedDispositions,
+      agentBehavior: {
+        sampleSize: agentBehavior?.sampleSize || 0,
+        overall: agentBehavior?.overall || 0,
+        clarity: agentBehavior?.clarity || 0,
+        engagement: agentBehavior?.engagement || 0,
+        empathy: agentBehavior?.empathy || 0,
+        objectionHandling: agentBehavior?.objectionHandling || 0,
+        qualification: agentBehavior?.qualification || 0,
+        closing: agentBehavior?.closing || 0,
+        flowCompliance: agentBehavior?.flowCompliance || 0,
+        sampleCallsAvgScore: sampleBehavior?.avgScore || 0,
+        sampleCallsCount: sampleBehavior?.sampleSize || 0,
+      },
+      recentCalls,
     });
   } catch (error) {
     console.error('[CLIENT PORTAL] Analytics error:', error);
@@ -383,7 +535,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
 
     if (targetIds.length === 0) return res.json([]);
 
-    const conversations = await db
+    const rawConversations = await db
       .select({
         id: callSessions.id,
         campaignId: callSessions.campaignId,
@@ -397,6 +549,22 @@ router.get('/conversations', async (req: Request, res: Response) => {
         transcript: callSessions.aiTranscript,
         analysis: callSessions.aiAnalysis,
         createdAt: callSessions.createdAt,
+        // Post-call quality dimensions from callQualityRecords
+        engagementScore: callQualityRecords.engagementScore,
+        clarityScore: callQualityRecords.clarityScore,
+        empathyScore: callQualityRecords.empathyScore,
+        objectionHandlingScore: callQualityRecords.objectionHandlingScore,
+        qualificationScore: callQualityRecords.qualificationScore,
+        closingScore: callQualityRecords.closingScore,
+        flowComplianceScore: callQualityRecords.flowComplianceScore,
+        campaignAlignmentScore: callQualityRecords.campaignAlignmentScore,
+        sentiment: callQualityRecords.sentiment,
+        engagementLevel: callQualityRecords.engagementLevel,
+        issues: callQualityRecords.issues,
+        recommendations: callQualityRecords.recommendations,
+        // Recording info
+        hasRecording: sql<boolean>`(${callSessions.recordingS3Key} IS NOT NULL)`,
+        recordingS3Key: callSessions.recordingS3Key,
       })
       .from(callSessions)
       .innerJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
@@ -411,11 +579,18 @@ router.get('/conversations', async (req: Request, res: Response) => {
         and(
           inArray(callSessions.campaignId, targetIds),
           eq(callSessions.status, 'completed'),
-          isNotNull(callSessions.aiTranscript)
         )
       )
       .orderBy(desc(callSessions.createdAt))
-      .limit(100);
+      .limit(200);
+
+    // Deduplicate by callSession id (left join on leads can produce duplicates)
+    const seen = new Set<string>();
+    const conversations = rawConversations.filter(c => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
 
     res.json(conversations);
   } catch (error) {

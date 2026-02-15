@@ -420,6 +420,12 @@ export default function VoiceSimulationPage() {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
+      // Clean up audio element to prevent blob URL leaks
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      window.speechSynthesis?.cancel();
     };
   }, [isSpeaking, view]);
 

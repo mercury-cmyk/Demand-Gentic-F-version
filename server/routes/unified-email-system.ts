@@ -42,6 +42,7 @@ router.post("/invitations/validate-token", async (req: Request, res: Response) =
     }
 
     const result = await bulkInvitationService.validateToken(token);
+    console.log(`[Communications/Invitations] Token validation result: valid=${result.valid}, reason=${result.reason || 'N/A'}, userId=${result.clientUserId || 'N/A'}`);
     if (!result.valid) {
       return res.json(result);
     }
@@ -62,7 +63,8 @@ router.post("/invitations/validate-token", async (req: Request, res: Response) =
       .limit(1);
 
     if (!user) {
-      return res.json({ valid: false, reason: "User account not found" });
+      console.warn(`[Communications/Invitations] Token valid but user not found: clientUserId=${result.clientUserId}`);
+      return res.json({ valid: false, reason: "User account not found. The associated account may have been removed." });
     }
 
     res.json({

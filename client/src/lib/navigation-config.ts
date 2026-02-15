@@ -14,6 +14,7 @@ export const NAVIGATION_DOMAINS = {
   ANALYTICS: 'analytics',
   OPERATIONS: 'operations',
   IAM: 'iam',
+  UNLICENSED: 'unlicensed',
   SETTINGS: 'settings',
 } as const;
 
@@ -130,7 +131,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           },
           {
             id: 'agentic-operator',
-            title: 'AgentX',
+            title: 'Agentic Demand Council',
             url: '/ai-studio/operator',
             roles: MANAGEMENT_ROLES,
             description: 'Unified agentic operations panel',
@@ -381,29 +382,27 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
         description: 'Call disposition reports, agent performance, and AI call analytics',
       },
+    ],
+  },
+
+  // ============================================
+  // UNLICENSED DEPARTMENT
+  // ============================================
+  {
+    id: 'unlicensed',
+    label: 'Unlicensed',
+    domain: NAVIGATION_DOMAINS.UNLICENSED,
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
+    description: 'Conversation quality and lead quality analysis departments',
+    items: [
       {
-        id: 'call-recordings',
-        title: 'Call Recordings',
-        url: '/call-recordings',
-        icon: 'Headphones',
-        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
-        description: 'Browse, search, and playback all call recordings',
-      },
-      {
-        id: 'reports',
-        title: 'Reports',
-        url: '/reports',
-        icon: 'FileText',
-        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
-        description: 'Custom reports and exports',
-      },
-      {
-        id: 'disposition-reanalysis',
-        title: 'Disposition Reanalysis',
-        url: '/disposition-reanalysis',
-        icon: 'RefreshCw',
-        roles: QA_ROLES,
-        description: 'Analyze calls, detect misclassified dispositions, and re-route leads',
+        id: 'unlicensed-departments',
+        title: 'Unlicensed Departments',
+        url: '/unlicensed-departments',
+        icon: 'Building',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
+        description: 'Conversation quality and lead quality departments',
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
       },
     ],
   },

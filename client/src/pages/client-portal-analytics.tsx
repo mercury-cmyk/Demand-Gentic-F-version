@@ -5,6 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   BarChart3,
   Phone,
   Mail,
@@ -73,6 +81,23 @@ export default function ClientPortalAnalytics() {
     { label: "Calls Made", value: analytics?.calls?.total || 0, icon: Phone, color: "text-purple-500" },
     { label: "Qualified Leads", value: analytics?.leads?.qualified || 0, icon: UserCheck, color: "text-orange-500" },
   ];
+
+  const behaviorDimensionData = analytics?.agentBehavior ? [
+    { metric: "Engagement", score: analytics.agentBehavior.engagement || 0 },
+    { metric: "Clarity", score: analytics.agentBehavior.clarity || 0 },
+    { metric: "Empathy", score: analytics.agentBehavior.empathy || 0 },
+    { metric: "Objection Handling", score: analytics.agentBehavior.objectionHandling || 0 },
+    { metric: "Qualification", score: analytics.agentBehavior.qualification || 0 },
+    { metric: "Closing", score: analytics.agentBehavior.closing || 0 },
+    { metric: "Flow", score: analytics.agentBehavior.flowCompliance || 0 },
+  ] : [];
+
+  const formatDuration = (seconds?: number | null) => {
+    if (!seconds) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <ClientPortalLayout>
@@ -207,6 +232,98 @@ export default function ClientPortalAnalytics() {
                     ) : (
                       <div className="flex items-center justify-center h-[250px] text-muted-foreground">
                         No disposition data available
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Calls + Agent Behaviour */}
+            {(analytics?.calls?.total || 0) > 0 && (
+              <div className="grid gap-6 lg:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-primary" />
+                      Agent Behaviour Analysis
+                    </CardTitle>
+                    <CardDescription>
+                      Average quality dimensions from analyzed calls
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-3 mb-5">
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Overall Behaviour Score</div>
+                        <div className="text-2xl font-bold">{analytics?.agentBehavior?.overall || 0}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Analyzed Calls</div>
+                        <div className="text-2xl font-bold">{analytics?.agentBehavior?.sampleSize || 0}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Live Calls</div>
+                        <div className="text-2xl font-bold">{analytics?.calls?.live || 0}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Sample Calls</div>
+                        <div className="text-2xl font-bold">{analytics?.calls?.sample || 0}</div>
+                      </div>
+                    </div>
+
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={behaviorDimensionData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="metric" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={50} />
+                        <YAxis domain={[0, 100]} />
+                        <Tooltip />
+                        <Bar dataKey="score" fill="hsl(262, 83%, 58%)" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Recent Calls</CardTitle>
+                    <CardDescription>
+                      Latest live and sample calls included in analytics
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {(analytics?.recentCalls || []).length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-10 text-center">
+                        No calls available yet.
+                      </div>
+                    ) : (
+                      <div className="max-h-[360px] overflow-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Contact</TableHead>
+                              <TableHead>Source</TableHead>
+                              <TableHead>Disposition</TableHead>
+                              <TableHead>Duration</TableHead>
+                              <TableHead>Score</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {analytics.recentCalls.map((call: any) => (
+                              <TableRow key={`${call.source}-${call.id}`}>
+                                <TableCell className="font-medium">{call.contactName || "Unknown"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={call.source === "sample" ? "secondary" : "outline"}>
+                                    {call.source === "sample" ? "Sample" : "Live"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{(call.disposition || "unknown").replace(/_/g, " ")}</TableCell>
+                                <TableCell>{formatDuration(call.duration)}</TableCell>
+                                <TableCell>{call.behaviorScore ?? "-"}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
                       </div>
                     )}
                   </CardContent>

@@ -10,51 +10,20 @@ import { db } from "../db";
 import { accountIntelligence, callAttempts, emailEvents, leads } from "@shared/schema";
 import { desc, gte, sql } from "drizzle-orm";
 import { buildUnifiedKnowledgePrompt } from "../services/unified-knowledge-hub";
+import { AGENT_DEFAULTS } from "@shared/brand-messaging";
 
 // ==================== DEFAULT ORGANIZATION INTELLIGENCE ====================
-// This is used when no organization-specific intelligence is configured in the database.
-// It provides sensible defaults for professional B2B outreach.
+// These defaults are sourced from the centralized brand messaging framework
+// (shared/brand-messaging.ts) to ensure all AI agents represent DemandGentic.ai
+// consistently when no organization-specific intelligence is configured.
 
-export const DEFAULT_ORG_INTELLIGENCE = `**Organization Context**
-You are calling on behalf of a professional B2B organization focused on helping business leaders achieve better outcomes.
+export const DEFAULT_ORG_INTELLIGENCE = AGENT_DEFAULTS.orgIntelligence;
 
-**Value Proposition**
-- We help companies improve their operations through thoughtful engagement
-- Our approach is consultative, not transactional
-- We believe in earning trust through genuine value exchange
+export const DEFAULT_COMPLIANCE_POLICY = AGENT_DEFAULTS.compliancePolicy;
 
-**Target Audience**
-- Business leaders and decision-makers
-- Companies looking for strategic improvements
-- Organizations open to exploring new approaches
+export const DEFAULT_PLATFORM_POLICIES = AGENT_DEFAULTS.platformPolicies;
 
-**Key Differentiators**
-- We lead with insight, not sales pressure
-- Every conversation is designed to be valuable regardless of outcome
-- We respect time and prioritize quality over quantity`;
-
-export const DEFAULT_COMPLIANCE_POLICY = `**Compliance Requirements**
-- Honor all opt-out requests immediately and permanently
-- Never call numbers on Do Not Call lists
-- Respect business hours (8am-6pm in recipient's timezone)
-- Document all consent and opt-out requests
-- Never misrepresent identity or purpose
-- Comply with TCPA, GDPR, CCPA and regional regulations`;
-
-export const DEFAULT_PLATFORM_POLICIES = `**Platform Rules**
-- Calls must have a clear, legitimate business purpose
-- Never use deceptive tactics or high-pressure techniques
-- Maintain professional, respectful tone at all times
-- End calls gracefully when requested
-- Report any compliance concerns immediately`;
-
-export const DEFAULT_VOICE_DEFAULTS = `**Voice & Communication Style**
-- Speak clearly at a natural, unhurried pace
-- Use professional but warm language
-- Ask one question at a time and wait for response
-- Listen actively without interrupting
-- Acknowledge what the other person says before responding
-- If uncertain, ask for clarification rather than assuming`;
+export const DEFAULT_VOICE_DEFAULTS = AGENT_DEFAULTS.voiceDefaults;
 
 export interface OrganizationPromptSettings {
   orgIntelligence: string;

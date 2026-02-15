@@ -115,11 +115,29 @@ export async function getOrBuildAccountCallBrief(params: {
     return latest;
   }
 
+  // Resolve product intelligence for this account
+  let productContext: string | null = null;
+  try {
+    const { resolveProductForAccount, formatProductContextForPrompt } =
+      await import('./product-intelligence');
+    const productMatch = await resolveProductForAccount({
+      accountId,
+      campaignId: campaignId || null,
+    });
+    if (productMatch.matched) {
+      productContext = formatProductContextForPrompt(productMatch);
+      console.log(`[AccountCallBrief] 🎯 Product matched: "${productMatch.eventTitle}"`);
+    }
+  } catch (piErr) {
+    console.warn('[AccountCallBrief] Product intelligence resolution failed:', piErr);
+  }
+
   const payload = await generateAccountCallBriefPayload({
     accountId,
     intelligence: intelligence.payloadJson as AccountIntelligencePayload,
     messagingBrief: messagingBrief.payloadJson as AccountMessagingBriefPayload,
     campaignIntent,
+    productContext,
   });
 
   const [inserted] = await db
@@ -317,6 +335,7 @@ export function buildCallPlanContextSection(params: {
   participantCallPlan: ParticipantCallPlanPayload;
   participantContext: ParticipantCallContext;
   memoryNotes: { account: string[]; participant: string[] };
+  productContext?: string | null;
 }): string {
   const memorySection = {
     account: params.memoryNotes.account,
@@ -341,6 +360,11 @@ export function buildCallPlanContextSection(params: {
     "- Ask questions before making statements.",
     "- Never pitch features or ask for a demo.",
     "- Do not assume internal problems; frame as industry patterns.",
+    ...(params.productContext ? [
+      "",
+      "# Product Intelligence (Matched Event)",
+      params.productContext,
+    ] : []),
   ].join("\n");
 }
 
@@ -508,6 +532,7 @@ async function generateAccountCallBriefPayload(params: {
   intelligence: AccountIntelligencePayload;
   messagingBrief: AccountMessagingBriefPayload;
   campaignIntent: CampaignIntent | null;
+  productContext?: string | null;
 }): Promise<AccountCallBriefPayload> {
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
   if (!openaiKey) {
@@ -551,7 +576,10 @@ ${JSON.stringify(params.messagingBrief, null, 2)}
 Campaign Intent:
 ${JSON.stringify(params.campaignIntent || {}, null, 2)}
 
-Return Account Call Brief JSON now.`,
+${params.productContext ? `Product/Event Context (matched for this account):
+${params.productContext}
+
+` : ''}Return Account Call Brief JSON now.`,
         },
       ],
       response_format: { type: "json_object" },

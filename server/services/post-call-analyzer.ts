@@ -269,51 +269,17 @@ CRITICAL RULES:
 3. STT artifacts (misspellings, garbled words) are NOT agent errors.
 4. Focus on: objective achievement, talking point coverage, qualification, and disposition accuracy.`;
 
-    // Use DeepSeek or Gemini for evaluation
-    const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
-    const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY);
+    // Use Gemini 3 Deep Think for evaluation
+    const { deepAnalyzeJSON } = await import("./vertex-ai/vertex-client");
 
-    let jsonStr: string | null = null;
-
-    if (hasDeepSeek) {
-      const OpenAI = (await import("openai")).default;
-      const client = new OpenAI({
-        apiKey: process.env.DEEPSEEK_API_KEY,
-        baseURL: "https://api.deepseek.com/v1",
-      });
-      const response = await client.chat.completions.create({
-        model: "deepseek-chat",
-        messages: [
-          { role: "system", content: "Return only valid JSON. No markdown." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.2,
-      });
-      jsonStr = response.choices[0]?.message?.content || null;
-    } else if (hasGemini) {
-      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genai = new GoogleGenerativeAI(geminiKey!);
-      const model = genai.getGenerativeModel({
-        model: "gemini-2.0-flash",
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
-      });
-      const result = await model.generateContent(prompt);
-      jsonStr = result.response?.text() || null;
-    }
-
-    if (!jsonStr) {
-      console.warn(`${LOG_PREFIX} No AI provider available for campaign outcome evaluation`);
+    let raw: any;
+    try {
+      raw = await deepAnalyzeJSON(prompt, { temperature: 0.2, maxTokens: 4096 });
+    } catch (vertexError: any) {
+      console.warn(`${LOG_PREFIX} Vertex AI evaluation failed: ${vertexError.message}`);
+      // Fallback or return partial data? returning null for now to indicate failure to process this step
       return null;
     }
-
-    // Parse JSON (strip markdown fences if present)
-    let cleaned = jsonStr.trim();
-    if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
-    else if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
-    if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
-
-    const raw = JSON.parse(cleaned.trim());
 
     return {
       campaignName: campaign.name || "Unknown",
@@ -367,6 +333,8 @@ export async function runPostCallAnalysis(
     disposition?: string;
     /** If a Gemini transcript is available from the live session, use as fallback */
     geminiTranscript?: string;
+    /** Optional GCS URI (gs://bucket/key) to avoid inline download limits for long audio */
+    gcsUri?: string;
   }
 ): Promise<PostCallAnalysisResult> {
   const startTime = Date.now();
@@ -417,10 +385,10 @@ export async function runPostCallAnalysis(
     const callDurationSec = options?.callDurationSec || session.durationSec || 0;
 
     // 2. Get audio URL for transcription
-    let audioUrl: string | null = null;
+    let audioUrl: string | null = options?.gcsUri || null;
 
     // Prefer S3/GCS recording (our own recording is stereo — inbound + outbound)
-    if (session.recordingS3Key && isS3Configured()) {
+    if (!audioUrl && session.recordingS3Key && isS3Configured()) {
       try {
         audioUrl = await getPresignedDownloadUrl(session.recordingS3Key, 3600);
         console.log(`${LOG_PREFIX} Using S3 recording: ${session.recordingS3Key}`);
@@ -569,6 +537,46 @@ export async function runPostCallAnalysis(
       } catch (outcomeError: any) {
         console.error(`${LOG_PREFIX} Campaign outcome evaluation failed: ${outcomeError.message}`);
       }
+    }
+
+    // 8b. Run Unlicensed Department analyses in parallel (independent of each other)
+    try {
+      const [{ analyzeConversationQualityDepartment }, { analyzeLeadQualityDepartment }] =
+        await Promise.all([
+          import("./ai-conversation-quality-department"),
+          import("./ai-lead-quality-department"),
+        ]);
+
+      const departmentInput = {
+        transcript: result.fullTranscript,
+        callSessionId,
+        campaignId: campaignId || undefined,
+        contactId: contactId || undefined,
+        dialerCallAttemptId: options?.callAttemptId,
+        disposition: disposition || undefined,
+        callDurationSec,
+      };
+
+      const [convQualityResult, leadQualityResult] = await Promise.allSettled([
+        analyzeConversationQualityDepartment(departmentInput),
+        analyzeLeadQualityDepartment(departmentInput),
+      ]);
+
+      if (convQualityResult.status === "fulfilled" && convQualityResult.value.success) {
+        console.log(`${LOG_PREFIX} ✅ Conversation Quality Dept: CQS=${convQualityResult.value.conversationQualityScore}`);
+      } else {
+        const reason = convQualityResult.status === "rejected" ? convQualityResult.reason?.message : "Analysis returned failure";
+        console.warn(`${LOG_PREFIX} ⚠️ Conversation Quality Dept failed: ${reason}`);
+      }
+
+      if (leadQualityResult.status === "fulfilled" && leadQualityResult.value.success) {
+        console.log(`${LOG_PREFIX} ✅ Lead Quality Dept: Score=${leadQualityResult.value.leadQualificationScore}, Intent=${leadQualityResult.value.intentStrength}`);
+      } else {
+        const reason = leadQualityResult.status === "rejected" ? leadQualityResult.reason?.message : "Analysis returned failure";
+        console.warn(`${LOG_PREFIX} ⚠️ Lead Quality Dept failed: ${reason}`);
+      }
+    } catch (deptError: any) {
+      console.error(`${LOG_PREFIX} Unlicensed department analyses failed: ${deptError.message}`);
     }
 
     // 9. Persist full analysis to call session

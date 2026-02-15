@@ -73,8 +73,7 @@ export function FilterBuilder({ entityType, onApplyFilter, initialFilter, includ
       const url = includeRelatedEntities 
         ? `/api/filters/fields/entity/${entityType}?includeRelated=true`
         : `/api/filters/fields/entity/${entityType}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to fetch filter fields');
+      const response = await apiRequest("GET", url);
       const data = await response.json();
       console.log('Filter fields loaded:', data); // Debug log
       return data;

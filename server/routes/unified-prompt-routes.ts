@@ -35,6 +35,14 @@ const listPromptsSchema = z.object({
   isActive: z.enum(['true', 'false']).optional().transform(v => v === 'true'),
   search: z.string().optional(),
   tags: z.string().optional().transform(v => v?.split(',')),
+  // Enhanced governance filters
+  department: z.string().optional(),
+  promptFunction: z.string().optional(),
+  purpose: z.string().optional(),
+  aiModel: z.string().optional(),
+  status: z.string().optional(),
+  owner: z.string().optional(),
+  entity: z.string().optional(),
   limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
   offset: z.string().optional().transform(v => v ? parseInt(v) : 0),
   orderBy: z.enum(['name', 'priority', 'updatedAt', 'version']).optional(),
@@ -419,6 +427,107 @@ router.get('/key/:key(*)', async (req: Request, res: Response) => {
   }
 });
 
+// ==================== GOVERNANCE & AUDIT ENDPOINTS (must be before /:id) ====================
+
+/**
+ * GET /api/prompts/audit
+ * Full system audit with dependency graph and statistics
+ */
+router.get('/audit', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const audit = await unifiedPromptService.getSystemAudit();
+    res.json({ success: true, audit });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /audit error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/prompts/departments
+ * List prompts grouped by department with counts
+ */
+router.get('/departments', async (req: Request, res: Response) => {
+  try {
+    const departments = await unifiedPromptService.getDepartmentCounts();
+    res.json({ success: true, departments });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /departments error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/prompts/functions
+ * List prompts grouped by function with counts
+ */
+router.get('/functions', async (req: Request, res: Response) => {
+  try {
+    const functions = await unifiedPromptService.getFunctionCounts();
+    res.json({ success: true, functions });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /functions error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/prompts/models
+ * List prompts grouped by AI model with counts
+ */
+router.get('/models', async (req: Request, res: Response) => {
+  try {
+    const models = await unifiedPromptService.getModelCounts();
+    res.json({ success: true, models });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /models error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/prompts/governance
+ * Governance dashboard data: drafts, recent changes, ownership gaps
+ */
+router.get('/governance', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const governance = await unifiedPromptService.getGovernanceData();
+    res.json({ success: true, ...governance });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /governance error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/prompts/flow-map
+ * Intelligence flow visualization data showing prompt connections
+ */
+router.get('/flow-map', async (req: Request, res: Response) => {
+  try {
+    const flowMap = await unifiedPromptService.getFlowMap();
+    res.json({ success: true, ...flowMap });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /flow-map error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/prompts/dependencies/:id
+ * Get dependency graph for a specific prompt
+ */
+router.get('/dependencies/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const dependencies = await unifiedPromptService.getDependencies(id);
+    res.json({ success: true, dependencies });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /dependencies/:id error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ==================== PARAMETERIZED ROUTES (/:id must be LAST) ====================
 
 /**
@@ -689,6 +798,42 @@ router.get('/:id/learn', async (req: Request, res: Response) => {
     res.json({ success: true, learnings });
   } catch (error: any) {
     console.error('[UnifiedPrompts] GET /:id/learn error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/prompts/:id/ownership
+ * Assign ownership of a prompt
+ */
+router.put('/:id/ownership', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { ownerId, ownerDepartment } = req.body;
+    await unifiedPromptService.setOwnership(id, ownerId, ownerDepartment);
+    res.json({ success: true, message: 'Ownership updated' });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] PUT /:id/ownership error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/prompts/:id/status
+ * Change prompt status (draft/live/archived/deprecated)
+ */
+router.put('/:id/status', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const validStatuses = ['draft', 'live', 'archived', 'deprecated'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+    await unifiedPromptService.setStatus(id, status, (req as any).userId);
+    res.json({ success: true, message: `Status updated to ${status}` });
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] PUT /:id/status error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

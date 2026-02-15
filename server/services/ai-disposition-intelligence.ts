@@ -5,29 +5,7 @@
  * detect patterns, and produce actionable improvements for AI voice agents.
  */
 
-import OpenAI from 'openai';
-
-// Use DeepSeek for coaching analysis (cheaper, good at reasoning tasks)
-// Falls back to OpenAI if DeepSeek is not configured
-function getAIClient(): { client: OpenAI; model: string } {
-  const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
-  if (hasDeepSeek) {
-    return {
-      client: new OpenAI({
-        apiKey: process.env.DEEPSEEK_API_KEY,
-        baseURL: 'https://api.deepseek.com/v1',
-      }),
-      model: 'deepseek-chat',
-    };
-  }
-  return {
-    client: new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    }),
-    model: 'gpt-4o',
-  };
-}
+import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
 
 const LOG_PREFIX = '[DispositionIntelligence]';
 
@@ -214,26 +192,10 @@ ${callSummaries}
 Generate a comprehensive coaching analysis. Be specific — reference actual phrases from the transcripts. Prioritize issues by frequency and impact on campaign objectives.`;
 
   try {
-    const { client, model } = getAIClient();
-    console.log(`${LOG_PREFIX} Generating coaching for ${calls.length} calls using ${model}...`);
+    console.log(`${LOG_PREFIX} Generating coaching for ${calls.length} calls using Gemini 3 Deep Think...`);
 
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 4000,
-      response_format: { type: 'json_object' },
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('Empty AI response');
-    }
-
-    const parsed = JSON.parse(content);
+    const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+    const parsed = await deepAnalyzeJSON<any>(fullPrompt, { temperature: 0.3, maxTokens: 4000 });
     console.log(`${LOG_PREFIX} Coaching generated: ${parsed.topIssues?.length || 0} issues, ${parsed.recommendations?.length || 0} recommendations`);
 
     return {

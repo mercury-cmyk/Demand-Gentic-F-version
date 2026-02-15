@@ -29,6 +29,7 @@ import {
   type CredentialCategory,
 } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { BRAND, TAGLINE, STATS } from "@shared/brand-messaging";
 
 // ==================== SUPER ORGANIZATION INITIALIZATION ====================
 
@@ -49,35 +50,51 @@ export async function initializeSuperOrganization(): Promise<CampaignOrganizatio
 
   console.log('[SUPER-ORG] Creating super organization: Pivotal B2B...');
 
-  // Create the super organization
+  // Create the super organization with full brand context from shared/brand-messaging.ts
   const [superOrg] = await db
     .insert(campaignOrganizations)
     .values({
       id: SUPER_ORG_ID,
       name: SUPER_ORG_NAME,
-      domain: SUPER_ORG_DOMAIN,
-      description: 'Platform owner organization - Pivotal B2B',
-      industry: 'Technology / B2B Services',
+      domain: BRAND.domains.primary,
+      description: `${TAGLINE.identity}. ${TAGLINE.primary} ${STATS.yearsExperience} years of front-line B2B demand expertise.`,
+      industry: BRAND.company.industry,
       organizationType: 'super',
       parentOrganizationId: null, // Super org has no parent
       isDefault: true, // Super org is default for campaigns
       isActive: true,
       identity: {
-        legalName: { value: 'Pivotal B2B LLC', confidence: 1.0 },
-        description: { value: 'Enterprise AI-powered demand generation platform', confidence: 1.0 },
-        industry: { value: 'Technology / B2B Services', confidence: 1.0 },
+        legalName: { value: BRAND.company.legalName, confidence: 1.0 },
+        description: {
+          value: `${BRAND.company.productName} is an AI-powered demand generation platform built on ${STATS.yearsExperience} years of front-line B2B experience. ${TAGLINE.corePromise}`,
+          confidence: 1.0,
+        },
+        industry: { value: BRAND.company.industry, confidence: 1.0 },
       },
       offerings: {
-        coreProducts: { value: 'AI Voice Agents, Email Campaigns, Demand Generation', confidence: 1.0 },
-        useCases: { value: 'Lead generation, appointment setting, market research', confidence: 1.0 },
+        coreProducts: {
+          value: 'AI Voice Agents, Intelligent Email Marketing, Generative Content Studio, Pipeline Management, B2B Data & Intelligence',
+          confidence: 1.0,
+        },
+        useCases: {
+          value: 'AI-led ABM, AI SDR-as-a-Service, Qualified Appointment Generation, Market & Account Intelligence, Generative Content Creation',
+          confidence: 1.0,
+        },
+        differentiators: {
+          value: `Reasoning-first AI agents, Organization Intelligence, Problem-to-Solution mapping, Compliance-first design, ${STATS.verifiedContacts} verified contacts across ${STATS.countriesCovered} countries`,
+          confidence: 1.0,
+        },
       },
       icp: {
-        industries: { value: 'B2B, SaaS, Technology, Professional Services', confidence: 1.0 },
-        personas: { value: 'Sales Leaders, Marketing Directors, Revenue Operations', confidence: 1.0 },
+        industries: { value: 'B2B, SaaS, Technology, Professional Services, 40+ industries', confidence: 1.0 },
+        personas: { value: 'Sales Leaders, Marketing Directors, Revenue Operations, CROs, VP Sales', confidence: 1.0 },
       },
       positioning: {
-        oneLiner: { value: 'AI-powered demand generation that converts', confidence: 1.0 },
-        valueProposition: { value: 'Scale your outreach with intelligent AI agents', confidence: 1.0 },
+        oneLiner: { value: `${TAGLINE.identity}. ${TAGLINE.primary}`, confidence: 1.0 },
+        valueProposition: {
+          value: `${TAGLINE.mission}: ${TAGLINE.corePromise} Problem Intelligence, Solution Mapping, Pinpoint Context, Compliance First.`,
+          confidence: 1.0,
+        },
       },
     })
     .returning();

@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  Building,
   Building2,
   Users,
   Megaphone,
@@ -23,6 +24,8 @@ import {
   Brain,
   FolderKanban,
   Wand2,
+  Trophy,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -66,6 +69,7 @@ import {
 // ============================================
 const ICON_MAP: Record<string, LucideIcon> = {
   LayoutDashboard,
+  Building,
   Building2,
   Users,
   Megaphone,
@@ -85,6 +89,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Brain,
   FolderKanban,
   Wand2,
+  Trophy,
+  RefreshCw,
 };
 
 function resolveIcon(iconName: string): LucideIcon {

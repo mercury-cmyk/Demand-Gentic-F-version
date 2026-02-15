@@ -1,67 +1,9 @@
-import OpenAI from "openai";
 import { workerDb as db } from "../db";
 import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { generateJSON, chat } from "./vertex-ai/vertex-client";
-
-// Lazy DeepSeek client – instantiate only when needed and when credentials exist
-let _deepseekClient: OpenAI | null = null;
-function getDeepSeekClient(): OpenAI {
-  if (!_deepseekClient) {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-      throw new Error("DeepSeek API key not configured. Set DEEPSEEK_API_KEY.");
-    }
-    _deepseekClient = new OpenAI({
-      apiKey,
-      baseURL: "https://api.deepseek.com/v1",
-    });
-  }
-  return _deepseekClient;
-}
-
-/**
- * Generate JSON response using DeepSeek for conversation quality analysis
- * Uses deepseek-chat model which is optimized for reasoning tasks
- */
-async function analyzeWithDeepSeek<T>(
-  systemPrompt: string,
-  userPrompt: string,
-  options: { temperature?: number; maxTokens?: number } = {}
-): Promise<T> {
-  const client = getDeepSeekClient();
-  const { temperature = 0.3, maxTokens = 2000 } = options;
-
-  const response = await client.chat.completions.create({
-    model: "deepseek-chat",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt + "\n\nRespond with valid JSON only. No markdown code blocks, no explanation." }
-    ],
-    temperature,
-    max_tokens: maxTokens,
-    response_format: { type: "json_object" },
-  });
-
-  const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("DeepSeek returned empty response");
-  }
-
-  // Parse and return JSON
-  try {
-    return JSON.parse(content) as T;
-  } catch (e) {
-    // Try to extract JSON from potential markdown code block
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[1].trim()) as T;
-    }
-    throw new Error(`Failed to parse DeepSeek response as JSON: ${content.substring(0, 200)}`);
-  }
-}
+import { deepAnalyzeJSON, chat } from "./vertex-ai/vertex-client";
 
 interface QAParameters {
   required_info: string[];
@@ -252,12 +194,19 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
         } : null
       };
 
-      // Generate dynamic evaluation prompt
+      // Generate dynamic evaluation prompt (includes campaign objective & success criteria)
       analysisPrompt = generateDynamicEvaluationPrompt(
         parsedRules,
         customQaFields,
         lead.transcript,
-        contactData
+        contactData,
+        {
+          campaignName: campaign?.name,
+          campaignObjective: campaign?.campaignObjective,
+          successCriteria: campaign?.successCriteria,
+          targetAudienceDescription: campaign?.targetAudienceDescription,
+          campaignContextBrief: campaign?.campaignContextBrief,
+        }
       );
     } else {
       // Use standard evaluation (pass existingQaData for CH info)
@@ -269,28 +218,25 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       "You are an expert B2B lead qualification analyst. Analyze call transcripts and data to determine if leads meet qualification criteria. Return structured JSON analysis."
     );
 
-    // Use DeepSeek for conversation quality analysis (cost-effective, high reasoning)
+    // Use Gemini 3 Deep Think for conversation quality analysis
     let rawAnalysis: any;
     try {
-      console.log(`[AI-QA] Using DeepSeek for conversation quality analysis (lead: ${leadId})`);
-      rawAnalysis = await analyzeWithDeepSeek<any>(systemPrompt, analysisPrompt, {
+      console.log(`[AI-QA] Using Gemini 3 Deep Think for lead qualification (lead: ${leadId})`);
+      const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
+      rawAnalysis = await deepAnalyzeJSON<any>(fullPrompt, {
         temperature: 0.3,
         maxTokens: 2000,
       });
-    } catch (deepseekError: any) {
-      console.error('[AI-QA] DeepSeek analysis failed:', deepseekError.message);
-      // Fallback to Vertex AI if DeepSeek fails
-      console.log('[AI-QA] Falling back to Vertex AI...');
-      const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
+    } catch (analysisError: any) {
+      console.error('[AI-QA] Deep Think analysis failed:', analysisError.message);
+      // Fallback to chat-based analysis
+      console.log('[AI-QA] Falling back to chat...');
       try {
-        rawAnalysis = await generateJSON<any>(fullPrompt, {
-          temperature: 0.3,
-          maxTokens: 2000,
-        });
-      } catch (vertexError) {
-        console.error('[AI-QA] Vertex AI fallback also failed');
         const textResponse = await chat(systemPrompt, [{ role: "user", content: analysisPrompt + "\n\nRespond with valid JSON only." }], { temperature: 0.3, maxTokens: 2000 });
         rawAnalysis = JSON.parse(textResponse);
+      } catch (chatError) {
+        console.error('[AI-QA] Chat fallback also failed');
+        throw chatError;
       }
     }
 
@@ -347,9 +293,97 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       console.warn(`[AI-QA] ⚠️ SHORT DURATION: Lead ${leadId} has call duration ${callDuration}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Forcing manual review.`);
     }
     
+    // =========================================================================
+    // CALL SCREENING / BOT DETECTION — Must run BEFORE any qualification logic
+    // Detects: Google Call Assist, call screening bots, IVR, voicemail, etc.
+    // These are NOT human conversations and must NEVER be qualified.
+    // =========================================================================
+    const transcriptLower = (lead.transcript || '').toLowerCase();
+    
+    // Google Call Assist / Call Screening patterns
+    const isCallScreening = /call\s*assist\s*by\s*google|calling\s*assist\s*by\s*google|google.*recording\s*this\s*call\s*for|i'?m\s*screening\s*calls|before\s*i\s*try\s*to\s*connect\s*you|can\s*i\s*ask\s*what\s*you'?re?\s*calling\s*about|let\s*me\s*try\s*to\s*get\s*the\s*person.*on\s*the\s*line|screening\s*this\s*call/i.test(transcriptLower);
+    
+    // IVR / Auto-attendant patterns
+    const isIVR = /press\s*\d+\s*(for|to)|your\s*call\s*is\s*(important|being\s*recorded)|please\s*hold|for\s*english\s*press|para\s*español|automated\s*attendant|dial\s*by\s*name|extension\s*number/i.test(transcriptLower);
+    
+    // Voicemail patterns (when wrongly dispositioned as qualified)
+    const isVoicemail = /leave\s*(a\s*)?message|after\s*the\s*(tone|beep)|voicemail\s*box|mailbox\s*is\s*full|not\s*available.*leave/i.test(transcriptLower);
+    
+    // No real prospect engagement — agent talked but contact never responded meaningfully
+    // Count actual contact turns (excluding screening bot phrases)
+    const contactTurns = (lead.transcript || '').split('\n')
+      .filter((line: string) => /^contact:/i.test(line.trim()))
+      .map((line: string) => line.replace(/^contact:\s*/i, '').trim())
+      .filter((text: string) => {
+        const lower = text.toLowerCase();
+        // Exclude bot/screening phrases — these are NOT human responses
+        const isBotPhrase = /call\s*assist|google|recording\s*this\s*call|try\s*to\s*connect|what\s*you'?re?\s*calling\s*about|get\s*the\s*person|on\s*the\s*line|screening/i.test(lower);
+        // Exclude very short non-substantive responses
+        const isTooShort = lower.replace(/[^a-z]/g, '').length < 3;
+        return !isBotPhrase && !isTooShort;
+      });
+    
+    const hasNoHumanEngagement = contactTurns.length === 0;
+    const isNonHumanCall = isCallScreening || isIVR || isVoicemail || hasNoHumanEngagement;
+    
+    if (isNonHumanCall) {
+      const reasons: string[] = [];
+      if (isCallScreening) reasons.push('Call screening bot detected (e.g., Google Call Assist)');
+      if (isIVR) reasons.push('IVR/auto-attendant detected');
+      if (isVoicemail) reasons.push('Voicemail detected');
+      if (hasNoHumanEngagement) reasons.push(`No human prospect engagement (0 substantive contact turns)`);
+      
+      const rejectReason = `❌ AUTO-REJECTED: Non-human call — ${reasons.join('; ')}. AI Score overridden to 0.`;
+      console.warn(`[AI-QA] 🤖 NON-HUMAN CALL: Lead ${leadId} — ${reasons.join('; ')}`);
+      
+      // Force rejection regardless of what AI analysis said
+      await db.update(leads)
+        .set({
+          aiScore: '0',
+          aiAnalysis: rawAnalysis as any,
+          aiQualificationStatus: 'not_qualified',
+          qaStatus: 'rejected',
+          qaDecision: rejectReason,
+          qaData: {
+            ...updatedQaData,
+            non_human_call: true,
+            non_human_reasons: reasons,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, leadId));
+      
+      // Log the rejection
+      try {
+        await db.insert(activityLog).values({
+          entityType: 'lead',
+          entityId: leadId,
+          eventType: 'qa_auto_rejected' as any,
+          payload: {
+            score: 0,
+            qualificationStatus: 'not_qualified',
+            qaStatus: 'rejected',
+            qaDecision: rejectReason,
+            nonHumanCall: true,
+            nonHumanReasons: reasons,
+            originalAiScore: normalizedAnalysis.score,
+            campaignId: lead.campaignId,
+          },
+          createdBy: null,
+        });
+      } catch (logErr) {
+        console.error('[AI-QA] Failed to log non-human call rejection:', logErr);
+      }
+      
+      return {
+        ...normalizedAnalysis,
+        score: 0,
+        qualification_status: 'not_qualified',
+      };
+    }
+
     // Check for EXPLICIT callback/interest signals using conservative patterns
     // These must be prospect-initiated phrases, not common AI agent script lines
-    const transcriptLower = (lead.transcript || '').toLowerCase();
     
     // Very explicit callback requests from prospect
     const hasCallbackSignal = /call me back|ring me back|phone me back|call me tomorrow|try me again later|can you call me/i.test(transcriptLower);
@@ -519,9 +553,18 @@ ${hasCompaniesHouseData ? `
 **IMPORTANT: This company has been officially verified through the UK Companies House registry. Do NOT mark "Company Registration Number", "Company Status", or "Legal Name" as missing - they are already validated and available above.**
 ` : ''}
 
-## CAMPAIGN OFFER:
-${campaign?.name || 'Content offer'}
-Call Script Context: ${campaign?.callScript?.substring(0, 500) || 'Marketing campaign'}
+## CAMPAIGN OBJECTIVE & SUCCESS CRITERIA:
+- Campaign: ${campaign?.name || 'Content offer'}
+- Objective: ${campaign?.campaignObjective || 'Not specified'}
+- Success Criteria: ${campaign?.successCriteria || 'Not specified'}
+- Target Audience: ${campaign?.targetAudienceDescription || 'Not specified'}
+- Context Brief: ${campaign?.campaignContextBrief || 'Not specified'}
+- Call Script Context: ${campaign?.callScript?.substring(0, 500) || 'Marketing campaign'}
+
+**IMPORTANT**: Score this lead against the campaign objective and success criteria above.
+- The lead MUST align with the stated objective to be considered qualified.
+- The success criteria define what a successful outcome looks like — verify whether the call achieved it.
+- If the target audience is specified, verify that the prospect matches the described profile.
 
 ## QUALIFICATION CRITERIA:
 ${JSON.stringify(qaParams, null, 2)}
@@ -590,7 +633,10 @@ Return JSON in this exact format:
   }
 }
 
-Calculate final score as weighted average. If score >= ${qaParams.min_score}, status is "qualified". If score < 40, status is "not_qualified". Otherwise "needs_review".`;
+## SCORING GUIDANCE:
+- Calculate final score as weighted average.
+- If score >= ${qaParams.min_score}, status is "qualified". If score < 40, status is "not_qualified". Otherwise "needs_review".
+- CRITICAL: A lead can only be "qualified" if it aligns with the Campaign Objective and meets the Success Criteria listed above. Even if individual scores are high, reject or flag for review if the call outcome does not match the campaign's stated success criteria.`;
 }
 
 /**

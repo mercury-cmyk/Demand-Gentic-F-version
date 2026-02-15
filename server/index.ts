@@ -4,6 +4,16 @@ import "./suppress-warnings";
 // Validate and load environment variables
 import "./env";
 
+// CRITICAL: Configure HTTP/HTTPS agents for high concurrency BEFORE any imports
+// Node.js defaults to 6 sockets per host - this causes request queuing under load
+import http from "http";
+import https from "https";
+
+http.globalAgent.maxSockets = 200;
+https.globalAgent.maxSockets = 200;
+http.globalAgent.maxFreeSockets = 50;
+https.globalAgent.maxFreeSockets = 50;
+
 // Global Error Handlers - catch unhandled exceptions to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[CRITICAL] Unhandled Rejection:', reason);

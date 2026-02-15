@@ -377,6 +377,42 @@ export async function transcribeFromRecording(
   recordingUrl: string,
   options?: TranscriptionAudioSourceOptions
 ): Promise<{ transcript: string; wordCount: number } | null> {
+  // If we have a direct GCS URI, use long-running recognition with URI to bypass inline limits.
+  if (recordingUrl.startsWith('gs://')) {
+    try {
+      const client = getSpeechClient();
+      const config: RecognitionConfig = {
+        model: 'telephony',
+        languageCode: 'en-US',
+        alternativeLanguageCodes: ['en-GB'],
+        enableAutomaticPunctuation: true,
+        enableWordConfidence: true,
+        diarizationConfig: {
+          enableSpeakerDiarization: true,
+          minSpeakerCount: 2,
+          maxSpeakerCount: 2,
+        },
+        useEnhanced: true,
+      };
+      const audio: RecognitionAudio = { uri: recordingUrl };
+      const [operation] = await client.longRunningRecognize({ config, audio });
+      const [response] = await operation.promise();
+      if (!response.results || response.results.length === 0) return null;
+      const transcriptText = response.results
+        .map(result => result.alternatives?.[0]?.transcript || '')
+        .join(' ')
+        .trim();
+      return {
+        transcript: transcriptText,
+        wordCount: transcriptText.split(/\s+/).length,
+      };
+    } catch (error) {
+      if (options?.throwOnError) throw error;
+      console.error('[Transcription] Error with GCS URI transcription:', error);
+      return null;
+    }
+  }
+
   // Use throwOnError to ensure reliability service can detect permanent errors (like 403)
   const transcript = await submitTranscription(recordingUrl, { ...options, throwOnError: true });
   if (!transcript) return null;
@@ -665,6 +701,7 @@ export interface StructuredTranscript {
   text: string;
   utterances: Array<{
     speaker: string;
+    channelTag?: number;
     text: string;
     start: number;
     end: number;
@@ -681,55 +718,90 @@ export async function submitStructuredTranscription(
   try {
     const client = getSpeechClient();
 
-    // Download audio file
-    const audioData = await downloadAudio(audioUrl, options);
-    if (!audioData) {
-      return null;
-    }
+    // If we have a direct GCS URI, avoid downloading and use long-running with URI to bypass inline size limits
+    const isGcsUri = audioUrl.startsWith('gs://');
 
-    console.log(`[Transcription] 🎤 Starting structured transcription | Audio type: ${audioData.mimeType}`);
+    let audioData: { base64: string; mimeType: string } | null = null;
+    let wavChannels: number | null = null;
+    let config: RecognitionConfig | null = null;
+    let audio: RecognitionAudio;
 
-    const config: RecognitionConfig = {
-      model: 'telephony',
-      languageCode: 'en-US',
-      alternativeLanguageCodes: ['en-GB'],
-      encoding: getEncodingFromMimeType(audioData.mimeType),
-      sampleRateHertz: audioData.mimeType === 'audio/wav' ? 8000 : undefined,
-      enableAutomaticPunctuation: true,
-      enableWordConfidence: true,
-      diarizationConfig: {
-        enableSpeakerDiarization: true,
-        minSpeakerCount: 2,
-        maxSpeakerCount: 2,
-      },
-      useEnhanced: true,
-    };
+    if (isGcsUri) {
+      console.log(`[Transcription] 🎤 Using GCS URI for structured transcription: ${audioUrl}`);
+      config = {
+        model: 'telephony',
+        languageCode: 'en-US',
+        alternativeLanguageCodes: ['en-GB'],
+        enableAutomaticPunctuation: true,
+        enableWordConfidence: true,
+        diarizationConfig: {
+          enableSpeakerDiarization: true,
+          minSpeakerCount: 2,
+          maxSpeakerCount: 2,
+        },
+        useEnhanced: true,
+      };
+      audio = { uri: audioUrl };
+    } else {
+      // Download audio file
+      audioData = await downloadAudio(audioUrl, options);
+      if (!audioData) {
+        return null;
+      }
 
-    if (audioData.mimeType === 'audio/wav') {
-      const wavChannels = getWavChannelCount(audioData.base64);
+      console.log(`[Transcription] 🎤 Starting structured transcription | Audio type: ${audioData.mimeType}`);
+
+      const useChannelSeparation = audioData.mimeType === 'audio/wav';
+      wavChannels = useChannelSeparation ? getWavChannelCount(audioData.base64) : null;
+
+      config = {
+        model: 'telephony',
+        languageCode: 'en-US',
+        alternativeLanguageCodes: ['en-GB'],
+        encoding: getEncodingFromMimeType(audioData.mimeType),
+        sampleRateHertz: audioData.mimeType === 'audio/wav' ? 8000 : undefined,
+        enableAutomaticPunctuation: true,
+        enableWordConfidence: true,
+        // For true stereo WAV, prefer channel separation (deterministic left/right).
+        // For non-stereo or unknown channel count, fall back to diarization.
+        diarizationConfig: wavChannels && wavChannels > 1 ? undefined : {
+          enableSpeakerDiarization: true,
+          minSpeakerCount: 2,
+          maxSpeakerCount: 2,
+        },
+        useEnhanced: true,
+      };
+
       if (wavChannels) {
         config.audioChannelCount = wavChannels;
         config.enableSeparateRecognitionPerChannel = wavChannels > 1;
       }
+
+      audio = { content: audioData.base64 };
     }
-
-    const audio: RecognitionAudio = {
-      content: audioData.base64,
-    };
-
-    const audioSizeBytes = Buffer.from(audioData.base64, 'base64').length;
-    const estimatedDurationSeconds = audioSizeBytes / (8000 * 2);
 
     let results: protos.google.cloud.speech.v1.ISpeechRecognitionResult[] = [];
 
-    if (estimatedDurationSeconds > 60) {
-      console.log(`[Transcription] Using long-running recognition (estimated ${Math.round(estimatedDurationSeconds)}s)`);
-      const [operation] = await client.longRunningRecognize({ config, audio });
+    // Decide path: use long-running if GCS URI or estimated >60s
+    const useLongRunning =
+      isGcsUri ||
+      (() => {
+        if (!audioData) return true; // GCS path already handled
+        const audioSizeBytes = Buffer.from(audioData.base64, 'base64').length;
+        const estimatedDurationSeconds = audioSizeBytes / (8000 * 2);
+        return estimatedDurationSeconds > 60;
+      })();
+
+    if (useLongRunning) {
+      console.log(`[Transcription] Using long-running recognition${isGcsUri ? ' (GCS URI)' : ''}`);
+      const [operation] = await client.longRunningRecognize({ config: config!, audio });
       const [response] = await operation.promise();
       results = response.results || [];
     } else {
+      const audioSizeBytes = Buffer.from(audioData!.base64, 'base64').length;
+      const estimatedDurationSeconds = audioSizeBytes / (8000 * 2);
       console.log(`[Transcription] Using synchronous recognition (estimated ${Math.round(estimatedDurationSeconds)}s)`);
-      const [response] = await client.recognize({ config, audio });
+      const [response] = await client.recognize({ config: config!, audio });
       results = response.results || [];
     }
 
@@ -738,19 +810,6 @@ export async function submitStructuredTranscription(
       return null;
     }
 
-    // Process results for full text
-    const fullTranscript = results
-      .map(result => result.alternatives?.[0]?.transcript || '')
-      .join(' ')
-      .trim();
-
-    // Flatten all words from all results
-    const words = results.flatMap(result => result.alternatives?.[0]?.words || []);
-    
-    const utterances: StructuredTranscript['utterances'] = [];
-    let currentSpeakerMs = -1;
-    let currentUtteranceWords: protos.google.cloud.speech.v1.IWordInfo[] = [];
-
     const getSeconds = (time: any): number => {
       if (!time) return 0;
       if (typeof time === 'number') return time;
@@ -758,10 +817,53 @@ export async function submitStructuredTranscription(
       const n = parseInt((time.nanos || 0).toString());
       return s + n / 1e9;
     };
+    const hasChannelResults = results.some(r => typeof r.channelTag === 'number' && Number(r.channelTag) > 0);
+
+    if (hasChannelResults) {
+      const channelUtterances = results
+        .map((result, idx) => {
+          const alt = result.alternatives?.[0];
+          const text = (alt?.transcript || '').trim();
+          if (!text) return null;
+
+          const words = alt?.words || [];
+          const start = words.length > 0 ? getSeconds(words[0].startTime) : idx;
+          const end = words.length > 0 ? getSeconds(words[words.length - 1].endTime) : start;
+          const channelTag = typeof result.channelTag === 'number' ? Number(result.channelTag) : undefined;
+
+          return {
+            speaker: channelTag ? `Channel ${channelTag}` : 'Speaker 1',
+            channelTag,
+            text,
+            start,
+            end,
+          };
+        })
+        .filter((u): u is NonNullable<typeof u> => !!u)
+        .sort((a, b) => a.start - b.start);
+
+      const fullTranscript = channelUtterances.map(u => u.text).join(' ').trim();
+      console.log(`[Transcription] ✅ Structured transcription completed (channel mode) | ${channelUtterances.length} utterances`);
+      return {
+        text: fullTranscript,
+        utterances: channelUtterances,
+      };
+    }
+
+    // Fallback: speaker diarization mode
+    const fullTranscript = results
+      .map(result => result.alternatives?.[0]?.transcript || '')
+      .join(' ')
+      .trim();
+
+    const words = results.flatMap(result => result.alternatives?.[0]?.words || []);
+    const utterances: StructuredTranscript['utterances'] = [];
+    let currentSpeakerMs = -1;
+    let currentUtteranceWords: protos.google.cloud.speech.v1.IWordInfo[] = [];
 
     for (const word of words) {
-      const spk = word.speakerTag || 1; // Default to 1 if missing
-      
+      const spk = word.speakerTag || 1;
+
       if (spk !== currentSpeakerMs && currentSpeakerMs !== -1) {
         if (currentUtteranceWords.length > 0) {
           utterances.push({
@@ -776,8 +878,7 @@ export async function submitStructuredTranscription(
       currentSpeakerMs = spk;
       currentUtteranceWords.push(word);
     }
-    
-    // Push last one
+
     if (currentUtteranceWords.length > 0) {
       utterances.push({
         speaker: `Speaker ${currentSpeakerMs}`,
@@ -787,11 +888,8 @@ export async function submitStructuredTranscription(
       });
     }
 
-    console.log(`[Transcription] ✅ Structured transcription completed | ${utterances.length} utterances`);
-    return {
-      text: fullTranscript,
-      utterances
-    };
+    console.log(`[Transcription] ✅ Structured transcription completed (diarization mode) | ${utterances.length} utterances`);
+    return { text: fullTranscript, utterances };
 
   } catch (error) {
     console.error('[Transcription] Error with structured transcription:', error);
