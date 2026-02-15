@@ -499,13 +499,19 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
                     <Building2 className="h-6 w-6 text-primary" />
                  </div>
                  <div>
-                    <h2 className="text-2xl font-semibold tracking-tight">{profile.identity.legalName.value}</h2>
+                    <h2 className="text-2xl font-semibold tracking-tight">{profile.identity?.legalName?.value || 'Organization'}</h2>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <a href={`https://${profile.identity.domain.value}`} target="_blank" rel="noreferrer" className="hover:text-primary transition-colors hover:underline">
-                            {profile.identity.domain.value}
-                        </a>
-                        <span>•</span>
-                         <span>{profile.identity.employees.value} employees</span>
+                        {profile.identity?.domain?.value && (
+                          <>
+                            <a href={`https://${profile.identity.domain.value}`} target="_blank" rel="noreferrer" className="hover:text-primary transition-colors hover:underline">
+                                {profile.identity.domain.value}
+                            </a>
+                            <span>•</span>
+                          </>
+                        )}
+                        {profile.identity?.employees?.value && (
+                          <span>{profile.identity.employees.value} employees</span>
+                        )}
                     </div>
                  </div>
              </div>

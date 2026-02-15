@@ -129,6 +129,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/agent-reports', roles: ANALYTICS_ROLES, description: 'Agent Reports' },
   { pattern: '/agent-reports-dashboard', roles: ANALYTICS_ROLES, description: 'Agent Reports Dashboard' },
   { pattern: '/ai-call-analytics', roles: ANALYTICS_ROLES, description: 'AI Call Analytics' },
+  { pattern: '/showcase-calls', roles: [...ANALYTICS_ROLES, USER_ROLES.AGENT], description: 'Showcase Calls' },
 
   // ============================================
   // OPERATIONS - Management + Client
@@ -174,6 +175,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/ai-content-generator', roles: MANAGEMENT_ROLES, description: 'AI Content Generator' },
   { pattern: '/social-media-publisher', roles: MANAGEMENT_ROLES, description: 'Social Media Publisher' },
   { pattern: '/suppressions', roles: MANAGEMENT_ROLES, description: 'Suppressions' },
+  { pattern: '/content-promotion', roles: MANAGEMENT_ROLES, description: 'Content Promotion' },
 
   // ============================================
   // RESOURCES & EVENTS - All authenticated users

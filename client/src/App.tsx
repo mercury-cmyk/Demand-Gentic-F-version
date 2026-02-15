@@ -165,6 +165,8 @@ import MercuryNotificationsPage from "@/pages/mercury-notifications";
 import DeliverabilityDashboardPage from "@/pages/deliverability-dashboard";
 import BrandKitsPage from "@/pages/brand-kits";
 import { EmailBuilderDnD } from "@/components/email-builder/EmailBuilderDnD";
+import ContentPromoPublicPage from "@/pages/content-promo-public";
+import ContentPromotionManagerPage from "@/pages/content-promotion-manager";
 
 // IAM - Identity & Access Management
 import IamOverview from "@/pages/iam/iam-overview";
@@ -400,6 +402,7 @@ function AuthenticatedApp() {
               <Route path="/ai-content-generator" component={AIContentGeneratorPage} />
               <Route path="/social-media-publisher" component={SocialMediaPublisherPage} />
               <Route path="/generative-studio" component={GenerativeStudioPage} />
+              <Route path="/content-promotion" component={ContentPromotionManagerPage} />
 
               {/* Suppressions */}
               <Route path="/suppressions" component={SuppressionsPage} />
@@ -632,8 +635,9 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
 
-      {/* Public lead forms and booking */}
+      {/* Public lead forms, booking, and content promotion */}
       <Route path="/forms/:id" component={LeadFormPublicPage} />
+      <Route path="/promo/:slug" component={ContentPromoPublicPage} />
       <Route path="/book/:username/:slug" component={PublicBookingPage} />
 
       {/* Client Portal public routes (login/join/invite) */}

@@ -10,6 +10,7 @@ export const NAVIGATION_DOMAINS = {
   AI_INTELLIGENCE: 'ai-intelligence',
   CORE_CRM: 'core-crm',
   CAMPAIGNS: 'campaigns',
+  QUALITY_CONTROL: 'quality-control',
   DATA_VERIFICATION: 'data-verification',
   ANALYTICS: 'analytics',
   OPERATIONS: 'operations',
@@ -309,6 +310,37 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Dialer and call execution interface',
       },
       {
+        id: 'content-promotion',
+        title: 'Content Promotion',
+        url: '/content-promotion',
+        icon: 'PanelTop',
+        roles: MANAGEMENT_ROLES,
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
+        description: 'Create and manage content promotion landing pages',
+      },
+    ],
+  },
+
+  // ============================================
+  // QUALITY CONTROL CENTER
+  // ============================================
+  {
+    id: 'quality-control',
+    label: 'Quality Control Center',
+    domain: NAVIGATION_DOMAINS.QUALITY_CONTROL,
+    roles: [...QA_ROLES, USER_ROLES.QUALITY_ANALYST],
+    description: 'Unified quality control, data integrity, and lead review',
+    items: [
+      {
+        id: 'unified-intelligence',
+        title: 'Unified Intelligence',
+        url: '/unified-intelligence',
+        icon: 'BarChart3',
+        roles: MANAGEMENT_ROLES,
+        description: 'Comprehensive call quality and intelligence dashboard',
+        badge: { text: 'New', variant: 'new' },
+      },
+      {
         id: 'qa-lead-review',
         title: 'QA & Lead Review',
         url: '/leads',
@@ -324,19 +356,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: MANAGEMENT_ROLES,
         description: 'Call quality analysis and scoring',
       },
-    ],
-  },
-
-  // ============================================
-  // DATA & VERIFICATION DOMAIN
-  // ============================================
-  {
-    id: 'data-verification',
-    label: 'Data & Verification',
-    domain: NAVIGATION_DOMAINS.DATA_VERIFICATION,
-    roles: [...DATA_ROLES, USER_ROLES.QUALITY_ANALYST],
-    description: 'Data integrity, validation, and verification campaigns',
-    items: [
       {
         id: 'data-integrity',
         title: 'Data Integrity',
@@ -353,6 +372,15 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: [...DATA_ROLES, USER_ROLES.QUALITY_ANALYST],
         description: 'Lead and contact verification workflows',
       },
+      {
+        id: 'unlicensed-departments',
+        title: 'Unlicensed Departments',
+        url: '/unlicensed-departments',
+        icon: 'Building',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
+        description: 'Conversation quality and lead quality departments',
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
+      },
     ],
   },
 
@@ -363,7 +391,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     id: 'analytics',
     label: 'Analytics & Insights',
     domain: NAVIGATION_DOMAINS.ANALYTICS,
-    roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
+    roles: [...QA_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.AGENT],
     description: 'Campaign analytics, call reports, and performance insights',
     items: [
       {
@@ -382,30 +410,18 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
         description: 'Call disposition reports, agent performance, and AI call analytics',
       },
-    ],
-  },
-
-  // ============================================
-  // UNLICENSED DEPARTMENT
-  // ============================================
-  {
-    id: 'unlicensed',
-    label: 'Unlicensed',
-    domain: NAVIGATION_DOMAINS.UNLICENSED,
-    roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
-    description: 'Conversation quality and lead quality analysis departments',
-    items: [
       {
-        id: 'unlicensed-departments',
-        title: 'Unlicensed Departments',
-        url: '/unlicensed-departments',
-        icon: 'Building',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
-        description: 'Conversation quality and lead quality departments',
-        badge: { text: 'New', variant: 'new' as BadgeVariant },
+        id: 'showcase-calls',
+        title: 'Showcase Calls',
+        url: '/showcase-calls',
+        icon: 'Trophy',
+        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.AGENT],
+        description: 'Top meaningful call conversations with recordings, transcript, issues, and recommendations',
       },
     ],
   },
+
+
 
   // ============================================
   // OPERATIONS DOMAIN

@@ -106,6 +106,7 @@ import campaignOpsRouter from './routes/campaign-ops-routes';
 import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import adminAgenticCampaignsRouter from './routes/admin-agentic-campaigns';
+import contentPromotionRouter from './routes/content-promotion-routes';
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
 import {
@@ -14951,6 +14952,7 @@ Provide JSON response with:
   app.use(pipelineAccountsRouter);
   app.use(pipelineIntelligenceRouter);
   app.use('/api/generative-studio', generativeStudioRouter);
+  app.use(contentPromotionRouter);
   app.use('/api/disposition-intelligence', dispositionIntelligenceRouter);
   app.use('/api/showcase-calls', showcaseCallsRouter);
   app.use('/api/disposition-reanalysis', dispositionReanalysisRouter);

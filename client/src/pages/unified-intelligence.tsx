@@ -227,7 +227,7 @@ export default function UnifiedIntelligencePage() {
     data: conversationsData,
     isLoading: conversationsLoading,
     refetch: refetchConversations,
-  } = useQuery<{ conversations: any[]; topChallenges?: TopChallenge[]; stats?: any }>({
+  } = useQuery<{ conversations: any[]; topChallenges?: TopChallenge[]; stats?: any; total?: number }>({
     queryKey: ['/api/qa/conversations', filters.campaignId, filters.source, filters.search],
     queryFn: async () => {
       const response = await apiRequest('GET', `/api/qa/conversations?${buildQaQueryParams()}`);

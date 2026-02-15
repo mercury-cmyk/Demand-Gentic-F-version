@@ -15,12 +15,17 @@ import {
   contacts,
   accounts,
 } from "@shared/schema";
-import { eq, and, desc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
+import { eq, and, or, desc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
 import { requireAuth } from "../auth";
-import { getCallSessionRecordingUrl, getCallSessionRecordingS3Key } from "../services/recording-storage";
+import { getCallSessionRecordingS3Key } from "../services/recording-storage";
 import { streamFromS3, s3ObjectExists } from "../lib/storage";
 
 const router = Router();
+const SHOWCASE_MAX_CALLS = 100;
+const SHOWCASE_DEFAULT_RECENT_DAYS = 120;
+const MIN_MEANINGFUL_DURATION_SEC = 30;
+const MIN_TRANSCRIPT_CHARS = 120;
+const MIN_OVERALL_SCORE = 45;
 
 // Showcase categories
 const SHOWCASE_CATEGORIES = [
@@ -36,31 +41,34 @@ const SHOWCASE_CATEGORIES = [
 // HELPERS
 // ============================================================================
 
-// Dispositions that are NOT real conversations — exclude from showcase
-const NON_CONVERSATION_DISPOSITIONS = [
-  'voicemail', 'no_answer', 'no answer', 'no contact', 'no_contact',
-  'busy', 'invalid_data', 'wrong_number', 'disconnected',
-  'system failure', 'system_failure', 'system error', 'system_error',
-  'technical issue', 'technical_issue', 'unknown', 'needs_review',
-  'dnc-request', 'dnc_request', 'do_not_call', 'removed',
-  'answering machine', 'reached voicemail', 'fax', 'callback',
-];
+// Ranking and filtering helpers for outcome-agnostic showcase selection.
+function handlingQualityScoreSql() {
+  return sql<number>`
+    (
+      COALESCE(${callQualityRecords.engagementScore}, 0) +
+      COALESCE(${callQualityRecords.clarityScore}, 0) +
+      COALESCE(${callQualityRecords.empathyScore}, 0) +
+      COALESCE(${callQualityRecords.objectionHandlingScore}, 0) +
+      COALESCE(${callQualityRecords.flowComplianceScore}, 0) +
+      COALESCE(${callQualityRecords.closingScore}, 0)
+    ) / 6.0
+  `;
+}
 
-/** SQL filter to exclude voicemails and non-conversation dispositions */
-function realConversationFilter() {
-  // Case-insensitive match against non-conversation patterns
-  return sql`(
-    LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT IN (${sql.join(
-      NON_CONVERSATION_DISPOSITIONS.map(d => sql`${d}`),
-      sql`, `
-    )})
-    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%voicemail%'
-    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%no answer%'
-    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%no_answer%'
-    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%system%'
-    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%fax%'
-    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%answering machine%'
-  )`;
+function handlingPrecisionScoreSql() {
+  return sql<number>`
+    CASE
+      WHEN ${callQualityRecords.dispositionAccurate} = true THEN 100
+      WHEN ${callQualityRecords.dispositionAccurate} = false THEN 0
+      ELSE 50
+    END
+  `;
+}
+
+function durationPriorityScoreSql() {
+  return sql<number>`
+    LEAST(COALESCE(${callSessions.durationSec}, 0), 1200) / 12.0
+  `;
 }
 
 function buildFilters(query: any) {
@@ -73,6 +81,13 @@ function buildFilters(query: any) {
   }
   if (query.startDate) {
     conditions.push(gte(callQualityRecords.createdAt, new Date(query.startDate as string)));
+  } else {
+    conditions.push(
+      gte(
+        callQualityRecords.createdAt,
+        new Date(Date.now() - SHOWCASE_DEFAULT_RECENT_DAYS * 24 * 60 * 60 * 1000)
+      )
+    );
   }
   if (query.endDate) {
     conditions.push(lte(callQualityRecords.createdAt, new Date(query.endDate as string)));
@@ -83,50 +98,45 @@ function buildFilters(query: any) {
   if (query.category && query.category !== 'all') {
     conditions.push(eq(callQualityRecords.showcaseCategory, query.category as string));
   }
-  if (query.disposition && query.disposition !== 'all') {
-    conditions.push(eq(callQualityRecords.assignedDisposition, query.disposition as string));
-  }
 
   return and(...conditions);
 }
 
-/** Weighted agent performance score (behavior, not outcomes) */
+/** Showcase ranking score: conversation quality + handling + precision. */
 function agentPerformanceScoreSql() {
   return sql<number>`
-    COALESCE(${callQualityRecords.engagementScore}, 0) * 0.20 +
-    COALESCE(${callQualityRecords.clarityScore}, 0) * 0.20 +
-    COALESCE(${callQualityRecords.empathyScore}, 0) * 0.25 +
-    COALESCE(${callQualityRecords.objectionHandlingScore}, 0) * 0.20 +
-    COALESCE(${callQualityRecords.flowComplianceScore}, 0) * 0.15
+    COALESCE(${callQualityRecords.overallQualityScore}, 0) * 0.40 +
+    ${handlingQualityScoreSql()} * 0.30 +
+    ${handlingPrecisionScoreSql()} * 0.10 +
+    ${durationPriorityScoreSql()} * 0.20
   `;
 }
 
+/** Outcome-agnostic, analysis-backed filter for showcase candidates. */
+function buildBaseShowcaseWhere(query: any) {
+  return and(
+    buildFilters(query),
+    isNotNull(callQualityRecords.fullTranscript),
+    gte(callSessions.durationSec, MIN_MEANINGFUL_DURATION_SEC),
+    gte(callQualityRecords.overallQualityScore, MIN_OVERALL_SCORE),
+    sql`LENGTH(COALESCE(${callQualityRecords.fullTranscript}, '')) >= ${MIN_TRANSCRIPT_CHARS}`,
+    or(
+      eq(callSessions.recordingStatus, 'stored'),
+      isNotNull(callSessions.recordingS3Key)
+    ),
+  );
+}
+
 // ============================================================================
-// GET / — List top 200 recent calls with recordings (Showcase candidates)
+// GET / — List top 100 recent calls with recordings (Showcase candidates)
 // ============================================================================
 
 router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
-    // User requested "at least 200 latest calls"
-    const limit = 200; 
-    const offset = (page - 1) * limit;
-
-    // Relaxed filters to ensure we show calls
-    // We prioritize calls with recordings and transcripts
-    const whereClause = and(
-      buildFilters(req.query),
-      // We still want "real" calls (not 0s voicemails), but let's be less strict
-      // realConversationFilter(), // Removing this strict filter for now to ensure visibility
-      isNotNull(callQualityRecords.fullTranscript),
-      // Duration > 10s is enough to show something happened
-      gte(callSessions.durationSec, 10),
-      // Must have recording accessible
-      or(
-        eq(callSessions.recordingStatus, 'stored'),
-        isNotNull(callSessions.recordingS3Key)
-      )
-    );
+    // Showcase should return up to the top 100 calls by quality + handling precision.
+    const page = 1;
+    const limit = SHOWCASE_MAX_CALLS;
+    const whereClause = buildBaseShowcaseWhere(req.query);
 
     // Count total matches
     const [{ total }] = await db
@@ -175,9 +185,14 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
       .where(whereClause)
-      .orderBy(desc(agentPerformanceScoreSql()))
-      .limit(limit)
-      .offset(offset);
+      .orderBy(
+        desc(agentPerformanceScoreSql()),
+        desc(callQualityRecords.overallQualityScore),
+        desc(callQualityRecords.createdAt),
+      )
+      .limit(limit);
+
+    const cappedTotal = Math.min(Number(total) || 0, limit);
 
     res.json({
       calls: rows.map(r => ({
@@ -188,8 +203,8 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       pagination: {
         page,
         limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+        total: cappedTotal,
+        totalPages: 1,
       },
     });
   } catch (error: any) {
@@ -204,19 +219,10 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
 
 router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
   try {
-    const threshold = parseInt(req.query.threshold as string, 10) || 75;
+    const threshold = parseInt(req.query.threshold as string, 10) || 60;
     const limitCount = Math.min(50, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
 
-    // Also relax these filters to ensure discoverability works
-    const baseCandidatesFilters = and(
-      buildFilters(req.query),
-      isNotNull(callQualityRecords.fullTranscript),
-      gte(callSessions.durationSec, 10),
-      or(
-        eq(callSessions.recordingStatus, 'stored'),
-        isNotNull(callSessions.recordingS3Key)
-      )
-    );
+    const baseCandidatesFilters = buildBaseShowcaseWhere(req.query);
 
     const candidates = await db
       .select({
@@ -250,7 +256,11 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
       .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
       .where(baseCandidatesFilters)
-      .orderBy(desc(agentPerformanceScoreSql()))
+      .orderBy(
+        desc(agentPerformanceScoreSql()),
+        desc(callQualityRecords.overallQualityScore),
+        desc(callQualityRecords.createdAt),
+      )
       .limit(limitCount);
 
     // Suggest a category for each candidate based on their highest dimension
@@ -272,7 +282,12 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
       };
     });
 
-    res.json({ candidates: enriched, threshold });
+    const thresholdMatches = enriched.filter(c => c.agentPerformanceScore >= threshold);
+    const finalCandidates = thresholdMatches.length > 0
+      ? thresholdMatches
+      : enriched;
+
+    res.json({ candidates: finalCandidates, threshold });
   } catch (error: any) {
     console.error('[ShowcaseCalls] Auto-detect error:', error);
     res.status(500).json({ error: 'Failed to auto-detect showcase calls' });
@@ -285,16 +300,7 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
 
 router.get("/stats", requireAuth, async (req: Request, res: Response) => {
   try {
-    // Relaxed filters to match the GET / logic
-    const showcaseWhere = and(
-      buildFilters(req.query),
-      isNotNull(callQualityRecords.fullTranscript),
-      gte(callSessions.durationSec, 10),
-      or(
-        eq(callSessions.recordingStatus, 'stored'),
-        isNotNull(callSessions.recordingS3Key)
-      )
-    );
+    const showcaseWhere = buildBaseShowcaseWhere(req.query);
 
     const [countCheck] = await db
       .select({ count: drizzleCount() })
@@ -322,27 +328,16 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
     // Or maybe showcaseWhere is somehow too strict? No, check_recordings.ts says 18.
 
 
-    // Overall real-conversation stats (for context when nothing pinned yet)
+    // Overall eligible showcase pool stats (for context when nothing pinned yet)
     const [conversationStats] = await db
       .select({
         totalConversations: drizzleCount(),
         avgScore: sql<number>`ROUND(AVG(${callQualityRecords.overallQualityScore}))`,
-        highPerformers: sql<number>`COUNT(CASE WHEN (
-          COALESCE(${callQualityRecords.engagementScore}, 0) * 0.20 +
-          COALESCE(${callQualityRecords.clarityScore}, 0) * 0.20 +
-          COALESCE(${callQualityRecords.empathyScore}, 0) * 0.25 +
-          COALESCE(${callQualityRecords.objectionHandlingScore}, 0) * 0.20 +
-          COALESCE(${callQualityRecords.flowComplianceScore}, 0) * 0.15
-        ) >= 75 THEN 1 END)`,
+        highPerformers: sql<number>`COUNT(CASE WHEN (${agentPerformanceScoreSql()}) >= 80 THEN 1 END)`,
       })
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
-      .where(and(
-        isNotNull(callQualityRecords.overallQualityScore),
-        realConversationFilter(),
-        gte(callQualityRecords.engagementScore, 20),
-        gte(callSessions.durationSec, 30),
-      ));
+      .where(showcaseWhere);
 
     // Category breakdown
     const categoryBreakdown = await db
@@ -351,10 +346,11 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
         count: drizzleCount(),
       })
       .from(callQualityRecords)
+      .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
       .where(showcaseWhere)
       .groupBy(callQualityRecords.showcaseCategory);
 
-    // Top campaigns with real conversations
+    // Top campaigns inside the eligible showcase pool
     const topCampaigns = await db
       .select({
         campaignId: callQualityRecords.campaignId,
@@ -365,18 +361,13 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
       .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
-      .where(and(
-        isNotNull(callQualityRecords.overallQualityScore),
-        realConversationFilter(),
-        gte(callQualityRecords.engagementScore, 20),
-        gte(callSessions.durationSec, 30),
-      ))
+      .where(showcaseWhere)
       .groupBy(callQualityRecords.campaignId, campaigns.name)
       .orderBy(desc(sql`ROUND(AVG(${callQualityRecords.overallQualityScore}))`))
       .limit(5);
 
     res.json({
-      total: showcaseStats.total,
+      total: Math.min(Number(showcaseStats.total) || 0, SHOWCASE_MAX_CALLS),
       averages: {
         overall: showcaseStats.avgOverall ?? 0,
         engagement: showcaseStats.avgEngagement ?? 0,

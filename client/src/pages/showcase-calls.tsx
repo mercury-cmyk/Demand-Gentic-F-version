@@ -124,6 +124,7 @@ const CATEGORY_ICONS: Record<string, any> = {
   perfect_flow: BarChart3,
   empathetic_response: Heart,
 };
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 // ============================================================================
 // Main Page Component
@@ -155,7 +156,7 @@ export default function ShowcaseCallsPage() {
   const buildParams = () => {
     const params = new URLSearchParams();
     params.append("page", page.toString());
-    params.append("limit", "200");
+    params.append("limit", "100");
     if (selectedCampaign !== "all") params.append("campaignId", selectedCampaign);
     if (selectedCategory !== "all") params.append("category", selectedCategory);
     if (minScore) params.append("minScore", minScore);
@@ -172,6 +173,9 @@ export default function ShowcaseCallsPage() {
       const res = await apiRequest("GET", "/api/showcase-calls/stats");
       return res.json();
     },
+    staleTime: SIX_HOURS_MS,
+    refetchInterval: SIX_HOURS_MS,
+    refetchIntervalInBackground: true,
   });
 
   const { data: showcasedData, isLoading: showcasedLoading } = useQuery<ShowcaseListResponse>({
@@ -181,6 +185,9 @@ export default function ShowcaseCallsPage() {
       return res.json();
     },
     enabled: tab === "showcased",
+    staleTime: SIX_HOURS_MS,
+    refetchInterval: SIX_HOURS_MS,
+    refetchIntervalInBackground: true,
   });
 
   const { data: discoverData, isLoading: discoverLoading } = useQuery<AutoDetectResponse>({
@@ -194,6 +201,9 @@ export default function ShowcaseCallsPage() {
       return res.json();
     },
     enabled: tab === "discover",
+    staleTime: SIX_HOURS_MS,
+    refetchInterval: SIX_HOURS_MS,
+    refetchIntervalInBackground: true,
   });
 
   const { data: detailData, isLoading: detailLoading } = useQuery<CallDetails>({
@@ -284,7 +294,7 @@ export default function ShowcaseCallsPage() {
               Showcase Calls
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Best AI agent performances — professional handling across all situations
+              Meaningful, professional conversations with recording playback, clear transcript, detected issues, and recommendations. Refreshes every 6 hours.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)}>
@@ -411,7 +421,7 @@ export default function ShowcaseCallsPage() {
                   <Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <h3 className="text-lg font-semibold">No showcase calls yet</h3>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Go to the Discover tab to find and pin your best AI agent performances.
+                    Go to the Discover tab to find and pin your top meaningful conversations.
                   </p>
                 </CardContent>
               </Card>
@@ -461,8 +471,8 @@ export default function ShowcaseCallsPage() {
           <TabsContent value="discover" className="mt-4">
             <div className="mb-4">
               <p className="text-sm text-muted-foreground">
-                Auto-detected calls with high agent performance scores (engagement, clarity, empathy, objection handling, flow compliance).
-                These calls demonstrate professional handling regardless of outcome.
+                Auto-detected calls with strong conversation quality, handling precision, and longer call duration.
+                These calls demonstrate meaningful professional handling regardless of outcome.
               </p>
             </div>
 
@@ -646,6 +656,53 @@ export default function ShowcaseCallsPage() {
                   </Card>
                 )}
 
+                {/* Detected Issues */}
+                {!!detailData.issues?.length && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Detected Issues</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {detailData.issues.map((issue: any, idx: number) => (
+                        <div key={`issue-${idx}`} className="rounded-md border p-2">
+                          <p className="text-sm font-medium">
+                            {issue?.type || issue?.category || `Issue ${idx + 1}`}
+                          </p>
+                          {issue?.severity && (
+                            <p className="text-xs text-muted-foreground capitalize">
+                              Severity: {String(issue.severity)}
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {issue?.description || issue?.evidence || JSON.stringify(issue)}
+                          </p>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Recommendations */}
+                {!!detailData.recommendations?.length && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Recommendations</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {detailData.recommendations.map((rec: any, idx: number) => (
+                        <div key={`rec-${idx}`} className="rounded-md border p-2">
+                          <p className="text-sm font-medium">
+                            {rec?.category || rec?.title || `Recommendation ${idx + 1}`}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {rec?.suggestedChange || rec?.description || rec?.expectedImpact || JSON.stringify(rec)}
+                          </p>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Showcase Notes */}
                 {detailData.showcaseNotes && (
                   <Card>
@@ -669,3 +726,4 @@ export default function ShowcaseCallsPage() {
     </div>
   );
 }
+

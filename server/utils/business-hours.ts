@@ -49,13 +49,7 @@ export const MIDDLE_EAST_BUSINESS_HOURS: BusinessHoursConfig = {
  */
 const MIDDLE_EAST_COUNTRIES = new Set([
   'AE', 'UNITED ARAB EMIRATES', 'UAE', 'DUBAI',
-  'SA', 'SAUDI ARABIA',
-  'IL', 'ISRAEL',
-  'QA', 'QATAR',
-  'KW', 'KUWAIT',
-  'BH', 'BAHRAIN',
-  'OM', 'OMAN',
-  'EG', 'EGYPT',
+  'SA', 'SAUDI ARABIA', 'KSA'
 ]);
 
 /**

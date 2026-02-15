@@ -13825,3 +13825,200 @@ export const mercuryNotificationPreferences = pgTable("mercury_notification_pref
   userTypeIdx: index("mercury_prefs_user_type_idx").on(table.userId, table.userType),
   notifTypeIdx: index("mercury_prefs_notif_type_idx").on(table.notificationType),
 }));
+
+// ============================================================
+// CONTENT PROMOTION LANDING PAGES
+// ============================================================
+
+export const contentPromoPageTypeEnum = pgEnum('content_promo_page_type', [
+  'gated_download',
+  'ungated_download',
+  'webinar_registration',
+  'demo_request',
+  'confirmation',
+]);
+
+export const contentPromoPageStatusEnum = pgEnum('content_promo_page_status', [
+  'draft',
+  'published',
+  'archived',
+  'expired',
+]);
+
+export const contentPromoTemplateThemeEnum = pgEnum('content_promo_template_theme', [
+  'executive',
+  'modern_gradient',
+  'clean_minimal',
+  'bold_impact',
+  'tech_forward',
+]);
+
+export const contentPromotionPages = pgTable("content_promotion_pages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id"),
+  title: text("title").notNull(),
+  slug: text("slug").notNull().unique(),
+  pageType: contentPromoPageTypeEnum("page_type").notNull(),
+  status: contentPromoPageStatusEnum("status").notNull().default('draft'),
+  templateTheme: contentPromoTemplateThemeEnum("template_theme").notNull().default('modern_gradient'),
+
+  heroConfig: jsonb("hero_config").$type<{
+    headline: string;
+    subHeadline: string;
+    backgroundStyle: 'gradient' | 'image' | 'pattern' | 'video';
+    backgroundValue: string;
+    badgeText?: string;
+    badgeIcon?: string;
+  }>().notNull(),
+
+  assetConfig: jsonb("asset_config").$type<{
+    title: string;
+    description: string;
+    assetType: string;
+    fileUrl: string;
+    thumbnailUrl?: string;
+    fileSize?: string;
+    pageCount?: number;
+    readTime?: string;
+  }>(),
+
+  brandingConfig: jsonb("branding_config").$type<{
+    primaryColor: string;
+    accentColor: string;
+    textColor?: string;
+    logoUrl?: string;
+    companyName: string;
+    faviconUrl?: string;
+  }>().notNull(),
+
+  formConfig: jsonb("form_config").$type<{
+    fields: Array<{
+      name: string;
+      label: string;
+      type: 'text' | 'email' | 'tel' | 'select' | 'textarea' | 'hidden';
+      required: boolean;
+      placeholder?: string;
+      options?: string[];
+      prefillParam?: string;
+      halfWidth?: boolean;
+    }>;
+    submitButtonText: string;
+    submitButtonIcon?: string;
+    consentText?: string;
+    consentRequired?: boolean;
+    showProgressBar?: boolean;
+  }>(),
+
+  socialProofConfig: jsonb("social_proof_config").$type<{
+    stats?: Array<{ value: string; label: string; icon?: string }>;
+    testimonials?: Array<{
+      quote: string;
+      authorName: string;
+      authorTitle: string;
+      authorCompany: string;
+      avatarUrl?: string;
+    }>;
+    companyLogos?: Array<{ name: string; logoUrl: string }>;
+    trustBadges?: Array<{ text: string; icon: string }>;
+  }>(),
+
+  benefitsConfig: jsonb("benefits_config").$type<{
+    sectionTitle?: string;
+    sectionSubtitle?: string;
+    items: Array<{ icon: string; title: string; description: string }>;
+  }>(),
+
+  urgencyConfig: jsonb("urgency_config").$type<{
+    enabled: boolean;
+    type: 'countdown' | 'limited_quantity' | 'social_proof_count';
+    countdownEndDate?: string;
+    quantityRemaining?: number;
+    recentDownloadsCount?: number;
+    messageTemplate?: string;
+  }>(),
+
+  thankYouConfig: jsonb("thank_you_config").$type<{
+    headline: string;
+    message: string;
+    showDownloadButton: boolean;
+    downloadButtonText?: string;
+    redirectUrl?: string;
+    redirectDelay?: number;
+    showSocialShare?: boolean;
+    additionalCta?: { text: string; url: string };
+  }>(),
+
+  seoConfig: jsonb("seo_config").$type<{
+    metaTitle?: string;
+    metaDescription?: string;
+    ogImageUrl?: string;
+    noIndex?: boolean;
+  }>(),
+
+  linkedLeadFormId: varchar("linked_lead_form_id"),
+  viewCount: integer("view_count").notNull().default(0),
+  uniqueViewCount: integer("unique_view_count").notNull().default(0),
+  submissionCount: integer("submission_count").notNull().default(0),
+  conversionRate: numeric("conversion_rate", { precision: 5, scale: 2 }),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  slugIdx: uniqueIndex("content_promo_pages_slug_idx").on(table.slug),
+  statusIdx: index("content_promo_pages_status_idx").on(table.status),
+  pageTypeIdx: index("content_promo_pages_type_idx").on(table.pageType),
+  tenantIdx: index("content_promo_pages_tenant_idx").on(table.tenantId),
+  createdAtIdx: index("content_promo_pages_created_idx").on(table.createdAt),
+}));
+
+export const contentPromotionPageViews = pgTable("content_promotion_page_views", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  pageId: varchar("page_id").notNull(),
+  visitorEmail: varchar("visitor_email", { length: 320 }),
+  visitorFirstName: varchar("visitor_first_name", { length: 255 }),
+  visitorLastName: varchar("visitor_last_name", { length: 255 }),
+  visitorCompany: varchar("visitor_company", { length: 255 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  referrer: text("referrer"),
+  utmSource: varchar("utm_source", { length: 255 }),
+  utmMedium: varchar("utm_medium", { length: 255 }),
+  utmCampaign: varchar("utm_campaign", { length: 255 }),
+  utmTerm: varchar("utm_term", { length: 255 }),
+  utmContent: varchar("utm_content", { length: 255 }),
+  eventType: varchar("event_type", { length: 50 }).notNull().default('view'),
+  formData: jsonb("form_data"),
+  timeOnPageMs: integer("time_on_page_ms"),
+  scrollDepthPercent: integer("scroll_depth_percent"),
+  submissionId: varchar("submission_id"),
+  convertedAt: timestamp("converted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pageIdx: index("content_promo_views_page_idx").on(table.pageId),
+  emailIdx: index("content_promo_views_email_idx").on(table.visitorEmail),
+  eventIdx: index("content_promo_views_event_idx").on(table.eventType),
+  createdAtIdx: index("content_promo_views_created_idx").on(table.createdAt),
+  utmCampaignIdx: index("content_promo_views_utm_campaign_idx").on(table.utmCampaign),
+}));
+
+export const insertContentPromotionPageSchema = createInsertSchema(contentPromotionPages).omit({
+  id: true,
+  viewCount: true,
+  uniqueViewCount: true,
+  submissionCount: true,
+  conversionRate: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertContentPromotionPageViewSchema = createInsertSchema(contentPromotionPageViews).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type ContentPromotionPage = typeof contentPromotionPages.$inferSelect;
+export type InsertContentPromotionPage = z.infer<typeof insertContentPromotionPageSchema>;
+export type ContentPromotionPageView = typeof contentPromotionPageViews.$inferSelect;
+export type InsertContentPromotionPageView = z.infer<typeof insertContentPromotionPageViewSchema>;
