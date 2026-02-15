@@ -42,6 +42,7 @@ import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram'
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
   QualifiedLeadsTable,
+  CallRecordingsView,
   LeadDetailModal,
   EnhancedLeadDetailModal,
   ExportLeadsDialog,
@@ -258,16 +259,23 @@ function resolveTab(tab: string | null): string {
   return TAB_ALIASES[tab] || tab;
 }
 
+function resolveLeadsView(view: string | null): 'recordings' | 'qualified' {
+  return view === 'qualified' ? 'qualified' : 'recordings';
+}
+
 export default function ClientPortalDashboard() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
+  const urlParams = new URLSearchParams(searchString);
   const { toast } = useToast();
   const agentPanel = useAgentPanelContextOptional();
   const [user, setUser] = useState<ClientUser | null>(null);
 
   // URL-driven tab system
-  const tabFromUrl = new URLSearchParams(searchString).get('tab');
+  const tabFromUrl = urlParams.get('tab');
+  const leadsViewFromUrl = urlParams.get('leadsView');
   const [activeTab, setActiveTabState] = useState(resolveTab(tabFromUrl));
+  const [leadsSubView, setLeadsSubViewState] = useState<'recordings' | 'qualified'>(resolveLeadsView(leadsViewFromUrl));
   const [targetMarketTab, setTargetMarketTab] = useState('accounts');
   const [showSupportDialog, setShowSupportDialog] = useState(false);
 
@@ -279,10 +287,33 @@ export default function ClientPortalDashboard() {
     }
   }, [tabFromUrl]);
 
+  // Sync leads sub-view with URL changes
+  useEffect(() => {
+    const resolved = resolveLeadsView(leadsViewFromUrl);
+    if (resolved !== leadsSubView) {
+      setLeadsSubViewState(resolved);
+    }
+  }, [leadsViewFromUrl]);
+
   // Update URL when activeTab changes internally
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
-    window.history.replaceState(null, '', `/client-portal/dashboard?tab=${tab}`);
+    const params = new URLSearchParams(searchString);
+    params.set('tab', tab);
+    if (tab === 'leads') {
+      params.set('leadsView', leadsSubView);
+    } else {
+      params.delete('leadsView');
+    }
+    window.history.replaceState(null, '', `/client-portal/dashboard?${params.toString()}`);
+  };
+
+  const setLeadsSubView = (view: 'recordings' | 'qualified') => {
+    setLeadsSubViewState(view);
+    const params = new URLSearchParams(searchString);
+    params.set('tab', 'leads');
+    params.set('leadsView', view);
+    window.history.replaceState(null, '', `/client-portal/dashboard?${params.toString()}`);
   };
   
   // Queue View State
@@ -293,6 +324,171 @@ export default function ClientPortalDashboard() {
   const [showEmailTestDialog, setShowEmailTestDialog] = useState(false);
   const [testEmailCampaignId, setTestEmailCampaignId] = useState<string | null>(null);
 
+
+  // Work Order Request State (managed campaigns by Pivotal team)
+  const [showWorkOrderDialog, setShowWorkOrderDialog] = useState(false);
+  const [workOrderStep, setWorkOrderStep] = useState(1);
+  
+  // Temp inputs for tag fields
+  const [geoInput, setGeoInput] = useState('');
+  const [titleInput, setTitleInput] = useState('');
+  const [industryInput, setIndustryInput] = useState('');
+
+  const [newWorkOrder, setNewWorkOrder] = useState({
+    campaignType: '' as string,
+    campaignGoals: '',
+    productServices: '',
+    talkingPoints: '',
+    qualifications: '',
+    successCriteria: '',
+    requiredLeads: '',
+    desiredTimeline: '',
+    deadline: '',
+    additionalInstructions: '',
+    priority: 'normal' as 'low' | 'normal' | 'high' | 'urgent',
+    landingPageUrl: '',
+    projectFileUrl: '',
+    fileName: '',
+    // Audience Targeting
+    targetGeo: [] as string[],
+    targetTitles: [] as string[],
+    targetIndustries: [] as string[],
+    targetRevenue: [] as string[],
+    targetEmployeeSize: [] as string[],
+  });
+
+  // ArgyleEvent interface definition
+  interface ArgyleEvent {
+    id: string;
+    externalId: string;
+    sourceUrl: string;
+    title: string;
+    community: string | null;
+    eventType: string | null;
+    location: string | null;
+    startAtIso: string | null;
+    startAtHuman: string | null;
+    needsDateReview: boolean;
+    lastSyncedAt: string;
+    draft?: {
+      id: string;
+      status: string;
+      leadCount: number | null;
+      draftFields: Record<string, any>;
+      sourceFields: Record<string, any> | null;
+    } | null;
+  }
+
+  // Argyle Event Selection (Link Drafts)
+  const [selectedArgyleEventId, setSelectedArgyleEventId] = useState<string>('none');
+  // Feature access state (loaded later from API)
+  const [enabledFeatures, setEnabledFeatures] = useState<string[]>([
+    'accounts_contacts', 'bulk_upload', 'campaign_creation', 'email_templates',
+    'call_flows', 'voice_selection', 'calendar_booking', 'analytics_dashboard', 'reports_export'
+  ]);
+
+  // Fetch Argyle Events (if feature enabled/client authorized)
+  const { data: argyleEventsData } = useQuery<{ events: ArgyleEvent[] }>({
+    queryKey: ['argyle-events'],
+    queryFn: async () => {
+      try {
+        const res = await apiRequest('GET', '/api/client-portal/argyle-events/events');
+        return await res.json();
+      } catch (e) {
+        return { events: [] };
+      }
+    },
+    enabled: enabledFeatures.includes('argyle_events'),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  
+  const argyleEvents = argyleEventsData?.events || [];
+  const hasDrafts = argyleEvents.some(e => e.draft && e.draft.status !== 'submitted');
+
+  // Create Project Mutation (Work Order)
+  const createWorkOrderMutation = useMutation({
+    mutationFn: async (data: typeof newWorkOrder) => {
+      // Format description with all targeting details
+      const targetingDetails = [
+        `GEO: ${data.targetGeo.join(', ')}`,
+        `TITLES: ${data.targetTitles.join(', ')}`,
+        `INDUSTRIES: ${data.targetIndustries.join(', ')}`,
+        `REVENUE: ${data.targetRevenue.join(', ')}`,
+        `EMPLOYEE SIZE: ${data.targetEmployeeSize.join(', ')}`
+      ].join('\n');
+
+      const fullDescription = `CAMPAIGN OBJECTIVE/CONTEXT:\n${data.campaignGoals}\n\nPRODUCT/SERVICES:\n${data.productServices}\n\nKEY TALKING POINTS:\n${data.talkingPoints}\n\nQUALIFICATIONS:\n${data.qualifications}\n\nSUCCESS CRITERIA:\n${data.successCriteria}\n\nTARGET AUDIENCE:\n${targetingDetails}\n\nTIMELINE:\n${data.desiredTimeline}\n\nPRIORITY:\n${data.priority}\n\nINSTRUCTIONS:\n${data.additionalInstructions}`;
+
+      // Map Work Order fields to Project Request schema
+      return apiRequest('POST', '/api/client-portal/projects', {
+        name: `${getProgramTypeLabel(data.campaignType)} Request`,
+        description: fullDescription,
+        requestedLeadCount: parseInt(data.requiredLeads.replace(/\D/g, '') || '0'),
+        endDate: data.deadline || undefined,
+        startDate: new Date().toISOString(),
+        budgetCurrency: 'USD',
+        landingPageUrl: data.landingPageUrl || undefined,
+        projectFileUrl: data.projectFileUrl || undefined,
+      });
+    },
+    onSuccess: () => {
+      toast({ 
+        title: 'Work Order Submitted', 
+        description: 'Your project request has been submitted for review.' 
+      });
+      setShowWorkOrderDialog(false);
+      setWorkOrderStep(1);
+      
+      // Reset form
+      setNewWorkOrder({
+        campaignType: '',
+        campaignGoals: '',
+        productServices: '',
+        talkingPoints: '',
+        qualifications: '',
+        successCriteria: '',
+        requiredLeads: '',
+        desiredTimeline: '',
+        deadline: '',
+        additionalInstructions: '',
+        priority: 'normal',
+        landingPageUrl: '',
+        projectFileUrl: '',
+        fileName: '',
+        targetGeo: [],
+        targetTitles: [],
+        targetIndustries: [],
+        targetRevenue: [],
+        targetEmployeeSize: [],
+      });
+
+      // Refresh projects list to show the new order
+      queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: 'Submission Failed', 
+        description: error.message || 'Failed to submit work order.',
+        variant: 'destructive',
+      });
+    }
+  });
+
+  const getProgramTypeLabel = (type: string) => {
+    switch (type) {
+      case 'appointment_setting': return 'Appointment Setting';
+      case 'event_reg_digital_ungated': return 'Event Reg - Digital (Ungated)';
+      case 'event_reg_digital_gated': return 'Event Reg - Digital (Gated)';
+      case 'in_person_events': return 'In-Person Events';
+      case 'data_hygiene_enrichment': return 'Data Hygiene';
+      case 'call_campaign': return 'Call Campaign';
+      case 'email_campaign': return 'Email Campaign';
+      case 'combined': return 'Combined';
+      case 'data_enrichment': return 'Data Enrichment';
+      default: return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+  };
 
   // Self-Service Campaign Creation State
   const [showCampaignCreator, setShowCampaignCreator] = useState(false);
@@ -475,13 +671,6 @@ export default function ClientPortalDashboard() {
   });
   const [bulkUploadFile, setBulkUploadFile] = useState<File | null>(null);
   const [bulkUploadType, setBulkUploadType] = useState<'contacts' | 'accounts'>('contacts');
-
-
-  // Feature access state (will be loaded from API)
-  const [enabledFeatures, setEnabledFeatures] = useState<string[]>([
-    'accounts_contacts', 'bulk_upload', 'campaign_creation', 'email_templates',
-    'call_flows', 'voice_selection', 'calendar_booking', 'analytics_dashboard', 'reports_export'
-  ]);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('clientPortalUser');
@@ -681,7 +870,7 @@ export default function ClientPortalDashboard() {
         return { enabled: false };
       }
     },
-    enabled: !!user,
+    enabled: !!user && !!featuresData?.enabledFeatures?.includes('argyle_events'),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -2556,16 +2745,26 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold">Qualified Leads</h2>
-                <p className="text-muted-foreground">QA-approved leads from your campaigns with recordings and transcripts</p>
+                <h2 className="text-2xl font-bold">Leads</h2>
+                <p className="text-muted-foreground">View Telnyx call recordings and QA-approved leads</p>
               </div>
             </div>
 
-            {/* QA-Approved Leads Table */}
-            <QualifiedLeadsTable
-              onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}
-              onExport={() => setShowExportDialog(true)}
-            />
+            <Tabs value={leadsSubView} onValueChange={(v) => setLeadsSubView(v as 'recordings' | 'qualified')}>
+              <TabsList>
+                <TabsTrigger value="recordings">Call Recordings</TabsTrigger>
+                <TabsTrigger value="qualified">Qualified Leads</TabsTrigger>
+              </TabsList>
+              <TabsContent value="recordings" className="mt-4">
+                <CallRecordingsView />
+              </TabsContent>
+              <TabsContent value="qualified" className="mt-4">
+                <QualifiedLeadsTable
+                  onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}
+                  onExport={() => setShowExportDialog(true)}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
 

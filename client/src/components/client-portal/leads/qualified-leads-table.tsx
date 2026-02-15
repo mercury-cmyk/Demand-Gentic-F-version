@@ -44,6 +44,10 @@ interface Campaign {
   approvedLeadsCount: number;
 }
 
+interface QualifiedLeadsDebugData {
+  [key: string]: unknown;
+}
+
 interface QualifiedLeadsTableProps {
   onViewDetails: (leadId: string) => void;
   onExport: () => void;
@@ -83,6 +87,7 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
     total: number;
     page: number;
     pageSize: number;
+    debug?: QualifiedLeadsDebugData;
   }>({
     queryKey: ['client-portal-qualified-leads', page, pageSize, search, campaignFilter, sortBy, sortOrder],
     queryFn: async () => {
@@ -91,6 +96,7 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
         pageSize: String(pageSize),
         sortBy,
         sortOrder,
+        debug: '1',
       });
       if (search) params.set('search', search);
       if (campaignFilter && campaignFilter !== 'all') params.set('campaignId', campaignFilter);
@@ -106,6 +112,7 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
   const leads = leadsResponse?.leads || [];
   const total = leadsResponse?.total || 0;
   const totalPages = Math.ceil(total / pageSize);
+  const debugText = leadsResponse?.debug ? JSON.stringify(leadsResponse.debug, null, 2) : '';
 
   const handleSort = (column: string) => {
     if (sortBy === column) {
@@ -232,6 +239,14 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
                 ? 'No leads match your current filters. Try adjusting your search criteria.'
                 : 'QA-approved leads from your campaigns will appear here once they are delivered.'}
             </p>
+            {debugText && (
+              <div className="mt-6 max-w-3xl mx-auto text-left">
+                <p className="text-xs font-semibold text-slate-700 mb-2">Diagnostics (copy/paste this)</p>
+                <pre className="text-xs bg-slate-950 text-slate-100 rounded-md p-3 overflow-auto border border-slate-700">
+                  {debugText}
+                </pre>
+              </div>
+            )}
           </div>
         ) : (
           <>

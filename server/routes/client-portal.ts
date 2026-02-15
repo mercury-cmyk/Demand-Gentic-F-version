@@ -55,6 +55,8 @@ import { ukefReportsRouter } from '../integrations/ukef_reports';
 import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
+import { fetchTelnyxRecordings } from '../services/telnyx-sync-service';
+import { getPlayableRecordingLink } from '../services/recording-link-resolver';
 
 const router = Router();
 
@@ -96,6 +98,30 @@ export interface ClientJWTPayload {
   lastName: string | null;
   isClient: true;
   isOwner?: boolean;
+}
+
+interface ClientRecordingStreamTokenPayload {
+  recordingId: string;
+  clientUserId: string;
+  clientAccountId: string;
+  isClientRecordingStream: true;
+}
+
+function normalizePhoneDigits(value: string | null | undefined): string {
+  return (value || '').replace(/\D/g, '');
+}
+
+function formatPhoneForTelnyx(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith('+')) return trimmed;
+
+  const digits = normalizePhoneDigits(trimmed);
+  if (!digits) return undefined;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return `+${digits}`;
 }
 
 declare global {
@@ -1004,12 +1030,14 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       pageSize = '50',
       sortBy = 'approvedAt',
       sortOrder = 'desc',
-      search
+      search,
+      debug,
     } = req.query;
 
     const pageNum = parseInt(page as string);
     const pageSizeNum = Math.min(parseInt(pageSize as string), 100); // Max 100 per page
     const offset = (pageNum - 1) * pageSizeNum;
+    const includeDebug = debug === '1';
 
     // Get campaigns the client has access to (regular campaigns with QA leads)
     const accessList = await db
@@ -1029,8 +1057,205 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       .map(a => a.regularCampaignId)
       .filter((id): id is string => id !== null);
 
+    const buildTelnyxFallbackLeads = async () => {
+      const phoneSearchDigits = typeof search === 'string' ? normalizePhoneDigits(search) : '';
+      const telnyxPhoneFilter = typeof search === 'string' ? formatPhoneForTelnyx(search) : undefined;
+      const telnyxRecordings = await fetchTelnyxRecordings({
+        pageSize: Math.min(100, pageSizeNum),
+        maxPages: Math.max(10, pageNum),
+        phoneNumber: telnyxPhoneFilter,
+      });
+
+      if (telnyxRecordings.length === 0) {
+        return {
+          leads: [],
+          total: 0,
+          debug: includeDebug ? {
+            source: 'telnyx-fallback',
+            reason: 'no_telnyx_recordings_for_filter',
+            search: typeof search === 'string' ? search : null,
+            normalizedSearchDigits: phoneSearchDigits || null,
+            telnyxPhoneFilter: telnyxPhoneFilter || null,
+          } : undefined,
+        };
+      }
+
+      const candidateNumbers = new Set<string>();
+      for (const rec of telnyxRecordings) {
+        const fromDigits = normalizePhoneDigits(rec.from);
+        const toDigits = normalizePhoneDigits(rec.to);
+        if (fromDigits) {
+          candidateNumbers.add(fromDigits);
+          candidateNumbers.add(`+${fromDigits}`);
+        }
+        if (toDigits) {
+          candidateNumbers.add(toDigits);
+          candidateNumbers.add(`+${toDigits}`);
+        }
+      }
+
+      const candidateList = Array.from(candidateNumbers);
+      if (candidateList.length === 0) {
+        return {
+          leads: [],
+          total: 0,
+          debug: includeDebug ? {
+            source: 'telnyx-fallback',
+            reason: 'no_candidate_numbers_from_telnyx_recordings',
+            telnyxRecordingsFetched: telnyxRecordings.length,
+            search: typeof search === 'string' ? search : null,
+            normalizedSearchDigits: phoneSearchDigits || null,
+            telnyxPhoneFilter: telnyxPhoneFilter || null,
+          } : undefined,
+        };
+      }
+
+      const candidateLast10 = Array.from(
+        new Set(
+          candidateList
+            .map((value) => normalizePhoneDigits(value))
+            .filter((digits) => digits.length >= 10)
+            .map((digits) => digits.slice(-10))
+        )
+      );
+
+      const phoneMatchConditions = [
+        inArray(contacts.directPhoneE164, candidateList),
+        inArray(contacts.mobilePhoneE164, candidateList),
+        ...candidateLast10.map((digits) => like(contacts.directPhone, `%${digits}%`)),
+        ...candidateLast10.map((digits) => like(contacts.mobilePhone, `%${digits}%`)),
+      ];
+
+      const contactRows = await db
+        .select({
+          id: contacts.id,
+          firstName: contacts.firstName,
+          lastName: contacts.lastName,
+          email: contacts.email,
+          directPhoneE164: contacts.directPhoneE164,
+          mobilePhoneE164: contacts.mobilePhoneE164,
+          directPhoneRaw: contacts.directPhone,
+          mobilePhoneRaw: contacts.mobilePhone,
+          accountName: accounts.name,
+          accountIndustry: accounts.industry,
+        })
+        .from(contacts)
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(or(...phoneMatchConditions)!);
+
+      const contactsByPhone = new Map<string, typeof contactRows[number]>();
+      for (const row of contactRows) {
+        const phoneValues = [
+          row.directPhoneE164,
+          row.mobilePhoneE164,
+          row.directPhoneRaw,
+          row.mobilePhoneRaw,
+        ];
+        for (const phoneValue of phoneValues) {
+          const digits = normalizePhoneDigits(phoneValue);
+          if (digits) {
+            contactsByPhone.set(digits, row);
+            if (digits.length >= 10) {
+              contactsByPhone.set(digits.slice(-10), row);
+            }
+          }
+        }
+      }
+
+      const fallbackRows = telnyxRecordings
+        .map((rec) => {
+          const fromDigits = normalizePhoneDigits(rec.from);
+          const toDigits = normalizePhoneDigits(rec.to);
+          const matchedContact = contactsByPhone.get(toDigits) || contactsByPhone.get(fromDigits);
+          const matchedContactName = matchedContact
+            ? [matchedContact.firstName, matchedContact.lastName].filter(Boolean).join(' ').trim() || null
+            : null;
+          const inferredPhone = rec.to || rec.from || null;
+          const contactName = matchedContactName || inferredPhone;
+          const durationSec = Math.floor((rec.duration_millis || 0) / 1000);
+          const matchedPhoneDigits =
+            (matchedContact
+              ? normalizePhoneDigits(matchedContact.directPhoneE164) ||
+                normalizePhoneDigits(matchedContact.mobilePhoneE164) ||
+                normalizePhoneDigits(matchedContact.directPhoneRaw) ||
+                normalizePhoneDigits(matchedContact.mobilePhoneRaw)
+              : null) ||
+            null;
+          return {
+            id: `telnyx-${rec.id}`,
+            contactName,
+            contactEmail: matchedContact?.email || null,
+            accountName: matchedContact?.accountName || null,
+            accountIndustry: matchedContact?.accountIndustry || null,
+            campaignId: null,
+            campaignName: matchedContact ? 'Telnyx Recording' : 'Telnyx Recording (Unmapped)',
+            aiScore: null,
+            callDuration: durationSec,
+            hasRecording: true,
+            hasTranscript: false,
+            qaStatus: 'approved',
+            createdAt: rec.created_at,
+            approvedAt: rec.recording_ended_at || rec.created_at,
+            matchedPhoneDigits,
+            recordingFrom: rec.from || null,
+            recordingTo: rec.to || null,
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+
+      const filteredRows = (typeof search === 'string' && search.trim())
+        ? fallbackRows.filter((row) => {
+            const term = search.trim().toLowerCase();
+            return (
+              (row.contactName || '').toLowerCase().includes(term) ||
+              (row.contactEmail || '').toLowerCase().includes(term) ||
+              (row.accountName || '').toLowerCase().includes(term) ||
+              normalizePhoneDigits(row.recordingFrom || '').includes(phoneSearchDigits) ||
+              normalizePhoneDigits(row.recordingTo || '').includes(phoneSearchDigits) ||
+              normalizePhoneDigits(row.matchedPhoneDigits || '').includes(phoneSearchDigits)
+            );
+          })
+        : fallbackRows;
+
+      const total = filteredRows.length;
+      const offset = (pageNum - 1) * pageSizeNum;
+      const pagedRows = filteredRows.slice(offset, offset + pageSizeNum);
+      return {
+        leads: pagedRows,
+        total,
+        debug: includeDebug ? {
+          source: 'telnyx-fallback',
+          search: typeof search === 'string' ? search : null,
+          normalizedSearchDigits: phoneSearchDigits || null,
+          telnyxPhoneFilter: telnyxPhoneFilter || null,
+          telnyxRecordingsFetched: telnyxRecordings.length,
+          contactRowsMatchedByPhone: contactRows.length,
+          fallbackRowsBeforeSearch: fallbackRows.length,
+          fallbackRowsUnmapped: fallbackRows.filter((row) => !row.contactEmail && !row.accountName).length,
+          fallbackRowsAfterSearch: filteredRows.length,
+          candidatePhoneCount: candidateList.length,
+          sampleRecordingPhones: telnyxRecordings.slice(0, 5).map((rec) => ({
+            from: rec.from || null,
+            to: rec.to || null,
+          })),
+          reason: filteredRows.length === 0 ? 'recordings_found_but_no_contact_match_or_search_filter_excluded_all' : null,
+        } : undefined,
+      };
+    };
+
     if (accessibleCampaignIds.length === 0) {
-      return res.json({ leads: [], total: 0, page: pageNum, pageSize: pageSizeNum });
+      const fallback = await buildTelnyxFallbackLeads();
+      return res.json({
+        leads: fallback.leads,
+        total: fallback.total,
+        page: pageNum,
+        pageSize: pageSizeNum,
+        debug: includeDebug ? {
+          accessMode: 'no_accessible_campaigns_using_telnyx_fallback',
+          accessibleCampaignIdsCount: accessibleCampaignIds.length,
+          fallback: fallback.debug || null,
+        } : undefined,
+      });
     }
 
     // Build where conditions
@@ -1101,11 +1326,32 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       .limit(pageSizeNum)
       .offset(offset);
 
+    if (leadsData.length === 0) {
+      const fallback = await buildTelnyxFallbackLeads();
+      return res.json({
+        leads: fallback.leads,
+        total: fallback.total,
+        page: pageNum,
+        pageSize: pageSizeNum,
+        debug: includeDebug ? {
+          accessMode: 'accessible_campaigns_present_but_db_leads_empty_using_telnyx_fallback',
+          accessibleCampaignIdsCount: accessibleCampaignIds.length,
+          dbLeadsCount: leadsData.length,
+          fallback: fallback.debug || null,
+        } : undefined,
+      });
+    }
+
     res.json({
       leads: leadsData,
       total,
       page: pageNum,
       pageSize: pageSizeNum,
+      debug: includeDebug ? {
+        accessMode: 'db_leads',
+        accessibleCampaignIdsCount: accessibleCampaignIds.length,
+        dbLeadsCount: leadsData.length,
+      } : undefined,
     });
   } catch (error) {
     console.error('[CLIENT PORTAL] Get qualified leads error:', error);
@@ -1296,6 +1542,204 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
     console.error('[CLIENT PORTAL] Get lead campaigns error:', error.message);
     console.error('[CLIENT PORTAL] Error stack:', error.stack);
     res.status(500).json({ message: "Failed to fetch campaigns" });
+  }
+});
+
+// List Telnyx call recordings for client portal Leads tab (temporary global view)
+router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) || '25', 10)));
+    const phone = typeof req.query.phone === 'string' ? req.query.phone.trim() : '';
+    const telnyxPhoneFilter = formatPhoneForTelnyx(phone);
+
+    let startDate: Date | undefined;
+    let endDate: Date | undefined;
+
+    if (typeof req.query.startDate === 'string' && req.query.startDate.trim()) {
+      const parsed = new Date(req.query.startDate);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ message: 'Invalid startDate' });
+      }
+      parsed.setHours(0, 0, 0, 0);
+      startDate = parsed;
+    }
+
+    if (typeof req.query.endDate === 'string' && req.query.endDate.trim()) {
+      const parsed = new Date(req.query.endDate);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ message: 'Invalid endDate' });
+      }
+      parsed.setHours(23, 59, 59, 999);
+      endDate = parsed;
+    }
+
+    // Limit Telnyx fetch scope to requested page/batch size to avoid loading huge recording sets.
+    const telnyxFetchPageSize = Math.min(100, pageSize);
+    const telnyxFetchMaxPages = Math.max(1, page);
+
+    const telnyxRecordings = await fetchTelnyxRecordings({
+      startDate,
+      endDate,
+      phoneNumber: telnyxPhoneFilter,
+      pageSize: telnyxFetchPageSize,
+      maxPages: telnyxFetchMaxPages,
+    });
+
+    const normalizedSearch = phone.replace(/\D/g, '');
+    const filtered = telnyxRecordings
+      .filter((recording) => {
+        if (!normalizedSearch) return true;
+        const from = (recording.from || '').replace(/\D/g, '');
+        const to = (recording.to || '').replace(/\D/g, '');
+        return from.includes(normalizedSearch) || to.includes(normalizedSearch);
+      })
+      .sort((a, b) => {
+        const left = new Date(a.created_at).getTime();
+        const right = new Date(b.created_at).getTime();
+        return right - left;
+      });
+
+    const total = filtered.length;
+    const offset = (page - 1) * pageSize;
+    const items = filtered.slice(offset, offset + pageSize).map((recording) => ({
+      id: recording.id,
+      callControlId: recording.call_control_id || null,
+      callLegId: recording.call_leg_id || null,
+      callSessionId: recording.call_session_id || null,
+      createdAt: recording.created_at,
+      recordingStartedAt: recording.recording_started_at || null,
+      recordingEndedAt: recording.recording_ended_at || null,
+      from: recording.from || null,
+      to: recording.to || null,
+      durationMillis: recording.duration_millis || 0,
+      durationSec: Math.floor((recording.duration_millis || 0) / 1000),
+      status: recording.status,
+      channels: recording.channels || null,
+      hasMp3: Boolean(recording.download_urls?.mp3),
+      hasWav: Boolean(recording.download_urls?.wav),
+      primaryFormat: recording.download_urls?.mp3 ? 'mp3' : recording.download_urls?.wav ? 'wav' : null,
+    }));
+
+    res.json({
+      total,
+      page,
+      pageSize,
+      items,
+      source: 'telnyx',
+    });
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Failed to list Telnyx recordings:', error);
+    res.status(502).json({
+      message: 'Failed to fetch recordings from Telnyx',
+      details: error?.message || 'Unknown error',
+    });
+  }
+});
+
+// Generate a short-lived tokenized stream URL for browser audio playback
+router.get(
+  ['/qualified-leads/recordings/:recordingId/stream-token', '/telnyx-recordings/:recordingId/stream-token'],
+  requireClientAuth,
+  async (req, res) => {
+  try {
+    const { recordingId } = req.params;
+    const payload: ClientRecordingStreamTokenPayload = {
+      recordingId,
+      clientUserId: req.clientUser!.clientUserId,
+      clientAccountId: req.clientUser!.clientAccountId,
+      isClientRecordingStream: true,
+    };
+    const streamToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+    const streamUrl = `/api/client-portal/telnyx-recordings/${encodeURIComponent(recordingId)}/stream?token=${encodeURIComponent(streamToken)}`;
+    res.json({ streamUrl, expiresIn: 900 });
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Failed to create recording stream token:', error);
+    res.status(500).json({ message: 'Failed to prepare recording playback' });
+  }
+});
+
+// Stream recording audio via server-side proxy (no Telnyx portal redirect)
+router.get(['/qualified-leads/recordings/:recordingId/stream', '/telnyx-recordings/:recordingId/stream'], async (req, res) => {
+  try {
+    const { recordingId } = req.params;
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+
+    let authorized = false;
+
+    if (token) {
+      try {
+        const payload = jwt.verify(token, JWT_SECRET) as ClientRecordingStreamTokenPayload;
+        authorized = Boolean(payload?.isClientRecordingStream && payload.recordingId === recordingId);
+      } catch {
+        authorized = false;
+      }
+    }
+
+    if (!authorized && bearerToken && bearerToken !== 'null' && bearerToken !== 'undefined') {
+      try {
+        const payload = jwt.verify(bearerToken, JWT_SECRET) as ClientJWTPayload;
+        authorized = Boolean(payload?.isClient);
+      } catch {
+        authorized = false;
+      }
+    }
+
+    if (!authorized) {
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(401).send('Authentication required');
+    }
+
+    const resolved = await getPlayableRecordingLink(recordingId);
+    if (!resolved?.url) {
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(404).send('Recording audio not available');
+    }
+
+    const audioResponse = await fetch(resolved.url);
+    if (!audioResponse.ok) {
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(502).send('Failed to fetch recording audio');
+    }
+
+    const upstreamContentType = (audioResponse.headers.get('content-type') || '').toLowerCase();
+    const contentType =
+      upstreamContentType.startsWith('audio/')
+        ? upstreamContentType
+        : (resolved.mimeType || 'audio/mpeg');
+    const contentLength = audioResponse.headers.get('content-length');
+    res.setHeader('Content-Type', contentType);
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+
+    const reader = audioResponse.body?.getReader();
+    if (!reader) {
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(500).send('Failed to read audio stream');
+    }
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        res.write(value);
+      }
+    }
+
+    res.end();
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Recording stream error:', error);
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'text/plain');
+      res.status(500).send('Failed to stream recording');
+    } else {
+      res.end();
+    }
   }
 });
 

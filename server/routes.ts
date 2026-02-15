@@ -63,6 +63,7 @@ import unifiedEmailRoutes from './routes/unified-email-routes';
 import unifiedEmailSystemRouter from './routes/unified-email-system';
 import emailBuilderRouter from './routes/email-builder';
 import clientPortalRouter from './routes/client-portal';
+import clientPortalQualifiedLeadsRouter from './routes/client-portal-qualified-leads';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
 import unlicensedConvQualityRouter from './routes/unlicensed-conversation-quality-routes';
@@ -14922,6 +14923,7 @@ Provide JSON response with:
   app.use('/api/admin', adminAgenticCampaignsRouter);
 
   app.use('/api/client-portal', clientPortalRouter);
+  app.use('/api/client-portal/qualified-leads', clientPortalQualifiedLeadsRouter);
 
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);
