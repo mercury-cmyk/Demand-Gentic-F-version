@@ -22,6 +22,10 @@ export type CallPerformanceSnapshot = {
   notInterested?: MetricValue;
   noAnswer?: MetricValue;
   voicemail?: MetricValue;
+  busy?: MetricValue;
+  wrongNumber?: MetricValue;
+  callbackRequested?: MetricValue;
+  noDisposition?: MetricValue;
 };
 
 export type CampaignPerformanceSnapshotData = {
@@ -111,15 +115,19 @@ export function CampaignPerformanceSnapshot({
           <Phone className="h-4 w-4 text-emerald-500" />
           Call Performance
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
           <MetricItem label="Contacts in Queue" value={call?.contactsInQueue} isLoading={isLoading} />
           <MetricItem label="Calls Made" value={call?.callsMade} isLoading={isLoading} />
           <MetricItem label="Calls Connected" value={call?.callsConnected} isLoading={isLoading} />
           <MetricItem label="Leads Qualified" value={call?.leadsQualified} isLoading={isLoading} />
           <MetricItem label="DNC Requests" value={call?.dncRequests} isLoading={isLoading} />
           <MetricItem label="Not Interested" value={call?.notInterested} isLoading={isLoading} />
+          <MetricItem label="Callback Requested" value={call?.callbackRequested} isLoading={isLoading} />
+          <MetricItem label="Wrong Number" value={call?.wrongNumber} isLoading={isLoading} />
           <MetricItem label="No Answer" value={call?.noAnswer} isLoading={isLoading} />
           <MetricItem label="Voicemail" value={call?.voicemail} isLoading={isLoading} />
+          <MetricItem label="Busy" value={call?.busy} isLoading={isLoading} />
+          <MetricItem label="No Disposition" value={call?.noDisposition} isLoading={isLoading} />
         </div>
       </div>
     </div>

@@ -52,6 +52,7 @@ export function AudioPlayerEnhanced({
   isRetrying,
 }: AudioPlayerEnhancedProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const previousRetryingRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -60,9 +61,34 @@ export function AudioPlayerEnhanced({
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
-  // Stream URL through backend to bypass CORS
-  const streamUrl = `/api/recordings/${recordingId}/stream`;
+  // Prefer explicit recording URL when provided; fallback to recording stream endpoint.
+  const baseStreamUrl = recordingUrl || `/api/recordings/${recordingId}/stream`;
+  const streamUrl = `${baseStreamUrl}${baseStreamUrl.includes('?') ? '&' : '?'}v=${retryNonce}`;
+
+  useEffect(() => {
+    setError(null);
+    setIsLoading(true);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setRetryNonce(0);
+  }, [recordingId, recordingUrl]);
+
+  // When a sync request finishes, force one fresh playback attempt.
+  useEffect(() => {
+    const wasRetrying = previousRetryingRef.current;
+    const nowRetrying = Boolean(isRetrying);
+
+    if (wasRetrying && !nowRetrying) {
+      setError(null);
+      setIsLoading(true);
+      setRetryNonce((prev) => prev + 1);
+    }
+
+    previousRetryingRef.current = nowRetrying;
+  }, [isRetrying]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -205,6 +231,17 @@ export function AudioPlayerEnhanced({
     };
   }, [recordingId, seekTo]);
 
+  const handleRetryClick = useCallback(() => {
+    if (onRetrySync) {
+      onRetrySync();
+      return;
+    }
+
+    setError(null);
+    setIsLoading(true);
+    setRetryNonce((prev) => prev + 1);
+  }, [onRetrySync]);
+
   if (error) {
     return (
       <div className={cn('flex flex-col gap-3 p-4 bg-destructive/10 rounded-lg', className)}>
@@ -217,12 +254,12 @@ export function AudioPlayerEnhanced({
             <Button
               variant="outline"
               size="sm"
-              onClick={onRetrySync}
+              onClick={handleRetryClick}
               disabled={isRetrying}
               className="gap-2"
             >
               <RefreshCw className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
-              {isRetrying ? 'Syncing...' : 'Retry Sync from Telnyx'}
+              {isRetrying ? 'Syncing...' : 'Retry Sync'}
             </Button>
           )}
           {onClose && (
@@ -232,7 +269,9 @@ export function AudioPlayerEnhanced({
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Recording may have expired. Click "Retry Sync" to fetch a fresh copy from Telnyx.
+          {onRetrySync
+            ? 'Recording may be stale. Click "Retry Sync" to refresh it.'
+            : 'Recording could not be loaded from storage for this call.'}
         </p>
       </div>
     );

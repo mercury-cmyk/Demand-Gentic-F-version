@@ -3254,6 +3254,12 @@ export const callSessions = pgTable("call_sessions", {
   telnyxRecordingId: text("telnyx_recording_id"), // Stable Telnyx recording ID for on-demand URL generation
   recordingProvider: text("recording_provider").default('telnyx'), // Provider: telnyx | elevenlabs
   fromNumber: text("from_number"),
+  
+  // Added to fix schema drift 
+  callerNumberId: text("caller_number_id"),
+  fromDid: text("from_did"),
+  routingDecisionId: text("routing_decision_id"),
+
   toNumberE164: text("to_number_e164").notNull(),
   startedAt: timestamp("started_at").notNull().defaultNow(),
   endedAt: timestamp("ended_at"),

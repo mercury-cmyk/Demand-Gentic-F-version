@@ -32,6 +32,10 @@ export interface RecordingLinkResult {
   telnyxRecordingId?: string;
 }
 
+export interface RecordingLinkOptions {
+  skipCached?: boolean;
+}
+
 // ─── Telnyx helpers (server-only) ──────────────────────────────────────
 
 const TELNYX_API = 'https://api.telnyx.com/v2';
@@ -163,6 +167,7 @@ function backfillRecordingId(
  */
 export async function getPlayableRecordingLink(
   conversationId: string,
+  options: RecordingLinkOptions = {},
 ): Promise<RecordingLinkResult | null> {
   // ── 1. call_sessions ──────────────────────────────────────────────
   const [session] = await db
@@ -231,7 +236,7 @@ export async function getPlayableRecordingLink(
     }
 
     // Priority 4: Cached URL
-    if (session.recordingUrl) {
+    if (session.recordingUrl && !options.skipCached) {
       return {
         url: session.recordingUrl,
         source: 'cached',
@@ -302,7 +307,7 @@ export async function getPlayableRecordingLink(
       }
     }
 
-    if (lead.recordingUrl) {
+    if (lead.recordingUrl && !options.skipCached) {
       return {
         url: lead.recordingUrl,
         source: 'cached',
@@ -352,7 +357,7 @@ export async function getPlayableRecordingLink(
       }
     }
 
-    if (attempt.recordingUrl) {
+    if (attempt.recordingUrl && !options.skipCached) {
       return {
         url: attempt.recordingUrl,
         source: 'cached',

@@ -173,7 +173,8 @@ export default function ShowcaseCallsPage() {
       const res = await apiRequest("GET", "/api/showcase-calls/stats");
       return res.json();
     },
-    staleTime: SIX_HOURS_MS,
+    staleTime: 0,
+    refetchOnMount: "always",
     refetchInterval: SIX_HOURS_MS,
     refetchIntervalInBackground: true,
   });
@@ -185,7 +186,8 @@ export default function ShowcaseCallsPage() {
       return res.json();
     },
     enabled: tab === "showcased",
-    staleTime: SIX_HOURS_MS,
+    staleTime: 0,
+    refetchOnMount: "always",
     refetchInterval: SIX_HOURS_MS,
     refetchIntervalInBackground: true,
   });
@@ -201,7 +203,8 @@ export default function ShowcaseCallsPage() {
       return res.json();
     },
     enabled: tab === "discover",
-    staleTime: SIX_HOURS_MS,
+    staleTime: 0,
+    refetchOnMount: "always",
     refetchInterval: SIX_HOURS_MS,
     refetchIntervalInBackground: true,
   });
@@ -261,6 +264,46 @@ export default function ShowcaseCallsPage() {
     },
   });
 
+  const retrySyncMutation = useMutation({
+    mutationFn: async (callSessionId: string) => {
+      // Fast path: backfill Telnyx recording ID first when possible.
+      try {
+        const resyncRes = await apiRequest("POST", `/api/recordings/${callSessionId}/resync`);
+        const resyncData = await resyncRes.json();
+        if (resyncData?.success) {
+          return { mode: "resync", ...resyncData };
+        }
+      } catch {
+        // Fallback to full retry-sync below
+      }
+
+      const retryRes = await apiRequest("POST", `/api/recordings/${callSessionId}/retry-sync`, {
+        transcribe: false,
+      });
+      const retryData = await retryRes.json();
+      return { mode: "retry-sync", ...retryData };
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Recording sync requested",
+        description:
+          data?.mode === "resync"
+            ? "Recording link refreshed. Retrying playback now."
+            : "Trying to fetch a fresh recording copy now.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls/details", detailCallId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls/auto-detect"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Recording sync failed",
+        description: error?.message || "Could not fetch a fresh recording right now.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // ---- Handlers ----
 
   const handlePin = (call: ShowcaseCall) => {
@@ -275,6 +318,11 @@ export default function ShowcaseCallsPage() {
 
   const handleUnpin = (callSessionId: string) => {
     unpinMutation.mutate(callSessionId);
+  };
+
+  const handleRetrySync = () => {
+    if (!detailCallId) return;
+    retrySyncMutation.mutate(detailCallId);
   };
 
   const pagination = showcasedData?.pagination;
@@ -635,8 +683,15 @@ export default function ShowcaseCallsPage() {
                     </CardHeader>
                     <CardContent>
                       <AudioPlayerEnhanced
-                        src={detailData.playbackUrl}
-                        title={`Call with ${detailData.contactName || "Unknown"}`}
+                        recordingId={detailData.callSessionId}
+                        recordingUrl={(() => {
+                          const token = localStorage.getItem('authToken') || localStorage.getItem('clientPortalToken');
+                          return token 
+                            ? `${detailData.playbackUrl}${detailData.playbackUrl.includes('?') ? '&' : '?'}token=${token}`
+                            : detailData.playbackUrl;
+                        })()}
+                        onRetrySync={handleRetrySync}
+                        isRetrying={retrySyncMutation.isPending}
                       />
                     </CardContent>
                   </Card>

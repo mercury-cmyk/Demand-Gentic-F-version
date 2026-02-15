@@ -58,6 +58,39 @@ export function isValidE164(phoneNumber: string): boolean {
 }
 
 /**
+ * Check if an E.164 phone number is a toll-free/freephone/service number
+ * These are inbound-only company lines, not useful for reaching a specific contact
+ */
+export function isTollFreeOrServiceNumber(phone: string): boolean {
+  const digits = phone.replace(/[^\d]/g, '');
+
+  // UK toll-free/service prefixes (after country code 44):
+  // 0800/0808 = freephone, 0845/0870 = non-geographic, 0844/0843 = business rate
+  if (digits.startsWith('44')) {
+    const subscriber = digits.substring(2);
+    if (/^(800|808|845|870|844|843|842|871|872|873)/.test(subscriber)) {
+      return true;
+    }
+  }
+
+  // US/CA toll-free prefixes (after country code 1):
+  // 800, 888, 877, 866, 855, 844, 833
+  if (digits.startsWith('1')) {
+    const subscriber = digits.substring(1);
+    if (/^(800|888|877|866|855|844|833)/.test(subscriber)) {
+      return true;
+    }
+  }
+
+  // International toll-free: +800 (UIFN)
+  if (digits.startsWith('800')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Get the best phone number for a contact with fallback logic
  * Prioritizes: direct phone > mobile phone > HQ phone
  */
@@ -84,31 +117,33 @@ export function getBestPhoneForContact(contact: {
   }
 
   // Try direct phone: prefer pre-normalized E164, then normalize raw
-  if (contact.directPhoneE164 && isValidE164(contact.directPhoneE164)) {
+  // Skip toll-free numbers - they are company inbound lines, not direct contact numbers
+  if (contact.directPhoneE164 && isValidE164(contact.directPhoneE164) && !isTollFreeOrServiceNumber(contact.directPhoneE164)) {
     return { phone: contact.directPhoneE164, type: 'direct' };
   }
   if (contact.directPhone) {
     const normalized = normalize(contact.directPhone);
-    if (normalized) return { phone: normalized, type: 'direct' };
+    if (normalized && !isTollFreeOrServiceNumber(normalized)) return { phone: normalized, type: 'direct' };
   }
 
   // Fallback to mobile phone
-  if (contact.mobilePhoneE164 && isValidE164(contact.mobilePhoneE164)) {
+  if (contact.mobilePhoneE164 && isValidE164(contact.mobilePhoneE164) && !isTollFreeOrServiceNumber(contact.mobilePhoneE164)) {
     return { phone: contact.mobilePhoneE164, type: 'mobile' };
   }
   if (contact.mobilePhone) {
     const normalized = normalize(contact.mobilePhone);
-    if (normalized) return { phone: normalized, type: 'mobile' };
+    if (normalized && !isTollFreeOrServiceNumber(normalized)) return { phone: normalized, type: 'mobile' };
   }
 
   // Last resort: HQ phone (use account's country, not contact's country)
-  if (contact.hqPhoneE164 && isValidE164(contact.hqPhoneE164)) {
+  // Skip toll-free/freephone numbers - these are inbound-only company lines (e.g. 0800, 1-800)
+  if (contact.hqPhoneE164 && isValidE164(contact.hqPhoneE164) && !isTollFreeOrServiceNumber(contact.hqPhoneE164)) {
     return { phone: contact.hqPhoneE164, type: 'hq' };
   }
   if (contact.hqPhone) {
     const hqCountry = contact.hqCountry || undefined;
     const normalized = normalize(contact.hqPhone, hqCountry);
-    if (normalized) return { phone: normalized, type: 'hq' };
+    if (normalized && !isTollFreeOrServiceNumber(normalized)) return { phone: normalized, type: 'hq' };
   }
 
   return { phone: null, type: null };

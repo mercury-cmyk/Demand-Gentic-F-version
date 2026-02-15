@@ -1125,7 +1125,7 @@ export async function streamRecording(req: Request, res: Response) {
       console.warn(
         `[Recordings API] Cached URL failed for ${id} (${audioResponse.status}). Re-resolving fresh…`,
       );
-      result = await getPlayableRecordingLink(id);
+      result = await getPlayableRecordingLink(id, { skipCached: true });
       if (result && result.source !== 'cached') {
         audioResponse = await fetch(result.url);
       }

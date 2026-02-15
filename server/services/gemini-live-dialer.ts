@@ -2570,13 +2570,19 @@ Instructions:
                   .map(t => t.text.toLowerCase())
                   .join(' ');
 
-                // Check for email confirmation evidence
+                // Determine if this is an appointment-type campaign
+                const appointmentTypes = ['appointment_setting', 'appointment_generation', 'demo_request'];
+                const isAppointmentCampaign = callContext.campaignType
+                  ? appointmentTypes.includes(callContext.campaignType)
+                  : false;
+
+                // Check for email confirmation evidence (appointment campaigns only)
                 const hasEmailMention = allTranscriptText.includes('email') ||
                                         allTranscriptText.includes('@') ||
                                         allTranscriptText.includes('send you') ||
                                         allTranscriptText.includes('send it to');
 
-                // Check for time/date confirmation evidence (for appointment campaigns)
+                // Check for time/date confirmation evidence (appointment campaigns only)
                 const hasTimeConfirmation = allTranscriptText.includes('schedule') ||
                                             allTranscriptText.includes('calendar') ||
                                             allTranscriptText.includes('time') ||
@@ -2608,7 +2614,7 @@ Instructions:
                                            contactTranscriptText.includes('tell me more') ||
                                            contactTranscriptText.includes('let\'s do it');
 
-                // Minimum conversation requirements
+                // Minimum conversation requirements (all campaign types)
                 const hasMinimumConversation = transcriptTurns.length >= 6; // At least 3 exchanges
                 const hasContactParticipation = transcriptTurns.filter(t => t.role === 'contact').length >= 2;
 
@@ -2617,14 +2623,17 @@ Instructions:
                 if (!hasMinimumConversation) missingSteps.push('have a meaningful conversation (at least 3 exchanges)');
                 if (!hasContactParticipation) missingSteps.push('get verbal responses from the contact');
                 if (!hasPositiveResponse) missingSteps.push('receive explicit interest/agreement from contact');
-                if (!hasEmailMention) missingSteps.push('confirm their email address');
-                if (!hasTimeConfirmation) missingSteps.push('confirm meeting date/time');
+                // Email and time/date confirmation only required for appointment campaigns
+                if (isAppointmentCampaign) {
+                  if (!hasEmailMention) missingSteps.push('confirm their email address');
+                  if (!hasTimeConfirmation) missingSteps.push('confirm meeting date/time');
+                }
                 if (!hasGoodbye) missingSteps.push('say a proper goodbye');
 
                 // BLOCK the qualified_lead if critical criteria not met
                 if (missingSteps.length > 0) {
-                  console.warn(`[Gemini Live] 🚫 BLOCKING qualified_lead DISPOSITION: Missing criteria: ${missingSteps.join(', ')}`);
-                  console.warn(`[Gemini Live] 📝 Transcript analysis: turns=${transcriptTurns.length}, email=${hasEmailMention}, time=${hasTimeConfirmation}, goodbye=${hasGoodbye}, positive=${hasPositiveResponse}`);
+                  console.warn(`[Gemini Live] 🚫 BLOCKING qualified_lead DISPOSITION (campaign type: ${callContext.campaignType || 'unknown'}): Missing criteria: ${missingSteps.join(', ')}`);
+                  console.warn(`[Gemini Live] 📝 Transcript analysis: turns=${transcriptTurns.length}, email=${hasEmailMention}, time=${hasTimeConfirmation}, goodbye=${hasGoodbye}, positive=${hasPositiveResponse}, isAppointment=${isAppointmentCampaign}`);
 
                   // Send error response to force AI to complete the flow
                   const toolResponse = {
@@ -2634,7 +2643,7 @@ Instructions:
                           name: call.name,
                           id: call.id,
                           response: {
-                            error: `INCOMPLETE QUALIFICATION: You cannot submit qualified_lead yet. You must first: ${missingSteps.join(', ')}. After completing these steps, submit the disposition again. If the prospect is not actually interested, use "not_interested" instead.`
+                            error: `INCOMPLETE QUALIFICATION: You cannot submit qualified_lead yet. You must first: ${missingSteps.join(', ')}. After completing these steps, submit the disposition again. If you are unsure about the outcome, use "needs_review" instead.`
                           }
                         }
                       ]
@@ -2645,7 +2654,56 @@ Instructions:
                   }
                   return; // Don't process the disposition
                 }
-                console.log(`[Gemini Live] ✅ qualified_lead validation PASSED: email=${hasEmailMention}, time=${hasTimeConfirmation}, goodbye=${hasGoodbye}, positive=${hasPositiveResponse}`);
+                console.log(`[Gemini Live] ✅ qualified_lead validation PASSED (${isAppointmentCampaign ? 'appointment' : 'non-appointment'}): email=${hasEmailMention}, time=${hasTimeConfirmation}, goodbye=${hasGoodbye}, positive=${hasPositiveResponse}`);
+              }
+
+              // ================== NOT_INTERESTED VALIDATION ==================
+              // Prevent misclassifying engaged calls as not_interested
+              // If the contact showed positive signals, route to needs_review instead
+              if (disposition === 'not_interested') {
+                const contactTranscriptForValidation = transcriptTurns
+                  .filter(t => t.role === 'contact')
+                  .map(t => t.text.toLowerCase())
+                  .join(' ');
+                const contactTurns = transcriptTurns.filter(t => t.role === 'contact').length;
+
+                // Check if contact actually showed interest signals despite AI classifying as not_interested
+                const positiveSignals: string[] = [];
+                const interestPhrases = [
+                  'yes', 'sure', 'okay', 'sounds good', 'tell me more', 'interested',
+                  'send me', 'email me', 'call me back', 'let\'s do it',
+                  'sounds interesting', 'go ahead', 'that would be great',
+                  'i\'d like', 'i would like', 'can you send', 'more information',
+                  'how does it work', 'what does it cost', 'when can we',
+                ];
+                for (const phrase of interestPhrases) {
+                  if (contactTranscriptForValidation.includes(phrase)) {
+                    positiveSignals.push(phrase);
+                  }
+                }
+
+                // If there are positive signals AND meaningful engagement, block not_interested
+                if (positiveSignals.length >= 2 && contactTurns >= 3) {
+                  console.warn(`[Gemini Live] 🚫 BLOCKING not_interested DISPOSITION: Contact showed positive signals: [${positiveSignals.join(', ')}] with ${contactTurns} turns`);
+
+                  const toolResponse = {
+                    toolResponse: {
+                      functionResponses: [
+                        {
+                          name: call.name,
+                          id: call.id,
+                          response: {
+                            error: `DISPOSITION MISMATCH: The contact showed interest signals (${positiveSignals.join(', ')}) with ${contactTurns} meaningful responses. This does not match "not_interested". If the prospect showed genuine interest, use "qualified_lead". If the outcome is unclear, use "needs_review". Only use "not_interested" if the prospect EXPLICITLY declined.`
+                          }
+                        }
+                      ]
+                    }
+                  };
+                  if (geminiWs?.readyState === WebSocket.OPEN) {
+                    geminiWs.send(JSON.stringify(toolResponse));
+                  }
+                  return; // Don't process - force AI to reconsider
+                }
               }
               // ================== END VALIDATION ==================
 

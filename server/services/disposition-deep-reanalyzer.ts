@@ -979,11 +979,11 @@ export async function deepReanalyzeBatch(
   const missedTPFreq = new Map<string, number>();
   let analyzedWithScores = 0;
 
-  // Process sessions in parallel chunks of 1 to avoid HTTP timeout/rate limits
-  const CONCURRENCY = 1;
+  // Process sessions in parallel chunks — DeepSeek/Vertex can handle moderate concurrency
+  const CONCURRENCY = 5;
   for (let chunkStart = 0; chunkStart < sessions.length; chunkStart += CONCURRENCY) {
     const chunk = sessions.slice(chunkStart, chunkStart + CONCURRENCY);
-    console.log(`${LOG_PREFIX} Processing chunk ${Math.floor(chunkStart / CONCURRENCY) + 1}/${Math.ceil(sessions.length / CONCURRENCY)} (${chunk.length} calls)`);
+    console.log(`${LOG_PREFIX} Processing chunk ${Math.floor(chunkStart / CONCURRENCY) + 1}/${Math.ceil(sessions.length / CONCURRENCY)} (${chunk.length} calls, ${chunkStart + chunk.length}/${sessions.length} total)`);
 
     const chunkResults = await Promise.allSettled(chunk.map(async (session) => {
       const currentDisp = session.aiDisposition || "unknown";
@@ -1469,6 +1469,14 @@ export interface DispositionContactDetail {
     hasTranscript: boolean;
   }>;
   aiAnalysis: any;
+  dispositionDetails: {
+    assignedDisposition: string | null;
+    expectedDisposition: string | null;
+    dispositionAccurate: boolean | null;
+    dispositionNotes: any;
+    overallQualityScore: number | null;
+    sentiment: string | null;
+  } | null;
 }
 
 export async function getContactsByDisposition(
@@ -1477,6 +1485,10 @@ export async function getContactsByDisposition(
     campaignId?: string;
     dateFrom?: string;
     dateTo?: string;
+    minDurationSec?: number;
+    maxDurationSec?: number;
+    minTurns?: number;
+    maxTurns?: number;
     limit?: number;
     offset?: number;
     search?: string;
@@ -1500,6 +1512,8 @@ export async function getContactsByDisposition(
   if (filters.campaignId) conditions.push(eq(callSessions.campaignId, filters.campaignId));
   if (filters.dateFrom) conditions.push(gte(callSessions.startedAt, new Date(filters.dateFrom)));
   if (filters.dateTo) conditions.push(lte(callSessions.startedAt, new Date(filters.dateTo)));
+  if (filters.minDurationSec) conditions.push(gte(callSessions.durationSec, filters.minDurationSec));
+  if (filters.maxDurationSec) conditions.push(lte(callSessions.durationSec, filters.maxDurationSec));
 
   // Get total count
   const [countResult] = await db
@@ -1615,6 +1629,42 @@ export async function getContactsByDisposition(
     }
   }
 
+  // Pre-load call quality records for disposition details
+  const qaMap = new Map<string, {
+    assignedDisposition: string | null;
+    expectedDisposition: string | null;
+    dispositionAccurate: boolean | null;
+    dispositionNotes: any;
+    overallQualityScore: number | null;
+    sentiment: string | null;
+  }>();
+  if (sessionIds.length > 0) {
+    const qaRecords = await db
+      .select({
+        callSessionId: callQualityRecords.callSessionId,
+        assignedDisposition: callQualityRecords.assignedDisposition,
+        expectedDisposition: callQualityRecords.expectedDisposition,
+        dispositionAccurate: callQualityRecords.dispositionAccurate,
+        dispositionNotes: callQualityRecords.dispositionNotes,
+        overallQualityScore: callQualityRecords.overallQualityScore,
+        sentiment: callQualityRecords.sentiment,
+      })
+      .from(callQualityRecords)
+      .where(sql`${callQualityRecords.callSessionId} IN (${sql.join(sessionIds.map(id => sql`${id}`), sql`, `)})`);
+    for (const qa of qaRecords) {
+      if (qa.callSessionId) {
+        qaMap.set(qa.callSessionId, {
+          assignedDisposition: qa.assignedDisposition,
+          expectedDisposition: qa.expectedDisposition,
+          dispositionAccurate: qa.dispositionAccurate,
+          dispositionNotes: qa.dispositionNotes,
+          overallQualityScore: qa.overallQualityScore,
+          sentiment: qa.sentiment,
+        });
+      }
+    }
+  }
+
   // Pre-load interaction history for each contact
   const interactionMap = new Map<string, Array<{ date: string; disposition: string; durationSec: number; callSessionId: string; agentType: string | null; hasRecording: boolean; hasTranscript: boolean }>>();
   if (contactIds.length > 0) {
@@ -1661,6 +1711,17 @@ export async function getContactsByDisposition(
         contactInfo.company.toLowerCase().includes(searchLower) ||
         (contactInfo.email || "").toLowerCase().includes(searchLower) ||
         (s.toNumberE164 || "").includes(searchLower);
+    });
+  }
+
+  // Apply turns filter if provided (post-query since turns are computed from transcript text)
+  if (filters.minTurns || filters.maxTurns) {
+    filteredSessions = filteredSessions.filter(s => {
+      const transcript = attemptMap.get(s.id)?.fullTranscript || s.aiTranscript;
+      const turnCount = parseTranscriptToTurns(transcript).length;
+      if (filters.minTurns && turnCount < filters.minTurns) return false;
+      if (filters.maxTurns && turnCount > filters.maxTurns) return false;
+      return true;
     });
   }
 
@@ -1713,6 +1774,7 @@ export async function getContactsByDisposition(
       qaStatus: leadInfo?.qaStatus || null,
       interactionHistory,
       aiAnalysis: session.aiAnalysis,
+      dispositionDetails: qaMap.get(session.id) || null,
     };
   });
 

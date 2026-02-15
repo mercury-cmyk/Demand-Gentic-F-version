@@ -90,6 +90,7 @@ import {
   History,
   Mic,
   Volume2,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 // ==================== TYPES ====================
@@ -243,6 +244,14 @@ interface DispositionContact {
     hasTranscript: boolean;
   }>;
   aiAnalysis: any;
+  dispositionDetails: {
+    assignedDisposition: string | null;
+    expectedDisposition: string | null;
+    dispositionAccurate: boolean | null;
+    dispositionNotes: any;
+    overallQualityScore: number | null;
+    sentiment: string | null;
+  } | null;
 }
 
 interface ContactsByDispositionResponse {
@@ -360,7 +369,7 @@ export default function DispositionReanalysisPage() {
   const [dateTo, setDateTo] = useState<string>('');
   const [minDuration, setMinDuration] = useState<string>('');
   const [maxDuration, setMaxDuration] = useState<string>('');
-  const [batchLimit, setBatchLimit] = useState<string>('30');
+  const [batchLimit, setBatchLimit] = useState<string>('100');
   const [agentTypeFilter, setAgentTypeFilter] = useState<string>('all');
   const [confidenceThreshold, setConfidenceThreshold] = useState<string>('');
   const [minTurns, setMinTurns] = useState<string>('');
@@ -389,10 +398,22 @@ export default function DispositionReanalysisPage() {
   const [pushDashboardDialog, setPushDashboardDialog] = useState(false);
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
 
+  // Contacts tab filters
+  const [contactsMinDuration, setContactsMinDuration] = useState('');
+  const [contactsMaxDuration, setContactsMaxDuration] = useState('');
+  const [contactsMinTurns, setContactsMinTurns] = useState('');
+  const [contactsMaxTurns, setContactsMaxTurns] = useState('');
+  const [contactsDateFrom, setContactsDateFrom] = useState('');
+  const [contactsDateTo, setContactsDateTo] = useState('');
+  const [contactsFiltersExpanded, setContactsFiltersExpanded] = useState(false);
+
   // Client sample validation state
   const [sampleValidationResult, setSampleValidationResult] = useState<ClientSampleValidationResponse | null>(null);
   const [sampleValidationDialog, setSampleValidationDialog] = useState(false);
   const [sampleClientNotes, setSampleClientNotes] = useState('');
+
+  // Auto-batch progress state
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
 
   // ==================== QUERIES ====================
 
@@ -419,12 +440,16 @@ export default function DispositionReanalysisPage() {
 
   // Contacts by disposition query
   const { data: contactsByDisp, isLoading: contactsLoading, refetch: refetchContacts } = useQuery<ContactsByDispositionResponse>({
-    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, dateFrom, dateTo, contactsPage, contactsSearch],
+    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, contactsDateFrom, contactsDateTo, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsPage, contactsSearch],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (campaignId) params.set('campaignId', campaignId);
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
+      if (contactsDateFrom) params.set('dateFrom', contactsDateFrom);
+      if (contactsDateTo) params.set('dateTo', contactsDateTo);
+      if (contactsMinDuration) params.set('minDurationSec', contactsMinDuration);
+      if (contactsMaxDuration) params.set('maxDurationSec', contactsMaxDuration);
+      if (contactsMinTurns) params.set('minTurns', contactsMinTurns);
+      if (contactsMaxTurns) params.set('maxTurns', contactsMaxTurns);
       params.set('limit', '50');
       params.set('offset', String(contactsPage * 50));
       if (contactsSearch) params.set('search', contactsSearch);
@@ -449,64 +474,120 @@ export default function DispositionReanalysisPage() {
 
   // ==================== MUTATIONS ====================
 
-  // Deep Preview (dry-run)
+  // Build filter body from current state
+  const buildFilterBody = useCallback((limit: number, offset: number) => {
+    const body: any = {
+      hasTranscript: true,
+      limit,
+      offset,
+      agentType: agentTypeFilter,
+    };
+    if (campaignId) body.campaignId = campaignId;
+    if (dispositionFilter.length > 0) body.dispositions = dispositionFilter;
+    if (dateFrom) body.dateFrom = dateFrom;
+    if (dateTo) body.dateTo = dateTo;
+    if (minDuration) body.minDurationSec = parseInt(minDuration);
+    if (maxDuration) body.maxDurationSec = parseInt(maxDuration);
+    if (confidenceThreshold) body.confidenceThreshold = parseFloat(confidenceThreshold) / 100;
+    if (minTurns) body.minTurns = parseInt(minTurns);
+    if (maxTurns) body.maxTurns = parseInt(maxTurns);
+    return body;
+  }, [campaignId, dispositionFilter, dateFrom, dateTo, minDuration, maxDuration, confidenceThreshold, minTurns, maxTurns, agentTypeFilter]);
+
+  // Merge two DeepReanalysisSummary objects
+  const mergeSummaries = useCallback((a: DeepReanalysisSummary, b: DeepReanalysisSummary): DeepReanalysisSummary => {
+    const totalAnalyzed = a.totalAnalyzed + b.totalAnalyzed;
+    return {
+      totalAnalyzed,
+      totalShouldChange: a.totalShouldChange + b.totalShouldChange,
+      totalChanged: a.totalChanged + b.totalChanged,
+      totalErrors: a.totalErrors + b.totalErrors,
+      dryRun: a.dryRun,
+      avgConfidence: totalAnalyzed > 0 ? (a.avgConfidence * a.totalAnalyzed + b.avgConfidence * b.totalAnalyzed) / totalAnalyzed : 0,
+      avgAgentScore: totalAnalyzed > 0 ? (a.avgAgentScore * a.totalAnalyzed + b.avgAgentScore * b.totalAnalyzed) / totalAnalyzed : 0,
+      avgCallQuality: totalAnalyzed > 0 ? (a.avgCallQuality * a.totalAnalyzed + b.avgCallQuality * b.totalAnalyzed) / totalAnalyzed : 0,
+      breakdown: [...a.breakdown, ...b.breakdown],
+      agentBehaviorSummary: b.agentBehaviorSummary, // Use latest
+      callQualitySummary: b.callQualitySummary,
+      calls: [...a.calls, ...b.calls],
+      actionsSummary: {
+        newLeadsCreated: a.actionsSummary.newLeadsCreated + b.actionsSummary.newLeadsCreated,
+        leadsRemovedFromCampaign: a.actionsSummary.leadsRemovedFromCampaign + b.actionsSummary.leadsRemovedFromCampaign,
+        movedToQA: a.actionsSummary.movedToQA + b.actionsSummary.movedToQA,
+        movedToNeedsReview: a.actionsSummary.movedToNeedsReview + b.actionsSummary.movedToNeedsReview,
+        retriesScheduled: a.actionsSummary.retriesScheduled + b.actionsSummary.retriesScheduled,
+        pushedToClient: a.actionsSummary.pushedToClient + b.actionsSummary.pushedToClient,
+      },
+    };
+  }, []);
+
+  // Deep Preview (dry-run) — auto-batches through all matching calls
   const previewMutation = useMutation({
     mutationFn: async () => {
-      const body: any = {
-        hasTranscript: true,
-        limit: parseInt(batchLimit) || 30,
-        agentType: agentTypeFilter,
-      };
-      if (campaignId) body.campaignId = campaignId;
-      if (dispositionFilter.length > 0) body.dispositions = dispositionFilter;
-      if (dateFrom) body.dateFrom = dateFrom;
-      if (dateTo) body.dateTo = dateTo;
-      if (minDuration) body.minDurationSec = parseInt(minDuration);
-      if (maxDuration) body.maxDurationSec = parseInt(maxDuration);
-      if (confidenceThreshold) body.confidenceThreshold = parseFloat(confidenceThreshold) / 100;
-      if (minTurns) body.minTurns = parseInt(minTurns);
-      if (maxTurns) body.maxTurns = parseInt(maxTurns);
+      const chunkSize = parseInt(batchLimit) || 100;
+      let offset = 0;
+      let merged: DeepReanalysisSummary | null = null;
 
-      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/preview', body, { timeout: 600000 });
-      return res.json() as Promise<DeepReanalysisSummary>;
+      // Loop until a batch returns fewer results than the chunk size
+      while (true) {
+        setBatchProgress({ current: offset, total: offset + chunkSize, phase: 'Previewing' });
+        const body = buildFilterBody(chunkSize, offset);
+        const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/preview', body, { timeout: 600000 });
+        const batch = await res.json() as DeepReanalysisSummary;
+
+        merged = merged ? mergeSummaries(merged, batch) : batch;
+        // Update progress with running total
+        setBatchProgress({ current: merged.totalAnalyzed, total: merged.totalAnalyzed, phase: 'Previewing' });
+
+        // Stop if this batch returned fewer calls than requested (no more data)
+        if (batch.totalAnalyzed < chunkSize) break;
+        offset += chunkSize;
+      }
+
+      setBatchProgress(null);
+      return merged!;
     },
     onSuccess: (data) => {
       setPreviewResult(data);
       setActiveTab('results');
-      toast({ title: 'Deep Analysis Complete', description: `Analyzed ${data.totalAnalyzed} calls. ${data.totalShouldChange} misclassifications found. Avg agent score: ${Math.round(data.avgAgentScore)}/100` });
+      toast({ title: 'Deep Analysis Complete', description: `Analyzed ${data.totalAnalyzed} calls across all batches. ${data.totalShouldChange} misclassifications found. Avg agent score: ${Math.round(data.avgAgentScore)}/100` });
     },
     onError: (err: any) => {
+      setBatchProgress(null);
       toast({ title: 'Analysis Failed', description: err.message, variant: 'destructive' });
     },
   });
 
-  // Deep Apply
+  // Deep Apply — auto-batches through all matching calls
   const applyMutation = useMutation({
     mutationFn: async () => {
-      const body: any = {
-        hasTranscript: true,
-        limit: parseInt(batchLimit) || 30,
-        agentType: agentTypeFilter,
-      };
-      if (campaignId) body.campaignId = campaignId;
-      if (dispositionFilter.length > 0) body.dispositions = dispositionFilter;
-      if (dateFrom) body.dateFrom = dateFrom;
-      if (dateTo) body.dateTo = dateTo;
-      if (minDuration) body.minDurationSec = parseInt(minDuration);
-      if (maxDuration) body.maxDurationSec = parseInt(maxDuration);
-      if (confidenceThreshold) body.confidenceThreshold = parseFloat(confidenceThreshold) / 100;
-      if (minTurns) body.minTurns = parseInt(minTurns);
-      if (maxTurns) body.maxTurns = parseInt(maxTurns);
+      const chunkSize = parseInt(batchLimit) || 100;
+      let offset = 0;
+      let merged: DeepReanalysisSummary | null = null;
 
-      const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/apply', body, { timeout: 600000 });
-      return res.json() as Promise<DeepReanalysisSummary>;
+      while (true) {
+        setBatchProgress({ current: offset, total: offset + chunkSize, phase: 'Applying' });
+        const body = buildFilterBody(chunkSize, offset);
+        const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/apply', body, { timeout: 600000 });
+        const batch = await res.json() as DeepReanalysisSummary;
+
+        merged = merged ? mergeSummaries(merged, batch) : batch;
+        setBatchProgress({ current: merged.totalAnalyzed, total: merged.totalAnalyzed, phase: 'Applying' });
+
+        if (batch.totalAnalyzed < chunkSize) break;
+        offset += chunkSize;
+      }
+
+      setBatchProgress(null);
+      return merged!;
     },
     onSuccess: (data) => {
       setPreviewResult(data);
       queryClient.invalidateQueries({ queryKey: ['/api/disposition-reanalysis/stats'] });
-      toast({ title: 'Changes Applied', description: `Updated ${data.totalChanged} dispositions. ${data.totalErrors} errors.` });
+      toast({ title: 'Changes Applied', description: `Updated ${data.totalChanged} dispositions across all batches. ${data.totalErrors} errors.` });
     },
     onError: (err: any) => {
+      setBatchProgress(null);
       toast({ title: 'Apply Failed', description: err.message, variant: 'destructive' });
     },
   });
@@ -697,7 +778,35 @@ export default function DispositionReanalysisPage() {
     setContactsPage(0);
     setContactsSearch('');
     setSelectedContactIds(new Set());
+    setContactsMinDuration('');
+    setContactsMaxDuration('');
+    setContactsMinTurns('');
+    setContactsMaxTurns('');
+    setContactsDateFrom('');
+    setContactsDateTo('');
+    setContactsFiltersExpanded(false);
     setActiveTab('contacts');
+  }, []);
+
+  const activeContactsFilterCount = useMemo(() => {
+    let count = 0;
+    if (contactsMinDuration) count++;
+    if (contactsMaxDuration) count++;
+    if (contactsMinTurns) count++;
+    if (contactsMaxTurns) count++;
+    if (contactsDateFrom) count++;
+    if (contactsDateTo) count++;
+    return count;
+  }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo]);
+
+  const clearContactsFilters = useCallback(() => {
+    setContactsMinDuration('');
+    setContactsMaxDuration('');
+    setContactsMinTurns('');
+    setContactsMaxTurns('');
+    setContactsDateFrom('');
+    setContactsDateTo('');
+    setContactsPage(0);
   }, []);
 
   const handleExport = useCallback(async (format: 'csv' | 'json') => {
@@ -1010,33 +1119,46 @@ export default function DispositionReanalysisPage() {
 
               <Separator />
 
+              {batchProgress && (
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {batchProgress.phase} calls... {batchProgress.current} processed
+                  </div>
+                  <Progress value={100} className="h-2 animate-pulse" />
+                  <p className="text-xs text-muted-foreground">
+                    Auto-batching in chunks of {batchLimit}. This will continue until all matching calls are processed.
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-3">
                 <Button
                   onClick={() => previewMutation.mutate()}
-                  disabled={previewMutation.isPending}
+                  disabled={previewMutation.isPending || applyMutation.isPending}
                 >
                   {previewMutation.isPending ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Eye className="mr-2 h-4 w-4" />
                   )}
-                  Preview Changes (Dry Run)
+                  {previewMutation.isPending ? `Previewing (${batchProgress?.current || 0} calls)...` : 'Preview All (Dry Run)'}
                 </Button>
                 <Button
                   variant="destructive"
                   onClick={() => {
-                    if (window.confirm('This will modify call dispositions and route leads. Are you sure?')) {
+                    if (window.confirm('This will modify call dispositions and route leads across ALL matching calls. Are you sure?')) {
                       applyMutation.mutate();
                     }
                   }}
-                  disabled={applyMutation.isPending}
+                  disabled={applyMutation.isPending || previewMutation.isPending}
                 >
                   {applyMutation.isPending ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Play className="mr-2 h-4 w-4" />
                   )}
-                  Apply Changes
+                  {applyMutation.isPending ? `Applying (${batchProgress?.current || 0} calls)...` : 'Apply All Changes'}
                 </Button>
               </div>
             </CardContent>
@@ -1190,7 +1312,7 @@ export default function DispositionReanalysisPage() {
                       size="sm"
                       variant="outline"
                       disabled={validateForClientMutation.isPending}
-                      onClick={() => validateForClientMutation.mutate()}
+                      onClick={() => validateForClientMutation.mutate(Array.from(selectedCalls))}
                     >
                       {validateForClientMutation.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Volume2 className="mr-1 h-3 w-3" />}
                       Push as Client Samples
@@ -1340,6 +1462,107 @@ export default function DispositionReanalysisPage() {
                   </Button>
                 </div>
               </div>
+
+              {/* Contacts filters - collapsible */}
+              <Card className="border-dashed">
+                <CardContent className="py-3">
+                  <div className="flex items-center justify-between">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setContactsFiltersExpanded(!contactsFiltersExpanded)}
+                      className="gap-2"
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Filters
+                      {activeContactsFilterCount > 0 && (
+                        <Badge variant="secondary" className="text-xs">
+                          {activeContactsFilterCount}
+                        </Badge>
+                      )}
+                    </Button>
+                    {activeContactsFilterCount > 0 && (
+                      <Button variant="ghost" size="sm" onClick={clearContactsFilters} className="text-xs text-red-600">
+                        Clear all
+                      </Button>
+                    )}
+                  </div>
+
+                  {contactsFiltersExpanded && (
+                    <div className="mt-3 space-y-3">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Min Duration (sec)</Label>
+                          <Input
+                            type="number"
+                            placeholder="0"
+                            value={contactsMinDuration}
+                            onChange={(e) => { setContactsMinDuration(e.target.value); setContactsPage(0); }}
+                            className="h-8"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Max Duration (sec)</Label>
+                          <Input
+                            type="number"
+                            placeholder="Any"
+                            value={contactsMaxDuration}
+                            onChange={(e) => { setContactsMaxDuration(e.target.value); setContactsPage(0); }}
+                            className="h-8"
+                          />
+                        </div>
+                        <div />
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Min Transcript Turns</Label>
+                          <Input
+                            type="number"
+                            placeholder="0"
+                            value={contactsMinTurns}
+                            onChange={(e) => { setContactsMinTurns(e.target.value); setContactsPage(0); }}
+                            className="h-8"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Max Transcript Turns</Label>
+                          <Input
+                            type="number"
+                            placeholder="Any"
+                            value={contactsMaxTurns}
+                            onChange={(e) => { setContactsMaxTurns(e.target.value); setContactsPage(0); }}
+                            className="h-8"
+                          />
+                        </div>
+                        <div />
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Date From</Label>
+                          <Input
+                            type="date"
+                            value={contactsDateFrom}
+                            onChange={(e) => { setContactsDateFrom(e.target.value); setContactsPage(0); }}
+                            className="h-8"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Date To</Label>
+                          <Input
+                            type="date"
+                            value={contactsDateTo}
+                            onChange={(e) => { setContactsDateTo(e.target.value); setContactsPage(0); }}
+                            className="h-8"
+                          />
+                        </div>
+                        <div />
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
 
               {/* Bulk actions bar for contacts */}
               {selectedContactIds.size > 0 && (
@@ -1668,6 +1891,248 @@ export default function DispositionReanalysisPage() {
                 Override Disposition
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== CONTACT DETAIL DIALOG ==================== */}
+      <Dialog open={!!selectedContactDetail} onOpenChange={(open) => !open && setSelectedContactDetail(null)}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              {selectedContactDetail?.contactName}
+              <DispositionBadge disposition={selectedContactDetail?.disposition || ''} />
+            </DialogTitle>
+            <DialogDescription>
+              {selectedContactDetail?.companyName}
+              {selectedContactDetail?.jobTitle && ` \u2014 ${selectedContactDetail.jobTitle}`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedContactDetail && (
+            <div className="space-y-4">
+              {/* Contact info grid */}
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Phone</Label>
+                  <p className="font-mono text-sm">{selectedContactDetail.contactPhone}</p>
+                </div>
+                {selectedContactDetail.contactEmail && (
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Email</Label>
+                    <p className="text-sm">{selectedContactDetail.contactEmail}</p>
+                  </div>
+                )}
+                <div>
+                  <Label className="text-xs text-muted-foreground">Campaign</Label>
+                  <p className="text-sm font-medium">{selectedContactDetail.campaignName}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Duration / Date</Label>
+                  <p className="text-sm">
+                    {formatDuration(selectedContactDetail.durationSec)} &mdash; {formatDate(selectedContactDetail.callDate)}
+                  </p>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Disposition Details Section */}
+              <Card className="border-primary/20 bg-primary/5">
+                <CardContent className="pt-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <Target className="h-4 w-4" />
+                    Disposition Details
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Current Disposition</Label>
+                      <div className="mt-1"><DispositionBadge disposition={selectedContactDetail.disposition} /></div>
+                    </div>
+                    {selectedContactDetail.dispositionDetails?.expectedDisposition && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Expected Disposition</Label>
+                        <div className="mt-1">
+                          <DispositionBadge disposition={selectedContactDetail.dispositionDetails.expectedDisposition} />
+                        </div>
+                      </div>
+                    )}
+                    {selectedContactDetail.dispositionDetails?.dispositionAccurate !== null && selectedContactDetail.dispositionDetails?.dispositionAccurate !== undefined && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Accuracy</Label>
+                        <div className="mt-1">
+                          {selectedContactDetail.dispositionDetails.dispositionAccurate ? (
+                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Accurate
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-red-50 text-red-700">
+                              <XCircle className="h-3 w-3 mr-1" /> Mismatch
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quality score and sentiment */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedContactDetail.dispositionDetails?.overallQualityScore != null && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Call Quality Score</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Progress value={selectedContactDetail.dispositionDetails.overallQualityScore} className="flex-1 h-2" />
+                          <span className="text-xs font-medium">{selectedContactDetail.dispositionDetails.overallQualityScore}%</span>
+                        </div>
+                      </div>
+                    )}
+                    {selectedContactDetail.dispositionDetails?.sentiment && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Sentiment</Label>
+                        <div className="mt-1">
+                          <Badge variant="outline" className={
+                            selectedContactDetail.dispositionDetails.sentiment === 'positive' ? 'bg-emerald-50 text-emerald-700' :
+                            selectedContactDetail.dispositionDetails.sentiment === 'negative' ? 'bg-red-50 text-red-700' :
+                            'bg-slate-50 text-slate-600'
+                          }>
+                            {selectedContactDetail.dispositionDetails.sentiment}
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Disposition notes */}
+                  {selectedContactDetail.dispositionDetails?.dispositionNotes && (
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Disposition Notes</Label>
+                      <div className="mt-1 bg-muted rounded-md p-3 text-sm">
+                        {Array.isArray(selectedContactDetail.dispositionDetails.dispositionNotes) ? (
+                          <ul className="space-y-1 list-disc list-inside">
+                            {selectedContactDetail.dispositionDetails.dispositionNotes.map((note: any, i: number) => (
+                              <li key={i} className="text-xs">{typeof note === 'string' ? note : JSON.stringify(note)}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs">{JSON.stringify(selectedContactDetail.dispositionDetails.dispositionNotes)}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* AI Analysis */}
+              {selectedContactDetail.aiAnalysis && (
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold mb-2">
+                      <Brain className="h-4 w-4" />
+                      AI Analysis
+                    </div>
+                    <div className="bg-muted rounded-md p-3 text-xs max-h-40 overflow-y-auto">
+                      {typeof selectedContactDetail.aiAnalysis === 'object' ? (
+                        <pre className="whitespace-pre-wrap">{JSON.stringify(selectedContactDetail.aiAnalysis, null, 2)}</pre>
+                      ) : (
+                        <p>{String(selectedContactDetail.aiAnalysis)}</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Separator />
+
+              {/* Transcript and History Tabs */}
+              <Tabs value={contactDetailTab} onValueChange={(v) => setContactDetailTab(v as any)}>
+                <TabsList>
+                  <TabsTrigger value="transcript" className="gap-1.5">
+                    <FileText className="h-3.5 w-3.5" /> Transcript
+                    {selectedContactDetail.parsedTranscript?.length > 0 && (
+                      <Badge variant="secondary" className="ml-1 text-xs">
+                        {selectedContactDetail.parsedTranscript.length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="history" className="gap-1.5">
+                    <History className="h-3.5 w-3.5" /> History
+                    <Badge variant="secondary" className="ml-1 text-xs">
+                      {selectedContactDetail.interactionHistory?.length || 0}
+                    </Badge>
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="transcript">
+                  {selectedContactDetail.recordingUrl && (
+                    <div className="mb-3">
+                      <audio controls className="w-full" src={selectedContactDetail.recordingUrl} />
+                    </div>
+                  )}
+                  <ScrollArea className="h-[300px] border rounded-md p-3 bg-muted/30">
+                    <TranscriptView transcript={selectedContactDetail.fullTranscript} />
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="history">
+                  <ScrollArea className="h-[300px]">
+                    <div className="space-y-2">
+                      {selectedContactDetail.interactionHistory?.map((h, i) => (
+                        <div key={i} className="flex items-center gap-3 rounded-lg border p-2.5 text-sm">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <DispositionBadge disposition={h.disposition} />
+                              <span className="text-xs text-muted-foreground">{formatDuration(h.durationSec)}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">{formatDate(h.date)}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {h.hasRecording && <Badge variant="outline" className="text-[10px]">Rec</Badge>}
+                            {h.hasTranscript && <Badge variant="outline" className="text-[10px]">Trans</Badge>}
+                          </div>
+                        </div>
+                      ))}
+                      {(!selectedContactDetail.interactionHistory || selectedContactDetail.interactionHistory.length === 0) && (
+                        <p className="text-sm text-muted-foreground text-center py-6">No interaction history available.</p>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
+
+              {/* Lead status */}
+              <div className="flex items-center gap-4 text-sm">
+                {selectedContactDetail.hasLead ? (
+                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700">
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> Lead Created
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-slate-50 text-slate-600">No lead</Badge>
+                )}
+                {selectedContactDetail.qaStatus && (
+                  <Badge variant="outline" className="text-xs">QA: {selectedContactDetail.qaStatus}</Badge>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setSelectedContactDetail(null)}>Close</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (selectedContactDetail) {
+                  setOverrideDialog({
+                    callSessionId: selectedContactDetail.callSessionId,
+                    currentDisp: selectedContactDetail.disposition,
+                  });
+                  setOverrideDisposition('');
+                  setSelectedContactDetail(null);
+                }
+              }}
+            >
+              Override Disposition
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

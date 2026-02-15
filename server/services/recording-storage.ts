@@ -400,7 +400,7 @@ export async function getCallSessionRecordingUrl(
       
       // Update DB with the key we found
       await db.update(callSessions)
-        .set({ recordingS3Key: mp3Key, recordingStatus: 'stored' })
+        .set({ recordingS3Key: mp3Key, recordingStatus: 'stored', recordingFormat: 'mp3' })
         .where(eq(callSessions.id, callSessionId));
         
       return { url, source: 'local' };
@@ -410,10 +410,20 @@ export async function getCallSessionRecordingUrl(
       const url = await getPresignedDownloadUrl(wavKey, 7 * 24 * 60 * 60);
       
       await db.update(callSessions)
-        .set({ recordingS3Key: wavKey, recordingStatus: 'stored' })
+        .set({ recordingS3Key: wavKey, recordingStatus: 'stored', recordingFormat: 'wav' })
         .where(eq(callSessions.id, callSessionId));
         
       return { url, source: 'local' };
+    }
+
+    // Try hard to find it in GCS using standard naming patterns if key is missing
+    const standardKey = `call-recordings/${session.campaignId || 'unknown'}/${callSessionId}.mp3`;
+    if (await s3ObjectExists(standardKey)) {
+       const url = await getPresignedDownloadUrl(standardKey, 7 * 24 * 60 * 60);
+       await db.update(callSessions)
+        .set({ recordingS3Key: standardKey, recordingStatus: 'stored', recordingFormat: 'mp3' })
+        .where(eq(callSessions.id, callSessionId));
+       return { url, source: 'local' };
     }
     
     // Recording not in S3 - try to download from Telnyx URL

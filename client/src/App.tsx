@@ -130,6 +130,7 @@ import ClientPortalCallReports from "@/pages/client-portal-call-reports";
 import ClientPortalCallRecordings from "@/pages/client-portal-call-recordings";
 import ClientPortalAnalytics from "@/pages/client-portal-analytics";
 import ClientPortalConversationQuality from "@/pages/client-portal-conversation-quality";
+import ClientPortalShowcaseCalls from "@/pages/client-portal-showcase-calls";
 import ClientPortalEmailCampaigns from "@/pages/client-portal-email-campaigns";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
@@ -719,6 +720,11 @@ function Router() {
       <Route path="/client-portal/conversation-quality">
         <ClientPortalProtectedRoute>
           <ClientPortalConversationQuality />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/showcase-calls">
+        <ClientPortalProtectedRoute>
+          <ClientPortalShowcaseCalls />
         </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/email-campaigns">

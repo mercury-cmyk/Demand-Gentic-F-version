@@ -288,7 +288,7 @@ router.post("/deep/preview", requireAuth, async (req: Request, res: Response) =>
       confidenceThreshold: req.body.confidenceThreshold,
       minTurns: req.body.minTurns,
       maxTurns: req.body.maxTurns,
-      limit: Math.min(req.body.limit || 50, 200),
+      limit: Math.min(req.body.limit || 100, 500),
       offset: req.body.offset || 0,
     };
 
@@ -319,7 +319,7 @@ router.post("/deep/apply", requireAuth, async (req: Request, res: Response) => {
       confidenceThreshold: req.body.confidenceThreshold,
       minTurns: req.body.minTurns,
       maxTurns: req.body.maxTurns,
-      limit: Math.min(req.body.limit || 30, 100),
+      limit: Math.min(req.body.limit || 100, 300),
       offset: req.body.offset || 0,
     };
 
@@ -446,7 +446,7 @@ router.post("/deep/export", requireAuth, async (req: Request, res: Response) => 
 router.get("/contacts-by-disposition/:disposition", requireAuth, async (req: Request, res: Response) => {
   try {
     const { disposition } = req.params;
-    const { campaignId, dateFrom, dateTo, limit, offset, search } = req.query;
+    const { campaignId, dateFrom, dateTo, limit, offset, search, minDurationSec, maxDurationSec, minTurns, maxTurns } = req.query;
 
     if (!disposition) {
       return res.status(400).json({ error: "disposition is required" });
@@ -456,6 +456,10 @@ router.get("/contacts-by-disposition/:disposition", requireAuth, async (req: Req
       campaignId: campaignId as string | undefined,
       dateFrom: dateFrom as string | undefined,
       dateTo: dateTo as string | undefined,
+      minDurationSec: minDurationSec ? parseInt(minDurationSec as string) : undefined,
+      maxDurationSec: maxDurationSec ? parseInt(maxDurationSec as string) : undefined,
+      minTurns: minTurns ? parseInt(minTurns as string) : undefined,
+      maxTurns: maxTurns ? parseInt(maxTurns as string) : undefined,
       limit: limit ? parseInt(limit as string) : 50,
       offset: offset ? parseInt(offset as string) : 0,
       search: search as string | undefined,

@@ -5015,6 +5015,10 @@ export function registerRoutes(app: Express) {
           notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'not_interested' THEN 1 END)::int`,
           noAnswer: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'no-answer' THEN 1 END)::int`,
           voicemail: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'voicemail' THEN 1 END)::int`,
+          busy: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'busy' THEN 1 END)::int`,
+          wrongNumber: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text IN ('wrong_number', 'invalid_data') THEN 1 END)::int`,
+          callbackRequested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'callback-requested' THEN 1 END)::int`,
+          noDisposition: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IS NULL THEN 1 END)::int`,
         })
         .from(callAttempts)
         .where(eq(callAttempts.campaignId, campaignId));
@@ -5064,11 +5068,15 @@ export function registerRoutes(app: Express) {
           noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiNoAnswerDispositions.map((value) => sql`${value}`),
             sql`, `
-          )}) OR ${callSessions.status} IN ('no_answer', 'failed', 'busy') THEN 1 END)::int`,
+          )}) OR (${callSessions.aiDisposition} IS NULL AND ${callSessions.status} = 'no_answer') THEN 1 END)::int`,
           voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiVoicemailDispositions.map((value) => sql`${value}`),
             sql`, `
           )}) THEN 1 END)::int`,
+          busy: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN ('busy') AND ${callSessions.aiDisposition} IS NULL THEN 1 END)::int`,
+          wrongNumber: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'invalid_data' THEN 1 END)::int`,
+          callbackRequested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'callback_requested' THEN 1 END)::int`,
+          noDisposition: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IS NULL AND ${callSessions.status} NOT IN ('no_answer', 'busy') THEN 1 END)::int`,
         })
         .from(callSessions)
         .where(eq(callSessions.campaignId, campaignId));
@@ -5081,6 +5089,10 @@ export function registerRoutes(app: Express) {
       const notInterested = (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0);
       const noAnswer = (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0);
       const voicemail = (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0);
+      const busy = (humanCallStats?.busy || 0) + (aiCallStats?.busy || 0);
+      const wrongNumber = (humanCallStats?.wrongNumber || 0) + (aiCallStats?.wrongNumber || 0);
+      const callbackRequested = (humanCallStats?.callbackRequested || 0) + (aiCallStats?.callbackRequested || 0);
+      const noDisposition = (humanCallStats?.noDisposition || 0) + (aiCallStats?.noDisposition || 0);
 
       res.json({
         campaignId,
@@ -5092,6 +5104,10 @@ export function registerRoutes(app: Express) {
         notInterested,
         noAnswer,
         voicemail,
+        busy,
+        wrongNumber,
+        callbackRequested,
+        noDisposition,
       });
     } catch (error) {
       console.error('[CALL STATS] Error:', error);
@@ -5156,6 +5172,10 @@ export function registerRoutes(app: Express) {
                 notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'not_interested' THEN 1 END)::int`,
                 noAnswer: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'no-answer' THEN 1 END)::int`,
                 voicemail: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'voicemail' THEN 1 END)::int`,
+                busy: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'busy' THEN 1 END)::int`,
+                wrongNumber: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text IN ('wrong_number', 'invalid_data') THEN 1 END)::int`,
+                callbackRequested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'callback-requested' THEN 1 END)::int`,
+                noDisposition: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IS NULL THEN 1 END)::int`,
               })
               .from(callAttempts)
               .where(eq(callAttempts.campaignId, campaignId));
@@ -5168,8 +5188,12 @@ export function registerRoutes(app: Express) {
                 leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'qualified_lead' THEN 1 END)::int`,
                 dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'do_not_call' THEN 1 END)::int`,
                 notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
-                noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' OR ${callSessions.status} IN ('no_answer', 'failed', 'busy') THEN 1 END)::int`,
+                noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' OR (${callSessions.aiDisposition} IS NULL AND ${callSessions.status} = 'no_answer') THEN 1 END)::int`,
                 voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
+                busy: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN ('busy') AND ${callSessions.aiDisposition} IS NULL THEN 1 END)::int`,
+                wrongNumber: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'invalid_data' THEN 1 END)::int`,
+                callbackRequested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'callback_requested' THEN 1 END)::int`,
+                noDisposition: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IS NULL AND ${callSessions.status} NOT IN ('no_answer', 'busy') THEN 1 END)::int`,
               })
               .from(callSessions)
               .where(eq(callSessions.campaignId, campaignId));
@@ -5183,6 +5207,10 @@ export function registerRoutes(app: Express) {
               notInterested: (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0),
               noAnswer: (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0),
               voicemail: (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0),
+              busy: (humanCallStats?.busy || 0) + (aiCallStats?.busy || 0),
+              wrongNumber: (humanCallStats?.wrongNumber || 0) + (aiCallStats?.wrongNumber || 0),
+              callbackRequested: (humanCallStats?.callbackRequested || 0) + (aiCallStats?.callbackRequested || 0),
+              noDisposition: (humanCallStats?.noDisposition || 0) + (aiCallStats?.noDisposition || 0),
             };
           }
         } catch (err) {

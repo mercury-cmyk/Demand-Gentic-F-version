@@ -352,19 +352,23 @@ export function determineSmartDisposition(
   // The AI's in-call safeguards (booking flow check, agent turns, etc.) are more reliable
   // than keyword matching. Only DOWNGRADE is allowed (e.g., voicemail override above).
   // We CAN suggest needs_review for human verification.
+  //
+  // EXCEPTION: If the AI set not_interested but transcript shows positive engagement,
+  // we SHOULD override to needs_review so a human can catch misclassified leads.
 
   // 2. Check for MIXED signals (both positive and negative)
   if (analysis.positiveSignals.length > 0 && analysis.negativeSignals.length > 0) {
     result.suggestedDisposition = 'needs_review';
     result.confidence = 0.6;
     result.reasoning = `Mixed signals detected: Positive(${analysis.positiveSignals.length}) vs Negative(${analysis.negativeSignals.length}) - needs human review`;
+    // Override not_interested too — mixed signals means the AI may have been wrong
     result.shouldOverride = currentDisposition !== 'needs_review' && currentDisposition !== 'qualified_lead';
     console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
   // 3. Positive signals detected
-  // CHANGED: Never auto-upgrade to qualified_lead. Route to needs_review instead.
+  // Never auto-upgrade to qualified_lead. Route to needs_review instead.
   // Only the AI agent's submit_disposition tool (with its booking flow validation)
   // should produce a qualified_lead disposition.
   if (analysis.positiveSignals.length > 0 && analysis.hasUserResponse) {
@@ -382,9 +386,9 @@ export function determineSmartDisposition(
     result.confidence = 0.75 + (analysis.positiveSignals.length * 0.05);
     result.reasoning = `Positive signals detected: ${analysis.positiveSignals.join(', ')} - routed to QA for human verification`;
     result.metSuccessIndicators = analysis.positiveSignals;
-    // Only suggest override if current disposition is no_answer/voicemail (under-classification)
-    // Never override an AI-set qualified_lead or not_interested
-    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === null;
+    // Override not_interested when positive signals exist — the AI likely misclassified
+    // Still never override qualified_lead (already the best outcome)
+    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === 'not_interested' || currentDisposition === null;
     console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
@@ -400,11 +404,12 @@ export function determineSmartDisposition(
   }
 
   // 4. Real conversation with engagement but no explicit signals - needs review
+  // A real back-and-forth conversation that was marked not_interested deserves human review
   if (analysis.hasRealConversation && analysis.userTurns >= 2) {
     result.suggestedDisposition = 'needs_review';
     result.confidence = 0.7;
     result.reasoning = `Real conversation with ${analysis.userTurns} user turns - needs human review`;
-    result.shouldOverride = currentDisposition === 'no_answer';
+    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'not_interested';
     console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }

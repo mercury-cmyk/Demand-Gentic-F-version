@@ -15,17 +15,59 @@ import {
   contacts,
   accounts,
 } from "@shared/schema";
-import { eq, and, or, desc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
+import { eq, and, or, ne, desc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { getCallSessionRecordingS3Key } from "../services/recording-storage";
-import { streamFromS3, s3ObjectExists } from "../lib/storage";
+import { streamFromS3, s3ObjectExists, readFromGCS } from "../lib/storage";
+import { getPlayableRecordingLink } from "../services/recording-link-resolver";
 
 const router = Router();
-const SHOWCASE_MAX_CALLS = 100;
-const SHOWCASE_DEFAULT_RECENT_DAYS = 120;
-const MIN_MEANINGFUL_DURATION_SEC = 30;
-const MIN_TRANSCRIPT_CHARS = 120;
-const MIN_OVERALL_SCORE = 45;
+const SHOWCASE_MAX_CALLS = 500;
+const SHOWCASE_DEFAULT_RECENT_DAYS = 365;
+const MIN_MEANINGFUL_DURATION_SEC = 15;
+const MIN_TRANSCRIPT_CHARS = 50;
+const MIN_OVERALL_SCORE = 30; // Lowered to catch more potentials
+const HIGH_PERFORMER_APS_THRESHOLD = 70;
+const VOICEMAIL_OR_IVR_TRANSCRIPT_REGEX =
+  "(leave\\s+(a|your)\\s+message|after\\s+the\\s+(tone|beep)|forwarded\\s+to\\s+(an\\s+)?(automatic\\s+)?voice\\s+messaging|voicemail|voice\\s*mail|answering\\s+machine|mailbox(\\s+is\\s+full)?)";
+  // Removed "please record your message" and others to be less aggressive provided other signals are good
+const CALL_SCREENING_TRANSCRIPT_REGEX =
+  "(calling\\s+assist\\s+by\\s+google|google\\s+call\\s+screening|screening\\s+service\\s+from\\s+google|this\\s+call\\s+is\\s+being\\s+screened|i\\s+try\\s+to\\s+connect\\s+you,?\\s+can\\s+i\\s+ask\\s+what\\s+you'?re\\s+calling\\s+about\\??)";
+const QUALIFIED_DISPOSITIONS = [
+  "qualified",
+  "appointment_set",
+  "appointment set",
+  "converted",
+  "transferred",
+  "call_transferred",
+  "callback_scheduled",
+  "callback scheduled"
+];
+const NON_HUMAN_DISPOSITIONS = [
+  "voicemail",
+  "no_answer",
+  "no answer",
+  "no contact",
+  "no_contact",
+  "busy",
+  "fax",
+  "answering_machine",
+  "answering machine",
+  "wrong_number",
+  "disconnected",
+  "invalid_data",
+  "invalid data",
+  "system_error",
+  "system error",
+  "technical_issue",
+  "technical issue",
+  "unavailable",
+  "failed",
+  "machine",
+  "dnc",          // Filter out DNC calls
+  "do_not_call",
+  "do not call",
+];
 
 // Showcase categories
 const SHOWCASE_CATEGORIES = [
@@ -71,6 +113,54 @@ function durationPriorityScoreSql() {
   `;
 }
 
+/** Exclude non-human/non-conversation outcomes (e.g., voicemail, no-answer). */
+function humanConversationDispositionFilterSql() {
+  return sql`(
+    LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT IN (${sql.join(
+      NON_HUMAN_DISPOSITIONS.map((d) => sql`${d}`),
+      sql`, `
+    )})
+    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%voicemail%'
+    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%no answer%'
+    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%answering machine%'
+    AND LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) NOT LIKE '%fax%'
+  )`;
+}
+
+/** Require explicit two-sided transcript structure (agent + contact turns). */
+function twoSidedTranscriptFilterSql() {
+  return sql`(
+    COALESCE(${callQualityRecords.fullTranscript}, '') ~* '(agent|ai|assistant|bot)\\s*:'
+    AND COALESCE(${callQualityRecords.fullTranscript}, '') ~* '(contact|customer|prospect|user|caller|human)\\s*:'
+  )`;
+}
+
+/** Exclude voicemail/IVR-like transcript content even when disposition is mislabeled. */
+function noVoicemailTranscriptFilterSql() {
+  return sql`COALESCE(${callQualityRecords.fullTranscript}, '') !~* ${VOICEMAIL_OR_IVR_TRANSCRIPT_REGEX}`;
+}
+
+/** Exclude known machine call-screening transcripts (e.g., Google Call Assist). */
+function noCallScreeningTranscriptFilterSql() {
+  return sql`COALESCE(${callQualityRecords.fullTranscript}, '') !~* ${CALL_SCREENING_TRANSCRIPT_REGEX}`;
+}
+
+function hasRecordingIndicator(record: {
+  recordingStatus?: string | null;
+  recordingS3Key?: string | null;
+  recordingUrl?: string | null;
+  telnyxCallId?: string | null;
+  telnyxRecordingId?: string | null;
+}) {
+  return Boolean(
+    record.recordingS3Key ||
+    record.recordingUrl ||
+    record.telnyxRecordingId ||
+    record.telnyxCallId ||
+    record.recordingStatus === 'stored'
+  );
+}
+
 function buildFilters(query: any) {
   const conditions: any[] = [
     isNotNull(callQualityRecords.overallQualityScore),
@@ -102,6 +192,18 @@ function buildFilters(query: any) {
   return and(...conditions);
 }
 
+function qualifiedHighQualityBoostSql() {
+  return sql<number>`
+    CASE
+      WHEN LOWER(COALESCE(${callQualityRecords.assignedDisposition}, '')) IN (${sql.join(
+        QUALIFIED_DISPOSITIONS.map((d) => sql`${d}`),
+        sql`, `
+      )}) AND COALESCE(${callQualityRecords.overallQualityScore}, 0) >= 60 THEN 1
+      ELSE 0
+    END
+  `;
+}
+
 /** Showcase ranking score: conversation quality + handling + precision. */
 function agentPerformanceScoreSql() {
   return sql<number>`
@@ -116,26 +218,36 @@ function agentPerformanceScoreSql() {
 function buildBaseShowcaseWhere(query: any) {
   return and(
     buildFilters(query),
+    humanConversationDispositionFilterSql(),
     isNotNull(callQualityRecords.fullTranscript),
+    twoSidedTranscriptFilterSql(),
+    noVoicemailTranscriptFilterSql(),
+    noCallScreeningTranscriptFilterSql(),
     gte(callSessions.durationSec, MIN_MEANINGFUL_DURATION_SEC),
     gte(callQualityRecords.overallQualityScore, MIN_OVERALL_SCORE),
     sql`LENGTH(COALESCE(${callQualityRecords.fullTranscript}, '')) >= ${MIN_TRANSCRIPT_CHARS}`,
     or(
-      eq(callSessions.recordingStatus, 'stored'),
-      isNotNull(callSessions.recordingS3Key)
-    ),
+      and(
+        eq(callSessions.recordingStatus, 'stored'),
+        isNotNull(callSessions.recordingS3Key)
+      ),
+      isNotNull(callSessions.recordingUrl),
+      and(isNotNull(callSessions.telnyxRecordingId), ne(callSessions.recordingStatus, 'failed'))
+    )
   );
 }
 
 // ============================================================================
-// GET / — List top 100 recent calls with recordings (Showcase candidates)
+// GET / — List top matching calls (Showcase candidates)
 // ============================================================================
 
 router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    // Showcase should return up to the top 100 calls by quality + handling precision.
-    const page = 1;
-    const limit = SHOWCASE_MAX_CALLS;
+    // Determine pagination
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const offset = (page - 1) * limit;
+
     const whereClause = buildBaseShowcaseWhere(req.query);
 
     // Count total matches
@@ -143,9 +255,10 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       .select({ total: drizzleCount() })
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id)) // Join callSessions for duration filter
+      .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id)) // Needed if filtering by campaigns
       .where(whereClause); 
       
-    console.log(`[ShowcaseCalls] List count: ${total}`);
+    console.log(`[ShowcaseCalls] List count: ${total}, page: ${page}, limit: ${limit}`);
 
     // Fetch calls - sorted by Agent Performance Score
     const rows = await db
@@ -171,6 +284,9 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
         durationSec: callSessions.durationSec,
         recordingStatus: callSessions.recordingStatus,
         recordingS3Key: callSessions.recordingS3Key,
+        recordingUrl: callSessions.recordingUrl,
+        telnyxCallId: callSessions.telnyxCallId,
+        telnyxRecordingId: callSessions.telnyxRecordingId,
         agentType: callSessions.agentType,
         startedAt: callSessions.startedAt,
         transcriptExcerpt: sql<string>`LEFT(${callQualityRecords.fullTranscript}, 200)`,
@@ -186,26 +302,26 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
       .where(whereClause)
       .orderBy(
+        desc(qualifiedHighQualityBoostSql()),
         desc(agentPerformanceScoreSql()),
         desc(callQualityRecords.overallQualityScore),
         desc(callQualityRecords.createdAt),
       )
-      .limit(limit);
-
-    const cappedTotal = Math.min(Number(total) || 0, limit);
+      .limit(limit)
+      .offset(offset);
 
     res.json({
       calls: rows.map(r => ({
         ...r,
-        hasRecording: !!(r.recordingS3Key),
+        hasRecording: hasRecordingIndicator(r),
         agentPerformanceScore: Math.round(Number(r.agentPerformanceScore) || 0),
       })),
       pagination: {
         page,
         limit,
-        total: cappedTotal,
-        totalPages: 1,
-      },
+        total: Number(total),
+        totalPages: Math.ceil(Number(total) / limit),
+      }
     });
   } catch (error: any) {
     console.error('[ShowcaseCalls] List error:', error);
@@ -219,8 +335,8 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
 
 router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
   try {
-    const threshold = parseInt(req.query.threshold as string, 10) || 60;
-    const limitCount = Math.min(50, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
+    const threshold = parseInt(req.query.threshold as string, 10) || 55;
+    const limitCount = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 40));
 
     const baseCandidatesFilters = buildBaseShowcaseWhere(req.query);
 
@@ -244,6 +360,9 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
         durationSec: callSessions.durationSec,
         recordingStatus: callSessions.recordingStatus,
         recordingS3Key: callSessions.recordingS3Key,
+        recordingUrl: callSessions.recordingUrl,
+        telnyxCallId: callSessions.telnyxCallId,
+        telnyxRecordingId: callSessions.telnyxRecordingId,
         agentType: callSessions.agentType,
         startedAt: callSessions.startedAt,
         transcriptExcerpt: sql<string>`LEFT(${callQualityRecords.fullTranscript}, 200)`,
@@ -276,7 +395,7 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
 
       return {
         ...c,
-        hasRecording: !!(c.recordingS3Key),
+        hasRecording: hasRecordingIndicator(c),
         agentPerformanceScore: Math.round(Number(c.agentPerformanceScore) || 0),
         suggestedCategory: topDimension[0],
       };
@@ -333,7 +452,7 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
       .select({
         totalConversations: drizzleCount(),
         avgScore: sql<number>`ROUND(AVG(${callQualityRecords.overallQualityScore}))`,
-        highPerformers: sql<number>`COUNT(CASE WHEN (${agentPerformanceScoreSql()}) >= 80 THEN 1 END)`,
+        highPerformers: sql<number>`COUNT(CASE WHEN (${agentPerformanceScoreSql()}) >= ${HIGH_PERFORMER_APS_THRESHOLD} THEN 1 END)`,
       })
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
@@ -454,6 +573,9 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
         durationSec: callSessions.durationSec,
         recordingStatus: callSessions.recordingStatus,
         recordingS3Key: callSessions.recordingS3Key,
+        recordingUrl: callSessions.recordingUrl,
+        telnyxCallId: callSessions.telnyxCallId,
+        telnyxRecordingId: callSessions.telnyxRecordingId,
         agentType: callSessions.agentType,
         startedAt: callSessions.startedAt,
         endedAt: callSessions.endedAt,
@@ -472,18 +594,17 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
     }
 
     // Get playback URL with fallback to stream if needed
-    let playbackUrl: string | null = null;
-    if (record.recordingS3Key) {
-      // Use internal streaming endpoint to guarantee playback
-      // since the user wants GUARANTEED access.
-      // We'll prioritize the stream proxy over presigned URLs if reliability is the concern.
-      playbackUrl = `/api/showcase-calls/${callSessionId}/stream`;
-    }
+    // ALWAYS use the showcase-specific stream endpoint which proxies correctly
+    // Note: The frontend uses this URL directly in an <audio> tag, so it must work with cookies
+    const playbackUrl = `/api/showcase-calls/${callSessionId}/stream`;
+    
+    // Check if we actually have any source content (S3 key, Telnyx ID, or URL)
+    const hasRecording = hasRecordingIndicator(record);
 
     res.json({
       ...record,
-      playbackUrl,
-      hasRecording: !!(record.recordingS3Key),
+      playbackUrl: hasRecording ? playbackUrl : null,
+      hasRecording,
       agentPerformanceScore: Math.round(Number(record.agentPerformanceScore) || 0),
     });
   } catch (error: any) {
@@ -568,49 +689,165 @@ router.delete("/:callSessionId/pin", requireAuth, async (req: Request, res: Resp
 // GET /:callSessionId/stream — Stream recording from GCS (proxy)
 // ============================================================================
 
-router.get("/:callSessionId/stream", requireAuth, async (req: Request, res: Response) => {
+// Bypass strict header check for this route to support <audio src> with query token
+router.get("/:callSessionId/stream", async (req: Request, res: Response) => {
   try {
     const { callSessionId } = req.params;
-
-    const [session] = await db
-      .select({ 
-        recordingS3Key: callSessions.recordingS3Key,
-        recordingStatus: callSessions.recordingStatus,
-        campaignId: callSessions.campaignId 
-      })
-      .from(callSessions)
-      .where(eq(callSessions.id, callSessionId));
-
-    if (!session) {
-      return res.status(404).send('Recording not found');
-    }
-
-    // Try to determine the key.
-    // 1. Check existing s3Key from DB
-    let s3Key = session.recordingS3Key;
     
-    // 2. If not in DB, guess based on campaign + callSessionId
-    if (!s3Key) {
-       // Check common extensions
-       const mp3 = getCallSessionRecordingS3Key(callSessionId, session.campaignId, 'mp3');
-       if (await s3ObjectExists(mp3)) s3Key = mp3;
-       else {
-         const wav = getCallSessionRecordingS3Key(callSessionId, session.campaignId, 'wav');
-         if (await s3ObjectExists(wav)) s3Key = wav;
+    // Manual auth check supporting query token for audio elements
+    // Supports both Internal Users (userId) and Client Portal Users (clientUserId)
+    let authenticatedUserId: string | undefined = (req as any).user?.userId || (req as any).clientUser?.clientUserId;
+
+    if (!authenticatedUserId) {
+       const token = req.query.token as string;
+       if (token) {
+         try {
+           const { verifyToken } = await import("../auth");
+           const payload = verifyToken(token) as any;
+           if (payload) {
+             authenticatedUserId = payload.userId || payload.clientUserId;
+           }
+         } catch (e) { /* ignore invalid token */ }
        }
     }
 
-    if (!s3Key) {
-      return res.status(404).send('Recording file not found in GCS');
+    // Fallback: Check standard header if present (e.g. if called via XHR)
+    if (!authenticatedUserId && req.headers.authorization) {
+        try {
+          const { verifyToken } = await import("../auth");
+          const token = req.headers.authorization.replace('Bearer ', '');
+          const payload = verifyToken(token) as any;
+          if (payload) {
+             authenticatedUserId = payload.userId || payload.clientUserId;
+          }
+        } catch (e) { /* ignore invalid token */ }
     }
 
-    // Proxy stream
-    res.setHeader('Content-Type', s3Key.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg');
-    const stream = await streamFromS3(s3Key);
-    stream.pipe(res);
+    if (!authenticatedUserId) {
+      return res.status(401).send('Authentication required');
+    }
+
+    // ── Resolve a playable URL ───────────────────────────────────────
+    let result = await getPlayableRecordingLink(callSessionId);
+
+    if (!result) {
+        // Fallback: If not resolved by standard resolver (e.g. no key in DB but file exists), try old guessing logic
+        const [session] = await db
+          .select({ 
+            recordingS3Key: callSessions.recordingS3Key,
+            campaignId: callSessions.campaignId 
+          })
+          .from(callSessions)
+          .where(eq(callSessions.id, callSessionId));
+    
+        if (session) {
+           let s3Key = session.recordingS3Key;
+           if (!s3Key) {
+             const mp3 = getCallSessionRecordingS3Key(callSessionId, session.campaignId, 'mp3');
+             if (await s3ObjectExists(mp3)) s3Key = mp3;
+             else {
+               const wav = getCallSessionRecordingS3Key(callSessionId, session.campaignId, 'wav');
+               if (await s3ObjectExists(wav)) s3Key = wav;
+             }
+           }
+           
+           if (s3Key) {
+             console.log(`[ShowcaseCalls] Fallback GCS key found: ${s3Key}`);
+             const stream = await streamFromS3(s3Key);
+             res.setHeader('Content-Type', s3Key.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg');
+             stream.pipe(res);
+             return;
+           }
+        }
+
+      console.error(`[ShowcaseCalls] No audio URL found for ${callSessionId}`);
+      return res.status(404).send('Recording audio not available');
+    }
+
+    // ── Handle GCS internal stream (when signBlob is unavailable) ────
+    if (result.url.startsWith('gcs-internal://')) {
+      const gcsKey = result.url.replace(/^gcs-internal:\/\/[^/]+\//, '');
+      try {
+        const { stream, contentType, size } = await readFromGCS(gcsKey);
+
+        res.setHeader('Content-Type', contentType);
+        if (size > 0) {
+          res.setHeader('Content-Length', size.toString());
+        }
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+
+        (stream as any).pipe(res);
+        return;
+      } catch (gcsErr: any) {
+        console.error(`[ShowcaseCalls] GCS direct stream failed for ${callSessionId}:`, gcsErr.message);
+      }
+    }
+
+    // ── FAST PATH: Direct Redirect (Performance Optimization) ──────────
+    // Instead of proxying the stream through our server (which adds latency/CPU),
+    // redirect the client directly to the signed/public URL if it's external.
+    if (result.url.startsWith('http') && result.source !== 'cached') {
+       return res.redirect(result.url);
+    }
+
+    // ── Fallback Proxy: Fetch audio bytes from external URL ───────────
+    // Only used for cached URLs (might be stale/private) or if redirect fails
+    let audioResponse = await fetch(result.url);
+
+    // If fetch fails and source was cached, retry with fresh resolution
+    if (!audioResponse.ok && result.source === 'cached') {
+      console.warn(`[ShowcaseCalls] Cached URL failed for ${callSessionId} (${audioResponse.status}). Re-resolving...`);
+      result = await getPlayableRecordingLink(callSessionId, { skipCached: true });
+      if (result && result.source !== 'cached') {
+        // If we get a fresh non-cached URL, prefer redirect for speed
+        if (result.url.startsWith('http')) {
+           return res.redirect(result.url);
+        }
+        audioResponse = await fetch(result.url);
+      }
+    }
+
+    if (!audioResponse.ok || !result) {
+       console.error(`[ShowcaseCalls] Failed to fetch audio for ${callSessionId}: ${audioResponse?.status}`);
+       return res.status(audioResponse?.status === 404 ? 404 : 502).send('Failed to fetch recording audio');
+    }
+
+    // Stream audio bytes to the browser (Legacy Fallback)
+    const contentType = audioResponse.headers.get('content-type') || result.mimeType || 'audio/mpeg';
+    const contentLength = audioResponse.headers.get('content-length');
+
+    res.setHeader('Content-Type', contentType);
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'private, max-age=300'); // Short cache for signed URLs
+
+    const reader = audioResponse.body?.getReader();
+    if (!reader) {
+      return res.status(500).send('Failed to read audio stream');
+    }
+
+    // ... piping logic ...
+    const pipeStream = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      } catch (err) {
+        console.error('[ShowcaseCalls] Stream error:', err);
+        if (!res.headersSent) res.end();
+      }
+    };
+    pipeStream();
+
   } catch (error: any) {
     console.error('[ShowcaseCalls] Stream error:', error);
-    res.status(500).send('Failed to stream recording');
+    if (!res.headersSent) res.status(500).send('Failed to stream recording');
   }
 });
 

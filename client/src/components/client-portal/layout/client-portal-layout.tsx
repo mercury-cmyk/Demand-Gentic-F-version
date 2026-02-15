@@ -66,6 +66,7 @@ import {
   TestTube,
   Building2,
   Plus,
+  Trophy,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -149,6 +150,7 @@ const baseNavigationGroups: NavGroup[] = [
     items: [
       { name: 'Analytics', href: '/client-portal/analytics', icon: BarChart3 },
       { name: 'Conversation Quality', href: '/client-portal/conversation-quality', icon: MessageSquareText },
+      { name: 'Showcase Calls', href: '/client-portal/showcase-calls', icon: Trophy },
     ],
   },
   {

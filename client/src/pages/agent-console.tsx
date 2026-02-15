@@ -1937,6 +1937,9 @@ export default function AgentConsolePage() {
                     </SelectContent>
                   </Select>
                 </div>
+                {validPhoneOptions.length === 0 && !showManualDial && (
+                  <p className="text-[10px] text-amber-200/90">No direct phone available — use Manual Dial</p>
+                )}
 
                 {/* Manual Phone Input */}
                 {showManualDial && (
@@ -2149,6 +2152,9 @@ export default function AgentConsolePage() {
                           </SelectItem>
                         </SelectContent>
                       </Select>
+                      {validPhoneOptions.length === 0 && !showManualDial && (
+                        <span className="text-xs text-amber-200/90">No direct phone — use Manual Dial</span>
+                      )}
                     </div>
 
                     {/* Manual Phone Input */}
