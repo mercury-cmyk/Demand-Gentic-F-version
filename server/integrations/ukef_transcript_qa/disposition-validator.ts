@@ -8,7 +8,7 @@
  * Safety:
  * - NEVER auto-changes dispositions without explicit approval (audit mode by default)
  * - Writes to disposition_review_tasks and audit log only
- * - Does not touch leads.transcript or leads.qaStatus
+ * - applyReviewDecision also marks leads as published/submitted_to_client
  * - All changes are audited in transcript_qa_audit_log
  *
  * Privacy:
@@ -302,6 +302,19 @@ export async function applyReviewDecision(
         )
       `);
     }
+  }
+
+  // Mark the lead as published and submitted to client so it appears in the
+  // client portal Qualified Leads table and can be approved/rejected there.
+  if (task.lead_id) {
+    await db.execute(sql`
+      UPDATE leads
+      SET qa_status = 'published',
+          submitted_to_client = true,
+          updated_at = now()
+      WHERE id = ${task.lead_id}
+        AND (qa_status IS DISTINCT FROM 'published' OR submitted_to_client IS NOT TRUE)
+    `);
   }
 
   // Audit log

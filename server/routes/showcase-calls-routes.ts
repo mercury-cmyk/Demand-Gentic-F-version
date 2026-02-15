@@ -11,6 +11,7 @@ import { db } from "../db";
 import {
   callQualityRecords,
   callSessions,
+  dialerCallAttempts,
   campaigns,
   contacts,
   accounts,
@@ -621,7 +622,7 @@ router.post("/:callSessionId/pin", requireAuth, async (req: Request, res: Respon
   try {
     const { callSessionId } = req.params;
     const { category, notes } = req.body;
-    const userId = (req as any).user?.id;
+    const userId = (req as any).user?.userId || (req as any).user?.id || (req as any).user?.clientUserId;
 
     if (category && !SHOWCASE_CATEGORIES.includes(category)) {
       return res.status(400).json({
@@ -643,7 +644,47 @@ router.post("/:callSessionId/pin", requireAuth, async (req: Request, res: Respon
       .returning({ id: callQualityRecords.id });
 
     if (!updated) {
-      return res.status(404).json({ error: 'Call quality record not found' });
+      // Fallback: allow pinning calls that have not been analyzed yet by creating
+      // a minimal quality record tied to the session.
+      const [session] = await db
+        .select({
+          id: callSessions.id,
+          campaignId: callSessions.campaignId,
+          contactId: callSessions.contactId,
+        })
+        .from(callSessions)
+        .where(eq(callSessions.id, callSessionId))
+        .limit(1);
+
+      if (!session) {
+        return res.status(404).json({ error: 'Call session not found' });
+      }
+
+      const [attempt] = await db
+        .select({
+          id: dialerCallAttempts.id,
+          campaignId: dialerCallAttempts.campaignId,
+          contactId: dialerCallAttempts.contactId,
+        })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.callSessionId, callSessionId))
+        .orderBy(desc(dialerCallAttempts.createdAt))
+        .limit(1);
+
+      await db.insert(callQualityRecords).values({
+        callSessionId,
+        dialerCallAttemptId: attempt?.id ?? null,
+        campaignId: session.campaignId ?? attempt?.campaignId ?? null,
+        contactId: session.contactId ?? attempt?.contactId ?? null,
+        analysisStage: "manual_showcase_pin",
+        interactionType: "live_call",
+        isShowcase: true,
+        showcaseCategory: category || null,
+        showcaseNotes: notes || null,
+        showcasedAt: new Date(),
+        showcasedBy: userId || null,
+        updatedAt: new Date(),
+      });
     }
 
     res.json({ success: true, message: 'Call pinned as showcase' });
@@ -699,31 +740,37 @@ router.get("/:callSessionId/stream", async (req: Request, res: Response) => {
     let authenticatedUserId: string | undefined = (req as any).user?.userId || (req as any).clientUser?.clientUserId;
 
     if (!authenticatedUserId) {
-       const token = req.query.token as string;
+       // Check query param first (audio elements often use this)
+       let token = req.query.token as string;
+       
+       // Fallback to header if no query token
+       if (!token && req.headers.authorization) {
+         token = req.headers.authorization.replace('Bearer ', '');
+       }
+
        if (token) {
          try {
            const { verifyToken } = await import("../auth");
+           // We need to handle both standard User payload and Client payload
            const payload = verifyToken(token) as any;
+           
            if (payload) {
+             // Admin/Internal User token has 'userId'
+             // Client key has 'clientUserId'
              authenticatedUserId = payload.userId || payload.clientUserId;
+             
+             // If we found a valid user, attach to request for downstream use if needed
+             if (payload.userId) (req as any).user = payload;
+             if (payload.clientUserId) (req as any).clientUser = payload;
            }
-         } catch (e) { /* ignore invalid token */ }
+         } catch (e) { 
+           console.warn(`[ShowcaseCalls] Token verification failed for stream:`, e); 
+         }
        }
     }
 
-    // Fallback: Check standard header if present (e.g. if called via XHR)
-    if (!authenticatedUserId && req.headers.authorization) {
-        try {
-          const { verifyToken } = await import("../auth");
-          const token = req.headers.authorization.replace('Bearer ', '');
-          const payload = verifyToken(token) as any;
-          if (payload) {
-             authenticatedUserId = payload.userId || payload.clientUserId;
-          }
-        } catch (e) { /* ignore invalid token */ }
-    }
-
     if (!authenticatedUserId) {
+      console.warn('[ShowcaseCalls] Stream request rejected: No valid authentication found');
       return res.status(401).send('Authentication required');
     }
 

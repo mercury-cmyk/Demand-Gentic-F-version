@@ -49,6 +49,7 @@ import {
   buildQueryParams,
   formatDuration,
 } from '@/components/call-intelligence';
+import { PushToShowcaseButton } from '@/components/showcase-calls/push-to-showcase-button';
 
 interface Campaign {
   id: string;
@@ -508,6 +509,12 @@ export default function CallIntelligenceDashboard() {
                         {pushToLeadMutation.isPending ? 'Pushing...' : 'Push to QA'}
                       </Button>
                     )}
+                    <PushToShowcaseButton
+                      callSessionId={selectedCall.id}
+                      contactName={selectedCall.contact?.name}
+                      sourceLabel="Call Intelligence Dashboard"
+                      buttonProps={{ size: "sm", variant: "outline" }}
+                    />
                   </div>
                 </div>
 

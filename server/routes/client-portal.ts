@@ -21,6 +21,7 @@ import {
   workOrders,
   // QA-approved leads system
   leads,
+  dialerCallAttempts,
   leadComments,
   campaigns,
   campaignQueue,
@@ -1087,12 +1088,14 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         callDuration: leads.callDuration,
         hasRecording: sql<boolean>`${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL`,
         hasTranscript: sql<boolean>`${leads.transcript} IS NOT NULL AND ${leads.transcript} != ''`,
+        callSessionId: dialerCallAttempts.callSessionId,
         qaStatus: leads.qaStatus,
         createdAt: leads.createdAt,
         approvedAt: leads.approvedAt,
       })
       .from(leads)
       .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
       .where(and(...whereConditions))
       .orderBy(orderDirection(sortColumn))
       .limit(pageSizeNum)
@@ -1345,6 +1348,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
         recordingS3Key: leads.recordingS3Key,
         transcript: leads.transcript,
         structuredTranscript: leads.structuredTranscript,
+        callSessionId: dialerCallAttempts.callSessionId,
         // Timestamps
         createdAt: leads.createdAt,
         approvedAt: leads.approvedAt,
@@ -1352,6 +1356,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
       })
       .from(leads)
       .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
       .where(eq(leads.id, id))
       .limit(1);
 
@@ -1421,6 +1426,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
       // Call details
       callDuration: lead.callDuration,
       dialedNumber: lead.dialedNumber,
+      callSessionId: lead.callSessionId,
       // Timestamps
       createdAt: lead.createdAt,
       approvedAt: lead.approvedAt,

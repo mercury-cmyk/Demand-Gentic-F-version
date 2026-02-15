@@ -294,6 +294,7 @@ router.get(
       const items = await db.execute<{
         id: string;
         lead_id: string;
+        call_session_id: string | null;
         contact_name: string | null;
         contact_email: string | null;
         campaign_name: string | null;
@@ -307,6 +308,7 @@ router.get(
         created_at: string;
       }>(sql`
         SELECT drt.id, drt.lead_id,
+               dca.call_session_id,
                concat(co.first_name, ' ', co.last_name) as contact_name,
                co.email as contact_email,
                ca.name as campaign_name,
@@ -320,6 +322,7 @@ router.get(
                drt.created_at::text
         FROM disposition_review_tasks drt
         JOIN leads l ON l.id = drt.lead_id
+        LEFT JOIN dialer_call_attempts dca ON dca.id = l.call_attempt_id
         LEFT JOIN contacts co ON co.id = l.contact_id
         LEFT JOIN campaigns ca ON ca.id = drt.campaign_id
         WHERE drt.validation_status = ${statusFilter}::disposition_validation_status
@@ -331,6 +334,7 @@ router.get(
         items: (items.rows || []).map(row => ({
           id: row.id,
           leadId: row.lead_id,
+          callSessionId: row.call_session_id,
           contactName: row.contact_name,
           contactEmail: row.contact_email,
           campaignName: row.campaign_name,

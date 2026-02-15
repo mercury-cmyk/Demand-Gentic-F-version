@@ -15,9 +15,11 @@ import {
   FileText, Loader2, UserCheck, ArrowUpDown, RefreshCw, MessageSquare, Sparkles,
   TrendingUp, Building2,
 } from 'lucide-react';
+import { PushToShowcaseButton } from '@/components/showcase-calls/push-to-showcase-button';
 
 interface QualifiedLead {
   id: string;
+  callSessionId?: string | null;
   contactName: string | null;
   contactEmail: string | null;
   accountName: string | null;
@@ -346,18 +348,30 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
                           : '-'}
                       </TableCell>
                       <TableCell className="text-right py-4">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="hover:bg-blue-100 hover:text-blue-700"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onViewDetails(lead.id);
-                          }}
-                        >
-                          <Eye className="h-4 w-4 mr-1.5" />
-                          View
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          {lead.callSessionId && (
+                            <PushToShowcaseButton
+                              callSessionId={lead.callSessionId}
+                              contactName={lead.contactName}
+                              sourceLabel="Leads Table"
+                              label="Showcase"
+                              stopPropagation
+                              buttonProps={{ size: 'sm', variant: 'outline' }}
+                            />
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="hover:bg-blue-100 hover:text-blue-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onViewDetails(lead.id);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1.5" />
+                            View
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

@@ -55,6 +55,7 @@ export default function CampaignsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [campaignToDelete, setCampaignToDelete] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused" | "completed" | "draft">("all");
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string | number>>(new Set());
   const [assignAgentsDialogOpen, setAssignAgentsDialogOpen] = useState(false);
   const [selectedCampaignForAgents, setSelectedCampaignForAgents] = useState<any>(null);
@@ -359,22 +360,23 @@ export default function CampaignsPage() {
     const matchesTab = activeTab === "all" ||
       c.type === activeTab ||
       (activeTab === "call" && (PHONE_CAMPAIGN_TYPES.includes(c.type) || c.dialMode === 'ai_agent'));
+    const matchesStatus = statusFilter === "all" || c.status === statusFilter;
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
+    return matchesTab && matchesStatus && matchesSearch;
   });
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case "active":
-        return "bg-green-500/10 text-green-600 border-green-200 hover:bg-green-500/20";
+        return "border-emerald-200 bg-emerald-50 text-emerald-700";
       case "paused":
-        return "bg-amber-500/10 text-amber-600 border-amber-200 hover:bg-amber-500/20";
+        return "border-amber-200 bg-amber-50 text-amber-700";
       case "completed":
-        return "bg-blue-500/10 text-blue-600 border-blue-200 hover:bg-blue-500/20";
+        return "border-sky-200 bg-sky-50 text-sky-700";
       case "draft":
-        return "bg-gray-500/10 text-gray-600 border-gray-200 hover:bg-gray-500/20";
+        return "border-slate-200 bg-slate-50 text-slate-700";
       default:
-        return "bg-gray-500/10 text-gray-600 border-gray-200";
+        return "border-slate-200 bg-slate-50 text-slate-700";
     }
   };
 
@@ -392,127 +394,187 @@ export default function CampaignsPage() {
     return null;
   };
 
+  const activeCampaignCount = campaigns.filter((c: any) => c.status === "active").length;
+  const activeEmailCount = campaigns.filter((c: any) => isEmailCampaign(c) && c.status === "active").length;
+  const activePhoneCount = campaigns.filter((c: any) => isPhoneCampaign(c) && c.status === "active").length;
+  const pausedCampaignCount = campaigns.filter((c: any) => c.status === "paused").length;
+
+  const campaignPerformanceRates = campaigns
+    .map((campaign: any) => {
+      const snapshot = campaignSnapshots[String(campaign.id)];
+      if (isEmailCampaign(campaign)) {
+        const recipients = snapshot?.email?.totalRecipients ?? campaign.sent ?? 0;
+        const opens = snapshot?.email?.opens ?? campaign.opened ?? 0;
+        return recipients > 0 ? (opens / recipients) * 100 : null;
+      }
+
+      if (isPhoneCampaign(campaign)) {
+        const attempts = snapshot?.call?.callsMade ?? campaign.calls ?? 0;
+        const connected = snapshot?.call?.callsConnected ?? campaign.connected ?? 0;
+        return attempts > 0 ? (connected / attempts) * 100 : null;
+      }
+
+      return null;
+    })
+    .filter((rate): rate is number => rate !== null);
+
+  const avgPerformanceRate = campaignPerformanceRates.length > 0
+    ? Math.round(campaignPerformanceRates.reduce((sum, rate) => sum + rate, 0) / campaignPerformanceRates.length)
+    : 0;
+
   return (
     <div className="flex min-h-screen flex-col overflow-hidden">
       <div className="flex-1 overflow-auto">
-        <div className="min-h-screen bg-background p-6 space-y-8">
+        <div className="min-h-screen bg-background p-4 md:p-6 space-y-6">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">
-            Campaigns
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Manage and monitor your outreach initiatives
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {canManageCampaigns && (
-            <Button className="gap-2 shadow-sm" onClick={() => setLocation("/campaigns/create")}>
-              <Plus className="w-4 h-4" />
-              New Campaign
-            </Button>
-          )}
+      <div className="relative overflow-hidden rounded-2xl border bg-card p-5 md:p-6 shadow-sm">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-cyan-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -left-20 -bottom-24 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="relative flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">
+              Campaign Lists
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Manage outreach pipelines, monitor performance, and take action fast.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="bg-background/80 text-xs">
+                {campaigns.length} total
+              </Badge>
+              <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700 text-xs">
+                {activeCampaignCount} active
+              </Badge>
+              <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700 text-xs">
+                {pausedCampaignCount} paused
+              </Badge>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {canManageCampaigns && (
+              <Button className="gap-2 shadow-sm" onClick={() => setLocation("/campaigns/create")}>
+                <Plus className="w-4 h-4" />
+                New Campaign
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Stats Overview - Refreshed */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 pb-6">
-        <Card className="shadow-sm border-slate-200 bg-white">
-            <CardContent className="p-5 flex flex-col justify-between h-full">
-                <div className="flex justify-between items-start">
-                    <p className="text-sm font-medium text-slate-500">Total Campaigns</p>
-                    <div className="h-8 w-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-500">
-                        <Zap className="h-4 w-4" />
-                    </div>
-                </div>
-                <div>
-                     <h3 className="text-2xl font-semibold text-slate-900">{campaigns.length}</h3>
-                     <p className="text-xs text-slate-400 mt-1">All time</p>
-                </div>
-            </CardContent>
+      {/* Stats Overview */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card className="border-border/70 bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Total Campaigns</p>
+              <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
+                <Zap className="h-4 w-4" />
+              </div>
+            </div>
+            <h3 className="mt-3 text-2xl font-semibold text-foreground">{campaigns.length}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Across all channels</p>
+          </CardContent>
         </Card>
-        <Card className="shadow-sm border-slate-200 bg-white">
-            <CardContent className="p-5 flex flex-col justify-between h-full">
-                <div className="flex justify-between items-start">
-                    <p className="text-sm font-medium text-slate-500">Active Email</p>
-                    <div className="h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-500">
-                        <Mail className="h-4 w-4" />
-                    </div>
-                </div>
-                <div>
-                     <h3 className="text-2xl font-semibold text-slate-900">{campaigns.filter((c: any) => c.type === "email" && c.status === "active").length}</h3>
-                     <div className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
-                        <ArrowUpRight className="h-3 w-3 mr-1" />
-                        <span>+5 this week</span>
-                     </div>
-                </div>
-            </CardContent>
+
+        <Card className="border-border/70 bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Active Email</p>
+              <div className="h-9 w-9 rounded-full bg-cyan-50 text-cyan-700 flex items-center justify-center">
+                <Mail className="h-4 w-4" />
+              </div>
+            </div>
+            <h3 className="mt-3 text-2xl font-semibold text-foreground">{activeEmailCount}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Email campaigns running now</p>
+          </CardContent>
         </Card>
-        <Card className="shadow-sm border-slate-200 bg-white">
-            <CardContent className="p-5 flex flex-col justify-between h-full">
-                <div className="flex justify-between items-start">
-                    <p className="text-sm font-medium text-slate-500">Active Phone</p>
-                    <div className="h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-500">
-                        <Phone className="h-4 w-4" />
-                    </div>
-                </div>
-                <div>
-                     <h3 className="text-2xl font-semibold text-slate-900">{campaigns.filter((c: any) => (c.type === "call" || c.type === "telemarketing" || c.type === "sql") && c.status === "active").length}</h3>
-                     <div className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
-                        <ArrowUpRight className="h-3 w-3 mr-1" />
-                        <span>+2 this week</span>
-                     </div>
-                </div>
-            </CardContent>
+
+        <Card className="border-border/70 bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Active Phone</p>
+              <div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                <Phone className="h-4 w-4" />
+              </div>
+            </div>
+            <h3 className="mt-3 text-2xl font-semibold text-foreground">{activePhoneCount}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Dialer and AI campaigns live</p>
+          </CardContent>
         </Card>
-        <Card className="shadow-sm border-slate-200 bg-white">
-            <CardContent className="p-5 flex flex-col justify-between h-full">
-                <div className="flex justify-between items-start">
-                    <p className="text-sm font-medium text-slate-500">Avg Performance</p>
-                    <div className="h-8 w-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-500">
-                        <BarChart className="h-4 w-4" />
-                    </div>
-                </div>
-                <div>
-                     <h3 className="text-2xl font-semibold text-slate-900">28%</h3>
-                     <p className="text-xs text-slate-400 mt-1">Open/Connect rate</p>
-                </div>
-            </CardContent>
+
+        <Card className="border-border/70 bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Avg Performance</p>
+              <div className="h-9 w-9 rounded-full bg-amber-50 text-amber-700 flex items-center justify-center">
+                <BarChart className="h-4 w-4" />
+              </div>
+            </div>
+            <h3 className="mt-3 text-2xl font-semibold text-foreground">{avgPerformanceRate}%</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Average open/connect rate</p>
+          </CardContent>
         </Card>
       </div>
 
       {/* Main Content */}
-      <Card className="border-none shadow-sm bg-card/50 backdrop-blur-sm">
+      <Card className="border border-border/70 shadow-sm bg-card">
         <CardHeader className="pb-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
-              <TabsList className="grid w-full grid-cols-3 md:w-[400px]">
-                <TabsTrigger value="all">All</TabsTrigger>
-                <TabsTrigger value="email">Email</TabsTrigger>
-                <TabsTrigger value="call">Phone</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <div className="relative w-full md:w-72">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search campaigns..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8"
-              />
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full xl:w-auto">
+                <TabsList className="grid w-full grid-cols-3 xl:w-[420px] bg-muted/60">
+                  <TabsTrigger value="all">All</TabsTrigger>
+                  <TabsTrigger value="email">Email</TabsTrigger>
+                  <TabsTrigger value="call">Phone</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <div className="relative w-full xl:w-80">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search campaigns..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                {(["all", "active", "paused", "draft", "completed"] as const).map((status) => (
+                  <Button
+                    key={status}
+                    variant={statusFilter === status ? "default" : "outline"}
+                    size="sm"
+                    className="h-8 capitalize"
+                    onClick={() => setStatusFilter(status)}
+                  >
+                    {status}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Showing {filteredCampaigns.length} of {campaigns.length} campaigns
+              </p>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {filteredCampaigns.length === 0 ? (
+            {isLoading ? (
+              <div className="grid gap-3">
+                {[1, 2, 3].map((item) => (
+                  <div key={item} className="h-28 animate-pulse rounded-xl border border-border/60 bg-muted/30" />
+                ))}
+              </div>
+            ) : filteredCampaigns.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground bg-muted/20 rounded-lg border border-dashed">
                 <div className="flex justify-center mb-4">
                   <AlertCircle className="h-10 w-10 text-muted-foreground/50" />
                 </div>
                 <h3 className="text-lg font-medium">No campaigns found</h3>
-                <p className="text-sm mt-1">Try creating a new campaign to get started.</p>
+                <p className="text-sm mt-1">Adjust your filters or create a new campaign to get started.</p>
               </div>
             ) : (
               filteredCampaigns.map((campaign: any) => {
@@ -542,12 +604,12 @@ export default function CampaignsPage() {
                     open={isExpanded}
                     onOpenChange={() => toggleCampaignExpanded(campaign.id)}
                   >
-                    <div className="group rounded-xl border bg-card transition-all duration-200 hover:shadow-md">
-                      <div className="p-4">
+                    <div className="group rounded-2xl border border-border/70 bg-card transition-all duration-200 hover:border-primary/30 hover:shadow-md">
+                      <div className="p-4 md:p-5">
                         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                           {/* Left: Info */}
                           <div className="flex items-start gap-4 min-w-[250px]">
-                            <div className={`p-2.5 rounded-lg ${isEmail ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+                            <div className={`p-2.5 rounded-lg ring-1 ${isEmail ? 'bg-cyan-50 text-cyan-700 ring-cyan-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
                               {isEmail ? <Mail className="h-5 w-5" /> : <Phone className="h-5 w-5" />}
                             </div>
                             <div>
@@ -556,14 +618,14 @@ export default function CampaignsPage() {
                                 {campaign.startDate && (
                                   <>
                                     <span>Started {new Date(campaign.startDate).toLocaleDateString()}</span>
-                                    <span>•</span>
+                                    <span>|</span>
                                   </>
                                 )}
                                 <span className="capitalize">{isPhone ? 'Phone' : campaign.type}</span>
                                 {isPhone && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'hybrid') && (
                                   <>
-                                    <span>•</span>
-                                    <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-purple-300 text-purple-600">
+                                    <span>|</span>
+                                    <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-cyan-300 text-cyan-700">
                                       <Bot className="h-3 w-3 mr-1" />
                                       {campaign.dialMode === 'hybrid' ? 'Hybrid' : 'AI Agent'}
                                     </Badge>
@@ -571,8 +633,8 @@ export default function CampaignsPage() {
                                 )}
                                 {isPhone && campaignQueueStats && (
                                   <>
-                                    <span>•</span>
-                                    <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                                    <span>|</span>
+                                    <Badge variant="secondary" className="text-[10px] py-0 px-1.5 bg-muted/60">
                                       <Users className="h-3 w-3 mr-1" />
                                       {campaignQueueStats.queued} in queue
                                     </Badge>
@@ -585,7 +647,7 @@ export default function CampaignsPage() {
                           {/* Middle: Metrics & Status */}
                           <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full md:w-auto items-center">
                             <div className="flex items-center gap-2">
-                              <Badge variant="outline" className={getStatusColor(campaign.status)}>
+                              <Badge variant="outline" className={`${getStatusColor(campaign.status)} capitalize`}>
                                 {campaign.status}
                               </Badge>
                             </div>
@@ -721,7 +783,7 @@ export default function CampaignsPage() {
 
                       {/* Expandable Type-Specific Panel */}
                       <CollapsibleContent>
-                        <div className="border-t px-4 py-4 bg-muted/20">
+                        <div className="border-t px-4 py-4 bg-muted/30">
                           {isPhone && (campaign as any).lastStallReason && campaign.status === 'active' && (
                             <Alert variant="warning" className="mb-3">
                               <AlertCircle className="h-4 w-4" />
@@ -814,3 +876,4 @@ export default function CampaignsPage() {
     </div>
   );
 }
+

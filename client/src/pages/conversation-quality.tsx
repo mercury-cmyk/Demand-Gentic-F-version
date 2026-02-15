@@ -34,6 +34,7 @@ import {
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { PushToShowcaseButton } from "@/components/showcase-calls/push-to-showcase-button";
 
 interface TranscriptTurn {
   role: 'agent' | 'contact' | 'assistant' | 'user' | 'system';
@@ -366,6 +367,7 @@ function RecordingPlayer({
   const showReanalyze = !conversation.isTestCall &&
     (conversation.transcript && conversation.transcript.length >= 50) &&
     (!conversation.analysis?.overallScore || conversation.analysis.overallScore === 0);
+  const canPushToShowcase = conversation.type === 'call' && conversation.source === 'call_session';
 
   return (
     <div className="bg-muted/50 p-3 rounded-lg">
@@ -381,6 +383,14 @@ function RecordingPlayer({
           )}
         </h4>
         <div className="flex items-center gap-2">
+          {canPushToShowcase && (
+            <PushToShowcaseButton
+              callSessionId={conversation.id}
+              contactName={conversation.contactName}
+              sourceLabel="Conversation Quality"
+              buttonProps={{ size: "sm", variant: "outline" }}
+            />
+          )}
           {showTranscribe && (
             <Button
               size="sm"

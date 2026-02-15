@@ -33,6 +33,7 @@ import {
   getDispositionColor,
   type DispositionType,
 } from './types';
+import { PushToShowcaseButton } from '../showcase-calls/push-to-showcase-button';
 
 interface DispositionDeepDiveProps {
   filters: DispositionIntelligenceFilters;
@@ -160,6 +161,15 @@ export function DispositionDeepDive({ filters }: DispositionDeepDiveProps) {
                           "{call.transcriptSnippet}..."
                         </p>
                       )}
+
+                      <div className="mt-2 flex justify-end">
+                        <PushToShowcaseButton
+                          callSessionId={call.callSessionId}
+                          contactName={call.contactName}
+                          sourceLabel="Disposition Intelligence"
+                          buttonProps={{ size: 'sm', variant: 'outline' }}
+                        />
+                      </div>
                     </CardContent>
                   </Card>
                 ))}

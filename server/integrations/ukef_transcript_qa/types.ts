@@ -144,6 +144,7 @@ export interface PipelineStatusResponse {
 export interface ReviewQueueItem {
   id: string;
   leadId: string;
+  callSessionId: string | null;
   contactName: string | null;
   contactEmail: string | null;
   campaignName: string | null;

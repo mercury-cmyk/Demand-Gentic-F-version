@@ -17,6 +17,7 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { PushToShowcaseButton } from '@/components/showcase-calls/push-to-showcase-button';
 import {
   Play,
   Loader2,
@@ -67,6 +68,7 @@ interface PipelineStatus {
 interface ReviewQueueItem {
   id: string;
   leadId: string;
+  callSessionId?: string | null;
   contactName: string | null;
   contactEmail: string | null;
   campaignName: string | null;
@@ -642,6 +644,16 @@ function ReviewQueueSection({
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {item.callSessionId && (
+                    <PushToShowcaseButton
+                      callSessionId={item.callSessionId}
+                      contactName={item.contactName}
+                      sourceLabel="QA Review Queue"
+                      label="Showcase"
+                      stopPropagation
+                      buttonProps={{ size: 'sm', variant: 'outline' }}
+                    />
+                  )}
                   <Badge variant={
                     (item.confidence || 0) >= 0.9 ? 'default' :
                     (item.confidence || 0) >= 0.7 ? 'secondary' : 'destructive'

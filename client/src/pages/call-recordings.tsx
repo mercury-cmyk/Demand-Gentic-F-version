@@ -42,6 +42,7 @@ import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { PushToShowcaseButton } from "@/components/showcase-calls/push-to-showcase-button";
 
 // Recording status badge colors
 const STATUS_COLORS: Record<string, string> = {
@@ -949,6 +950,16 @@ function CallRecordingsPage() {
                           </Button>
                         )
                       )}
+
+                      <PushToShowcaseButton
+                        callSessionId={recording.id}
+                        contactName={recording.contactName}
+                        sourceLabel="Call Recordings"
+                        buttonProps={{
+                          variant: "outline",
+                          size: "sm",
+                        }}
+                      />
 
                       {/* Transcribe button - only show if no transcript */}
                       {!recording.hasTranscript && recording.hasRecording !== false && (

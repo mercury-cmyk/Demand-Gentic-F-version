@@ -41,6 +41,7 @@ import { CallAnalysisSummary } from './CallAnalysisSummary';
 import { QualityAnalysisPanel } from './QualityAnalysisPanel';
 import { AgentLearningPipeline } from '../call-intelligence/AgentLearningPipeline';
 import { QualityIssue, QualityRecommendation } from '../call-intelligence/types';
+import { PushToShowcaseButton } from '../showcase-calls/push-to-showcase-button';
 
 interface UnifiedDetailPanelProps {
   conversation: UnifiedConversationDetail | null;
@@ -100,6 +101,7 @@ export function UnifiedDetailPanel({
   const hasRecordingAvailable = conversation.recording.available;
   const canAnalyze = hasTranscriptContent && !hasCallAnalysis && conversation.source === 'call_session';
   const canTranscribe = hasRecordingAvailable && !hasTranscriptContent && conversation.source === 'call_session';
+  const canPushToShowcase = conversation.source === 'call_session';
   const hasCallHistory = (conversation.callCount || 1) > 1 && conversation.callHistory;
 
   // Map issues and recommendations for the Learning Pipeline
@@ -150,7 +152,7 @@ export function UnifiedDetailPanel({
             {/* Overview Tab */}
             <TabsContent value="overview" className="mt-4 space-y-4">
               {/* Action Buttons: Analyze / Transcribe */}
-              {(canAnalyze || canTranscribe) && (
+              {(canAnalyze || canTranscribe || canPushToShowcase) && (
                 <div className="flex gap-2 flex-wrap">
                   {canAnalyze && (
                     <Button
@@ -181,6 +183,14 @@ export function UnifiedDetailPanel({
                       )}
                       {isTranscribing ? 'Transcribing...' : 'Transcribe from Recording'}
                     </Button>
+                  )}
+                  {canPushToShowcase && (
+                    <PushToShowcaseButton
+                      callSessionId={conversation.id}
+                      contactName={conversation.contact.name}
+                      sourceLabel="Unified Intelligence"
+                      buttonProps={{ size: "sm", variant: "outline" }}
+                    />
                   )}
                 </div>
               )}

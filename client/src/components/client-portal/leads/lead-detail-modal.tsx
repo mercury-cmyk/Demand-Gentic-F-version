@@ -16,9 +16,11 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { TranscriptViewer } from './transcript-viewer';
 import { RecordingPlayer } from './recording-player';
+import { PushToShowcaseButton } from '@/components/showcase-calls/push-to-showcase-button';
 
 interface LeadDetail {
   id: string;
+  callSessionId?: string | null;
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
@@ -279,6 +281,15 @@ export function LeadDetailModal({ leadId, open, onClose }: LeadDetailModalProps)
                         </div>
 
                         <Separator />
+
+                        {lead.callSessionId && (
+                          <PushToShowcaseButton
+                            callSessionId={lead.callSessionId}
+                            contactName={lead.contactName}
+                            sourceLabel="Lead Detail"
+                            buttonProps={{ size: 'sm', variant: 'outline', className: 'w-full' }}
+                          />
+                        )}
 
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">

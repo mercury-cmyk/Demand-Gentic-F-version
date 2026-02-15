@@ -20,6 +20,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { TranscriptViewer } from './transcript-viewer';
 import { RecordingPlayer } from './recording-player';
+import { PushToShowcaseButton } from '@/components/showcase-calls/push-to-showcase-button';
 
 interface LeadComment {
   id: string;
@@ -35,6 +36,7 @@ interface LeadComment {
 
 interface LeadDetail {
   id: string;
+  callSessionId?: string | null;
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
@@ -343,6 +345,17 @@ export function EnhancedLeadDetailModal({ leadId, open, onClose }: EnhancedLeadD
 
                 {/* Call Details Tab */}
                 <TabsContent value="call-details" className="mt-0 space-y-6">
+                  {lead.callSessionId && (
+                    <div className="flex justify-end">
+                      <PushToShowcaseButton
+                        callSessionId={lead.callSessionId}
+                        contactName={lead.contactName}
+                        sourceLabel="Lead Detail"
+                        buttonProps={{ size: 'sm', variant: 'outline' }}
+                      />
+                    </div>
+                  )}
+
                   {lead.recordingUrl && (
                     <RecordingPlayer recordingUrl={lead.recordingUrl} />
                   )}
