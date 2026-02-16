@@ -19,6 +19,7 @@ import { analyzeConversationQuality, type ConversationQualityAnalysis } from "./
 import { logCallIntelligence } from "./call-intelligence-logger";
 import { recordTranscriptionResult } from "./transcription-monitor";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
+import { getFreshAudioUrl } from "./recording-link-resolver";
 
 const LOG_PREFIX = "[PostCallAnalyzer]";
 
@@ -562,6 +563,50 @@ export async function runPostCallAnalysis(
         } catch (basicError: any) {
           console.error(`${LOG_PREFIX} Basic transcription also failed: ${basicError.message}`);
         }
+      }
+    }
+
+    if (!structuredTranscript || structuredTranscript.text.length < 10) {
+      // Last-chance fallback: resolve a fresh playable URL and retry once.
+      try {
+        const freshAudioUrl = await getFreshAudioUrl(callSessionId);
+        if (freshAudioUrl && freshAudioUrl !== audioUrl) {
+          console.log(`${LOG_PREFIX} Retrying transcription with fresh resolved recording URL`);
+
+          try {
+            structuredTranscript = await submitStructuredTranscription(freshAudioUrl, {
+              telnyxCallId: session.telnyxCallId || undefined,
+              recordingS3Key: session.recordingS3Key || undefined,
+            });
+          } catch (retryStructuredError: any) {
+            console.error(`${LOG_PREFIX} Structured retry failed: ${retryStructuredError.message}`);
+          }
+
+          if (!structuredTranscript) {
+            try {
+              const retryBasicResult = await transcribeFromRecording(freshAudioUrl, {
+                telnyxCallId: session.telnyxCallId || undefined,
+                recordingS3Key: session.recordingS3Key || undefined,
+              });
+              if (retryBasicResult && retryBasicResult.transcript) {
+                structuredTranscript = {
+                  text: retryBasicResult.transcript,
+                  utterances: [{
+                    speaker: "Speaker 1",
+                    text: retryBasicResult.transcript,
+                    start: 0,
+                    end: callDurationSec || 0,
+                  }],
+                };
+                console.log(`${LOG_PREFIX} Using basic transcription fallback after fresh URL retry: ${retryBasicResult.transcript.length} chars`);
+              }
+            } catch (retryBasicError: any) {
+              console.error(`${LOG_PREFIX} Basic retry failed: ${retryBasicError.message}`);
+            }
+          }
+        }
+      } catch (freshUrlError: any) {
+        console.warn(`${LOG_PREFIX} Failed to resolve fresh recording URL: ${freshUrlError.message}`);
       }
     }
 
