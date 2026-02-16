@@ -403,16 +403,20 @@ function normalizeCountryName(country: string): string {
 function isCountryEnabled(country: string | null | undefined): boolean {
   if (!country) return false;
   
-  // Clean up the input - trim whitespace and normalize
-  const cleaned = country.toString().trim().toUpperCase();
-  if (!cleaned) return false;
-  
-  // Try direct match first
-  if (ENABLED_CALLING_REGIONS[cleaned] === true) return true;
-  
-  // Try normalized version (handles typos)
-  const normalizedCountry = normalizeCountryName(cleaned);
-  if (ENABLED_CALLING_REGIONS[normalizedCountry] === true) return true;
+  // Clean/normalize common data variants e.g. "United Kingdom (UK)", "U.S.A.", etc.
+  const raw = country.toString().trim().toUpperCase();
+  if (!raw) return false;
+
+  const noParens = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const alnumOnly = raw.replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const candidates = Array.from(new Set([raw, noParens, alnumOnly].filter(Boolean)));
+
+  // Try direct and typo-normalized forms
+  for (const cleaned of candidates) {
+    if (ENABLED_CALLING_REGIONS[cleaned] === true) return true;
+    const normalizedCountry = normalizeCountryName(cleaned);
+    if (ENABLED_CALLING_REGIONS[normalizedCountry] === true) return true;
+  }
   
   // Try common long-form to short-form mappings
   const COUNTRY_ALIASES: Record<string, string> = {
@@ -439,12 +443,50 @@ function isCountryEnabled(country: string | null | undefined): boolean {
     'MACAU': 'HONG KONG',
   };
   
-  if (COUNTRY_ALIASES[cleaned]) {
-    const aliased = COUNTRY_ALIASES[cleaned];
-    if (ENABLED_CALLING_REGIONS[aliased] === true) return true;
+  for (const cleaned of candidates) {
+    if (COUNTRY_ALIASES[cleaned]) {
+      const aliased = COUNTRY_ALIASES[cleaned];
+      if (ENABLED_CALLING_REGIONS[aliased] === true) return true;
+    }
   }
   
   return false;
+}
+
+/**
+ * Infer country from E.164 phone prefix when country metadata is missing.
+ * Returns canonical country name/code used by ENABLED_CALLING_REGIONS, or null.
+ */
+function inferCountryFromPhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const e164 = String(phone).replace(/[^\d+]/g, '');
+  if (!e164.startsWith('+')) return null;
+
+  const prefixMap: Array<{ prefix: string; country: string }> = [
+    { prefix: '+971', country: 'AE' }, { prefix: '+966', country: 'SA' }, { prefix: '+972', country: 'IL' },
+    { prefix: '+974', country: 'QA' }, { prefix: '+965', country: 'KW' }, { prefix: '+973', country: 'BH' },
+    { prefix: '+968', country: 'OM' }, { prefix: '+886', country: 'TW' }, { prefix: '+852', country: 'HK' },
+    { prefix: '+420', country: 'CZ' }, { prefix: '+358', country: 'FI' }, { prefix: '+353', country: 'IE' },
+    { prefix: '+351', country: 'PT' }, { prefix: '+972', country: 'IL' },
+    { prefix: '+971', country: 'AE' },
+    { prefix: '+44', country: 'GB' }, { prefix: '+1', country: 'US' }, { prefix: '+61', country: 'AU' },
+    { prefix: '+64', country: 'NZ' }, { prefix: '+65', country: 'SG' }, { prefix: '+81', country: 'JP' },
+    { prefix: '+82', country: 'KR' }, { prefix: '+91', country: 'IN' }, { prefix: '+86', country: 'CN' },
+    { prefix: '+60', country: 'MY' }, { prefix: '+63', country: 'PH' }, { prefix: '+66', country: 'TH' },
+    { prefix: '+84', country: 'VN' }, { prefix: '+62', country: 'ID' }, { prefix: '+55', country: 'BR' },
+    { prefix: '+54', country: 'AR' }, { prefix: '+56', country: 'CL' }, { prefix: '+57', country: 'CO' },
+    { prefix: '+51', country: 'PE' }, { prefix: '+27', country: 'ZA' }, { prefix: '+49', country: 'DE' },
+    { prefix: '+33', country: 'FR' }, { prefix: '+39', country: 'IT' }, { prefix: '+34', country: 'ES' },
+    { prefix: '+31', country: 'NL' }, { prefix: '+32', country: 'BE' }, { prefix: '+41', country: 'CH' },
+    { prefix: '+43', country: 'AT' }, { prefix: '+46', country: 'SE' }, { prefix: '+47', country: 'NO' },
+    { prefix: '+45', country: 'DK' }, { prefix: '+48', country: 'PL' }, { prefix: '+30', country: 'GR' },
+    { prefix: '+52', country: 'MX' },
+  ];
+
+  // Prefer longest prefix matches first
+  prefixMap.sort((a, b) => b.prefix.length - a.prefix.length);
+  const match = prefixMap.find(p => e164.startsWith(p.prefix));
+  return match?.country ?? null;
 }
 
 interface OrchestratorJobData {
@@ -1016,19 +1058,28 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     const country = (item as any).country;
     const state = (item as any).state;
     const timezone = (item as any).timezone;
+    const inferredTimezone = (item as any).inferred_timezone;
+    const geoPhone = mobilePhone || directPhone;
+    const inferredCountry = inferCountryFromPhone(geoPhone);
+    const effectiveCountry = country || inferredCountry;
+    const effectiveTimezone = timezone || inferredTimezone;
     
     // Check if country is in enabled calling regions
-    if (!isCountryEnabled(country)) {
+    if (!isCountryEnabled(effectiveCountry)) {
       countryNotEnabled++;
       // Track which countries are being rejected
-      const countryKey = country ? String(country).toUpperCase() : 'NULL/EMPTY';
+      const countryKey = effectiveCountry ? String(effectiveCountry).toUpperCase() : 'NULL/EMPTY';
       rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
       continue; // Skip contacts from disabled regions
     }
     
     // Check business hours for this contact's timezone/country FIRST
     // Use stored timezone if available, fall back to country/state detection
-    const bizHoursCheck = isContactWithinBusinessHours({ country, state, timezone });
+    const bizHoursCheck = isContactWithinBusinessHours({
+      country: effectiveCountry,
+      state,
+      timezone: effectiveTimezone,
+    });
     const tzKey = bizHoursCheck.timezone || 'unknown';
     
     // Track timezone stats
@@ -1120,7 +1171,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     }
 
     // Add to candidates with priority and country info
-    candidateItems.push({ item: { ...item, _country: country, _timezone: tzKey }, phone: e164, priority, contact });
+    candidateItems.push({ item: { ...item, _country: effectiveCountry, _timezone: tzKey }, phone: e164, priority, contact });
   }
   
   // Sort by priority: UK mobile (1) first, then UK landline (2), then other phones
