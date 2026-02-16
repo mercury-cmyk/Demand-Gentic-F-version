@@ -6419,6 +6419,64 @@ function flushAudioBuffer(session: OpenAIRealtimeSession): void {
   ensureTelnyxOutboundPacer(session);
 }
 
+async function resolveTelnyxCallControlId(session: OpenAIRealtimeSession): Promise<string | null> {
+  if (session.telnyxCallControlId && session.telnyxCallControlId.trim().length > 0) {
+    return session.telnyxCallControlId;
+  }
+
+  try {
+    const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
+    const bridge = getTelnyxAiBridge();
+    const callState =
+      bridge.getClientStateByControlId(session.callId)
+      || bridge.getActiveCall(session.callId)
+      || bridge.getClientStateByControlId(session.callAttemptId)
+      || bridge.getActiveCall(session.callAttemptId);
+
+    const controlId = callState?.callControlId || null;
+    if (controlId) {
+      session.telnyxCallControlId = controlId;
+    }
+    return controlId;
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to resolve Telnyx call control ID for ${session.callId}:`, error);
+    return null;
+  }
+}
+
+async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<void> {
+  const telnyxApiKey = process.env.TELNYX_API_KEY;
+  if (!telnyxApiKey) {
+    return;
+  }
+
+  const callControlId = await resolveTelnyxCallControlId(session);
+  if (!callControlId) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${telnyxApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn(`${LOG_PREFIX} Telnyx hangup API returned ${response.status} for ${callControlId}: ${errText}`);
+      return;
+    }
+
+    console.log(`${LOG_PREFIX} ✅ Telnyx hangup API succeeded for call ${session.callId} (control_id=${callControlId})`);
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Telnyx hangup API request failed for call ${session.callId}:`, error);
+  }
+}
+
 async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voicemail' | 'error'): Promise<void> {
   const session = activeSessions.get(callId);
   if (!session || !session.isActive) return;
@@ -6536,6 +6594,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       console.error(`${LOG_PREFIX} Error disconnecting Gemini provider:`, err);
     }
   }
+
+  // HARD TERMINATION: Explicit Telnyx hangup for deterministic enforcement.
+  // Do this before closing websocket so duration-based endings reliably terminate carrier-side calls.
+  await forceTelnyxHangup(session);
 
   // Close Telnyx WebSocket to terminate the call (this triggers Telnyx to hangup)
   if (session.telnyxWs && session.telnyxWs.readyState === WebSocket.OPEN) {
