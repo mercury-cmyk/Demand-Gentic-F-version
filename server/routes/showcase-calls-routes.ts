@@ -23,7 +23,7 @@ import { streamFromS3, s3ObjectExists, readFromGCS } from "../lib/storage";
 import { getPlayableRecordingLink } from "../services/recording-link-resolver";
 
 const router = Router();
-const SHOWCASE_MAX_CALLS = 500;
+const SHOWCASE_MAX_CALLS = 50;
 const SHOWCASE_DEFAULT_RECENT_DAYS = 365;
 const MIN_MEANINGFUL_DURATION_SEC = 15;
 const MIN_TRANSCRIPT_CHARS = 50;
@@ -246,7 +246,8 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
     // Determine pagination
     const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const requestedLimit = parseInt(req.query.limit as string, 10) || SHOWCASE_MAX_CALLS;
+    const limit = Math.min(requestedLimit, SHOWCASE_MAX_CALLS);
     const offset = (page - 1) * limit;
 
     const whereClause = buildBaseShowcaseWhere(req.query);
@@ -258,8 +259,13 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id)) // Join callSessions for duration filter
       .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id)) // Needed if filtering by campaigns
       .where(whereClause); 
+
+    const cappedTotal = Math.min(Number(total), SHOWCASE_MAX_CALLS);
+    const safeOffset = Math.min(offset, cappedTotal);
+    const remaining = Math.max(0, cappedTotal - safeOffset);
+    const safeLimit = Math.min(limit, remaining || limit);
       
-    console.log(`[ShowcaseCalls] List count: ${total}, page: ${page}, limit: ${limit}`);
+    console.log(`[ShowcaseCalls] List count: ${total}, capped: ${cappedTotal}, page: ${page}, limit: ${limit}`);
 
     // Fetch calls - sorted by Agent Performance Score
     const rows = await db
@@ -308,8 +314,8 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
         desc(callQualityRecords.overallQualityScore),
         desc(callQualityRecords.createdAt),
       )
-      .limit(limit)
-      .offset(offset);
+      .limit(safeLimit)
+      .offset(safeOffset);
 
     res.json({
       calls: rows.map(r => ({
@@ -320,8 +326,8 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       pagination: {
         page,
         limit,
-        total: Number(total),
-        totalPages: Math.ceil(Number(total) / limit),
+        total: cappedTotal,
+        totalPages: Math.ceil(cappedTotal / limit),
       }
     });
   } catch (error: any) {
