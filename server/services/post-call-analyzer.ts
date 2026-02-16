@@ -20,6 +20,7 @@ import { logCallIntelligence } from "./call-intelligence-logger";
 import { recordTranscriptionResult } from "./transcription-monitor";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
 import { getFreshAudioUrl } from "./recording-link-resolver";
+import { buildPostCallTranscriptWithSummary } from "./post-call-transcript-summary";
 
 const LOG_PREFIX = "[PostCallAnalyzer]";
 
@@ -620,7 +621,17 @@ export async function runPostCallAnalysis(
     const agentSpeaker = identifyAgentSpeaker(structuredTranscript.utterances);
     result.turns = buildPrecisionTurns(structuredTranscript.utterances, agentSpeaker);
     result.metrics = computeTurnMetrics(result.turns);
-    result.fullTranscript = formatTranscript(result.turns);
+    const plainTranscript = formatTranscript(result.turns);
+    const transcriptWithSummary = buildPostCallTranscriptWithSummary(
+      plainTranscript,
+      result.turns.map((t) => ({
+        role: t.speaker,
+        text: t.text,
+        timeOffset: t.startSec,
+      })),
+      { durationSec: callDurationSec }
+    );
+    result.fullTranscript = transcriptWithSummary;
 
     console.log(`${LOG_PREFIX} 📊 Turn metrics: ${result.metrics.totalTurns} turns (Agent: ${result.metrics.agentTurns}, Contact: ${result.metrics.contactTurns}), Agent words: ${result.metrics.agentWords}, Contact words: ${result.metrics.contactWords}`);
 
@@ -628,7 +639,7 @@ export async function runPostCallAnalysis(
     if (options?.callAttemptId) {
       await db.update(dialerCallAttempts)
         .set({
-          fullTranscript: result.fullTranscript,
+          fullTranscript: transcriptWithSummary,
           updatedAt: new Date(),
         })
         .where(eq(dialerCallAttempts.id, options.callAttemptId));
@@ -636,7 +647,7 @@ export async function runPostCallAnalysis(
 
     await db.update(callSessions)
       .set({
-        aiTranscript: result.fullTranscript,
+        aiTranscript: transcriptWithSummary,
       })
       .where(eq(callSessions.id, callSessionId));
 
@@ -645,7 +656,7 @@ export async function runPostCallAnalysis(
     // 7. Run conversation quality analysis
     try {
       result.qualityAnalysis = await analyzeConversationQuality({
-        transcript: result.fullTranscript,
+        transcript: plainTranscript,
         interactionType: "live_call",
         analysisStage: "post_call",
         callDurationSeconds: callDurationSec,
@@ -661,7 +672,7 @@ export async function runPostCallAnalysis(
     if (campaignId) {
       try {
         result.campaignOutcome = await evaluateCampaignOutcome(
-          result.fullTranscript,
+          plainTranscript,
           result.turns,
           result.metrics,
           callDurationSec,
@@ -685,7 +696,7 @@ export async function runPostCallAnalysis(
         ]);
 
       const departmentInput = {
-        transcript: result.fullTranscript,
+        transcript: plainTranscript,
         callSessionId,
         campaignId: campaignId || undefined,
         contactId: contactId || undefined,
@@ -759,7 +770,7 @@ export async function runPostCallAnalysis(
           campaignId,
           contactId,
           qualityAnalysis: result.qualityAnalysis,
-          fullTranscript: result.fullTranscript,
+          fullTranscript: plainTranscript,
         });
         if (intelligenceResult.success) {
           result.intelligenceRecordId = intelligenceResult.recordId;

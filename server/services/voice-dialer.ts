@@ -3687,7 +3687,11 @@ Only AFTER completing these steps can you submit the disposition.`
     }
     case 'submit_call_summary': session.callSummary = normalizeCallSummary(args); return { success: true };
     case 'schedule_callback': return { success: true, scheduled: args.callback_datetime };
-    case 'transfer_to_human': session.detectedDisposition = 'qualified_lead'; return { success: true };
+    case 'transfer_to_human':
+      if (!session.detectedDisposition) {
+        session.detectedDisposition = 'needs_review';
+      }
+      return { success: true };
     case 'end_call': {
       const reason = (args.reason || 'Call ended by AI').toLowerCase();
       const startTimeMs = session.startTime instanceof Date ? session.startTime.getTime() : Date.now();
@@ -4727,7 +4731,14 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
       const MIN_PLAYBACK_BEFORE_INTERRUPT_MS = 1500;
       if (session.isResponseInProgress && session.currentResponseItemId) {
         if (session.audioPlaybackMs >= MIN_PLAYBACK_BEFORE_INTERRUPT_MS) {
-          await handleUserInterruption(session);
+          const repeatedPhraseGuard = shouldSuppressRepeatedPhraseInterruption(session);
+          if (repeatedPhraseGuard.suppress) {
+            console.log(
+              `${LOG_PREFIX} Suppressing interruption for repeated phrase (${repeatedPhraseGuard.phrase}, repeats=${repeatedPhraseGuard.repeats}) on call: ${session.callId}`
+            );
+          } else {
+            await handleUserInterruption(session);
+          }
         } else {
           console.log(`${LOG_PREFIX} Ignoring speech_started - only ${session.audioPlaybackMs}ms of audio played (need ${MIN_PLAYBACK_BEFORE_INTERRUPT_MS}ms)`);
         }
@@ -5246,6 +5257,68 @@ function detectAudioQualityComplaint(transcript: string): { detected: boolean; p
   // Only explicit phrases like "can't hear you" or "bad line" should trigger audio quality handling.
 
   return { detected: false, phrase: '', severity: 'low' };
+}
+
+function normalizeRepeatedInterruptionPhrase(text: string): 'hello' | 'can_you_hear_me' | null {
+  const normalized = String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return null;
+
+  if (/^(hello|hi|hey)(\s+(hello|hi|hey)){0,4}\??$/.test(normalized)) {
+    return 'hello';
+  }
+
+  if (/^(can|could)\s+you\s+hear\s+me(\s+now)?\??$/.test(normalized)) {
+    return 'can_you_hear_me';
+  }
+
+  if (normalized.includes('can you hear me') || normalized.includes('could you hear me')) {
+    return 'can_you_hear_me';
+  }
+
+  return null;
+}
+
+function shouldSuppressRepeatedPhraseInterruption(
+  session: OpenAIRealtimeSession
+): { suppress: boolean; phrase: 'hello' | 'can_you_hear_me' | null; repeats: number } {
+  const now = Date.now();
+  const recentUserTurns = session.transcripts
+    .filter((t) => t.role === 'user' && (now - t.timestamp.getTime()) <= 12000)
+    .slice(-5);
+
+  if (recentUserTurns.length < 2) {
+    return { suppress: false, phrase: null, repeats: 0 };
+  }
+
+  const mapped = recentUserTurns
+    .map((t) => ({
+      phrase: normalizeRepeatedInterruptionPhrase(t.text),
+      words: t.text.trim().split(/\s+/).filter(Boolean).length,
+    }))
+    .filter((item) => !!item.phrase && item.words <= 7) as Array<{
+      phrase: 'hello' | 'can_you_hear_me';
+      words: number;
+    }>;
+
+  if (mapped.length < 2) {
+    return { suppress: false, phrase: null, repeats: 0 };
+  }
+
+  const lastPhrase = mapped[mapped.length - 1].phrase;
+  const lastTwo = mapped.slice(-2);
+  const consecutiveMatch = lastTwo.length === 2 && lastTwo.every((m) => m.phrase === lastPhrase);
+  const repeatCount = mapped.filter((m) => m.phrase === lastPhrase).length;
+
+  if (consecutiveMatch && repeatCount >= 2) {
+    return { suppress: true, phrase: lastPhrase, repeats: repeatCount };
+  }
+
+  return { suppress: false, phrase: null, repeats: 0 };
 }
 
 /**
@@ -6052,7 +6125,9 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
             timestamp: new Date().toISOString(),
           };
 
-          session.detectedDisposition = 'qualified_lead';
+          if (!session.detectedDisposition) {
+            session.detectedDisposition = 'needs_review';
+          }
 
           if (session.openaiWs?.readyState === WebSocket.OPEN) {
             session.openaiWs.send(JSON.stringify({

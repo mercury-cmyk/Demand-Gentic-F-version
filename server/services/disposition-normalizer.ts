@@ -55,8 +55,7 @@ export function normalizeDisposition(rawDisposition: string | null | undefined):
   // Qualified outcomes - creates a lead
   if ([
     'qualified', 'lead', 'meeting_booked',
-    'transfer_to_human', 'transferred', 'positive_intent', 'expressed_interest',
-    'handoff', 'demo_scheduled', 'appointment_set'
+    'positive_intent', 'expressed_interest', 'demo_scheduled', 'appointment_set'
   ].includes(d)) {
     return 'qualified_lead';
   }
@@ -100,7 +99,8 @@ export function normalizeDisposition(rawDisposition: string | null | undefined):
   // Ambiguous outcomes - need human review (NOT defaulting to no_answer to preserve intent)
   // These indicate the call connected but outcome is unclear
   if ([
-    'needs_review', 'unclear', 'ambiguous', 'interrupted', 'call_dropped'
+    'needs_review', 'unclear', 'ambiguous', 'interrupted', 'call_dropped',
+    'transfer_to_human', 'transferred', 'handoff'
   ].includes(d)) {
     return 'needs_review';
   }

@@ -158,17 +158,56 @@ function analyzeTranscriptForQualification(
   userText: string;
   fullText: string;
 } {
+  const normalizeText = (value: string | null | undefined): string =>
+    String(value || '').replace(/\s+/g, ' ').trim();
+
+  const extractSummaryAndTranscript = (raw: string): { summaryText: string; transcriptText: string } => {
+    const text = String(raw || '');
+    const summaryMarker = '[Call Summary]';
+    const transcriptMarker = '[Call Transcript]';
+
+    if (!text.includes(summaryMarker)) {
+      return { summaryText: '', transcriptText: text };
+    }
+
+    const summaryStart = text.indexOf(summaryMarker) + summaryMarker.length;
+    const transcriptStart = text.indexOf(transcriptMarker);
+
+    if (transcriptStart > -1) {
+      return {
+        summaryText: normalizeText(text.slice(summaryStart, transcriptStart)),
+        transcriptText: normalizeText(text.slice(transcriptStart + transcriptMarker.length)),
+      };
+    }
+
+    return {
+      summaryText: normalizeText(text.slice(summaryStart)),
+      transcriptText: text,
+    };
+  };
+
   let parsedTranscript: any[] = [];
+  let summaryText = '';
   
   if (typeof transcript === 'string') {
+    const extracted = extractSummaryAndTranscript(transcript);
+    summaryText = extracted.summaryText;
+
     try {
-      parsedTranscript = JSON.parse(transcript);
+      parsedTranscript = JSON.parse(extracted.transcriptText);
     } catch (e) {
       // Plain text transcript
-      const fullText = transcript.toLowerCase();
+      const fullText = normalizeText(`${summaryText} ${extracted.transcriptText}`).toLowerCase();
+      const summaryLower = summaryText.toLowerCase();
+      const summaryHasContactSignals =
+        /contact response|contact signaled|contact showed|contact indicated|contact response included/.test(summaryLower);
+
+      const summaryTurnMatch = summaryLower.match(/\((\d+)\s*agent,\s*(\d+)\s*contact\)/);
+      const summaryContactTurns = summaryTurnMatch ? Number(summaryTurnMatch[2]) || 0 : 0;
+
       return {
-        hasUserResponse: fullText.includes('user:') || fullText.includes('contact:'),
-        userTurns: 0,
+        hasUserResponse: fullText.includes('user:') || fullText.includes('contact:') || summaryHasContactSignals || summaryContactTurns > 0,
+        userTurns: summaryContactTurns,
         positiveSignals: context.positiveKeywords.filter(k => fullText.includes(k.toLowerCase())),
         negativeSignals: context.negativeKeywords.filter(k => fullText.includes(k.toLowerCase())),
         isVoicemail: fullText.includes('voicemail') || fullText.includes('leave a message'),
@@ -198,8 +237,9 @@ function analyzeTranscriptForQualification(
 
   // Extract user messages
   const userMessages = parsedTranscript.filter(t => t.role === 'user');
-  const userText = userMessages.map(m => (m.message || m.text || '')).join(' ').toLowerCase();
-  const fullText = parsedTranscript.map(t => (t.message || t.text || '')).join(' ').toLowerCase();
+  const userText = normalizeText(userMessages.map(m => (m.message || m.text || '')).join(' ')).toLowerCase();
+  const fullText = normalizeText(`${summaryText} ${parsedTranscript.map(t => (t.message || t.text || '')).join(' ')}`).toLowerCase();
+  const summaryLower = summaryText.toLowerCase();
 
   // Detect voicemail/IVR — comprehensive list aligned with isVoicemailTranscript() in voice-dialer.ts
   const voicemailPatterns = [
@@ -262,7 +302,7 @@ function analyzeTranscriptForQualification(
   // Find positive signals
   const positiveSignals: string[] = [];
   for (const keyword of context.positiveKeywords) {
-    if (userText.includes(keyword.toLowerCase())) {
+    if (userText.includes(keyword.toLowerCase()) || summaryLower.includes(keyword.toLowerCase())) {
       positiveSignals.push(keyword);
     }
   }
@@ -270,7 +310,7 @@ function analyzeTranscriptForQualification(
   // Find negative signals
   const negativeSignals: string[] = [];
   for (const keyword of context.negativeKeywords) {
-    if (userText.includes(keyword.toLowerCase())) {
+    if (userText.includes(keyword.toLowerCase()) || summaryLower.includes(keyword.toLowerCase())) {
       negativeSignals.push(keyword);
     }
   }
@@ -282,11 +322,14 @@ function analyzeTranscriptForQualification(
   });
 
   // Determine if there's a real conversation
-  const hasRealConversation = meaningfulUserTurns.length >= 2 && !isVoicemail && !isIVR && !isGatekeeper;
+  const summaryTurnMatch = summaryLower.match(/\((\d+)\s*agent,\s*(\d+)\s*contact\)/);
+  const summaryContactTurns = summaryTurnMatch ? Number(summaryTurnMatch[2]) || 0 : 0;
+  const effectiveUserTurns = Math.max(meaningfulUserTurns.length, summaryContactTurns);
+  const hasRealConversation = effectiveUserTurns >= 2 && !isVoicemail && !isIVR && !isGatekeeper;
 
   return {
-    hasUserResponse: userMessages.length > 0,
-    userTurns: meaningfulUserTurns.length,
+    hasUserResponse: userMessages.length > 0 || summaryContactTurns > 0,
+    userTurns: effectiveUserTurns,
     positiveSignals,
     negativeSignals,
     isVoicemail,

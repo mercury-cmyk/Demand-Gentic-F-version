@@ -42,6 +42,7 @@ import {
   buildCampaignContextSection,
   buildContactContextSection,
 } from "./foundation-capabilities";
+import { guardQualifiedLeadDisposition } from "./disposition-engagement-guard";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -242,7 +243,7 @@ const DISPOSITION_FUNCTION_TOOLS = [
         disposition: {
           type: "string",
           enum: ["qualified_lead", "not_interested", "do_not_call", "voicemail", "no_answer", "invalid_data", "callback_requested", "needs_review"],
-          description: "The disposition code for this call. qualified_lead: prospect expressed interest and qualifies. callback_requested: prospect asked for a callback / better time. needs_review: ambiguous outcome or incomplete flow (e.g., interest detected but email/time not confirmed). not_interested: prospect declined. do_not_call: prospect requested to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: wrong number or disconnected."
+          description: "The disposition code for this call. qualified_lead: use only when there is real contextual engagement and clear interest in next steps (not transfer/gatekeeper/screener-only chatter). callback_requested: prospect asked for a callback / better time. needs_review: ambiguous outcome or incomplete flow (e.g., contact reached but context engagement incomplete). not_interested: prospect declined. do_not_call: prospect requested to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no meaningful human response. invalid_data: wrong number or disconnected."
         },
         confidence: {
           type: "number",
@@ -1911,9 +1912,29 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
     console.log(`${LOG_PREFIX} Function call: ${name}`, args);
 
     switch (name) {
-      case "submit_disposition":
-        session.detectedDisposition = args.disposition as DispositionCode;
-        console.log(`${LOG_PREFIX} Disposition detected: ${args.disposition} (confidence: ${args.confidence})`);
+      case "submit_disposition": {
+        const guarded = guardQualifiedLeadDisposition(
+          args.disposition as DispositionCode,
+          session.transcripts
+        );
+        const finalDisposition = guarded.disposition;
+
+        if (guarded.reason === "screener_without_context") {
+          console.warn(
+            `${LOG_PREFIX} Disposition safeguard: downgraded qualified_lead -> no_answer (screener detected without contextual engagement)`
+          );
+        } else if (guarded.reason === "insufficient_contextual_engagement") {
+          console.warn(
+            `${LOG_PREFIX} Disposition safeguard: downgraded qualified_lead -> needs_review (insufficient contextual engagement)`
+          );
+        }
+
+        session.detectedDisposition = finalDisposition;
+        console.log(
+          `${LOG_PREFIX} Disposition detected: ${args.disposition}${
+            finalDisposition !== args.disposition ? ` -> ${finalDisposition}` : ""
+          } (confidence: ${args.confidence})`
+        );
         
         if (session.openaiWs?.readyState === WebSocket.OPEN) {
           session.openaiWs.send(JSON.stringify({
@@ -1927,10 +1948,11 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
           session.openaiWs.send(JSON.stringify({ type: "response.create" }));
         }
         
-        if (args.disposition === 'do_not_call' || args.disposition === 'not_interested') {
+        if (finalDisposition === 'do_not_call' || finalDisposition === 'not_interested') {
           setTimeout(() => endCall(session.callId, 'completed'), 5000);
         }
         break;
+      }
 
       case "submit_call_summary": {
         const summary = normalizeCallSummary(args);
@@ -1972,7 +1994,9 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
 
       case "transfer_to_human":
         console.log(`${LOG_PREFIX} Transfer to human requested: ${args.reason}`);
-        session.detectedDisposition = 'qualified_lead';
+        if (!session.detectedDisposition) {
+          session.detectedDisposition = 'needs_review';
+        }
         if (session.openaiWs?.readyState === WebSocket.OPEN) {
           session.openaiWs.send(JSON.stringify({
             type: "conversation.item.create",
@@ -2667,12 +2691,13 @@ If the person expresses discomfort or asks to stop:
 
 ## submit_disposition
 Call this when you determine the call outcome. REQUIRED at end of every call.
-- qualified_lead: Prospect expressed genuine interest, asked relevant questions, or wants more info
+- qualified_lead: ONLY when there was real contextual engagement (beyond identity/transfer chatter) and clear prospect interest in next steps
 - not_interested: Prospect politely declined
 - do_not_call: Prospect explicitly asked not to be called again
 - voicemail: Reached voicemail or answering machine
-- no_answer: Call connected but no meaningful human interaction
+- no_answer: Call connected but no meaningful human interaction (including screener/transfer-only calls)
 - callback_requested: Prospect asked to be called back
+- needs_review: Ambiguous or partial calls (e.g., connected to contact but context discussion never happened)
 
 ## submit_call_summary
 Call this after submit_disposition when a human conversation occurred.

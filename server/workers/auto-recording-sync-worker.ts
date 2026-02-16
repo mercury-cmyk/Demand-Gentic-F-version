@@ -9,6 +9,7 @@ import { submitStructuredTranscription } from '../services/deepgram-postcall-tra
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
 import { fetchTelnyxRecording } from '../services/telnyx-recordings';
+import { buildPostCallTranscriptWithSummary } from '../services/post-call-transcript-summary';
 
 // Lazy Redis connection - only connect when worker is actually used
 let connection: Redis | null = null;
@@ -411,11 +412,20 @@ export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJob
         return { success: true, transcriptionFailed: true };
       }
 
+      const transcriptWithSummary = buildPostCallTranscriptWithSummary(
+        transcriptionResult.transcript,
+        (transcriptionResult.transcriptTurns || []).map((turn: any) => ({
+          role: turn.role === 'agent' ? 'agent' : 'contact',
+          text: String(turn.text || ''),
+          timeOffset: typeof turn.timeOffset === 'number' ? turn.timeOffset : undefined,
+        }))
+      );
+
       // Step 3: Save transcript and structured transcript
       if (leadId) {
         await db.update(leads)
           .set({
-            transcript: transcriptionResult.transcript,
+            transcript: transcriptWithSummary,
             structuredTranscript: transcriptionResult.structuredTranscript,
             transcriptionStatus: 'completed',
             recordingStatus: 'completed',
@@ -424,7 +434,7 @@ export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJob
       }
 
       if (callAttemptId && transcriptionResult.transcript?.trim()) {
-        const transcriptText = transcriptionResult.transcript.trim();
+        const transcriptText = transcriptWithSummary.trim();
         
         if (callAttemptId.startsWith('test-attempt-')) {
           const testCallId = callAttemptId.replace('test-attempt-', '');
@@ -482,7 +492,8 @@ export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJob
 
     autoRecordingSyncWorker.on('error', (err) => {
       // Suppress Redis connection errors - they're expected when Redis is unavailable
-      if (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.message?.includes('ECONNREFUSED') || err.message?.includes('ETIMEDOUT')) {
+      const errorCode = (err as any)?.code;
+      if (errorCode === 'ECONNREFUSED' || errorCode === 'ETIMEDOUT' || err.message?.includes('ECONNREFUSED') || err.message?.includes('ETIMEDOUT')) {
         return; // Silent - Redis connection issues are handled with reconnection
       }
       console.error('[AutoRecordingSyncWorker] Worker error:', err);
