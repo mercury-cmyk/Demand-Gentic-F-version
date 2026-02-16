@@ -733,17 +733,22 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       AND cq.status = 'queued'
       AND (cq.next_attempt_at IS NULL OR cq.next_attempt_at <= NOW())
       AND (c.direct_phone_e164 IS NOT NULL OR c.mobile_phone_e164 IS NOT NULL)
-      -- Exclude contacts already called today (Telnyx D66 daily limit protection)
+      -- Exclude contacts already called today (any agent type - prevents duplicate calls)
       -- Match by contact_id first (reliable), then by phone number (catches manual imports)
       AND NOT EXISTS (
         SELECT 1 FROM call_sessions cs 
         WHERE cs.created_at >= CURRENT_DATE
-          AND cs.agent_type = 'ai'
           AND (
             cs.contact_id = cq.contact_id
             OR cs.to_number_e164 = c.direct_phone_e164 
             OR cs.to_number_e164 = c.mobile_phone_e164
           )
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM dialer_call_attempts dca
+        WHERE dca.created_at >= CURRENT_DATE
+          AND dca.contact_id = cq.contact_id
+          AND dca.campaign_id = ${campaignId}
       )
     ORDER BY within_hours DESC, cq.ai_priority_score DESC NULLS LAST, phone_priority ASC, cq.priority DESC, cq.created_at ASC
     LIMIT ${limit * 3}
