@@ -207,6 +207,11 @@ interface DeepReanalysisSummary {
     retriesScheduled: number;
     pushedToClient: number;
   };
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  snapshotBefore?: string;
+  stagedFastPathCount?: number;
+  deepCacheHits?: number;
 }
 
 interface DispositionContact {
@@ -475,13 +480,16 @@ export default function DispositionReanalysisPage() {
   // ==================== MUTATIONS ====================
 
   // Build filter body from current state
-  const buildFilterBody = useCallback((limit: number, offset: number) => {
+  const buildFilterBody = useCallback((limit: number, offset: number, cursor?: string | null, snapshotBefore?: string) => {
     const body: any = {
       hasTranscript: true,
       limit,
       offset,
       agentType: agentTypeFilter,
+      skipDeepForObvious: true,
     };
+    if (cursor) body.cursor = cursor;
+    if (snapshotBefore) body.snapshotBefore = snapshotBefore;
     if (campaignId) body.campaignId = campaignId;
     if (dispositionFilter.length > 0) body.dispositions = dispositionFilter;
     if (dateFrom) body.dateFrom = dateFrom;
@@ -518,34 +526,53 @@ export default function DispositionReanalysisPage() {
         retriesScheduled: a.actionsSummary.retriesScheduled + b.actionsSummary.retriesScheduled,
         pushedToClient: a.actionsSummary.pushedToClient + b.actionsSummary.pushedToClient,
       },
+      hasMore: b.hasMore,
+      nextCursor: b.nextCursor,
+      snapshotBefore: a.snapshotBefore || b.snapshotBefore,
+      stagedFastPathCount: (a.stagedFastPathCount || 0) + (b.stagedFastPathCount || 0),
+      deepCacheHits: (a.deepCacheHits || 0) + (b.deepCacheHits || 0),
     };
   }, []);
+
+  const runBatchedDeepSweep = useCallback(async (
+    endpoint: '/api/disposition-reanalysis/deep/preview' | '/api/disposition-reanalysis/deep/apply',
+    phaseLabel: string,
+    round: number,
+  ): Promise<DeepReanalysisSummary> => {
+    const chunkSize = parseInt(batchLimit) || 100;
+    let offset = 0;
+    let cursor: string | null = null;
+    let snapshotBefore: string | undefined;
+    let merged: DeepReanalysisSummary | null = null;
+
+    while (true) {
+      setBatchProgress({ current: offset, total: offset + chunkSize, phase: `${phaseLabel} (Round ${round})` });
+      const body = buildFilterBody(chunkSize, offset, cursor, snapshotBefore);
+      const res = await apiRequest('POST', endpoint, body, { timeout: 600000 });
+      const batch = await res.json() as DeepReanalysisSummary;
+
+      if (!snapshotBefore && batch.snapshotBefore) {
+        snapshotBefore = batch.snapshotBefore;
+      }
+
+      merged = merged ? mergeSummaries(merged, batch) : batch;
+      setBatchProgress({ current: merged.totalAnalyzed, total: merged.totalAnalyzed, phase: `${phaseLabel} (Round ${round})` });
+
+      if (!batch.hasMore || !batch.nextCursor) break;
+      cursor = batch.nextCursor;
+      offset += chunkSize;
+    }
+
+    return merged!;
+  }, [batchLimit, buildFilterBody, mergeSummaries]);
 
   // Deep Preview (dry-run) — auto-batches through all matching calls
   const previewMutation = useMutation({
     mutationFn: async () => {
-      const chunkSize = parseInt(batchLimit) || 100;
-      let offset = 0;
-      let merged: DeepReanalysisSummary | null = null;
-
-      // Loop until a batch returns fewer results than the chunk size
-      while (true) {
-        setBatchProgress({ current: offset, total: offset + chunkSize, phase: 'Previewing' });
-        const body = buildFilterBody(chunkSize, offset);
-        const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/preview', body, { timeout: 600000 });
-        const batch = await res.json() as DeepReanalysisSummary;
-
-        merged = merged ? mergeSummaries(merged, batch) : batch;
-        // Update progress with running total
-        setBatchProgress({ current: merged.totalAnalyzed, total: merged.totalAnalyzed, phase: 'Previewing' });
-
-        // Stop if this batch returned fewer calls than requested (no more data)
-        if (batch.totalAnalyzed < chunkSize) break;
-        offset += chunkSize;
-      }
+      const merged = await runBatchedDeepSweep('/api/disposition-reanalysis/deep/preview', 'Previewing', 1);
 
       setBatchProgress(null);
-      return merged!;
+      return merged;
     },
     onSuccess: (data) => {
       setPreviewResult(data);
@@ -560,31 +587,109 @@ export default function DispositionReanalysisPage() {
 
   // Deep Apply — auto-batches through all matching calls
   const applyMutation = useMutation({
-    mutationFn: async () => {
-      const chunkSize = parseInt(batchLimit) || 100;
-      let offset = 0;
-      let merged: DeepReanalysisSummary | null = null;
+    mutationFn: async (): Promise<{ summary: DeepReanalysisSummary; roundsRun: number; remainingIssues: number; stoppedReason: string }> => {
+      const maxRounds = 6;
+      let roundsRun = 0;
+      let remainingIssues = 0;
+      let stoppedReason = 'clean';
+      let lastApply: DeepReanalysisSummary | null = null;
 
-      while (true) {
-        setBatchProgress({ current: offset, total: offset + chunkSize, phase: 'Applying' });
-        const body = buildFilterBody(chunkSize, offset);
-        const res = await apiRequest('POST', '/api/disposition-reanalysis/deep/apply', body, { timeout: 600000 });
-        const batch = await res.json() as DeepReanalysisSummary;
+      const cumulativeActions = {
+        newLeadsCreated: 0,
+        leadsRemovedFromCampaign: 0,
+        movedToQA: 0,
+        movedToNeedsReview: 0,
+        retriesScheduled: 0,
+        pushedToClient: 0,
+      };
+      let cumulativeChanged = 0;
+      let cumulativeErrors = 0;
 
-        merged = merged ? mergeSummaries(merged, batch) : batch;
-        setBatchProgress({ current: merged.totalAnalyzed, total: merged.totalAnalyzed, phase: 'Applying' });
+      for (let round = 1; round <= maxRounds; round++) {
+        roundsRun = round;
 
-        if (batch.totalAnalyzed < chunkSize) break;
-        offset += chunkSize;
+        const applySummary = await runBatchedDeepSweep('/api/disposition-reanalysis/deep/apply', 'Applying', round);
+        lastApply = applySummary;
+
+        cumulativeChanged += applySummary.totalChanged;
+        cumulativeErrors += applySummary.totalErrors;
+        cumulativeActions.newLeadsCreated += applySummary.actionsSummary.newLeadsCreated;
+        cumulativeActions.leadsRemovedFromCampaign += applySummary.actionsSummary.leadsRemovedFromCampaign;
+        cumulativeActions.movedToQA += applySummary.actionsSummary.movedToQA;
+        cumulativeActions.movedToNeedsReview += applySummary.actionsSummary.movedToNeedsReview;
+        cumulativeActions.retriesScheduled += applySummary.actionsSummary.retriesScheduled;
+        cumulativeActions.pushedToClient += applySummary.actionsSummary.pushedToClient;
+
+        const verifySummary = await runBatchedDeepSweep('/api/disposition-reanalysis/deep/preview', 'Verifying', round);
+        remainingIssues = verifySummary.totalShouldChange;
+
+        if (remainingIssues <= 0) {
+          stoppedReason = 'clean';
+          break;
+        }
+
+        if (applySummary.totalChanged <= 0) {
+          stoppedReason = 'no_progress';
+          break;
+        }
+
+        if (round === maxRounds) {
+          stoppedReason = 'max_rounds';
+        }
       }
 
       setBatchProgress(null);
-      return merged!;
+
+      const fallbackSummary: DeepReanalysisSummary = lastApply || {
+        totalAnalyzed: 0,
+        totalShouldChange: 0,
+        totalChanged: 0,
+        totalErrors: 0,
+        dryRun: false,
+        avgConfidence: 0,
+        avgAgentScore: 0,
+        avgCallQuality: 0,
+        breakdown: [],
+        agentBehaviorSummary: {
+          avgEngagement: 0,
+          avgEmpathy: 0,
+          avgObjectionHandling: 0,
+          avgClosing: 0,
+          avgQualification: 0,
+          avgScriptAdherence: 0,
+          topStrengths: [],
+          topWeaknesses: [],
+        },
+        callQualitySummary: {
+          avgCampaignAlignment: 0,
+          avgTalkingPointsCoverage: 0,
+          topMissedTalkingPoints: [],
+          identityConfirmedRate: 0,
+          qualificationMetRate: 0,
+        },
+        calls: [],
+        actionsSummary: cumulativeActions,
+      };
+
+      fallbackSummary.dryRun = false;
+      fallbackSummary.totalChanged = cumulativeChanged;
+      fallbackSummary.totalErrors = cumulativeErrors;
+      fallbackSummary.actionsSummary = cumulativeActions;
+
+      return {
+        summary: fallbackSummary,
+        roundsRun,
+        remainingIssues,
+        stoppedReason,
+      };
     },
     onSuccess: (data) => {
-      setPreviewResult(data);
+      setPreviewResult(data.summary);
       queryClient.invalidateQueries({ queryKey: ['/api/disposition-reanalysis/stats'] });
-      toast({ title: 'Changes Applied', description: `Updated ${data.totalChanged} dispositions across all batches. ${data.totalErrors} errors.` });
+      toast({
+        title: data.remainingIssues === 0 ? 'All Problematic Dispositions Processed' : 'Apply Completed With Remaining Issues',
+        description: `Rounds: ${data.roundsRun}. Updated: ${data.summary.totalChanged}. Remaining actionable issues: ${data.remainingIssues}. Stop reason: ${data.stoppedReason}.`,
+      });
     },
     onError: (err: any) => {
       setBatchProgress(null);
@@ -1158,7 +1263,9 @@ export default function DispositionReanalysisPage() {
                   ) : (
                     <Play className="mr-2 h-4 w-4" />
                   )}
-                  {applyMutation.isPending ? `Applying (${batchProgress?.current || 0} calls)...` : 'Apply All Changes'}
+                  {applyMutation.isPending
+                    ? `${batchProgress?.phase || 'Applying'} (${batchProgress?.current || 0} calls)...`
+                    : 'Apply Until Stable'}
                 </Button>
               </div>
             </CardContent>

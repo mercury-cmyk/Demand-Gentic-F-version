@@ -25,6 +25,7 @@ import {
   Sparkles,
   AlertTriangle,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -271,6 +272,14 @@ export default function AgentPromptsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => (window.location.href = '/prompt-management')}
+          >
+            <ExternalLink className="h-4 w-4 mr-2" />
+            Edit Core Prompts
+          </Button>
           <Button
             variant="outline"
             size="sm"

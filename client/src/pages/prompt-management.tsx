@@ -98,41 +98,43 @@ import {
 
 interface PromptListItem {
   id: string;
-  promptKey: string;
+  key?: string;
+  source?: string;
+  promptKey?: string;
   name: string;
   description: string | null;
-  promptType: string;
-  promptScope: string;
+  promptType?: string;
+  promptScope?: string;
   agentType: string | null;
   category: string | null;
   isActive: boolean;
   version: number;
   updatedAt: string;
-  updatedByName: string | null;
+  updatedByName?: string | null;
 }
 
 interface PromptDetail extends PromptListItem {
   content: string;
-  defaultContent: string;
-  isLocked: boolean;
+  defaultContent?: string;
+  isLocked?: boolean;
   priority: number;
   tags: string[];
-  sourceFile: string | null;
-  sourceLine: number | null;
-  sourceExport: string | null;
+  sourceFile?: string | null;
+  sourceLine?: number | null;
+  sourceExport?: string | null;
   createdAt: string;
-  createdByName: string | null;
+  createdByName?: string | null;
 }
 
 interface PromptVersionItem {
   id: string;
   version: number;
-  changeDescription: string;
+  changeDescription: string | null;
   changedAt: string;
-  changedByName: string | null;
-  addedLines: number;
-  removedLines: number;
-  modifiedLines: number;
+  changedByName?: string | null;
+  addedLines?: number | null;
+  removedLines?: number | null;
+  modifiedLines?: number | null;
 }
 
 interface PromptVersionDetail extends PromptVersionItem {
@@ -227,6 +229,108 @@ export default function PromptManagementPage() {
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterEntity, setFilterEntity] = useState<string>('');
 
+  const isFoundationalSyntheticId = (value?: string | null) =>
+    Boolean(value && value.startsWith('foundational_'));
+
+  const getPromptLookupUrl = (value: string) => {
+    if (isFoundationalSyntheticId(value)) {
+      const agentId = value.replace('foundational_', '');
+      return `/api/prompts/key/foundational.${agentId}`;
+    }
+    return `/api/prompts/${value}`;
+  };
+
+  const getPromptUpdateUrl = (value: string) => {
+    const sourceId = selectedPromptId || value;
+    if (sourceId && isFoundationalSyntheticId(sourceId)) {
+      const agentId = sourceId.replace('foundational_', '');
+      return `/api/prompts/key/foundational.${agentId}`;
+    }
+    if (isFoundationalSyntheticId(value)) {
+      const agentId = value.replace('foundational_', '');
+      return `/api/prompts/key/foundational.${agentId}`;
+    }
+    return `/api/prompts/${value}`;
+  };
+
+  const resolvePromptIdForMutation = async (): Promise<string> => {
+    const currentId = effectivePromptId;
+    if (!currentId) {
+      throw new Error('No prompt selected');
+    }
+
+    if (!isFoundationalSyntheticId(currentId)) {
+      return currentId;
+    }
+
+    const agentId = currentId.replace('foundational_', '');
+    const foundationalKey = `foundational.${agentId}`;
+
+    // First attempt: resolve directly by key
+    try {
+      const directLookupRes = await apiRequest('GET', `/api/prompts/key/${foundationalKey}`);
+      const directLookupData = await directLookupRes.json();
+      const directResolvedId = directLookupData?.prompt?.id || directLookupData?.id;
+      if (directResolvedId && !isFoundationalSyntheticId(directResolvedId)) {
+        return directResolvedId;
+      }
+    } catch {
+      // Continue to sync-based resolution
+    }
+
+    // Second attempt: sync then resolve
+    try {
+      await apiRequest('POST', '/api/prompts/sync', {});
+      const lookupRes = await apiRequest('GET', `/api/prompts/key/${foundationalKey}`);
+      const lookupData = await lookupRes.json();
+      const resolvedId = lookupData?.prompt?.id || lookupData?.id;
+      if (resolvedId && !isFoundationalSyntheticId(resolvedId)) {
+        return resolvedId;
+      }
+    } catch {
+      // Final fallback below
+    }
+
+    // Final fallback: use current ID and let server resolve/materialize it.
+    return currentId;
+  };
+
+  const parseApiResponse = async <T = any>(res: Response): Promise<T> => {
+    const text = await res.text();
+    if (!text) return {} as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`Non-JSON API response: ${text.slice(0, 120)}`);
+    }
+  };
+
+  const normalizePrompt = (prompt: any): PromptDetail => ({
+    ...prompt,
+    promptKey: prompt.promptKey ?? prompt.key,
+    promptType: prompt.promptType ?? prompt.metadata?.promptType ?? prompt.source ?? 'system',
+    promptScope: prompt.promptScope ?? prompt.metadata?.promptScope ?? prompt.source ?? 'global',
+    content: prompt.content ?? '',
+    defaultContent: prompt.defaultContent ?? prompt.content ?? '',
+    tags: prompt.tags ?? [],
+    sourceFile: prompt.sourceFile ?? prompt.metadata?.sourceFile ?? null,
+    sourceLine: prompt.sourceLine ?? prompt.metadata?.sourceLine ?? null,
+    sourceExport: prompt.sourceExport ?? prompt.metadata?.sourceExport ?? null,
+    isLocked:
+      (prompt.key && String(prompt.key).startsWith('foundational.')) ||
+      (prompt.source && String(prompt.source) === 'foundational')
+        ? false
+        : (prompt.isLocked ?? false),
+    createdAt: prompt.createdAt,
+    updatedAt: prompt.updatedAt,
+    updatedByName: prompt.updatedByName ?? null,
+    createdByName: prompt.createdByName ?? null,
+    description: prompt.description ?? null,
+    agentType: prompt.agentType ?? null,
+    category: prompt.category ?? 'system',
+    priority: prompt.priority ?? 0,
+  });
+
   // Only allow admins
   if (!user || user.role !== 'admin') {
     return <Redirect to="/" />;
@@ -266,7 +370,7 @@ export default function PromptManagementPage() {
       params.set('limit', '200');
       const res = await apiRequest('GET', `/api/prompts?${params}`);
       const data = await res.json();
-      return data.prompts || data;
+      return (data.prompts || data).map((p: any) => normalizePrompt(p));
     },
   });
 
@@ -328,39 +432,52 @@ export default function PromptManagementPage() {
   });
 
   const { data: selectedPrompt, isLoading: isLoadingPrompt } = useQuery<PromptDetail>({
-    queryKey: ['/api/prompts', selectedPromptId],
+    queryKey: ['/api/prompts', 'detail', selectedPromptId],
     queryFn: async () => {
-      const res = await apiRequest('GET', `/api/prompts/${selectedPromptId}`);
-      const data = await res.json();
-      return data.prompt || data;
+      const res = await apiRequest('GET', getPromptLookupUrl(selectedPromptId!));
+      const data = await parseApiResponse<any>(res);
+      return normalizePrompt(data.prompt || data);
     },
     enabled: !!selectedPromptId,
   });
 
+  const effectivePromptId = selectedPrompt?.id || selectedPromptId;
+
   const { data: versionHistory, isLoading: isLoadingVersions } = useQuery<PromptVersionItem[]>({
-    queryKey: ['/api/prompts', selectedPromptId, 'versions'],
+    queryKey: ['/api/prompts', effectivePromptId, 'versions'],
     queryFn: async () => {
-      const res = await apiRequest('GET', `/api/prompts/${selectedPromptId}/versions`);
-      const data = await res.json();
-      return data.versions || data;
+      const res = await apiRequest('GET', `/api/prompts/${effectivePromptId}/versions`);
+      const data = await parseApiResponse<any>(res);
+      return (data.versions || data).map((v: any) => ({
+        ...v,
+        changeDescription: v.changeDescription ?? null,
+        addedLines: v.addedLines ?? 0,
+        removedLines: v.removedLines ?? 0,
+        modifiedLines: v.modifiedLines ?? 0,
+      }));
     },
-    enabled: !!selectedPromptId && viewMode === 'history',
+    enabled: !!effectivePromptId && viewMode === 'history',
   });
 
   // ==================== MUTATIONS ====================
 
   const updateMutation = useMutation({
     mutationFn: async (data: { content: string; changeDescription: string }) => {
-      const res = await apiRequest('PUT', `/api/prompts/${selectedPromptId}`, data);
-      return res.json();
+      const promptId = await resolvePromptIdForMutation();
+      const updateUrl = getPromptUpdateUrl(promptId);
+      const res = await apiRequest('PUT', updateUrl, data);
+      const result = await parseApiResponse<any>(res);
+      return { result, promptId };
     },
-    onSuccess: (data) => {
+    onSuccess: ({ result, promptId }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/prompts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/prompts', 'detail', selectedPromptId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/prompts', promptId, 'versions'] });
       setViewMode('view');
       setChangeDescription('');
       toast({
         title: 'Prompt Updated',
-        description: `Version ${data.version} saved successfully.`,
+        description: `Version ${result.prompt?.version ?? result.version ?? 'updated'} saved successfully.`,
       });
     },
     onError: (error: Error) => {
@@ -374,11 +491,15 @@ export default function PromptManagementPage() {
 
   const resetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest('POST', `/api/prompts/${selectedPromptId}/reset`, {});
-      return res.json();
+      const promptId = await resolvePromptIdForMutation();
+      const res = await apiRequest('POST', `/api/prompts/${promptId}/revert`, {});
+      const result = await parseApiResponse<any>(res);
+      return { result, promptId };
     },
-    onSuccess: () => {
+    onSuccess: ({ promptId }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/prompts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/prompts', 'detail', selectedPromptId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/prompts', promptId, 'versions'] });
       toast({
         title: 'Reset Complete',
         description: 'Prompt has been reset to default content.',
@@ -395,15 +516,19 @@ export default function PromptManagementPage() {
 
   const revertMutation = useMutation({
     mutationFn: async (version: number) => {
-      const res = await apiRequest('POST', `/api/prompts/${selectedPromptId}/revert/${version}`, {});
-      return res.json();
+      const promptId = await resolvePromptIdForMutation();
+      const res = await apiRequest('POST', `/api/prompts/${promptId}/restore/${version}`, {});
+      const result = await parseApiResponse<any>(res);
+      return { result, promptId, restoredVersion: version };
     },
-    onSuccess: (data) => {
+    onSuccess: ({ promptId, restoredVersion }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/prompts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/prompts', 'detail', selectedPromptId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/prompts', promptId, 'versions'] });
       setSelectedVersion(null);
       toast({
         title: 'Reverted',
-        description: `Prompt reverted to version ${data.version - 1}.`,
+        description: `Prompt reverted to version ${restoredVersion}.`,
       });
     },
     onError: (error: Error) => {
@@ -424,7 +549,7 @@ export default function PromptManagementPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/prompts'] });
       toast({
         title: 'Sync Complete',
-        description: `${data.created} created, ${data.updated} updated, ${data.skipped} unchanged.`,
+        description: `${data.result?.created ?? 0} created, ${data.result?.updated ?? 0} updated, ${data.result?.unchanged ?? 0} unchanged.`,
       });
     },
     onError: (error: Error) => {
@@ -458,32 +583,23 @@ export default function PromptManagementPage() {
   };
 
   const handleSaveEdit = () => {
-    if (!changeDescription.trim()) {
-      toast({
-        title: 'Description Required',
-        description: 'Please describe what changed.',
-        variant: 'destructive',
-      });
-      return;
-    }
     updateMutation.mutate({
       content: editContent,
-      changeDescription: changeDescription.trim(),
+      changeDescription: changeDescription.trim() || 'Manual update via Prompt Management',
     });
   };
 
   const handleViewVersion = async (version: number) => {
-    try {
-      const res = await apiRequest('GET', `/api/prompts/${selectedPromptId}/versions/${version}`);
-      const versionDetail = await res.json();
-      setSelectedVersion(versionDetail);
-    } catch (error) {
+    const versionDetail = versionHistory?.find((v) => v.version === version) ?? null;
+    if (!versionDetail) {
       toast({
         title: 'Error',
         description: 'Failed to load version details.',
         variant: 'destructive',
       });
+      return;
     }
+    setSelectedVersion(versionDetail as PromptVersionDetail);
   };
 
   const handleCopyContent = () => {
@@ -532,7 +648,7 @@ export default function PromptManagementPage() {
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-sm truncate">{prompt.name}</div>
-                <div className="text-xs text-muted-foreground truncate">{prompt.promptKey}</div>
+                <div className="text-xs text-muted-foreground truncate">{prompt.promptKey || prompt.key}</div>
               </div>
               <div className="flex items-center gap-1">
                 {prompt.isActive ? (
@@ -598,6 +714,12 @@ export default function PromptManagementPage() {
       );
     }
 
+    const isCorePrompt =
+      selectedPrompt.source === 'foundational' ||
+      !!selectedPrompt.promptKey?.startsWith('foundational.') ||
+      !!selectedPrompt.tags?.includes('core-agent') ||
+      !!selectedPrompt.tags?.includes('foundational');
+
     return (
       <Card className="h-full flex flex-col">
         <CardHeader className="pb-3">
@@ -634,7 +756,11 @@ export default function PromptManagementPage() {
                     <History className="h-4 w-4 mr-1" />
                     History
                   </Button>
-                  <Button size="sm" onClick={handleStartEdit} disabled={selectedPrompt.isLocked}>
+                  <Button
+                    size="sm"
+                    onClick={handleStartEdit}
+                    disabled={Boolean((selectedPrompt.isLocked ?? false) && !isCorePrompt)}
+                  >
                     <Edit2 className="h-4 w-4 mr-1" />
                     Edit
                   </Button>
@@ -649,7 +775,7 @@ export default function PromptManagementPage() {
                   <Button
                     size="sm"
                     onClick={handleSaveEdit}
-                    disabled={updateMutation.isPending || !changeDescription.trim()}
+                    disabled={updateMutation.isPending}
                   >
                     {updateMutation.isPending ? (
                       <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -684,11 +810,16 @@ export default function PromptManagementPage() {
                 </Badge>
                 <Badge variant="outline">{selectedPrompt.promptType}</Badge>
                 <Badge variant="outline">{selectedPrompt.promptScope}</Badge>
-                {selectedPrompt.tags?.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="text-xs">
+                {selectedPrompt.tags?.map((tag, idx) => (
+                  <Badge key={`${tag}-${idx}`} variant="secondary" className="text-xs">
                     {tag}
                   </Badge>
                 ))}
+                {isCorePrompt && (
+                  <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+                    Core Prompt (Editable)
+                  </Badge>
+                )}
               </div>
 
               {/* Dependencies section */}
@@ -785,12 +916,12 @@ export default function PromptManagementPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="changeDescription">Change Description (required)</Label>
+                <Label htmlFor="changeDescription">Change Description (optional)</Label>
                 <Input
                   id="changeDescription"
                   value={changeDescription}
                   onChange={(e) => setChangeDescription(e.target.value)}
-                  placeholder="What changed? e.g., 'Updated compliance language'"
+                  placeholder="What changed? e.g., 'Updated compliance language' (optional)"
                 />
               </div>
               <div className="flex items-center gap-4 text-xs text-muted-foreground">

@@ -427,6 +427,93 @@ router.get('/key/:key(*)', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * PUT /api/prompts/key/:key
+ * Update a prompt by key (supports foundational.* keys safely)
+ */
+router.put('/key/:key(*)', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { key } = req.params;
+    const data = updatePromptSchema.parse(req.body);
+    const userId = (req as any).userId;
+
+    let prompt = await unifiedPromptService.getByKey(key);
+
+    // For foundational keys, ensure registry-backed materialization before update.
+    if ((!prompt || prompt.source === 'foundational') && key.startsWith('foundational.')) {
+      await unifiedPromptService.syncFoundationalPrompts(userId);
+      prompt = await unifiedPromptService.getByKey(key);
+    }
+
+    if (!prompt) {
+      return res.status(404).json({ success: false, error: 'Prompt not found' });
+    }
+
+    const updated = await unifiedPromptService.update(prompt.id, {
+      ...data,
+      userId,
+    });
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Prompt not found' });
+    }
+
+    res.json({ success: true, prompt: updated });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, error: 'Validation error', details: error.errors });
+    }
+    if (error.message?.includes('locked')) {
+      return res.status(403).json({ success: false, error: error.message });
+    }
+    console.error('[UnifiedPrompts] PUT /key/:key error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/prompts/key/:key
+ * Non-wildcard alias for key updates (avoids wildcard parsing edge-cases)
+ */
+router.put('/key/:key', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { key } = req.params;
+    const data = updatePromptSchema.parse(req.body);
+    const userId = (req as any).userId;
+
+    let prompt = await unifiedPromptService.getByKey(key);
+
+    if ((!prompt || prompt.source === 'foundational') && key.startsWith('foundational.')) {
+      await unifiedPromptService.syncFoundationalPrompts(userId);
+      prompt = await unifiedPromptService.getByKey(key);
+    }
+
+    if (!prompt) {
+      return res.status(404).json({ success: false, error: 'Prompt not found' });
+    }
+
+    const updated = await unifiedPromptService.update(prompt.id, {
+      ...data,
+      userId,
+    });
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Prompt not found' });
+    }
+
+    res.json({ success: true, prompt: updated });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, error: 'Validation error', details: error.errors });
+    }
+    if (error.message?.includes('locked')) {
+      return res.status(403).json({ success: false, error: error.message });
+    }
+    console.error('[UnifiedPrompts] PUT /key/:key error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ==================== GOVERNANCE & AUDIT ENDPOINTS (must be before /:id) ====================
 
 /**
@@ -585,6 +672,32 @@ router.put('/:id', requireRole('admin'), async (req: Request, res: Response) => 
     const { id } = req.params;
     const data = updatePromptSchema.parse(req.body);
     const userId = (req as any).userId;
+
+    // Backward-compatible fallback for synthetic foundational IDs.
+    if (id.startsWith('foundational_')) {
+      const key = `foundational.${id.replace('foundational_', '')}`;
+
+      let byKey = await unifiedPromptService.getByKey(key);
+      if (!byKey || byKey.source === 'foundational') {
+        await unifiedPromptService.syncFoundationalPrompts(userId);
+        byKey = await unifiedPromptService.getByKey(key);
+      }
+
+      if (!byKey) {
+        return res.status(404).json({ success: false, error: 'Prompt not found' });
+      }
+
+      const updatedByKey = await unifiedPromptService.update(byKey.id, {
+        ...data,
+        userId,
+      });
+
+      if (!updatedByKey) {
+        return res.status(404).json({ success: false, error: 'Prompt not found' });
+      }
+
+      return res.json({ success: true, prompt: updatedByKey });
+    }
 
     const prompt = await unifiedPromptService.update(id, {
       ...data,

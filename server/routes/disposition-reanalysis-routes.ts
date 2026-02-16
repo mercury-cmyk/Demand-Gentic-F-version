@@ -288,6 +288,9 @@ router.post("/deep/preview", requireAuth, async (req: Request, res: Response) =>
       confidenceThreshold: req.body.confidenceThreshold,
       minTurns: req.body.minTurns,
       maxTurns: req.body.maxTurns,
+      cursor: req.body.cursor,
+      snapshotBefore: req.body.snapshotBefore,
+      skipDeepForObvious: req.body.skipDeepForObvious ?? true,
       limit: Math.min(req.body.limit || 100, 500),
       offset: req.body.offset || 0,
     };
@@ -319,6 +322,9 @@ router.post("/deep/apply", requireAuth, async (req: Request, res: Response) => {
       confidenceThreshold: req.body.confidenceThreshold,
       minTurns: req.body.minTurns,
       maxTurns: req.body.maxTurns,
+      cursor: req.body.cursor,
+      snapshotBefore: req.body.snapshotBefore,
+      skipDeepForObvious: req.body.skipDeepForObvious ?? true,
       limit: Math.min(req.body.limit || 100, 300),
       offset: req.body.offset || 0,
     };

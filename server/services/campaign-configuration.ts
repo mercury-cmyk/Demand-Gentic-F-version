@@ -20,17 +20,17 @@ export const CAMPAIGN_CONFIGURATIONS: Record<string, CampaignConfiguration> = {
   content_syndication: {
     type: "content_syndication",
     label: "Content Syndication",
-    purpose: "Engage ideal buyers around a relevant topic, communicate value proposition contextually, assess interest and relevance, and obtain explicit consent for follow-up communication.",
+    purpose: "Run a consistent content-delivery call flow where the framework stays fixed but campaign context (asset/topic/value details) can change.",
     agentFocus: [
-      "Interest validation",
-      "Consent capture",
-      "Value-based framing"
+      "Fixed step-by-step call framework",
+      "Dynamic campaign context insertion",
+      "Email confirmation and explicit consent"
     ],
     successCriteria: [
-      "Explicit consent obtained",
-      "Interest validated"
+      "Prospect confirms contact email",
+      "Prospect gives permission to receive the asset"
     ],
-    openingMessageTemplate: "Hi {{contact.firstName}}, I'm specific_agent_name calling from {{company_name}}. I see you're the {{contact.jobTitle}} over at {{contact.companyName}} — that's actually why I'm reaching out. We just released a report on {{topic}} that's been really relevant for folks in your kind of role. I'd like to send it your way — is {{contact.email}} still the best address?"
+    openingMessageTemplate: "Hello, this is {{agent_name}} calling on behalf of {{company_name}}. How are you today? I believe I'm speaking with the {{contact.jobTitle}} at {{contact.companyName}}. I'm calling because we have a free {{asset_type}} called \"{{asset_title}}\" about {{asset_topic}}. It covers {{value_point_1}}, {{value_point_2}}, and more. I have your email as {{contact.email}}. Is that correct? Great — may I send you a copy?"
   },
   live_webinar: {
     type: "live_webinar",
@@ -223,7 +223,10 @@ export function generateAgentSystemPrompt(config: CampaignConfiguration, basePro
   } else if (config.type === 'executive_dinner' || config.type === 'leadership_forum') {
     prompt += `- Maintain a high level of professionalism and deference, appropriate for speaking with senior executives.\n`;
   } else if (config.type === 'content_syndication') {
-    prompt += `- Focus on relevance and value. Do not be pushy. If they are interested, confirm their email.\n`;
+    prompt += `- Keep this FIXED flow: (1) greeting, (2) role/company relevance check, (3) asset intro + 1-2 value points, (4) email confirmation, (5) explicit permission to send, (6) optional future-updates consent, (7) polite close.\n`;
+    prompt += `- The FRAMEWORK is fixed; only campaign context changes (asset title, topic, value points, organization details).\n`;
+    prompt += `- Keep discovery minimal. This is a content delivery conversation, not a deep qualification call.\n`;
+    prompt += `- Close politely and mention optional future updates only after consent is provided.\n`;
   } else if (config.type === 'lead_qualification') {
     prompt += `- Run structured discovery: one question at a time, listen fully, and capture specific evidence.\n`;
     prompt += `- Keep it conversational, not interrogative. Use short acknowledgments between questions.\n`;

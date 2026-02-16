@@ -5490,7 +5490,7 @@ RULES:
 
 Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
 
-${session.campaignType === 'content_syndication' ? `CONTENT CAMPAIGN RAPPORT: Before your pitch, briefly acknowledge the prospect's role and company to build rapport. Example: "I see you're the [Title] at [Company], that's actually why I'm reaching out..." — then bridge directly into the content insight and assume delivery by confirming the email. Do NOT ask "would you like to receive it?" — state the value and confirm the email.
+${session.campaignType === 'content_syndication' ? `CONTENT SYNDICATION FIXED FLOW: Keep this sequence locked on every call: (1) brief rapport, (2) role/company relevance, (3) asset intro + 1-2 value points, (4) confirm email, (5) ask explicit permission to send, (6) optional consent for future updates, (7) polite close. Only the campaign context changes (asset/topic/value details), not the flow.
 
 ` : ''}${session.campaignType === 'lead_qualification' ? `LEAD QUALIFICATION FLOW: This campaign is awareness + qualification. After this short value-first intro and after the prospect responds, ask a MAXIMUM of TWO concise discovery questions to confirm two things: (1) whether they see a gap in current demand gen results, and (2) whether they are open to a problem-first approach. Do not over-question. Then secure a concrete next step: short discovery call OR permission to send briefing with follow-up date.
 
@@ -5658,7 +5658,7 @@ CRITICAL: Within 2 SECONDS of this message, you MUST be speaking. Silence = FAIL
 
 Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
 
-${session.campaignType === 'content_syndication' ? `CONTENT CAMPAIGN RAPPORT: Before your pitch, briefly acknowledge the prospect's role and company to build rapport. Example: "I see you're the [Title] at [Company], that's actually why I'm reaching out..." — then bridge directly into the content insight and assume delivery by confirming the email. Do NOT ask "would you like to receive it?" — state the value and confirm the email.
+${session.campaignType === 'content_syndication' ? `CONTENT SYNDICATION FIXED FLOW: Keep this sequence locked on every call: (1) brief rapport, (2) role/company relevance, (3) asset intro + 1-2 value points, (4) confirm email, (5) ask explicit permission to send, (6) optional consent for future updates, (7) polite close. Only the campaign context changes (asset/topic/value details), not the flow.
 
 ` : ''}${session.campaignType === 'lead_qualification' ? `LEAD QUALIFICATION FLOW: This campaign is awareness + qualification. After this short value-first intro and after the prospect responds, ask a MAXIMUM of TWO concise discovery questions to confirm two things: (1) whether they see a gap in current demand gen results, and (2) whether they are open to a problem-first approach. Do not over-question. Then secure a concrete next step: short discovery call OR permission to send briefing with follow-up date.
 
@@ -9079,13 +9079,16 @@ If the person confirms they are ${fullName}:
 4. Close warmly — thank them for their time, say goodbye.
 
 ${campaignType === 'content_syndication' ? `**CONTENT CAMPAIGN RAPPORT STEP (MANDATORY):**
-After identity is confirmed and before your pitch, build brief rapport by acknowledging their role and company:
-- Reference their title (${contactJobTitle}) and company (${contactCompany}) naturally to show you know who they are
-- Example: "Oh great — I see you're the ${contactJobTitle} over at ${contactCompany}, that's actually why I'm reaching out..."
-- This should feel natural, not scripted — use it as a bridge INTO the value statement
-- Keep it to ONE sentence — acknowledge role/company → bridge to content relevance
-- Then deliver the content insight and assume delivery (confirm email)
-- Do NOT turn this into a discovery question — it's a statement of recognition, not an interrogation` : ''}
+After identity is confirmed, follow the fixed framework in this exact order:
+- Step 1: One-sentence rapport using role/company context
+- Step 2: One-sentence asset intro with 1-2 dynamic value points
+- Step 3: Confirm email accuracy
+- Step 4: Ask explicit permission to send the asset ("May I send you a copy?")
+- Step 5: Optionally ask consent for future related updates
+- Step 6: Close politely
+
+The framework order is fixed. Context (asset title/topic/value details) may change per campaign.
+Do NOT turn this into deep discovery.` : ''}
 ${campaignType === 'lead_qualification' ? `**LEAD QUALIFICATION STEP (MANDATORY):**
 After identity is confirmed and after your short value-first opening:
 - Ask qualification questions ONE AT A TIME in a conversational flow
@@ -9101,14 +9104,14 @@ After identity is confirmed and after your short value-first opening:
 - Lead with what's in it for THEM — not with who you are
 - Do NOT say "Great, thanks for confirming" or any other pleasantry before the value hook
 - Do NOT ask "do you have a moment?" or "would you be interested?"
-- NEVER frame your pitch as a yes/no question. Do NOT use phrases like "would you like to receive", "are you interested in", "wondered if you'd be open to", "want to receive a free copy?". Instead, state the value and ASSUME the next step (e.g. confirm email, propose a time).
+- Avoid generic/weak permission language (e.g., "are you interested?"). For content campaigns, use clear and specific consent language after value + email confirmation (e.g., "May I send you a copy?").
 - Keep the entire intro to ONE short sentence — name + org + value + ask
 - Use the campaign objective and talking points from the Campaign Context section below to frame your value proposition
 
 If permission is given for other campaign types:
 - Clearly and briefly state the call purpose aligned with the campaign objective
 - Deliver it concisely, naturally, and in a human-sounding tone — NOT scripted
-- For content/white paper campaigns: FIRST acknowledge their role and company briefly to build rapport (e.g. "I see you're the ${contactJobTitle} at ${contactCompany}, that's actually why I'm reaching out..."), THEN state one compelling insight from the content, THEN ASSUME interest and confirm the email address — do NOT ask "would you like to receive it?" or any yes/no permission question. Example: "I see you're heading up [role] at [company] — we just published a report showing [insight]. I'll send it over, is ${contactEmail} still the best address?"
+- For content/white paper campaigns: keep the same fixed scaffold every time; only swap context values (title/company, asset title, topic, and value points). Example: "I see you're heading up [role] at [company], that's why I reached out. We published [asset] on [topic], including [value point 1] and [value point 2]. I have ${contactEmail} as your email, is that right? Great — may I send you a copy?"
 - For meeting/appointment campaigns: ask ONE relevant question, then propose next steps
 - For lead qualification campaigns: keep discovery light (max two questions), confirm gap + interest, and end with a clear next step
 - Listen carefully and allow them to speak without interruption

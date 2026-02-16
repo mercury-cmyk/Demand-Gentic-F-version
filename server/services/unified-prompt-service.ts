@@ -226,7 +226,7 @@ function mapFoundationalToUnified(agentId: string, prompt: typeof FOUNDATIONAL_P
     version: parseInt(prompt.version.replace('v', '').split('.')[0]) || 1,
     versionHash: generateVersionHash(prompt.prompt),
     isActive: true,
-    isLocked: true, // Foundational prompts are locked by default
+    isLocked: false, // Foundational prompts are editable via registry-backed revisions
     priority: 100,
     tags: ['foundational', prompt.channel, category],
     metadata: {
@@ -265,6 +265,7 @@ class UnifiedPromptService {
     orderDir?: 'asc' | 'desc';
   } = {}): Promise<{ prompts: UnifiedPrompt[]; total: number }> {
     const prompts: UnifiedPrompt[] = [];
+    const registryByKey = new Map<string, PromptRegistry>();
     const { source, category, agentType, isActive, search, tags, department, promptFunction, purpose, aiModel, status, owner, entity, limit = 50, offset = 0, orderBy = 'priority', orderDir = 'desc' } = options;
 
     // 1. Fetch from prompt_registry
@@ -288,6 +289,8 @@ class UnifiedPromptService {
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(orderDir === 'desc' ? desc(promptRegistry[orderBy] as any) : asc(promptRegistry[orderBy] as any));
 
+      registryPrompts.forEach((p) => registryByKey.set(p.promptKey, p));
+
       prompts.push(...registryPrompts.map(mapRegistryToUnified));
     }
 
@@ -308,6 +311,11 @@ class UnifiedPromptService {
     // 3. Fetch foundational prompts (from code)
     if (!source || source === 'foundational') {
       for (const [agentId, prompt] of Object.entries(FOUNDATIONAL_PROMPTS)) {
+        const foundationalKey = `foundational.${agentId}`;
+        if (registryByKey.has(foundationalKey)) {
+          continue; // Prefer editable registry-backed foundational prompt and avoid duplicates
+        }
+
         const unified = mapFoundationalToUnified(agentId, prompt);
         if (category && unified.category !== category) continue;
         if (agentType && unified.agentType !== agentType) continue;
@@ -343,6 +351,11 @@ class UnifiedPromptService {
     // Check if it's a foundational prompt
     if (id.startsWith('foundational_')) {
       const agentId = id.replace('foundational_', '');
+      const foundationalKey = `foundational.${agentId}`;
+
+      const [registryPrompt] = await db.select().from(promptRegistry).where(eq(promptRegistry.promptKey, foundationalKey)).limit(1);
+      if (registryPrompt) return mapRegistryToUnified(registryPrompt);
+
       const prompt = FOUNDATIONAL_PROMPTS[agentId as keyof typeof FOUNDATIONAL_PROMPTS];
       if (prompt) return mapFoundationalToUnified(agentId, prompt);
     }
@@ -365,6 +378,9 @@ class UnifiedPromptService {
     // Check if it's a foundational prompt
     if (key.startsWith('foundational.')) {
       const agentId = key.replace('foundational.', '');
+      const [registryPrompt] = await db.select().from(promptRegistry).where(eq(promptRegistry.promptKey, key)).limit(1);
+      if (registryPrompt) return mapRegistryToUnified(registryPrompt);
+
       const prompt = FOUNDATIONAL_PROMPTS[agentId as keyof typeof FOUNDATIONAL_PROMPTS];
       if (prompt) return mapFoundationalToUnified(agentId, prompt);
     }
@@ -433,18 +449,63 @@ class UnifiedPromptService {
     changeDescription?: string;
     userId?: string;
   }): Promise<UnifiedPrompt | null> {
+    let targetId = id;
+
+    // If caller uses synthetic foundational ID, resolve to registry ID when materialized
+    if (id.startsWith('foundational_')) {
+      const agentId = id.replace('foundational_', '');
+      const foundationalKey = `foundational.${agentId}`;
+      const [existingRegistry] = await db.select().from(promptRegistry).where(eq(promptRegistry.promptKey, foundationalKey)).limit(1);
+      if (existingRegistry) {
+        targetId = existingRegistry.id;
+      }
+    }
+
     // Get current prompt
-    const current = await this.getById(id);
+    const current = await this.getById(targetId);
     if (!current) return null;
 
-    // Foundational prompts cannot be updated directly
+    // Foundational prompts are materialized into registry so edits get full revision history
     if (current.source === 'foundational') {
-      throw new Error('Foundational prompts cannot be updated. Create a registry override instead.');
+      const agentId = targetId.replace('foundational_', '');
+      const foundationalKey = `foundational.${agentId}`;
+      const foundational = FOUNDATIONAL_PROMPTS[agentId as keyof typeof FOUNDATIONAL_PROMPTS];
+
+      if (!foundational) {
+        throw new Error(`Unknown foundational prompt: ${agentId}`);
+      }
+
+      let [existingRegistry] = await db.select().from(promptRegistry).where(eq(promptRegistry.promptKey, foundationalKey)).limit(1);
+
+      if (!existingRegistry) {
+        const category = mapChannelToCategory(foundational.channel);
+        const [createdRegistry] = await db.insert(promptRegistry).values({
+          promptKey: foundationalKey,
+          name: foundational.name,
+          description: `Foundational prompt for ${foundational.channel} agent`,
+          promptType: 'foundational',
+          promptScope: 'global',
+          agentType: agentId,
+          category,
+          content: foundational.prompt,
+          defaultContent: foundational.prompt,
+          priority: 100,
+          tags: ['foundational', foundational.channel, category, 'core-agent'],
+          sourceFile: `server/services/agents/core-${agentId.replace('_', '-')}-agent.ts`,
+          sourceExport: `${agentId.toUpperCase()}_FOUNDATIONAL_PROMPT`,
+          createdBy: data.userId,
+          updatedBy: data.userId,
+        }).returning();
+
+        existingRegistry = createdRegistry;
+      }
+
+      return await this.update(existingRegistry.id, data);
     }
 
     if (current.source === 'registry') {
       // Get the full record
-      const [existing] = await db.select().from(promptRegistry).where(eq(promptRegistry.id, id)).limit(1);
+      const [existing] = await db.select().from(promptRegistry).where(eq(promptRegistry.id, targetId)).limit(1);
       if (!existing) return null;
 
       // Check if locked
@@ -455,7 +516,7 @@ class UnifiedPromptService {
       // Create version history if content changed
       if (data.content && data.content !== existing.content) {
         await db.insert(promptVersions).values({
-          promptId: id,
+          promptId: targetId,
           version: existing.version,
           content: existing.content,
           previousContent: existing.content,
@@ -477,7 +538,7 @@ class UnifiedPromptService {
           updatedBy: data.userId,
           updatedAt: new Date(),
         })
-        .where(eq(promptRegistry.id, id))
+        .where(eq(promptRegistry.id, targetId))
         .returning();
 
       return mapRegistryToUnified(updated);
@@ -485,13 +546,13 @@ class UnifiedPromptService {
 
     if (current.source === 'role_based') {
       // Get the full record
-      const [existing] = await db.select().from(agentPrompts).where(eq(agentPrompts.id, id)).limit(1);
+      const [existing] = await db.select().from(agentPrompts).where(eq(agentPrompts.id, targetId)).limit(1);
       if (!existing) return null;
 
       // Create history if content changed
       if (data.content && data.content !== existing.promptContent) {
         await db.insert(agentPromptHistory).values({
-          agentPromptId: id,
+          agentPromptId: targetId,
           previousContent: existing.promptContent,
           previousCapabilities: existing.capabilities as string[] | null,
           previousRestrictions: existing.restrictions as string[] | null,
@@ -513,7 +574,7 @@ class UnifiedPromptService {
           updatedBy: data.userId,
           updatedAt: new Date(),
         })
-        .where(eq(agentPrompts.id, id))
+        .where(eq(agentPrompts.id, targetId))
         .returning();
 
       return mapAgentPromptToUnified(updated);
@@ -566,20 +627,42 @@ class UnifiedPromptService {
    * Get version history for a prompt
    */
   async getVersionHistory(id: string): Promise<PromptVersion[]> {
-    const current = await this.getById(id);
+    let targetId = id;
+
+    if (id.startsWith('foundational_')) {
+      const agentId = id.replace('foundational_', '');
+      const foundationalKey = `foundational.${agentId}`;
+      const [registryPrompt] = await db.select().from(promptRegistry).where(eq(promptRegistry.promptKey, foundationalKey)).limit(1);
+      if (registryPrompt) {
+        targetId = registryPrompt.id;
+      }
+    }
+
+    const current = await this.getById(targetId);
     if (!current) return [];
+
+    if (current.source === 'foundational') {
+      const foundationalKey = current.key;
+      const [registryPrompt] = await db.select().from(promptRegistry).where(eq(promptRegistry.promptKey, foundationalKey)).limit(1);
+      if (!registryPrompt) return [];
+
+      return await db.select()
+        .from(promptVersions)
+        .where(eq(promptVersions.promptId, registryPrompt.id))
+        .orderBy(desc(promptVersions.version));
+    }
 
     if (current.source === 'registry') {
       return await db.select()
         .from(promptVersions)
-        .where(eq(promptVersions.promptId, id))
+        .where(eq(promptVersions.promptId, targetId))
         .orderBy(desc(promptVersions.version));
     }
 
     if (current.source === 'role_based') {
       const history = await db.select()
         .from(agentPromptHistory)
-        .where(eq(agentPromptHistory.agentPromptId, id))
+        .where(eq(agentPromptHistory.agentPromptId, targetId))
         .orderBy(desc(agentPromptHistory.version));
 
       // Map to PromptVersion format

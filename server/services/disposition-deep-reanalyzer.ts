@@ -11,6 +11,7 @@
  */
 
 import { db } from "../db";
+import { createHash } from "crypto";
 import {
   callSessions,
   dialerCallAttempts,
@@ -34,6 +35,83 @@ import {
 import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
 
 const LOG_PREFIX = "[DeepReanalyzer]";
+const DEEP_ANALYSIS_CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
+const DEEP_ANALYSIS_CACHE_MAX_ENTRIES = 5000;
+const DEEP_ANALYSIS_PROMPT_VERSION = "v2-phase2";
+
+type DeepAnalysisOutput = {
+  agentBehavior: AgentBehaviorScore;
+  callQuality: CallQualityAssessment;
+  dispositionAssessment: {
+    suggestedDisposition: string;
+    confidence: number;
+    reasoning: string;
+    positiveSignals: string[];
+    negativeSignals: string[];
+    shouldOverride: boolean;
+  };
+};
+
+type DeepAnalysisRunResult = {
+  output: DeepAnalysisOutput;
+  cacheHit: boolean;
+};
+
+const deepAnalysisCache = new Map<string, { createdAt: number; value: DeepAnalysisOutput }>();
+
+function pruneDeepAnalysisCache(now: number = Date.now()): void {
+  for (const [key, cached] of deepAnalysisCache) {
+    if (now - cached.createdAt > DEEP_ANALYSIS_CACHE_TTL_MS) {
+      deepAnalysisCache.delete(key);
+    }
+  }
+
+  if (deepAnalysisCache.size <= DEEP_ANALYSIS_CACHE_MAX_ENTRIES) return;
+
+  const sorted = [...deepAnalysisCache.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+  const toDelete = deepAnalysisCache.size - DEEP_ANALYSIS_CACHE_MAX_ENTRIES;
+  for (let i = 0; i < toDelete; i++) {
+    deepAnalysisCache.delete(sorted[i][0]);
+  }
+}
+
+function stableJson(value: any): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableJson(v)).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`).join(",")}}`;
+}
+
+function buildDeepAnalysisCacheKey(input: {
+  transcript: string;
+  campaignId?: string | null;
+  currentDisposition: string;
+  durationSec: number;
+  campaignObjective: string | null;
+  qaParameters: any;
+  talkingPoints: any;
+  campaignObjections: any;
+  campaignContext: CampaignQualificationContext | null;
+}): string {
+  const joined = [
+    DEEP_ANALYSIS_PROMPT_VERSION,
+    input.campaignId || "",
+    input.currentDisposition,
+    String(input.durationSec || 0),
+    input.campaignObjective || "",
+    input.transcript,
+    stableJson(input.qaParameters || null),
+    stableJson(input.talkingPoints || null),
+    stableJson(input.campaignObjections || null),
+    stableJson(input.campaignContext || null),
+  ].join("\n---\n");
+
+  return createHash("sha256").update(joined, "utf8").digest("hex");
+}
 
 // ==================== TYPES ====================
 
@@ -50,6 +128,9 @@ export interface DeepReanalysisFilter {
   confidenceThreshold?: number; // Only show results above this confidence
   minTurns?: number; // Minimum transcript turn count
   maxTurns?: number; // Maximum transcript turn count
+  cursor?: string; // Cursor for stable pagination under mutations
+  snapshotBefore?: string; // ISO timestamp high-watermark for consistent batches
+  skipDeepForObvious?: boolean; // Enable stage-1 deterministic triage
   limit?: number;
   offset?: number;
 }
@@ -161,6 +242,94 @@ export interface DeepReanalysisSummary {
     retriesScheduled: number;
     pushedToClient: number;
   };
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  snapshotBefore?: string;
+  stagedFastPathCount?: number;
+  deepCacheHits?: number;
+}
+
+interface DeepBatchCursor {
+  startedAt: string;
+  id: string;
+}
+
+function encodeDeepBatchCursor(cursor: DeepBatchCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64");
+}
+
+function decodeDeepBatchCursor(raw?: string): DeepBatchCursor | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+    if (parsed?.startedAt && parsed?.id) {
+      return {
+        startedAt: String(parsed.startedAt),
+        id: String(parsed.id),
+      };
+    }
+  } catch {
+    // Ignore malformed cursor
+  }
+  return null;
+}
+
+function getDispositionConfidenceThreshold(disposition: string): number {
+  switch (disposition) {
+    case "qualified_lead":
+      return 0.8;
+    case "callback_requested":
+      return 0.72;
+    case "not_interested":
+    case "do_not_call":
+      return 0.75;
+    case "voicemail":
+    case "no_answer":
+      return 0.65;
+    case "invalid_data":
+      return 0.7;
+    case "needs_review":
+      return 0.55;
+    default:
+      return 0.7;
+  }
+}
+
+function hasDispositionEvidence(
+  suggestedDisposition: string,
+  positiveSignals: string[],
+  negativeSignals: string[],
+  reasoning: string
+): boolean {
+  if (suggestedDisposition === "qualified_lead" || suggestedDisposition === "callback_requested") {
+    return positiveSignals.length > 0 || /meeting|demo|interested|follow\s*up|call\s*back/i.test(reasoning);
+  }
+  if (suggestedDisposition === "not_interested" || suggestedDisposition === "do_not_call") {
+    return negativeSignals.length > 0 || /not interested|don't call|remove|stop calling|declin/i.test(reasoning);
+  }
+  return positiveSignals.length + negativeSignals.length > 0 || reasoning.trim().length >= 24;
+}
+
+function shouldAutoApplyDispositionChange(assessment: {
+  suggestedDisposition: string;
+  confidence: number;
+  reasoning: string;
+  positiveSignals: string[];
+  negativeSignals: string[];
+  shouldOverride: boolean;
+}, currentDisposition: string): boolean {
+  if (assessment.suggestedDisposition === currentDisposition) return false;
+  if (!assessment.shouldOverride) return false;
+
+  const minConfidence = getDispositionConfidenceThreshold(assessment.suggestedDisposition);
+  if (assessment.confidence < minConfidence) return false;
+
+  return hasDispositionEvidence(
+    assessment.suggestedDisposition,
+    assessment.positiveSignals,
+    assessment.negativeSignals,
+    assessment.reasoning
+  );
 }
 
 // ==================== TRANSCRIPT PARSING ====================
@@ -247,6 +416,115 @@ function computeConversationMetrics(turns: { role: string; text: string }[]) {
   };
 }
 
+function runLightweightDispositionTriage(
+  transcript: any,
+  currentDisposition: string,
+  durationSec: number
+): {
+  suggestedDisposition: string;
+  confidence: number;
+  reasoning: string;
+  positiveSignals: string[];
+  negativeSignals: string[];
+  shouldOverride: boolean;
+} | null {
+  const turns = parseTranscriptToTurns(transcript);
+  const metrics = computeConversationMetrics(turns);
+  const transcriptStr = turns.map((t) => t.text).join(" ").toLowerCase();
+
+  if (!transcriptStr || transcriptStr.trim().length < 6) {
+    return {
+      suggestedDisposition: "no_answer",
+      confidence: 0.82,
+      reasoning: "No meaningful transcript content; no real conversation detected.",
+      positiveSignals: [],
+      negativeSignals: [],
+      shouldOverride: currentDisposition !== "no_answer",
+    };
+  }
+
+  const voicemailPattern = /leave (a )?message|after the beep|voicemail|mailbox|answering machine/i;
+  const callScreenPattern = /record your name|reason for call|call screening|call assist|before i try to connect|google recording|cannot take your call|who i'm speaking to|what you're calling about/i;
+  const dncPattern = /do not call|don't call|stop calling|remove me from (the )?list|unsubscribe/i;
+  const notInterestedPattern = /not interested|no thanks|we are all set|we're all set|not a fit|no need/i;
+  const callbackPattern = /call me back|call back|not a good time|i'?m busy|in a meeting|try again tomorrow|next week/i;
+
+  const positiveSignals: string[] = [];
+  const negativeSignals: string[] = [];
+
+  if (callbackPattern.test(transcriptStr)) positiveSignals.push("callback_requested_phrase");
+  if (notInterestedPattern.test(transcriptStr)) negativeSignals.push("not_interested_phrase");
+  if (dncPattern.test(transcriptStr)) negativeSignals.push("dnc_phrase");
+
+  if (voicemailPattern.test(transcriptStr) && !metrics.hasRealConversation) {
+    return {
+      suggestedDisposition: "voicemail",
+      confidence: 0.9,
+      reasoning: "Voicemail markers detected without a real two-way business conversation.",
+      positiveSignals,
+      negativeSignals,
+      shouldOverride: currentDisposition !== "voicemail",
+    };
+  }
+
+  if ((callScreenPattern.test(transcriptStr) || metrics.hasScreenerDetected) && !metrics.hasRealConversation) {
+    return {
+      suggestedDisposition: "no_answer",
+      confidence: 0.88,
+      reasoning: "Automated call screener detected and prospect never connected to a real conversation.",
+      positiveSignals,
+      negativeSignals,
+      shouldOverride: currentDisposition !== "no_answer",
+    };
+  }
+
+  if (dncPattern.test(transcriptStr)) {
+    return {
+      suggestedDisposition: "do_not_call",
+      confidence: 0.92,
+      reasoning: "Explicit do-not-call language detected from contact.",
+      positiveSignals,
+      negativeSignals,
+      shouldOverride: currentDisposition !== "do_not_call",
+    };
+  }
+
+  if (callbackPattern.test(transcriptStr) && !notInterestedPattern.test(transcriptStr)) {
+    return {
+      suggestedDisposition: "callback_requested",
+      confidence: 0.8,
+      reasoning: "Contact explicitly requested a callback or indicated timing conflict.",
+      positiveSignals,
+      negativeSignals,
+      shouldOverride: currentDisposition !== "callback_requested",
+    };
+  }
+
+  if (notInterestedPattern.test(transcriptStr) && metrics.hasRealConversation) {
+    return {
+      suggestedDisposition: "not_interested",
+      confidence: 0.84,
+      reasoning: "Explicit decline detected after contact engagement.",
+      positiveSignals,
+      negativeSignals,
+      shouldOverride: currentDisposition !== "not_interested",
+    };
+  }
+
+  if (!metrics.hasRealConversation && durationSec <= 20) {
+    return {
+      suggestedDisposition: "no_answer",
+      confidence: 0.75,
+      reasoning: "Short call with no real conversation indicates no-answer outcome.",
+      positiveSignals,
+      negativeSignals,
+      shouldOverride: currentDisposition !== "no_answer",
+    };
+  }
+
+  return null;
+}
+
 // ==================== DEEP AI ANALYSIS ====================
 
 /**
@@ -255,24 +533,14 @@ function computeConversationMetrics(turns: { role: string; text: string }[]) {
 async function runDeepAIAnalysis(
   transcript: any,
   campaignContext: CampaignQualificationContext | null,
+  campaignId: string | null,
   currentDisposition: string,
   durationSec: number,
   campaignObjective: string | null,
   qaParameters: any,
   talkingPoints: any,
   campaignObjections: any
-): Promise<{
-  agentBehavior: AgentBehaviorScore;
-  callQuality: CallQualityAssessment;
-  dispositionAssessment: {
-    suggestedDisposition: string;
-    confidence: number;
-    reasoning: string;
-    positiveSignals: string[];
-    negativeSignals: string[];
-    shouldOverride: boolean;
-  };
-}> {
+): Promise<DeepAnalysisRunResult> {
   // Parse transcript into structured turns
   const turns = parseTranscriptToTurns(transcript);
   const metrics = computeConversationMetrics(turns);
@@ -289,7 +557,7 @@ async function runDeepAIAnalysis(
   }
 
   if (!structuredTranscript || structuredTranscript.length < 20) {
-    return getDefaultDeepAnalysis(currentDisposition, durationSec);
+    return { output: getDefaultDeepAnalysis(currentDisposition, durationSec), cacheHit: false };
   }
 
   // Smart truncation: keep beginning + end (closing part is critical for disposition)
@@ -302,6 +570,27 @@ async function runDeepAIAnalysis(
       structuredTranscript.slice(0, keepStart) +
       "\n\n[... middle of conversation omitted for brevity ...]\n\n" +
       structuredTranscript.slice(-keepEnd);
+  }
+
+  const cacheKey = buildDeepAnalysisCacheKey({
+    transcript: finalTranscript,
+    campaignId,
+    currentDisposition,
+    durationSec,
+    campaignObjective,
+    qaParameters,
+    talkingPoints,
+    campaignObjections,
+    campaignContext,
+  });
+
+  const now = Date.now();
+  const cached = deepAnalysisCache.get(cacheKey);
+  if (cached && now - cached.createdAt <= DEEP_ANALYSIS_CACHE_TTL_MS) {
+    // LRU-ish refresh by reinsert
+    deepAnalysisCache.delete(cacheKey);
+    deepAnalysisCache.set(cacheKey, { createdAt: now, value: cached.value });
+    return { output: cached.value, cacheHit: true };
   }
 
   // Build talking points string
@@ -490,7 +779,7 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
     const confidence = Math.min(Math.max(parsed.dispositionAssessment?.confidence ?? 0.5, 0), 1);
     const shouldOverride = (parsed.dispositionAssessment?.shouldOverride ?? false) && confidence >= 0.5;
 
-    return {
+    const output: DeepAnalysisOutput = {
       agentBehavior: {
         engagementScore: clampScore(parsed.agentBehavior?.engagementScore),
         empathyScore: clampScore(parsed.agentBehavior?.empathyScore),
@@ -522,9 +811,14 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
         shouldOverride,
       },
     };
+
+    deepAnalysisCache.set(cacheKey, { createdAt: now, value: output });
+    pruneDeepAnalysisCache(now);
+
+    return { output, cacheHit: false };
   } catch (error: any) {
     console.error(`${LOG_PREFIX} AI analysis failed:`, error.message);
-    return getDefaultDeepAnalysis(currentDisposition, durationSec);
+    return { output: getDefaultDeepAnalysis(currentDisposition, durationSec), cacheHit: false };
   }
 }
 
@@ -534,7 +828,7 @@ function clampScore(val: any, defaultVal: number = 50): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-function getDefaultDeepAnalysis(currentDisposition: string, durationSec: number) {
+function getDefaultDeepAnalysis(currentDisposition: string, durationSec: number): DeepAnalysisOutput {
   return {
     agentBehavior: {
       engagementScore: 0,
@@ -687,6 +981,7 @@ export async function deepAnalyzeSingleCall(
   const deepAnalysis = await runDeepAIAnalysis(
     transcript,
     campaignCtx,
+    session.campaignId,
     currentDisp,
     session.durationSec || 0,
     campaignObjective,
@@ -714,15 +1009,15 @@ export async function deepAnalyzeSingleCall(
     campaignObjective,
     durationSec: session.durationSec || 0,
     currentDisposition: currentDisp,
-    suggestedDisposition: deepAnalysis.dispositionAssessment.suggestedDisposition,
-    confidence: deepAnalysis.dispositionAssessment.confidence,
-    reasoning: deepAnalysis.dispositionAssessment.reasoning,
-    positiveSignals: deepAnalysis.dispositionAssessment.positiveSignals,
-    negativeSignals: deepAnalysis.dispositionAssessment.negativeSignals,
-    shouldOverride: deepAnalysis.dispositionAssessment.shouldOverride,
+    suggestedDisposition: deepAnalysis.output.dispositionAssessment.suggestedDisposition,
+    confidence: deepAnalysis.output.dispositionAssessment.confidence,
+    reasoning: deepAnalysis.output.dispositionAssessment.reasoning,
+    positiveSignals: deepAnalysis.output.dispositionAssessment.positiveSignals,
+    negativeSignals: deepAnalysis.output.dispositionAssessment.negativeSignals,
+    shouldOverride: deepAnalysis.output.dispositionAssessment.shouldOverride,
     agentType: session.agentType,
-    agentBehavior: deepAnalysis.agentBehavior,
-    callQuality: deepAnalysis.callQuality,
+    agentBehavior: deepAnalysis.output.agentBehavior,
+    callQuality: deepAnalysis.output.callQuality,
     fullTranscript: transcript,
     transcriptPreview,
     recordingUrl: session.recordingUrl,
@@ -746,9 +1041,11 @@ export async function deepReanalyzeBatch(
   dryRun: boolean = true
 ): Promise<DeepReanalysisSummary> {
   const limit = Math.min(filters.limit || 50, 200);
-  const offset = filters.offset || 0;
+  const cursor = decodeDeepBatchCursor(filters.cursor);
+  const snapshotBefore = filters.snapshotBefore ? new Date(filters.snapshotBefore) : new Date();
+  const skipDeepForObvious = filters.skipDeepForObvious !== false;
 
-  console.log(`${LOG_PREFIX} Starting deep batch reanalysis. DryRun=${dryRun}, Limit=${limit}`);
+  console.log(`${LOG_PREFIX} Starting deep batch reanalysis. DryRun=${dryRun}, Limit=${limit}, Cursor=${cursor ? "yes" : "no"}, SnapshotBefore=${snapshotBefore.toISOString()}`);
 
   // Build conditions
   const conditions: any[] = [];
@@ -770,10 +1067,17 @@ export async function deepReanalyzeBatch(
   if (filters.agentType && filters.agentType !== "all") {
     conditions.push(eq(callSessions.agentType, filters.agentType));
   }
+  conditions.push(lte(callSessions.startedAt, snapshotBefore));
+  if (cursor) {
+    const cursorStartedAt = new Date(cursor.startedAt);
+    conditions.push(
+      sql`(${callSessions.startedAt} < ${cursorStartedAt} OR (${callSessions.startedAt} = ${cursorStartedAt} AND ${callSessions.id} < ${cursor.id}))`
+    );
+  }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : isNotNull(callSessions.aiTranscript);
 
-  let sessions = await db
+  const rawSessions = await db
     .select({
       id: callSessions.id,
       aiDisposition: callSessions.aiDisposition,
@@ -788,9 +1092,16 @@ export async function deepReanalyzeBatch(
     })
     .from(callSessions)
     .where(whereClause)
-    .orderBy(desc(callSessions.startedAt))
-    .limit(limit)
-    .offset(offset);
+    .orderBy(desc(callSessions.startedAt), desc(callSessions.id))
+    .limit(limit);
+
+  const hasMore = rawSessions.length === limit;
+  const lastSession = rawSessions.length > 0 ? rawSessions[rawSessions.length - 1] : null;
+  const nextCursor = hasMore && lastSession?.startedAt
+    ? encodeDeepBatchCursor({ startedAt: lastSession.startedAt.toISOString(), id: lastSession.id })
+    : null;
+
+  let sessions = rawSessions;
 
   console.log(`${LOG_PREFIX} Found ${sessions.length} calls to deep-analyze`);
 
@@ -798,8 +1109,7 @@ export async function deepReanalyzeBatch(
   if (filters.minTurns !== undefined || filters.maxTurns !== undefined) {
     sessions = sessions.filter((s) => {
       try {
-        const transcript = s.aiTranscript ? (typeof s.aiTranscript === "string" ? JSON.parse(s.aiTranscript) : s.aiTranscript) : [];
-        const turnCount = Array.isArray(transcript) ? transcript.length : 0;
+        const turnCount = parseTranscriptToTurns(s.aiTranscript).length;
         if (filters.minTurns !== undefined && turnCount < filters.minTurns) return false;
         if (filters.maxTurns !== undefined && turnCount > filters.maxTurns) return false;
         return true;
@@ -965,6 +1275,11 @@ export async function deepReanalyzeBatch(
       retriesScheduled: 0,
       pushedToClient: 0,
     },
+    hasMore,
+    nextCursor,
+    snapshotBefore: snapshotBefore.toISOString(),
+    stagedFastPathCount: 0,
+    deepCacheHits: 0,
   };
 
   const breakdownMap = new Map<string, { count: number; totalConf: number }>();
@@ -979,11 +1294,17 @@ export async function deepReanalyzeBatch(
   const missedTPFreq = new Map<string, number>();
   let analyzedWithScores = 0;
 
-  // Process sessions in parallel chunks — DeepSeek/Vertex can handle moderate concurrency
-  const CONCURRENCY = 5;
-  for (let chunkStart = 0; chunkStart < sessions.length; chunkStart += CONCURRENCY) {
-    const chunk = sessions.slice(chunkStart, chunkStart + CONCURRENCY);
-    console.log(`${LOG_PREFIX} Processing chunk ${Math.floor(chunkStart / CONCURRENCY) + 1}/${Math.ceil(sessions.length / CONCURRENCY)} (${chunk.length} calls, ${chunkStart + chunk.length}/${sessions.length} total)`);
+  // Process sessions in adaptive parallel chunks for better throughput under varying model latency.
+  const minConcurrency = 3;
+  const maxConcurrency = 12;
+  let concurrency = skipDeepForObvious ? 8 : 5;
+  let chunkStart = 0;
+  let chunkIndex = 0;
+  while (chunkStart < sessions.length) {
+    const chunk = sessions.slice(chunkStart, chunkStart + concurrency);
+    chunkIndex++;
+    const start = Date.now();
+    console.log(`${LOG_PREFIX} Processing chunk ${chunkIndex} (size=${chunk.length}, concurrency=${concurrency}, progress=${chunkStart + chunk.length}/${sessions.length})`);
 
     const chunkResults = await Promise.allSettled(chunk.map(async (session) => {
       const currentDisp = session.aiDisposition || "unknown";
@@ -996,10 +1317,57 @@ export async function deepReanalyzeBatch(
 
       const transcript = attempt?.fullTranscript || session.aiTranscript;
 
-      // Run deep AI analysis
-      const deepResult = await runDeepAIAnalysis(
+      // Stage-1 fast triage: skip deep model for obvious outcomes when enabled.
+      const lightweight = skipDeepForObvious
+        ? runLightweightDispositionTriage(transcript, currentDisp, session.durationSec || 0)
+        : null;
+
+      if (lightweight) {
+        const deepResult = {
+          agentBehavior: {
+            engagementScore: 0,
+            empathyScore: 0,
+            objectionHandlingScore: 0,
+            closingScore: 0,
+            qualificationScore: 0,
+            scriptAdherenceScore: 0,
+            overallScore: 0,
+            strengths: [],
+            weaknesses: [],
+            coachingNotes: "Stage-1 triage used (deep analysis skipped)",
+          },
+          callQuality: {
+            campaignAlignmentScore: 0,
+            talkingPointsCoverage: 0,
+            missedTalkingPoints: [],
+            objectionResponseQuality: "n/a",
+            sentimentProgression: "neutral",
+            identityConfirmed: false,
+            qualificationMet: false,
+            keyMoments: [],
+          },
+          dispositionAssessment: lightweight,
+        };
+
+        return {
+          session,
+          currentDisp,
+          campData,
+          attempt,
+          contactInfo,
+          leadInfo,
+          transcript,
+          deepResult,
+          fastPath: true,
+          cacheHit: false,
+        };
+      }
+
+      // Stage-2 deep AI analysis for ambiguous/high-value calls.
+      const deepAnalysis = await runDeepAIAnalysis(
         transcript,
         campData?.ctx || null,
+        session.campaignId,
         currentDisp,
         session.durationSec || 0,
         campData?.objective || null,
@@ -1008,7 +1376,18 @@ export async function deepReanalyzeBatch(
         campData?.objections || null
       );
 
-      return { session, currentDisp, campData, attempt, contactInfo, leadInfo, transcript, deepResult };
+      return {
+        session,
+        currentDisp,
+        campData,
+        attempt,
+        contactInfo,
+        leadInfo,
+        transcript,
+        deepResult: deepAnalysis.output,
+        fastPath: false,
+        cacheHit: deepAnalysis.cacheHit,
+      };
     }));
 
     for (const result of chunkResults) {
@@ -1020,7 +1399,14 @@ export async function deepReanalyzeBatch(
         continue;
       }
 
-      const { session, currentDisp, campData, attempt, contactInfo, leadInfo, transcript, deepResult } = result.value;
+      const { session, currentDisp, campData, attempt, contactInfo, leadInfo, transcript, deepResult, fastPath, cacheHit } = result.value;
+
+      if (fastPath) {
+        summary.stagedFastPathCount = (summary.stagedFastPathCount || 0) + 1;
+      }
+      if (cacheHit) {
+        summary.deepCacheHits = (summary.deepCacheHits || 0) + 1;
+      }
 
       // Filter by confidence threshold
       if (filters.confidenceThreshold &&
@@ -1099,9 +1485,13 @@ export async function deepReanalyzeBatch(
         }
       }
 
-      // Check for disposition change — count any call where AI suggests a different disposition
+      // Check for disposition change using per-disposition confidence gates.
       const dispositionDiffers = deepResult.dispositionAssessment.suggestedDisposition !== currentDisp;
-      if (dispositionDiffers) {
+      const isActionableByConfidence =
+        deepResult.dispositionAssessment.confidence >=
+        getDispositionConfidenceThreshold(deepResult.dispositionAssessment.suggestedDisposition);
+
+      if (dispositionDiffers && isActionableByConfidence) {
         summary.totalShouldChange++;
         const key = `${currentDisp} → ${deepResult.dispositionAssessment.suggestedDisposition}`;
         const existing = breakdownMap.get(key) || { count: 0, totalConf: 0 };
@@ -1109,8 +1499,8 @@ export async function deepReanalyzeBatch(
         existing.totalConf += deepResult.dispositionAssessment.confidence;
         breakdownMap.set(key, existing);
 
-        // Only apply DB changes when not dry-run AND AI explicitly flagged shouldOverride
-        if (!dryRun && deepResult.dispositionAssessment.shouldOverride) {
+        // Only apply DB changes when not dry-run and full gate passes.
+        if (!dryRun && shouldAutoApplyDispositionChange(deepResult.dispositionAssessment, currentDisp)) {
           const result = await applyDeepDispositionChange(
             session,
             attempt,
@@ -1135,6 +1525,23 @@ export async function deepReanalyzeBatch(
 
       summary.calls.push(callDetail);
     }
+
+    const elapsedMs = Date.now() - start;
+    const rejectedCount = chunkResults.filter((r) => r.status === "rejected").length;
+    const rejectionRate = chunkResults.length > 0 ? rejectedCount / chunkResults.length : 0;
+
+    // Adaptive tuning:
+    // - speed up when stable and fast
+    // - slow down when slow or failures increase (rate limits/network/model pressure)
+    if (rejectionRate >= 0.2 || elapsedMs > 30000) {
+      concurrency = Math.max(minConcurrency, concurrency - 2);
+    } else if (rejectionRate > 0 || elapsedMs > 18000) {
+      concurrency = Math.max(minConcurrency, concurrency - 1);
+    } else if (elapsedMs < 8000) {
+      concurrency = Math.min(maxConcurrency, concurrency + 1);
+    }
+
+    chunkStart += chunk.length;
   }
 
   // Compute averages
@@ -1175,7 +1582,9 @@ export async function deepReanalyzeBatch(
   }
   summary.breakdown.sort((a, b) => b.count - a.count);
 
-  console.log(`${LOG_PREFIX} Deep batch complete: Analyzed=${summary.totalAnalyzed}, ShouldChange=${summary.totalShouldChange}, Changed=${summary.totalChanged}`);
+  console.log(
+    `${LOG_PREFIX} Deep batch complete: Analyzed=${summary.totalAnalyzed}, ShouldChange=${summary.totalShouldChange}, Changed=${summary.totalChanged}, FastPath=${summary.stagedFastPathCount || 0}, CacheHits=${summary.deepCacheHits || 0}, HasMore=${summary.hasMore ? "yes" : "no"}`
+  );
   return summary;
 }
 

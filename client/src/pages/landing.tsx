@@ -288,14 +288,15 @@ export default function LandingPage() {
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
               The Problem Solvers.{" "}
               <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                Your Agentic Demand Partner.
+                Your Agentic Execution Partner.
               </span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              We are not just a platform — we are {TAGLINE.identity}.
-              {TAGLINE.full}: organization intelligence powers every agent,
-              every voice conversation, every piece of content, and every pipeline decision.
-              Truth, human-to-human connection, and empathy are never optional — they're the foundation.
+              We are not just a platform — we are {TAGLINE.identity}. Human-led strategy and
+              intelligence work as one foundation. From there, agentic execution activates every
+              conversation, content flow, and pipeline decision. Our generative AI is guided exclusively
+              by your brand, purpose-built for your organization, and fully customizable to your goals,
+              rules, and operating model.
             </p>
           </div>
 
@@ -309,14 +310,15 @@ export default function LandingPage() {
                   <Users className="h-7 w-7 text-white" />
                 </div>
                 <Badge className="mb-3 bg-violet-100 text-violet-700 border-none">The Problem Solvers</Badge>
-                <h3 className="text-xl font-bold mb-2">Human-Led Strategy</h3>
+                <h3 className="text-xl font-bold mb-2">Human-Led Strategy + Intelligence</h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  11+ years of front-line B2B demand experience. We lead with problem intelligence,
-                  solution mapping, and empathy — AI executes what humans architect.
+                  11+ years of front-line B2B demand expertise fused with organization intelligence.
+                  We combine strategic human judgment, problem mapping, and empathy into one operating core
+                  before any AI action begins.
                 </p>
                 <div className="p-3 rounded-xl bg-violet-50 border border-violet-100">
                   <p className="text-xs font-medium text-violet-900">
-                    "Truth, human connection, and empathy are never optional."
+                    "Human strategy and intelligence are one system — truth and empathy lead every move."
                   </p>
                 </div>
               </CardContent>
@@ -330,14 +332,15 @@ export default function LandingPage() {
                   <Brain className="h-7 w-7 text-white" />
                 </div>
                 <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">The Agentic Demand Council</Badge>
-                <h3 className="text-xl font-bold mb-2">Agentic Intelligence</h3>
+                <h3 className="text-xl font-bold mb-2">Agentic Execution</h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  Purpose-built agents powered by organization intelligence — reasoning first,
-                  compliance first, and never forgetting a single interaction at contact or account level.
+                  Purpose-built agents execute across voice, email, and workflows with reasoning-first,
+                  compliance-first behavior. Every interaction is coordinated with account and contact memory,
+                  so execution stays context-aware and precise.
                 </p>
                 <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
                   <p className="text-xs font-medium text-indigo-900">
-                    "No interaction happens without reasoning first."
+                    "Agentic execution starts with reasoning and ends with accountable outcomes."
                   </p>
                 </div>
               </CardContent>
@@ -351,14 +354,15 @@ export default function LandingPage() {
                   <Wand2 className="h-7 w-7 text-white" />
                 </div>
                 <Badge className="mb-3 bg-emerald-100 text-emerald-700 border-none">Content Studio</Badge>
-                <h3 className="text-xl font-bold mb-2">Generative Content</h3>
+                <h3 className="text-xl font-bold mb-2">Brand-Exclusive Generative AI</h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  Landing pages, emails, blogs, eBooks, solution briefs, and images —
-                  all generated with your brand voice and published in one click.
+                  Generate landing pages, emails, blogs, eBooks, solution briefs, and images with AI that is
+                  guided exclusively by your brand. Built specifically for your organization, with full customization
+                  across voice, structure, workflows, and publishing controls.
                 </p>
                 <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
                   <p className="text-xs font-medium text-emerald-900">
-                    "An entire content team, powered by AI, guided by your brand."
+                    "Generative AI, exclusively your brand — fully customizable for your organization."
                   </p>
                 </div>
               </CardContent>
@@ -371,15 +375,16 @@ export default function LandingPage() {
                 <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/25">
                   <Database className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Global Data</Badge>
-                <h3 className="text-xl font-bold mb-2">Precision Data</h3>
+                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Precision ABM Data</Badge>
+                <h3 className="text-xl font-bold mb-2">Precision ABM Data</h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  70M+ verified contacts across 195 countries. 98% email accuracy.
-                  Weekly refresh. Multi-source verification.
+                  ABM-ready intelligence with 70M+ verified contacts across 195 countries,
+                  buying committee context, intent and firmographic signals, and 98% email accuracy.
+                  Weekly refresh and multi-source verification keep targeting precise.
                 </p>
                 <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
                   <p className="text-xs font-medium text-blue-900">
-                    "Your campaigns are only as good as your data. Ours is the best."
+                    "Precision ABM data powers precision pipeline outcomes."
                   </p>
                 </div>
               </CardContent>
