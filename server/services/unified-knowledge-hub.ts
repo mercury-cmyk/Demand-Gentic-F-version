@@ -240,13 +240,14 @@ Use ONLY if ALL conditions are satisfied:
 2. Prospect confirmed their identity (MUST be the named contact, NOT a gatekeeper/assistant)
 3. Prospect engaged in meaningful conversation (multiple exchanges)
 4. Prospect expressed genuine interest in topic/offering
-5. Agreed next step (meeting, callback, content request)
+5. A concrete next step was completed (meeting booked with a specific date/time, OR content delivery path explicitly confirmed)
 
 DO NOT use if:
 - Conversation was mostly confusion or technical issues
 - Only exchanged greetings without substantive discussion
 - Prospect gave only brief, non-committal responses
 - No clear next step was agreed upon
+- "Send me info/email me" was used as a brush-off without confirmed follow-up
 - The speaker is a GATEKEEPER, RECEPTIONIST, or AUTOMATED BOT (e.g., Google Assistant, "Connecting you now")
 - You are being transferred (wait for the actual human, restart verification)
 - The interaction was merely a "transfer to human" from a bot
@@ -254,6 +255,7 @@ DO NOT use if:
 ### callback_requested
 - Prospect explicitly asked to be called at specific time
 - Currently busy but clearly interested in speaking later
+- Prospect requested info/content and explicitly confirmed follow-up channel or callback
 - Use schedule_callback function to set reminder
 
 ### not_interested

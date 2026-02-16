@@ -13,6 +13,8 @@ type CliOptions = {
   apply: boolean;
   limit: number;
   pinnedOnly: boolean;
+  minDurationSec: number;
+  minOverallScore: number;
 };
 
 type ChangeCandidate = {
@@ -34,7 +36,19 @@ function parseArgs(argv: string[]): CliOptions {
     ? Math.min(Math.floor(rawLimit), 1000)
     : 200;
 
-  return { apply, limit, pinnedOnly };
+  const minDurationIdx = argv.findIndex((arg) => arg === "--min-duration");
+  const rawMinDuration = minDurationIdx >= 0 ? Number(argv[minDurationIdx + 1]) : MIN_MEANINGFUL_DURATION_SEC;
+  const minDurationSec = Number.isFinite(rawMinDuration) && rawMinDuration >= 0
+    ? Math.floor(rawMinDuration)
+    : MIN_MEANINGFUL_DURATION_SEC;
+
+  const minScoreIdx = argv.findIndex((arg) => arg === "--min-score");
+  const rawMinScore = minScoreIdx >= 0 ? Number(argv[minScoreIdx + 1]) : MIN_OVERALL_SCORE;
+  const minOverallScore = Number.isFinite(rawMinScore) && rawMinScore >= 0 && rawMinScore <= 100
+    ? Math.floor(rawMinScore)
+    : MIN_OVERALL_SCORE;
+
+  return { apply, limit, pinnedOnly, minDurationSec, minOverallScore };
 }
 
 const MIN_MEANINGFUL_DURATION_SEC = 15;
@@ -81,6 +95,8 @@ async function main() {
   console.log(`Mode: ${options.apply ? "APPLY" : "DRY RUN"}`);
   console.log(`Limit: ${options.limit}`);
   console.log(`Scope: ${options.pinnedOnly ? "Pinned showcase calls only" : "Eligible showcase pool"}`);
+  console.log(`Min duration: ${options.minDurationSec}s`);
+  console.log(`Min score: ${options.minOverallScore}`);
   console.log();
 
   const showcaseRows = options.pinnedOnly
@@ -102,8 +118,8 @@ async function main() {
         .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
         .where(
           and(
-            gte(callQualityRecords.overallQualityScore, MIN_OVERALL_SCORE),
-            gte(callSessions.durationSec, MIN_MEANINGFUL_DURATION_SEC),
+            gte(callSessions.durationSec, options.minDurationSec),
+            gte(callQualityRecords.overallQualityScore, options.minOverallScore),
             isNotNull(callQualityRecords.fullTranscript),
             sql`LENGTH(COALESCE(${callQualityRecords.fullTranscript}, '')) >= ${MIN_TRANSCRIPT_CHARS}`,
             sql`COALESCE(${callQualityRecords.fullTranscript}, '') ~* '(agent|ai|assistant|bot)\\s*:'`,

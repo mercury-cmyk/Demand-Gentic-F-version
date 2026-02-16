@@ -155,6 +155,8 @@ const MAX_TRANSCRIPTS = 200;
 const MAX_STATE_HISTORY = 50;
 const MAX_AUDIO_PATTERNS = 100;
 const MAX_RESPONSE_LATENCIES = 100;
+const VOICEMAIL_EARLY_WINDOW_MS = 3500;
+const CHANNEL_BLEED_WINDOW_MS = 8000;
 
 /** Trim array from the front if it exceeds maxLen. Call after pushing. */
 function trimArray<T>(arr: T[], maxLen: number): void {
@@ -506,7 +508,7 @@ function schedulePurposePivotGuard(session: OpenAIRealtimeSession): void {
       const provider = (session as any).geminiProvider;
       if (provider?.isReady?.()) {
         provider.sendTextMessage(
-          "STATE ENFORCEMENT: identity has been confirmed. Move immediately to PURPOSE_PIVOT in one concise sentence."
+          "STATE ENFORCEMENT: identity confirmed. Immediately deliver your core purpose/value statement now in ONE concise sentence, then stop and listen."
         );
       }
       return;
@@ -516,7 +518,7 @@ function schedulePurposePivotGuard(session: OpenAIRealtimeSession): void {
       session.openaiWs.send(JSON.stringify({
         type: "response.create",
         response: {
-          instructions: "STATE ENFORCEMENT: identity confirmed. Immediately give the concise purpose line now.",
+          instructions: "STATE ENFORCEMENT: identity confirmed. Immediately deliver your core purpose/value statement now in ONE concise sentence, then stop and listen.",
         },
       }));
     }
@@ -570,6 +572,105 @@ function recordVoicemailDetectedEvent(session: OpenAIRealtimeSession, source: st
       once: true,
     });
   }
+}
+
+function normalizeTranscriptForComparison(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isVoicemailCueTranscript(transcript: string): boolean {
+  const lower = normalizeTranscriptForComparison(transcript);
+  if (!lower) return false;
+
+  const cues = [
+    "leave a message",
+    "leave your message",
+    "after the beep",
+    "after the tone",
+    "not available",
+    "cannot take your call",
+    "cant take your call",
+    "unable to answer",
+    "please leave",
+    "record your message",
+    "voicemail",
+    "voice mail",
+    "mailbox",
+    "no one is available",
+    "your call has been forwarded",
+    "automatic voice message system",
+    "beep",
+  ];
+
+  return cues.some((cue) => lower.includes(cue));
+}
+
+function shouldFastAbortForEarlyVoicemail(session: OpenAIRealtimeSession, transcript: string): boolean {
+  if (session.detectedDisposition === "voicemail") return false;
+  if (!isVoicemailCueTranscript(transcript)) return false;
+
+  const now = Date.now();
+  const baseline =
+    session.timingMetrics.firstProspectAudioAt?.getTime() ||
+    session.timingMetrics.callConnectedAt?.getTime() ||
+    session.startTime.getTime();
+  const elapsedMs = Math.max(0, now - baseline);
+
+  return elapsedMs <= VOICEMAIL_EARLY_WINDOW_MS;
+}
+
+function isLikelyChannelBleed(session: OpenAIRealtimeSession, transcript: string): boolean {
+  const normalized = normalizeTranscriptForComparison(transcript);
+  if (!normalized || normalized.length < 8) return false;
+
+  const now = Date.now();
+  const recentAssistantTurns = session.transcripts
+    .filter((t) => t.role === "assistant" && now - t.timestamp.getTime() <= CHANNEL_BLEED_WINDOW_MS)
+    .slice(-4);
+
+  if (recentAssistantTurns.length === 0) return false;
+
+  for (const turn of recentAssistantTurns) {
+    const assistantNorm = normalizeTranscriptForComparison(turn.text);
+    if (!assistantNorm) continue;
+
+    if (normalized === assistantNorm) return true;
+    if (assistantNorm.includes(normalized) || normalized.includes(assistantNorm)) return true;
+
+    const userWords = new Set(normalized.split(" ").filter((w) => w.length >= 3));
+    const assistantWords = new Set(assistantNorm.split(" ").filter((w) => w.length >= 3));
+    if (userWords.size === 0 || assistantWords.size === 0) continue;
+
+    let overlap = 0;
+    userWords.forEach((w) => {
+      if (assistantWords.has(w)) overlap += 1;
+    });
+
+    const overlapRatio = overlap / Math.max(userWords.size, assistantWords.size);
+    if (overlapRatio >= 0.75 && userWords.size >= 4) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function recordChannelBleedDetected(session: OpenAIRealtimeSession, transcript: string, source: string): void {
+  session.technicalIssue.detected = true;
+  session.technicalIssue.lastIssueAt = new Date();
+  session.technicalIssue.phrases.push(`channel_bleed:${source}`);
+  trimArray(session.technicalIssue.phrases, 20);
+  queueSessionEvent(session, "realtime.channel_bleed_detected", {
+    valueText: source,
+    metadata: {
+      sample: transcript.substring(0, 120),
+    },
+  });
+  console.warn(`${LOG_PREFIX} [AudioGuard] Channel bleed suspected (${source}) - ignoring transcript: "${transcript.substring(0, 80)}"`);
 }
 
 function resolveVoiceLiftVariantForSession(
@@ -2648,6 +2749,14 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     console.log(`${LOG_PREFIX} Parallel init complete (+${Date.now() - initStartTime}ms)`);
 
+    const campaignMaxDurationRaw = Number(campaignConfig?.maxCallDurationSeconds);
+    if (Number.isFinite(campaignMaxDurationRaw) && campaignMaxDurationRaw > 0) {
+      session.campaignMaxCallDurationSeconds = campaignMaxDurationRaw;
+      console.log(`${LOG_PREFIX} [Gemini] ⏱️ Campaign max call duration set to ${campaignMaxDurationRaw}s`);
+    } else {
+      console.log(`${LOG_PREFIX} [Gemini] ⏱️ Campaign max call duration not set or disabled (value: ${campaignConfig?.maxCallDurationSeconds ?? 'null'})`);
+    }
+
     // Set campaign type on session for disposition validation
     if (campaignConfig?.type) {
       session.campaignType = campaignConfig.type;
@@ -2868,6 +2977,15 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     provider.on('transcript:user', async (event: any) => {
       if (!event.isFinal) return;
 
+      if (shouldFastAbortForEarlyVoicemail(session, event.text)) {
+        console.log(`${LOG_PREFIX} [AudioGuard] Gemini early voicemail cue detected - ending call`);
+        session.detectedDisposition = 'voicemail';
+        session.callOutcome = 'voicemail';
+        recordVoicemailDetectedEvent(session, "gemini_early_voicemail_cue");
+        await endCall(session.callId, 'voicemail');
+        return;
+      }
+
       const audioType = detectAudioType(event.text, session);
       session.audioDetection.audioPatterns.push({
         timestamp: event.timestamp || new Date(),
@@ -2884,6 +3002,11 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
       if (audioType.type !== 'human') {
         console.log(`${LOG_PREFIX} [Gemini] Ignoring non-human audio: ${audioType.type} (confidence: ${audioType.confidence.toFixed(2)})`);
+        return;
+      }
+
+      if (isLikelyChannelBleed(session, event.text)) {
+        recordChannelBleedDetected(session, event.text, "gemini_transcript_user");
         return;
       }
 
@@ -3190,10 +3313,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Fallback: If caller doesn't speak, send greeting.
     // This handles: silent pickups, voicemail that doesn't announce, etc.
-    // 3s is fast enough to avoid dead air but allows Deepgram to fire first if speech exists.
+    // 4.5s balances dead-air risk while allowing early voicemail cues to surface first.
     const fallbackGreetingTimer = setTimeout(() => {
       if (session.isActive && !session.audioDetection.hasGreetingSent) {
-        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 3s - sending greeting (fallback)`);
+        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4.5s - sending greeting (fallback)`);
         session.audioDetection.hasGreetingSent = true;
         provider.sendOpeningMessage(openingScript);
         session.openingPromptSentAt = new Date();
@@ -3203,7 +3326,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           once: true,
         });
       }
-    }, 3000);
+    }, 4500);
     (session as any).fallbackGreetingTimer = fallbackGreetingTimer; // Store to clear it later
 
     // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 5s,
@@ -3657,6 +3780,23 @@ Only AFTER completing these steps can you submit the disposition.`
         reason.includes('stop calling') ||
         session.detectedDisposition === 'voicemail' ||
         session.detectedDisposition === 'invalid_data';
+
+      // OPENING EXECUTION GUARD:
+      // If identity was confirmed but we never delivered a clean intro + purpose,
+      // block termination and force a crisp recovery line.
+      const openingPurposeDelivered = hasOpeningPurposeDelivered(agentTranscriptText);
+      if (
+        identityConfirmed &&
+        !openingPurposeDelivered &&
+        callDurationSeconds < 45 &&
+        !isLegitimateEarlyEnd
+      ) {
+        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - intro/purpose not fully delivered before termination.`);
+        return {
+          success: false,
+          error: 'STOP — your opening was incomplete. Before ending, say this clearly: "Sorry, quick audio check — can you hear me clearly now?" Then restart with: "Hi [First Name], this is [Agent Name] calling on behalf of [Organization]. I am calling because [single-sentence purpose]." Wait for their response before continuing.',
+        };
+      }
 
       // CRITICAL: Proper farewell patterns - must be a standalone closing statement
       const closingFarewellPatterns = [
@@ -4276,6 +4416,17 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
       if (message.transcript && allowTranscripts && settings.advanced.clientEvents.userTranscript) {
         console.log(`${LOG_PREFIX} User: ${message.transcript}`);
 
+        // FAST VOICEMAIL ABORT: If voicemail cues appear in the first 2-3 seconds,
+        // stop the script immediately to avoid talking over voicemail greetings.
+        if (shouldFastAbortForEarlyVoicemail(session, message.transcript)) {
+          console.log(`${LOG_PREFIX} [AudioGuard] Early voicemail cue detected - aborting script immediately`);
+          session.detectedDisposition = 'voicemail';
+          session.callOutcome = 'voicemail';
+          recordVoicemailDetectedEvent(session, "openai_early_voicemail_cue");
+          await endCall(session.callId, 'voicemail');
+          break;
+        }
+
         // INTELLIGENT AUDIO DETECTION - Determine if this is human, IVR, or music
         const audioType = detectAudioType(message.transcript, session);
         session.audioDetection.audioPatterns.push({
@@ -4445,6 +4596,11 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
         // Only process transcript if it's human speech
         if (audioType.type === 'human') {
+          if (isLikelyChannelBleed(session, message.transcript)) {
+            recordChannelBleedDetected(session, message.transcript, "openai_input_transcript");
+            break;
+          }
+
           session.transcripts.push({
             role: 'user',
             text: message.transcript,
@@ -5007,6 +5163,27 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
   // Couldn't determine with high confidence - treat as potential human to be safe
   console.log(`${LOG_PREFIX} [AudioDetect] UNKNOWN (treating as human): "${normalizedText.substring(0, 50)}..."`);
   return { type: 'human', confidence: 0.5 }; // Changed from 'unknown' to 'human' - be safe and respond
+}
+
+function hasOpeningPurposeDelivered(agentTranscriptText: string): boolean {
+  const text = normalizeTranscriptForComparison(agentTranscriptText);
+  if (!text) return false;
+
+  const introPattern =
+    text.includes("calling on behalf of") ||
+    text.includes("this is") ||
+    text.includes("my name is");
+
+  const purposePattern =
+    text.includes("im calling to") ||
+    text.includes("i am calling to") ||
+    text.includes("reason im calling") ||
+    text.includes("reason i am calling") ||
+    text.includes("white paper") ||
+    text.includes("offer") ||
+    text.includes("help");
+
+  return introPattern && purposePattern;
 }
 
 /**
@@ -6047,6 +6224,24 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                 trimArray(session.transcripts, MAX_TRANSCRIPTS);
                 maybeRecordPurposeStart(session, segment.text);
               } else if (segment.speaker === 'contact') {
+                if (shouldFastAbortForEarlyVoicemail(session, segment.text)) {
+                  console.log(`${LOG_PREFIX} [AudioGuard] Deepgram early voicemail cue detected - ending call`);
+                  session.detectedDisposition = 'voicemail';
+                  session.callOutcome = 'voicemail';
+                  recordVoicemailDetectedEvent(session, "deepgram_early_voicemail_cue");
+                  setImmediate(() => {
+                    endCall(session.callId, 'voicemail').catch((err) => {
+                      console.error(`${LOG_PREFIX} Failed to end call after Deepgram voicemail cue:`, err);
+                    });
+                  });
+                  return;
+                }
+
+                if (isLikelyChannelBleed(session, segment.text)) {
+                  recordChannelBleedDetected(session, segment.text, "deepgram_contact_transcript");
+                  return;
+                }
+
                 // Store transcript for session records
                 session.transcripts.push({
                   role: 'user',
@@ -8036,10 +8231,11 @@ During this initial silence, LISTEN carefully to what the caller says:
 - Ringing/ringback tone is NOT a person. Do NOT speak during ringtone.
 - If there is silence, hold music, IVR, or robotic audio, do NOT deliver your greeting.
 - Speak only after an actual person starts talking.
+- If you hear voicemail cues in the first moments ("leave a message", "after the beep", "not available"), IMMEDIATELY submit_disposition("voicemail") and then end_call. Do not continue the script.
 
 ### Phase 1: Identity Verification
 When you hear a standard greeting (e.g., "Hello?", "Hi", "Yeah?"), your first response is ALWAYS:
-- "Hi, am I speaking with [Contact Name]?"
+- "Hi, may I speak with [Contact Name]?" (or "Hi, am I speaking with [Contact Name]?")
 
 Wait silently for their answer. Identity is confirmed ONLY by explicit affirmation:
 - "Yes", "That's me", "Speaking", "This is [Name]"
@@ -8059,12 +8255,15 @@ If someone else answers (receptionist, assistant, automated system):
 If transferred to a new voice, re-verify identity: "Hi, just to confirm — am I speaking with [Contact Name]?"
 
 ### Phase 3: Introduction & Value Hook
-Once identity is confirmed, pause 1 second, then:
-1. "Hi [First Name], my name is [Agent Name], calling on behalf of [Organization Name]."
-2. Immediately deliver the value hook aligned with the campaign objective.
+Once identity is confirmed, move IMMEDIATELY in the very next sentence (no filler, no pause):
+1. "Hi [First Name], this is [Agent Name] calling on behalf of [Organization Name]."
+2. In the SAME breath, state purpose/value aligned with campaign objective.
 3. Follow with the ask — do NOT ask "do you have a moment?" first.
 4. STOP and wait for their response.
 5. Be warm, kind, and respectful throughout.
+
+If audio seems unclear or they interrupt with "hello?" repeatedly, use this recovery line first:
+"Sorry, quick audio check — can you hear me clearly now?"
 
 Keep the organization name confidential until identity is confirmed.
 
@@ -9122,6 +9321,24 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
     return;
   }
 
+  if (shouldFastAbortForEarlyVoicemail(session, transcript)) {
+    console.log(`${LOG_PREFIX} [AudioGuard] ${source} early voicemail cue detected - ending call`);
+    session.detectedDisposition = 'voicemail';
+    session.callOutcome = 'voicemail';
+    recordVoicemailDetectedEvent(session, `${source}_early_voicemail_cue`);
+    setImmediate(() => {
+      endCall(callId, 'voicemail').catch((err) => {
+        console.error(`${LOG_PREFIX} Failed to end call after ${source} voicemail cue:`, err);
+      });
+    });
+    return;
+  }
+
+  if (isLikelyChannelBleed(session, transcript)) {
+    recordChannelBleedDetected(session, transcript, `${source}_transcript_feed`);
+    return;
+  }
+
   // Add to session transcripts for storage/analytics
   session.transcripts.push({
     role: 'user',
@@ -9597,3 +9814,6 @@ export {
   createOutOfBandResponse,
   handleUserInterruption,
 };
+
+
+

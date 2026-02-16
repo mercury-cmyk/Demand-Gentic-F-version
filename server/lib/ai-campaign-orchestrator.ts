@@ -53,6 +53,7 @@ const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck call
 const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_EMPTY_RECHECK_SECONDS || 60));
 const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
 const ACTIVE_POOL_CACHE_TTL_MS = 30000;
+const ORCHESTRATOR_HEARTBEAT_MS = Math.max(30000, ORCHESTRATOR_INTERVAL_MS * 3);
 
 // Cached concurrency limits from DB (refreshed every 60s)
 let _cachedDefaultMaxConcurrent = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
@@ -515,6 +516,8 @@ interface ProcessCampaignOptions {
 
 let orchestratorQueue: Queue<OrchestratorJobData> | null = null;
 let orchestratorWorker: Worker<OrchestratorJobData> | null = null;
+let orchestratorHeartbeatTimer: NodeJS.Timeout | null = null;
+let lastOrchestratorTickAt = 0;
 let lastCampaignStartIndex = 0;
 
 /**
@@ -1946,7 +1949,9 @@ export function initializeAiCampaignOrchestrator(): void {
     'ai-campaign-orchestrator',
     async (job: Job<OrchestratorJobData>) => {
       if (job.data.type === 'tick') {
-        return orchestratorTick();
+        const result = await orchestratorTick();
+        lastOrchestratorTickAt = Date.now();
+        return result;
       } else if (job.data.type === 'campaign-replenish' && job.data.campaignId) {
         const { globalMax } = await getConcurrencyLimits();
         const globalSlots = Math.max(0, globalMax - (await getGlobalInProgressCount()));
@@ -1985,6 +1990,58 @@ export function initializeAiCampaignOrchestrator(): void {
   }).catch(err => {
     console.error('[AI Orchestrator] Failed to add repeatable job:', err);
   });
+
+  // Run an immediate tick on startup so all active campaigns begin processing
+  // without waiting for the next repeat window.
+  orchestratorQueue.add(
+    'orchestrator-tick-startup',
+    { type: 'tick' },
+    {
+      jobId: `ai-orchestrator-startup-${Date.now()}`,
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  ).then(() => {
+    console.log('[AI Orchestrator] Startup tick enqueued');
+  }).catch(err => {
+    console.error('[AI Orchestrator] Failed to enqueue startup tick:', err);
+  });
+
+  // Heartbeat watchdog: if tick processing stalls or queue becomes idle,
+  // enqueue a rescue tick to keep call triggering continuous.
+  if (orchestratorHeartbeatTimer) {
+    clearInterval(orchestratorHeartbeatTimer);
+  }
+  lastOrchestratorTickAt = Date.now();
+  orchestratorHeartbeatTimer = setInterval(async () => {
+    if (!orchestratorQueue) return;
+
+    try {
+      const [activeCount, waitingCount] = await Promise.all([
+        orchestratorQueue.getActiveCount(),
+        orchestratorQueue.getWaitingCount(),
+      ]);
+
+      const now = Date.now();
+      const staleTick = now - lastOrchestratorTickAt > ORCHESTRATOR_HEARTBEAT_MS;
+      const queueIdle = activeCount === 0 && waitingCount === 0;
+
+      if (staleTick || queueIdle) {
+        await orchestratorQueue.add(
+          'orchestrator-tick-rescue',
+          { type: 'tick' },
+          {
+            jobId: `ai-orchestrator-rescue-${now}`,
+            removeOnComplete: true,
+            removeOnFail: true,
+          }
+        );
+        console.warn(`[AI Orchestrator] Heartbeat enqueued rescue tick (staleTick=${staleTick}, queueIdle=${queueIdle})`);
+      }
+    } catch (err) {
+      console.error('[AI Orchestrator] Heartbeat check failed:', err);
+    }
+  }, ORCHESTRATOR_HEARTBEAT_MS);
 
   // Run startup resume to clear any stuck items from previous server instance
   startupResumeStuckCalls().catch(err => {
