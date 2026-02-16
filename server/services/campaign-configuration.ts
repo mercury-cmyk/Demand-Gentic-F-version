@@ -129,11 +129,28 @@ export const CAMPAIGN_CONFIGURATIONS: Record<string, CampaignConfiguration> = {
   lead_qualification: {
     type: "lead_qualification",
     label: "Lead Qualification",
-    purpose: "Gather structured information for routing and prioritization.",
+    purpose: "Build awareness for Agentic B2B Demand (Problem Intelligence + Solution Mapping) and qualify whether demand generation leaders have a recognized gap and interest in a deeper discovery conversation.",
     agentFocus: [
-      "Discovery",
-      "Classification"
-    ]
+      "Lead with awareness message: problem-first outreach instead of spray-and-pray",
+      "Ask a small number of discovery questions (max 2) to confirm fit",
+      "Secure a clear next step when interest is confirmed"
+    ],
+    requirements: [
+      "Keep discovery short and conversational (no interrogation)",
+      "Do not ask more than two qualification questions before moving to close",
+      "If not ready for a meeting, ask permission to send briefing and confirm follow-up timing"
+    ],
+    successCriteria: [
+      "Prospect acknowledges a limitation or gap in current demand generation/outbound approach",
+      "Prospect expresses interest in Problem Intelligence or Solution Mapping approach",
+      "Concrete next step agreed: booked discovery call OR explicit permission to send briefing with follow-up date"
+    ],
+    qualificationQuestions: [
+      "Are your current outbound conversion rates where you want them to be, or is there a gap?",
+      "What is the biggest challenge in your demand generation process right now?",
+      "Would it be useful to explore a problem-first approach like Problem Intelligence and Solution Mapping?"
+    ],
+    openingMessageTemplate: "Hi {{contact.firstName}}, this is specific_agent_name from {{company_name}}. We help B2B demand generation leaders replace spray-and-pray outreach with problem-first conversations using Problem Intelligence and Solution Mapping. Quick question: are your conversion rates where you want them to be, or is there a gap?"
   },
   data_validation: {
     type: "data_validation",
@@ -185,6 +202,13 @@ export function generateAgentSystemPrompt(config: CampaignConfiguration, basePro
     });
   }
 
+  if (config.qualificationQuestions && config.qualificationQuestions.length > 0) {
+    prompt += `\nMANDATORY QUALIFICATION QUESTIONS:\n`;
+    config.qualificationQuestions.forEach((question, index) => {
+      prompt += `${index + 1}. ${question}\n`;
+    });
+  }
+
   if (config.successCriteria && config.successCriteria.length > 0) {
     prompt += `\nSUCCESS CRITERIA:\n`;
     config.successCriteria.forEach(crit => {
@@ -200,6 +224,10 @@ export function generateAgentSystemPrompt(config: CampaignConfiguration, basePro
     prompt += `- Maintain a high level of professionalism and deference, appropriate for speaking with senior executives.\n`;
   } else if (config.type === 'content_syndication') {
     prompt += `- Focus on relevance and value. Do not be pushy. If they are interested, confirm their email.\n`;
+  } else if (config.type === 'lead_qualification') {
+    prompt += `- Run structured discovery: one question at a time, listen fully, and capture specific evidence.\n`;
+    prompt += `- Keep it conversational, not interrogative. Use short acknowledgments between questions.\n`;
+    prompt += `- End with a clear qualification status and explicit next step.\n`;
   }
 
   return prompt;

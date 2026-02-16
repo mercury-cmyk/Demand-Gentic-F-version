@@ -407,7 +407,7 @@ const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
   "needs_review",
 ]);
 
-export type RealtimeSession = (OpenAIRealtimeSession | ElevenLabsRealtimeSession | GeminiRealtimeSession) & { bookingTypeId?: number };
+export type RealtimeSession = OpenAIRealtimeSession & { bookingTypeId?: number };
 
 const activeSessions = new Map<string, RealtimeSession>();
 const streamIdToCallId = new Map<string, string>();
@@ -3429,7 +3429,7 @@ Only AFTER completing these steps can you submit the disposition.`
         // Check if the very last transcript entry is the agent's farewell (prospect hasn't spoken since)
         const allTranscripts = session.transcripts;
         const lastTranscript = allTranscripts.length > 0 ? allTranscripts[allTranscripts.length - 1] : null;
-        const lastTurnIsAgent = lastTranscript && (lastTranscript.role === 'agent' || lastTranscript.role === 'assistant');
+        const lastTurnIsAgent = lastTranscript?.role === 'assistant';
         if (lastTurnIsAgent) {
           console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Agent said farewell but prospect hasn't responded yet. Waiting for prospect-led disconnect.`);
           console.warn(`${LOG_PREFIX} [Gemini] Last agent: "${lastAgentText.substring(0, 80)}" | Last user: "${lastUserText.substring(0, 80)}"`);
@@ -4942,6 +4942,8 @@ Deliver your value proposition from the campaign context and talking points in O
 
 ${session.campaignType === 'content_syndication' ? `CONTENT CAMPAIGN RAPPORT: Before your pitch, briefly acknowledge the prospect's role and company to build rapport. Example: "I see you're the [Title] at [Company], that's actually why I'm reaching out..." — then bridge directly into the content insight and assume delivery by confirming the email. Do NOT ask "would you like to receive it?" — state the value and confirm the email.
 
+` : ''}${session.campaignType === 'lead_qualification' ? `LEAD QUALIFICATION FLOW: This campaign is awareness + qualification. After this short value-first intro and after the prospect responds, ask a MAXIMUM of TWO concise discovery questions to confirm two things: (1) whether they see a gap in current demand gen results, and (2) whether they are open to a problem-first approach. Do not over-question. Then secure a concrete next step: short discovery call OR permission to send briefing with follow-up date.
+
 ` : ''}RULES:
 - Lead with the VALUE — not with "thanks for confirming" or pleasantries
 - Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
@@ -5107,6 +5109,8 @@ CRITICAL: Within 2 SECONDS of this message, you MUST be speaking. Silence = FAIL
 Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
 
 ${session.campaignType === 'content_syndication' ? `CONTENT CAMPAIGN RAPPORT: Before your pitch, briefly acknowledge the prospect's role and company to build rapport. Example: "I see you're the [Title] at [Company], that's actually why I'm reaching out..." — then bridge directly into the content insight and assume delivery by confirming the email. Do NOT ask "would you like to receive it?" — state the value and confirm the email.
+
+` : ''}${session.campaignType === 'lead_qualification' ? `LEAD QUALIFICATION FLOW: This campaign is awareness + qualification. After this short value-first intro and after the prospect responds, ask a MAXIMUM of TWO concise discovery questions to confirm two things: (1) whether they see a gap in current demand gen results, and (2) whether they are open to a problem-first approach. Do not over-question. Then secure a concrete next step: short discovery call OR permission to send briefing with follow-up date.
 
 ` : ''}RULES:
 - Lead with the VALUE — not with "thanks for confirming" or pleasantries
@@ -6024,7 +6028,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // Full precision transcript comes from post-call analysis (from recording)
   const geminiTranscript = session.transcripts.length > 0
     ? session.transcripts
-        .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+        .map((t: { role: 'user' | 'assistant'; text: string; timestamp: Date }) => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
         .join('\n')
     : '';
 
@@ -6156,18 +6160,21 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           audioOutputSeconds: costMetrics?.audioOutputSeconds ?? 0,
         };
 
+        const deepgramSegments: TranscriptSegment[] =
+          (((session as any).deepgramSession?.transcriptSegments as TranscriptSegment[] | undefined) ?? []);
+
         // Build transcript turns - prefer Deepgram segments (has both agent + contact)
         // over session.transcripts (may lack agent turns in native-audio mode)
         let transcriptTurns: Array<{ role: string; text: string; timestamp: string }>;
         if (deepgramSegments.length > 0) {
-          transcriptTurns = deepgramSegments.map(seg => ({
+          transcriptTurns = deepgramSegments.map((seg: TranscriptSegment) => ({
             role: seg.speaker === 'agent' ? 'agent' : 'contact',
             text: seg.text,
             timestamp: new Date(seg.timestamp).toISOString(),
           }));
           console.log(`${LOG_PREFIX} 📝 Test call using ${deepgramSegments.length} Deepgram segments for transcript turns`);
         } else {
-          transcriptTurns = session.transcripts.map(t => ({
+          transcriptTurns = session.transcripts.map((t: { role: 'user' | 'assistant'; text: string; timestamp: Date }) => ({
             role: t.role === 'assistant' ? 'agent' : 'contact',
             text: t.text,
             timestamp: t.timestamp.toISOString(),
@@ -6177,7 +6184,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         // Use the Deepgram-based fullTranscript from outer scope (includes both agent + contact)
         // Do NOT shadow with session.transcripts-only version (misses agent in native-audio mode)
         const testCallFullTranscript = fullTranscript || session.transcripts
-          .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+          .map((t: { role: 'user' | 'assistant'; text: string; timestamp: Date }) => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
           .join('\n');
 
         // POST-CALL ANALYSIS: Quality analysis deferred to post-call pipeline
@@ -6276,7 +6283,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         }
 
           // Build transcript turns for structured analysis
-          const transcriptTurns = session.transcripts.map(t => ({
+          const transcriptTurns = session.transcripts.map((t: { role: 'user' | 'assistant'; text: string; timestamp: Date }) => ({
             role: t.role === 'assistant' ? 'agent' : 'contact',
             text: t.text,
             timestamp: t.timestamp.toISOString(),
@@ -7691,6 +7698,11 @@ During this initial silence, LISTEN carefully to what the caller says:
 <call_flow>
 ## Outbound Call Flow (follow this sequence exactly)
 
+### Pre-Phase: Audio Readiness (MANDATORY)
+- Ringing/ringback tone is NOT a person. Do NOT speak during ringtone.
+- If there is silence, hold music, IVR, or robotic audio, do NOT deliver your greeting.
+- Speak only after an actual person starts talking.
+
 ### Phase 1: Identity Verification
 When you hear a standard greeting (e.g., "Hello?", "Hi", "Yeah?"), your first response is ALWAYS:
 - "Hi, am I speaking with [Contact Name]?"
@@ -8327,6 +8339,8 @@ When you hear ANY human voice — including "Hello?", "Hi", "Yeah?", "Good morni
 "Hi, am I speaking with ${firstName}?"
 
 **"Hello?" is NOT identity confirmation. Do NOT say "Great, thanks for confirming" as your first response.**
+**Ringing/ringback tone is NOT human speech. Never speak during ringtone.**
+**If you hear IVR/robot audio, wait or navigate IVR first — only continue after a real person speaks.**
 
 ### CRITICAL: Turn-Taking Rules
 **NEVER speak until the other person finishes responding.** After asking ANY question:
@@ -8379,6 +8393,14 @@ After identity is confirmed and before your pitch, build brief rapport by acknow
 - Keep it to ONE sentence — acknowledge role/company → bridge to content relevance
 - Then deliver the content insight and assume delivery (confirm email)
 - Do NOT turn this into a discovery question — it's a statement of recognition, not an interrogation` : ''}
+${campaignType === 'lead_qualification' ? `**LEAD QUALIFICATION STEP (MANDATORY):**
+After identity is confirmed and after your short value-first opening:
+- Ask qualification questions ONE AT A TIME in a conversational flow
+- Ask a MAXIMUM of TWO discovery questions total
+- Focus only on two signals: recognized demand gen gap + openness to problem-first approach
+- Do NOT rush to scheduling before those two signals are clear
+- For qualified interest, propose a concrete next step and confirm best email for handoff
+- If not ready for a meeting, ask permission to send a short briefing and agree a specific follow-up date` : ''}
 
 **TIMING RULE: Your entire post-confirmation intro MUST be under 7 seconds. No filler. No pleasantries. Value first.**
 
@@ -8395,6 +8417,7 @@ If permission is given for other campaign types:
 - Deliver it concisely, naturally, and in a human-sounding tone — NOT scripted
 - For content/white paper campaigns: FIRST acknowledge their role and company briefly to build rapport (e.g. "I see you're the ${contactJobTitle} at ${contactCompany}, that's actually why I'm reaching out..."), THEN state one compelling insight from the content, THEN ASSUME interest and confirm the email address — do NOT ask "would you like to receive it?" or any yes/no permission question. Example: "I see you're heading up [role] at [company] — we just published a report showing [insight]. I'll send it over, is ${contactEmail} still the best address?"
 - For meeting/appointment campaigns: ask ONE relevant question, then propose next steps
+- For lead qualification campaigns: keep discovery light (max two questions), confirm gap + interest, and end with a clear next step
 - Listen carefully and allow them to speak without interruption
 - Acknowledge their perspective thoughtfully
 - Continue the conversation flow through to booking/completion
@@ -8442,6 +8465,7 @@ If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
 - If the screener repeats its prompt → remain silent (it is still processing)
 - If 30+ seconds of silence after your response → end the call with no_answer disposition
 - NEVER respond to the screener more than once
+- Do NOT deliver pitch/discovery until a real human responds
 
 ---
 
@@ -8460,6 +8484,7 @@ If you hear an automated phone system (IVR), menu prompts, or "press X for...":
 - Listen carefully to ALL menu options before pressing any keys
 - ONLY press keys when explicitly prompted by the IVR
 - Wait for the IVR to finish speaking before pressing the next digit
+- If the IVR asks for digits or extension, send exactly what was requested (no guessing), then WAIT for the next prompt or a real person
 
 **Navigation strategies:**
 - If there's a "dial-by-name directory": Spell the contact's last name
@@ -8471,6 +8496,7 @@ If you hear an automated phone system (IVR), menu prompts, or "press X for...":
 - Guess extension numbers
 - Spam random keys
 - Press keys before the IVR finishes speaking
+- Start your campaign pitch while still inside IVR/robot flow
 
 ---
 
