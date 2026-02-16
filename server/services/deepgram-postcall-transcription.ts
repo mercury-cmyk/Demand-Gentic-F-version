@@ -52,6 +52,31 @@ function mapSpeakerLabel(speaker: string | number | undefined): string {
   return "Speaker 1";
 }
 
+function extractStorageKeyFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.replace(/^\/+/, "");
+    if (!path) return null;
+
+    if (host === "s3.amazonaws.com" || host === "storage.googleapis.com") {
+      const parts = path.split("/").filter(Boolean);
+      if (parts.length >= 2) return parts.slice(1).join("/");
+      return null;
+    }
+
+    if (host.endsWith(".s3.amazonaws.com")) {
+      return path;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function getRefreshedUrlFromS3(recordingS3Key: string | null | undefined): Promise<string | null> {
   if (!recordingS3Key || !isS3Configured()) {
     return null;
@@ -158,7 +183,9 @@ export async function submitStructuredTranscription(
   const attempts: string[] = [];
   if (audioUrl) attempts.push(audioUrl);
 
-  const s3RefreshedUrl = await getRefreshedUrlFromS3(options?.recordingS3Key);
+  const inferredS3Key = options?.recordingS3Key || extractStorageKeyFromUrl(audioUrl);
+
+  const s3RefreshedUrl = await getRefreshedUrlFromS3(inferredS3Key);
   if (s3RefreshedUrl && !attempts.includes(s3RefreshedUrl)) {
     attempts.push(s3RefreshedUrl);
   }

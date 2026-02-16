@@ -181,7 +181,90 @@ async function transcribeWithSpeakers(
     } else {
       // Fallback for non-stereo/legacy transcripts.
       const uniqueSpeakers = Array.from(new Set(utterances.map(u => u.speaker)));
-      const agentSpeaker = uniqueSpeakers[0] || 'Speaker 1';
+
+      const inferAgentSpeaker = (): string => {
+        if (utterances.length === 0) return uniqueSpeakers[0] || 'Speaker 1';
+
+        const scores = new Map<string, number>();
+        uniqueSpeakers.forEach((s) => scores.set(s, 0));
+
+        const normalizedFirstName = (contactFirstName || '').trim().toLowerCase();
+
+        const agentCues = [
+          'this is',
+          'calling from',
+          'may i speak',
+          'am i speaking with',
+          'i am calling',
+          "i'm calling",
+          "i'll be brief",
+          'quick question',
+          'follow up',
+        ];
+
+        const contactCues = [
+          'hello',
+          'speaking',
+          'who is this',
+          'wrong number',
+          'not interested',
+          'do not call',
+          "don't call",
+          'take me off',
+        ];
+
+        for (let i = 0; i < utterances.length; i++) {
+          const u = utterances[i];
+          const speaker = u.speaker;
+          const text = String(u.text || '').toLowerCase().trim();
+          const words = text.split(/\s+/).filter(Boolean);
+          let score = scores.get(speaker) || 0;
+
+          if (agentCues.some(c => text.includes(c))) score += 3;
+          if (contactCues.some(c => text.includes(c))) score -= 2;
+
+          if (normalizedFirstName && text.includes(normalizedFirstName) && text.includes('speak')) {
+            score += 2;
+          }
+
+          // Very short opener like "hello" / "speaking" is usually the contact.
+          if (i === 0 && words.length <= 3 && (text.includes('hello') || text.includes('speaking'))) {
+            score -= 3;
+          }
+
+          // Longer, structured utterances are more likely agent pitch/opening.
+          if (words.length >= 10) score += 1;
+
+          scores.set(speaker, score);
+        }
+
+        let bestSpeaker = uniqueSpeakers[0] || 'Speaker 1';
+        let bestScore = Number.NEGATIVE_INFINITY;
+        for (const speaker of uniqueSpeakers) {
+          const score = scores.get(speaker) || 0;
+          if (score > bestScore) {
+            bestScore = score;
+            bestSpeaker = speaker;
+          }
+        }
+
+        // Tie-breaker: if first turn is a short greeting and second speaker exists, prefer second speaker as agent.
+        const first = utterances[0];
+        const second = utterances[1];
+        const firstWords = String(first?.text || '').trim().split(/\s+/).filter(Boolean).length;
+        if (
+          second &&
+          first?.speaker === bestSpeaker &&
+          firstWords <= 3 &&
+          String(first?.text || '').toLowerCase().includes('hello')
+        ) {
+          bestSpeaker = second.speaker;
+        }
+
+        return bestSpeaker;
+      };
+
+      const agentSpeaker = inferAgentSpeaker();
 
       transcriptTurns = utterances.map(u => ({
         role: u.speaker === agentSpeaker ? 'agent' : 'contact',

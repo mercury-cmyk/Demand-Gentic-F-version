@@ -6,6 +6,7 @@
  */
 
 import OpenAI from 'openai';
+import * as cheerio from 'cheerio';
 import { db } from "../db";
 import {
   generativeStudioProjects,
@@ -46,6 +47,8 @@ interface GenerationParams {
 interface LandingPageParams extends GenerationParams {
   ctaGoal?: string;
   numberOfVariants?: number;
+  thankYouPageUrl?: string;
+  assetUrl?: string;
 }
 
 interface EmailTemplateParams extends GenerationParams {
@@ -149,6 +152,111 @@ function resolveFieldValue(field: any): string | null {
   return null;
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function enforceLeadCaptureForm(
+  html: string,
+  thankYouPageUrl?: string,
+  assetUrl?: string
+): string {
+  if (!html || !html.trim()) return html;
+
+  try {
+    const $ = cheerio.load(html);
+
+    const normalizedThankYouUrl = (thankYouPageUrl || '/thank-you').trim();
+    const normalizedAssetUrl = (assetUrl || '').trim();
+    const safeThankYouUrl = escapeHtmlAttribute(normalizedThankYouUrl);
+    const safeAssetUrl = escapeHtmlAttribute(normalizedAssetUrl);
+
+    let form = $('form').first();
+
+    if (!form.length) {
+      const fallbackForm = `
+        <section id="lead-capture" style="max-width:640px;margin:32px auto;padding:24px;border:1px solid #e5e7eb;border-radius:12px;background:#ffffff;">
+          <h2 style="margin:0 0 8px;font-size:24px;line-height:1.2;">Get the asset</h2>
+          <p style="margin:0 0 16px;color:#4b5563;">Share your details and we’ll redirect you to the thank-you page.</p>
+          <form id="lead-capture-form" action="${safeThankYouUrl}" method="GET" data-asset-url="${safeAssetUrl}"></form>
+        </section>`;
+
+      if ($('main').length) {
+        $('main').first().append(fallbackForm);
+      } else if ($('body').length) {
+        $('body').append(fallbackForm);
+      } else {
+        $.root().append(fallbackForm);
+      }
+
+      form = $('form').first();
+    }
+
+    form
+      .attr('id', 'lead-capture-form')
+      .attr('method', 'GET')
+      .attr('action', normalizedThankYouUrl)
+      .attr('data-asset-url', normalizedAssetUrl)
+      .empty();
+
+    form.append(`
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <label for="lead-name" style="font-weight:600;color:#111827;">Name</label>
+        <input id="lead-name" name="name" type="text" required autocomplete="name" placeholder="Your full name" style="padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;" />
+
+        <label for="lead-business-email" style="font-weight:600;color:#111827;margin-top:6px;">Business Email</label>
+        <input id="lead-business-email" name="business_email" type="email" required autocomplete="email" placeholder="you@company.com" style="padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;" />
+
+        <input type="hidden" name="asset_url" value="${safeAssetUrl}" />
+
+        <button type="submit" style="margin-top:10px;padding:12px 16px;border:none;border-radius:8px;background:#4f46e5;color:#ffffff;font-weight:600;cursor:pointer;">Continue</button>
+      </div>
+    `);
+
+    $('#lead-capture-redirect-script').remove();
+
+    const redirectScript = `
+      (function () {
+        var form = document.getElementById('lead-capture-form');
+        if (!form) return;
+
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+
+          var formData = new FormData(form);
+          var name = String(formData.get('name') || '').trim();
+          var email = String(formData.get('business_email') || '').trim();
+          var assetUrl = String(formData.get('asset_url') || '').trim();
+          var action = form.getAttribute('action') || '/thank-you';
+
+          var query = new URLSearchParams();
+          query.set('name', name);
+          query.set('business_email', email);
+          if (assetUrl) query.set('asset_url', assetUrl);
+
+          var separator = action.indexOf('?') >= 0 ? '&' : '?';
+          window.location.href = action + separator + query.toString();
+        });
+      })();
+    `;
+
+    if ($('body').length) {
+      $('body').append(`<script id="lead-capture-redirect-script">${redirectScript}</script>`);
+    } else {
+      $.root().append(`<script id="lead-capture-redirect-script">${redirectScript}</script>`);
+    }
+
+    return $.html();
+  } catch {
+    return html;
+  }
+}
+
 async function getOrganizationContext(organizationId?: string): Promise<string> {
   if (!organizationId) return '';
 
@@ -235,6 +343,8 @@ export async function generateLandingPage(params: LandingPageParams): Promise<Ge
 Title: ${params.title}
 Requirements: ${params.prompt}
 ${params.ctaGoal ? `CTA Goal: ${params.ctaGoal}` : ''}
+Thank You Page URL: ${params.thankYouPageUrl || '/thank-you'}
+Asset Download/View URL: ${params.assetUrl || 'https://example.com/asset-download'}
 ${baseContext}
 ${brandContext}
 
@@ -244,6 +354,13 @@ Generate a complete, production-ready landing page. The page MUST include:
 - A features section with icons/descriptions
 - A social proof / testimonials section
 - A clear call-to-action section
+- A lead capture form with ONLY these fields:
+  1) Name (text)
+  2) Business Email (email)
+- On submit, the form MUST redirect to the provided thank-you page URL and pass:
+  - name
+  - business_email
+  - asset_url (download/view URL)
 - A footer
 
 Output as JSON with these fields:
@@ -270,6 +387,7 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
   }), 'generative-studio');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
+  result.html = enforceLeadCaptureForm(result.html || '', params.thankYouPageUrl, params.assetUrl);
   const tokensUsed = completion.usage?.total_tokens || 0;
   const duration = Date.now() - startTime;
 
@@ -291,6 +409,8 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
       css: result.css,
       sections: result.sections,
       ctaGoal: params.ctaGoal,
+      thankYouPageUrl: params.thankYouPageUrl || '/thank-you',
+      assetUrl: params.assetUrl || null,
       organizationId: params.organizationId,
       clientProjectId: params.clientProjectId,
     },

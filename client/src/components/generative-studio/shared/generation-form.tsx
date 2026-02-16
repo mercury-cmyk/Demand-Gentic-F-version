@@ -30,6 +30,16 @@ interface GenerationFormProps {
   orgIntelligence?: OrgIntelligenceProfile | null;
   disabled?: boolean;
   disabledReason?: string;
+  initialValues?: {
+    title?: string;
+    prompt?: string;
+    targetAudience?: string;
+    industry?: string;
+    tone?: string;
+    brandKitId?: string;
+    additionalContext?: string;
+  };
+  initialValuesKey?: string;
 }
 
 export default function GenerationForm({
@@ -42,6 +52,8 @@ export default function GenerationForm({
   orgIntelligence,
   disabled,
   disabledReason,
+  initialValues,
+  initialValuesKey,
 }: GenerationFormProps) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -71,6 +83,18 @@ export default function GenerationForm({
       setOiApplied(true);
     }
   }, [orgIntelligence]);
+
+  useEffect(() => {
+    if (!initialValues) return;
+
+    setTitle((prev) => (prev?.trim()?.length ? prev : initialValues.title || ""));
+    setPrompt((prev) => (prev?.trim()?.length ? prev : initialValues.prompt || ""));
+    setTargetAudience((prev) => (prev?.trim()?.length ? prev : initialValues.targetAudience || ""));
+    setIndustry((prev) => (prev?.trim()?.length ? prev : initialValues.industry || ""));
+    setTone((prev) => (prev?.trim()?.length ? prev : initialValues.tone || ""));
+    setBrandKitId((prev) => (prev?.trim()?.length ? prev : initialValues.brandKitId || ""));
+    setAdditionalContext((prev) => (prev?.trim()?.length ? prev : initialValues.additionalContext || ""));
+  }, [initialValues, initialValuesKey]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -111,12 +111,115 @@ function countWords(text: string): number {
 }
 
 /**
+ * Extract object key from legacy/public bucket URL formats.
+ * Supports:
+ * - https://s3.amazonaws.com/<bucket>/<key>
+ * - https://<bucket>.s3.amazonaws.com/<key>
+ * - https://storage.googleapis.com/<bucket>/<key>
+ */
+function extractStorageKeyFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.replace(/^\/+/, "");
+
+    if (!path) return null;
+
+    // path-style AWS/GCS URL: /bucket/key
+    if (host === "s3.amazonaws.com" || host === "storage.googleapis.com") {
+      const parts = path.split("/").filter(Boolean);
+      if (parts.length >= 2) {
+        return parts.slice(1).join("/");
+      }
+      return null;
+    }
+
+    // virtual-hosted-style S3 URL: bucket.s3.amazonaws.com/key
+    if (host.endsWith(".s3.amazonaws.com")) {
+      return path;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Identify which speaker is the "agent" from structured utterances.
- * The agent always speaks first (opens the call).
+ * Do not assume first utterance is agent (prospect often answers first with "Hello").
  */
 function identifyAgentSpeaker(utterances: StructuredTranscript["utterances"]): string {
   if (utterances.length === 0) return "Speaker 1";
-  return utterances[0].speaker;
+
+  const uniqueSpeakers = Array.from(new Set(utterances.map(u => u.speaker)));
+  if (uniqueSpeakers.length === 1) return uniqueSpeakers[0];
+
+  const scores = new Map<string, number>();
+  uniqueSpeakers.forEach((s) => scores.set(s, 0));
+
+  const agentCues = [
+    'this is',
+    'calling from',
+    'may i speak',
+    'am i speaking with',
+    'quick question',
+    'follow up',
+    "i'll be brief",
+  ];
+
+  const contactCues = [
+    'hello',
+    'speaking',
+    'who is this',
+    'wrong number',
+    'not interested',
+    'do not call',
+    "don't call",
+  ];
+
+  utterances.forEach((u, idx) => {
+    const text = String(u.text || '').toLowerCase().trim();
+    const words = text.split(/\s+/).filter(Boolean);
+    let score = scores.get(u.speaker) || 0;
+
+    if (agentCues.some(c => text.includes(c))) score += 3;
+    if (contactCues.some(c => text.includes(c))) score -= 2;
+    if (words.length >= 10) score += 1;
+
+    if (idx === 0 && words.length <= 3 && (text.includes('hello') || text.includes('speaking'))) {
+      score -= 3;
+    }
+
+    scores.set(u.speaker, score);
+  });
+
+  let bestSpeaker = uniqueSpeakers[0];
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const speaker of uniqueSpeakers) {
+    const score = scores.get(speaker) || 0;
+    if (score > bestScore) {
+      bestScore = score;
+      bestSpeaker = speaker;
+    }
+  }
+
+  // Tie-breaker for short contact greeting opener.
+  const first = utterances[0];
+  const second = utterances[1];
+  const firstWords = String(first?.text || '').trim().split(/\s+/).filter(Boolean).length;
+  if (
+    second &&
+    first.speaker === bestSpeaker &&
+    firstWords <= 3 &&
+    String(first.text || '').toLowerCase().includes('hello')
+  ) {
+    return second.speaker;
+  }
+
+  return bestSpeaker;
 }
 
 /**
@@ -401,6 +504,22 @@ export async function runPostCallAnalysis(
     if (!audioUrl && session.recordingUrl) {
       audioUrl = session.recordingUrl;
       console.log(`${LOG_PREFIX} Using existing recording URL`);
+
+      // Legacy sessions may store non-presigned bucket URLs. Try deriving key and generating a signed URL.
+      if (isS3Configured()) {
+        const derivedKey = extractStorageKeyFromUrl(session.recordingUrl);
+        if (derivedKey) {
+          try {
+            const signedUrl = await getPresignedDownloadUrl(derivedKey, 3600);
+            if (signedUrl) {
+              audioUrl = signedUrl;
+              console.log(`${LOG_PREFIX} Refreshed existing recording URL via derived key: ${derivedKey}`);
+            }
+          } catch (e: any) {
+            console.warn(`${LOG_PREFIX} Failed to refresh existing recording URL from derived key: ${e.message}`);
+          }
+        }
+      }
     }
 
     // 3. Transcribe with structured diarization
