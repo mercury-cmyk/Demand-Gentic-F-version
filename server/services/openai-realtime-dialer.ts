@@ -43,6 +43,7 @@ import {
   buildContactContextSection,
 } from "./foundation-capabilities";
 import { guardQualifiedLeadDisposition } from "./disposition-engagement-guard";
+import { RealtimeCallTelemetry, hashText } from "./realtime-call-telemetry";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -203,6 +204,14 @@ interface OpenAIRealtimeSession {
     currentState: 'IDENTITY_CHECK' | 'RIGHT_PARTY_INTRO' | 'CONTEXT_FRAMING' | 'DISCOVERY' | 'LISTENING' | 'ACKNOWLEDGEMENT' | 'PERMISSION_REQUEST' | 'CLOSE' | 'GATEKEEPER';
     stateHistory: string[];
   };
+  telemetry: RealtimeCallTelemetry;
+  currentResponseTurnId: number;
+  currentResponseStartedAt: number | null;
+  currentResponseAudioStarted: boolean;
+  currentResponseAudioChunkCount: number;
+  currentResponseText: string;
+  currentResponseDuplicateGuardTriggered: boolean;
+  deadAirRecoveryPrompted: boolean;
 }
 
 interface DispositionFunctionResult {
@@ -534,6 +543,14 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
               },
+              telemetry: new RealtimeCallTelemetry(sessionId!, sessionId!),
+              currentResponseTurnId: 0,
+              currentResponseStartedAt: null,
+              currentResponseAudioStarted: false,
+              currentResponseAudioChunkCount: 0,
+              currentResponseText: '',
+              currentResponseDuplicateGuardTriggered: false,
+              deadAirRecoveryPrompted: false,
             };
           } else {
             console.warn(`${LOG_PREFIX} âš ï¸  Test session detected for call ${sessionId} - skipping DB validation. Locks/dispositions will not be enforced.`);
@@ -594,10 +611,24 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
               },
+              telemetry: new RealtimeCallTelemetry(sessionId!, sessionId!),
+              currentResponseTurnId: 0,
+              currentResponseStartedAt: null,
+              currentResponseAudioStarted: false,
+              currentResponseAudioChunkCount: 0,
+              currentResponseText: '',
+              currentResponseDuplicateGuardTriggered: false,
+              deadAirRecoveryPrompted: false,
             };
           }
 
           activeSessions.set(sessionId!, session!);
+          session!.telemetry.emit("call.started", "system", {
+            provider,
+            runId: runId || null,
+            campaignId: campaignId || null,
+            callAttemptId: callAttemptId || null,
+          });
           
           // Persist session to Redis for cross-instance state sharing
           // This solves "invalid call control ID" in production with multiple instances
@@ -626,6 +657,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           if (initialStreamId) {
             session!.streamSid = initialStreamId;
             streamIdToCallId.set(initialStreamId, sessionId!);
+            session!.telemetry.emit("media.connected", "system", { streamId: initialStreamId });
             if (session!.audioFrameBuffer.length > 0) {
               console.log(`${LOG_PREFIX} dY" Flushing ${session!.audioFrameBuffer.length} buffered audio frames after initial stream_id`);
               flushAudioBuffer(session!);
@@ -662,6 +694,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           if (message.stream_id && session) {
             session.streamSid = message.stream_id;
             console.log(`${LOG_PREFIX} ðŸ”— Telnyx streaming_event received! stream_id set to: ${message.stream_id} for call: ${session.callId}`);
+            session.telemetry.emit("media.connected", "system", { streamId: message.stream_id });
             
             // Map stream_id to call ID for routing
             if (!streamIdToCallId.has(message.stream_id)) {
@@ -1267,11 +1300,38 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
     // RESPONSE LIFECYCLE EVENTS
     // =========================================================================
     case "response.created":
+      if (session.isResponseInProgress && session.currentResponseTurnId === session.telemetry.turnId) {
+        console.warn(`${LOG_PREFIX} Duplicate response.created detected for call: ${session.callId}, turn: ${session.telemetry.turnId}. Cancelling duplicate response.`);
+        session.telemetry.emit("guard.duplicate_llm_dropped", "system", {
+          responseId: message.response?.id || null,
+          turnId: session.telemetry.turnId,
+          reason: "response_already_in_progress",
+        });
+        if (session.openaiWs?.readyState === WebSocket.OPEN) {
+          session.openaiWs.send(JSON.stringify({ type: "response.cancel" }));
+        }
+        break;
+      }
+
       // Track response ID and mark response as in progress
       session.currentResponseId = message.response?.id || null;
       session.isResponseInProgress = true;
       session.audioPlaybackMs = 0;
       session.lastAudioDeltaTimestamp = Date.now();
+      session.currentResponseTurnId = session.telemetry.turnId;
+      session.currentResponseStartedAt = Date.now();
+      session.currentResponseAudioStarted = false;
+      session.currentResponseAudioChunkCount = 0;
+      session.currentResponseText = "";
+      session.currentResponseDuplicateGuardTriggered = false;
+      const lastUserTranscript = [...session.transcripts].reverse().find((t) => t.role === "user")?.text || "";
+      session.telemetry.emit("llm.requested", "system", {
+        promptHash: hashText(lastUserTranscript || `call:${session.callId}:turn:${session.telemetry.turnId}`),
+        reason: "normal",
+        idempotencyKey: `${session.callId}:${session.telemetry.turnId}`,
+        conversationState: session.conversationState.currentState,
+        responseId: session.currentResponseId,
+      }, session.currentResponseTurnId);
       console.log(`${LOG_PREFIX} Response created (id: ${session.currentResponseId}) for call: ${session.callId}`);
       scheduleSoftTimeout(session);
       break;
@@ -1293,6 +1353,24 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
     case "response.audio.delta":
       if (message.delta) {
+        session.currentResponseAudioChunkCount += 1;
+        if (!session.currentResponseAudioStarted) {
+          session.currentResponseAudioStarted = true;
+          session.telemetry.emit("tts.started", "agent", {
+            utteranceId: session.currentResponseItemId,
+            responseId: session.currentResponseId,
+          }, session.currentResponseTurnId);
+          session.telemetry.emit("playback.started", "system", {
+            utteranceId: session.currentResponseItemId,
+            responseId: session.currentResponseId,
+          }, session.currentResponseTurnId);
+        }
+        if (session.currentResponseAudioChunkCount === 1 || session.currentResponseAudioChunkCount % 25 === 0) {
+          session.telemetry.emit("tts.chunk_sent", "agent", {
+            chunkCount: session.currentResponseAudioChunkCount,
+          }, session.currentResponseTurnId);
+        }
+
         // Decode base64 audio from OpenAI
         const audioBuffer = Buffer.from(message.delta, 'base64');
 
@@ -1363,11 +1441,21 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
       break;
 
     case "response.audio.done":
+      session.telemetry.emit("tts.stopped", "agent", {
+        utteranceId: session.currentResponseItemId,
+        totalPlaybackMs: Math.round(session.audioPlaybackMs),
+        chunkCount: session.currentResponseAudioChunkCount,
+      }, session.currentResponseTurnId);
+      session.telemetry.emit("playback.ended", "system", {
+        utteranceId: session.currentResponseItemId,
+        totalPlaybackMs: Math.round(session.audioPlaybackMs),
+      }, session.currentResponseTurnId);
       console.log(`${LOG_PREFIX} Response audio complete (total: ${Math.round(session.audioPlaybackMs)}ms) for call: ${session.callId}`);
       break;
 
     case "response.audio_transcript.delta":
       if (message.delta && allowTranscripts && settings.advanced.clientEvents.agentResponse) {
+        session.currentResponseText += message.delta;
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
         if (lastTranscript?.role === 'assistant') {
           lastTranscript.text += message.delta;
@@ -1390,6 +1478,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
     case "response.text.delta":
       // Handle text-only responses (when output_modalities includes "text")
       if (message.delta && allowTranscripts && settings.advanced.clientEvents.agentResponse) {
+        session.currentResponseText += message.delta;
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
         if (lastTranscript?.role === 'assistant') {
           lastTranscript.text += message.delta;
@@ -1422,10 +1511,56 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
       break;
 
     case "response.done":
+      {
+        const completionText = session.currentResponseText.trim();
+        const responseHash = hashText(completionText || `response:${session.currentResponseId || "unknown"}`);
+        const duplicateCompletion = session.telemetry.isDuplicateCompletionForTurn(session.currentResponseTurnId, responseHash);
+        if (duplicateCompletion) {
+          session.currentResponseDuplicateGuardTriggered = true;
+          session.telemetry.emit("guard.duplicate_llm_dropped", "system", {
+            responseHash,
+            turnId: session.currentResponseTurnId,
+            reason: "duplicate_completion_hash_same_turn",
+          }, session.currentResponseTurnId);
+        }
+
+        const repeatCheck = session.telemetry.detectRepeatUtterance(responseHash);
+        if (repeatCheck.repeated) {
+          session.telemetry.emit("guard.repeat_utterance_blocked", "system", {
+            responseHash,
+            deltaMs: repeatCheck.deltaMs,
+            action: "detect_only",
+          }, session.currentResponseTurnId);
+        }
+
+        const latencyMs = session.currentResponseStartedAt
+          ? Math.max(0, Date.now() - session.currentResponseStartedAt)
+          : null;
+
+        session.telemetry.emit("llm.completed", "system", {
+          latencyMs,
+          responseHash,
+          responsePreview: completionText.slice(0, 120),
+          duplicateCompletion,
+        }, session.currentResponseTurnId);
+        session.telemetry.emit("turn.closed", "system", {
+          turnDurationMs: latencyMs,
+          sttFinalText: [...session.transcripts].reverse().find((t) => t.role === "user")?.text?.slice(0, 500) || "",
+          agentFinalText: completionText.slice(0, 500),
+          completionCountForTurn: 1,
+          ttsStartCountForTurn: session.currentResponseAudioStarted ? 1 : 0,
+          interrupted: false,
+        }, session.currentResponseTurnId);
+      }
+
       // Full response complete
       session.isResponseInProgress = false;
       session.currentResponseId = null;
       session.currentResponseItemId = null;
+      session.currentResponseStartedAt = null;
+      session.currentResponseAudioStarted = false;
+      session.currentResponseAudioChunkCount = 0;
+      session.currentResponseText = "";
       console.log(`${LOG_PREFIX} Response complete for call: ${session.callId}`);
       clearSoftTimeout(session);
       break;
@@ -1433,6 +1568,14 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
     case "response.cancelled":
       // Response was cancelled (e.g., due to user interruption)
       session.isResponseInProgress = false;
+      session.telemetry.emit("playback.canceled", "system", {
+        responseId: session.currentResponseId,
+        itemId: session.currentResponseItemId,
+      }, session.currentResponseTurnId);
+      session.currentResponseStartedAt = null;
+      session.currentResponseAudioStarted = false;
+      session.currentResponseAudioChunkCount = 0;
+      session.currentResponseText = "";
       console.log(`${LOG_PREFIX} Response cancelled for call: ${session.callId}`);
       clearSoftTimeout(session);
       break;
@@ -1456,6 +1599,10 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
     case "conversation.item.input_audio_transcription.completed":
       if (message.transcript && allowTranscripts && settings.advanced.clientEvents.userTranscript) {
         console.log(`${LOG_PREFIX} User: ${message.transcript}`);
+        session.telemetry.emit("stt.final", "prospect", {
+          text: message.transcript,
+          textHash: hashText(message.transcript),
+        }, session.telemetry.turnId);
         session.transcripts.push({
           role: 'user',
           text: message.transcript,
@@ -1485,6 +1632,11 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
               });
             });
           }
+        } else if (session.conversationState.identityConfirmed && detectIdentityConfirmation(message.transcript)) {
+          session.telemetry.emit("guard.intro_blocked", "system", {
+            reason: "identity_already_confirmed",
+            transcriptHash: hashText(message.transcript),
+          }, session.telemetry.turnId);
         }
 
         // Voicemail detection is now handled by the agent via disposition function call
@@ -1511,16 +1663,33 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
     case "input_audio_buffer.speech_started":
       console.log(`${LOG_PREFIX} Speech detected on call: ${session.callId}`);
       session.lastUserSpeechTime = new Date();
+      session.deadAirRecoveryPrompted = false;
+      const turnId = session.telemetry.nextTurn();
+      session.telemetry.emit("vad.prospect.speech_start", "prospect", {
+        isResponseInProgress: session.isResponseInProgress,
+        responseItemId: session.currentResponseItemId,
+      }, turnId);
 
       // Handle user interruption - cancel current response and truncate
       if (session.isResponseInProgress && session.currentResponseItemId) {
+        session.telemetry.emit("barge_in.detected", "system", {
+          duringUtteranceId: session.currentResponseItemId,
+          offsetMsFromTtsStart: session.currentResponseStartedAt
+            ? Math.max(0, Date.now() - session.currentResponseStartedAt)
+            : null,
+          cancelIssued: true,
+        }, turnId);
         await handleUserInterruption(session);
+        session.telemetry.emit("barge_in.tts_cancel_sent", "system", {
+          duringUtteranceId: session.currentResponseItemId,
+        }, turnId);
       }
       break;
 
     case "input_audio_buffer.speech_stopped":
       console.log(`${LOG_PREFIX} Speech ended on call: ${session.callId}`);
       session.lastUserSpeechTime = new Date();
+      session.telemetry.emit("vad.prospect.speech_end", "prospect", {}, session.telemetry.turnId);
       // Note: With semantic_vad enabled, OpenAI will automatically commit and create response
       // Only manually trigger if VAD is disabled
       break;
@@ -2145,6 +2314,11 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   session.callOutcome = outcome;
 
   console.log(`${LOG_PREFIX} Ending call: ${callId}, outcome: ${outcome}, disposition: ${session.detectedDisposition}`);
+  session.telemetry.emit("call.ended", "system", {
+    outcome,
+    disposition: session.detectedDisposition || mapOutcomeToDisposition(outcome),
+    durationMs: Math.max(0, Date.now() - session.startTime.getTime()),
+  }, session.telemetry.turnId);
 
   // Finalize cost tracking and log detailed breakdown
   const costMetrics = finalizeCostTracking(callId);
@@ -2880,9 +3054,33 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       : null;
 
     if (timeSinceUserSpeech !== null && timeSinceUserSpeech > endAfterSilenceSeconds) {
+      session.telemetry.emit("watchdog.dead_air_hangup", "system", {
+        silenceSeconds: timeSinceUserSpeech,
+        thresholdSeconds: endAfterSilenceSeconds,
+      }, session.telemetry.turnId);
       console.warn(`${LOG_PREFIX} Ending call ${session.callId} after ${timeSinceUserSpeech}s of user silence (Limit: ${endAfterSilenceSeconds}s)`);
       endCall(session.callId, 'completed');
       return;
+    }
+
+    if (
+      timeSinceUserSpeech !== null
+      && timeSinceUserSpeech >= 4
+      && timeSinceUserSpeech < endAfterSilenceSeconds
+      && !session.deadAirRecoveryPrompted
+      && !session.isResponseInProgress
+      && session.openaiWs?.readyState === WebSocket.OPEN
+    ) {
+      session.deadAirRecoveryPrompted = true;
+      session.telemetry.emit("watchdog.dead_air_recovery_prompted", "system", {
+        silenceSeconds: timeSinceUserSpeech,
+      }, session.telemetry.turnId);
+      session.openaiWs.send(JSON.stringify({
+        type: "response.create",
+        response: {
+          instructions: "You may say one brief recovery line such as: Just checking, are you still there? Then pause and wait.",
+        },
+      }));
     }
 
     if (elapsedSeconds > maxDurationSeconds) {
