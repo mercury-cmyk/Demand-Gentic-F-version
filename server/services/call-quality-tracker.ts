@@ -58,6 +58,15 @@ export interface NumberHealthCheck {
   cooldownDurationHours?: number;
 }
 
+export interface VoiceLiftTelemetrySummary {
+  totalCallSessions: number;
+  identityToPurposeSamples: number;
+  avgIdentityToPurposeMs: number | null;
+  p95ModelLatencyMs: number | null;
+  avgVoicemailDetectionMs: number | null;
+  startupLoopRate: number;
+}
+
 // ==================== CONSTANTS ====================
 
 /**
@@ -322,6 +331,66 @@ export async function checkNumberHealth(numberId: string): Promise<NumberHealthC
     shouldCooldown,
     cooldownReason,
     cooldownDurationHours,
+  };
+}
+
+/**
+ * Weekly telemetry summary for voice-lift KPIs based on call_session_events.
+ */
+export async function getVoiceLiftTelemetrySummary(
+  campaignId: string,
+  days: number = 7
+): Promise<VoiceLiftTelemetrySummary> {
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const [summaryRow] = (await db.execute<{
+    total_call_sessions: string;
+    identity_to_purpose_samples: string;
+    avg_identity_to_purpose_ms: string | null;
+    p95_model_latency_ms: string | null;
+    avg_voicemail_detection_ms: string | null;
+    startup_loop_rate: string | null;
+  }>(sql`
+    WITH scoped_calls AS (
+      SELECT id
+      FROM call_sessions
+      WHERE campaign_id = ${campaignId}
+        AND created_at >= ${since}
+    ),
+    loop_flags AS (
+      SELECT cse.call_session_id,
+             MAX(CASE WHEN cse.event_key = 'realtime.loop_detected' THEN 1 ELSE 0 END) AS loop_detected
+      FROM call_session_events cse
+      JOIN scoped_calls sc ON sc.id = cse.call_session_id
+      GROUP BY cse.call_session_id
+    )
+    SELECT
+      (SELECT COUNT(*)::text FROM scoped_calls) AS total_call_sessions,
+      COUNT(*) FILTER (
+        WHERE cse.event_key = 'timer.identity_to_purpose_ms'
+      )::text AS identity_to_purpose_samples,
+      ROUND(AVG(cse.value_num) FILTER (
+        WHERE cse.event_key = 'timer.identity_to_purpose_ms'
+      ), 2)::text AS avg_identity_to_purpose_ms,
+      percentile_cont(0.95) WITHIN GROUP (ORDER BY cse.value_num) FILTER (
+        WHERE cse.event_key = 'realtime.p95_model_latency_ms'
+      )::text AS p95_model_latency_ms,
+      ROUND(AVG(cse.value_num) FILTER (
+        WHERE cse.event_key = 'timer.vm_detection_ms'
+      ), 2)::text AS avg_voicemail_detection_ms,
+      ROUND((SELECT COALESCE(AVG(loop_detected::numeric), 0) FROM loop_flags), 4)::text AS startup_loop_rate
+    FROM call_session_events cse
+    JOIN scoped_calls sc ON sc.id = cse.call_session_id
+  `)).rows;
+
+  return {
+    totalCallSessions: Number(summaryRow?.total_call_sessions || 0),
+    identityToPurposeSamples: Number(summaryRow?.identity_to_purpose_samples || 0),
+    avgIdentityToPurposeMs: summaryRow?.avg_identity_to_purpose_ms ? Number(summaryRow.avg_identity_to_purpose_ms) : null,
+    p95ModelLatencyMs: summaryRow?.p95_model_latency_ms ? Number(summaryRow.p95_model_latency_ms) : null,
+    avgVoicemailDetectionMs: summaryRow?.avg_voicemail_detection_ms ? Number(summaryRow.avg_voicemail_detection_ms) : null,
+    startupLoopRate: Number(summaryRow?.startup_loop_rate || 0),
   };
 }
 

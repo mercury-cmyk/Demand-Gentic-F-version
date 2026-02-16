@@ -1,11 +1,10 @@
-import { useState } from 'react';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
-  Target, ChevronRight, Clock, CheckCircle, Truck,
-  AlertCircle, Play, Pause, Users, BarChart3, Plus, Bot, Mic, List, Mail
+  Target, Clock, CheckCircle, Truck,
+  Play, Pause, Users, BarChart3, Plus, Mic, List, Phone, Mail
 } from 'lucide-react';
 
 interface Campaign {
@@ -50,86 +49,59 @@ interface CampaignCardProps {
   campaign: Campaign;
   onRequestMoreLeads: (campaignId: string) => void;
   onViewDetails?: (campaignId: string) => void;
-  onTestAgent?: (campaignId: string) => void;
-  onTestEmail?: (campaignId: string) => void;
+  onOpenPreviewStudio?: (campaignId: string, mode?: 'voice' | 'phone' | 'email') => void;
   onSelectVoice?: (campaignId: string) => void;
   onViewQueue?: (campaignId: string) => void;
 }
 
 const statusConfig: Record<string, {
   label: string;
-  color: string;
-  bgColor: string;
+  tone: string;
   icon: React.ElementType;
-  step: number;
 }> = {
   pending: {
     label: 'Pending Review',
-    color: 'text-amber-600',
-    bgColor: 'bg-amber-100 dark:bg-amber-900/30',
+    tone: 'text-amber-700 border-amber-300 bg-amber-50 dark:text-amber-300 dark:border-amber-800 dark:bg-amber-950/40',
     icon: Clock,
-    step: 1
   },
   approved: {
     label: 'Approved',
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-100 dark:bg-blue-900/30',
+    tone: 'text-blue-700 border-blue-300 bg-blue-50 dark:text-blue-300 dark:border-blue-800 dark:bg-blue-950/40',
     icon: CheckCircle,
-    step: 2
   },
   active: {
     label: 'In Progress',
-    color: 'text-green-600',
-    bgColor: 'bg-green-100 dark:bg-green-900/30',
+    tone: 'text-emerald-700 border-emerald-300 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:bg-emerald-950/40',
     icon: Play,
-    step: 3
   },
   progressing: {
     label: 'In Progress',
-    color: 'text-green-600',
-    bgColor: 'bg-green-100 dark:bg-green-900/30',
+    tone: 'text-emerald-700 border-emerald-300 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:bg-emerald-950/40',
     icon: Play,
-    step: 3
   },
   delivering: {
     label: 'Delivering',
-    color: 'text-purple-600',
-    bgColor: 'bg-purple-100 dark:bg-purple-900/30',
+    tone: 'text-violet-700 border-violet-300 bg-violet-50 dark:text-violet-300 dark:border-violet-800 dark:bg-violet-950/40',
     icon: Truck,
-    step: 4
   },
   delivered: {
     label: 'Delivered',
-    color: 'text-purple-600',
-    bgColor: 'bg-purple-100 dark:bg-purple-900/30',
+    tone: 'text-violet-700 border-violet-300 bg-violet-50 dark:text-violet-300 dark:border-violet-800 dark:bg-violet-950/40',
     icon: Truck,
-    step: 4
   },
   completed: {
     label: 'Completed',
-    color: 'text-slate-600',
-    bgColor: 'bg-slate-100 dark:bg-slate-800',
+    tone: 'text-slate-700 border-slate-300 bg-slate-50 dark:text-slate-300 dark:border-slate-700 dark:bg-slate-900/60',
     icon: CheckCircle,
-    step: 5
   },
   paused: {
     label: 'Paused',
-    color: 'text-gray-500',
-    bgColor: 'bg-gray-100 dark:bg-gray-800',
+    tone: 'text-gray-700 border-gray-300 bg-gray-50 dark:text-gray-300 dark:border-gray-700 dark:bg-gray-900/60',
     icon: Pause,
-    step: 3
   },
 };
 
-const statusSteps = [
-  { key: 'pending', label: 'Pending' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'active', label: 'In Progress' },
-  { key: 'delivered', label: 'Delivered' },
-  { key: 'completed', label: 'Completed' },
-];
-
-export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onTestEmail, onSelectVoice, onViewQueue }: CampaignCardProps) {
+export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onOpenPreviewStudio, onSelectVoice, onViewQueue }: CampaignCardProps) {
   const status = campaign.status || 'active';
   const config = statusConfig[status] || statusConfig.active;
   const StatusIcon = config.icon;
@@ -138,142 +110,95 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
   const targetCount = campaign.targetCount || campaign.eligibleCount || 100;
   const deliveredCount = campaign.deliveredCount || 0;
   const progressPercent = Math.min(Math.round((deliveredCount / targetCount) * 100), 100);
+  const queueCount = campaign.stats?.queueStats?.total ?? campaign.totalContacts ?? campaign.eligibleCount ?? 0;
+  const remainingCount = campaign.stats?.remaining ?? Math.max(targetCount - deliveredCount, 0);
+  const attemptsCount = campaign.stats?.attempts ?? campaign.deliveredCount ?? 0;
+  const leadsCount = campaign.stats?.leads ?? campaign.verifiedCount ?? 0;
+  const campaignTypeLabel = campaign.type || campaign.campaignType || 'campaign';
+  const dialModeLabel = campaign.dialMode ? campaign.dialMode.replace('_', ' ') : 'standard';
+  const statusAccent =
+    status === 'active'
+      ? 'from-emerald-500 to-teal-500'
+      : status === 'delivering' || status === 'delivered'
+        ? 'from-violet-500 to-fuchsia-500'
+        : status === 'approved'
+          ? 'from-blue-500 to-cyan-500'
+          : status === 'pending'
+            ? 'from-amber-500 to-orange-500'
+            : 'from-slate-500 to-slate-600';
 
   return (
-    <Card className="hover:shadow-lg transition-all duration-300 overflow-hidden group">
-      {/* Status Banner */}
-      <div className={`h-1.5 ${
-        status === 'active' ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
-        status === 'delivering' ? 'bg-gradient-to-r from-purple-500 to-pink-500' :
-        status === 'completed' ? 'bg-gradient-to-r from-slate-400 to-slate-500' :
-        status === 'approved' ? 'bg-gradient-to-r from-blue-500 to-cyan-500' :
-        status === 'pending' ? 'bg-gradient-to-r from-amber-400 to-orange-400' :
-        'bg-gradient-to-r from-gray-400 to-gray-500'
-      }`} />
+    <Card className="group relative overflow-hidden border-slate-200/80 bg-white/95 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-950/90">
+      <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${statusAccent}`} />
 
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-md">
-            <Target className="h-6 w-6 text-white" />
+      <CardHeader className="pb-4 pt-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="h-11 w-11 shrink-0 rounded-xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 flex items-center justify-center shadow-sm">
+              <Target className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="text-base md:text-lg leading-tight truncate">
+                {campaign.name}
+              </CardTitle>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline" className="capitalize">{campaignTypeLabel}</Badge>
+                <Badge variant="outline" className="capitalize">{dialModeLabel}</Badge>
+                {campaign.startDate && (
+                  <span>
+                    {new Date(campaign.startDate).toLocaleDateString()}
+                    {campaign.endDate ? ` – ${new Date(campaign.endDate).toLocaleDateString()}` : ''}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-          <Badge className={`${config.bgColor} ${config.color} border-0 gap-1`}>
+          <Badge variant="outline" className={`${config.tone} gap-1.5 whitespace-nowrap`}>
             <StatusIcon className="h-3 w-3" />
             {config.label}
           </Badge>
         </div>
-        <CardTitle className="mt-3 text-lg group-hover:text-primary transition-colors">
-          {campaign.name}
-        </CardTitle>
       </CardHeader>
 
-      <CardContent className="space-y-4">
-        {/* Status Timeline */}
-        <div className="relative">
-          <div className="flex justify-between items-center mb-2">
-            {statusSteps.map((step, index) => {
-              const isCompleted = config.step > index + 1;
-              const isCurrent = config.step === index + 1;
-              const isPaused = status === 'paused' && step.key === 'active';
-
-              return (
-                <div key={step.key} className="flex flex-col items-center relative z-10">
-                  <div className={`h-3 w-3 rounded-full transition-all ${
-                    isCompleted
-                      ? 'bg-green-500'
-                      : isCurrent
-                        ? isPaused
-                          ? 'bg-gray-400 ring-2 ring-gray-300 ring-offset-2'
-                          : 'bg-blue-500 ring-2 ring-blue-300 ring-offset-2'
-                        : 'bg-gray-200 dark:bg-gray-700'
-                  }`} />
-                  <span className={`text-[10px] mt-1 ${
-                    isCurrent ? 'font-semibold text-foreground' : 'text-muted-foreground'
-                  }`}>
-                    {step.label}
-                  </span>
-                </div>
-              );
-            })}
+      <CardContent className="space-y-5">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="rounded-lg border bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-900/50">
+            <p className="text-[11px] text-muted-foreground">Queue</p>
+            <p className="mt-1 text-sm font-semibold">{queueCount.toLocaleString()}</p>
           </div>
-          {/* Progress Line */}
-          <div className="absolute top-1.5 left-0 right-0 h-[2px] bg-gray-200 dark:bg-gray-700 -z-0">
-            <div
-              className="h-full bg-green-500 transition-all duration-500"
-              style={{ width: `${Math.min((config.step - 1) / (statusSteps.length - 1) * 100, 100)}%` }}
-            />
+          <div className="rounded-lg border bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-900/50">
+            <p className="text-[11px] text-muted-foreground">Remaining</p>
+            <p className="mt-1 text-sm font-semibold">{remainingCount.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg border bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-900/50">
+            <p className="text-[11px] text-muted-foreground">Attempts</p>
+            <p className="mt-1 text-sm font-semibold">{attemptsCount.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg border bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-900/50">
+            <p className="text-[11px] text-muted-foreground">Leads</p>
+            <p className="mt-1 text-sm font-semibold">{leadsCount.toLocaleString()}</p>
           </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-2 pt-2">
-          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-            <Users className="h-3.5 w-3.5 mx-auto text-blue-500 mb-1" />
-            <p className="text-[10px] text-muted-foreground">Queue</p>
-            <p className="font-semibold text-xs">{(campaign.stats?.queueStats?.total ?? campaign.totalContacts ?? campaign.eligibleCount ?? 0).toLocaleString()}</p>
+        <div className="rounded-lg border p-3 dark:border-slate-800">
+          <div className="mb-2 flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Delivery Progress</span>
+            <span className="font-semibold">{progressPercent}%</span>
           </div>
-          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-            <Clock className="h-3.5 w-3.5 mx-auto text-amber-500 mb-1" />
-            <p className="text-[10px] text-muted-foreground">Remaining</p>
-            <p className="font-semibold text-xs">{(campaign.stats?.remaining ?? 0).toLocaleString()}</p>
-          </div>
-          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-            <Truck className="h-3.5 w-3.5 mx-auto text-purple-500 mb-1" />
-            <p className="text-[10px] text-muted-foreground">Attempts</p>
-            <p className="font-semibold text-xs">{(campaign.stats?.attempts ?? campaign.deliveredCount ?? 0).toLocaleString()}</p>
-          </div>
-          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-            <CheckCircle className="h-3.5 w-3.5 mx-auto text-green-500 mb-1" />
-            <p className="text-[10px] text-muted-foreground">Leads</p>
-            <p className="font-semibold text-xs">{(campaign.stats?.leads ?? campaign.verifiedCount ?? 0).toLocaleString()}</p>
+          <Progress value={progressPercent} className="h-2" />
+          <div className="mt-2 text-[11px] text-muted-foreground">
+            {deliveredCount.toLocaleString()} delivered of {targetCount.toLocaleString()} target
           </div>
         </div>
-
-        {/* Detailed Stats */}
-        <div className="grid grid-cols-2 gap-y-1 gap-x-4 text-xs pt-3 border-t border-slate-100 dark:border-slate-800">
-             <div className="flex justify-between items-center">
-                 <span className="text-muted-foreground">Type:</span>
-                 <span className="font-medium capitalize text-right truncate pl-2">{campaign.type || campaign.campaignType || 'N/A'}</span>
-             </div>
-             <div className="flex justify-between items-center">
-                 <span className="text-muted-foreground">Dial Mode:</span>
-                 <span className="font-medium capitalize text-right truncate pl-2">{campaign.dialMode ? campaign.dialMode.replace('_', ' ') : 'Standard'}</span>
-             </div>
-             {campaign.startDate && (
-              <div className="flex justify-between items-center col-span-2">
-                 <span className="text-muted-foreground whitespace-nowrap">Dates:</span>
-                 <span className="font-medium text-right truncate pl-2">
-                  {new Date(campaign.startDate).toLocaleDateString()}
-                  {campaign.endDate ? ` - ${new Date(campaign.endDate).toLocaleDateString()}` : ''}
-                 </span>
-             </div>
-             )}
-              {(campaign.approvedBudget && campaign.approvedBudget !== '0' && campaign.approvedBudget !== '$0') && (
-              <div className="flex justify-between items-center col-span-2">
-                 <span className="text-muted-foreground">Budget:</span>
-                 <span className="font-medium text-right truncate pl-2">{campaign.approvedBudget}</span>
-             </div>
-             )}
-        </div>
-
-        {/* Progress Bar */}
-        {(status === 'active' || status === 'delivering') && (
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Delivery Progress</span>
-              <span className="font-medium">{progressPercent}%</span>
-            </div>
-            <Progress value={progressPercent} className="h-2" />
-          </div>
-        )}
       </CardContent>
 
-      <CardFooter className="pt-3 border-t bg-slate-50/50 dark:bg-slate-900/50 flex flex-col gap-2">
+      <CardFooter className="flex flex-col gap-2 border-t bg-slate-50/70 pt-3 dark:border-slate-800 dark:bg-slate-900/60">
         <div className="flex gap-2 w-full">
           {onViewQueue && (
             <Button
               variant="outline"
               size="sm"
-              className="flex-1 gap-1"
+              className="flex-1 gap-1.5"
               onClick={() => onViewQueue(campaign.id)}
             >
               <List className="h-3.5 w-3.5" />
@@ -283,7 +208,7 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
           <Button
             variant="outline"
             size="sm"
-            className="flex-1 gap-1"
+            className="flex-1 gap-1.5"
             onClick={() => onRequestMoreLeads(campaign.id)}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -300,35 +225,35 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
             </Button>
           )}
         </div>
-        {(onTestAgent || onTestEmail || onSelectVoice) && (
+        {(onOpenPreviewStudio || onSelectVoice) && (
           <div className="flex gap-2 w-full">
-            {onTestAgent && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 gap-1 border-violet-200 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-400 dark:hover:bg-violet-950/30"
-                onClick={() => onTestAgent(campaign.id)}
-              >
-                <Bot className="h-3.5 w-3.5" />
-                Test Call
-              </Button>
-            )}
-            {onTestEmail && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
-                onClick={() => onTestEmail(campaign.id)}
-              >
-                <Mail className="h-3.5 w-3.5" />
-                AI Email Test
-              </Button>
+            {onOpenPreviewStudio && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+                  onClick={() => onOpenPreviewStudio(campaign.id, 'phone')}
+                >
+                  <Phone className="h-3.5 w-3.5" />
+                  Test Call
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                  onClick={() => onOpenPreviewStudio(campaign.id, 'email')}
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  Test Email
+                </Button>
+              </>
             )}
             {onSelectVoice && (
               <Button
                 variant="outline"
                 size="sm"
-                className="flex-1 gap-1 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/30"
+                className="flex-1 gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 onClick={() => onSelectVoice(campaign.id)}
               >
                 <Mic className="h-3.5 w-3.5" />

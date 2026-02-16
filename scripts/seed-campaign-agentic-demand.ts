@@ -1,4 +1,4 @@
-
+﻿
 import { db } from "../server/db";
 import { campaigns, campaignChannelVariants, users } from "../shared/schema";
 import { eq } from "drizzle-orm";
@@ -27,7 +27,7 @@ async function seed() {
 
   // 2. Check if campaign already exists (idempotent)
   const campaignName =
-    "Agentic B2B Demand – Problem Intelligence & Solution Mapping (Voice)";
+    "Agentic B2B Demand â€“ Problem Intelligence & Solution Mapping (Voice)";
   const existing = await db
     .select()
     .from(campaigns)
@@ -41,9 +41,9 @@ async function seed() {
     process.exit(0);
   }
 
-  // ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // 3. Create the main campaign record
-  // ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [campaign] = await db
     .insert(campaigns)
     .values({
@@ -61,111 +61,111 @@ async function seed() {
         voice: "draft",
       },
 
-      // ── Campaign Objective ──
-      campaignObjective: `Build awareness and qualify interest among B2B marketing and demand generation leaders for DemandGentic's Agentic Demand Generation platform – specifically our Problem Intelligence engine and Solution Mapping framework.
+      // â”€â”€ Campaign Objective â”€â”€
+      campaignObjective: `Build awareness and qualify interest among B2B marketing and demand generation leaders for DemandGentic's Agentic Demand Generation platform â€“ specifically our Problem Intelligence engine and Solution Mapping framework.
 
 The campaign goal is twofold:
-1. AWARENESS: Introduce the concept of "Agentic B2B Demand" – AI agents that reason about prospect problems before outreach, replacing spray-and-pray tactics with intelligence-led engagement.
+1. AWARENESS: Introduce the concept of "Agentic B2B Demand" â€“ AI agents that reason about prospect problems before outreach, replacing spray-and-pray tactics with intelligence-led engagement.
 2. QUALIFICATION: Identify leaders who recognise the limitations of traditional demand gen (low conversion, poor targeting, wasted budget) and are open to evaluating an agentic, problem-first approach.
 
 Success = qualified interest confirmed: the prospect acknowledges a gap in their current demand gen approach and agrees to a deeper discovery conversation.`,
 
-      // ── Product / Service Info ──
+      // â”€â”€ Product / Service Info â”€â”€
       productServiceInfo: `DemandGentic is the world's first Agentic ABM Demand Reasoning platform. The two flagship capabilities we're introducing in this campaign:
 
 **1. Problem Intelligence Engine**
-• AI-powered research that maps each target account's real business challenges, competitive pressures, and strategic priorities BEFORE any outreach happens.
-• Sources include public filings, earnings calls, news, job postings, tech stack signals, and intent data.
-• Produces a structured "Problem Map" per account – not generic firmographics, but actual pain points.
-• Enables agents to open conversations with genuine relevance: "We noticed you're expanding into EMEA while consolidating your MarTech stack – that creates a unique pipeline challenge."
+â€¢ AI-powered research that maps each target account's real business challenges, competitive pressures, and strategic priorities BEFORE any outreach happens.
+â€¢ Sources include public filings, earnings calls, news, job postings, tech stack signals, and intent data.
+â€¢ Produces a structured "Problem Map" per account â€“ not generic firmographics, but actual pain points.
+â€¢ Enables agents to open conversations with genuine relevance: "We noticed you're expanding into EMEA while consolidating your MarTech stack â€“ that creates a unique pipeline challenge."
 
 **2. Solution Mapping Framework**
-• Automatically aligns DemandGentic's (or the client's) capabilities to each account's detected problems.
-• Generates a "Solution Fit Score" and a tailored messaging package: which problems to lead with, which proof points to cite, which objections to pre-empt.
-• Ensures every conversation is grounded in the prospect's reality, not a generic pitch.
-• Closes the gap between "we know their pain" and "here's exactly how we help."
+â€¢ Automatically aligns DemandGentic's (or the client's) capabilities to each account's detected problems.
+â€¢ Generates a "Solution Fit Score" and a tailored messaging package: which problems to lead with, which proof points to cite, which objections to pre-empt.
+â€¢ Ensures every conversation is grounded in the prospect's reality, not a generic pitch.
+â€¢ Closes the gap between "we know their pain" and "here's exactly how we help."
 
 **Platform proof points:**
-• 2M+ qualified leads generated across 500+ enterprise clients
-• 40% average lift in conversion rates vs. traditional outreach
-• 85% reduction in manual research and outreach effort
-• 40+ industries served globally
-• Compliance-first architecture (GDPR, CCPA, global privacy standards)
-• "Human Led Intelligence, AI Led Execution" philosophy`,
+â€¢ 2M+ qualified leads generated across 500+ enterprise clients
+â€¢ 40% average lift in conversion rates vs. traditional outreach
+â€¢ 85% reduction in manual research and outreach effort
+â€¢ 40+ industries served globally
+â€¢ Compliance-first architecture (GDPR, CCPA, global privacy standards)
+â€¢ "Human Led Intelligence, AI Led Execution" philosophy`,
 
-      // ── Talking Points ──
+      // â”€â”€ Talking Points â”€â”€
       talkingPoints: [
-        "Most B2B demand gen still relies on static lists, generic messaging, and volume-based outreach – conversion rates are declining industry-wide. Problem Intelligence changes the equation by understanding each account's real challenges before a single call is made.",
+        "Most B2B demand gen still relies on static lists, generic messaging, and volume-based outreach â€“ conversion rates are declining industry-wide. Problem Intelligence changes the equation by understanding each account's real challenges before a single call is made.",
         "We've seen that when agents lead with a prospect's actual business problem rather than a product pitch, connection-to-meeting rates increase by 3-4x. That's the power of Solution Mapping.",
-        "DemandGentic's AI agents don't just dial and pitch – they reason. They research the account, identify the top 3 problems, map our solution fit, and craft a conversation strategy. Every call is a discovery call, not a cold call.",
+        "DemandGentic's AI agents don't just dial and pitch â€“ they reason. They research the account, identify the top 3 problems, map our solution fit, and craft a conversation strategy. Every call is a discovery call, not a cold call.",
         "Traditional intent data tells you WHO is searching. Problem Intelligence tells you WHY they're searching and WHAT specific challenge they're trying to solve. That's the difference between a lead and a conversation.",
-        "We're not replacing your team – we're giving them superpowers. Problem Intelligence feeds your AEs with account-level insight packages so they walk into every meeting fully prepared.",
+        "We're not replacing your team â€“ we're giving them superpowers. Problem Intelligence feeds your AEs with account-level insight packages so they walk into every meeting fully prepared.",
         "Our compliance-first architecture means zero brand risk. Every interaction respects GDPR, CCPA, and local privacy regulations by design.",
-        "We recently helped a mid-market SaaS company increase their qualified pipeline by 60% in 90 days using Problem Intelligence to prioritise accounts showing real buying signals – not just intent scores.",
+        "We recently helped a mid-market SaaS company increase their qualified pipeline by 60% in 90 days using Problem Intelligence to prioritise accounts showing real buying signals â€“ not just intent scores.",
       ],
 
-      // ── Target Audience Description ──
+      // â”€â”€ Target Audience Description â”€â”€
       targetAudienceDescription: `**Primary Targets:**
-• VP of Demand Generation / Head of Demand Gen
-• VP of Growth Marketing / Head of Growth
-• Director of B2B Marketing / Senior Director of Marketing
-• Head of Pipeline Generation / Revenue Marketing
-• CMO / VP Marketing (at companies where they own demand gen directly)
+â€¢ VP of Demand Generation / Head of Demand Gen
+â€¢ VP of Growth Marketing / Head of Growth
+â€¢ Director of B2B Marketing / Senior Director of Marketing
+â€¢ Head of Pipeline Generation / Revenue Marketing
+â€¢ CMO / VP Marketing (at companies where they own demand gen directly)
 
 **Company Profile:**
-• B2B software vendors, SaaS companies, and technology-led B2B service providers
-• Company size: 200–10,000 employees (mid-market to enterprise)
-• Industries: SaaS, Cloud Infrastructure, Cybersecurity, FinTech, MarTech, HRTech, DevTools, Data/Analytics, AI/ML platforms
-• Geography: US, UK, EMEA – English-speaking markets
-• Revenue stage: Series B+ / $20M+ ARR (companies with established demand gen functions)
+â€¢ B2B software vendors, SaaS companies, and technology-led B2B service providers
+â€¢ Company size: 200â€“10,000 employees (mid-market to enterprise)
+â€¢ Industries: SaaS, Cloud Infrastructure, Cybersecurity, FinTech, MarTech, HRTech, DevTools, Data/Analytics, AI/ML platforms
+â€¢ Geography: US, UK, EMEA â€“ English-speaking markets
+â€¢ Revenue stage: Series B+ / $20M+ ARR (companies with established demand gen functions)
 
 **Psychographic Indicators:**
-• Frustrated with declining outbound conversion rates
-• Under pressure to deliver more pipeline with the same or fewer resources
-• Evaluating or curious about AI in their demand gen stack
-• Likely running ABM programmes but struggling with personalisation at scale
-• May have tested generic AI tools (ChatGPT for copy, etc.) but haven't seen pipeline impact`,
+â€¢ Frustrated with declining outbound conversion rates
+â€¢ Under pressure to deliver more pipeline with the same or fewer resources
+â€¢ Evaluating or curious about AI in their demand gen stack
+â€¢ Likely running ABM programmes but struggling with personalisation at scale
+â€¢ May have tested generic AI tools (ChatGPT for copy, etc.) but haven't seen pipeline impact`,
 
-      // ── Objection Handling ──
+      // â”€â”€ Objection Handling â”€â”€
       campaignObjections: [
         {
           objection: "We already have a demand gen team / agency handling this.",
           response:
-            "That's great – most of our clients do too. Problem Intelligence isn't a replacement for your team or agency; it's the research layer they've never had. Imagine if your AEs walked into every call already knowing the prospect's top 3 business challenges and exactly how your solution maps to them. That's what we enable. Our clients typically see a 40% lift in conversion when they layer this on top of their existing programmes.",
+            "That's great â€“ most of our clients do too. Problem Intelligence isn't a replacement for your team or agency; it's the research layer they've never had. Imagine if your AEs walked into every call already knowing the prospect's top 3 business challenges and exactly how your solution maps to them. That's what we enable. Our clients typically see a 40% lift in conversion when they layer this on top of their existing programmes.",
         },
         {
           objection:
             "We've tried AI tools for outreach and they felt generic / robotic.",
           response:
-            "I hear that a lot, and honestly, most AI outreach IS generic – it's just rewriting templates faster. What we do is fundamentally different. Before any outreach happens, our Problem Intelligence engine researches the account: their business challenges, competitive pressures, strategic initiatives. So when our agent calls, they're opening with the prospect's actual situation, not a canned pitch. It's the difference between 'Hey, want to learn about our product?' and 'We noticed you're scaling your EMEA pipeline while consolidating vendors – that creates a unique challenge we've helped others solve.'",
+            "I hear that a lot, and honestly, most AI outreach IS generic â€“ it's just rewriting templates faster. What we do is fundamentally different. Before any outreach happens, our Problem Intelligence engine researches the account: their business challenges, competitive pressures, strategic initiatives. So when our agent calls, they're opening with the prospect's actual situation, not a canned pitch. It's the difference between 'Hey, want to learn about our product?' and 'We noticed you're scaling your EMEA pipeline while consolidating vendors â€“ that creates a unique challenge we've helped others solve.'",
         },
         {
           objection: "We're not looking at new vendors right now / no budget.",
           response:
-            "Completely understand – this isn't a sales call in that sense. We're reaching out because we're seeing a shift in how the best B2B demand gen teams are operating, and I thought it would be worth a quick conversation to share what's working. Even if the timing isn't right for a formal evaluation, the Problem Intelligence approach is something your team can learn from. Would a 15-minute briefing be useful?",
+            "Completely understand â€“ this isn't a sales call in that sense. We're reaching out because we're seeing a shift in how the best B2B demand gen teams are operating, and I thought it would be worth a quick conversation to share what's working. Even if the timing isn't right for a formal evaluation, the Problem Intelligence approach is something your team can learn from. Would a 15-minute briefing be useful?",
         },
         {
           objection: "How is this different from intent data providers like Bombora / 6sense?",
           response:
-            "Great question. Intent data tells you WHO is researching topics. Problem Intelligence tells you WHY – what specific business challenge is driving that research, and exactly how your solution maps to it. Intent data says 'this account is surging on demand generation.' Problem Intelligence says 'this account is struggling with 12% outbound conversion rates, expanding into EMEA without localised content, and their CMO just committed to 40% pipeline growth.' That depth is what makes conversations convert.",
+            "Great question. Intent data tells you WHO is researching topics. Problem Intelligence tells you WHY â€“ what specific business challenge is driving that research, and exactly how your solution maps to it. Intent data says 'this account is surging on demand generation.' Problem Intelligence says 'this account is struggling with 12% outbound conversion rates, expanding into EMEA without localised content, and their CMO just committed to 40% pipeline growth.' That depth is what makes conversations convert.",
         },
         {
           objection: "Just send me an email / some information.",
           response:
-            "Absolutely – I'll send you a short overview of Problem Intelligence along with a case study showing how a B2B SaaS company increased qualified pipeline by 60% in 90 days using this approach. What email address works best? And if the content resonates, would you be open to a 15-minute call to explore how it could apply to your team?",
+            "Absolutely â€“ I'll send you a short overview of Problem Intelligence along with a case study showing how a B2B SaaS company increased qualified pipeline by 60% in 90 days using this approach. What email address works best? And if the content resonates, would you be open to a 15-minute call to explore how it could apply to your team?",
         },
         {
           objection: "We're focused on inbound / product-led growth, not outbound.",
           response:
-            "That makes sense – and actually, Problem Intelligence is equally powerful for inbound. When an inbound lead comes in, our engine instantly maps their account's business challenges and provides your SDR or AE with a tailored conversation package. So instead of a generic 'thanks for downloading our ebook' follow-up, your team opens with insight. We've seen inbound-to-meeting conversion rates jump 50% with this approach.",
+            "That makes sense â€“ and actually, Problem Intelligence is equally powerful for inbound. When an inbound lead comes in, our engine instantly maps their account's business challenges and provides your SDR or AE with a tailored conversation package. So instead of a generic 'thanks for downloading our ebook' follow-up, your team opens with insight. We've seen inbound-to-meeting conversion rates jump 50% with this approach.",
         },
       ],
 
-      // ── Success Criteria ──
+      // â”€â”€ Success Criteria â”€â”€
       successCriteria:
-        "Qualified interest confirmed: (1) Prospect acknowledges a limitation or gap in their current demand gen / outbound approach, (2) Prospect expresses interest in learning more about Problem Intelligence or Solution Mapping, and (3) A concrete next step is agreed – either a 15-minute discovery call booked, or explicit permission to send a detailed briefing with a follow-up date. Secondary success: Prospect requests content/case study – counts as warm interest for nurture sequence.",
+        "Qualified interest confirmed: (1) Prospect acknowledges a limitation or gap in their current demand gen / outbound approach, (2) Prospect expresses interest in learning more about Problem Intelligence or Solution Mapping, and (3) A concrete next step is agreed â€“ either a 15-minute discovery call booked, or explicit permission to send a detailed briefing with a follow-up date. Secondary success: Prospect requests content/case study â€“ counts as warm interest for nurture sequence.",
 
-      // ── Campaign Context Brief ──
+      // â”€â”€ Campaign Context Brief â”€â”€
       campaignContextBrief: `Voice-first awareness and qualification campaign introducing DemandGentic's Agentic B2B Demand platform to marketing and demand generation leaders at B2B SaaS companies.
 
 The campaign positions Problem Intelligence (AI-driven account research that maps real business challenges) and Solution Mapping (automated alignment of capabilities to detected problems) as the next evolution beyond intent data and traditional ABM.
@@ -174,39 +174,40 @@ The conversational approach is consultative and insight-led: agents open by demo
 
 This is NOT a hard-sell campaign. The goal is to spark curiosity, establish thought leadership, and qualify genuine interest for deeper sales engagement.`,
 
-      // ── Voice Call Script (AI Agent) ──
+      // â”€â”€ Voice Call Script (AI Agent) â”€â”€
       callScript: `OPENING:
-"Hi {{firstName}}, this is [Agent Name] calling from DemandGentic. I'll be brief – I'm reaching out because we work with B2B demand gen leaders, and there's a shift happening in how the best teams are generating qualified pipeline that I thought would be relevant given your role at {{companyName}}.
+"May I speak with {{fullName}}?"
 
-Do you have two minutes? I promise this won't be a product pitch."
+IF IDENTITY CONFIRMED:
+"This is [Agent Name] from DemandGentic. Quick reason for my call: we help B2B demand gen leaders replace spray-and-pray outreach using Problem Intelligence and Solution Mapping. Do you have 30 seconds for a quick overview?"
 
-IF YES – PROBLEM INTELLIGENCE INTRODUCTION:
+IF YES â€“ PROBLEM INTELLIGENCE INTRODUCTION:
 "Thank you. So here's what we're seeing: most B2B demand gen teams are sitting on a massive blind spot. They have intent data that tells them WHO is searching, but they don't know WHY. What specific business problem is driving that search? What's the competitive pressure? What initiative did their leadership just commit to?
 
-At DemandGentic, we built something called Problem Intelligence – it's an AI engine that researches every target account and maps their actual business challenges before any outreach happens. Not firmographics or technographics – real problems.
+At DemandGentic, we built something called Problem Intelligence â€“ it's an AI engine that researches every target account and maps their actual business challenges before any outreach happens. Not firmographics or technographics â€“ real problems.
 
 Then our Solution Mapping framework automatically connects those problems to how our client's product or service can help. So when a call happens, the agent already knows the prospect's top 3 challenges and exactly which proof points to lead with."
 
 BRIDGE TO QUALIFICATION:
 "The reason I'm calling is that we've seen this approach completely change conversion rates for B2B SaaS companies like {{companyName}}. One recent client went from 8% connection-to-meeting to over 30% in the first quarter.
 
-I'm curious – {{firstName}}, how is your team currently approaching outbound? Are you finding that your conversion rates are where you'd like them to be, or is there a gap?"
+I'm curious â€“ {{firstName}}, how is your team currently approaching outbound? Are you finding that your conversion rates are where you'd like them to be, or is there a gap?"
 
 DISCOVERY QUESTIONS (conversational, not interrogation):
-1. "What's your current approach to researching accounts before outreach – is it mostly manual, or are you using any tools for that?"
+1. "What's your current approach to researching accounts before outreach â€“ is it mostly manual, or are you using any tools for that?"
 2. "When your SDRs or agents get on a call, how much do they typically know about the prospect's specific business challenges?"
-3. "Where do you see the biggest drop-off in your demand gen funnel right now – is it at the top of funnel, in conversion, or downstream qualification?"
+3. "Where do you see the biggest drop-off in your demand gen funnel right now â€“ is it at the top of funnel, in conversion, or downstream qualification?"
 4. "Have you explored any AI-driven approaches for demand gen, beyond basic email copy or chatbots?"
 5. "If you could solve one thing about your pipeline generation this quarter, what would it be?"
 
 VALUE REINFORCEMENT (use based on prospect's answers):
 - If they mention low conversion: "That's exactly the pattern we see. Problem Intelligence typically lifts conversion 3-4x because every conversation starts with relevance, not a cold pitch."
-- If they mention manual research: "That's where 80% of SDR time goes – and it's usually surface-level. Our engine does deep research in seconds and produces account-level insight packages your team can use immediately."
-- If they mention ABM struggles: "ABM without problem-level intelligence is really just targeted spray-and-pray. When you know the actual problem, you can map your solution to it – that's when ABM actually works."
-- If they mention AI curiosity: "Most AI tools in demand gen focus on efficiency – doing the same thing faster. Problem Intelligence is about effectiveness – doing fundamentally different, smarter outreach."
+- If they mention manual research: "That's where 80% of SDR time goes â€“ and it's usually surface-level. Our engine does deep research in seconds and produces account-level insight packages your team can use immediately."
+- If they mention ABM struggles: "ABM without problem-level intelligence is really just targeted spray-and-pray. When you know the actual problem, you can map your solution to it â€“ that's when ABM actually works."
+- If they mention AI curiosity: "Most AI tools in demand gen focus on efficiency â€“ doing the same thing faster. Problem Intelligence is about effectiveness â€“ doing fundamentally different, smarter outreach."
 
 CLOSE:
-"{{firstName}}, based on what you've shared, I think there's a real opportunity for Problem Intelligence to [reference specific gap they mentioned]. What I'd suggest is a 15-minute briefing where we walk through how the engine works with a real example from your industry – no commitment, just insight.
+"{{firstName}}, based on what you've shared, I think there's a real opportunity for Problem Intelligence to [reference specific gap they mentioned]. What I'd suggest is a 15-minute briefing where we walk through how the engine works with a real example from your industry â€“ no commitment, just insight.
 
 Would [day] at [time] work, or is later in the week better?"
 
@@ -217,11 +218,11 @@ IF GATEKEEPER:
 "Hi, this is [Agent Name] from DemandGentic. I'm reaching out to {{firstName}} regarding how B2B marketing teams are using Problem Intelligence to improve demand generation performance. We work with several companies in your space. Could you connect me, or would it be better to reach them at a specific time?"
 
 VOICEMAIL:
-"Hi {{firstName}}, this is [Agent Name] from DemandGentic. I'm calling because we've been helping B2B SaaS companies dramatically improve their demand gen conversion rates using something called Problem Intelligence – it maps each target account's real business challenges before outreach happens. One client went from 8% to 30% connection-to-meeting rates. I'd love to share a quick overview. I'll send a brief note to your email as well. Thanks, {{firstName}}."`,
+"Hi {{firstName}}, this is [Agent Name] from DemandGentic. I'm calling because we've been helping B2B SaaS companies dramatically improve their demand gen conversion rates using something called Problem Intelligence â€“ it maps each target account's real business challenges before outreach happens. One client went from 8% to 30% connection-to-meeting rates. I'd love to share a quick overview. I'll send a brief note to your email as well. Thanks, {{firstName}}."`,
 
-      // ── Qualification Questions (structured) ──
+      // â”€â”€ Qualification Questions (structured) â”€â”€
       qualificationQuestions: [
-        "What is your current approach to B2B demand generation and outbound – in-house team, agency, or both?",
+        "What is your current approach to B2B demand generation and outbound â€“ in-house team, agency, or both?",
         "How do you currently research and prioritise target accounts before outreach?",
         "What conversion rate are you seeing from initial outreach to booked meetings?",
         "Have you evaluated or implemented any AI tools in your demand generation workflow?",
@@ -229,7 +230,7 @@ VOICEMAIL:
         "Who else on your team would be involved in evaluating a new approach to demand gen?",
       ],
 
-      // ── Call Flow State Machine ──
+      // â”€â”€ Call Flow State Machine â”€â”€
       callFlow: {
         steps: [
           {
@@ -259,7 +260,7 @@ VOICEMAIL:
             id: "qualification_discovery",
             name: "Qualification & Discovery",
             description:
-              "Explore prospect's current demand gen approach, conversion rates, pain points, and AI readiness. Use conversational discovery questions – not an interrogation. Listen for buying signals: frustration with conversion rates, manual research burden, ABM struggles.",
+              "Explore prospect's current demand gen approach, conversion rates, pain points, and AI readiness. Use conversational discovery questions â€“ not an interrogation. Listen for buying signals: frustration with conversion rates, manual research burden, ABM struggles.",
             exitConditions: [
               "Qualification criteria gathered",
               "Prospect shares specific pain point",
@@ -303,7 +304,7 @@ VOICEMAIL:
             exitConditions: [
               "Meeting booked",
               "Content delivery confirmed with follow-up date",
-              "Prospect declines – thank and close gracefully",
+              "Prospect declines â€“ thank and close gracefully",
             ],
             nextSteps: [],
           },
@@ -312,7 +313,7 @@ VOICEMAIL:
           "Always lead with insight and curiosity, never product features. If the prospect is busy, offer to send a 2-minute case study summary via email. Reference Problem Intelligence and Solution Mapping as category concepts, not product names. The goal is to spark recognition of a gap in their current approach.",
       },
 
-      // ── AI Agent Settings ──
+      // â”€â”€ AI Agent Settings â”€â”€
       aiAgentSettings: {
         persona: {
           name: "Jordan",
@@ -322,11 +323,11 @@ VOICEMAIL:
         },
         scripts: {
           opening:
-            "Hi {{firstName}}, this is Jordan from DemandGentic. I'll be brief – I'm reaching out because there's a shift happening in how the best B2B demand gen teams are building pipeline, and I thought it'd be relevant given your role at {{companyName}}. Do you have two minutes?",
+            "May I speak with {{fullName}}?",
           gatekeeper:
             "Hi, this is Jordan from DemandGentic. I'm reaching out to {{firstName}} regarding how B2B marketing teams are using Problem Intelligence to improve demand generation performance. Could you connect me?",
           pitch:
-            "Most B2B teams have intent data telling them WHO is searching – but not WHY. Problem Intelligence changes that. It maps each account's real business challenges before any outreach happens, and our Solution Mapping framework connects those problems directly to how your product helps. One client went from 8% to 30% connection-to-meeting rates.",
+            "Most B2B teams have intent data telling them WHO is searching â€“ but not WHY. Problem Intelligence changes that. It maps each account's real business challenges before any outreach happens, and our Solution Mapping framework connects those problems directly to how your product helps. One client went from 8% to 30% connection-to-meeting rates.",
           objections:
             "Use problem-intelligence-specific rebuttals. Always contrast with the status quo: intent data shows topics, Problem Intelligence shows root causes. AI outreach that's generic is doing automation, not intelligence. We're additive to existing teams, not replacement.",
           closing:
@@ -340,7 +341,7 @@ VOICEMAIL:
         gatekeeperLogic: {
           responses: {
             who_is_calling:
-              "This is Jordan from DemandGentic – we help B2B marketing teams improve demand gen performance using Problem Intelligence.",
+              "This is Jordan from DemandGentic â€“ we help B2B marketing teams improve demand gen performance using Problem Intelligence.",
             what_is_this_about:
               "We've been working with B2B SaaS companies on a new approach to demand generation that's significantly improving conversion rates. I wanted to share a quick insight with {{firstName}}.",
             they_are_busy:
@@ -350,7 +351,7 @@ VOICEMAIL:
         },
       },
 
-      // ── Business Hours ──
+      // â”€â”€ Business Hours â”€â”€
       timezone: "America/New_York",
       businessHoursConfig: {
         enabled: true,
@@ -368,7 +369,7 @@ VOICEMAIL:
         excludedDates: [],
       },
 
-      // ── Retry Rules ──
+      // â”€â”€ Retry Rules â”€â”€
       retryRules: {
         voicemail: { maxAttempts: 2, delayHours: 48 },
         no_answer: { maxAttempts: 3, delayHours: 6 },
@@ -377,15 +378,15 @@ VOICEMAIL:
         respect_local_tz: true,
       },
 
-      // ── Max Call Duration ──
-      maxCallDurationSeconds: 420, // 7 minutes – awareness calls need breathing room
+      // â”€â”€ Max Call Duration â”€â”€
+      maxCallDurationSeconds: 420, // 7 minutes â€“ awareness calls need breathing room
 
-      // ── Campaign Goals ──
+      // â”€â”€ Campaign Goals â”€â”€
       targetQualifiedLeads: 150,
       startDate: "2026-02-17", // Monday start
       endDate: "2026-04-18", // ~9 week campaign
 
-      // ── QA Parameters ──
+      // â”€â”€ QA Parameters â”€â”€
       qaParameters: {
         weights: {
           opening_quality: 10,
@@ -399,7 +400,7 @@ VOICEMAIL:
         minimumPassScore: 72,
       },
 
-      // ── Custom QA Rules (natural language) ──
+      // â”€â”€ Custom QA Rules (natural language) â”€â”€
       customQaRules: `Lead is QUALIFIED if ALL of the following are met:
 (1) Prospect holds a VP, Director, Head of, or C-level title in Marketing, Demand Generation, Growth, or Revenue.
 (2) Company is a B2B vendor, SaaS company, or technology-led B2B service provider with 200+ employees.
@@ -421,9 +422,9 @@ Lead is DISQUALIFIED if:
 
   console.log(`\nCreated campaign: "${campaign.name}" (id: ${campaign.id})`);
 
-  // ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // 4. Create voice channel variant
-  // ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const [voiceVariant] = await db
     .insert(campaignChannelVariants)
@@ -485,20 +486,20 @@ Lead is DISQUALIFIED if:
       executionPrompt: `You are Jordan, a Demand Intelligence Advisor at DemandGentic. You are calling B2B marketing and demand generation leaders at SaaS and B2B technology companies.
 
 YOUR MISSION:
-Build awareness of Agentic B2B Demand Generation – specifically Problem Intelligence and Solution Mapping – and qualify genuine interest for a deeper discovery conversation.
+Build awareness of Agentic B2B Demand Generation â€“ specifically Problem Intelligence and Solution Mapping â€“ and qualify genuine interest for a deeper discovery conversation.
 
 WHAT YOU'RE INTRODUCING:
-1. **Problem Intelligence** – An AI engine that researches each target account and maps their REAL business challenges (not just firmographics or intent signals) before any outreach. Sources: public filings, earnings, news, job postings, tech stack, intent data. Output: a structured "Problem Map" per account.
+1. **Problem Intelligence** â€“ An AI engine that researches each target account and maps their REAL business challenges (not just firmographics or intent signals) before any outreach. Sources: public filings, earnings, news, job postings, tech stack, intent data. Output: a structured "Problem Map" per account.
 
-2. **Solution Mapping** – Automatically aligns capabilities to each account's detected problems. Produces a tailored messaging package: which problems to lead with, which proof points to cite, which objections to pre-empt. Every conversation grounded in the prospect's reality.
+2. **Solution Mapping** â€“ Automatically aligns capabilities to each account's detected problems. Produces a tailored messaging package: which problems to lead with, which proof points to cite, which objections to pre-empt. Every conversation grounded in the prospect's reality.
 
 KEY STATS & PROOF POINTS:
-• 2M+ qualified leads across 500+ enterprise clients
-• One SaaS client: 8% → 30% connection-to-meeting rate in first quarter
-• 60% qualified pipeline increase in 90 days for a mid-market SaaS company
-• 40% average lift in conversion rates vs. traditional outreach
-• 85% reduction in manual research effort
-• 40+ industries served globally
+â€¢ 2M+ qualified leads across 500+ enterprise clients
+â€¢ One SaaS client: 8% â†’ 30% connection-to-meeting rate in first quarter
+â€¢ 60% qualified pipeline increase in 90 days for a mid-market SaaS company
+â€¢ 40% average lift in conversion rates vs. traditional outreach
+â€¢ 85% reduction in manual research effort
+â€¢ 40+ industries served globally
 
 CONVERSATIONAL APPROACH:
 - Lead with INSIGHT, not product. You're sharing a paradigm shift, not selling software.
@@ -506,7 +507,7 @@ CONVERSATIONAL APPROACH:
 - Use their answers to tailor your value statements. Never give a generic pitch.
 - Contrast Problem Intelligence with the status quo: "intent data tells you WHO, PI tells you WHY."
 - Position yourself as a peer sharing what's working, not a salesperson.
-- If they're not ready for a meeting, offer the case study – but always aim for a follow-up date.
+- If they're not ready for a meeting, offer the case study â€“ but always aim for a follow-up date.
 
 TONE: Professional, consultative, energetic but not pushy. Think "trusted advisor sharing a breakthrough" not "SDR running a script."
 
@@ -514,19 +515,19 @@ NEVER:
 - Hard-sell or pressure for a meeting
 - Claim to know specifics about their company you don't actually know
 - Badmouth their current tools or agency
-- Rush through discovery – this is an awareness call, take time to listen`,
+- Rush through discovery â€“ this is an awareness call, take time to listen`,
     })
     .returning();
 
   console.log(`  Created voice channel variant (id: ${voiceVariant.id})`);
 
-  // ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Summary
-  // ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   console.log(`
-════════════════════════════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   Campaign seeded successfully!
-════════════════════════════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   Campaign:    ${campaign.name}
   ID:          ${campaign.id}
   Type:        lead_qualification (awareness + qualification)
@@ -540,9 +541,9 @@ NEVER:
                Leaders at B2B Vendors and SaaS (200-10K employees)
 
   Goals:       ${campaign.targetQualifiedLeads} qualified leads
-  Timeline:    ${campaign.startDate} → ${campaign.endDate} (~9 weeks)
+  Timeline:    ${campaign.startDate} â†’ ${campaign.endDate} (~9 weeks)
 
-  AI Agent:    Jordan – Demand Intelligence Advisor
+  AI Agent:    Jordan â€“ Demand Intelligence Advisor
   Max Call:    7 minutes
   Hours:       Mon-Fri 09:00-17:30 (respect contact timezone)
 
@@ -553,7 +554,7 @@ NEVER:
   4. Review and approve voice channel variant
   5. Run test calls to validate agent performance
   6. Activate the campaign
-════════════════════════════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 `);
 
   process.exit(0);

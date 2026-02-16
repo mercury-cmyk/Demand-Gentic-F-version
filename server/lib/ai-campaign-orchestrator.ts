@@ -459,7 +459,16 @@ function isCountryEnabled(country: string | null | undefined): boolean {
  */
 function inferCountryFromPhone(phone: string | null | undefined): string | null {
   if (!phone) return null;
-  const e164 = String(phone).replace(/[^\d+]/g, '');
+  const digits = String(phone).replace(/[^\d+]/g, '');
+  let e164 = digits;
+  if (e164.startsWith('00')) {
+    e164 = `+${e164.slice(2)}`;
+  } else if (!e164.startsWith('+') && /^\d+$/.test(e164)) {
+    // Best-effort normalization for raw numeric international strings.
+    if (e164.startsWith('971')) e164 = `+${e164}`;
+    else if (e164.startsWith('44')) e164 = `+${e164}`;
+    else if (e164.startsWith('1')) e164 = `+${e164}`;
+  }
   if (!e164.startsWith('+')) return null;
 
   const prefixMap: Array<{ prefix: string; country: string }> = [
@@ -1060,9 +1069,28 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     const timezone = (item as any).timezone;
     const inferredTimezone = (item as any).inferred_timezone;
     const geoPhone = mobilePhone || directPhone;
+    const normalizedCountry = typeof country === 'string' ? country.trim() : country;
     const inferredCountry = inferCountryFromPhone(geoPhone);
-    const effectiveCountry = country || inferredCountry;
-    const effectiveTimezone = timezone || inferredTimezone;
+
+    // Be resilient to bad/missing country metadata:
+    // if stored country is missing or not enabled, trust phone-derived country when possible.
+    let effectiveCountry: string | null = (normalizedCountry as string) || null;
+    if (!effectiveCountry && inferredCountry) {
+      effectiveCountry = inferredCountry;
+    } else if (effectiveCountry && !isCountryEnabled(effectiveCountry) && inferredCountry && isCountryEnabled(inferredCountry)) {
+      effectiveCountry = inferredCountry;
+    }
+
+    // Prefer explicit timezone, then SQL inferred timezone, then derive from best-known geo data.
+    let effectiveTimezone: string | null = (typeof timezone === 'string' && timezone.trim())
+      ? timezone.trim()
+      : ((typeof inferredTimezone === 'string' && inferredTimezone.trim()) ? inferredTimezone.trim() : null);
+    if (!effectiveTimezone) {
+      effectiveTimezone = detectContactTimezone({
+        country: effectiveCountry,
+        state: state || undefined,
+      });
+    }
     
     // Check if country is in enabled calling regions
     if (!isCountryEnabled(effectiveCountry)) {

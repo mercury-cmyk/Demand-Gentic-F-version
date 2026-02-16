@@ -3,7 +3,7 @@
  *
  * Ensures every call has a transcript through:
  * 1. Primary: Gemini Live real-time transcription (built-in)
- * 2. Fallback: Google Cloud Speech-to-Text from recording
+ * 2. Fallback: Deepgram post-call transcription from recording
  * 3. Verification: Compare transcripts and flag discrepancies
  *
  * This service runs as a background job to:
@@ -16,7 +16,7 @@
 import { db } from '../db';
 import { dialerCallAttempts, callSessions, activityLog } from '@shared/schema';
 import { eq, and, or, isNull, isNotNull, gt, lt, sql } from 'drizzle-orm';
-import { transcribeFromRecording } from './google-transcription';
+import { transcribeFromRecording } from './deepgram-postcall-transcription';
 
 const LOG_PREFIX = '[Transcription-Reliability]';
 
@@ -134,7 +134,7 @@ export async function attemptFallbackTranscription(
       };
     }
 
-    // Use Google Cloud STT for fallback
+    // Use Deepgram post-call transcription for fallback
     const result = await transcribeFromRecording(urlToUse, { telnyxCallId });
 
     if (result && result.transcript && result.transcript.length > TRANSCRIPT_MIN_LENGTH) {
@@ -150,7 +150,7 @@ export async function attemptFallbackTranscription(
 
       // Log activity
       await logTranscriptionActivity(callAttemptId, 'fallback_completed', {
-        source: 'google_stt',
+        source: 'deepgram',
         transcriptLength: result.transcript.length,
         wordCount: result.transcript.split(/\s+/).length,
         refreshedVia: telnyxCallId ? 'telnyx_possible' : 'none',
@@ -173,7 +173,7 @@ export async function attemptFallbackTranscription(
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Fallback transcription failed:`, error);
 
-    // Check for permanent errors (like 422 or 404 from Telnyx/Google) to prevent retry loops
+    // Check for permanent errors (like 422/404/403 from provider fetch/transcription) to prevent retry loops
     const errorMessage = error.message || 'Unknown error';
     const isPermanentError = errorMessage.includes('422') || 
                              errorMessage.includes('not found') || 

@@ -150,7 +150,7 @@ export const CAMPAIGN_CONFIGURATIONS: Record<string, CampaignConfiguration> = {
       "What is the biggest challenge in your demand generation process right now?",
       "Would it be useful to explore a problem-first approach like Problem Intelligence and Solution Mapping?"
     ],
-    openingMessageTemplate: "Hi {{contact.firstName}}, this is specific_agent_name from {{company_name}}. We help B2B demand generation leaders replace spray-and-pray outreach with problem-first conversations using Problem Intelligence and Solution Mapping. Quick question: are your conversion rates where you want them to be, or is there a gap?"
+    openingMessageTemplate: "May I speak with {{contact.fullName}}?"
   },
   data_validation: {
     type: "data_validation",

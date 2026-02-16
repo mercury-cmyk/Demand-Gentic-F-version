@@ -740,6 +740,12 @@ router.delete("/:callSessionId/pin", requireAuth, async (req: Request, res: Resp
 router.get("/:callSessionId/stream", async (req: Request, res: Response) => {
   try {
     const { callSessionId } = req.params;
+
+    const normalizeToken = (raw?: string | string[]) => {
+      const value = Array.isArray(raw) ? raw[0] : raw;
+      if (!value) return undefined;
+      return value.replace(/^Bearer\s+/i, '').trim();
+    };
     
     // Manual auth check supporting query token for audio elements
     // Supports both Internal Users (userId) and Client Portal Users (clientUserId)
@@ -747,11 +753,11 @@ router.get("/:callSessionId/stream", async (req: Request, res: Response) => {
 
     if (!authenticatedUserId) {
        // Check query param first (audio elements often use this)
-       let token = req.query.token as string;
+       let token = normalizeToken(req.query.token as string | string[]);
        
        // Fallback to header if no query token
        if (!token && req.headers.authorization) {
-         token = req.headers.authorization.replace('Bearer ', '');
+         token = normalizeToken(req.headers.authorization);
        }
 
        if (token) {

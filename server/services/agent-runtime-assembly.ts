@@ -46,6 +46,10 @@ import {
   buildProblemIntelligencePromptSection,
   buildCondensedProblemIntelligenceSection,
 } from "./problem-intelligence";
+import {
+  buildAgenticDemandOpeningContract,
+  isAgenticDemandVoiceLiftCampaign,
+} from "./agentic-demand-voice-lift";
 
 // ==================== LAYER 1: UNIVERSAL AGENT KNOWLEDGE ====================
 
@@ -410,6 +414,16 @@ export interface AssembledPrompt {
   };
 }
 
+export function injectCampaignOpeningContract(systemPrompt: string, campaignName?: string | null): string {
+  if (!isAgenticDemandVoiceLiftCampaign(campaignName)) {
+    return systemPrompt;
+  }
+
+  const contract = buildAgenticDemandOpeningContract("variant_b");
+  if (!contract) return systemPrompt;
+  return `${systemPrompt}\n\n# Campaign Opening Contract\n${contract}`;
+}
+
 /**
  * Assemble complete agent runtime prompt
  * 
@@ -500,6 +514,16 @@ export async function assembleAgentPrompt(input: AssemblyInput): Promise<Assembl
     layers.push('campaign_context');
   }
 
+  let campaignName: string | null = null;
+  if (input.campaignId) {
+    const [campaign] = await db
+      .select({ name: campaigns.name })
+      .from(campaigns)
+      .where(eq(campaigns.id, input.campaignId))
+      .limit(1);
+    campaignName = campaign?.name || null;
+  }
+
   // ========== Agent's Custom System Prompt ==========
   if (agent.systemPrompt) {
     const sanitizedPrompt = stripVoiceAgentControlLayer(agent.systemPrompt).trim();
@@ -516,7 +540,7 @@ export async function assembleAgentPrompt(input: AssemblyInput): Promise<Assembl
   }
 
   return {
-    systemPrompt: promptParts.join('\n'),
+    systemPrompt: injectCampaignOpeningContract(promptParts.join('\n'), campaignName),
     firstMessage: agent.firstMessage || "Hello, how can I help you today?",
     metadata: {
       universalKnowledgeHash: getUniversalKnowledgeHash(),

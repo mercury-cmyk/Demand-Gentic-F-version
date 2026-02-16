@@ -112,6 +112,17 @@ import { normalizeDisposition } from "./disposition-normalizer";
 import { detectG711Format } from "./voice-providers/audio-transcoder";
 import { GeminiLiveProvider } from "./voice-providers/gemini-live-provider";
 import {
+  AGENTIC_DEMAND_CONTROL_OPENING_TEMPLATE,
+  AGENTIC_DEMAND_VARIANT_B_IDENTITY_TEMPLATE,
+  AGENTIC_DEMAND_VARIANT_B_PURPOSE_LINE,
+  assignVoiceLiftVariant,
+  buildAgenticDemandOpeningContract,
+  isAgenticDemandVoiceLiftCampaign,
+  looksLikePurposeStatement,
+  type VoiceLiftVariant,
+} from "./agentic-demand-voice-lift";
+import { emitCallSessionEvents, type CallSessionEventInput } from "./call-session-events";
+import {
   isDeepgramEnabled,
   startTranscriptionSession,
   sendInboundAudio,
@@ -300,6 +311,13 @@ interface OpenAIRealtimeSession {
     responseLatencies: number[];            // Array of response latencies in ms
     avgResponseLatencyMs: number | null;    // Rolling average
   };
+  voiceLiftVariant: VoiceLiftVariant | null;
+  pendingSessionEvents: CallSessionEventInput[];
+  openingPromptSentAt: Date | null;
+  purposeStartedAt: Date | null;
+  openingRestartCount: number;
+  maxDeadAirMs: number;
+  lastSpeechStoppedAt: Date | null;
 }
 
 interface DispositionFunctionResult {
@@ -406,6 +424,168 @@ const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
   "callback_requested",
   "needs_review",
 ]);
+
+function queueSessionEvent(
+  session: OpenAIRealtimeSession,
+  eventKey: string,
+  options: Omit<CallSessionEventInput, "eventKey"> & { once?: boolean } = {}
+): void {
+  if (options.once && session.pendingSessionEvents.some((e) => e.eventKey === eventKey)) {
+    return;
+  }
+
+  session.pendingSessionEvents.push({
+    eventKey,
+    eventTs: options.eventTs || new Date(),
+    valueNum: options.valueNum ?? null,
+    valueText: options.valueText ?? null,
+    metadata: options.metadata ?? null,
+  });
+}
+
+export function evaluateIdentityPurposePivot(identityConfirmedAt: Date, purposeStartedAt: Date): {
+  gapMs: number;
+  withinSla: boolean;
+} {
+  const gapMs = Math.max(0, purposeStartedAt.getTime() - identityConfirmedAt.getTime());
+  return {
+    gapMs,
+    withinSla: gapMs <= 700,
+  };
+}
+
+function maybeRecordPurposeStart(session: OpenAIRealtimeSession, agentText: string): void {
+  if (session.purposeStartedAt) return;
+  if (!session.conversationState.identityConfirmed) return;
+  if (!looksLikePurposeStatement(agentText)) return;
+
+  session.purposeStartedAt = new Date();
+  const purposePivotGuardTimer = (session as any).purposePivotGuardTimer as ReturnType<typeof setTimeout> | null;
+  if (purposePivotGuardTimer) {
+    clearTimeout(purposePivotGuardTimer);
+    (session as any).purposePivotGuardTimer = null;
+  }
+  queueSessionEvent(session, "opening.purpose_started_at", {
+    eventTs: session.purposeStartedAt,
+    once: true,
+  });
+
+  if (session.conversationState.identityConfirmedAt) {
+    const pivot = evaluateIdentityPurposePivot(
+      session.conversationState.identityConfirmedAt,
+      session.purposeStartedAt
+    );
+    queueSessionEvent(session, "timer.identity_to_purpose_ms", {
+      valueNum: pivot.gapMs,
+      metadata: { slaMs: 700 },
+      once: true,
+    });
+    if (!pivot.withinSla) {
+      queueSessionEvent(session, "realtime.loop_detected", {
+        valueText: "identity_to_purpose_sla_breach",
+        metadata: { gapMs: pivot.gapMs },
+      });
+    }
+  }
+}
+
+function schedulePurposePivotGuard(session: OpenAIRealtimeSession): void {
+  const existingTimer = (session as any).purposePivotGuardTimer as ReturnType<typeof setTimeout> | null;
+  if (existingTimer) clearTimeout(existingTimer);
+  (session as any).purposePivotGuardTimer = setTimeout(() => {
+    if (!session.isActive || session.isEnding || session.purposeStartedAt || !session.conversationState.identityConfirmed) {
+      return;
+    }
+
+    queueSessionEvent(session, "realtime.loop_detected", {
+      valueText: "missing_fast_purpose_pivot",
+      metadata: { targetMs: 700 },
+    });
+
+    if (session.provider === "google") {
+      const provider = (session as any).geminiProvider;
+      if (provider?.isReady?.()) {
+        provider.sendTextMessage(
+          "STATE ENFORCEMENT: identity has been confirmed. Move immediately to PURPOSE_PIVOT in one concise sentence."
+        );
+      }
+      return;
+    }
+
+    if (session.openaiWs?.readyState === WebSocket.OPEN) {
+      session.openaiWs.send(JSON.stringify({
+        type: "response.create",
+        response: {
+          instructions: "STATE ENFORCEMENT: identity confirmed. Immediately give the concise purpose line now.",
+        },
+      }));
+    }
+  }, 700);
+}
+
+function markFirstHumanAudio(session: OpenAIRealtimeSession, source: string): void {
+  const now = new Date();
+  queueSessionEvent(session, "realtime.first_human_audio_at", {
+    eventTs: now,
+    metadata: { source },
+    once: true,
+  });
+}
+
+function markIdentityConfirmed(session: OpenAIRealtimeSession, source: string): void {
+  const now = new Date();
+  if (!session.conversationState.identityConfirmedAt) {
+    session.conversationState.identityConfirmedAt = now;
+  }
+
+  queueSessionEvent(session, "opening.identity_confirmed_at", {
+    eventTs: session.conversationState.identityConfirmedAt,
+    metadata: { source },
+    once: true,
+  });
+  schedulePurposePivotGuard(session);
+}
+
+function percentile(values: number[], p: number): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(sorted.length - 1, idx))];
+}
+
+function recordVoicemailDetectedEvent(session: OpenAIRealtimeSession, source: string): void {
+  const detectedAt = new Date();
+  queueSessionEvent(session, "realtime.voicemail_detected_at", {
+    eventTs: detectedAt,
+    metadata: { source },
+    once: true,
+  });
+
+  const firstAudioAt = session.timingMetrics.firstProspectAudioAt;
+  if (firstAudioAt) {
+    const vmDetectionMs = detectedAt.getTime() - firstAudioAt.getTime();
+    queueSessionEvent(session, "timer.vm_detection_ms", {
+      valueNum: vmDetectionMs,
+      metadata: { targetMs: 3000, source },
+      once: true,
+    });
+  }
+}
+
+function resolveVoiceLiftVariantForSession(
+  session: OpenAIRealtimeSession,
+  campaignConfig: any,
+  contactInfo: any
+): VoiceLiftVariant {
+  const variant = assignVoiceLiftVariant({
+    campaignId: session.campaignId,
+    campaignName: campaignConfig?.name,
+    contactId: contactInfo?.id || session.contactId,
+    callAttemptId: session.callAttemptId,
+  });
+  session.voiceLiftVariant = variant;
+  return variant;
+}
 
 export type RealtimeSession = OpenAIRealtimeSession & { bookingTypeId?: number };
 
@@ -1301,6 +1481,13 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 responseLatencies: [],
                 avgResponseLatencyMs: null,
               },
+              voiceLiftVariant: null,
+              pendingSessionEvents: [],
+              openingPromptSentAt: null,
+              purposeStartedAt: null,
+              openingRestartCount: 0,
+              maxDeadAirMs: 0,
+              lastSpeechStoppedAt: null,
             };
           } else {
             // This block runs for both test sessions AND fallback sessions (production calls with generated IDs)
@@ -1434,6 +1621,13 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 responseLatencies: [],
                 avgResponseLatencyMs: null,
               },
+              voiceLiftVariant: null,
+              pendingSessionEvents: [],
+              openingPromptSentAt: null,
+              purposeStartedAt: null,
+              openingRestartCount: 0,
+              maxDeadAirMs: 0,
+              lastSpeechStoppedAt: null,
             };
           }
 
@@ -2002,6 +2196,14 @@ openaiWs.on("open", async () => {
         orgName: resolvedOrgName,
         agentName: resolvedAgentNameForTemplate,
       });
+      const voiceLiftVariant = resolveVoiceLiftVariantForSession(session, campaignConfig, contactInfo);
+      if (isAgenticDemandVoiceLiftCampaign(campaignConfig?.name)) {
+        queueSessionEvent(session, "ab.variant_assigned", {
+          valueText: voiceLiftVariant,
+          metadata: { split: "70_30", campaign: campaignConfig?.name || null },
+          once: true,
+        });
+      }
       // Get cost optimization settings early to use in prompt building
       const costSettingsEarly = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
       const useCondensedPrompt = costSettingsEarly.useCondensedPrompt !== false;
@@ -2238,6 +2440,18 @@ openaiWs.on("open", async () => {
         }
       }
 
+      if (isAgenticDemandVoiceLiftCampaign(campaignConfig?.name)) {
+        const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ""} ${contactInfo?.lastName || ""}`.trim() || "there";
+        if (session.voiceLiftVariant === "variant_b") {
+          openingScript = interpolateVoiceTemplate(AGENTIC_DEMAND_VARIANT_B_IDENTITY_TEMPLATE, {
+            ...voiceTemplateValues,
+            "contact.full_name": fullName,
+          });
+        } else {
+          openingScript = interpolateVoiceTemplate(AGENTIC_DEMAND_CONTROL_OPENING_TEMPLATE, voiceTemplateValues);
+        }
+      }
+
       if (!openingScript || !openingScript.trim()) {
         const fallbackName = contactInfo?.fullName || contactInfo?.firstName || "there";
         openingScript = `Hello, may I speak with ${fallbackName} please?`;
@@ -2272,6 +2486,12 @@ openaiWs.on("open", async () => {
 
         console.log(`${LOG_PREFIX} Sending greeting: "${openingScript.substring(0, 50)}..."`);
         session.audioDetection.hasGreetingSent = true;
+        session.openingPromptSentAt = new Date();
+        queueSessionEvent(session, "opening.identity_prompt_sent_at", {
+          eventTs: session.openingPromptSentAt,
+          metadata: { provider: "openai", variant: session.voiceLiftVariant || "control" },
+          once: true,
+        });
         sendOpeningMessage(openaiWs, openingScript);
 
         // SAFETY NET: If greeting was sent but no agent audio within 5s, retry once
@@ -2281,6 +2501,17 @@ openaiWs.on("open", async () => {
         const greetingRetryTimer = setTimeout(() => {
           if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
             console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 5s — retrying opening message`);
+            session.openingRestartCount += 1;
+            queueSessionEvent(session, "opening.restart_count", {
+              valueNum: session.openingRestartCount,
+              metadata: { provider: "openai" },
+            });
+            if (session.openingRestartCount > 1) {
+              queueSessionEvent(session, "realtime.loop_detected", {
+                valueText: "opening_restart_limit_exceeded",
+                metadata: { provider: "openai", count: session.openingRestartCount },
+              });
+            }
             sendOpeningMessage(openaiWs, openingScript);
           }
         }, 5000);
@@ -2496,6 +2727,14 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       orgName: resolvedOrgNameGemini,
       agentName: resolvedAgentNameGemini,
     });
+    const voiceLiftVariant = resolveVoiceLiftVariantForSession(session, campaignConfig, contactInfo);
+    if (isAgenticDemandVoiceLiftCampaign(campaignConfig?.name)) {
+      queueSessionEvent(session, "ab.variant_assigned", {
+        valueText: voiceLiftVariant,
+        metadata: { split: "70_30", campaign: campaignConfig?.name || null },
+        once: true,
+      });
+    }
     const costSettings = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
     const useCondensedPrompt = costSettings.useCondensedPrompt !== false;
 
@@ -2651,6 +2890,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       if (!session.audioDetection.humanDetected) {
         session.audioDetection.humanDetected = true;
         session.audioDetection.humanDetectedAt = new Date();
+        markFirstHumanAudio(session, "gemini_transcript_user");
 
         // Track first prospect speech timing
         if (!session.timingMetrics.firstProspectSpeechAt) {
@@ -2697,6 +2937,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
         // Track when user finished speaking (for response latency calculation)
         session.timingMetrics.lastProspectSpeechEndAt = new Date();
+        session.lastSpeechStoppedAt = session.timingMetrics.lastProspectSpeechEndAt;
       }
 
       // =====================================================================
@@ -2710,7 +2951,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         const identityConfirmed = detectIdentityConfirmation(event.text);
         if (identityConfirmed) {
           session.conversationState.identityConfirmed = true;
-          session.conversationState.identityConfirmedAt = new Date();
+          markIdentityConfirmed(session, "gemini_transcript_user");
           session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
           session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
           trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
@@ -2777,16 +3018,22 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         if (lastTranscript?.role === 'assistant') {
           // Append to existing assistant transcript with a space
           lastTranscript.text += ' ' + event.text;
+          maybeRecordPurposeStart(session, lastTranscript.text);
         } else {
           // Start new assistant transcript
           session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
           trimArray(session.transcripts, MAX_TRANSCRIPTS);
+          maybeRecordPurposeStart(session, event.text);
         }
         scheduleRealtimeQualityAnalysis(session);
 
         // Calculate response latency if we have a previous user speech end time
         const now = new Date();
         session.timingMetrics.lastAgentResponseStartAt = now;
+        if (session.lastSpeechStoppedAt) {
+          const deadAirMs = Math.max(0, now.getTime() - session.lastSpeechStoppedAt.getTime());
+          session.maxDeadAirMs = Math.max(session.maxDeadAirMs, deadAirMs);
+        }
         if (session.timingMetrics.lastProspectSpeechEndAt) {
           const responseLatencyMs = now.getTime() - session.timingMetrics.lastProspectSpeechEndAt.getTime();
           session.timingMetrics.responseLatencies.push(responseLatencyMs);
@@ -2900,6 +3147,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Prepare opening message
     let openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
+    if (isAgenticDemandVoiceLiftCampaign(campaignConfig?.name)) {
+      const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ""} ${contactInfo?.lastName || ""}`.trim() || "there";
+      if (session.voiceLiftVariant === "variant_b") {
+        openingScript = interpolateVoiceTemplate(AGENTIC_DEMAND_VARIANT_B_IDENTITY_TEMPLATE, {
+          ...voiceTemplateValues,
+          "contact.full_name": fullName,
+        });
+      } else {
+        openingScript = interpolateVoiceTemplate(AGENTIC_DEMAND_CONTROL_OPENING_TEMPLATE, voiceTemplateValues);
+      }
+    }
     if (!openingScript || !openingScript.trim()) {
       const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
       openingScript = `Hello, may I speak with ${fallbackName} please?`;
@@ -2938,6 +3196,12 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 3s - sending greeting (fallback)`);
         session.audioDetection.hasGreetingSent = true;
         provider.sendOpeningMessage(openingScript);
+        session.openingPromptSentAt = new Date();
+        queueSessionEvent(session, "opening.identity_prompt_sent_at", {
+          eventTs: session.openingPromptSentAt,
+          metadata: { provider: "google", variant: session.voiceLiftVariant || "control" },
+          once: true,
+        });
       }
     }, 3000);
     (session as any).fallbackGreetingTimer = fallbackGreetingTimer; // Store to clear it later
@@ -2948,6 +3212,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     const greetingRetryTimer = setTimeout(() => {
       if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
         console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 5s — retrying opening message`);
+        session.openingRestartCount += 1;
+        queueSessionEvent(session, "opening.restart_count", {
+          valueNum: session.openingRestartCount,
+          metadata: { provider: "google" },
+        });
+        if (session.openingRestartCount > 1) {
+          queueSessionEvent(session, "realtime.loop_detected", {
+            valueText: "opening_restart_limit_exceeded",
+            metadata: { provider: "google", count: session.openingRestartCount },
+          });
+        }
         provider.sendOpeningMessage(openingScript);
       }
     }, 5000);
@@ -3793,6 +4068,21 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
       session.isResponseInProgress = true;
       session.audioPlaybackMs = 0;
       session.lastAudioDeltaTimestamp = Date.now();
+      const responseCreatedAt = new Date();
+      if (session.timingMetrics.lastProspectSpeechEndAt) {
+        const responseLatencyMs = responseCreatedAt.getTime() - session.timingMetrics.lastProspectSpeechEndAt.getTime();
+        session.timingMetrics.lastAgentResponseStartAt = responseCreatedAt;
+        session.timingMetrics.responseLatencies.push(responseLatencyMs);
+        trimArray(session.timingMetrics.responseLatencies, MAX_RESPONSE_LATENCIES);
+        const latencies = session.timingMetrics.responseLatencies;
+        session.timingMetrics.avgResponseLatencyMs = Math.round(
+          latencies.reduce((a, b) => a + b, 0) / latencies.length
+        );
+      }
+      if (session.lastSpeechStoppedAt) {
+        const deadAirMs = Math.max(0, responseCreatedAt.getTime() - session.lastSpeechStoppedAt.getTime());
+        session.maxDeadAirMs = Math.max(session.maxDeadAirMs, deadAirMs);
+      }
       console.log(`${LOG_PREFIX} Response created (id: ${session.currentResponseId}) for call: ${session.callId}`);
       scheduleSoftTimeout(session);
       break;
@@ -3892,6 +4182,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
         if (lastTranscript?.role === 'assistant') {
           lastTranscript.text += message.delta;
+          maybeRecordPurposeStart(session, lastTranscript.text);
         } else {
           session.transcripts.push({
             role: 'assistant',
@@ -3899,6 +4190,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             timestamp: new Date()
           });
           trimArray(session.transcripts, MAX_TRANSCRIPTS);
+          maybeRecordPurposeStart(session, message.delta);
         }
         scheduleRealtimeQualityAnalysis(session);
       }
@@ -3916,6 +4208,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
         if (lastTranscript?.role === 'assistant') {
           lastTranscript.text += message.delta;
+          maybeRecordPurposeStart(session, lastTranscript.text);
         } else {
           session.transcripts.push({
             role: 'assistant',
@@ -3923,6 +4216,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             timestamp: new Date()
           });
           trimArray(session.transcripts, MAX_TRANSCRIPTS);
+          maybeRecordPurposeStart(session, message.delta);
         }
         scheduleRealtimeQualityAnalysis(session);
       }
@@ -4074,6 +4368,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
             session.detectedDisposition = 'voicemail';
             session.callOutcome = 'voicemail';
+            recordVoicemailDetectedEvent(session, "openai_input_transcript");
 
             // Update voicemailDetected flag in database immediately (non-blocking)
             if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
@@ -4120,6 +4415,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
                 session.detectedDisposition = 'voicemail';
                 session.callOutcome = 'voicemail';
+                recordVoicemailDetectedEvent(session, "openai_ivr_repeat");
 
                 // Update voicemailDetected flag in database immediately (non-blocking)
                 if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
@@ -4156,6 +4452,8 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           });
           trimArray(session.transcripts, MAX_TRANSCRIPTS);
           scheduleRealtimeQualityAnalysis(session);
+          session.timingMetrics.lastProspectSpeechEndAt = new Date();
+          session.lastSpeechStoppedAt = session.timingMetrics.lastProspectSpeechEndAt;
 
           // CRITICAL: Check for audio quality complaints FIRST
           // Detect phrases like "can't hear you", "bad line", "repeat that"
@@ -4192,6 +4490,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           if (!session.audioDetection.humanDetected) {
             session.audioDetection.humanDetected = true;
             session.audioDetection.humanDetectedAt = new Date();
+            markFirstHumanAudio(session, "openai_input_transcript");
             console.log(`${LOG_PREFIX} ✅ HUMAN DETECTED for call ${session.callId} at ${session.audioDetection.humanDetectedAt.toISOString()}`);
 
             // Update connected flag in database immediately (non-blocking)
@@ -4225,7 +4524,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           const identityConfirmed = detectIdentityConfirmation(message.transcript);
           if (identityConfirmed) {
             session.conversationState.identityConfirmed = true;
-            session.conversationState.identityConfirmedAt = new Date();
+            markIdentityConfirmed(session, "openai_input_transcript");
             session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
             session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
             trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
@@ -4282,6 +4581,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
     case "input_audio_buffer.speech_stopped":
       console.log(`${LOG_PREFIX} Speech ended on call: ${session.callId}`);
       session.lastUserSpeechTime = new Date();
+      session.lastSpeechStoppedAt = session.lastUserSpeechTime;
       // Note: With semantic_vad enabled, OpenAI will automatically commit and create response
       // Only manually trigger if VAD is disabled
       break;
@@ -5645,6 +5945,7 @@ async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transc
     console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId}`);
     session.detectedDisposition = 'voicemail';
     session.callOutcome = 'voicemail';
+    recordVoicemailDetectedEvent(session, "check_for_voicemail_detection");
     await endCall(session.callId, 'voicemail');
   }
 }
@@ -5744,6 +6045,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                   timestamp: new Date(segment.timestamp),
                 });
                 trimArray(session.transcripts, MAX_TRANSCRIPTS);
+                maybeRecordPurposeStart(session, segment.text);
               } else if (segment.speaker === 'contact') {
                 // Store transcript for session records
                 session.transcripts.push({
@@ -5752,6 +6054,8 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                   timestamp: new Date(segment.timestamp),
                 });
                 trimArray(session.transcripts, MAX_TRANSCRIPTS);
+                session.timingMetrics.lastProspectSpeechEndAt = new Date(segment.timestamp);
+                session.lastSpeechStoppedAt = session.timingMetrics.lastProspectSpeechEndAt;
 
                 // NOTE: Do NOT send Deepgram transcripts to Gemini via sendTextMessage!
                 // Gemini Live with native-audio already receives the raw audio via realtime_input
@@ -5773,6 +6077,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                   if (audioType.type === 'human') {
                     session.audioDetection.humanDetected = true;
                     session.audioDetection.humanDetectedAt = new Date();
+                    markFirstHumanAudio(session, "deepgram_contact_transcript");
                     console.log(`${LOG_PREFIX} ✅ [Deepgram] HUMAN DETECTED for call ${session.callId}`);
                   }
                 }
@@ -5782,7 +6087,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                   const identityConfirmed = detectIdentityConfirmation(segment.text);
                   if (identityConfirmed) {
                     session.conversationState.identityConfirmed = true;
-                    session.conversationState.identityConfirmedAt = new Date();
+                    markIdentityConfirmed(session, "deepgram_contact_transcript");
                     session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
                     session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
                     trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
@@ -5860,6 +6165,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
     recordInboundAudio(session.callId, audioBytes);
 
     if (session.telnyxInboundFrames === 1) {
+      session.timingMetrics.firstProspectAudioAt = new Date();
       const first8Hex = audioBytes.subarray(0, 8).toString('hex');
       console.log(`${LOG_PREFIX} First inbound audio frame received from Telnyx for call: ${session.callId} bytes=${audioBytes.length} first8=${first8Hex}`);
       // Check for WAV header (RIFF) - indicates container audio mixed with raw PCM
@@ -5930,6 +6236,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   session.isEnding = true;
   session.isActive = false;
   session.callOutcome = outcome;
+  if (outcome === "voicemail") {
+    recordVoicemailDetectedEvent(session, "end_call_outcome");
+  }
 
   // Notify bridge that WebSocket is definitely closed/ending
   try {
@@ -5960,6 +6269,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     clearTimeout((session as any).fallbackGreetingTimer);
     (session as any).fallbackGreetingTimer = null;
   }
+  if ((session as any).purposePivotGuardTimer) {
+    clearTimeout((session as any).purposePivotGuardTimer);
+    (session as any).purposePivotGuardTimer = null;
+  }
 
   stopTelnyxOutboundPacer(session);
   session.telnyxOutboundBuffer = Buffer.alloc(0);
@@ -5981,6 +6294,17 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     const max = Math.max(...tm.responseLatencies);
     console.log(`${LOG_PREFIX} ⏱️   Response latency range: ${min}ms - ${max}ms`);
   }
+  const p95ModelLatencyMs = percentile(tm.responseLatencies, 95);
+  if (p95ModelLatencyMs !== null) {
+    queueSessionEvent(session, "realtime.p95_model_latency_ms", {
+      valueNum: p95ModelLatencyMs,
+      once: true,
+    });
+  }
+  queueSessionEvent(session, "realtime.max_dead_air_ms", {
+    valueNum: session.maxDeadAirMs,
+    once: true,
+  });
 
   // Stop recording and upload to cloud storage (async, non-blocking)
   if (isRecordingActive(callId)) {
@@ -6236,6 +6560,11 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             queueItemId: isTestCall ? `test-queue-${testCallId}` : session.queueItemId,
           }).returning();
 
+          if (session.pendingSessionEvents.length > 0) {
+            await emitCallSessionEvents(testCallSession.id, session.pendingSessionEvents);
+            session.pendingSessionEvents = [];
+          }
+
           // Schedule post-call analysis with precision turns from recording
           schedulePostCallAnalysis(testCallSession.id, {
             callAttemptId: isTestCall ? undefined : session.callAttemptId,
@@ -6362,6 +6691,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
               callSessionId = callSession.id;
               console.log(`${LOG_PREFIX} ✅ Created call session ${callSessionId} with full conversation intelligence`);
+              if (session.pendingSessionEvents.length > 0) {
+                await emitCallSessionEvents(callSessionId, session.pendingSessionEvents);
+                session.pendingSessionEvents = [];
+              }
             }
           } catch (sessionError) {
             console.error(`${LOG_PREFIX} Failed to create call session:`, sessionError);
@@ -7502,6 +7835,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     return {
       ...aiSettings,
       id: campaign.id,
+      name: campaign.name,
       type: campaign.type, // Campaign type for disposition validation (appointment_setting, content_syndication, etc.)
       script: campaign.callScript,
       // Voice priority: persona.voice from wizard, fallback to Puck (Gemini default)
@@ -7977,6 +8311,27 @@ async function getProviderVoiceControlLayer(
   return { content: '', source: 'legacy' };
 }
 
+function applyVoiceLiftPromptContract(
+  basePrompt: string,
+  campaignConfig: any,
+  contactInfo: any,
+  callAttemptId?: string | null
+): string {
+  if (!isAgenticDemandVoiceLiftCampaign(campaignConfig?.name)) {
+    return basePrompt;
+  }
+
+  const variant = assignVoiceLiftVariant({
+    campaignName: campaignConfig?.name,
+    campaignId: campaignConfig?.id || null,
+    contactId: contactInfo?.id || null,
+    callAttemptId: callAttemptId || null,
+  });
+
+  if (variant !== "variant_b") return basePrompt;
+  return `${basePrompt}\n\n${buildAgenticDemandOpeningContract("variant_b")}`;
+}
+
 async function buildSystemPrompt(
   campaignConfig: any,
   contactInfo: any,
@@ -8181,6 +8536,7 @@ async function buildSystemPrompt(
       console.log(`${LOG_PREFIX} Added Gemini compliance preamble with conversation flow`);
     }
 
+    finalPrompt = applyVoiceLiftPromptContract(finalPrompt, campaignConfig, contactInfo, callAttemptId);
     const tokenEstimate = estimateTokenCount(finalPrompt);
     console.log(`${LOG_PREFIX} Using foundation agent prompt with campaign context layering (${finalPrompt.length} chars, ~${tokenEstimate} tokens) - condensed=${useCondensedPrompt}`);
     return finalPrompt;
@@ -8249,6 +8605,7 @@ async function buildSystemPrompt(
       console.log(`${LOG_PREFIX} Added Gemini compliance preamble (knowledge blocks path)`);
     }
 
+    finalPrompt = applyVoiceLiftPromptContract(finalPrompt, campaignConfig, contactInfo, callAttemptId);
     const tokenEstimate = estimateTokenCount(finalPrompt);
     console.log(`${LOG_PREFIX} Using knowledge blocks prompt with provider=${provider} (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
     return finalPrompt;
@@ -8722,6 +9079,7 @@ Before calling: say "I understand. Let me connect you with someone who can help.
     console.log(`${LOG_PREFIX} Added Gemini compliance preamble (canonical path)`);
   }
 
+  finalPrompt = applyVoiceLiftPromptContract(finalPrompt, campaignConfig, contactInfo, callAttemptId);
   const tokenEstimate = estimateTokenCount(finalPrompt);
   console.log(`${LOG_PREFIX} Using canonical system prompt with layered architecture (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
   return finalPrompt;
@@ -8771,6 +9129,8 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
     timestamp: new Date(),
   });
   trimArray(session.transcripts, MAX_TRANSCRIPTS);
+  session.timingMetrics.lastProspectSpeechEndAt = new Date();
+  session.lastSpeechStoppedAt = session.timingMetrics.lastProspectSpeechEndAt;
 
   // NOTE: Do NOT send transcripts to Gemini via sendTextMessage!
   // Gemini Live with native-audio already receives the raw audio via realtime_input
@@ -8788,6 +9148,7 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
     if (audioType.type === 'human') {
       session.audioDetection.humanDetected = true;
       session.audioDetection.humanDetectedAt = new Date();
+      markFirstHumanAudio(session, `${source}_transcript_feed`);
       console.log(`${LOG_PREFIX} ✅ [${source}] HUMAN DETECTED for call ${callId}`);
     }
   }
@@ -8797,7 +9158,7 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
     const identityConfirmed = detectIdentityConfirmation(transcript);
     if (identityConfirmed) {
       session.conversationState.identityConfirmed = true;
-      session.conversationState.identityConfirmedAt = new Date();
+      markIdentityConfirmed(session, `${source}_transcript_feed`);
       session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
       session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
       trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);

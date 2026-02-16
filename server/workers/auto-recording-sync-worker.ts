@@ -5,7 +5,7 @@ import { leads, dialerCallAttempts, campaignTestCalls } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
-import { submitTranscription, submitStructuredTranscription } from '../services/google-transcription';
+import { submitStructuredTranscription } from '../services/deepgram-postcall-transcription';
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
 import { fetchTelnyxRecording } from '../services/telnyx-recordings';
@@ -111,7 +111,7 @@ async function fetchRecordingFromTelnyx(
 }
 
 /**
- * Transcribe audio with Google Cloud Speech-to-Text
+ * Transcribe audio with Deepgram post-call transcription
  */
 async function transcribeWithSpeakers(
   recordingUrl: string,
@@ -119,9 +119,9 @@ async function transcribeWithSpeakers(
   telnyxCallId?: string | null
 ): Promise<{ transcript: string; structuredTranscript: any; transcriptTurns: any[] } | null> {
   try {
-    console.log('[AutoRecordingSyncWorker] 🎤 Starting Google Cloud Speech-to-Text transcription...');
+    console.log('[AutoRecordingSyncWorker] 🎤 Starting Deepgram post-call transcription...');
     
-    // Use Google Cloud Speech-to-Text service with structured output
+    // Use Deepgram service with structured output
     const result = await submitStructuredTranscription(recordingUrl, { telnyxCallId });
     
     if (!result) {
@@ -204,7 +204,7 @@ async function transcribeWithSpeakers(
       };
     }
 
-    console.log('[AutoRecordingSyncWorker] ✅ Google Cloud Speech-to-Text completed');
+    console.log('[AutoRecordingSyncWorker] ✅ Deepgram transcription completed');
     return {
       transcript: plainTranscript,
       structuredTranscript,

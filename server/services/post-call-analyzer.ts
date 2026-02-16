@@ -14,7 +14,7 @@
 import { db } from "../db";
 import { callSessions, dialerCallAttempts, campaigns } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./google-transcription";
+import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./deepgram-postcall-transcription";
 import { analyzeConversationQuality, type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
 import { logCallIntelligence } from "./call-intelligence-logger";
 import { recordTranscriptionResult } from "./transcription-monitor";
@@ -316,7 +316,7 @@ CRITICAL RULES:
  * 
  * Sequence:
  * 1. Obtain the recording URL from the call session
- * 2. Transcribe with Google STT (structured, speaker-diarized)
+ * 2. Transcribe with Deepgram (structured, speaker-diarized)
  * 3. Build precision turns and compute metrics
  * 4. Evaluate outcome against campaign criteria
  * 5. Run conversation quality analysis
@@ -446,35 +446,8 @@ export async function runPostCallAnalysis(
       }
     }
 
-    // 4. Final fallback — use Gemini's in-session transcript if available
-    if (!structuredTranscript && options?.geminiTranscript && options.geminiTranscript.length > 15) {
-      console.log(`${LOG_PREFIX} Using Gemini in-session transcript as fallback (${options.geminiTranscript.length} chars)`);
-      // Parse out speaker labels if present
-      const lines = options.geminiTranscript.split("\n").filter(Boolean);
-      const utterances: StructuredTranscript["utterances"] = [];
-      let timeOffset = 0;
-      const avgTurnDuration = lines.length > 0 ? (callDurationSec || 60) / lines.length : 5;
-
-      for (const line of lines) {
-        const agentMatch = line.match(/^(Agent|Assistant|AI|Bot)\s*:\s*(.*)$/i);
-        const contactMatch = line.match(/^(Contact|Prospect|User|Caller|Lead)\s*:\s*(.*)$/i);
-
-        if (agentMatch) {
-          utterances.push({ speaker: "Agent", text: agentMatch[2].trim(), start: timeOffset, end: timeOffset + avgTurnDuration });
-        } else if (contactMatch) {
-          utterances.push({ speaker: "Contact", text: contactMatch[2].trim(), start: timeOffset, end: timeOffset + avgTurnDuration });
-        } else {
-          // Unlabeled line — attribute to agent (Gemini's default)
-          utterances.push({ speaker: "Agent", text: line.trim(), start: timeOffset, end: timeOffset + avgTurnDuration });
-        }
-        timeOffset += avgTurnDuration;
-      }
-
-      structuredTranscript = { text: options.geminiTranscript, utterances };
-    }
-
     if (!structuredTranscript || structuredTranscript.text.length < 10) {
-      result.error = "No transcript available — recording may still be uploading. Will retry via background job.";
+      result.error = "No Deepgram post-call transcript available yet; recording may still be uploading. Will retry via background job.";
       console.warn(`${LOG_PREFIX} ${result.error}`);
       return result;
     }
