@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { db } from '../server/db';
 import { callQualityRecords, callSessions } from '../shared/schema';
-import { and, desc, eq, isNotNull, or } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, lte, or } from 'drizzle-orm';
 import { getPlayableRecordingLink } from '../server/services/recording-link-resolver';
 import { isRecordingStorageEnabled, storeCallSessionRecording } from '../server/services/recording-storage';
 
@@ -9,6 +9,7 @@ const DRY_RUN = process.argv.includes('--dry-run');
 const includeUnpinned = process.argv.includes('--include-unpinned');
 const limitArg = process.argv.find((arg) => arg.startsWith('--limit='));
 const LIMIT = Math.max(1, Number(limitArg?.split('=')[1] || 100));
+const MAX_SHOWCASE_DURATION_SEC = 4 * 60;
 
 interface ShowcaseSession {
   callSessionId: string;
@@ -52,7 +53,12 @@ async function getShowcaseSessions(limit: number): Promise<ShowcaseSession[]> {
     })
     .from(callQualityRecords)
     .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
-    .where(buildShowcaseWhere())
+    .where(
+      and(
+        buildShowcaseWhere(),
+        lte(callSessions.durationSec, MAX_SHOWCASE_DURATION_SEC),
+      )
+    )
     .orderBy(desc(callQualityRecords.showcasedAt), desc(callQualityRecords.createdAt))
     .limit(Math.max(limit * 3, limit));
 

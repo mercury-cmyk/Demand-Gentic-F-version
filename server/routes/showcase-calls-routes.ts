@@ -26,6 +26,7 @@ const router = Router();
 const SHOWCASE_MAX_CALLS = 50;
 const SHOWCASE_DEFAULT_RECENT_DAYS = 365;
 const MIN_MEANINGFUL_DURATION_SEC = 15;
+const MAX_SHOWCASE_DURATION_SEC = 4 * 60;
 const MIN_TRANSCRIPT_CHARS = 50;
 const MIN_OVERALL_SCORE = 30; // Lowered to catch more potentials
 const HIGH_PERFORMER_APS_THRESHOLD = 70;
@@ -225,6 +226,7 @@ function buildBaseShowcaseWhere(query: any) {
     noVoicemailTranscriptFilterSql(),
     noCallScreeningTranscriptFilterSql(),
     gte(callSessions.durationSec, MIN_MEANINGFUL_DURATION_SEC),
+    lte(callSessions.durationSec, MAX_SHOWCASE_DURATION_SEC),
     gte(callQualityRecords.overallQualityScore, MIN_OVERALL_SCORE),
     sql`LENGTH(COALESCE(${callQualityRecords.fullTranscript}, '')) >= ${MIN_TRANSCRIPT_CHARS}`,
     or(
@@ -647,6 +649,25 @@ router.post("/:callSessionId/pin", requireAuth, async (req: Request, res: Respon
     if (category && !SHOWCASE_CATEGORIES.includes(category)) {
       return res.status(400).json({
         error: `Invalid category. Must be one of: ${SHOWCASE_CATEGORIES.join(', ')}`,
+      });
+    }
+
+    const [sessionForDurationGate] = await db
+      .select({
+        id: callSessions.id,
+        durationSec: callSessions.durationSec,
+      })
+      .from(callSessions)
+      .where(eq(callSessions.id, callSessionId))
+      .limit(1);
+
+    if (!sessionForDurationGate) {
+      return res.status(404).json({ error: 'Call session not found' });
+    }
+
+    if ((sessionForDurationGate.durationSec ?? 0) > MAX_SHOWCASE_DURATION_SEC) {
+      return res.status(400).json({
+        error: `Call exceeds showcase maximum duration of ${MAX_SHOWCASE_DURATION_SEC} seconds (4 minutes).`,
       });
     }
 
