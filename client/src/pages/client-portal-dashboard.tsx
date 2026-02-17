@@ -2515,12 +2515,12 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6 md:space-y-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold">Campaigns</h2>
-                <p className="text-muted-foreground w-full md:w-auto">View and manage your AI-powered campaigns</p>
+                <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Campaign Operations</h2>
+                <p className="text-sm text-muted-foreground w-full md:w-auto">Monitor campaign delivery, performance, and execution from one workspace.</p>
               </div>
             </div>
 
-            <Card className="border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/20 dark:to-indigo-950/20">
+            <Card className="rounded-2xl border border-violet-200/80 dark:border-violet-800/80 bg-gradient-to-r from-violet-50/80 to-indigo-50/80 dark:from-violet-950/20 dark:to-indigo-950/20 shadow-sm">
               <CardContent className="p-5 md:p-6">
                 <div className="space-y-1.5">
                   <div className="space-y-1.5">
@@ -2540,12 +2540,12 @@ export default function ClientPortalDashboard() {
             {/* Campaign Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {/* Active Campaigns */}
-              <Card className="border-green-200 dark:border-green-800">
+              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Active Campaigns</p>
-                      <p className="text-3xl font-bold text-green-600">{filteredCampaigns.filter(c => c.status === 'active').length}</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Active Campaigns</p>
+                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{filteredCampaigns.filter(c => c.status === 'active').length}</p>
                       <div className="flex gap-3 mt-2 text-xs">
                         <span className="flex items-center gap-1 text-muted-foreground">
                           <Mail className="h-3 w-3" />
@@ -2557,20 +2557,20 @@ export default function ClientPortalDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
-                      <Zap className="h-6 w-6 text-white" />
+                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+                      <Zap className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Impressions - Email & Phone */}
-              <Card className="border-blue-200 dark:border-blue-800">
+              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Impressions</p>
-                      <p className="text-3xl font-bold text-blue-600">{totalLeadsDelivered.toLocaleString()}</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Impressions</p>
+                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{totalLeadsDelivered.toLocaleString()}</p>
                       <div className="flex gap-3 mt-2 text-xs">
                         <span className="flex items-center gap-1 text-muted-foreground">
                           <Mail className="h-3 w-3" />
@@ -2582,20 +2582,20 @@ export default function ClientPortalDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
-                      <BarChart3 className="h-6 w-6 text-white" />
+                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+                      <BarChart3 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Qualified Leads */}
-              <Card className="border-purple-200 dark:border-purple-800">
+              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Qualified Leads</p>
-                      <p className="text-3xl font-bold text-purple-600">{Math.floor(totalLeadsDelivered * 0.042).toLocaleString()}</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Qualified Leads</p>
+                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{Math.floor(totalLeadsDelivered * 0.042).toLocaleString()}</p>
                       <div className="flex gap-3 mt-2 text-xs">
                         <span className="flex items-center gap-1 text-muted-foreground">
                           <Mail className="h-3 w-3" />
@@ -2607,20 +2607,20 @@ export default function ClientPortalDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center shadow-lg">
-                      <UserCheck className="h-6 w-6 text-white" />
+                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+                      <UserCheck className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Conversion Rate */}
-              <Card className="border-amber-200 dark:border-amber-800">
+              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Conversion Rate</p>
-                      <p className="text-3xl font-bold text-amber-600">4.2%</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Conversion Rate</p>
+                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">4.2%</p>
                       <div className="flex gap-3 mt-2 text-xs">
                         <span className="flex items-center gap-1 text-muted-foreground">
                           <Mail className="h-3 w-3" />
@@ -2632,8 +2632,8 @@ export default function ClientPortalDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg">
-                      <TrendingUp className="h-6 w-6 text-white" />
+                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+                      <TrendingUp className="h-5 w-5 text-amber-600 dark:text-amber-400" />
                     </div>
                   </div>
                 </CardContent>
@@ -2641,20 +2641,37 @@ export default function ClientPortalDashboard() {
             </div>
 
             {/* Campaign Filters */}
-            <Card className="border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20">
+            <Card className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/70 shadow-sm">
               <CardContent className="p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Filters</p>
+                  {(campaignSearchQuery || campaignStatusFilter !== 'all' || campaignTypeFilter !== 'all') && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        setCampaignSearchQuery('');
+                        setCampaignStatusFilter('all');
+                        setCampaignTypeFilter('all');
+                      }}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
                 <div className="flex flex-col md:flex-row gap-3">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input 
-                      placeholder="Search campaigns..." 
-                      className="pl-9 bg-white dark:bg-gray-950"
+                      placeholder="Search by campaign name..." 
+                      className="pl-9 bg-white dark:bg-gray-950 border-slate-300/80 dark:border-slate-700"
                       value={campaignSearchQuery}
                       onChange={(e) => setCampaignSearchQuery(e.target.value)}
                     />
                   </div>
                   <Select value={campaignStatusFilter} onValueChange={(val) => setCampaignStatusFilter(val)}>
-                    <SelectTrigger className="w-full md:w-[180px] bg-white dark:bg-gray-950">
+                    <SelectTrigger className="w-full md:w-[210px] bg-white dark:bg-gray-950 border-slate-300/80 dark:border-slate-700">
                       <div className="flex items-center gap-2">
                         <Filter className="h-4 w-4" />
                         <SelectValue placeholder="Status" />
@@ -2671,7 +2688,7 @@ export default function ClientPortalDashboard() {
                     </SelectContent>
                   </Select>
                   <Select value={campaignTypeFilter} onValueChange={(val) => setCampaignTypeFilter(val)}>
-                    <SelectTrigger className="w-full md:w-[180px] bg-white dark:bg-gray-950">
+                    <SelectTrigger className="w-full md:w-[210px] bg-white dark:bg-gray-950 border-slate-300/80 dark:border-slate-700">
                       <SelectValue placeholder="Type" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2682,28 +2699,15 @@ export default function ClientPortalDashboard() {
                       <SelectItem value="data">Data Enrichment</SelectItem>
                     </SelectContent>
                   </Select>
-                  {(campaignSearchQuery || campaignStatusFilter !== 'all' || campaignTypeFilter !== 'all') && (
-                    <Button 
-                      variant="outline" 
-                      size="icon"
-                      onClick={() => {
-                        setCampaignSearchQuery('');
-                        setCampaignStatusFilter('all');
-                        setCampaignTypeFilter('all');
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
                 </div>
               </CardContent>
             </Card>
 
             {/* Your Campaigns */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Target className="h-5 w-5 text-purple-600" />
-                Your Campaigns
+              <h3 className="text-lg font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
+                <Target className="h-5 w-5 text-violet-600" />
+                Campaign Portfolio
                 {filteredCampaigns.length > 0 && (
                   <Badge variant="secondary" className="ml-2">{filteredCampaigns.length}</Badge>
                 )}
@@ -2711,7 +2715,7 @@ export default function ClientPortalDashboard() {
               {campaignsLoading ? (
                  <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
               ) : filteredCampaigns.length === 0 ? (
-                 <Card className="bg-slate-50 dark:bg-slate-900 border-dashed">
+                 <Card className="rounded-2xl bg-slate-50 dark:bg-slate-900 border-dashed border-slate-300/80 dark:border-slate-700">
                     <CardContent className="flex flex-col items-center justify-center py-12">
                       <div className="h-16 w-16 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mb-4">
                         <Target className="h-8 w-8 text-purple-600" />
@@ -2723,9 +2727,8 @@ export default function ClientPortalDashboard() {
                     </CardContent>
                  </Card>
               ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
                 {filteredCampaigns.map((campaign) => {
-                  const ef = campaign.enabledFeatures;
                   return (
                     <CampaignCard
                       key={campaign.id}

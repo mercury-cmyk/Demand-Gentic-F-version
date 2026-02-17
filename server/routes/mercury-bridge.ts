@@ -41,6 +41,12 @@ import {
 import { generateJSON } from '../services/vertex-ai';
 import { smtpOAuthService } from '../services/smtp-oauth-service';
 
+const DEFAULT_PORTAL_BASE_URL =
+  process.env.CLIENT_PORTAL_BASE_URL ||
+  process.env.APP_BASE_URL ||
+  process.env.MSFT_OAUTH_APP_URL ||
+  'https://demandgentic.ai';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SMTP OAUTH CALLBACK ROUTER (public — no auth, Google/Microsoft redirect here)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1115,7 +1121,7 @@ mercuryRouter.post('/invitations/send',
   requireFeatureFlag('smtp_email_enabled'),
   async (req: Request, res: Response) => {
     try {
-      const portalBaseUrl = req.body.portalBaseUrl || `${req.protocol}://${req.get('host')}`;
+      const portalBaseUrl = req.body.portalBaseUrl || DEFAULT_PORTAL_BASE_URL;
       const adminUserId = (req as any).user?.userId || 'unknown';
 
       const result = await bulkInvitationService.sendBulkInvitations({

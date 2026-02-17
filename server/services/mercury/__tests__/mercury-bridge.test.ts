@@ -306,7 +306,7 @@ import {
 
 describe('Mercury Constants', () => {
   it('should have correct from email', () => {
-    expect(MERCURY_DEFAULTS.fromEmail).toBe('mercury@pivotal-b2b.com');
+    expect(MERCURY_DEFAULTS.fromEmail).toBe('mercury@demandgentic.ai');
   });
 
   it('should have correct from name', () => {
@@ -1223,7 +1223,7 @@ describe('SMTP Connection Status', () => {
       configured: true,
       verified: true,
       providerName: 'Gmail',
-      fromEmail: 'mercury@pivotal-b2b.com',
+      fromEmail: 'mercury@demandgentic.ai',
       lastVerifiedAt: new Date(),
     };
     expect(status.configured).toBe(true);

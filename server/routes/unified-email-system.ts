@@ -24,6 +24,11 @@ import { eq } from "drizzle-orm";
  *   /invitations        — Single-user invitation preview, send, accept (public)
  */
 const router = Router();
+const DEFAULT_PORTAL_BASE_URL =
+  process.env.CLIENT_PORTAL_BASE_URL ||
+  process.env.APP_BASE_URL ||
+  process.env.MSFT_OAUTH_APP_URL ||
+  "https://demandgentic.ai";
 
 // =============================================================================
 // PUBLIC ROUTES (No authentication required — accessed by invited users)
@@ -221,7 +226,7 @@ router.post("/invitations/preview", async (req: Request, res: Response) => {
     }
 
     const { clientUserId, portalBaseUrl } = parsed.data;
-    const baseUrl = portalBaseUrl || `${req.protocol}://${req.get("host")}`;
+    const baseUrl = portalBaseUrl || DEFAULT_PORTAL_BASE_URL;
 
     const preview = await bulkInvitationService.previewInvitationEmail({
       clientUserId,
@@ -256,7 +261,7 @@ router.post(
       }
 
       const { clientUserId, portalBaseUrl } = parsed.data;
-      const baseUrl = portalBaseUrl || `${req.protocol}://${req.get("host")}`;
+      const baseUrl = portalBaseUrl || DEFAULT_PORTAL_BASE_URL;
       const adminUserId = (req as any).user?.userId || "unknown";
 
       const result = await bulkInvitationService.sendSingleInvitation({
@@ -316,7 +321,7 @@ router.post(
       }
 
       const { clientUserId, portalBaseUrl } = parsed.data;
-      const baseUrl = portalBaseUrl || `${req.protocol}://${req.get("host")}`;
+      const baseUrl = portalBaseUrl || DEFAULT_PORTAL_BASE_URL;
       const adminUserId = (req as any).user?.userId || "unknown";
 
       const result = await bulkInvitationService.resendSingleInvitation({

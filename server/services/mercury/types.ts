@@ -7,7 +7,7 @@
 // ─── Mercury Configuration ──────────────────────────────────────────────────
 
 export const MERCURY_DEFAULTS = {
-  fromEmail: 'mercury@pivotal-b2b.com',
+  fromEmail: 'mercury@demandgentic.ai',
   fromName: 'Pivotal B2B',
   replyTo: undefined as string | undefined,
   maxRetries: 3,
