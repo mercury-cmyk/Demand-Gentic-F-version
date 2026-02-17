@@ -16,7 +16,7 @@
 
 import { db } from '../db';
 import { callSessions, leads, dialerCallAttempts } from '@shared/schema';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import {
   getCallSessionRecordingUrl,
   getRecordingUrl,
@@ -34,6 +34,40 @@ export interface RecordingLinkResult {
 
 export interface RecordingLinkOptions {
   skipCached?: boolean;
+}
+
+function normalizePhoneCandidates(...rawValues: Array<string | null | undefined>): string[] {
+  const candidates = new Set<string>();
+
+  for (const raw of rawValues) {
+    if (!raw) continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+
+    candidates.add(trimmed);
+
+    const digits = trimmed.replace(/[^\d]/g, '');
+    if (!digits) continue;
+
+    if (digits.length === 11 && digits.startsWith('1')) {
+      candidates.add(`+${digits}`);
+      candidates.add(digits);
+      candidates.add(digits.slice(1));
+      continue;
+    }
+
+    if (digits.length === 10) {
+      candidates.add(`+1${digits}`);
+      candidates.add(`1${digits}`);
+      candidates.add(digits);
+      continue;
+    }
+
+    candidates.add(`+${digits}`);
+    candidates.add(digits);
+  }
+
+  return Array.from(candidates);
 }
 
 // ─── Telnyx helpers (server-only) ──────────────────────────────────────
@@ -130,6 +164,73 @@ async function fetchUrlByTelnyxCallId(
 }
 
 /**
+ * Search Telnyx recordings by phone number and time window, then backfill IDs.
+ */
+async function searchByPhoneAndTime(
+  phoneNumbers: string[],
+  timestamp: Date,
+  conversationId: string,
+): Promise<RecordingLinkResult | null> {
+  if (!phoneNumbers.length) return null;
+
+  try {
+    const { searchRecordingsByDialedNumber } = await import('./telnyx-recordings');
+    const windows = [
+      { beforeMinutes: 30, afterMinutes: 30 },
+      { beforeMinutes: 120, afterMinutes: 120 },
+    ];
+
+    for (const phoneNumber of phoneNumbers) {
+      for (const window of windows) {
+        const searchStart = new Date(timestamp);
+        searchStart.setMinutes(searchStart.getMinutes() - window.beforeMinutes);
+
+        const searchEnd = new Date(timestamp);
+        searchEnd.setMinutes(searchEnd.getMinutes() + window.afterMinutes);
+
+        const recordings = await searchRecordingsByDialedNumber(phoneNumber, searchStart, searchEnd);
+        const completed = recordings.find((r) => r.status === 'completed');
+        const recording = completed || recordings[0];
+
+        if (!recording) continue;
+
+        const downloadUrl = recording.download_urls?.mp3 || recording.download_urls?.wav;
+        if (!downloadUrl) continue;
+
+        console.log(
+          `[RecordingResolver] Found recording via phone search for ${conversationId}: ${recording.id} (phone=${phoneNumber})`,
+        );
+
+        db.update(callSessions)
+          .set({
+            telnyxCallId: recording.call_control_id,
+            telnyxRecordingId: recording.id,
+            recordingUrl: downloadUrl,
+          } as any)
+          .where(eq(callSessions.id, conversationId))
+          .then(() =>
+            console.log(`[RecordingResolver] Backfilled Telnyx IDs for call_session ${conversationId}`),
+          )
+          .catch(() => {});
+
+        return {
+          url: downloadUrl,
+          source: 'telnyx_recording_id',
+          expiresInSeconds: 600,
+          mimeType: downloadUrl.includes('.wav') ? 'audio/wav' : 'audio/mpeg',
+          telnyxRecordingId: recording.id,
+        };
+      }
+    }
+
+    return null;
+  } catch (err: any) {
+    console.warn(`[RecordingResolver] Phone number search failed for ${conversationId}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Fire-and-forget: backfill telnyxRecordingId on the relevant DB rows.
  */
 function backfillRecordingId(
@@ -177,6 +278,7 @@ export async function getPlayableRecordingLink(
       telnyxCallId: callSessions.telnyxCallId,
       recordingUrl: callSessions.recordingUrl,
       toNumberE164: callSessions.toNumberE164,
+      fromNumber: callSessions.fromNumber,
       startedAt: callSessions.startedAt,
     })
     .from(callSessions)
@@ -245,53 +347,86 @@ export async function getPlayableRecordingLink(
       };
     }
 
-    // Priority 5: Search Telnyx by dialed phone number + time range
-    if (session.toNumberE164 && session.startedAt) {
-      try {
-        const { searchRecordingsByDialedNumber } = await import('./telnyx-recordings');
-        const searchStart = new Date(session.startedAt);
-        searchStart.setMinutes(searchStart.getMinutes() - 30);
-        const searchEnd = new Date(session.startedAt);
-        searchEnd.setMinutes(searchEnd.getMinutes() + 30);
+    // Priority 5: Search Telnyx by call_session-linked dialer attempts
+    const attemptsBySession = await db
+      .select({
+        id: dialerCallAttempts.id,
+        recordingUrl: dialerCallAttempts.recordingUrl,
+        telnyxRecordingId: dialerCallAttempts.telnyxRecordingId,
+        telnyxCallId: dialerCallAttempts.telnyxCallId,
+        phoneDialed: dialerCallAttempts.phoneDialed,
+        callStartedAt: dialerCallAttempts.callStartedAt,
+      })
+      .from(dialerCallAttempts)
+      .where(eq(dialerCallAttempts.callSessionId, conversationId))
+      .orderBy(desc(dialerCallAttempts.createdAt))
+      .limit(5);
 
-        const recordings = await searchRecordingsByDialedNumber(
+    for (const attempt of attemptsBySession) {
+      if (attempt.telnyxRecordingId) {
+        const result = await fetchUrlByTelnyxRecordingId(attempt.telnyxRecordingId);
+        if (result) {
+          backfillRecordingId(conversationId, attempt.telnyxRecordingId, 'call_sessions');
+          return {
+            url: result.url,
+            source: 'telnyx_recording_id',
+            expiresInSeconds: 600,
+            mimeType: result.mimeType,
+            telnyxRecordingId: attempt.telnyxRecordingId,
+          };
+        }
+      }
+
+      if (attempt.telnyxCallId) {
+        const result = await fetchUrlByTelnyxCallId(attempt.telnyxCallId);
+        if (result) {
+          if (result.discoveredRecordingId) {
+            backfillRecordingId(conversationId, result.discoveredRecordingId, 'call_sessions');
+            backfillRecordingId(attempt.id, result.discoveredRecordingId, 'dialer_call_attempts');
+          }
+          return {
+            url: result.url,
+            source: 'telnyx_call_id',
+            expiresInSeconds: 600,
+            mimeType: result.mimeType,
+            telnyxRecordingId: result.discoveredRecordingId,
+          };
+        }
+      }
+
+      if (attempt.recordingUrl && !options.skipCached) {
+        return {
+          url: attempt.recordingUrl,
+          source: 'cached',
+          expiresInSeconds: 0,
+          mimeType: 'audio/mpeg',
+        };
+      }
+
+      if (attempt.callStartedAt || session.startedAt) {
+        const phoneCandidates = normalizePhoneCandidates(
+          attempt.phoneDialed,
           session.toNumberE164,
-          searchStart,
-          searchEnd,
+          session.fromNumber,
         );
 
-        const completed = recordings.find((r) => r.status === 'completed');
-        const recording = completed || recordings[0];
-        if (recording) {
-          const downloadUrl = recording.download_urls?.mp3 || recording.download_urls?.wav;
-          if (downloadUrl) {
-            console.log(
-              `[RecordingResolver] Found recording via phone number search for ${conversationId}: ${recording.id}`,
-            );
-            // Backfill telnyxCallId and telnyxRecordingId for faster future lookups
-            db.update(callSessions)
-              .set({
-                telnyxCallId: recording.call_control_id,
-                telnyxRecordingId: recording.id,
-                recordingUrl: downloadUrl,
-              } as any)
-              .where(eq(callSessions.id, conversationId))
-              .then(() =>
-                console.log(`[RecordingResolver] Backfilled Telnyx IDs for call_session ${conversationId}`),
-              )
-              .catch(() => {});
-
-            return {
-              url: downloadUrl,
-              source: 'telnyx_recording_id',
-              expiresInSeconds: 600,
-              mimeType: downloadUrl.includes('.wav') ? 'audio/wav' : 'audio/mpeg',
-              telnyxRecordingId: recording.id,
-            };
-          }
+        const result = await searchByPhoneAndTime(
+          phoneCandidates,
+          attempt.callStartedAt || session.startedAt!,
+          conversationId,
+        );
+        if (result) {
+          return result;
         }
-      } catch (err: any) {
-        console.warn(`[RecordingResolver] Phone number search failed for ${conversationId}: ${err.message}`);
+      }
+    }
+
+    // Priority 6: Search Telnyx by dialed phone number + time range
+    if (session.startedAt) {
+      const phoneCandidates = normalizePhoneCandidates(session.toNumberE164, session.fromNumber);
+      const result = await searchByPhoneAndTime(phoneCandidates, session.startedAt, conversationId);
+      if (result) {
+        return result;
       }
     }
   }

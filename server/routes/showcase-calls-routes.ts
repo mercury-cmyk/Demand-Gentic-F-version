@@ -18,7 +18,7 @@ import {
 } from "@shared/schema";
 import { eq, and, or, ne, desc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
 import { requireAuth } from "../auth";
-import { getCallSessionRecordingS3Key } from "../services/recording-storage";
+import { getCallSessionRecordingS3Key, storeCallSessionRecording } from "../services/recording-storage";
 import { streamFromS3, s3ObjectExists, readFromGCS } from "../lib/storage";
 import { getPlayableRecordingLink } from "../services/recording-link-resolver";
 
@@ -233,6 +233,7 @@ function buildBaseShowcaseWhere(query: any) {
         isNotNull(callSessions.recordingS3Key)
       ),
       isNotNull(callSessions.recordingUrl),
+      isNotNull(callSessions.telnyxCallId),
       and(isNotNull(callSessions.telnyxRecordingId), ne(callSessions.recordingStatus, 'failed'))
     )
   );
@@ -600,13 +601,23 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
       return res.status(404).json({ error: 'Call quality record not found' });
     }
 
+    // Resolve recording capability through the centralized resolver first.
+    // This catches cases where metadata exists in dialer_call_attempts (linked by call_session_id)
+    // even if call_sessions itself does not have recording fields populated yet.
+    let resolvedRecording = false;
+    try {
+      resolvedRecording = Boolean(await getPlayableRecordingLink(callSessionId));
+    } catch {
+      // Non-blocking: fall back to local indicator check below
+    }
+
     // Get playback URL with fallback to stream if needed
     // ALWAYS use the showcase-specific stream endpoint which proxies correctly
     // Note: The frontend uses this URL directly in an <audio> tag, so it must work with cookies
     const playbackUrl = `/api/showcase-calls/${callSessionId}/stream`;
-    
-    // Check if we actually have any source content (S3 key, Telnyx ID, or URL)
-    const hasRecording = hasRecordingIndicator(record);
+
+    // Check if we actually have any source content (S3 key, Telnyx ID, URL, or resolver-discovered source)
+    const hasRecording = resolvedRecording || hasRecordingIndicator(record);
 
     res.json({
       ...record,
@@ -846,6 +857,14 @@ router.get("/:callSessionId/stream", async (req: Request, res: Response) => {
     // ── FAST PATH: Direct Redirect (Performance Optimization) ──────────
     // Instead of proxying the stream through our server (which adds latency/CPU),
     // redirect the client directly to the signed/public URL if it's external.
+    if ((result.source === 'telnyx_recording_id' || result.source === 'telnyx_call_id') && result.url.startsWith('http')) {
+      // Self-heal: persist Telnyx-sourced recordings to GCS in the background so
+      // future showcase playback is stable even if provider URLs rotate/expire.
+      storeCallSessionRecording(callSessionId, result.url).catch((err: any) => {
+        console.warn(`[ShowcaseCalls] Background GCS persist failed for ${callSessionId}:`, err?.message || err);
+      });
+    }
+
     if (result.url.startsWith('http') && result.source !== 'cached') {
        return res.redirect(result.url);
     }
