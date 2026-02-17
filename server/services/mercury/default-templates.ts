@@ -616,14 +616,14 @@ View leads: {{portalLink}}`,
               <p style="margin:0 0 14px;">We've published your latest showcase call recordings for review.</p>
               <p style="margin:0 0 20px;">
                 Access them here:
-                <a href="{{portalBaseUrl}}{{showcasePath}}" style="color:#0f766e; text-decoration:none; font-weight:600;">{{portalBaseUrl}}{{showcasePath}}</a>
+                <a href="https://demandgentic.ai{{showcasePath}}" style="color:#0f766e; text-decoration:none; font-weight:600;">https://demandgentic.ai{{showcasePath}}</a>
               </p>
               <p style="margin:0 0 20px;">Path reference: <code>{{showcasePath}}</code></p>
 
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 18px;">
                 <tr>
                   <td style="background:#0f766e; border-radius:8px;">
-                    <a href="{{portalBaseUrl}}{{showcasePath}}" style="display:inline-block; padding:12px 24px; color:#ffffff; text-decoration:none; font-weight:600;">Open Showcase Calls</a>
+                    <a href="https://demandgentic.ai{{showcasePath}}" style="display:inline-block; padding:12px 24px; color:#ffffff; text-decoration:none; font-weight:600;">Open Showcase Calls</a>
                   </td>
                 </tr>
               </table>
@@ -646,7 +646,7 @@ View leads: {{portalLink}}`,
 We've published your latest showcase call recordings for review.
 
 Open Showcase Calls:
-{{portalBaseUrl}}{{showcasePath}}
+https://demandgentic.ai{{showcasePath}}
 
 Path reference: {{showcasePath}}
 
@@ -655,7 +655,6 @@ Path reference: {{showcasePath}}
 If the link doesn't open directly, copy and paste it into your browser.`,
     variables: [
       { name: 'recipientName', description: 'Recipient name', required: true, exampleValue: 'Jane Smith' },
-      { name: 'portalBaseUrl', description: 'Client portal base URL', required: true, exampleValue: 'https://app.pivotal-b2b.com' },
       { name: 'showcasePath', description: 'Portal path for showcase call recordings', required: true, defaultValue: '/client-portal/showcase-calls', exampleValue: '/client-portal/showcase-calls' },
       { name: 'notes', description: 'Optional note to include in the email', required: false, exampleValue: 'New highlighted calls from this week are now available.' },
     ],

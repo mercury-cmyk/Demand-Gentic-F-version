@@ -198,7 +198,7 @@ smtpProvidersRouter.post("/", requireAuth, async (req: Request, res: Response) =
         displayName: body.displayName,
         replyToAddress: body.replyToAddress,
         dailySendLimit: body.dailySendLimit || 500,
-        hourlySendLimit: body.hourlySendLimit || 100,
+        hourlySendLimit: body.hourlySendLimit || 25,
         isDefault: body.isDefault || false,
         smtpHost: body.smtpHost,
         smtpPort: body.smtpPort,

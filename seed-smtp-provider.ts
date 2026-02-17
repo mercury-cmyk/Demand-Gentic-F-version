@@ -105,7 +105,7 @@ async function ensureProvider(): Promise<string> {
       emailAddress: PROVIDER_EMAIL,
       displayName: "Pivotal B2B",
       dailySendLimit: 2000,
-      hourlySendLimit: 400,
+      hourlySendLimit: 25,
       isDefault: true,
       isActive: true,
       verificationStatus: "pending",

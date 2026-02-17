@@ -160,7 +160,7 @@ function InfoMode({ compact }: { compact?: boolean }) {
 
         <PillarCard icon={Calendar} title="Product Match" status="active" color="emerald" compact={compact}>
           <span className="text-muted-foreground text-xs">
-            Dynamically matched Digital Forum Event for their industry
+            Dynamically matched pinpoint killar content for them only
           </span>
         </PillarCard>
       </div>

@@ -122,7 +122,7 @@ export default function SmtpProvidersPage() {
     emailAddress: "",
     displayName: "",
     dailySendLimit: 500,
-    hourlySendLimit: 100,
+    hourlySendLimit: 25,
     // Custom SMTP fields
     smtpHost: "",
     smtpPort: 465,
@@ -264,7 +264,7 @@ export default function SmtpProvidersPage() {
       emailAddress: "",
       displayName: "",
       dailySendLimit: 500,
-      hourlySendLimit: 100,
+      hourlySendLimit: 25,
       smtpHost: "",
       smtpPort: 465,
       smtpSecure: true,
@@ -471,7 +471,7 @@ export default function SmtpProvidersPage() {
                   <div>
                     <span className="text-muted-foreground">This Hour:</span>
                     <span className="ml-1 font-medium">
-                      {provider.sentThisHour || 0}/{provider.hourlySendLimit || 100}
+                      {provider.sentThisHour || 0}/{provider.hourlySendLimit || 25}
                     </span>
                   </div>
                 </div>

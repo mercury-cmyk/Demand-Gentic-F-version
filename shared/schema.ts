@@ -3855,7 +3855,7 @@ export const smtpProviders = pgTable("smtp_providers", {
 
   // Rate Limiting
   dailySendLimit: integer("daily_send_limit").default(500),
-  hourlySendLimit: integer("hourly_send_limit").default(100),
+  hourlySendLimit: integer("hourly_send_limit").default(25),
   sentToday: integer("sent_today").default(0),
   sentThisHour: integer("sent_this_hour").default(0),
   sentTodayResetAt: timestamp("sent_today_reset_at"),
