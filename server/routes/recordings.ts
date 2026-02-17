@@ -34,6 +34,46 @@ const normalizeQAStatus = (value: unknown): QAStatusType | undefined =>
   typeof value === 'string' && QA_STATUSES.includes(value as QAStatusType) ? (value as QAStatusType) : undefined;
 
 const router = Router();
+const RECORDING_STREAM_FETCH_TIMEOUT_MS = 25_000;
+const RECORDING_STREAM_CHUNK_TIMEOUT_MS = 30_000;
+
+function isAbortError(error: unknown): boolean {
+  return !!(
+    error &&
+    typeof error === 'object' &&
+    'name' in error &&
+    (error as { name?: string }).name === 'AbortError'
+  );
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number = RECORDING_STREAM_FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readChunkWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Stream read timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+  });
+}
 
 /**
  * GET /api/recordings
@@ -1116,7 +1156,20 @@ export async function streamRecording(req: Request, res: Response) {
     }
 
     // ── Fetch audio bytes ────────────────────────────────────────────
-    let audioResponse = await fetch(result.url);
+    let audioResponse: Response;
+
+    try {
+      audioResponse = await fetchWithTimeout(result.url);
+    } catch (fetchError: any) {
+      console.error(
+        `[Recordings API] Upstream fetch timeout/error for ${id} from ${result.source}: ${fetchError?.message || fetchError}`,
+      );
+      res.setHeader('Content-Type', 'text/plain');
+      if (isAbortError(fetchError)) {
+        return res.status(504).send('Recording upstream timeout');
+      }
+      return res.status(502).send('Failed to fetch recording audio');
+    }
 
     // If the fetch fails AND the source was a cached (potentially expired)
     // URL, re-resolve excluding the cached path by forcing a fresh Telnyx
@@ -1127,7 +1180,18 @@ export async function streamRecording(req: Request, res: Response) {
       );
       result = await getPlayableRecordingLink(id, { skipCached: true });
       if (result && result.source !== 'cached') {
-        audioResponse = await fetch(result.url);
+        try {
+          audioResponse = await fetchWithTimeout(result.url);
+        } catch (refreshFetchError: any) {
+          console.error(
+            `[Recordings API] Fresh re-resolve fetch timeout/error for ${id} from ${result.source}: ${refreshFetchError?.message || refreshFetchError}`,
+          );
+          res.setHeader('Content-Type', 'text/plain');
+          if (isAbortError(refreshFetchError)) {
+            return res.status(504).send('Recording upstream timeout');
+          }
+          return res.status(502).send('Failed to fetch recording audio');
+        }
       }
     }
 
@@ -1162,16 +1226,29 @@ export async function streamRecording(req: Request, res: Response) {
     const pipeStream = async () => {
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await readChunkWithTimeout(
+            reader.read(),
+            RECORDING_STREAM_CHUNK_TIMEOUT_MS,
+          );
           if (done) break;
           res.write(value);
         }
         res.end();
       } catch (err) {
         console.error('[Recordings API] Stream error:', err);
+        try {
+          await reader.cancel();
+        } catch {
+          // ignore cancellation errors
+        }
         if (!res.headersSent) {
           res.setHeader('Content-Type', 'text/plain');
-          res.status(500).send('Stream interrupted');
+          const message = err instanceof Error ? err.message : String(err);
+          if (message.includes('timeout')) {
+            res.status(504).send('Recording stream timeout');
+          } else {
+            res.status(500).send('Stream interrupted');
+          }
         } else {
           res.end();
         }
