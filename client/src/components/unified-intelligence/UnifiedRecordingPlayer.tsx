@@ -80,9 +80,42 @@ export function UnifiedRecordingPlayer({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
   const [cacheBust, setCacheBust] = useState(0);
+  const [streamToken, setStreamToken] = useState<string | null>(null);
+  const [isTokenLoading, setIsTokenLoading] = useState(false);
 
-  // ALWAYS stream through the backend proxy — never expose raw Telnyx URLs
-  const streamUrl = `/api/recordings/${recordingId}/stream${cacheBust ? `?t=${cacheBust}` : ''}`;
+  // ALWAYS stream through the backend proxy — never expose raw Telnyx URLs.
+  // Require a short-lived token to avoid unauthenticated stream probes.
+  const baseStreamUrl = streamToken
+    ? `/api/recordings/${recordingId}/stream?token=${encodeURIComponent(streamToken)}`
+    : null;
+  const streamUrl = baseStreamUrl
+    ? `${baseStreamUrl}${cacheBust ? `&t=${cacheBust}` : ''}`
+    : null;
+
+  const fetchStreamToken = useCallback(async (): Promise<boolean> => {
+    try {
+      setIsTokenLoading(true);
+      const res = await apiRequest('GET', `/api/recordings/${recordingId}/stream-token`);
+      const data = await res.json();
+      if (data?.token) {
+        setStreamToken(data.token);
+        return true;
+      }
+      setStreamToken(null);
+      return false;
+    } catch (err) {
+      console.warn('[UnifiedRecordingPlayer] Failed to fetch stream token:', err);
+      setStreamToken(null);
+      return false;
+    } finally {
+      setIsTokenLoading(false);
+    }
+  }, [recordingId]);
+
+  useEffect(() => {
+    setStreamToken(null);
+    void fetchStreamToken();
+  }, [recordingId, fetchStreamToken]);
 
   /**
    * Ask the server to warm/validate a fresh recording link, then force the
@@ -161,6 +194,9 @@ export function UnifiedRecordingPlayer({
       // Auto-retry once via warm + cache-bust (silent)
       if (retryCount === 0) {
         setRetryCount(1);
+          if (playbackError.category === 'auth') {
+            await fetchStreamToken();
+          }
         const ok = await warmAndReload();
         if (ok) return; // retry silently
       }
@@ -189,7 +225,7 @@ export function UnifiedRecordingPlayer({
       audio.removeEventListener('waiting', handleWaiting);
       audio.removeEventListener('playing', handlePlaying);
     };
-  }, [onTimeUpdate, classifyError, logPlaybackError, warmAndReload, retryCount]);
+  }, [onTimeUpdate, classifyError, logPlaybackError, warmAndReload, retryCount, fetchStreamToken]);
 
   // Update playback speed
   useEffect(() => {
@@ -249,6 +285,7 @@ export function UnifiedRecordingPlayer({
     setRetryCount((prev) => prev + 1);
 
     try {
+      await fetchStreamToken();
       const ok = await warmAndReload();
       if (!ok) {
         // Direct cache-bust fallback
@@ -257,7 +294,7 @@ export function UnifiedRecordingPlayer({
     } finally {
       setIsRetrying(false);
     }
-  }, [retryCount, warmAndReload]);
+  }, [retryCount, warmAndReload, fetchStreamToken]);
 
   /**
    * Manual "Refresh link" — warms a fresh URL on server, then reloads audio.
@@ -290,6 +327,7 @@ export function UnifiedRecordingPlayer({
       if (data.success) {
         toast({ title: 'Resync complete', description: `Recording ID linked (${data.telnyxRecordingId?.slice(0, 12)}…).` });
         // Now try to play
+        await fetchStreamToken();
         setCacheBust(Date.now());
         setError(null);
       } else {
@@ -300,16 +338,17 @@ export function UnifiedRecordingPlayer({
     } finally {
       setIsResyncing(false);
     }
-  }, [recordingId, toast]);
+  }, [recordingId, toast, fetchStreamToken]);
 
   const handleDownload = useCallback(() => {
+    if (!streamUrl) return;
     const link = document.createElement('a');
-    link.href = `/api/recordings/${recordingId}/stream`;
+    link.href = streamUrl;
     link.download = `recording-${recordingId}.mp3`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [recordingId]);
+  }, [recordingId, streamUrl]);
 
   // Recording not available
   if (!recording.available) {
@@ -354,10 +393,15 @@ export function UnifiedRecordingPlayer({
             </Button>
           )}
           <a
-            href={`/api/recordings/${recordingId}/stream`}
+            href={streamUrl || '#'}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground underline"
+            onClick={(event) => {
+              if (!streamUrl) {
+                event.preventDefault();
+              }
+            }}
           >
             <ExternalLink className="h-3 w-3" />
             Open in new tab
@@ -371,10 +415,17 @@ export function UnifiedRecordingPlayer({
     <div className={cn('space-y-3 p-3 bg-muted/50 rounded-lg', className)}>
       <audio
         ref={audioRef}
-        src={streamUrl}
+        src={streamUrl || undefined}
         preload="metadata"
         crossOrigin="use-credentials"
       />
+
+      {!streamUrl && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className={cn('h-3 w-3', isTokenLoading && 'animate-spin')} />
+          <span>{isTokenLoading ? 'Authorizing recording stream…' : 'Waiting for stream authorization…'}</span>
+        </div>
+      )}
 
       {/* Main Controls */}
       <div className="flex items-center gap-2">
@@ -474,6 +525,7 @@ export function UnifiedRecordingPlayer({
           variant="ghost"
           className="h-8 w-8"
           onClick={handleDownload}
+          disabled={!streamUrl}
         >
           <Download className="h-4 w-4" />
         </Button>

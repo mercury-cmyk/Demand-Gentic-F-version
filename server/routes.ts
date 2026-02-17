@@ -14653,7 +14653,14 @@ Provide JSON response with:
   // Audio stream uses short-lived signed token in query string (audio elements can't send auth headers)
   // Token is verified server-side before streaming; tokens expire in 15 minutes
   app.get('/api/recordings/:id/stream', async (req, res) => {
-    const token = req.query.token as string;
+    const queryToken = req.query.token as string | undefined;
+    const authHeader = req.headers.authorization;
+    const headerToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : undefined;
+
+    const token = queryToken || headerToken;
+
     if (!token) {
       return res.status(401).send('Authentication required');
     }

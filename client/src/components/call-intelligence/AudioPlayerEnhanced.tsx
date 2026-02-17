@@ -64,14 +64,17 @@ export function AudioPlayerEnhanced({
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [streamToken, setStreamToken] = useState<string | null>(null);
+  const [isTokenLoading, setIsTokenLoading] = useState(false);
 
   // Prefer explicit recording URL when provided; fallback to recording stream endpoint.
   // The fallback endpoint requires a short-lived token query param.
   const fallbackStreamUrl = streamToken
     ? `/api/recordings/${recordingId}/stream?token=${encodeURIComponent(streamToken)}`
-    : `/api/recordings/${recordingId}/stream`;
+    : null;
   const baseStreamUrl = recordingUrl || fallbackStreamUrl;
-  const streamUrl = `${baseStreamUrl}${baseStreamUrl.includes('?') ? '&' : '?'}v=${retryNonce}`;
+  const streamUrl = baseStreamUrl
+    ? `${baseStreamUrl}${baseStreamUrl.includes('?') ? '&' : '?'}v=${retryNonce}`
+    : null;
 
   useEffect(() => {
     setError(null);
@@ -81,6 +84,7 @@ export function AudioPlayerEnhanced({
     setDuration(0);
     setRetryNonce(0);
     setStreamToken(null);
+    setIsTokenLoading(false);
   }, [recordingId, recordingUrl]);
 
   // Fetch a fresh stream token for protected /api/recordings/:id/stream playback.
@@ -91,14 +95,26 @@ export function AudioPlayerEnhanced({
     let cancelled = false;
     (async () => {
       try {
+        if (!cancelled) {
+          setIsTokenLoading(true);
+        }
         const res = await apiRequest('GET', `/api/recordings/${recordingId}/stream-token`);
         const data = await res.json();
         if (!cancelled && data?.token) {
           setStreamToken(data.token);
+          setError(null);
+        } else if (!cancelled) {
+          setError('Unable to authorize recording stream');
         }
-      } catch (err) {
+      } catch (err: any) {
         if (!cancelled) {
           console.warn('[AudioPlayerEnhanced] Failed to fetch stream token:', err);
+          setError('Unable to authorize recording stream');
+          setIsLoading(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsTokenLoading(false);
         }
       }
     })();
@@ -238,6 +254,7 @@ export function AudioPlayerEnhanced({
   }, []);
 
   const handleDownload = useCallback(() => {
+    if (!streamUrl) return;
     const link = document.createElement('a');
     link.href = streamUrl;
     link.download = `recording-${recordingId}.mp3`;
@@ -271,8 +288,11 @@ export function AudioPlayerEnhanced({
 
     setError(null);
     setIsLoading(true);
+    if (!recordingUrl) {
+      setStreamToken(null);
+    }
     setRetryNonce((prev) => prev + 1);
-  }, [onRetrySync]);
+  }, [onRetrySync, recordingUrl]);
 
   if (error) {
     return (
@@ -309,9 +329,18 @@ export function AudioPlayerEnhanced({
     );
   }
 
+  if (!recordingUrl && (isTokenLoading || !streamToken)) {
+    return (
+      <div className={cn('flex items-center gap-2 p-4 bg-muted rounded-lg', className)}>
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm text-muted-foreground">Authorizing recording stream...</span>
+      </div>
+    );
+  }
+
   return (
     <div className={cn('bg-muted/50 rounded-lg p-4 space-y-3', className)}>
-      <audio ref={audioRef} src={streamUrl} preload="metadata" />
+      <audio ref={audioRef} src={streamUrl || undefined} preload="metadata" />
 
       {/* Progress bar */}
       <div className="space-y-1">
@@ -401,7 +430,7 @@ export function AudioPlayerEnhanced({
           </div>
 
           {/* Download */}
-          <Button variant="ghost" size="sm" onClick={handleDownload} title="Download recording">
+          <Button variant="ghost" size="sm" onClick={handleDownload} title="Download recording" disabled={!streamUrl}>
             <Download className="h-4 w-4" />
           </Button>
         </div>
