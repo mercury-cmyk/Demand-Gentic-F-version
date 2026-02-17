@@ -915,6 +915,9 @@ export default function ClientPortalDashboard() {
     },
     enabled: !!user,
   });
+  const isArgyleClient =
+    user?.clientAccountName?.trim().toLowerCase() === 'argyle' ||
+    businessProfileData?.clientName?.trim().toLowerCase() === 'argyle';
 
   // Sync business profile data to local state for editing
   useEffect(() => {
@@ -2307,8 +2310,10 @@ export default function ClientPortalDashboard() {
 
 
 
-            {/* How Our AI Engages Your Prospects */}
-            <IntelligenceFlowDiagram variant="full" className="mb-2" />
+            {/* How Our AI Engages Your Prospects (Argyle only) */}
+            {isArgyleClient && (
+              <IntelligenceFlowDiagram variant="full" className="mb-2" />
+            )}
 
             {/* Recent Activity */}
             <div className="grid lg:grid-cols-2 gap-6">
@@ -3841,8 +3846,10 @@ export default function ClientPortalDashboard() {
               </div>
             </div>
 
-            {/* 3-Pillar Intelligence Visualization */}
-            <IntelligenceFlowDiagram variant="full" className="mb-6" />
+            {/* 3-Pillar Intelligence Visualization (Argyle only) */}
+            {isArgyleClient && (
+              <IntelligenceFlowDiagram variant="full" className="mb-6" />
+            )}
 
             <Card className="border-dashed border-2">
               <CardContent className="flex flex-col items-center justify-center p-12 text-center">

@@ -134,21 +134,6 @@ export default function ShowcaseCallsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const resolveStreamToken = () => {
-    if (typeof window === 'undefined') return null;
-
-    const path = window.location.pathname || '';
-    const isClientPortal = path.startsWith('/client-portal');
-    const clientPortalToken = localStorage.getItem('clientPortalToken');
-    const authToken = localStorage.getItem('authToken');
-
-    // Mirror query client token preference to avoid using stale admin tokens
-    // on client portal routes (which causes 401 on stream playback).
-    return isClientPortal
-      ? (clientPortalToken || authToken)
-      : (authToken || clientPortalToken);
-  };
-
   // Filters
   const [tab, setTab] = useState("showcased");
   const [page, setPage] = useState(1);
@@ -699,13 +684,10 @@ export default function ShowcaseCallsPage() {
                     <CardContent>
                       <AudioPlayerEnhanced
                         recordingId={detailData.callSessionId}
-                        recordingUrl={(() => {
-                          const token = resolveStreamToken();
-                          const encodedToken = token ? encodeURIComponent(token) : null;
-                          return token 
-                            ? `${detailData.playbackUrl}${detailData.playbackUrl.includes('?') ? '&' : '?'}token=${encodedToken}`
-                            : detailData.playbackUrl;
-                        })()}
+                        // Intentionally use the generic recordings stream resolver path
+                        // (/api/recordings/:id/stream) which is token-optional and already
+                        // hardened for cached URL refresh + multi-source fallback.
+                        recordingUrl={null}
                         onRetrySync={handleRetrySync}
                         isRetrying={retrySyncMutation.isPending}
                       />

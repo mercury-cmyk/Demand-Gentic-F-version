@@ -793,8 +793,9 @@ router.get("/:callSessionId/stream", async (req: Request, res: Response) => {
     }
 
     if (!authenticatedUserId) {
-      console.warn('[ShowcaseCalls] Stream request rejected: No valid authentication found');
-      return res.status(401).send('Authentication required');
+      // Do not hard-fail playback when the browser cannot attach Authorization
+      // headers to <audio src>. We still attempt normal recording resolution.
+      console.warn('[ShowcaseCalls] Stream request without auth token; continuing with resolver fallback');
     }
 
     // ── Resolve a playable URL ───────────────────────────────────────
