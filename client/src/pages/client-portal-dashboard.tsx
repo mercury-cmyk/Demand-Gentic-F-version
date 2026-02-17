@@ -42,7 +42,6 @@ import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram'
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
   QualifiedLeadsTable,
-  CallRecordingsView,
   LeadDetailModal,
   EnhancedLeadDetailModal,
   ExportLeadsDialog,
@@ -2750,14 +2749,10 @@ export default function ClientPortalDashboard() {
               </div>
             </div>
 
-            <Tabs value={leadsSubView} onValueChange={(v) => setLeadsSubView(v as 'recordings' | 'qualified')}>
+            <Tabs value={leadsSubView} onValueChange={(v) => setLeadsSubView(v as 'qualified')}>
               <TabsList>
-                <TabsTrigger value="recordings">Call Recordings</TabsTrigger>
                 <TabsTrigger value="qualified">Qualified Leads</TabsTrigger>
               </TabsList>
-              <TabsContent value="recordings" className="mt-4">
-                <CallRecordingsView />
-              </TabsContent>
               <TabsContent value="qualified" className="mt-4">
                 <QualifiedLeadsTable
                   onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}
