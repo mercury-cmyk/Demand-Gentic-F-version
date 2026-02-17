@@ -32,7 +32,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
     name: 'Client Portal Invitation',
     description: 'Premium invitation email sent to client users to set up their portal account.',
     category: 'invitation',
-    subjectTemplate: '{{companyName}} — Reset Your Portal Password',
+    subjectTemplate: '{{companyName}} — Set Your Portal Password',
     htmlTemplate: `<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
 <head>
@@ -132,12 +132,12 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
                         <td align="center">
                           <!--[if mso]>
                           <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{inviteLink}}" style="height:52px;v-text-anchor:middle;width:260px;" arcsize="19%" stroke="f" fillcolor="#2563eb">
-                          <w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;">Reset My Password</center>
+                          <w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;">Set Up My Account</center>
                           </v:roundrect>
                           <![endif]-->
                           <!--[if !mso]><!-->
                           <a href="{{inviteLink}}" target="_blank" class="mobile-btn cta-btn" style="font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:16px; font-weight:600; color:#ffffff; text-decoration:none; padding:16px 44px; border-radius:10px; display:inline-block; letter-spacing:0.2px; background-color:#2563eb;">
-                            Reset My Password
+                            Set Up My Account
                           </a>
                           <!--<![endif]-->
                         </td>
@@ -285,7 +285,7 @@ You've been invited to the {{companyName}} workspace on the Pivotal B2B demand g
 
   You do not need an existing password from us.
 
-Reset Your Password: {{inviteLink}}
+Set Up Your Account: {{inviteLink}}
 
 What you'll get access to:
 - Real-time campaign dashboard

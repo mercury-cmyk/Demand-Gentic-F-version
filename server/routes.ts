@@ -1339,7 +1339,10 @@ export function registerRoutes(app: Express) {
       const resetLink = `${baseUrl}/reset-password?token=${token}&type=${type}`;
 
       // Send email via transactional email service
-      await transactionalEmailService.triggerPasswordResetEmail(email.toLowerCase(), resetLink, "1 hour");
+      const resetEmailResult = await transactionalEmailService.triggerPasswordResetEmail(email.toLowerCase(), resetLink, "1 hour");
+      if (!resetEmailResult.success) {
+        console.error('[PASSWORD RESET] Email dispatch failed:', resetEmailResult.error);
+      }
 
       res.json(successResponse);
     } catch (error) {

@@ -24,7 +24,6 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { smtpOAuthService } from "./smtp-oauth-service";
-import { queueTransactionalEmail } from "../workers/transactional-email-worker";
 
 export interface TransactionalEmailRequest {
   eventType: TransactionalEventType;
@@ -56,6 +55,127 @@ export interface ResolvedEmail {
 }
 
 export class TransactionalEmailService {
+  private async sendPasswordResetFallbackSmtp(params: {
+    email: string;
+    resetLink: string;
+    expiresIn: string;
+  }): Promise<TransactionalEmailResult> {
+    try {
+      const provider = await this.getProvider(undefined, undefined);
+
+      const [log] = await db.insert(transactionalEmailLogs).values({
+        templateId: null,
+        smtpProviderId: provider?.id || null,
+        eventType: "password_reset",
+        triggerSource: "password_reset_fallback",
+        recipientEmail: params.email,
+        subject: "Reset your password",
+        variablesUsed: {
+          resetLink: params.resetLink,
+          expiresIn: params.expiresIn,
+        },
+        status: "sending",
+      }).returning();
+
+      let transporter: any;
+      let fromEmail = "no-reply@demandgentic.ai";
+      let fromName = "DemandGentic";
+
+      if (provider) {
+        const rateLimitCheck = await smtpOAuthService.checkRateLimits(provider);
+        if (!rateLimitCheck.allowed) {
+          return {
+            success: false,
+            error: `Password reset fallback blocked by rate limit: ${rateLimitCheck.reason}`,
+          };
+        }
+
+        transporter = await smtpOAuthService.createTransporter(provider);
+        fromEmail = provider.emailAddress;
+        fromName = provider.displayName || "DemandGentic";
+      } else {
+        transporter = smtpOAuthService.createEnvTransporter();
+        if (!transporter) {
+          return {
+            success: false,
+            error: "No SMTP provider configured for password reset fallback",
+          };
+        }
+
+        fromEmail = process.env.SMTP_USER || fromEmail;
+      }
+
+      const subject = "Reset your password";
+      const text = `We received a request to reset your password.\n\nReset your password: ${params.resetLink}\n\nThis link expires in ${params.expiresIn}.\n\nIf you did not request this, you can safely ignore this email.`;
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #111827;">
+          <h2 style="margin-bottom: 12px;">Reset your password</h2>
+          <p style="line-height: 1.6;">We received a request to reset your password.</p>
+          <p style="line-height: 1.6; margin: 20px 0;">
+            <a href="${params.resetLink}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;display:inline-block;">
+              Reset Password
+            </a>
+          </p>
+          <p style="line-height: 1.6; font-size: 14px; color: #4b5563;">This link expires in ${params.expiresIn}.</p>
+          <p style="line-height: 1.6; font-size: 14px; color: #4b5563;">If you did not request this, you can safely ignore this email.</p>
+          <p style="line-height: 1.6; font-size: 13px; color: #6b7280; margin-top: 24px;">Or copy and paste this URL into your browser:<br/>${params.resetLink}</p>
+        </div>
+      `;
+
+      const info = await transporter.sendMail({
+        from: `${fromName} <${fromEmail}>`,
+        to: params.email,
+        subject,
+        html,
+        text,
+      });
+
+      await db
+        .update(transactionalEmailLogs)
+        .set({
+          status: "sent",
+          messageId: info.messageId,
+          sentAt: new Date(),
+        })
+        .where(eq(transactionalEmailLogs.id, log.id));
+
+      if (provider) {
+        await smtpOAuthService.updateRateLimits(provider.id);
+      }
+
+      return {
+        success: true,
+        logId: log.id,
+        messageId: info.messageId,
+      };
+    } catch (error: any) {
+      try {
+        await db.insert(transactionalEmailLogs).values({
+          templateId: null,
+          smtpProviderId: null,
+          eventType: "password_reset",
+          triggerSource: "password_reset_fallback",
+          recipientEmail: params.email,
+          subject: "Reset your password",
+          variablesUsed: {
+            resetLink: params.resetLink,
+            expiresIn: params.expiresIn,
+          },
+          status: "failed",
+          errorMessage: error.message,
+          failedAt: new Date(),
+        });
+      } catch {
+        // Ignore secondary logging errors to preserve primary failure
+      }
+
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
   /**
    * Send a transactional email based on event type
    */
@@ -102,37 +222,59 @@ export class TransactionalEmailService {
         recipientName: request.recipientName,
         subject: resolvedEmail.subject,
         variablesUsed: request.variables,
-        status: "pending",
+        status: "sending",
         metadata: request.metadata,
       };
 
       const [log] = await db.insert(transactionalEmailLogs).values(logEntry).returning();
 
-      // 6. Queue for async sending
-      await queueTransactionalEmail({
-        logId: log.id,
-        providerId: provider.id,
-        to: request.recipientEmail,
-        toName: request.recipientName,
-        from: resolvedEmail.fromEmail,
-        fromName: resolvedEmail.fromName,
-        replyTo: resolvedEmail.replyTo,
-        subject: resolvedEmail.subject,
-        html: resolvedEmail.htmlContent,
-        text: resolvedEmail.textContent,
-      });
+      // 6. Send immediately (no queue delay)
+      try {
+        const transporter = await smtpOAuthService.createTransporter(provider);
+        const info = await transporter.sendMail({
+          from: `${resolvedEmail.fromName} <${resolvedEmail.fromEmail}>`,
+          to: request.recipientName
+            ? `${request.recipientName} <${request.recipientEmail}>`
+            : request.recipientEmail,
+          replyTo: resolvedEmail.replyTo,
+          subject: resolvedEmail.subject,
+          html: resolvedEmail.htmlContent,
+          text: resolvedEmail.textContent,
+        });
 
-      // Update log status to queued
-      await db
-        .update(transactionalEmailLogs)
-        .set({ status: "queued", queuedAt: new Date() })
-        .where(eq(transactionalEmailLogs.id, log.id));
+        await db
+          .update(transactionalEmailLogs)
+          .set({
+            status: "sent",
+            messageId: info.messageId,
+            sentAt: new Date(),
+          })
+          .where(eq(transactionalEmailLogs.id, log.id));
 
-      return {
-        success: true,
-        logId: log.id,
-        queued: true,
-      };
+        await smtpOAuthService.updateRateLimits(provider.id);
+
+        return {
+          success: true,
+          logId: log.id,
+          messageId: info.messageId,
+          queued: false,
+        };
+      } catch (sendError: any) {
+        await db
+          .update(transactionalEmailLogs)
+          .set({
+            status: "failed",
+            errorMessage: sendError.message,
+            failedAt: new Date(),
+          })
+          .where(eq(transactionalEmailLogs.id, log.id));
+
+        return {
+          success: false,
+          logId: log.id,
+          error: sendError.message,
+        };
+      }
     } catch (error: any) {
       console.error("[TransactionalEmailService] Error sending email:", error);
       return {
@@ -362,7 +504,7 @@ export class TransactionalEmailService {
     resetLink: string,
     expiresIn: string = "1 hour"
   ): Promise<TransactionalEmailResult> {
-    return this.sendTransactionalEmail({
+    const result = await this.sendTransactionalEmail({
       eventType: "password_reset",
       recipientEmail: email,
       variables: {
@@ -370,6 +512,20 @@ export class TransactionalEmailService {
         expiresIn,
       },
       triggerSource: "password_reset_request",
+    });
+
+    if (result.success) {
+      return result;
+    }
+
+    console.warn(
+      `[TransactionalEmailService] Password reset template flow failed, using SMTP fallback. email=${email}, error=${result.error}`
+    );
+
+    return this.sendPasswordResetFallbackSmtp({
+      email,
+      resetLink,
+      expiresIn,
     });
   }
 
