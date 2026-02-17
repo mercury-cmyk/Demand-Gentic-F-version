@@ -32,7 +32,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
     name: 'Client Portal Invitation',
     description: 'Premium invitation email sent to client users to set up their portal account.',
     category: 'invitation',
-    subjectTemplate: '{{companyName}} — Set Your Portal Password',
+    subjectTemplate: '{{companyName}} — Reset Your Portal Password',
     htmlTemplate: `<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
 <head>
@@ -132,12 +132,12 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
                         <td align="center">
                           <!--[if mso]>
                           <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{inviteLink}}" style="height:52px;v-text-anchor:middle;width:260px;" arcsize="19%" stroke="f" fillcolor="#2563eb">
-                          <w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;">Set Up My Account</center>
+                          <w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;">Reset My Password</center>
                           </v:roundrect>
                           <![endif]-->
                           <!--[if !mso]><!-->
                           <a href="{{inviteLink}}" target="_blank" class="mobile-btn cta-btn" style="font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:16px; font-weight:600; color:#ffffff; text-decoration:none; padding:16px 44px; border-radius:10px; display:inline-block; letter-spacing:0.2px; background-color:#2563eb;">
-                            Set Up My Account
+                            Reset My Password
                           </a>
                           <!--<![endif]-->
                         </td>
@@ -285,7 +285,7 @@ You've been invited to the {{companyName}} workspace on the Pivotal B2B demand g
 
   You do not need an existing password from us.
 
-Set Up Your Account: {{inviteLink}}
+Reset Your Password: {{inviteLink}}
 
 What you'll get access to:
 - Real-time campaign dashboard
@@ -305,7 +305,8 @@ Pivotal B2B - DemandGentic.ai Platform`,
       { name: 'lastName', description: 'Recipient last name', required: false, exampleValue: 'Smith' },
       { name: 'email', description: 'Recipient email', required: true, exampleValue: 'jane@example.com' },
       { name: 'companyName', description: 'Client account name', required: true, exampleValue: 'Acme Corp' },
-      { name: 'inviteLink', description: 'Invitation URL with token', required: true, exampleValue: 'https://app.pivotal-b2b.com/client-portal/accept-invite?token=abc123' },
+      { name: 'inviteLink', description: 'Password reset URL with token (legacy variable name)', required: true, exampleValue: 'https://app.pivotal-b2b.com/reset-password?token=abc123&type=client' },
+      { name: 'resetLink', description: 'Password reset URL with token', required: false, exampleValue: 'https://app.pivotal-b2b.com/reset-password?token=abc123&type=client' },
       { name: 'expiryDays', description: 'Number of days until expiration', required: true, defaultValue: '7', exampleValue: '7' },
       { name: 'portalUrl', description: 'Client portal base URL', required: false, exampleValue: 'https://app.pivotal-b2b.com' },
     ],
@@ -584,6 +585,79 @@ View leads: {{portalLink}}`,
       { name: 'campaignName', description: 'Campaign name', required: true, exampleValue: 'Q1 Lead Gen' },
       { name: 'leadCount', description: 'Number of leads delivered', required: true, exampleValue: '25' },
       { name: 'portalLink', description: 'Link to view leads', required: false, exampleValue: 'https://app.pivotal-b2b.com/client-portal/leads' },
+    ],
+  },
+  {
+    templateKey: 'showcase_recordings_shared',
+    name: 'Showcase Recordings Shared',
+    description: 'Client notification with direct path to showcase call recordings in the portal.',
+    category: 'notification',
+    subjectTemplate: 'Your showcase call recordings are ready',
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+</head>
+<body style="margin:0; padding:0; background:#f4f6f8; font-family:'Segoe UI',Arial,sans-serif; color:#1f2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8; padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:12px; overflow:hidden;">
+          <tr>
+            <td style="background:#0f766e; color:#ffffff; padding:20px 28px; font-size:22px; font-weight:700;">
+              Showcase Call Recordings
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px; font-size:15px; line-height:1.65;">
+              <p style="margin:0 0 14px;">Hi {{recipientName}},</p>
+              <p style="margin:0 0 14px;">We've published your latest showcase call recordings for review.</p>
+              <p style="margin:0 0 20px;">
+                Access them here:
+                <a href="{{portalBaseUrl}}{{showcasePath}}" style="color:#0f766e; text-decoration:none; font-weight:600;">{{portalBaseUrl}}{{showcasePath}}</a>
+              </p>
+              <p style="margin:0 0 20px;">Path reference: <code>{{showcasePath}}</code></p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 18px;">
+                <tr>
+                  <td style="background:#0f766e; border-radius:8px;">
+                    <a href="{{portalBaseUrl}}{{showcasePath}}" style="display:inline-block; padding:12px 24px; color:#ffffff; text-decoration:none; font-weight:600;">Open Showcase Calls</a>
+                  </td>
+                </tr>
+              </table>
+
+              {{#if notes}}
+              <p style="margin:0 0 16px;"><strong>Notes:</strong> {{notes}}</p>
+              {{/if}}
+
+              <p style="margin:0; color:#6b7280; font-size:13px;">If the button doesn't work, copy and paste the link above into your browser.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+    textTemplate: `Hi {{recipientName}},
+
+We've published your latest showcase call recordings for review.
+
+Open Showcase Calls:
+{{portalBaseUrl}}{{showcasePath}}
+
+Path reference: {{showcasePath}}
+
+{{#if notes}}Notes: {{notes}}{{/if}}
+
+If the link doesn't open directly, copy and paste it into your browser.`,
+    variables: [
+      { name: 'recipientName', description: 'Recipient name', required: true, exampleValue: 'Jane Smith' },
+      { name: 'portalBaseUrl', description: 'Client portal base URL', required: true, exampleValue: 'https://app.pivotal-b2b.com' },
+      { name: 'showcasePath', description: 'Portal path for showcase call recordings', required: true, defaultValue: '/client-portal/showcase-calls', exampleValue: '/client-portal/showcase-calls' },
+      { name: 'notes', description: 'Optional note to include in the email', required: false, exampleValue: 'New highlighted calls from this week are now available.' },
     ],
   },
   {

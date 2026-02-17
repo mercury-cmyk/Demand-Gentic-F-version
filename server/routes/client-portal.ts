@@ -22,6 +22,7 @@ import {
   // QA-approved leads system
   leads,
   dialerCallAttempts,
+  callSessions,
   leadComments,
   campaigns,
   campaignQueue,
@@ -1545,9 +1546,10 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
   }
 });
 
-// List Telnyx call recordings for client portal Leads tab (temporary global view)
+// List Telnyx call recordings for client portal Leads tab (scoped to client campaigns)
 router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientAuth, async (req, res) => {
   try {
+    const clientAccountId = req.clientUser!.clientAccountId;
     const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
     const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) || '25', 10)));
     const phone = typeof req.query.phone === 'string' ? req.query.phone.trim() : '';
@@ -1574,6 +1576,78 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
       endDate = parsed;
     }
 
+    const accessRows = await db
+      .select({ campaignId: clientCampaignAccess.regularCampaignId })
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          isNotNull(clientCampaignAccess.regularCampaignId),
+        )
+      );
+
+    const accessibleCampaignIds = accessRows
+      .map((row) => row.campaignId)
+      .filter((id): id is string => Boolean(id));
+
+    if (accessibleCampaignIds.length === 0) {
+      return res.json({
+        total: 0,
+        page,
+        pageSize,
+        items: [],
+        source: 'telnyx',
+      });
+    }
+
+    const callSessionConditions = [inArray(callSessions.campaignId, accessibleCampaignIds)];
+    if (startDate) {
+      callSessionConditions.push(sql`${callSessions.createdAt} >= ${startDate}`);
+    }
+    if (endDate) {
+      callSessionConditions.push(sql`${callSessions.createdAt} <= ${endDate}`);
+    }
+
+    const scopedSessions = await db
+      .select({
+        id: callSessions.id,
+        telnyxCallId: callSessions.telnyxCallId,
+        toNumberE164: callSessions.toNumberE164,
+        fromNumber: callSessions.fromNumber,
+      })
+      .from(callSessions)
+      .where(and(...callSessionConditions))
+      .limit(5000);
+
+    if (scopedSessions.length === 0) {
+      return res.json({
+        total: 0,
+        page,
+        pageSize,
+        items: [],
+        source: 'telnyx',
+      });
+    }
+
+    const scopedCallSessionIds = new Set(scopedSessions.map((session) => session.id));
+    const scopedTelnyxCallIds = new Set(
+      scopedSessions
+        .map((session) => session.telnyxCallId)
+        .filter((value): value is string => Boolean(value))
+    );
+    const scopedPhoneDigits = new Set<string>();
+    for (const session of scopedSessions) {
+      const sessionPhones = [session.toNumberE164, session.fromNumber];
+      for (const phoneValue of sessionPhones) {
+        const digits = normalizePhoneDigits(phoneValue);
+        if (!digits) continue;
+        scopedPhoneDigits.add(digits);
+        if (digits.length >= 10) {
+          scopedPhoneDigits.add(digits.slice(-10));
+        }
+      }
+    }
+
     // Limit Telnyx fetch scope to requested page/batch size to avoid loading huge recording sets.
     const telnyxFetchPageSize = Math.min(100, pageSize);
     const telnyxFetchMaxPages = Math.max(1, page);
@@ -1589,9 +1663,21 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
     const normalizedSearch = phone.replace(/\D/g, '');
     const filtered = telnyxRecordings
       .filter((recording) => {
+        const callSessionMatch = Boolean(recording.call_session_id) && scopedCallSessionIds.has(recording.call_session_id);
+        const callControlMatch = Boolean(recording.call_control_id) && scopedTelnyxCallIds.has(recording.call_control_id);
+        const fromDigits = normalizePhoneDigits(recording.from);
+        const toDigits = normalizePhoneDigits(recording.to);
+        const phoneMatch =
+          (fromDigits && (scopedPhoneDigits.has(fromDigits) || (fromDigits.length >= 10 && scopedPhoneDigits.has(fromDigits.slice(-10))))) ||
+          (toDigits && (scopedPhoneDigits.has(toDigits) || (toDigits.length >= 10 && scopedPhoneDigits.has(toDigits.slice(-10)))));
+
+        if (!callSessionMatch && !callControlMatch && !phoneMatch) {
+          return false;
+        }
+
         if (!normalizedSearch) return true;
-        const from = (recording.from || '').replace(/\D/g, '');
-        const to = (recording.to || '').replace(/\D/g, '');
+        const from = fromDigits;
+        const to = toDigits;
         return from.includes(normalizedSearch) || to.includes(normalizedSearch);
       })
       .sort((a, b) => {

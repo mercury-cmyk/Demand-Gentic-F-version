@@ -16,6 +16,7 @@ import {
   clientAccounts,
   mercuryInvitationTokens,
   mercuryEmailOutbox,
+  passwordResetTokens,
 } from '@shared/schema';
 import { mercuryEmailService } from './email-service';
 import { isFeatureEnabled } from '../../feature-flags';
@@ -29,6 +30,75 @@ import crypto from 'crypto';
 
 export class BulkInvitationService {
   private readonly INVITE_TEMPLATE_KEY = 'client_invite';
+  private invitationSchemaInitPromise: Promise<void> | null = null;
+
+  private async createClientPasswordResetLink(params: {
+    clientUserId: string;
+    email: string;
+    portalBaseUrl: string;
+  }): Promise<string> {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + MERCURY_DEFAULTS.inviteExpiryDays);
+
+    await db.insert(passwordResetTokens).values({
+      token,
+      userId: null,
+      clientUserId: params.clientUserId,
+      email: params.email.toLowerCase(),
+      userType: 'client',
+      expiresAt,
+    });
+
+    return `${params.portalBaseUrl}/reset-password?token=${token}&type=client`;
+  }
+
+  private async ensureInvitationTokenSchema(): Promise<void> {
+    if (!this.invitationSchemaInitPromise) {
+      this.invitationSchemaInitPromise = (async () => {
+        await db.execute(sql`
+          ALTER TABLE mercury_invitation_tokens
+            ADD COLUMN IF NOT EXISTS token_hash varchar,
+            ADD COLUMN IF NOT EXISTS revoked_at timestamptz,
+            ADD COLUMN IF NOT EXISTS revoked_by varchar,
+            ADD COLUMN IF NOT EXISTS replaced_by_token_id varchar;
+        `);
+
+        await db.execute(sql`
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1
+              FROM pg_constraint
+              WHERE conname = 'mercury_invite_revoked_by_fkey'
+            ) THEN
+              ALTER TABLE mercury_invitation_tokens
+                ADD CONSTRAINT mercury_invite_revoked_by_fkey
+                FOREIGN KEY (revoked_by)
+                REFERENCES users(id)
+                ON DELETE SET NULL;
+            END IF;
+          END $$;
+        `);
+
+        await db.execute(sql`
+          CREATE UNIQUE INDEX IF NOT EXISTS mercury_invite_token_hash_idx
+            ON mercury_invitation_tokens(token_hash)
+            WHERE token_hash IS NOT NULL;
+        `);
+
+        await db.execute(sql`
+          CREATE INDEX IF NOT EXISTS mercury_invite_revoked_idx
+            ON mercury_invitation_tokens(revoked_at);
+        `);
+      })().catch((error) => {
+        this.invitationSchemaInitPromise = null;
+        throw error;
+      });
+    }
+
+    await this.invitationSchemaInitPromise;
+  }
 
   private hashInviteToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
@@ -49,6 +119,8 @@ export class BulkInvitationService {
     eligible: InvitationCandidate[];
     skipped: InvitationCandidate[];
   }> {
+    await this.ensureInvitationTokenSchema();
+
     // Fetch all active client users with their account info
     const users = await db
       .select({
@@ -201,8 +273,12 @@ export class BulkInvitationService {
           const expiresAt = new Date();
           expiresAt.setDate(expiresAt.getDate() + MERCURY_DEFAULTS.inviteExpiryDays);
 
-          // Build invitation link
-          const inviteLink = `${params.portalBaseUrl}/client-portal/accept-invite?token=${token}`;
+          // Build password reset link for existing client users
+          const resetLink = await this.createClientPasswordResetLink({
+            clientUserId: candidate.clientUserId,
+            email: candidate.email,
+            portalBaseUrl: params.portalBaseUrl,
+          });
 
           // Render template
           const rendered = await mercuryEmailService.renderTemplate(this.INVITE_TEMPLATE_KEY, {
@@ -210,7 +286,8 @@ export class BulkInvitationService {
             lastName: candidate.lastName || '',
             email: candidate.email,
             companyName: candidate.clientAccountName,
-            inviteLink,
+            inviteLink: resetLink, // Backward compatibility with existing template variable name
+            resetLink,
             expiryDays: MERCURY_DEFAULTS.inviteExpiryDays.toString(),
             portalUrl: params.portalBaseUrl,
           });
@@ -329,6 +406,8 @@ export class BulkInvitationService {
     reason?: string;
     errorCode?: string;
   }> {
+    await this.ensureInvitationTokenSchema();
+
     const [record] = await db
       .select()
       .from(mercuryInvitationTokens)
@@ -363,6 +442,8 @@ export class BulkInvitationService {
    * Mark an invitation token as used.
    */
   async markTokenUsed(token: string): Promise<void> {
+    await this.ensureInvitationTokenSchema();
+
     await db.update(mercuryInvitationTokens).set({
       usedAt: new Date(),
     }).where(
@@ -384,6 +465,8 @@ export class BulkInvitationService {
     portalBaseUrl: string;
     forceResend?: boolean;
   }): Promise<{ success: boolean; token?: string; error?: string }> {
+    await this.ensureInvitationTokenSchema();
+
     if (!isFeatureEnabled('smtp_email_enabled')) {
       return { success: false, error: 'SMTP email sending is disabled (smtp_email_enabled flag is OFF)' };
     }
@@ -447,8 +530,12 @@ export class BulkInvitationService {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + MERCURY_DEFAULTS.inviteExpiryDays);
 
-      // Build invitation link
-      const inviteLink = `${params.portalBaseUrl}/client-portal/accept-invite?token=${token}`;
+      // Build password reset link for existing client users
+      const resetLink = await this.createClientPasswordResetLink({
+        clientUserId: user.id,
+        email: user.email,
+        portalBaseUrl: params.portalBaseUrl,
+      });
 
       // Render template
       const rendered = await mercuryEmailService.renderTemplate(this.INVITE_TEMPLATE_KEY, {
@@ -456,7 +543,8 @@ export class BulkInvitationService {
         lastName: user.lastName || '',
         email: user.email,
         companyName: user.accountName || 'Unknown',
-        inviteLink,
+        inviteLink: resetLink, // Backward compatibility with existing template variable name
+        resetLink,
         expiryDays: MERCURY_DEFAULTS.inviteExpiryDays.toString(),
         portalUrl: params.portalBaseUrl,
       });
@@ -544,6 +632,8 @@ export class BulkInvitationService {
     clientUserId?: string;
     token?: string;
   }): Promise<{ success: boolean; revokedCount: number; error?: string }> {
+    await this.ensureInvitationTokenSchema();
+
     if (!params.clientUserId && !params.token) {
       return { success: false, revokedCount: 0, error: 'Either clientUserId or token is required' };
     }
@@ -617,7 +707,7 @@ export class BulkInvitationService {
 
     if (!user) return null;
 
-    const sampleLink = `${params.portalBaseUrl}/client-portal/accept-invite?token=PREVIEW_TOKEN`;
+    const sampleLink = `${params.portalBaseUrl}/reset-password?token=PREVIEW_TOKEN&type=client`;
 
     const rendered = await mercuryEmailService.renderTemplate(this.INVITE_TEMPLATE_KEY, {
       firstName: user.firstName || 'there',
@@ -625,6 +715,7 @@ export class BulkInvitationService {
       email: user.email,
       companyName: user.accountName || 'Unknown',
       inviteLink: sampleLink,
+      resetLink: sampleLink,
       expiryDays: MERCURY_DEFAULTS.inviteExpiryDays.toString(),
       portalUrl: params.portalBaseUrl,
     });

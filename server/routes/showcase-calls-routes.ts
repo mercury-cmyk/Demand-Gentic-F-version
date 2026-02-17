@@ -251,7 +251,10 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
     const limit = Math.min(requestedLimit, SHOWCASE_MAX_CALLS);
     const offset = (page - 1) * limit;
 
-    const whereClause = buildBaseShowcaseWhere(req.query);
+    const whereClause = and(
+      buildBaseShowcaseWhere(req.query),
+      eq(callQualityRecords.isShowcase, true)
+    );
 
     // Count total matches
     const [{ total }] = await db

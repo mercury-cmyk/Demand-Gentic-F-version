@@ -94,12 +94,28 @@ async function main() {
       client_user_id VARCHAR NOT NULL REFERENCES client_users(id) ON DELETE CASCADE,
       client_account_id VARCHAR NOT NULL REFERENCES client_accounts(id) ON DELETE CASCADE,
       token VARCHAR NOT NULL UNIQUE,
+      token_hash VARCHAR,
       expires_at TIMESTAMPTZ NOT NULL,
       used_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ,
+      revoked_by VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+      replaced_by_token_id VARCHAR,
       email_outbox_id VARCHAR REFERENCES mercury_email_outbox(id) ON DELETE SET NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS mercury_invite_token_hash_idx
+      ON mercury_invitation_tokens(token_hash)
+      WHERE token_hash IS NOT NULL
+  `);
+
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS mercury_invite_revoked_idx
+      ON mercury_invitation_tokens(revoked_at)
+  `);
+
   console.log('  mercury_invitation_tokens ✓');
 
   await db.execute(sql`

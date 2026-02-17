@@ -253,7 +253,26 @@ export default function ShowcaseCallsPage() {
       const res = await apiRequest("DELETE", `/api/showcase-calls/${callSessionId}/pin`);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, callSessionId) => {
+      queryClient.setQueriesData<ShowcaseListResponse>(
+        { queryKey: ["/api/showcase-calls"] },
+        (prev) => {
+          if (!prev) return prev;
+          const nextCalls = prev.calls.filter((c) => c.callSessionId !== callSessionId);
+          if (nextCalls.length === prev.calls.length) return prev;
+
+          return {
+            ...prev,
+            calls: nextCalls,
+            pagination: {
+              ...prev.pagination,
+              total: Math.max(0, prev.pagination.total - 1),
+              totalPages: Math.max(1, Math.ceil(Math.max(0, prev.pagination.total - 1) / prev.pagination.limit)),
+            },
+          };
+        }
+      );
+
       toast({ title: "Showcase call unpinned" });
       queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls"] });
       queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls/stats"] });

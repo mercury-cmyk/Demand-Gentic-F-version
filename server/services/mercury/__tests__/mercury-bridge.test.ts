@@ -537,8 +537,8 @@ describe('BulkInvitationService — sendBulkInvitations gating', () => {
 import { DEFAULT_TEMPLATES, seedDefaultTemplates } from '../default-templates';
 
 describe('Default Templates', () => {
-  it('should have 6 default templates', () => {
-    expect(DEFAULT_TEMPLATES).toHaveLength(6);
+  it('should have 7 default templates', () => {
+    expect(DEFAULT_TEMPLATES).toHaveLength(7);
   });
 
   it('should have unique template keys', () => {
@@ -572,6 +572,12 @@ describe('Default Templates', () => {
   it('should include leads_delivered template', () => {
     const found = DEFAULT_TEMPLATES.find(t => t.templateKey === 'leads_delivered');
     expect(found).toBeDefined();
+  });
+
+  it('should include showcase_recordings_shared template', () => {
+    const found = DEFAULT_TEMPLATES.find(t => t.templateKey === 'showcase_recordings_shared');
+    expect(found).toBeDefined();
+    expect(found!.category).toBe('notification');
   });
 
   it('should include test_notification template', () => {
@@ -1313,8 +1319,8 @@ describe('Phase 9 — Seed Default Templates Enhanced', () => {
     expect(typeof fn).toBe('function');
   });
 
-  it('DEFAULT_TEMPLATES has 6 templates', () => {
-    expect(DEFAULT_TEMPLATES).toHaveLength(6);
+  it('DEFAULT_TEMPLATES has 7 templates', () => {
+    expect(DEFAULT_TEMPLATES).toHaveLength(7);
   });
 
   it('each template has required fields', () => {
