@@ -46,6 +46,12 @@ interface CampaignRules {
   minHoursBetweenAttempts: number;
   retryWindowDaysMin: number;
   retryWindowDaysMax: number;
+  voicemailRetryWindowDaysMin: number;
+  voicemailRetryWindowDaysMax: number;
+  noAnswerRetryWindowDaysMin: number;
+  noAnswerRetryWindowDaysMax: number;
+  needsReviewRetryWindowDaysMin: number;
+  needsReviewRetryWindowDaysMax: number;
   leadsCapPerCampaign: number | null;
   businessHoursStart: string; // "09:00"
   businessHoursEnd: string; // "17:00"
@@ -57,11 +63,117 @@ const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
   minHoursBetweenAttempts: 24,
   retryWindowDaysMin: 3,
   retryWindowDaysMax: 7,
+  voicemailRetryWindowDaysMin: 3,
+  voicemailRetryWindowDaysMax: 7,
+  noAnswerRetryWindowDaysMin: 1,
+  noAnswerRetryWindowDaysMax: 3,
+  needsReviewRetryWindowDaysMin: 1,
+  needsReviewRetryWindowDaysMax: 2,
   leadsCapPerCampaign: null,
   businessHoursStart: "09:00",
   businessHoursEnd: "17:00",
   timezone: "America/New_York"
 };
+
+function toPositiveInt(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  const rounded = Math.floor(parsed);
+  return rounded > 0 ? rounded : undefined;
+}
+
+function resolveRetryWindowDays(
+  candidate: unknown,
+  fallbackMin: number,
+  fallbackMax: number
+): { minDays: number; maxDays: number } {
+  if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    const days = Math.max(1, Math.floor(candidate));
+    return { minDays: days, maxDays: days };
+  }
+
+  if (candidate && typeof candidate === "object") {
+    const c = candidate as Record<string, unknown>;
+    const exactDays = toPositiveInt(c.days ?? c.retryDays ?? c.windowDays);
+    if (exactDays) {
+      return { minDays: exactDays, maxDays: exactDays };
+    }
+
+    const minDays = toPositiveInt(c.minDays ?? c.min_days ?? c.min);
+    const maxDays = toPositiveInt(c.maxDays ?? c.max_days ?? c.max);
+    const resolvedMin = minDays ?? fallbackMin;
+    const resolvedMax = Math.max(maxDays ?? fallbackMax, resolvedMin);
+    return { minDays: resolvedMin, maxDays: resolvedMax };
+  }
+
+  return { minDays: fallbackMin, maxDays: Math.max(fallbackMax, fallbackMin) };
+}
+
+function deriveCampaignRules(campaign: typeof campaigns.$inferSelect | undefined): CampaignRules {
+  const retryRulesRaw = (campaign?.retryRules && typeof campaign.retryRules === "object")
+    ? (campaign.retryRules as Record<string, unknown>)
+    : {};
+  const businessHoursRaw = (retryRulesRaw.business_hours && typeof retryRulesRaw.business_hours === "object")
+    ? (retryRulesRaw.business_hours as Record<string, unknown>)
+    : {};
+  const businessHoursConfigRaw = (campaign?.businessHoursConfig && typeof campaign.businessHoursConfig === "object")
+    ? (campaign.businessHoursConfig as Record<string, unknown>)
+    : {};
+
+  const maxAttemptsPerContact =
+    toPositiveInt(retryRulesRaw.maxAttemptsPerContact ?? retryRulesRaw.maxAttempts) ??
+    DEFAULT_CAMPAIGN_RULES.maxAttemptsPerContact;
+
+  const minHoursBetweenAttempts =
+    toPositiveInt(retryRulesRaw.minHoursBetweenAttempts ?? retryRulesRaw.min_hours_between_attempts) ??
+    DEFAULT_CAMPAIGN_RULES.minHoursBetweenAttempts;
+
+  const retryWindowDaysMin =
+    toPositiveInt(retryRulesRaw.retryWindowDaysMin ?? retryRulesRaw.retry_window_days_min) ??
+    DEFAULT_CAMPAIGN_RULES.retryWindowDaysMin;
+  const retryWindowDaysMax = Math.max(
+    toPositiveInt(retryRulesRaw.retryWindowDaysMax ?? retryRulesRaw.retry_window_days_max) ??
+      DEFAULT_CAMPAIGN_RULES.retryWindowDaysMax,
+    retryWindowDaysMin
+  );
+
+  const voicemailWindow = resolveRetryWindowDays(
+    retryRulesRaw.voicemail,
+    retryWindowDaysMin,
+    retryWindowDaysMax
+  );
+  const noAnswerWindow = resolveRetryWindowDays(
+    retryRulesRaw.no_answer ?? retryRulesRaw.noAnswer,
+    Math.max(1, retryWindowDaysMin),
+    retryWindowDaysMax
+  );
+  const needsReviewWindow = resolveRetryWindowDays(
+    retryRulesRaw.needs_review ?? retryRulesRaw.needsReview,
+    DEFAULT_CAMPAIGN_RULES.needsReviewRetryWindowDaysMin,
+    DEFAULT_CAMPAIGN_RULES.needsReviewRetryWindowDaysMax
+  );
+
+  return {
+    ...DEFAULT_CAMPAIGN_RULES,
+    maxAttemptsPerContact,
+    minHoursBetweenAttempts,
+    retryWindowDaysMin,
+    retryWindowDaysMax,
+    voicemailRetryWindowDaysMin: voicemailWindow.minDays,
+    voicemailRetryWindowDaysMax: voicemailWindow.maxDays,
+    noAnswerRetryWindowDaysMin: noAnswerWindow.minDays,
+    noAnswerRetryWindowDaysMax: noAnswerWindow.maxDays,
+    needsReviewRetryWindowDaysMin: needsReviewWindow.minDays,
+    needsReviewRetryWindowDaysMax: needsReviewWindow.maxDays,
+    leadsCapPerCampaign: campaign?.targetQualifiedLeads ?? DEFAULT_CAMPAIGN_RULES.leadsCapPerCampaign,
+    businessHoursStart:
+      String(businessHoursRaw.start ?? businessHoursConfigRaw.startTime ?? DEFAULT_CAMPAIGN_RULES.businessHoursStart),
+    businessHoursEnd:
+      String(businessHoursRaw.end ?? businessHoursConfigRaw.endTime ?? DEFAULT_CAMPAIGN_RULES.businessHoursEnd),
+    timezone:
+      String(campaign?.timezone ?? businessHoursRaw.timezone ?? businessHoursConfigRaw.timezone ?? DEFAULT_CAMPAIGN_RULES.timezone),
+  };
+}
 
 // Disposition engine result
 interface DispositionResult {
@@ -146,13 +258,7 @@ export async function processDisposition(
       .where(eq(campaigns.id, callAttempt.campaignId))
       .limit(1);
 
-    // Safely extract campaign config, handling null/undefined values
-    const rawConfig = campaign ? (campaign as unknown as { config?: Partial<CampaignRules> | null }).config : null;
-    const campaignConfig: Partial<CampaignRules> = (rawConfig && typeof rawConfig === 'object') ? rawConfig : {};
-    const rules: CampaignRules = {
-      ...DEFAULT_CAMPAIGN_RULES,
-      ...campaignConfig
-    };
+    const rules = deriveCampaignRules(campaign);
 
     let finalDisposition = disposition;
 
@@ -734,10 +840,12 @@ async function processVoicemailOrNoAnswer(
   }
 
   // Calculate next attempt time (random within 3-7 day window)
-  const baseMinDays = rules.retryWindowDaysMin;
-  const baseMaxDays = rules.retryWindowDaysMax;
-  const minDays = type === 'no_answer' ? Math.max(baseMinDays, 1) : baseMinDays;
-  const maxDays = Math.max(baseMaxDays, minDays);
+  const minDays = type === 'no_answer'
+    ? rules.noAnswerRetryWindowDaysMin
+    : rules.voicemailRetryWindowDaysMin;
+  const maxDays = type === 'no_answer'
+    ? Math.max(rules.noAnswerRetryWindowDaysMax, minDays)
+    : Math.max(rules.voicemailRetryWindowDaysMax, minDays);
   const retryDays = minDays + Math.floor(Math.random() * (maxDays - minDays + 1));
   const nextAttemptAt = new Date();
   nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
@@ -924,8 +1032,10 @@ async function processNeedsReview(
     return;
   }
 
-  // Schedule quick retry (1-2 days instead of 3-7 for voicemail/no_answer)
-  const retryDays = 1 + Math.floor(Math.random() * 2); // 1-2 days
+  // Schedule quick retry using campaign-configurable needs_review window
+  const minDays = Math.max(1, rules.needsReviewRetryWindowDaysMin);
+  const maxDays = Math.max(minDays, rules.needsReviewRetryWindowDaysMax);
+  const retryDays = minDays + Math.floor(Math.random() * (maxDays - minDays + 1));
   const nextAttemptAt = new Date();
   nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
 
@@ -1186,8 +1296,8 @@ export function getDispositionDescription(disposition: CanonicalDisposition): st
     'qualified_lead': 'Contact qualified - routes to QA queue',
     'not_interested': 'Contact not interested - removes from campaign',
     'do_not_call': 'DNC request - adds to global DNC list',
-    'voicemail': 'Left voicemail - schedules retry in 3-7 days',
-    'no_answer': 'No answer - schedules retry in 3-7 days',
+    'voicemail': 'Left voicemail - schedules campaign-configured retry',
+    'no_answer': 'No answer - schedules campaign-configured retry',
     'invalid_data': 'Invalid data - marks phone as invalid',
     'needs_review': 'Needs human review - schedules quick retry',
     'callback_requested': 'Callback requested - routes to QA for scheduling'

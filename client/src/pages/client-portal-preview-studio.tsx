@@ -153,6 +153,7 @@ export default function ClientPortalPreviewStudioPage() {
   const searchString = useSearch();
   const urlParams = new URLSearchParams(searchString);
   const campaignIdFromUrl = urlParams.get('campaignId');
+  const modeFromUrl = urlParams.get('mode');
   const { toast } = useToast();
 
   // Context selection
@@ -203,6 +204,12 @@ export default function ClientPortalPreviewStudioPage() {
       setSelectedCampaignId(campaignIdFromUrl);
     }
   }, [campaignIdFromUrl, selectedCampaignId]);
+
+  useEffect(() => {
+    if (modeFromUrl === 'email' || modeFromUrl === 'voice' || modeFromUrl === 'phone') {
+      setPreviewMode(modeFromUrl);
+    }
+  }, [modeFromUrl]);
 
   // Fetch campaigns using CLIENT PORTAL endpoint
   const { data: campaigns = [], isLoading: campaignsLoading } = useQuery<Campaign[]>({

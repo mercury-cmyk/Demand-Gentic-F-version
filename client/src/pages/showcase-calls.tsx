@@ -134,6 +134,21 @@ export default function ShowcaseCallsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  const resolveStreamToken = () => {
+    if (typeof window === 'undefined') return null;
+
+    const path = window.location.pathname || '';
+    const isClientPortal = path.startsWith('/client-portal');
+    const clientPortalToken = localStorage.getItem('clientPortalToken');
+    const authToken = localStorage.getItem('authToken');
+
+    // Mirror query client token preference to avoid using stale admin tokens
+    // on client portal routes (which causes 401 on stream playback).
+    return isClientPortal
+      ? (clientPortalToken || authToken)
+      : (authToken || clientPortalToken);
+  };
+
   // Filters
   const [tab, setTab] = useState("showcased");
   const [page, setPage] = useState(1);
@@ -156,7 +171,7 @@ export default function ShowcaseCallsPage() {
   const buildParams = () => {
     const params = new URLSearchParams();
     params.append("page", page.toString());
-    params.append("limit", "100");
+    params.append("limit", "50");
     if (selectedCampaign !== "all") params.append("campaignId", selectedCampaign);
     if (selectedCategory !== "all") params.append("category", selectedCategory);
     if (minScore) params.append("minScore", minScore);
@@ -685,9 +700,10 @@ export default function ShowcaseCallsPage() {
                       <AudioPlayerEnhanced
                         recordingId={detailData.callSessionId}
                         recordingUrl={(() => {
-                          const token = localStorage.getItem('authToken') || localStorage.getItem('clientPortalToken');
+                          const token = resolveStreamToken();
+                          const encodedToken = token ? encodeURIComponent(token) : null;
                           return token 
-                            ? `${detailData.playbackUrl}${detailData.playbackUrl.includes('?') ? '&' : '?'}token=${token}`
+                            ? `${detailData.playbackUrl}${detailData.playbackUrl.includes('?') ? '&' : '?'}token=${encodedToken}`
                             : detailData.playbackUrl;
                         })()}
                         onRetrySync={handleRetrySync}

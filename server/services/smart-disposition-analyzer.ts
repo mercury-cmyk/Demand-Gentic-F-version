@@ -372,12 +372,13 @@ export function determineSmartDisposition(
   // Only the AI agent's submit_disposition tool (with its booking flow validation)
   // should produce a qualified_lead disposition.
   if (analysis.positiveSignals.length > 0 && analysis.hasUserResponse) {
-    // If the call is too short/minimal, it's definitely not qualified (likely IVR/gatekeeper)
+    // If the call is too short/minimal, avoid hard "no_answer" so campaign goals
+    // can still be recovered via human/QA verification when positive cues exist.
     if (isMinimalCall) {
-      result.suggestedDisposition = 'no_answer';
-      result.confidence = 0.7;
-      result.reasoning = `Positive keywords detected but call too short (${callDurationSeconds}s, ${analysis.userTurns} turns) - likely IVR/gatekeeper, not real engagement`;
-      result.shouldOverride = false; // Don't override existing disposition
+      result.suggestedDisposition = 'needs_review';
+      result.confidence = 0.62;
+      result.reasoning = `Positive keywords detected in a short call (${callDurationSeconds}s, ${analysis.userTurns} turns) - route to review instead of hard no_answer`;
+      result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === null;
       console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
       return result;
     }

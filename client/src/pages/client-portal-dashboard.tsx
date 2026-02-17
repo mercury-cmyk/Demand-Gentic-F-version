@@ -60,8 +60,6 @@ import { UkefTranscriptQaContent } from '@/pages/client-portal/ukef-transcript-q
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 import { extractColorsFromImage } from '@/lib/color-extractor';
-import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
-import { AiEmailTestDialog } from '@/components/client-portal/email/ai-email-test-dialog';
 import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
 import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/icp-positioning';
 import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
@@ -552,17 +550,11 @@ export default function ClientPortalDashboard() {
   // New agentic panels state
   const [showReportsPanel, setShowReportsPanel] = useState(false);
   const [showEmailGenerator, setShowEmailGenerator] = useState(false);
-  // Test AI Agent & Voice Selection state (client-facing)
-  const [showClientTestAgent, setShowClientTestAgent] = useState(false);
-  const [clientTestCampaignId, setClientTestCampaignId] = useState<string>('');
+  // Voice Selection state (client-facing)
   const [showClientVoiceSelect, setShowClientVoiceSelect] = useState(false);
   const [clientVoiceCampaignId, setClientVoiceCampaignId] = useState<string>('');
   const [clientSelectedVoice, setClientSelectedVoice] = useState<string>('Kore');
   const [clientSelectedProvider, setClientSelectedProvider] = useState<string>('google');
-
-  // AI Email Test state (client-facing)
-  const [showAiEmailTest, setShowAiEmailTest] = useState(false);
-  const [aiEmailTestCampaignId, setAiEmailTestCampaignId] = useState<string>('');
 
   // Testing panels state
   const [showTestCallPanel, setShowTestCallPanel] = useState(false);
@@ -1479,6 +1471,14 @@ export default function ClientPortalDashboard() {
   const closeRequestLeadsDialog = () => {
     setShowRequestLeadsDialog(false);
     setSelectedCampaignForRequest(undefined);
+  };
+
+  const openCampaignPreviewStudio = (campaignId?: string, mode: 'voice' | 'phone' | 'email' = 'voice') => {
+    const params = new URLSearchParams();
+    if (campaignId) params.set('campaignId', campaignId);
+    params.set('mode', mode);
+    const query = params.toString();
+    setLocation(`/client-portal/preview-studio${query ? `?${query}` : ''}`);
   };
 
   const activityConfig: Record<string, { title: string; type: ActivityItem['type']; status?: ActivityItem['status'] }> = {
@@ -2512,10 +2512,23 @@ export default function ClientPortalDashboard() {
                 <h2 className="text-2xl font-bold">Campaigns</h2>
                 <p className="text-muted-foreground w-full md:w-auto">View and manage your AI-powered campaigns</p>
               </div>
-              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                {/* Preview Studio button removed - clients use /client-portal/preview-studio instead */}
-              </div>
             </div>
+
+            <Card className="border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/20 dark:to-indigo-950/20">
+              <CardContent className="p-5 md:p-6">
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
+                    <h3 className="font-semibold text-violet-900 dark:text-violet-300 flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      Campaign testing now lives in Preview Studio
+                    </h3>
+                    <p className="text-sm text-violet-800/80 dark:text-violet-300/80">
+                      Test Calls and Test Emails are run from Preview Studio only so your team uses one consistent workflow per campaign.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
 
             {/* Campaign Stats */}
@@ -2712,14 +2725,7 @@ export default function ClientPortalDashboard() {
                       key={campaign.id}
                       campaign={campaign}
                       onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
-                      onTestAgent={(campaignId) => {
-                        setClientTestCampaignId(campaignId);
-                        setShowClientTestAgent(true);
-                      }}
-                      onTestEmail={(campaignId) => {
-                        setAiEmailTestCampaignId(campaignId);
-                        setShowAiEmailTest(true);
-                      }}
+                      onOpenPreviewStudio={(campaignId, mode) => openCampaignPreviewStudio(campaignId, mode || 'voice')}
                       onSelectVoice={(campaignId) => {
                         setClientVoiceCampaignId(campaignId);
                         setShowClientVoiceSelect(true);
@@ -5623,37 +5629,6 @@ export default function ClientPortalDashboard() {
       />
 
       {/* AgentX is now universal - provided by AgentSidePanel in ClientPortalLayout */}
-
-      {/* ==================== TEST AI AGENT DIALOG ==================== */}
-      <Dialog open={showClientTestAgent} onOpenChange={setShowClientTestAgent}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5 text-violet-600" />
-              Test AI Agent
-            </DialogTitle>
-            <DialogDescription>
-              Make a real test call to validate your AI agent for campaign: {campaigns.find(c => c.id === clientTestCampaignId)?.name || ''}
-            </DialogDescription>
-          </DialogHeader>
-          {clientTestCampaignId && (
-            <CampaignTestPanel
-              campaignId={clientTestCampaignId}
-              campaignName={campaigns.find(c => c.id === clientTestCampaignId)?.name || 'Campaign'}
-              dialMode="ai_agent"
-              hidePreviewStudio={true}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* ==================== AI EMAIL TEST DIALOG ==================== */}
-      <AiEmailTestDialog
-        open={showAiEmailTest}
-        onOpenChange={setShowAiEmailTest}
-        campaignId={aiEmailTestCampaignId}
-        campaignName={campaigns.find(c => c.id === aiEmailTestCampaignId)?.name || 'Campaign'}
-      />
 
       {/* ==================== VOICE SELECTION DIALOG ==================== */}
       <Dialog open={showClientVoiceSelect} onOpenChange={setShowClientVoiceSelect}>

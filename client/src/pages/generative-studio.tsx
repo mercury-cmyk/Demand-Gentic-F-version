@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -184,6 +185,13 @@ const MODULES = [
 ] as const;
 
 export default function GenerativeStudioPage() {
+  const search = useSearch();
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  const moduleFromUrl = searchParams.get("module");
+  const campaignIdFromUrl = searchParams.get("campaignId");
+  const orgIdFromUrl = searchParams.get("organizationId");
+  const projectIdFromUrl = searchParams.get("clientProjectId") || searchParams.get("projectId");
+
   const [activeModule, setActiveModule] = useState("image");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
@@ -229,6 +237,24 @@ export default function GenerativeStudioPage() {
       setSelectedOrgId(storedOrgId);
     }
   }, []);
+
+  useEffect(() => {
+    if (moduleFromUrl && MODULES.some((m) => m.id === moduleFromUrl)) {
+      setActiveModule(moduleFromUrl);
+    }
+  }, [moduleFromUrl]);
+
+  useEffect(() => {
+    if (orgIdFromUrl) {
+      setSelectedOrgId(orgIdFromUrl);
+    }
+  }, [orgIdFromUrl]);
+
+  useEffect(() => {
+    if (projectIdFromUrl) {
+      setSelectedProjectId(projectIdFromUrl);
+    }
+  }, [projectIdFromUrl]);
 
   useEffect(() => {
     if (selectedOrgId) {
@@ -529,6 +555,7 @@ export default function GenerativeStudioPage() {
               orgIntelligence={orgProfile}
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
+              campaignId={campaignIdFromUrl || undefined}
             />
           )}
           {activeModule === "email" && (

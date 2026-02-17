@@ -10,7 +10,7 @@
  */
 
 import { db } from '../../db';
-import { eq, and, isNull, lt, desc, count, sql } from 'drizzle-orm';
+import { eq, and, isNull, lt, desc, count, sql, inArray, or } from 'drizzle-orm';
 import {
   clientUsers,
   clientAccounts,
@@ -29,6 +29,18 @@ import crypto from 'crypto';
 
 export class BulkInvitationService {
   private readonly INVITE_TEMPLATE_KEY = 'client_invite';
+
+  private hashInviteToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  private tokenLookupClause(token: string) {
+    const tokenHash = this.hashInviteToken(token);
+    return or(
+      eq(mercuryInvitationTokens.tokenHash, tokenHash),
+      eq(mercuryInvitationTokens.token, token), // Backward compatibility for legacy tokens
+    );
+  }
 
   /**
    * Get all eligible and ineligible invitation candidates.
@@ -54,21 +66,24 @@ export class BulkInvitationService {
     // Fetch existing invitation tokens for all users
     const existingTokens = await db
       .select({
+        id: mercuryInvitationTokens.id,
         clientUserId: mercuryInvitationTokens.clientUserId,
         expiresAt: mercuryInvitationTokens.expiresAt,
         usedAt: mercuryInvitationTokens.usedAt,
+        revokedAt: mercuryInvitationTokens.revokedAt,
         createdAt: mercuryInvitationTokens.createdAt,
       })
       .from(mercuryInvitationTokens)
       .orderBy(desc(mercuryInvitationTokens.createdAt));
 
     // Build token lookup (latest token per user)
-    const tokenMap = new Map<string, { expiresAt: Date; usedAt: Date | null; createdAt: Date }>();
+    const tokenMap = new Map<string, { expiresAt: Date; usedAt: Date | null; revokedAt: Date | null; createdAt: Date }>();
     for (const token of existingTokens) {
       if (!tokenMap.has(token.clientUserId)) {
         tokenMap.set(token.clientUserId, {
           expiresAt: token.expiresAt,
           usedAt: token.usedAt,
+          revokedAt: token.revokedAt,
           createdAt: token.createdAt,
         });
       }
@@ -83,6 +98,7 @@ export class BulkInvitationService {
       const alreadyInvited = !!existingToken;
       const inviteExpired = existingToken ? new Date(existingToken.expiresAt) < now : false;
       const inviteUsed = existingToken ? !!existingToken.usedAt : false;
+      const inviteRevoked = existingToken ? !!existingToken.revokedAt : false;
 
       const candidate: InvitationCandidate = {
         clientUserId: user.id,
@@ -102,7 +118,7 @@ export class BulkInvitationService {
       } else if (!user.isActive) {
         candidate.reason = 'User is inactive';
         skipped.push(candidate);
-      } else if (alreadyInvited && !inviteExpired && !inviteUsed) {
+      } else if (alreadyInvited && !inviteExpired && !inviteUsed && !inviteRevoked) {
         candidate.reason = 'Active invitation pending';
         skipped.push(candidate);
       } else {
@@ -181,6 +197,7 @@ export class BulkInvitationService {
         try {
           // Generate invitation token
           const token = mercuryEmailService.generateInviteToken();
+          const tokenHash = this.hashInviteToken(token);
           const expiresAt = new Date();
           expiresAt.setDate(expiresAt.getDate() + MERCURY_DEFAULTS.inviteExpiryDays);
 
@@ -236,6 +253,7 @@ export class BulkInvitationService {
             clientUserId: candidate.clientUserId,
             clientAccountId: candidate.clientAccountId,
             token,
+            tokenHash,
             expiresAt,
             emailOutboxId: outboxId,
           });
@@ -314,7 +332,7 @@ export class BulkInvitationService {
     const [record] = await db
       .select()
       .from(mercuryInvitationTokens)
-      .where(eq(mercuryInvitationTokens.token, token))
+      .where(this.tokenLookupClause(token))
       .limit(1);
 
     if (!record) {
@@ -324,6 +342,10 @@ export class BulkInvitationService {
     if (record.usedAt) {
       console.info(`[Mercury/Invite] Token already used (userId: ${record.clientUserId}, usedAt: ${record.usedAt})`);
       return { valid: false, reason: 'This invitation has already been accepted. You can log in with the password you created during setup.', errorCode: 'TOKEN_USED' };
+    }
+    if (record.revokedAt) {
+      console.info(`[Mercury/Invite] Token revoked (userId: ${record.clientUserId}, revokedAt: ${record.revokedAt})`);
+      return { valid: false, reason: 'This invitation link has been revoked and replaced. Please use the most recent invitation email.', errorCode: 'TOKEN_REVOKED' };
     }
     if (new Date(record.expiresAt) < new Date()) {
       console.info(`[Mercury/Invite] Token expired (userId: ${record.clientUserId}, expiredAt: ${record.expiresAt})`);
@@ -343,7 +365,13 @@ export class BulkInvitationService {
   async markTokenUsed(token: string): Promise<void> {
     await db.update(mercuryInvitationTokens).set({
       usedAt: new Date(),
-    }).where(eq(mercuryInvitationTokens.token, token));
+    }).where(
+      and(
+        this.tokenLookupClause(token),
+        isNull(mercuryInvitationTokens.usedAt),
+        isNull(mercuryInvitationTokens.revokedAt),
+      )
+    );
   }
 
   /**
@@ -354,6 +382,7 @@ export class BulkInvitationService {
     clientUserId: string;
     adminUserId: string;
     portalBaseUrl: string;
+    forceResend?: boolean;
   }): Promise<{ success: boolean; token?: string; error?: string }> {
     if (!isFeatureEnabled('smtp_email_enabled')) {
       return { success: false, error: 'SMTP email sending is disabled (smtp_email_enabled flag is OFF)' };
@@ -380,25 +409,41 @@ export class BulkInvitationService {
     if (!user.isActive) return { success: false, error: 'Client user is inactive' };
 
     // Guard: check for existing active (non-expired, non-used) invitation token
-    const [existingToken] = await db
+    const activePendingTokens = await db
       .select({ id: mercuryInvitationTokens.id, expiresAt: mercuryInvitationTokens.expiresAt })
       .from(mercuryInvitationTokens)
       .where(
         and(
           eq(mercuryInvitationTokens.clientUserId, params.clientUserId),
           isNull(mercuryInvitationTokens.usedAt),
+          isNull(mercuryInvitationTokens.revokedAt),
         )
       )
       .orderBy(desc(mercuryInvitationTokens.createdAt))
-      .limit(1);
+      .limit(10);
 
-    if (existingToken && new Date(existingToken.expiresAt) > new Date()) {
+    const validActiveTokenIds = activePendingTokens
+      .filter((token) => new Date(token.expiresAt) > new Date())
+      .map((token) => token.id);
+
+    if (!params.forceResend && validActiveTokenIds.length > 0) {
       return { success: false, error: 'This user already has an active pending invitation. Please wait for it to expire or be used before sending a new one.' };
+    }
+
+    if (params.forceResend && validActiveTokenIds.length > 0) {
+      await db
+        .update(mercuryInvitationTokens)
+        .set({
+          revokedAt: new Date(),
+          revokedBy: params.adminUserId,
+        })
+        .where(inArray(mercuryInvitationTokens.id, validActiveTokenIds));
     }
 
     try {
       // Generate invitation token
       const token = mercuryEmailService.generateInviteToken();
+      const tokenHash = this.hashInviteToken(token);
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + MERCURY_DEFAULTS.inviteExpiryDays);
 
@@ -448,13 +493,21 @@ export class BulkInvitationService {
       }
 
       // Save invitation token
-      await db.insert(mercuryInvitationTokens).values({
+      const [insertedToken] = await db.insert(mercuryInvitationTokens).values({
         clientUserId: user.id,
         clientAccountId: user.clientAccountId,
         token,
+        tokenHash,
         expiresAt,
         emailOutboxId: outboxId,
-      });
+      }).returning({ id: mercuryInvitationTokens.id });
+
+      if (params.forceResend && validActiveTokenIds.length > 0 && insertedToken?.id) {
+        await db
+          .update(mercuryInvitationTokens)
+          .set({ replacedByTokenId: insertedToken.id })
+          .where(inArray(mercuryInvitationTokens.id, validActiveTokenIds));
+      }
 
       // Trigger outbox processing
       mercuryEmailService.processOutbox().catch(err => {
@@ -466,6 +519,76 @@ export class BulkInvitationService {
     } catch (err: any) {
       console.error(`[Mercury/Invite] Single invite error for ${user.email}: ${err.message}`);
       return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Resend a single invitation by revoking existing active tokens and issuing a fresh token.
+   */
+  async resendSingleInvitation(params: {
+    clientUserId: string;
+    adminUserId: string;
+    portalBaseUrl: string;
+  }): Promise<{ success: boolean; token?: string; error?: string }> {
+    return this.sendSingleInvitation({
+      ...params,
+      forceResend: true,
+    });
+  }
+
+  /**
+   * Revoke pending invitation(s) for a user or a specific token.
+   */
+  async revokeInvitations(params: {
+    adminUserId: string;
+    clientUserId?: string;
+    token?: string;
+  }): Promise<{ success: boolean; revokedCount: number; error?: string }> {
+    if (!params.clientUserId && !params.token) {
+      return { success: false, revokedCount: 0, error: 'Either clientUserId or token is required' };
+    }
+
+    try {
+      const now = new Date();
+      let revokedCount = 0;
+
+      if (params.token) {
+        const result = await db
+          .update(mercuryInvitationTokens)
+          .set({
+            revokedAt: now,
+            revokedBy: params.adminUserId,
+          })
+          .where(
+            and(
+              this.tokenLookupClause(params.token),
+              isNull(mercuryInvitationTokens.usedAt),
+              isNull(mercuryInvitationTokens.revokedAt),
+            )
+          )
+          .returning({ id: mercuryInvitationTokens.id });
+        revokedCount = result.length;
+      } else if (params.clientUserId) {
+        const result = await db
+          .update(mercuryInvitationTokens)
+          .set({
+            revokedAt: now,
+            revokedBy: params.adminUserId,
+          })
+          .where(
+            and(
+              eq(mercuryInvitationTokens.clientUserId, params.clientUserId),
+              isNull(mercuryInvitationTokens.usedAt),
+              isNull(mercuryInvitationTokens.revokedAt),
+            )
+          )
+          .returning({ id: mercuryInvitationTokens.id });
+        revokedCount = result.length;
+      }
+
+      return { success: true, revokedCount };
+    } catch (err: any) {
+      return { success: false, revokedCount: 0, error: err.message };
     }
   }
 

@@ -46,6 +46,10 @@ import {
   buildProblemIntelligencePromptSection,
   buildCondensedProblemIntelligenceSection,
 } from "./problem-intelligence";
+import {
+  buildAgenticDemandOpeningContract,
+  isAgenticDemandVoiceLiftCampaign,
+} from "./agentic-demand-voice-lift";
 
 // ==================== LAYER 1: UNIVERSAL AGENT KNOWLEDGE ====================
 
@@ -410,6 +414,36 @@ export interface AssembledPrompt {
   };
 }
 
+export function injectCampaignOpeningContract(systemPrompt: string, campaignName?: string | null): string {
+  const globalContract = `
+## OPENING CONTRACT (ALL CAMPAIGNS)
+
+This contract is mandatory for every outbound call:
+
+1) First spoken line after pickup must be identity check:
+   "May I speak with {{contact.full_name}}?"
+
+2) Once identity is confirmed or corrected, move to call purpose immediately in the same turn.
+   Do not pause with filler text between identity and purpose.
+
+3) If the contact asks "who is this?", provide only name + company, then return to purpose.
+
+4) If voicemail/automation cues appear in the first seconds, abort conversational script immediately.
+   Do not deliver the full pitch to voicemail.
+`.trim();
+
+  let output = `${systemPrompt}\n\n# Opening Contract\n${globalContract}`;
+
+  if (!isAgenticDemandVoiceLiftCampaign(campaignName)) {
+    return output;
+  }
+
+  const contract = buildAgenticDemandOpeningContract("variant_b");
+  if (!contract) return output;
+  output += `\n\n# Campaign Opening Contract\n${contract}`;
+  return output;
+}
+
 /**
  * Assemble complete agent runtime prompt
  * 
@@ -500,6 +534,16 @@ export async function assembleAgentPrompt(input: AssemblyInput): Promise<Assembl
     layers.push('campaign_context');
   }
 
+  let campaignName: string | null = null;
+  if (input.campaignId) {
+    const [campaign] = await db
+      .select({ name: campaigns.name })
+      .from(campaigns)
+      .where(eq(campaigns.id, input.campaignId))
+      .limit(1);
+    campaignName = campaign?.name || null;
+  }
+
   // ========== Agent's Custom System Prompt ==========
   if (agent.systemPrompt) {
     const sanitizedPrompt = stripVoiceAgentControlLayer(agent.systemPrompt).trim();
@@ -516,7 +560,7 @@ export async function assembleAgentPrompt(input: AssemblyInput): Promise<Assembl
   }
 
   return {
-    systemPrompt: promptParts.join('\n'),
+    systemPrompt: injectCampaignOpeningContract(promptParts.join('\n'), campaignName),
     firstMessage: agent.firstMessage || "Hello, how can I help you today?",
     metadata: {
       universalKnowledgeHash: getUniversalKnowledgeHash(),

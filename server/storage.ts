@@ -1344,7 +1344,27 @@ export class DatabaseStorage implements IStorage {
 
   // Campaigns
   async getCampaigns(filters?: any): Promise<Campaign[]> {
-    return await db.select().from(campaigns).orderBy(desc(campaigns.createdAt));
+    const conditions: any[] = [];
+
+    if (filters?.status) {
+      conditions.push(eq(campaigns.status, filters.status));
+    }
+
+    if (filters?.dialMode) {
+      conditions.push(eq(campaigns.dialMode, filters.dialMode));
+    }
+
+    if (filters?.type) {
+      conditions.push(eq(campaigns.type, filters.type));
+    }
+
+    const query = db.select().from(campaigns);
+
+    if (conditions.length > 0) {
+      return await query.where(and(...conditions)).orderBy(desc(campaigns.createdAt));
+    }
+
+    return await query.orderBy(desc(campaigns.createdAt));
   }
 
   async getCampaign(id: string): Promise<Campaign | undefined> {

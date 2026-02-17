@@ -7,7 +7,7 @@
  */
 
 import { db } from "../db";
-import { campaignQueue, campaigns, globalDnc, contacts, dialerCallAttempts, dialerRuns } from "@shared/schema";
+import { campaignQueue, campaigns, globalDnc, contacts, dialerCallAttempts, dialerRuns, callSessions } from "@shared/schema";
 import { eq, and, sql, lt, isNull, or, inArray, not, count } from "drizzle-orm";
 
 // Lock TTL in seconds (5 minutes default)
@@ -117,6 +117,22 @@ export async function lockNextContact(
           AND (
             cq.target_agent_type = 'any' 
             OR cq.target_agent_type = ${agentType}
+          )
+          -- Prevent calling the same contact twice in a single day
+          AND NOT EXISTS (
+            SELECT 1 FROM call_sessions cs
+            WHERE cs.created_at >= CURRENT_DATE
+              AND (
+                cs.contact_id = cq.contact_id
+                OR cs.to_number_e164 = c.direct_phone_e164
+                OR cs.to_number_e164 = c.mobile_phone_e164
+              )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM dialer_call_attempts dca
+            WHERE dca.created_at >= CURRENT_DATE
+              AND dca.contact_id = cq.contact_id
+              AND dca.campaign_id = ${campaignId}
           )
         ORDER BY cq.priority DESC, cq.created_at ASC
         LIMIT 1

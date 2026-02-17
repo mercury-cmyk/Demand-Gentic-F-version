@@ -4,8 +4,8 @@ import { isWithinBusinessHours, type BusinessHoursConfig } from "../utils/busine
 import { VoicemailPolicyExecutor } from "./voicemail-policy-executor";
 import { getBestPhoneForContact, normalizePhoneWithCountryCode } from "../lib/phone-utils";
 import { db } from "../db";
-import { contacts } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { contacts, callSessions } from "@shared/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { isContactEligibleForCall } from "../lib/contact-suppression";
 
 interface DialerConfig {
@@ -373,6 +373,23 @@ export class PowerDialerEngine {
         if (!isContactEligibleForCall(fullContact.nextCallEligibleAt)) {
           console.log(`[AutoDialer] Contact ${contact.contactId} suppressed until ${fullContact.nextCallEligibleAt}, skipping`);
           // Don't mark as removed - will be retried when eligible
+          continue;
+        }
+
+        // SAME-DAY DUPLICATE CALL CHECK: prevent calling the same contact twice in one day
+        const [alreadyCalledToday] = await db
+          .select({ id: callSessions.id })
+          .from(callSessions)
+          .where(
+            and(
+              sql`${callSessions.createdAt} >= CURRENT_DATE`,
+              eq(callSessions.contactId, contact.contactId)
+            )
+          )
+          .limit(1);
+        
+        if (alreadyCalledToday) {
+          console.log(`[AutoDialer] Contact ${contact.contactId} already called today, skipping`);
           continue;
         }
 

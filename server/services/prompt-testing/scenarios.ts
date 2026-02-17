@@ -42,5 +42,17 @@ export const SCENARIOS: Scenario[] = [
       "Just send me the cancellation paperwork."
     ],
     goal: "Book a 'Success Review' meeting with a Product Specialist to save the account."
+  },
+  {
+    id: "early-voicemail-detection",
+    name: "Early Voicemail Detection (First 3 Seconds)",
+    description: "Validate that voicemail cues are detected immediately and the conversational script is aborted.",
+    prospectPersona: "Automated voicemail system. No live person is present.",
+    objectionSequence: [
+      "Hi, you've reached Ann Moore. I'm not available right now, please leave a message after the beep.",
+      "At the tone, record your message.",
+      "BEEP"
+    ],
+    goal: "Detect voicemail within 3 seconds and terminate without pitching."
   }
 ];

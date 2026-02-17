@@ -6,6 +6,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import {
@@ -62,9 +63,14 @@ export function AudioPlayerEnhanced({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [streamToken, setStreamToken] = useState<string | null>(null);
 
   // Prefer explicit recording URL when provided; fallback to recording stream endpoint.
-  const baseStreamUrl = recordingUrl || `/api/recordings/${recordingId}/stream`;
+  // The fallback endpoint requires a short-lived token query param.
+  const fallbackStreamUrl = streamToken
+    ? `/api/recordings/${recordingId}/stream?token=${encodeURIComponent(streamToken)}`
+    : `/api/recordings/${recordingId}/stream`;
+  const baseStreamUrl = recordingUrl || fallbackStreamUrl;
   const streamUrl = `${baseStreamUrl}${baseStreamUrl.includes('?') ? '&' : '?'}v=${retryNonce}`;
 
   useEffect(() => {
@@ -74,6 +80,32 @@ export function AudioPlayerEnhanced({
     setCurrentTime(0);
     setDuration(0);
     setRetryNonce(0);
+    setStreamToken(null);
+  }, [recordingId, recordingUrl]);
+
+  // Fetch a fresh stream token for protected /api/recordings/:id/stream playback.
+  // Skip when an explicit recordingUrl is provided (it may already be tokenized/proxied).
+  useEffect(() => {
+    if (recordingUrl || !recordingId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiRequest('GET', `/api/recordings/${recordingId}/stream-token`);
+        const data = await res.json();
+        if (!cancelled && data?.token) {
+          setStreamToken(data.token);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('[AudioPlayerEnhanced] Failed to fetch stream token:', err);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [recordingId, recordingUrl]);
 
   // When a sync request finishes, force one fresh playback attempt.

@@ -32,7 +32,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
     name: 'Client Portal Invitation',
     description: 'Premium invitation email sent to client users to set up their portal account.',
     category: 'invitation',
-    subjectTemplate: '{{companyName}} — Your Client Portal is Ready',
+    subjectTemplate: '{{companyName}} — Set Your Portal Password',
     htmlTemplate: `<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
 <head>
@@ -85,7 +85,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
 <body style="margin:0; padding:0; background-color:#f0f2f5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;">
   <!-- Preheader -->
   <div style="display:none; font-size:1px; color:#f0f2f5; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">
-    Your personalized workspace is ready — set up your account to access campaigns, leads, and real-time analytics.
+    Your workspace is ready — create your password to activate access. No previous password is required.
   </div>
 
   <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;">
@@ -120,7 +120,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
               <h2 class="body-text" style="margin:0 0 8px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:20px; color:#0f172a; font-weight:600;">Hi {{firstName}},</h2>
 
               <p class="mobile-text body-text-light" style="margin:0 0 28px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; line-height:1.7; color:#475569;">
-                You've been invited to the <strong style="color:#0f172a;">{{companyName}}</strong> workspace on our demand generation platform. Your account is ready — just set your password to get started.
+                You've been invited to the <strong style="color:#0f172a;">{{companyName}}</strong> workspace on our demand generation platform. Your account is ready — create your password to activate access. You do <strong style="color:#0f172a;">not</strong> need a previous password.
               </p>
 
               <!-- CTA Button -->
@@ -227,7 +227,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
                 <tr>
                   <td style="background-color:#fffbeb; border-radius:8px; border: 1px solid #fde68a; padding: 14px 20px;">
                     <p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; color:#92400e; line-height:1.5;">
-                      <strong>Heads up:</strong> This invitation link expires in <strong>{{expiryDays}} days</strong>. After that, you'll need to request a new one.
+                      <strong>Heads up:</strong> This invitation link expires in <strong>{{expiryDays}} days</strong>. If it expires, ask your admin to resend your invitation.
                     </p>
                   </td>
                 </tr>
@@ -274,14 +274,16 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
   </table>
 </body>
 </html>`,
-    textTemplate: `Your Client Portal is Ready
-===========================
+    textTemplate: `Set Your Portal Password
+  =========================
 
 Hi {{firstName}},
 
 You've been invited to the {{companyName}} workspace on the Pivotal B2B demand generation platform.
 
-Your account is ready — just click the link below to set your password and get started.
+  Your account is ready — click the link below to create your password and activate access.
+
+  You do not need an existing password from us.
 
 Set Up Your Account: {{inviteLink}}
 

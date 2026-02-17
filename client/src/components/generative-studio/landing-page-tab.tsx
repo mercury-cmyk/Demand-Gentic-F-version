@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,7 @@ interface LandingPageTabProps {
   orgIntelligence?: OrgIntelligenceProfile | null;
   organizationId?: string;
   clientProjectId?: string;
+  campaignId?: string;
 }
 
 export default function LandingPageTab({
@@ -23,6 +25,7 @@ export default function LandingPageTab({
   orgIntelligence,
   organizationId,
   clientProjectId,
+  campaignId,
 }: LandingPageTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -30,7 +33,52 @@ export default function LandingPageTab({
   const [projectId, setProjectId] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ctaGoal, setCtaGoal] = useState("");
+  const [thankYouPageUrl, setThankYouPageUrl] = useState("/thank-you");
+  const [assetUrl, setAssetUrl] = useState("");
   const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
+
+  const { data: campaignDetails } = useQuery<any>({
+    queryKey: ["/api/campaigns", campaignId],
+    enabled: !!campaignId,
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/campaigns/${campaignId}`);
+      return res.json();
+    },
+  });
+
+  const prefilledPrompt = campaignDetails
+    ? [
+        campaignDetails.campaignObjective ? `Campaign objective: ${campaignDetails.campaignObjective}` : null,
+        campaignDetails.productServiceInfo ? `Product / service details: ${campaignDetails.productServiceInfo}` : null,
+        campaignDetails.targetAudienceDescription ? `Target audience: ${campaignDetails.targetAudienceDescription}` : null,
+        campaignDetails.campaignContextBrief ? `Campaign context brief: ${campaignDetails.campaignContextBrief}` : null,
+        Array.isArray(campaignDetails.talkingPoints) && campaignDetails.talkingPoints.length > 0
+          ? `Talking points: ${campaignDetails.talkingPoints.join("; ")}`
+          : null,
+        Array.isArray(campaignDetails.campaignObjections) && campaignDetails.campaignObjections.length > 0
+          ? `Common objections and responses: ${campaignDetails.campaignObjections.map((item: any) => {
+              if (item?.objection || item?.response) {
+                return `${item?.objection || "Objection"}: ${item?.response || ""}`.trim();
+              }
+              return String(item);
+            }).join("; ")}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+
+  const prefilledAdditionalContext = campaignDetails
+    ? [
+        campaignDetails.successCriteria ? `Success criteria: ${campaignDetails.successCriteria}` : null,
+        campaignDetails.landingPageUrl ? `Existing landing page URL (for reference): ${campaignDetails.landingPageUrl}` : null,
+        campaignDetails.projectFileUrl ? `Project brief / file URL (for reference): ${campaignDetails.projectFileUrl}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+
+  const derivedAssetUrl = campaignDetails?.projectFileUrl || "";
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -83,6 +131,8 @@ export default function LandingPageTab({
     generateMutation.mutate({
       ...params,
       ctaGoal: ctaGoal || undefined,
+      thankYouPageUrl: thankYouPageUrl || '/thank-you',
+      assetUrl: assetUrl || derivedAssetUrl || undefined,
       organizationId,
       clientProjectId,
     });
@@ -106,6 +156,14 @@ export default function LandingPageTab({
           contentType="Landing Page"
           brandKits={brandKits}
           orgIntelligence={orgIntelligence}
+          initialValues={campaignDetails ? {
+            title: `${campaignDetails.name || "Campaign"} Landing Page`,
+            prompt: prefilledPrompt,
+            targetAudience: campaignDetails.targetAudienceDescription || undefined,
+            industry: campaignDetails.industry || orgIntelligence?.identity?.industry?.value || undefined,
+            additionalContext: prefilledAdditionalContext || undefined,
+          } : undefined}
+          initialValuesKey={campaignId}
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Landing Page"
@@ -117,6 +175,22 @@ export default function LandingPageTab({
                 placeholder="e.g., Book a demo, Sign up for free trial"
                 value={ctaGoal}
                 onChange={(e) => setCtaGoal(e.target.value)}
+                disabled={!organizationId}
+              />
+
+              <Label>Thank You Page URL</Label>
+              <Input
+                placeholder="e.g., /thank-you or https://example.com/thank-you"
+                value={thankYouPageUrl}
+                onChange={(e) => setThankYouPageUrl(e.target.value)}
+                disabled={!organizationId}
+              />
+
+              <Label>Asset Download/View URL</Label>
+              <Input
+                placeholder="e.g., https://example.com/assets/ebook.pdf"
+                value={assetUrl || derivedAssetUrl}
+                onChange={(e) => setAssetUrl(e.target.value)}
                 disabled={!organizationId}
               />
             </div>

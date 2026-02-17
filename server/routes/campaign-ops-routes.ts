@@ -208,4 +208,132 @@ router.get(
   }
 );
 
+// GET /api/campaigns/:id/ops/eligibility-breakdown
+// Returns why queued contacts are/aren't currently callable for AI campaigns.
+router.get(
+  '/campaigns/:id/ops/eligibility-breakdown',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.id;
+
+      const [campaign] = await db
+        .select({
+          id: campaigns.id,
+          name: campaigns.name,
+          status: campaigns.status,
+          dialMode: campaigns.dialMode,
+          lastStallReason: campaigns.lastStallReason,
+          lastStallReasonAt: campaigns.lastStallReasonAt,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+
+      if (!campaign) {
+        return res.status(404).json({ error: 'not_found', message: 'Campaign not found' });
+      }
+
+      const queueStatusRows = await db
+        .select({
+          status: campaignQueue.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(campaignQueue)
+        .where(eq(campaignQueue.campaignId, campaignId))
+        .groupBy(campaignQueue.status);
+
+      const queueStatus = {
+        queued: 0,
+        inProgress: 0,
+        done: 0,
+        removed: 0,
+        total: 0,
+      };
+
+      for (const row of queueStatusRows) {
+        queueStatus.total += row.count;
+        if (row.status === 'queued') queueStatus.queued += row.count;
+        if (row.status === 'in_progress') queueStatus.inProgress += row.count;
+        if (row.status === 'done') queueStatus.done += row.count;
+        if (row.status === 'removed') queueStatus.removed += row.count;
+      }
+
+      const removedRows = await db
+        .select({
+          reason: campaignQueue.removedReason,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(campaignQueue)
+        .where(
+          and(
+            eq(campaignQueue.campaignId, campaignId),
+            eq(campaignQueue.status, 'removed')
+          )
+        )
+        .groupBy(campaignQueue.removedReason);
+
+      const removedBreakdown: Record<string, number> = {};
+      for (const row of removedRows) {
+        removedBreakdown[row.reason || 'unknown'] = row.count;
+      }
+
+      const phoneCountryTimezone = await pool.query(
+        `
+          SELECT
+            COUNT(*)::int AS queued_total,
+            COUNT(*) FILTER (
+              WHERE COALESCE(NULLIF(TRIM(c.mobile_phone_e164), ''), NULLIF(TRIM(c.direct_phone_e164), ''), NULLIF(TRIM(c.mobile_phone), ''), NULLIF(TRIM(c.direct_phone), '')) IS NOT NULL
+            )::int AS has_phone,
+            COUNT(*) FILTER (
+              WHERE COALESCE(NULLIF(TRIM(c.mobile_phone_e164), ''), NULLIF(TRIM(c.direct_phone_e164), ''), NULLIF(TRIM(c.mobile_phone), ''), NULLIF(TRIM(c.direct_phone), '')) IS NULL
+            )::int AS no_phone,
+            COUNT(*) FILTER (WHERE c.country IS NULL OR TRIM(c.country) = '')::int AS country_missing,
+            COUNT(*) FILTER (WHERE c.timezone IS NULL OR TRIM(c.timezone) = '')::int AS timezone_missing
+          FROM campaign_queue cq
+          INNER JOIN contacts c ON c.id = cq.contact_id
+          WHERE cq.campaign_id = $1
+            AND cq.status = 'queued'
+        `,
+        [campaignId]
+      );
+
+      const eligibilityBase = phoneCountryTimezone.rows[0] || {
+        queued_total: 0,
+        has_phone: 0,
+        no_phone: 0,
+        country_missing: 0,
+        timezone_missing: 0,
+      };
+
+      const timezoneAnalysis = await analyzeCampaignTimezones(campaignId);
+      const topCountries = Object.entries(timezoneAnalysis.countryDistribution)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([country, count]) => ({ country, count }));
+
+      res.json({
+        campaign,
+        queueStatus,
+        removedBreakdown,
+        eligibility: {
+          queuedAnalyzed: Number(eligibilityBase.queued_total || 0),
+          callableNow: timezoneAnalysis.totalCallableNow,
+          sleepingByBusinessHours: timezoneAnalysis.totalSleeping,
+          unknownTimezone: timezoneAnalysis.totalUnknownTimezone,
+          hasPhone: Number(eligibilityBase.has_phone || 0),
+          noPhone: Number(eligibilityBase.no_phone || 0),
+          countryMissing: Number(eligibilityBase.country_missing || 0),
+          timezoneFieldMissing: Number(eligibilityBase.timezone_missing || 0),
+        },
+        topCountries,
+        analyzedAt: timezoneAnalysis.analyzedAt,
+      });
+    } catch (error: any) {
+      console.error('Error fetching eligibility breakdown:', error);
+      res.status(500).json({ error: 'internal_server_error', message: error.message });
+    }
+  }
+);
+
 export default router;

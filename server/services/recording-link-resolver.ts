@@ -176,6 +176,8 @@ export async function getPlayableRecordingLink(
       telnyxRecordingId: callSessions.telnyxRecordingId,
       telnyxCallId: callSessions.telnyxCallId,
       recordingUrl: callSessions.recordingUrl,
+      toNumberE164: callSessions.toNumberE164,
+      startedAt: callSessions.startedAt,
     })
     .from(callSessions)
     .where(eq(callSessions.id, conversationId));
@@ -186,13 +188,11 @@ export async function getPlayableRecordingLink(
       try {
         const result = await getCallSessionRecordingUrl(conversationId);
         if (result.url) {
-          // If signBlob is unavailable, GCS returns gcs-internal:// which browsers can't play.
-          // In that case, use the server-side stream proxy endpoint instead.
-          const finalUrl = result.url.startsWith('gcs-internal://')
-            ? `/api/recordings/${conversationId}/stream`
-            : result.url;
+          // Keep gcs-internal:// URLs as-is — server-side stream endpoints
+          // (recordings, showcase-calls) handle them directly via readFromGCS().
+          // Converting to /api/recordings/... breaks server-side fetch() calls.
           return {
-            url: finalUrl,
+            url: result.url,
             source: 'gcs',
             expiresInSeconds: result.url.startsWith('gcs-internal://') ? 3600 : 604_800,
             mimeType: 'audio/mpeg',
@@ -244,6 +244,56 @@ export async function getPlayableRecordingLink(
         mimeType: 'audio/mpeg',
       };
     }
+
+    // Priority 5: Search Telnyx by dialed phone number + time range
+    if (session.toNumberE164 && session.startedAt) {
+      try {
+        const { searchRecordingsByDialedNumber } = await import('./telnyx-recordings');
+        const searchStart = new Date(session.startedAt);
+        searchStart.setMinutes(searchStart.getMinutes() - 30);
+        const searchEnd = new Date(session.startedAt);
+        searchEnd.setMinutes(searchEnd.getMinutes() + 30);
+
+        const recordings = await searchRecordingsByDialedNumber(
+          session.toNumberE164,
+          searchStart,
+          searchEnd,
+        );
+
+        const completed = recordings.find((r) => r.status === 'completed');
+        const recording = completed || recordings[0];
+        if (recording) {
+          const downloadUrl = recording.download_urls?.mp3 || recording.download_urls?.wav;
+          if (downloadUrl) {
+            console.log(
+              `[RecordingResolver] Found recording via phone number search for ${conversationId}: ${recording.id}`,
+            );
+            // Backfill telnyxCallId and telnyxRecordingId for faster future lookups
+            db.update(callSessions)
+              .set({
+                telnyxCallId: recording.call_control_id,
+                telnyxRecordingId: recording.id,
+                recordingUrl: downloadUrl,
+              } as any)
+              .where(eq(callSessions.id, conversationId))
+              .then(() =>
+                console.log(`[RecordingResolver] Backfilled Telnyx IDs for call_session ${conversationId}`),
+              )
+              .catch(() => {});
+
+            return {
+              url: downloadUrl,
+              source: 'telnyx_recording_id',
+              expiresInSeconds: 600,
+              mimeType: downloadUrl.includes('.wav') ? 'audio/wav' : 'audio/mpeg',
+              telnyxRecordingId: recording.id,
+            };
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[RecordingResolver] Phone number search failed for ${conversationId}: ${err.message}`);
+      }
+    }
   }
 
   // ── 2. leads ──────────────────────────────────────────────────────
@@ -262,11 +312,8 @@ export async function getPlayableRecordingLink(
       try {
         const result = await getRecordingUrl(conversationId);
         if (result.url) {
-          const finalUrl = result.url.startsWith('gcs-internal://')
-            ? `/api/recordings/${conversationId}/stream`
-            : result.url;
           return {
-            url: finalUrl,
+            url: result.url,
             source: 'gcs',
             expiresInSeconds: result.url.startsWith('gcs-internal://') ? 3600 : 604_800,
             mimeType: 'audio/mpeg',

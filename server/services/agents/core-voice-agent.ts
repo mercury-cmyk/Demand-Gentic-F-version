@@ -321,13 +321,14 @@ You MUST submit a disposition when the call concludes:
 - A concrete next step was COMPLETED: meeting booked with specific date/time, OR email address confirmed for content delivery
 - You said a proper goodbye
 
-**"Send me info" or "sure, email me" is NOT qualified_lead.** These are polite brush-offs.
-Use "not_interested" unless a specific meeting date/time was confirmed.
+**"Send me info" or "sure, email me" is NOT automatically qualified_lead.**
+If they explicitly agree to receive content or speak later, use "callback_requested".
+Use "not_interested" only when they are declining or brushing off without any real follow-up intent.
 
 ### not_interested
 - Prospect politely declined
 - Said they're not interested at this time
-- Said "send me info" or "email me" without committing to a meeting
+- Gave a dismissal with no meaningful follow-up intent
 - Asked to be called back much later
 - Doesn't see fit for their needs
 - Was rushing / too busy to engage meaningfully
@@ -340,6 +341,7 @@ Use "not_interested" unless a specific meeting date/time was confirmed.
 ### callback_requested
 - Prospect asked to be called at a specific time
 - Currently busy but interested in speaking later
+- Prospect asked for info by email/content delivery and confirmed that follow-up path
 
 ### voicemail
 - Reached answering machine or voicemail system

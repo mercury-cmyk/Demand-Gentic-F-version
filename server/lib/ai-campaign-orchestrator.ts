@@ -15,6 +15,7 @@ import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
 import { db } from '../db';
 import { campaigns, campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents, dialerCallAttempts, dialerRuns, agentDefaults } from '@shared/schema';
+import { telnyxNumbers } from '@shared/number-pool-schema';
 import { eq, sql, inArray, and } from 'drizzle-orm';
 import { checkSuppressionBulk } from './suppression.service';
 import { getBestPhoneForContact } from './phone-utils';
@@ -49,12 +50,19 @@ const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRE
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches (prevents burst overload)
 const PARALLEL_CALL_BATCH_SIZE = 10; // Smaller batches to avoid DB pool exhaustion
 const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
+const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_EMPTY_RECHECK_SECONDS || 60));
+const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
+const ACTIVE_POOL_CACHE_TTL_MS = 30000;
+const ORCHESTRATOR_HEARTBEAT_MS = Math.max(30000, ORCHESTRATOR_INTERVAL_MS * 3);
 
 // Cached concurrency limits from DB (refreshed every 60s)
 let _cachedDefaultMaxConcurrent = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
 let _cachedGlobalMaxConcurrent = ENV_GLOBAL_MAX_CONCURRENT_CALLS;
 let _concurrencyLastFetched = 0;
 const CONCURRENCY_CACHE_TTL_MS = 60000; // 1 minute
+let _cachedHasActivePoolNumbers: boolean | null = null;
+let _activePoolLastFetched = 0;
+const campaignEmptyPoolBackoffUntil = new Map<string, number>();
 
 async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: number }> {
   const now = Date.now();
@@ -75,6 +83,27 @@ async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: 
     console.warn('[AI Orchestrator] Failed to load concurrency limits from DB, using env/cached values');
   }
   return { defaultMax: _cachedDefaultMaxConcurrent, globalMax: _cachedGlobalMaxConcurrent };
+}
+
+async function hasActivePoolNumbers(): Promise<boolean> {
+  const now = Date.now();
+  if (_cachedHasActivePoolNumbers !== null && now - _activePoolLastFetched < ACTIVE_POOL_CACHE_TTL_MS) {
+    return _cachedHasActivePoolNumbers;
+  }
+
+  try {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(telnyxNumbers)
+      .where(eq(telnyxNumbers.status, 'active'));
+
+    _cachedHasActivePoolNumbers = (result?.count || 0) > 0;
+    _activePoolLastFetched = now;
+    return _cachedHasActivePoolNumbers;
+  } catch (error) {
+    console.warn('[AI Orchestrator] Failed to check active number pool size; assuming numbers are available');
+    return true;
+  }
 }
 
 // Legacy constants for backward compat (now dynamically loaded)
@@ -375,16 +404,20 @@ function normalizeCountryName(country: string): string {
 function isCountryEnabled(country: string | null | undefined): boolean {
   if (!country) return false;
   
-  // Clean up the input - trim whitespace and normalize
-  const cleaned = country.toString().trim().toUpperCase();
-  if (!cleaned) return false;
-  
-  // Try direct match first
-  if (ENABLED_CALLING_REGIONS[cleaned] === true) return true;
-  
-  // Try normalized version (handles typos)
-  const normalizedCountry = normalizeCountryName(cleaned);
-  if (ENABLED_CALLING_REGIONS[normalizedCountry] === true) return true;
+  // Clean/normalize common data variants e.g. "United Kingdom (UK)", "U.S.A.", etc.
+  const raw = country.toString().trim().toUpperCase();
+  if (!raw) return false;
+
+  const noParens = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const alnumOnly = raw.replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const candidates = Array.from(new Set([raw, noParens, alnumOnly].filter(Boolean)));
+
+  // Try direct and typo-normalized forms
+  for (const cleaned of candidates) {
+    if (ENABLED_CALLING_REGIONS[cleaned] === true) return true;
+    const normalizedCountry = normalizeCountryName(cleaned);
+    if (ENABLED_CALLING_REGIONS[normalizedCountry] === true) return true;
+  }
   
   // Try common long-form to short-form mappings
   const COUNTRY_ALIASES: Record<string, string> = {
@@ -411,12 +444,59 @@ function isCountryEnabled(country: string | null | undefined): boolean {
     'MACAU': 'HONG KONG',
   };
   
-  if (COUNTRY_ALIASES[cleaned]) {
-    const aliased = COUNTRY_ALIASES[cleaned];
-    if (ENABLED_CALLING_REGIONS[aliased] === true) return true;
+  for (const cleaned of candidates) {
+    if (COUNTRY_ALIASES[cleaned]) {
+      const aliased = COUNTRY_ALIASES[cleaned];
+      if (ENABLED_CALLING_REGIONS[aliased] === true) return true;
+    }
   }
   
   return false;
+}
+
+/**
+ * Infer country from E.164 phone prefix when country metadata is missing.
+ * Returns canonical country name/code used by ENABLED_CALLING_REGIONS, or null.
+ */
+function inferCountryFromPhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = String(phone).replace(/[^\d+]/g, '');
+  let e164 = digits;
+  if (e164.startsWith('00')) {
+    e164 = `+${e164.slice(2)}`;
+  } else if (!e164.startsWith('+') && /^\d+$/.test(e164)) {
+    // Best-effort normalization for raw numeric international strings.
+    if (e164.startsWith('971')) e164 = `+${e164}`;
+    else if (e164.startsWith('44')) e164 = `+${e164}`;
+    else if (e164.startsWith('1')) e164 = `+${e164}`;
+  }
+  if (!e164.startsWith('+')) return null;
+
+  const prefixMap: Array<{ prefix: string; country: string }> = [
+    { prefix: '+971', country: 'AE' }, { prefix: '+966', country: 'SA' }, { prefix: '+972', country: 'IL' },
+    { prefix: '+974', country: 'QA' }, { prefix: '+965', country: 'KW' }, { prefix: '+973', country: 'BH' },
+    { prefix: '+968', country: 'OM' }, { prefix: '+886', country: 'TW' }, { prefix: '+852', country: 'HK' },
+    { prefix: '+420', country: 'CZ' }, { prefix: '+358', country: 'FI' }, { prefix: '+353', country: 'IE' },
+    { prefix: '+351', country: 'PT' }, { prefix: '+972', country: 'IL' },
+    { prefix: '+971', country: 'AE' },
+    { prefix: '+44', country: 'GB' }, { prefix: '+1', country: 'US' }, { prefix: '+61', country: 'AU' },
+    { prefix: '+64', country: 'NZ' }, { prefix: '+65', country: 'SG' }, { prefix: '+81', country: 'JP' },
+    { prefix: '+82', country: 'KR' }, { prefix: '+91', country: 'IN' }, { prefix: '+86', country: 'CN' },
+    { prefix: '+60', country: 'MY' }, { prefix: '+63', country: 'PH' }, { prefix: '+66', country: 'TH' },
+    { prefix: '+84', country: 'VN' }, { prefix: '+62', country: 'ID' }, { prefix: '+55', country: 'BR' },
+    { prefix: '+54', country: 'AR' }, { prefix: '+56', country: 'CL' }, { prefix: '+57', country: 'CO' },
+    { prefix: '+51', country: 'PE' }, { prefix: '+27', country: 'ZA' }, { prefix: '+49', country: 'DE' },
+    { prefix: '+33', country: 'FR' }, { prefix: '+39', country: 'IT' }, { prefix: '+34', country: 'ES' },
+    { prefix: '+31', country: 'NL' }, { prefix: '+32', country: 'BE' }, { prefix: '+41', country: 'CH' },
+    { prefix: '+43', country: 'AT' }, { prefix: '+46', country: 'SE' }, { prefix: '+47', country: 'NO' },
+    { prefix: '+45', country: 'DK' }, { prefix: '+48', country: 'PL' }, { prefix: '+30', country: 'GR' },
+    { prefix: '+52', country: 'MX' },
+  ];
+
+  // Prefer longest prefix matches first
+  prefixMap.sort((a, b) => b.prefix.length - a.prefix.length);
+  const match = prefixMap.find(p => e164.startsWith(p.prefix));
+  return match?.country ?? null;
 }
 
 interface OrchestratorJobData {
@@ -436,6 +516,8 @@ interface ProcessCampaignOptions {
 
 let orchestratorQueue: Queue<OrchestratorJobData> | null = null;
 let orchestratorWorker: Worker<OrchestratorJobData> | null = null;
+let orchestratorHeartbeatTimer: NodeJS.Timeout | null = null;
+let lastOrchestratorTickAt = 0;
 let lastCampaignStartIndex = 0;
 
 /**
@@ -705,17 +787,22 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       AND cq.status = 'queued'
       AND (cq.next_attempt_at IS NULL OR cq.next_attempt_at <= NOW())
       AND (c.direct_phone_e164 IS NOT NULL OR c.mobile_phone_e164 IS NOT NULL)
-      -- Exclude contacts already called today (Telnyx D66 daily limit protection)
+      -- Exclude contacts already called today (any agent type - prevents duplicate calls)
       -- Match by contact_id first (reliable), then by phone number (catches manual imports)
       AND NOT EXISTS (
         SELECT 1 FROM call_sessions cs 
         WHERE cs.created_at >= CURRENT_DATE
-          AND cs.agent_type = 'ai'
           AND (
             cs.contact_id = cq.contact_id
             OR cs.to_number_e164 = c.direct_phone_e164 
             OR cs.to_number_e164 = c.mobile_phone_e164
           )
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM dialer_call_attempts dca
+        WHERE dca.created_at >= CURRENT_DATE
+          AND dca.contact_id = cq.contact_id
+          AND dca.campaign_id = ${campaignId}
       )
     ORDER BY within_hours DESC, cq.ai_priority_score DESC NULLS LAST, phone_priority ASC, cq.priority DESC, cq.created_at ASC
     LIMIT ${limit * 3}
@@ -791,6 +878,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     await setOrchestratorStallReason(campaignId, 'No AI agent settings configured for this campaign.');
     return { initiated: 0, skipped: 0 };
   }
+  const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
   
   // Log Gemini-only mode and voice configuration
   const configuredVoice = aiSettings.persona?.voice || 'Puck';
@@ -850,6 +938,35 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   if (queueItems.length === 0) {
     await setOrchestratorStallReason(campaignId, 'No contacts remaining in the queue.');
     return { initiated: 0, skipped: 0 };
+  }
+
+  // Fast-fail when pool routing is enabled but there are no active numbers.
+  // This avoids per-item requeue loops and noisy "No numbers in eligible pool" logs.
+  const poolRoutingEnabledForCampaign = isNumberPoolEnabled() && (numberPoolConfig?.enabled ?? true);
+  if (poolRoutingEnabledForCampaign) {
+    const retryAt = campaignEmptyPoolBackoffUntil.get(campaignId) || 0;
+    if (retryAt > Date.now()) {
+      const waitSeconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+      await setOrchestratorStallReason(campaignId, `Number pool has no active numbers. Rechecking in ${waitSeconds}s.`);
+      return { initiated: 0, skipped: 0 };
+    }
+
+    const hasActiveNumbers = await hasActivePoolNumbers();
+    if (!hasActiveNumbers) {
+      campaignEmptyPoolBackoffUntil.set(campaignId, Date.now() + EMPTY_POOL_RECHECK_MS);
+      console.warn(
+        `[AI Orchestrator] Number pool is empty - delaying campaign ${campaignId} for ${EMPTY_POOL_RECHECK_SECONDS}s before retry`
+      );
+      await setOrchestratorStallReason(
+        campaignId,
+        `Number pool has no active numbers. Rechecking in ${EMPTY_POOL_RECHECK_SECONDS}s.`
+      );
+      return { initiated: 0, skipped: 0 };
+    }
+
+    campaignEmptyPoolBackoffUntil.delete(campaignId);
+  } else {
+    campaignEmptyPoolBackoffUntil.delete(campaignId);
   }
 
   // === COMPLIANCE CHECKS (same as batch-start) ===
@@ -953,19 +1070,47 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     const country = (item as any).country;
     const state = (item as any).state;
     const timezone = (item as any).timezone;
+    const inferredTimezone = (item as any).inferred_timezone;
+    const geoPhone = mobilePhone || directPhone;
+    const normalizedCountry = typeof country === 'string' ? country.trim() : country;
+    const inferredCountry = inferCountryFromPhone(geoPhone);
+
+    // Be resilient to bad/missing country metadata:
+    // if stored country is missing or not enabled, trust phone-derived country when possible.
+    let effectiveCountry: string | null = (normalizedCountry as string) || null;
+    if (!effectiveCountry && inferredCountry) {
+      effectiveCountry = inferredCountry;
+    } else if (effectiveCountry && !isCountryEnabled(effectiveCountry) && inferredCountry && isCountryEnabled(inferredCountry)) {
+      effectiveCountry = inferredCountry;
+    }
+
+    // Prefer explicit timezone, then SQL inferred timezone, then derive from best-known geo data.
+    let effectiveTimezone: string | null = (typeof timezone === 'string' && timezone.trim())
+      ? timezone.trim()
+      : ((typeof inferredTimezone === 'string' && inferredTimezone.trim()) ? inferredTimezone.trim() : null);
+    if (!effectiveTimezone) {
+      effectiveTimezone = detectContactTimezone({
+        country: effectiveCountry,
+        state: state || undefined,
+      });
+    }
     
     // Check if country is in enabled calling regions
-    if (!isCountryEnabled(country)) {
+    if (!isCountryEnabled(effectiveCountry)) {
       countryNotEnabled++;
       // Track which countries are being rejected
-      const countryKey = country ? String(country).toUpperCase() : 'NULL/EMPTY';
+      const countryKey = effectiveCountry ? String(effectiveCountry).toUpperCase() : 'NULL/EMPTY';
       rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
       continue; // Skip contacts from disabled regions
     }
     
     // Check business hours for this contact's timezone/country FIRST
     // Use stored timezone if available, fall back to country/state detection
-    const bizHoursCheck = isContactWithinBusinessHours({ country, state, timezone });
+    const bizHoursCheck = isContactWithinBusinessHours({
+      country: effectiveCountry,
+      state,
+      timezone: effectiveTimezone,
+    });
     const tzKey = bizHoursCheck.timezone || 'unknown';
     
     // Track timezone stats
@@ -1057,7 +1202,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     }
 
     // Add to candidates with priority and country info
-    candidateItems.push({ item: { ...item, _country: country, _timezone: tzKey }, phone: e164, priority, contact });
+    candidateItems.push({ item: { ...item, _country: effectiveCountry, _timezone: tzKey }, phone: e164, priority, contact });
   }
   
   // Sort by priority: UK mobile (1) first, then UK landline (2), then other phones
@@ -1306,7 +1451,6 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // === NUMBER POOL ROTATION ===
         // Select caller ID from number pool for spam prevention
         // Use campaign-level number pool config if available
-        const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
         // callerIdResult already declared at outer scope for catch-block visibility
         try {
           callerIdResult = await getCallerIdForCall({
@@ -1805,7 +1949,9 @@ export function initializeAiCampaignOrchestrator(): void {
     'ai-campaign-orchestrator',
     async (job: Job<OrchestratorJobData>) => {
       if (job.data.type === 'tick') {
-        return orchestratorTick();
+        const result = await orchestratorTick();
+        lastOrchestratorTickAt = Date.now();
+        return result;
       } else if (job.data.type === 'campaign-replenish' && job.data.campaignId) {
         const { globalMax } = await getConcurrencyLimits();
         const globalSlots = Math.max(0, globalMax - (await getGlobalInProgressCount()));
@@ -1844,6 +1990,58 @@ export function initializeAiCampaignOrchestrator(): void {
   }).catch(err => {
     console.error('[AI Orchestrator] Failed to add repeatable job:', err);
   });
+
+  // Run an immediate tick on startup so all active campaigns begin processing
+  // without waiting for the next repeat window.
+  orchestratorQueue.add(
+    'orchestrator-tick-startup',
+    { type: 'tick' },
+    {
+      jobId: `ai-orchestrator-startup-${Date.now()}`,
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  ).then(() => {
+    console.log('[AI Orchestrator] Startup tick enqueued');
+  }).catch(err => {
+    console.error('[AI Orchestrator] Failed to enqueue startup tick:', err);
+  });
+
+  // Heartbeat watchdog: if tick processing stalls or queue becomes idle,
+  // enqueue a rescue tick to keep call triggering continuous.
+  if (orchestratorHeartbeatTimer) {
+    clearInterval(orchestratorHeartbeatTimer);
+  }
+  lastOrchestratorTickAt = Date.now();
+  orchestratorHeartbeatTimer = setInterval(async () => {
+    if (!orchestratorQueue) return;
+
+    try {
+      const [activeCount, waitingCount] = await Promise.all([
+        orchestratorQueue.getActiveCount(),
+        orchestratorQueue.getWaitingCount(),
+      ]);
+
+      const now = Date.now();
+      const staleTick = now - lastOrchestratorTickAt > ORCHESTRATOR_HEARTBEAT_MS;
+      const queueIdle = activeCount === 0 && waitingCount === 0;
+
+      if (staleTick || queueIdle) {
+        await orchestratorQueue.add(
+          'orchestrator-tick-rescue',
+          { type: 'tick' },
+          {
+            jobId: `ai-orchestrator-rescue-${now}`,
+            removeOnComplete: true,
+            removeOnFail: true,
+          }
+        );
+        console.warn(`[AI Orchestrator] Heartbeat enqueued rescue tick (staleTick=${staleTick}, queueIdle=${queueIdle})`);
+      }
+    } catch (err) {
+      console.error('[AI Orchestrator] Heartbeat check failed:', err);
+    }
+  }, ORCHESTRATOR_HEARTBEAT_MS);
 
   // Run startup resume to clear any stuck items from previous server instance
   startupResumeStuckCalls().catch(err => {

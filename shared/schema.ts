@@ -3301,6 +3301,22 @@ export const callSessions = pgTable("call_sessions", {
   recordingStatusIdx: index("call_sessions_recording_status_idx").on(table.recordingStatus),
 }));
 
+// Call Session Events - high-resolution runtime telemetry for voice QA
+export const callSessionEvents = pgTable("call_session_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callSessionId: varchar("call_session_id").references(() => callSessions.id, { onDelete: "cascade" }).notNull(),
+  eventKey: text("event_key").notNull(),
+  eventTs: timestamp("event_ts").notNull().defaultNow(),
+  valueNum: numeric("value_num", { precision: 12, scale: 3 }),
+  valueText: text("value_text"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  callSessionIdx: index("call_session_events_call_session_idx").on(table.callSessionId),
+  eventKeyIdx: index("call_session_events_event_key_idx").on(table.eventKey),
+  eventTsIdx: index("call_session_events_event_ts_idx").on(table.eventTs),
+}));
+
 // Call Quality Records - Comprehensive logging of call quality analysis, conversation intelligence, issues, and recommendations
 export const callQualityRecords = pgTable("call_quality_records", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -12009,12 +12025,18 @@ export type ContactPredictiveScore = typeof contactPredictiveScores.$inferSelect
 export type InsertContactPredictiveScore = z.infer<typeof insertContactPredictiveScoreSchema>;
 
 // Call Quality Records Schema
+export const insertCallSessionEventsSchema = createInsertSchema(callSessionEvents).omit({
+  id: true,
+  createdAt: true,
+});
 export const insertCallQualityRecordsSchema = createInsertSchema(callQualityRecords).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
+export type CallSessionEvent = typeof callSessionEvents.$inferSelect;
+export type InsertCallSessionEvent = z.infer<typeof insertCallSessionEventsSchema>;
 export type CallQualityRecord = typeof callQualityRecords.$inferSelect;
 export type InsertCallQualityRecord = z.infer<typeof insertCallQualityRecordsSchema>;
 
@@ -13802,15 +13824,21 @@ export const mercuryInvitationTokens = pgTable("mercury_invitation_tokens", {
   clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'cascade' }).notNull(),
   clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'cascade' }).notNull(),
   token: varchar("token").notNull().unique(),
+  tokenHash: varchar("token_hash"),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   usedAt: timestamp("used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedBy: varchar("revoked_by").references(() => users.id, { onDelete: 'set null' }),
+  replacedByTokenId: varchar("replaced_by_token_id"),
   emailOutboxId: varchar("email_outbox_id").references(() => mercuryEmailOutbox.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   tokenIdx: uniqueIndex("mercury_invite_token_idx").on(table.token),
+  tokenHashIdx: uniqueIndex("mercury_invite_token_hash_idx").on(table.tokenHash),
   userIdx: index("mercury_invite_user_idx").on(table.clientUserId),
   accountIdx: index("mercury_invite_account_idx").on(table.clientAccountId),
   expiresIdx: index("mercury_invite_expires_idx").on(table.expiresAt),
+  revokedIdx: index("mercury_invite_revoked_idx").on(table.revokedAt),
 }));
 
 export type MercuryInvitationToken = typeof mercuryInvitationTokens.$inferSelect;

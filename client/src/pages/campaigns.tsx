@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Mail, Phone, Plus, BarChart, Settings, Play, Pause, Edit, Trash2,
   MoreVertical, Zap, Search, ArrowUpRight, AlertCircle, CheckCircle2,
-  ChevronDown, ChevronUp, Bot, Users, Mic
+  ChevronDown, ChevronUp, Bot, Users, Mic, Globe
 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
@@ -320,6 +320,19 @@ export default function CampaignsPage() {
     } else {
       setLocation(`/campaigns/${campaign.type}/edit/${campaign.id}`);
     }
+  };
+
+  const handleCreateLandingPageClick = (campaign: any) => {
+    const params = new URLSearchParams();
+    params.set("module", "landing-page");
+    params.set("campaignId", String(campaign.id));
+    if (campaign.problemIntelligenceOrgId) {
+      params.set("organizationId", String(campaign.problemIntelligenceOrgId));
+    }
+    if (campaign.projectId) {
+      params.set("clientProjectId", String(campaign.projectId));
+    }
+    setLocation(`/generative-studio?${params.toString()}`);
   };
 
   const toggleCampaignExpanded = (campaignId: string | number) => {
@@ -731,6 +744,10 @@ export default function CampaignsPage() {
                                     Edit
                                   </DropdownMenuItem>
                                 )}
+                                <DropdownMenuItem onClick={() => handleCreateLandingPageClick(campaign)}>
+                                  <Globe className="mr-2 h-4 w-4" />
+                                  Create Landing Page
+                                </DropdownMenuItem>
                                 {isPhone && (
                                   <>
                                     {/* Start AI Calls - only for active AI agent campaigns */}
