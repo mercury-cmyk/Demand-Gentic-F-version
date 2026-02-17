@@ -861,7 +861,7 @@ export default function ClientPortalDashboard() {
         return { enabled: false };
       }
     },
-    enabled: !!user && !!featuresData?.enabledFeatures?.includes('argyle_events'),
+    enabled: !!user,
     staleTime: 5 * 60 * 1000,
   });
 

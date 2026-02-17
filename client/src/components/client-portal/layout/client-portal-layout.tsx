@@ -248,8 +248,8 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         return { available: false };
       }
     },
-    // Disabled here to avoid unauthorized probes and noisy 403s in non-Argyle tenants.
-    enabled: false,
+    // Probe safely; non-Argyle tenants return disabled without surfacing errors.
+    enabled: !!clientAccountId,
     staleTime: 5 * 60 * 1000,
   });
 
