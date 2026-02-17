@@ -302,6 +302,15 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Unified campaign management for email and phone',
       },
       {
+        id: 'campaign-manager',
+        title: 'Campaign Manager',
+        url: '/campaign-manager',
+        icon: 'Target',
+        roles: MANAGEMENT_ROLES,
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
+        description: 'AI quarterly planning, approvals, and channel orchestration',
+      },
+      {
         id: 'agent-console',
         title: 'Agent Console',
         url: '/agent-console',

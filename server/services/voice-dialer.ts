@@ -1390,9 +1390,14 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           const provider: 'openai' | 'google' = 'google';
 
           if (isTestSession) {
-            audioFormat = 'g711_ulaw';
-            audioFormatSource = 'test';
-            console.log(`${LOG_PREFIX} Test session using provider: ${provider}, audio format: g711_ulaw`);
+            // Preserve negotiated codec for test calls (especially international PCMA).
+            // Forcing µ-law here can mismatch Telnyx's actual wire codec and result in
+            // silence/garbled audio in Preview Studio phone tests.
+            if (audioFormatSource === 'default') {
+              audioFormat = 'g711_ulaw';
+              audioFormatSource = 'test';
+            }
+            console.log(`${LOG_PREFIX} Test session using provider: ${provider}, audio format: ${audioFormat} (source: ${audioFormatSource})`);
           }
 
           console.log(`${LOG_PREFIX} ðŸ“ž Starting session for call: ${sessionId}`);

@@ -81,6 +81,32 @@ const SHOWCASE_CATEGORIES = [
   'empathetic_response',
 ] as const;
 
+async function enforceShowcaseDurationCap(): Promise<number> {
+  const updated = await db.execute(sql`
+    WITH target AS (
+      SELECT cqr.call_session_id
+      FROM call_quality_records cqr
+      INNER JOIN call_sessions cs ON cs.id = cqr.call_session_id
+      WHERE cqr.is_showcase = true
+        AND COALESCE(cs.duration_sec, 0) > ${MAX_SHOWCASE_DURATION_SEC}
+    )
+    UPDATE call_quality_records cqr
+    SET
+      is_showcase = false,
+      showcase_category = NULL,
+      showcase_notes = NULL,
+      showcased_at = NULL,
+      showcased_by = NULL,
+      updated_at = NOW()
+    FROM target t
+    WHERE cqr.call_session_id = t.call_session_id
+    RETURNING cqr.call_session_id;
+  `);
+
+  const rows = ((updated as any)?.rows ?? []) as Array<{ call_session_id?: string }>;
+  return rows.length;
+}
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -247,6 +273,11 @@ function buildBaseShowcaseWhere(query: any) {
 
 router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
+    const autoUnpinned = await enforceShowcaseDurationCap();
+    if (autoUnpinned > 0) {
+      console.log(`[ShowcaseCalls] Auto-unpinned ${autoUnpinned} call(s) above ${MAX_SHOWCASE_DURATION_SEC}s`);
+    }
+
     // Determine pagination
     const page = parseInt(req.query.page as string, 10) || 1;
     const requestedLimit = parseInt(req.query.limit as string, 10) || SHOWCASE_MAX_CALLS;
@@ -348,6 +379,11 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
 
 router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
   try {
+    const autoUnpinned = await enforceShowcaseDurationCap();
+    if (autoUnpinned > 0) {
+      console.log(`[ShowcaseCalls] Auto-unpinned ${autoUnpinned} call(s) above ${MAX_SHOWCASE_DURATION_SEC}s`);
+    }
+
     const threshold = parseInt(req.query.threshold as string, 10) || 55;
     const limitCount = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 40));
 
@@ -432,6 +468,11 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
 
 router.get("/stats", requireAuth, async (req: Request, res: Response) => {
   try {
+    const autoUnpinned = await enforceShowcaseDurationCap();
+    if (autoUnpinned > 0) {
+      console.log(`[ShowcaseCalls] Auto-unpinned ${autoUnpinned} call(s) above ${MAX_SHOWCASE_DURATION_SEC}s`);
+    }
+
     const showcaseWhere = buildBaseShowcaseWhere(req.query);
 
     const [countCheck] = await db

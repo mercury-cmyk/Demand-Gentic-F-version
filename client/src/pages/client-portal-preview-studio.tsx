@@ -102,6 +102,20 @@ interface Campaign {
   name: string;
 }
 
+interface PhonePostCallResult {
+  finalDisposition?: string | null;
+  postCallAnalysis?: {
+    generatedAt?: string;
+    transcriptTurnCount?: number;
+    transcriptAvailable?: boolean;
+    summary?: string;
+    conversationQuality?: {
+      overallScore?: number;
+      summary?: string;
+    } | null;
+  } | null;
+}
+
 // Voice options - All 24 Gemini voices
 const GEMINI_VOICES: VoiceOption[] = [
   // Primary B2B Sales voices
@@ -190,6 +204,7 @@ export default function ClientPortalPreviewStudioPage() {
     testCallId?: string;
   } | null>(null);
   const [phoneCallError, setPhoneCallError] = useState<string | null>(null);
+  const [phonePostCall, setPhonePostCall] = useState<PhonePostCallResult | null>(null);
 
   // Voice preview state
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
@@ -581,6 +596,7 @@ export default function ClientPortalPreviewStudioPage() {
       setPhoneSessionId(data.sessionId);
       setPhoneCallStatus('ringing');
       setPhoneCallError(null);
+      setPhonePostCall(null);
       setPhoneCallInfo({
         campaignName: data.campaignName,
         voiceProvider: data.voiceProvider,
@@ -612,8 +628,14 @@ export default function ClientPortalPreviewStudioPage() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setPhoneCallStatus('completed');
+      if (data?.finalDisposition || data?.postCallAnalysis) {
+        setPhonePostCall({
+          finalDisposition: data.finalDisposition,
+          postCallAnalysis: data.postCallAnalysis,
+        });
+      }
       toast({ title: 'Call Ended', description: 'Phone test call has ended.' });
     },
     onError: (error: Error) => {
@@ -636,6 +658,12 @@ export default function ClientPortalPreviewStudioPage() {
         if (!res.ok) return;
         const data = await res.json();
         const status = data.session?.status;
+        if (data.finalDisposition || data.postCallAnalysis) {
+          setPhonePostCall({
+            finalDisposition: data.finalDisposition,
+            postCallAnalysis: data.postCallAnalysis,
+          });
+        }
         if (status === 'completed' || status === 'error') {
           setPhoneCallStatus(status === 'error' ? 'error' : 'completed');
           if (phonePollingRef.current) {
@@ -678,6 +706,7 @@ export default function ClientPortalPreviewStudioPage() {
     setPhoneSessionId(null);
     setPhoneCallInfo(null);
     setPhoneCallError(null);
+    setPhonePostCall(null);
     if (phonePollingRef.current) {
       clearInterval(phonePollingRef.current);
       phonePollingRef.current = null;
@@ -988,6 +1017,7 @@ export default function ClientPortalPreviewStudioPage() {
                 phoneCallStatus={phoneCallStatus}
                 phoneCallInfo={phoneCallInfo}
                 phoneCallError={phoneCallError}
+                phonePostCall={phonePostCall}
                 onStartPhoneTest={handleStartPhoneTest}
                 onHangup={handleHangupPhoneTest}
                 onReset={handleResetPhoneTest}
@@ -1607,6 +1637,7 @@ interface PhoneTestSectionProps {
     testCallId?: string;
   } | null;
   phoneCallError: string | null;
+  phonePostCall: PhonePostCallResult | null;
   onStartPhoneTest: () => void;
   onHangup: () => void;
   onReset: () => void;
@@ -1624,6 +1655,7 @@ function PhoneTestSection({
   phoneCallStatus,
   phoneCallInfo,
   phoneCallError,
+  phonePostCall,
   onStartPhoneTest,
   onHangup,
   onReset,
@@ -1904,6 +1936,21 @@ function PhoneTestSection({
                         <p className="text-sm text-white/50 mt-1">
                           The test call to {phoneCallInfo?.phoneNumber || testPhoneNumber} has ended.
                         </p>
+                        {phonePostCall?.finalDisposition && (
+                          <Badge variant="outline" className="border-green-500/30 text-green-300 text-xs mt-2">
+                            Disposition: {phonePostCall.finalDisposition}
+                          </Badge>
+                        )}
+                        {phonePostCall?.postCallAnalysis?.summary && (
+                          <p className="text-xs text-white/60 mt-2 max-w-md mx-auto">
+                            {phonePostCall.postCallAnalysis.summary}
+                          </p>
+                        )}
+                        {typeof phonePostCall?.postCallAnalysis?.conversationQuality?.overallScore === 'number' && (
+                          <p className="text-xs text-cyan-300 mt-1">
+                            Quality score: {Math.round(phonePostCall.postCallAnalysis.conversationQuality.overallScore)}/100
+                          </p>
+                        )}
                       </div>
                       <Button onClick={onReset} className="bg-green-500 hover:bg-green-600">
                         <RefreshCw className="h-4 w-4 mr-2" />

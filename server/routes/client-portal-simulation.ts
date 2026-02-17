@@ -41,8 +41,11 @@ import {
   mergeAgentSettings,
 } from '../services/virtual-agent-settings';
 import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from '../services/number-pool-integration';
-import { ensureVoiceAgentControlLayer } from '../services/voice-agent-control-defaults';
-import { resolveAgentAssignment } from '../services/unified-call-context';
+import {
+  buildUnifiedCallContext,
+  contextToClientStateParams,
+} from '../services/unified-call-context';
+import { analyzeConversationQuality } from '../services/conversation-quality-analyzer';
 
 const router = Router();
 
@@ -1388,6 +1391,111 @@ async function resolveClientVirtualAgentId(campaignId: string): Promise<string |
 const CLIENT_PHONE_TEST_FIRST_MESSAGE =
   "Hello, may I speak with the person in charge of your technology decisions?";
 
+type ClientPostCallResult = {
+  finalDisposition: string;
+  postCallAnalysis: Record<string, unknown>;
+};
+
+function buildTranscriptText(transcripts: Array<{ role: string; content: string | null }>): string {
+  return transcripts
+    .map((entry) => {
+      const roleLabel = entry.role === 'assistant' ? 'Agent' : entry.role === 'user' ? 'Prospect' : 'System';
+      return `${roleLabel}: ${entry.content || ''}`.trim();
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function inferDispositionFromTranscript(transcriptText: string, metadata: Record<string, unknown>): string {
+  const lower = transcriptText.toLowerCase();
+  const endReason = String(metadata.endReason || '').toLowerCase();
+
+  if (endReason.includes('error') || metadata.error) return 'failed';
+  if (lower.includes('voicemail') || lower.includes('after the beep')) return 'voicemail';
+  if (lower.includes('do not call') || lower.includes("don't call")) return 'do_not_call';
+  if (lower.includes('not interested') || lower.includes('no thanks')) return 'not_interested';
+  if (lower.includes('call me back') || lower.includes('callback')) return 'callback_requested';
+  if (lower.includes('yes') && lower.includes('meeting')) return 'qualified';
+  if (endReason.includes('no_call_control')) return 'no_answer';
+  if (!lower.trim()) return 'no_answer';
+  return 'needs_review';
+}
+
+async function finalizePhoneTestPostCall(sessionId: string): Promise<ClientPostCallResult | null> {
+  const [session] = await db
+    .select()
+    .from(previewStudioSessions)
+    .where(eq(previewStudioSessions.id, sessionId))
+    .limit(1);
+
+  if (!session) return null;
+  if (session.status !== 'completed' && session.status !== 'error') return null;
+
+  const transcripts = await db
+    .select()
+    .from(previewSimulationTranscripts)
+    .where(eq(previewSimulationTranscripts.sessionId, sessionId))
+    .orderBy(previewSimulationTranscripts.timestampMs);
+
+  const metadata = ((session.metadata as Record<string, unknown>) || {}) as Record<string, unknown>;
+  const transcriptText = buildTranscriptText(transcripts);
+  const turnCount = transcripts.length;
+  const existingTurnCount = Number(metadata.postCallAnalysisTranscriptCount || 0);
+
+  if (metadata.finalDisposition && metadata.postCallAnalysis && existingTurnCount === turnCount) {
+    return {
+      finalDisposition: String(metadata.finalDisposition),
+      postCallAnalysis: metadata.postCallAnalysis as Record<string, unknown>,
+    };
+  }
+
+  const finalDisposition = inferDispositionFromTranscript(transcriptText, metadata);
+
+  let conversationQuality: Record<string, unknown> | null = null;
+  if (transcriptText.trim().length > 0) {
+    try {
+      const quality = await analyzeConversationQuality({
+        transcript: transcriptText,
+        interactionType: 'test_call',
+        analysisStage: 'post_call',
+        disposition: finalDisposition,
+        campaignId: session.campaignId,
+      });
+      conversationQuality = quality as unknown as Record<string, unknown>;
+    } catch (analysisError) {
+      console.warn('[Client Phone Test] Post-call quality analysis failed:', analysisError);
+    }
+  }
+
+  const postCallAnalysis: Record<string, unknown> = {
+    generatedAt: new Date().toISOString(),
+    transcriptTurnCount: turnCount,
+    transcriptAvailable: transcriptText.trim().length > 0,
+    summary:
+      transcriptText.trim().length > 0
+        ? `Post-call analysis ready (${turnCount} turns captured).`
+        : 'Call ended. No transcript captured yet; showing provisional outcome.',
+    conversationQuality,
+  };
+
+  await db.update(previewStudioSessions)
+    .set({
+      metadata: {
+        ...metadata,
+        finalDisposition,
+        postCallAnalysis,
+        postCallAnalysisTranscriptCount: turnCount,
+        postCallReadyAt: new Date().toISOString(),
+      },
+    })
+    .where(eq(previewStudioSessions.id, sessionId));
+
+  return {
+    finalDisposition,
+    postCallAnalysis,
+  };
+}
+
 /**
  * POST /phone-test/start
  * Initiate a real phone test call from the client portal.
@@ -1432,19 +1540,6 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    // Resolve agent assignment using unified resolver
-    // This supports BOTH inline aiAgentSettings (wizard-configured) AND legacy virtual agent assignments
-    const agentAssignment = await resolveAgentAssignment(campaignId);
-    if (!agentAssignment) {
-      return res.status(400).json({
-        error: 'No AI agent configured for this campaign',
-        suggestion: 'Please configure AI voice settings in the campaign wizard, or ask your admin to assign a virtual agent before testing',
-      });
-    }
-
-    const virtualAgentId = agentAssignment.virtualAgentId;
-    const mergedSettings = mergeAgentSettings(agentAssignment.settings ?? undefined);
-
     // Get account & contact
     const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
 
@@ -1453,56 +1548,6 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       const [contactResult] = await db.select().from(contacts).where(eq(contacts.id, contactId)).limit(1);
       contact = contactResult || null;
     }
-
-    // Build system prompt - start with the resolved agent's prompt
-    const systemPromptSections = [agentAssignment.systemPrompt || ''];
-
-    // Add campaign context (only if not already embedded by inline agent resolver)
-    const isInlineAgent = virtualAgentId?.startsWith('campaign-') && virtualAgentId?.includes('-inline');
-    if (!isInlineAgent) {
-      const campaignContext = [
-        campaign.name ? `Campaign: ${campaign.name}` : '',
-        campaign.campaignObjective ? `Objective: ${campaign.campaignObjective}` : '',
-        campaign.productServiceInfo ? `Product/Service: ${campaign.productServiceInfo}` : '',
-        campaign.talkingPoints ? `Talking Points: ${campaign.talkingPoints}` : '',
-        campaign.targetAudienceDescription ? `Target Audience: ${campaign.targetAudienceDescription}` : '',
-      ].filter(Boolean).join('\n');
-      if (campaignContext) systemPromptSections.push(campaignContext);
-    }
-
-    // Add account intelligence
-    try {
-      const { getOrBuildAccountIntelligence } = await import('../services/account-messaging-service');
-      const intelligenceRecord = await getOrBuildAccountIntelligence(accountId);
-      if (intelligenceRecord?.payloadJson) {
-        const intel = intelligenceRecord.payloadJson as any;
-        const intelLines = [
-          intel.companySummary ? `Company Summary: ${intel.companySummary}` : '',
-          intel.industry ? `Industry: ${intel.industry}` : '',
-          intel.employeeCount ? `Size: ~${intel.employeeCount} employees` : '',
-        ].filter(Boolean).join('\n');
-        if (intelLines) systemPromptSections.push(`\n--- Account Intelligence ---\n${intelLines}`);
-      }
-    } catch (e) {
-      // Ignore — intelligence is best-effort
-    }
-
-    // Add contact context
-    if (contact) {
-      const contactCtx = [
-        `Contact: ${(contact as any).fullName || ''}`,
-        (contact as any).jobTitle ? `Title: ${(contact as any).jobTitle}` : '',
-        account?.name ? `Company: ${account.name}` : '',
-      ].filter(Boolean).join('\n');
-      systemPromptSections.push(`\n--- Contact ---\n${contactCtx}`);
-    }
-
-    const useCondensed = mergedSettings.advanced.costOptimization.useCondensedPrompt !== false;
-    const systemPrompt = ensureVoiceAgentControlLayer(
-      systemPromptSections.filter(Boolean).join('\n\n'),
-      useCondensed
-    );
-    const firstMessage = agentAssignment.firstMessage || CLIENT_PHONE_TEST_FIRST_MESSAGE;
 
     // Normalize phone number
     let normalizedPhone = testPhoneNumber.replace(/[^\d+]/g, '');
@@ -1540,29 +1585,64 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Caller ID not configured' });
     }
 
-    // Create preview session
+    // Create preview call IDs
     const testCallId = `client-preview-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const runId = `run-client-preview-${Date.now()}`;
 
+    // Build unified context (same setup contract as campaign AI test calls)
+    const unifiedContext = await buildUnifiedCallContext({
+      campaignId,
+      callId: testCallId,
+      runId,
+      queueItemId: `preview-queue-${testCallId}`,
+      callAttemptId: `preview-attempt-${testCallId}`,
+      contactId: contactId || `preview-contact-${testCallId}`,
+      calledNumber: normalizedPhone,
+      fromNumber,
+      callerNumberId,
+      callerNumberDecisionId,
+      contactName: (contact as any)?.fullName || account?.name || 'Preview Contact',
+      contactFirstName: (contact as any)?.firstName || (contact as any)?.fullName?.split(' ')[0] || 'Preview',
+      contactLastName: (contact as any)?.lastName || (contact as any)?.fullName?.split(' ').slice(1).join(' ') || '',
+      contactJobTitle: (contact as any)?.jobTitle || 'Contact',
+      contactEmail: (contact as any)?.email || '',
+      accountName: account?.name || 'Preview Company',
+      isTestCall: true,
+      provider: voiceProvider === 'google' ? 'google' : 'openai',
+    });
+
+    if (!unifiedContext) {
+      return res.status(400).json({
+        error: 'No AI agent configured for this campaign',
+        suggestion: 'Please configure AI voice settings in the campaign wizard, or ask your admin to assign a virtual agent before testing',
+      });
+    }
+
     // Prepare voice selection
-    let voice = 'Puck';
+    let voice = unifiedContext.voice || 'Puck';
     if (voiceProvider === 'google') {
-      voice = (voiceOverride || agentAssignment.voice || 'Puck').toString().trim();
+      voice = (voiceOverride || unifiedContext.voice || 'Puck').toString().trim();
     } else {
       const supportedVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar']);
-      const rawVoice = (voiceOverride || agentAssignment.voice || '').toString().trim().toLowerCase();
+      const rawVoice = (voiceOverride || unifiedContext.voice || '').toString().trim().toLowerCase();
       voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
     }
 
     const providerForClientState = voiceProvider === 'google' ? 'google' : 'openai_realtime';
     const providerForSession = voiceProvider === 'google' ? 'google' : 'openai';
 
+    unifiedContext.voice = voice;
+    unifiedContext.provider = providerForSession;
+    unifiedContext.firstMessage = unifiedContext.firstMessage || CLIENT_PHONE_TEST_FIRST_MESSAGE;
+
+    // Create preview session
+
     const [session] = await db.insert(previewStudioSessions).values({
       campaignId,
       accountId,
       contactId: contactId || null,
       userId: clientUser.id || clientUser.clientAccountId,
-      virtualAgentId,
+      virtualAgentId: unifiedContext.virtualAgentId,
       sessionType: 'simulation',
       status: 'active',
       metadata: {
@@ -1579,57 +1659,48 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
 
     // Custom parameters for WebSocket
     const customParams = {
-      call_id: testCallId,
-      run_id: runId,
-      campaign_id: campaignId,
-      queue_item_id: `preview-queue-${testCallId}`,
-      call_attempt_id: `preview-attempt-${testCallId}`,
-      contact_id: contactId || `preview-contact-${testCallId}`,
-      called_number: normalizedPhone,
-      from_number: fromNumber,
-      caller_number_id: callerNumberId,
-      caller_number_decision_id: callerNumberDecisionId,
-      virtual_agent_id: virtualAgentId || undefined,
-      is_test_call: true,
+      ...contextToClientStateParams(unifiedContext),
       is_preview_test: true,
-      test_call_id: testCallId,
       preview_session_id: session.id,
-      first_message: firstMessage,
-      voice,
-      agent_name: agentAssignment.agentName || 'Preview Agent',
-      test_contact: {
-        name: (contact as any)?.fullName || account?.name || 'Preview Contact',
-        company: account?.name || 'Preview Company',
-        title: (contact as any)?.jobTitle || 'Contact',
-        email: (contact as any)?.email || undefined,
-      },
       provider: providerForClientState,
     };
 
     // Store session in Redis
     const { callSessionStore } = await import('../services/call-session-store');
     await callSessionStore.setSession(testCallId, {
-      call_id: testCallId,
-      run_id: runId,
-      campaign_id: campaignId,
-      queue_item_id: customParams.queue_item_id,
-      call_attempt_id: customParams.call_attempt_id,
-      contact_id: customParams.contact_id,
-      called_number: normalizedPhone,
-      from_number: fromNumber,
-      caller_number_id: callerNumberId,
-      caller_number_decision_id: callerNumberDecisionId,
-      virtual_agent_id: virtualAgentId || undefined,
+      call_id: unifiedContext.callId,
+      run_id: unifiedContext.runId,
+      campaign_id: unifiedContext.campaignId,
+      queue_item_id: unifiedContext.queueItemId,
+      call_attempt_id: unifiedContext.callAttemptId,
+      contact_id: unifiedContext.contactId,
+      called_number: unifiedContext.calledNumber,
+      from_number: unifiedContext.fromNumber,
+      caller_number_id: unifiedContext.callerNumberId,
+      caller_number_decision_id: unifiedContext.callerNumberDecisionId,
+      virtual_agent_id: unifiedContext.virtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
-      test_call_id: testCallId,
+      test_call_id: unifiedContext.testCallId || testCallId,
       preview_session_id: session.id,
-      first_message: firstMessage || undefined,
-      voice,
-      agent_name: customParams.agent_name,
-      test_contact: customParams.test_contact,
-      provider: providerForSession,
-      system_prompt: systemPrompt,
+      first_message: unifiedContext.firstMessage || undefined,
+      voice: unifiedContext.voice,
+      agent_name: unifiedContext.agentName,
+      organization_name: unifiedContext.organizationName,
+      provider: unifiedContext.provider,
+      system_prompt: unifiedContext.systemPrompt || undefined,
+      test_contact: {
+        name: unifiedContext.contactName,
+        company: unifiedContext.accountName,
+        title: unifiedContext.contactJobTitle,
+        email: unifiedContext.contactEmail || undefined,
+      },
+      campaign_objective: unifiedContext.campaignObjective,
+      success_criteria: unifiedContext.successCriteria,
+      target_audience_description: unifiedContext.targetAudienceDescription,
+      product_service_info: unifiedContext.productServiceInfo,
+      talking_points: unifiedContext.talkingPoints,
+      max_call_duration_seconds: unifiedContext.maxCallDurationSeconds,
     });
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
@@ -1744,7 +1815,20 @@ router.get('/phone-test/:sessionId', async (req: Request, res: Response) => {
       .where(eq(previewSimulationTranscripts.sessionId, sessionId))
       .orderBy(previewSimulationTranscripts.timestampMs);
 
-    res.json({ session, transcripts });
+    const postCall = await finalizePhoneTestPostCall(sessionId);
+
+    const [latestSession] = await db
+      .select()
+      .from(previewStudioSessions)
+      .where(eq(previewStudioSessions.id, sessionId))
+      .limit(1);
+
+    res.json({
+      session: latestSession || session,
+      transcripts,
+      finalDisposition: postCall?.finalDisposition || (latestSession?.metadata as any)?.finalDisposition || null,
+      postCallAnalysis: postCall?.postCallAnalysis || (latestSession?.metadata as any)?.postCallAnalysis || null,
+    });
   } catch (error) {
     console.error('[Client Phone Test] Error fetching session:', error);
     res.status(500).json({ error: 'Failed to fetch phone test session' });
@@ -1822,7 +1906,14 @@ router.post('/phone-test/:sessionId/hangup', async (req: Request, res: Response)
       })
       .where(eq(previewStudioSessions.id, sessionId));
 
-    res.json({ success: true, message: 'Call ended successfully' });
+    const postCall = await finalizePhoneTestPostCall(sessionId);
+
+    res.json({
+      success: true,
+      message: 'Call ended successfully',
+      finalDisposition: postCall?.finalDisposition || null,
+      postCallAnalysis: postCall?.postCallAnalysis || null,
+    });
   } catch (error) {
     console.error('[Client Phone Test] Hangup error:', error);
     res.status(500).json({ error: 'Failed to hang up call' });

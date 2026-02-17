@@ -80,6 +80,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // CAMPAIGNS - Management roles
   // ============================================
   { pattern: '/campaigns', roles: CLIENT_ACCESS_ROLES, description: 'Campaigns' },
+  { pattern: '/campaign-manager', roles: MANAGEMENT_ROLES, description: 'Campaign Manager' },
   { pattern: /^\/campaigns\//, roles: MANAGEMENT_ROLES, description: 'Campaign pages' },
   { pattern: '/email-campaigns', roles: MANAGEMENT_ROLES, description: 'Email Campaigns' },
   { pattern: /^\/email-campaigns\//, roles: MANAGEMENT_ROLES, description: 'Email Campaign pages' },

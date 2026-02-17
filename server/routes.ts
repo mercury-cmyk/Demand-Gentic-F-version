@@ -104,6 +104,7 @@ import transcriptionManagementRouter from './routes/transcription-management';
 import clientAssignmentRouter from './routes/client-assignment';
 import documentExtractRouter from './routes/document-extract';
 import campaignOpsRouter from './routes/campaign-ops-routes';
+import campaignManagerRouter from './routes/campaign-manager';
 import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import adminAgenticCampaignsRouter from './routes/admin-agentic-campaigns';
@@ -14880,6 +14881,9 @@ Provide JSON response with:
   // ==================== CLIENT PORTAL (Must be before catch-all /api routes) ====================
   // ==================== CAMPAIGN WIZARD (ADMIN) ====================
   app.use('/api/campaign-wizard', campaignWizardRouter);
+
+  // ==================== AI CAMPAIGN MANAGER (QUARTERLY PLANNING) ====================
+  app.use('/api/campaign-manager', campaignManagerRouter);
 
   // ==================== ADMIN PROJECT REQUESTS ====================
   app.use('/api/admin/project-requests', requireAuth, adminProjectRequestsRouter);
