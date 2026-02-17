@@ -39,7 +39,6 @@ import ListDetailPage from "@/pages/list-detail";
 import DomainSetsPage from "@/pages/domain-sets";
 import AccountsListDetail from "@/pages/accounts-list-detail";
 import CampaignsPage from "@/pages/campaigns";
-import CampaignManagerPage from "@/pages/campaign-manager";
 import CampaignCreatePage from "@/pages/campaign-create";
 import EmailCampaignsPage from "@/pages/email-campaigns";
 import EmailCampaignCreatePage from "@/pages/email-campaign-create";
@@ -54,29 +53,29 @@ import CampaignConfigPage from "@/pages/campaign-config";
 import CampaignSuppressionsPage from "@/pages/campaign-suppressions";
 import LeadsPage from "@/pages/leads";
 import LeadDetailPage from "@/pages/lead-detail";
-import ContentStudioPage from "@/pages/content-studio";
-import GenerativeStudioPage from "@/pages/generative-studio";
-import AIContentGeneratorPage from "@/pages/ai-content-generator";
-import SocialMediaPublisherPage from "@/pages/social-media-publisher";
 import SuppressionsPage from "@/pages/suppressions";
 import TelemarketingSuppressionListPage from "@/pages/telemarketing-suppression-list";
 import ImportsPage from "@/pages/imports";
-import ReportsPage from "@/pages/reports";
-import CallReportsPage from "@/pages/call-reports";
-import CallRecordingsPage from "@/pages/call-recordings";
 // CallIntelligenceDashboard removed - page deprecated
-import UnifiedIntelligencePage from "@/pages/unified-intelligence";
-
-import PotentialLeadsPage from "@/pages/potential-leads";
-import DispositionReanalysisPage from "@/pages/disposition-reanalysis";
-import ShowcaseCallsPage from "@/pages/showcase-calls";
 
 // Lazy-loaded components
 const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
+const CampaignManagerPage = lazy(() => import("@/pages/campaign-manager"));
+const ContentStudioPage = lazy(() => import("@/pages/content-studio"));
+const GenerativeStudioPage = lazy(() => import("@/pages/generative-studio"));
+const AIContentGeneratorPage = lazy(() => import("@/pages/ai-content-generator"));
+const SocialMediaPublisherPage = lazy(() => import("@/pages/social-media-publisher"));
+const ReportsPage = lazy(() => import("@/pages/reports"));
+const CallReportsPage = lazy(() => import("@/pages/call-reports"));
+const CallRecordingsPage = lazy(() => import("@/pages/call-recordings"));
+const UnifiedIntelligencePage = lazy(() => import("@/pages/unified-intelligence"));
+const PotentialLeadsPage = lazy(() => import("@/pages/potential-leads"));
+const DispositionReanalysisPage = lazy(() => import("@/pages/disposition-reanalysis"));
+const ShowcaseCallsPage = lazy(() => import("@/pages/showcase-calls"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
-import ConversationQualityPage from "@/pages/conversation-quality";
+const ConversationQualityPage = lazy(() => import("@/pages/conversation-quality"));
 import UnlicensedDepartmentsPage from "@/pages/unlicensed-departments";
-import EngagementAnalyticsPage from "@/pages/engagement-analytics";
+const EngagementAnalyticsPage = lazy(() => import("@/pages/engagement-analytics"));
 import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
 import SettingsPage from "@/pages/settings";
@@ -104,7 +103,7 @@ import PipelineImportPage from "@/pages/pipeline-import";
 import OpportunityDetailPage from "@/pages/opportunity-detail";
 import EmailSequencesPage from "@/pages/email-sequences";
 import InboxPage from "@/pages/inbox";
-import AgentReportsDashboard from "@/pages/agent-reports-dashboard";
+const AgentReportsDashboard = lazy(() => import("@/pages/agent-reports-dashboard"));
 import LeadFormsPage from "@/pages/lead-forms";
 import LeadFormPublicPage from "@/pages/lead-form-public";
 import AIProjectCreatorPage from "@/pages/ai-project-creator";
@@ -124,24 +123,24 @@ import ClientPortalPreviewStudio from "@/pages/client-portal-preview-studio";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
 import AgentCatalogPage from "@/pages/client-portal/agent-catalog";
 import ClientPortalCampaignCreate from "@/pages/client-portal/campaign-create";
-import ClientPortalIntelligence from "@/pages/client-portal-intelligence";
-import ClientPortalGenerativeStudio from "@/pages/client-portal-generative-studio";
+const ClientPortalIntelligence = lazy(() => import("@/pages/client-portal-intelligence"));
+const ClientPortalGenerativeStudio = lazy(() => import("@/pages/client-portal-generative-studio"));
 import ClientPortalCampaignQueue from "@/pages/client-portal-campaign-queue";
-import ClientPortalCallReports from "@/pages/client-portal-call-reports";
-import ClientPortalCallRecordings from "@/pages/client-portal-call-recordings";
-import ClientPortalAnalytics from "@/pages/client-portal-analytics";
-import ClientPortalConversationQuality from "@/pages/client-portal-conversation-quality";
-import ClientPortalShowcaseCalls from "@/pages/client-portal-showcase-calls";
+const ClientPortalCallReports = lazy(() => import("@/pages/client-portal-call-reports"));
+const ClientPortalCallRecordings = lazy(() => import("@/pages/client-portal-call-recordings"));
+const ClientPortalAnalytics = lazy(() => import("@/pages/client-portal-analytics"));
+const ClientPortalConversationQuality = lazy(() => import("@/pages/client-portal-conversation-quality"));
+const ClientPortalShowcaseCalls = lazy(() => import("@/pages/client-portal-showcase-calls"));
 import ClientPortalEmailCampaigns from "@/pages/client-portal-email-campaigns";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
 import QAReviewCenter from "@/pages/qa-review-center";
-import OrganizationIntelligencePage from "@/pages/ai-studio/intelligence";
-import AIAgentsPage from "@/pages/ai-studio/agents";
-import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
-import AgentPromptsPage from "@/pages/ai-studio/agent-prompts";
-import IntelligenceStudioDashboard from "@/pages/ai-studio/dashboard";
-import CampaignIntelligencePage from "@/pages/ai-studio/campaign-intelligence";
+const OrganizationIntelligencePage = lazy(() => import("@/pages/ai-studio/intelligence"));
+const AIAgentsPage = lazy(() => import("@/pages/ai-studio/agents"));
+const AgenticCRMOperatorPage = lazy(() => import("@/pages/ai-studio/operator"));
+const AgentPromptsPage = lazy(() => import("@/pages/ai-studio/agent-prompts"));
+const IntelligenceStudioDashboard = lazy(() => import("@/pages/ai-studio/dashboard"));
+const CampaignIntelligencePage = lazy(() => import("@/pages/ai-studio/campaign-intelligence"));
 import AgentCommandCenter from "@/pages/agent-command-center";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
@@ -784,7 +783,9 @@ function App() {
       <AuthProvider>
         <ThemeProvider defaultTheme="light">
           <TooltipProvider>
-            <Router />
+            <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading page...</div>}>
+              <Router />
+            </Suspense>
             <Toaster />
           </TooltipProvider>
         </ThemeProvider>
