@@ -39,6 +39,7 @@ import {
   campaignIntakeRequests,
 } from "@shared/schema";
 import { eq, and, or, desc, sql, gte, lte, count, sum } from "drizzle-orm";
+import { notificationService } from "../notification-service";
 
 // ==================== TYPES ====================
 
@@ -492,6 +493,22 @@ Return JSON:
       await db.update(clientProjects)
         .set({ intakeRequestId: intakeRequest.id })
         .where(eq(clientProjects.id, project.id));
+
+      // 6. Notify admins of new order request
+      try {
+        const [clientAccount] = await db
+          .select({ name: clientAccounts.name })
+          .from(clientAccounts)
+          .where(eq(clientAccounts.id, this.context.clientAccountId))
+          .limit(1);
+
+        await notificationService.notifyAdminOfNewOrder(
+          order,
+          clientAccount?.name || this.context.clientName || 'Unknown Client'
+        );
+      } catch (notifyError) {
+        console.error('[Client Agentic Hub] Failed to send admin order notification:', notifyError);
+      }
 
       this.emit("agent:completed", "campaign_order", { order, intakeRequest });
 

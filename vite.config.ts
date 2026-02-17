@@ -24,6 +24,20 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+
+          // Split known heavy ecosystems; keep everything else in a single vendor chunk
+          // to avoid circular dependency chunking warnings.
+          if (id.includes('@tiptap') || id.includes('grapesjs')) return 'vendor-editor';
+          if (id.includes('recharts') || id.includes('framer-motion')) return 'vendor-viz';
+
+          return 'vendor';
+        },
+      },
+    },
   },
   server: {
     port: 5000,

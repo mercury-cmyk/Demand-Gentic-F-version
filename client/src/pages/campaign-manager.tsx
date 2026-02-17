@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,17 @@ type CampaignOption = {
 type GeneratedPlanResponse = {
   success: boolean;
   plan: any;
+};
+
+type SavedPlanResponse = {
+  success: boolean;
+  campaignId: string;
+  campaignName: string;
+  approvalStatus: string | null;
+  approvedAt: string | null;
+  approvedById: string | null;
+  plan: any | null;
+  planMeta: any | null;
 };
 
 const now = new Date();
@@ -58,6 +69,45 @@ export default function CampaignManagerPage() {
       return res.json();
     },
   });
+
+  const {
+    data: savedPlanData,
+    isFetching: loadingSavedPlan,
+  } = useQuery<SavedPlanResponse>({
+    queryKey: ["/api/campaign-manager/campaigns", selectedCampaignId, "plan"],
+    enabled: Boolean(selectedCampaignId),
+    queryFn: async () => {
+      const res = await fetch(`/api/campaign-manager/campaigns/${selectedCampaignId}/plan`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken") || ""}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to load saved campaign plan");
+      return res.json();
+    },
+  });
+
+  useEffect(() => {
+    if (!savedPlanData) return;
+
+    setGeneratedPlan(savedPlanData.plan ?? null);
+    setSocialPack(null);
+
+    if (savedPlanData.plan?.meta?.campaign?.name) {
+      setCampaignName(savedPlanData.plan.meta.campaign.name);
+    }
+    if (savedPlanData.plan?.meta?.quarter) {
+      const q = Number(savedPlanData.plan.meta.quarter);
+      if (q >= 1 && q <= 4) setQuarter(String(q));
+    }
+    if (savedPlanData.plan?.meta?.year) {
+      const y = Number(savedPlanData.plan.meta.year);
+      if (Number.isFinite(y)) setYear(String(y));
+    }
+    if (typeof savedPlanData.plan?.meta?.scope === "string") {
+      setInternalOnly(savedPlanData.plan.meta.scope === "internal-first");
+    }
+  }, [savedPlanData]);
 
   const selectedCampaign = useMemo(
     () => campaigns.find((campaign) => campaign.id === selectedCampaignId) || null,
@@ -126,6 +176,7 @@ export default function CampaignManagerPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/campaign-manager/campaigns", selectedCampaignId, "plan"] });
       toast({ title: "Plan saved", description: "Campaign manager plan has been saved to the selected campaign." });
     },
     onError: (error: any) => {
@@ -143,6 +194,7 @@ export default function CampaignManagerPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/campaign-manager/campaigns", selectedCampaignId, "plan"] });
       toast({ title: "Plan approved", description: "Campaign is now marked approved for launch governance." });
     },
     onError: (error: any) => {
@@ -192,7 +244,7 @@ export default function CampaignManagerPage() {
         <CardContent className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Select campaign (optional but recommended)</Label>
-            <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+            <Select value={selectedCampaignId} onValueChange={(value) => setSelectedCampaignId(value)}>
               <SelectTrigger>
                 <SelectValue placeholder={campaignsLoading ? "Loading campaigns..." : "Choose campaign"} />
               </SelectTrigger>
@@ -204,6 +256,12 @@ export default function CampaignManagerPage() {
                 ))}
               </SelectContent>
             </Select>
+            {selectedCampaignId && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                {loadingSavedPlan ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {loadingSavedPlan ? "Loading saved campaign plan..." : savedPlanData?.plan ? "Loaded saved campaign plan." : "No saved plan found yet for this campaign."}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -291,6 +349,18 @@ export default function CampaignManagerPage() {
             <CardDescription>
               {generatedPlan?.meta?.window?.label || "Quarter"} · {selectedCampaign?.name || campaignName || "Unbound Campaign"}
             </CardDescription>
+            {selectedCampaignId && savedPlanData && (
+              <div className="pt-2 flex flex-wrap items-center gap-2">
+                <Badge variant={savedPlanData.approvalStatus === "approved" ? "default" : "secondary"}>
+                  {savedPlanData.approvalStatus || "draft"}
+                </Badge>
+                {savedPlanData.approvedAt ? (
+                  <span className="text-xs text-muted-foreground">
+                    Approved at {new Date(savedPlanData.approvedAt).toLocaleString()}
+                  </span>
+                ) : null}
+              </div>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

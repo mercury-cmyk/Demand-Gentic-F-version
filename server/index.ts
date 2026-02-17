@@ -101,20 +101,31 @@ app.use(sanitizeBody); // Remove HTML/SQL injection patterns
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
+  const shouldCaptureResponseBody =
+    process.env.LOG_API_RESPONSE_BODY === 'true' ||
+    (process.env.NODE_ENV !== 'production' && process.env.LOG_API_RESPONSE_BODY !== 'false');
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  if (shouldCaptureResponseBody) {
+    const originalResJson = res.json;
+    res.json = function (bodyJson, ...args) {
+      capturedJsonResponse = bodyJson;
+      return originalResJson.apply(res, [bodyJson, ...args]);
+    };
+  }
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      if (capturedJsonResponse && shouldCaptureResponseBody) {
+        try {
+          const responsePreview = JSON.stringify(capturedJsonResponse);
+          // Keep logging lightweight; avoid expensive giant payload logs
+          logLine += ` :: ${responsePreview.slice(0, 240)}`;
+        } catch {
+          logLine += " :: [response-body-unserializable]";
+        }
       }
 
       if (logLine.length > 80) {
@@ -528,7 +539,7 @@ app.use((req, res, next) => {
 
   // M365 email sync - Only start if enabled (DISABLED by default for performance)
   // Enable M365 auto-sync for production email inbox
-  const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true' || true; // Enabled by default
+  const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true';
   if (ENABLE_M365_SYNC) {
     const { startM365SyncJob } = await import("./jobs/m365-sync-job");
     startM365SyncJob();

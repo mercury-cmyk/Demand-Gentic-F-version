@@ -25,6 +25,7 @@ import {
 import { z } from 'zod';
 import { isFeatureEnabled } from '../feature-flags';
 import multer from 'multer';
+import { notificationService } from '../services/notification-service';
 
 const router = Router();
 
@@ -523,6 +524,31 @@ router.post('/create', async (req: Request, res: Response) => {
         submittedAt: new Date(),
       })
       .returning();
+
+    try {
+      const [clientAccount] = await db
+        .select({ name: clientAccounts.name })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, clientAccountId))
+        .limit(1);
+
+      await notificationService.notifyAdminOfClientRequest(
+        {
+          requestRef: newOrder.orderNumber,
+          title: newOrder.title,
+          description: newOrder.description,
+          status: newOrder.status,
+          priority: newOrder.priority,
+          requestType: newOrder.orderType,
+          targetLeadCount: newOrder.targetLeadCount,
+          budget: newOrder.estimatedBudget,
+        },
+        clientAccount?.name || 'Unknown Client',
+        'campaign'
+      );
+    } catch (notifyError) {
+      console.error('[CLIENT CAMPAIGNS] Failed to send admin email notification:', notifyError);
+    }
 
     res.status(201).json({
       success: true,

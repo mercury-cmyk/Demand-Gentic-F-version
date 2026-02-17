@@ -16,8 +16,10 @@ import {
   workOrders,
   workOrderDrafts,
   clientPortalActivityLogs,
+  clientAccounts,
 } from '@shared/schema';
 import { z } from 'zod';
+import { notificationService } from '../services/notification-service';
 
 const router = Router();
 
@@ -428,6 +430,32 @@ router.post('/client', async (req: Request, res: Response) => {
     }
 
     console.log(`[WorkOrders] Created work order ${orderNumber} (source: ${parsed.eventSource || 'direct'})`);
+
+    // ── Notify admins via email ─────────────────────────────────────────────
+    try {
+      const [clientAccount] = await db
+        .select({ name: clientAccounts.name })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, clientAccountId))
+        .limit(1);
+
+      await notificationService.notifyAdminOfClientRequest(
+        {
+          requestRef: workOrder.order_number || orderNumber,
+          title: workOrder.title || parsed.title,
+          description: workOrder.description || parsed.description || null,
+          status: workOrder.status || status,
+          priority: workOrder.priority || parsed.priority,
+          requestType: workOrder.order_type || parsed.orderType,
+          targetLeadCount: workOrder.target_lead_count ?? parsed.targetLeadCount ?? null,
+          budget: workOrder.estimated_budget ?? parsed.estimatedBudget ?? null,
+        },
+        clientAccount?.name || 'Unknown Client',
+        'order'
+      );
+    } catch (notifyError) {
+      console.error('[WorkOrders] Failed to send admin email notification:', notifyError);
+    }
 
     res.json({
       workOrder: {

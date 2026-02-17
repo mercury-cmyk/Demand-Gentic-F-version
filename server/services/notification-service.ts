@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { clientUsers, clientAccounts, clientProjects, clientPortalOrders } from '@shared/schema';
 import { eq } from 'drizzle-orm';
+import { mercuryEmailService } from './mercury/email-service';
 
 interface EmailOptions {
   to: string;
@@ -8,54 +9,57 @@ interface EmailOptions {
   html: string;
 }
 
+interface ClientRequestNotificationInput {
+  requestRef: string;
+  title: string;
+  description?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  requestType?: string | null;
+  targetLeadCount?: number | null;
+  budget?: string | number | null;
+}
+
 export class NotificationService {
-  private apiKey: string;
-  private domain: string;
-  private apiBase: string;
-  private adminEmail: string;
+  private adminEmails: string[];
 
   constructor() {
-    this.apiKey = process.env.MAILGUN_API_KEY || '';
-    this.domain = process.env.MAILGUN_DOMAIN || '';
-    this.apiBase = process.env.MAILGUN_API_BASE || 'https://api.mailgun.net/v3';
-    this.adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'admin@pivotal-b2b.com';
+    this.adminEmails = (process.env.ADMIN_NOTIFICATION_EMAIL || 'admin@pivotal-b2b.com')
+      .split(',')
+      .map((email) => email.trim())
+      .filter(Boolean);
   }
 
   private async sendEmail(options: EmailOptions): Promise<boolean> {
-    if (!this.apiKey || !this.domain) {
-      console.log(`[NotificationService] Mailgun not configured. Skipping email to ${options.to}: ${options.subject}`);
-      return false;
-    }
-
     try {
-      const formData = new FormData();
-      formData.append('from', `Pivotal B2B <notifications@${this.domain}>`);
-      formData.append('to', options.to);
-      formData.append('subject', options.subject);
-      formData.append('html', options.html);
-
-      const auth = Buffer.from(`api:${this.apiKey}`).toString('base64');
-      
-      const response = await fetch(`${this.apiBase}/${this.domain}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${auth}`,
-        },
-        body: formData,
+      const result = await mercuryEmailService.sendDirect({
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
       });
 
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`[NotificationService] Mailgun error: ${text}`);
+      if (!result.success) {
+        console.error(`[NotificationService] Mercury send failed to ${options.to}: ${result.error || 'Unknown error'}`);
         return false;
       }
 
-      console.log(`[NotificationService] Sent email to ${options.to}: ${options.subject}`);
+      console.log(`[NotificationService] Sent via Mercury SMTP to ${options.to}: ${options.subject}`);
       return true;
     } catch (error) {
       console.error('[NotificationService] Send error:', error);
       return false;
     }
+  }
+
+  private async sendToAllAdmins(subject: string, html: string): Promise<void> {
+    if (this.adminEmails.length === 0) {
+      console.log('[NotificationService] No admin recipients configured');
+      return;
+    }
+
+    await Promise.all(
+      this.adminEmails.map((email) => this.sendEmail({ to: email, subject, html }))
+    );
   }
 
   // --- Campaign/Project Notifications ---
@@ -70,7 +74,7 @@ export class NotificationService {
       <p><strong>Budget:</strong> ${project.budgetCurrency} ${project.budgetAmount || '0.00'}</p>
       <p>Please review explicitly in the Admin Portal.</p>
     `;
-    await this.sendEmail({ to: this.adminEmail, subject, html });
+    await this.sendToAllAdmins(subject, html);
   }
 
   async notifyClientOfProjectApprovalOld(project: typeof clientProjects.$inferSelect, clientEmail: string) {
@@ -127,7 +131,31 @@ export class NotificationService {
       <p><strong>Status:</strong> ${order.status}</p>
       <p>Please review order #${order.orderNumber} in the Admin Portal.</p>
     `;
-    await this.sendEmail({ to: this.adminEmail, subject, html });
+    await this.sendToAllAdmins(subject, html);
+  }
+
+  async notifyAdminOfClientRequest(
+    request: ClientRequestNotificationInput,
+    clientName: string,
+    category: 'order' | 'campaign' = 'order'
+  ) {
+    const categoryLabel = category === 'campaign' ? 'Campaign Request' : 'Order Request';
+    const subject = `New ${categoryLabel}: ${request.requestRef}`;
+    const html = `
+      <h2>New ${categoryLabel}</h2>
+      <p><strong>Client:</strong> ${clientName}</p>
+      <p><strong>Reference:</strong> ${request.requestRef}</p>
+      <p><strong>Title:</strong> ${request.title}</p>
+      <p><strong>Type:</strong> ${request.requestType || 'N/A'}</p>
+      <p><strong>Status:</strong> ${request.status || 'submitted'}</p>
+      <p><strong>Priority:</strong> ${request.priority || 'normal'}</p>
+      <p><strong>Target Leads:</strong> ${request.targetLeadCount ?? 'N/A'}</p>
+      <p><strong>Budget:</strong> ${request.budget ?? 'N/A'}</p>
+      <p><strong>Description:</strong> ${request.description || 'N/A'}</p>
+      <p>Please review this request in the Admin Portal.</p>
+    `;
+
+    await this.sendToAllAdmins(subject, html);
   }
 
   async notifyClientOfOrderApproval(order: typeof clientPortalOrders.$inferSelect, clientEmail: string) {
