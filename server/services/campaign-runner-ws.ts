@@ -527,6 +527,8 @@ class CampaignRunnerService {
             agentType: "ai",
             virtualAgentId,
             phoneDialed: task.phoneNumber,
+            callerNumberId: task.callerNumberId || null,
+            fromDid: task.fromNumber || null,
             attemptNumber,
             callStartedAt,
             callEndedAt,

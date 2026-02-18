@@ -1550,6 +1550,20 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         context.callerNumberId = callerIdResult.numberId;
         context.callerNumberDecisionId = callerIdResult.decisionId;
 
+        // Persist selected outbound DID metadata for observability/debugging,
+        // even if the call fails before media starts.
+        if (callAttemptId) {
+          try {
+            await db.update(dialerCallAttempts).set({
+              callerNumberId: callerIdResult.numberId || null,
+              fromDid: fromNumber,
+              updatedAt: new Date(),
+            }).where(eq(dialerCallAttempts.id, callAttemptId));
+          } catch (didPersistErr) {
+            console.error(`[AI Orchestrator] Failed to persist caller DID metadata on attempt ${callAttemptId}:`, didPersistErr);
+          }
+        }
+
         // =========================================================================
         // CENTRALIZED DUPLICATE CALL PREVENTION
         // =========================================================================
@@ -1641,6 +1655,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           try {
             await db.update(dialerCallAttempts).set({
               telnyxCallId: telnyxCallId,
+              callerNumberId: callerIdResult.numberId || null,
+              fromDid: fromNumber,
               callStartedAt: new Date(),
               updatedAt: new Date(),
             }).where(eq(dialerCallAttempts.id, callAttemptId));
