@@ -257,7 +257,14 @@ export class ManualQueueService {
             AND aq.queue_state = 'queued'
             AND (aq.scheduled_for IS NULL OR aq.scheduled_for <= NOW())
             AND (c.next_call_eligible_at IS NULL OR c.next_call_eligible_at <= NOW())
-          ORDER BY aq.ai_priority_score DESC NULLS LAST, aq.priority DESC, aq.created_at ASC
+          ORDER BY
+            CASE
+              WHEN regexp_replace(lower(COALESCE(c.last_call_outcome, '')), '[^a-z]', '', 'g') = 'callbackrequested' THEN 1
+              ELSE 0
+            END DESC,
+            COALESCE(aq.ai_priority_score, aq.priority) DESC,
+            aq.scheduled_for ASC NULLS FIRST,
+            aq.created_at ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         `);
@@ -580,7 +587,11 @@ export class ManualQueueService {
         contact: true,
         account: true,
       },
-      orderBy: [sql`${agentQueue.aiPriorityScore} DESC NULLS LAST`, sql`${agentQueue.priority} DESC`, sql`${agentQueue.createdAt} ASC`],
+      orderBy: [
+        sql`COALESCE(${agentQueue.aiPriorityScore}, ${agentQueue.priority}) DESC`,
+        sql`${agentQueue.scheduledFor} ASC NULLS FIRST`,
+        sql`${agentQueue.createdAt} ASC`,
+      ],
     });
   }
 }

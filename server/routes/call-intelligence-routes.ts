@@ -16,6 +16,7 @@ import {
   exportCallQualityData,
   getCallIntelligence,
 } from "../services/call-intelligence-logger";
+import { canonicalizeGcsRecordingUrl } from "../lib/recording-url-policy";
 
 const router = Router();
 
@@ -638,7 +639,11 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
     // ========================================
 
     // Transform dialer results to unified format
-    const dialerCalls = dialerResults.map((row) => ({
+    const dialerCalls = dialerResults.map((row) => {
+      const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+        recordingUrl: row.recordingUrl,
+      });
+      return {
       id: row.id,
       source: 'dialer' as const,
       telnyxCallId: row.telnyxCallId,
@@ -663,8 +668,9 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         name: row.campaignName || "No Campaign",
       },
       recording: {
-        available: !!row.recordingUrl,
-        status: row.recordingUrl ? "stored" : "pending",
+        available: !!gcsRecordingUrl,
+        url: gcsRecordingUrl,
+        status: gcsRecordingUrl ? "stored" : "pending",
         format: "mp3",
         durationSec: row.callDurationSeconds,
         fileSizeBytes: undefined,
@@ -696,11 +702,17 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         recommendations: row.recommendations as any[],
         analyzedAt: row.qualityAnalyzedAt?.toISOString(),
       },
-      lead: undefined,
-    }));
+        lead: undefined,
+      };
+    });
 
     // Transform session results to unified format
-    const sessionCalls = sessionResults.map((row) => ({
+    const sessionCalls = sessionResults.map((row) => {
+      const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+        recordingS3Key: row.recordingS3Key,
+        recordingUrl: row.recordingUrl,
+      });
+      return {
       id: row.id,
       source: 'session' as const,
       telnyxCallId: row.telnyxCallId,
@@ -725,7 +737,8 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         name: row.campaignName || "No Campaign",
       },
       recording: {
-        available: !!(row.recordingS3Key || row.recordingUrl),
+        available: !!gcsRecordingUrl,
+        url: gcsRecordingUrl,
         status: row.recordingStatus || "pending",
         format: row.recordingFormat,
         durationSec: row.recordingDurationSec,
@@ -758,13 +771,14 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         recommendations: row.recommendations as any[],
         analyzedAt: row.qualityAnalyzedAt?.toISOString(),
       },
-      lead: row.leadId
-        ? {
-            id: row.leadId,
-            qaStatus: row.leadQaStatus,
-          }
-        : undefined,
-    }));
+        lead: row.leadId
+          ? {
+              id: row.leadId,
+              qaStatus: row.leadQaStatus,
+            }
+          : undefined,
+      };
+    });
 
     // Merge, dedupe by telnyxCallId, and sort
     const seenTelnyxIds = new Set<string>();
@@ -913,6 +927,10 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
       .limit(1);
 
     if (sessionResult) {
+      const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+        recordingS3Key: sessionResult.recordingS3Key,
+        recordingUrl: sessionResult.recordingUrl,
+      });
       return res.json({
         success: true,
         data: {
@@ -940,7 +958,8 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
             name: sessionResult.campaignName || "No Campaign",
           },
           recording: {
-            available: !!(sessionResult.recordingS3Key || sessionResult.recordingUrl),
+            available: !!gcsRecordingUrl,
+            url: gcsRecordingUrl,
             status: sessionResult.recordingStatus || "pending",
             format: sessionResult.recordingFormat,
             durationSec: sessionResult.recordingDurationSec,
@@ -1042,6 +1061,10 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
       });
     }
 
+    const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+      recordingUrl: dialerResult.recordingUrl,
+    });
+
     res.json({
       success: true,
       data: {
@@ -1069,8 +1092,9 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
           name: dialerResult.campaignName || "No Campaign",
         },
         recording: {
-          available: !!dialerResult.recordingUrl,
-          status: dialerResult.recordingUrl ? "stored" : "pending",
+          available: !!gcsRecordingUrl,
+          url: gcsRecordingUrl,
+          status: gcsRecordingUrl ? "stored" : "pending",
           format: "mp3",
           durationSec: dialerResult.callDurationSeconds,
           fileSizeBytes: undefined,

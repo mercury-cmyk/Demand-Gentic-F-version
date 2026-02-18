@@ -460,15 +460,68 @@ export default function LeadsPage() {
       const data = await response.json();
       queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
       setSelectedLeads([]);
+
+      const approvedCount = Number(data?.approvedCount || 0);
+      const failedCount = Number(data?.failedCount || 0);
+      const summaryParts: string[] = [];
+      if (approvedCount > 0) summaryParts.push(`${approvedCount} approved`);
+      if (failedCount > 0) summaryParts.push(`${failedCount} failed validation`);
+
       toast({
-        title: "Success",
-        description: data.message || "Leads approved by PM and submitted to client portal",
+        title: approvedCount > 0 ? "PM Approval Complete" : "No Leads Approved",
+        description: summaryParts.length > 0
+          ? summaryParts.join(' · ')
+          : (data.message || "Leads approved by PM and submitted to client portal"),
+        variant: approvedCount > 0 ? (failedCount > 0 ? "destructive" : "default") : "destructive",
       });
     },
     onError: (error: Error) => {
       toast({
         title: "Error",
         description: error.message || "Failed to approve leads",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Bulk PM Approval with quality exceptions (requires override reason)
+  const bulkPmApproveWithExceptionsMutation = useMutation({
+    mutationFn: async ({ leadIds, overrideReason }: { leadIds: string[]; overrideReason: string }) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated");
+      }
+      return await apiRequest('POST', '/api/leads/pm-approve-bulk', {
+        leadIds,
+        pmApprovedById: user.id,
+        allowQualityBypass: true,
+        overrideReason,
+      });
+    },
+    onSuccess: async (response) => {
+      const data = await response.json();
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      setSelectedLeads([]);
+
+      const approvedCount = Number(data?.approvedCount || 0);
+      const overrideApprovedCount = Number(data?.overrideApprovedCount || 0);
+      const failedCount = Number(data?.failedCount || 0);
+      const summaryParts: string[] = [];
+      if (approvedCount > 0) summaryParts.push(`${approvedCount} approved`);
+      if (overrideApprovedCount > 0) summaryParts.push(`${overrideApprovedCount} via exception override`);
+      if (failedCount > 0) summaryParts.push(`${failedCount} failed status validation`);
+
+      toast({
+        title: approvedCount > 0 ? "PM Exception Approval Complete" : "No Leads Approved",
+        description: summaryParts.length > 0
+          ? summaryParts.join(' · ')
+          : (data.message || "No leads were approved"),
+        variant: approvedCount > 0 ? (failedCount > 0 ? "destructive" : "default") : "destructive",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve leads with exceptions",
         variant: "destructive",
       });
     },
@@ -1259,7 +1312,7 @@ export default function LeadsPage() {
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0"
-                          onClick={() => window.open(lead.recordingUrl!, '_blank')}
+                          onClick={() => openLeadRecordingInNewTab(lead.id, lead.recordingUrl)}
                           data-testid={`button-download-recording-${lead.id}`}
                           title="Download recording"
                         >
@@ -1586,15 +1639,16 @@ export default function LeadsPage() {
     }
   };
 
-  const handlePlayRecording = async (leadId: string, _recordingUrl: string) => {
-    // Open GCS recording in a new tab
+  const openLeadRecordingInNewTab = async (leadId: string, fallbackUrl?: string | null) => {
     setLoadingRecordingId(leadId);
     try {
-      const res = await apiRequest('GET', `/api/recordings/${leadId}/gcs-url`);
+      const res = await apiRequest('GET', `/api/leads/${leadId}/recording-url`);
       if (!res.ok) throw new Error('Failed to get recording URL');
       const data = await res.json();
       if (data.url) {
         window.open(data.url, '_blank', 'noopener,noreferrer');
+      } else if (fallbackUrl) {
+        window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
       } else {
         toast({
           title: "No Recording",
@@ -1612,6 +1666,10 @@ export default function LeadsPage() {
     } finally {
       setLoadingRecordingId(null);
     }
+  };
+
+  const handlePlayRecording = async (leadId: string, recordingUrl?: string | null) => {
+    await openLeadRecordingInNewTab(leadId, recordingUrl);
   };
 
   const isPlayingRecording = (_leadId: string) => {
@@ -2315,6 +2373,35 @@ export default function LeadsPage() {
                   )}
                   PM Approve & Publish ({selectedLeads.length})
                 </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      const reason = window.prompt(
+                        'Enter required reason for PM exception override (quality checks will be bypassed):'
+                      );
+                      if (!reason || !reason.trim()) {
+                        toast({
+                          title: "Override reason required",
+                          description: "Please provide a reason to approve with exceptions.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      bulkPmApproveWithExceptionsMutation.mutate({
+                        leadIds: selectedLeads,
+                        overrideReason: reason.trim(),
+                      });
+                    }}
+                    disabled={bulkPmApproveWithExceptionsMutation.isPending}
+                    data-testid="button-bulk-pm-approve-with-exceptions"
+                  >
+                    {bulkPmApproveWithExceptionsMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <AlertTriangle className="mr-2 h-4 w-4" />
+                    )}
+                    Approve with Exceptions ({selectedLeads.length})
+                  </Button>
                 <Button 
                   variant="outline" 
                   onClick={() => bulkExportMutation.mutate(selectedLeads)}
@@ -2354,13 +2441,14 @@ export default function LeadsPage() {
                     <TableHead>Campaign</TableHead>
                     <TableHead>QA Status</TableHead>
                     <TableHead>QA Approved By</TableHead>
+                    <TableHead>Recording</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pmReviewLeads.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         No leads pending PM review
                       </TableCell>
                     </TableRow>
@@ -2417,6 +2505,28 @@ export default function LeadsPage() {
                               </>
                             ) : '-'}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          {lead.recordingUrl ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handlePlayRecording(lead.id, lead.recordingUrl)}
+                              disabled={loadingRecordingId === lead.id}
+                              data-testid={`button-pm-play-recording-${lead.id}`}
+                            >
+                              {loadingRecordingId === lead.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <Play className="mr-1 h-4 w-4" />
+                                  Play
+                                </>
+                              )}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No recording</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
@@ -2858,7 +2968,7 @@ export default function LeadsPage() {
                   <div className="flex items-center gap-4">
                     <Button
                       variant="outline"
-                      onClick={() => window.open(selectedLead.recordingUrl!, '_blank')}
+                      onClick={() => openLeadRecordingInNewTab(selectedLead.id, selectedLead.recordingUrl)}
                       data-testid="button-play-recording-detail"
                     >
                       <Play className="mr-2 h-4 w-4" />

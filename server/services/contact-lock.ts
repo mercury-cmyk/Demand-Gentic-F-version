@@ -134,7 +134,14 @@ export async function lockNextContact(
               AND dca.contact_id = cq.contact_id
               AND dca.campaign_id = ${campaignId}
           )
-        ORDER BY cq.priority DESC, cq.created_at ASC
+        ORDER BY
+          CASE
+            WHEN regexp_replace(lower(COALESCE(c.last_call_outcome, '')), '[^a-z]', '', 'g') = 'callbackrequested' THEN 1
+            ELSE 0
+          END DESC,
+          COALESCE(cq.ai_priority_score, cq.priority) DESC,
+          cq.next_attempt_at ASC NULLS FIRST,
+          cq.created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
       `);

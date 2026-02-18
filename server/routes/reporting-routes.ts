@@ -19,6 +19,8 @@ import {
 import { eq, and, gte, lte, inArray, sql, desc, isNotNull, or, count } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { requireAuth, requireRole } from "../auth";
+import { getPresignedDownloadUrl } from "../lib/storage";
+import { getPlayableRecordingLink } from "../services/recording-link-resolver";
 
 /**
  * Canonical disposition mapping to unified display labels
@@ -804,6 +806,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         startTime: callSessions.startedAt,
         endTime: callSessions.endedAt,
         duration: callSessions.durationSec,
+        recordingS3Key: callSessions.recordingS3Key,
         recordingUrl: callSessions.recordingUrl,
         status: callSessions.status,
       })
@@ -869,6 +872,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         startTime: dialerCallAttempts.createdAt,
         endTime: dialerCallAttempts.endedAt,
         duration: dialerCallAttempts.callDurationSeconds,
+        recordingS3Key: callSessions.recordingS3Key,
         recordingUrl: dialerCallAttempts.recordingUrl,
         status: dialerCallAttempts.status,
       })
@@ -878,6 +882,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       .innerJoin(accounts, eq(contacts.accountId, accounts.id))
       .leftJoin(users, eq(dialerCallAttempts.humanAgentId, users.id))
       .leftJoin(virtualAgents, eq(dialerCallAttempts.virtualAgentId, virtualAgents.id))
+      .leftJoin(callSessions, eq(dialerCallAttempts.callSessionId, callSessions.id))
       .where(dialerConditions.length > 0 ? and(...dialerConditions) : undefined);
 
     // Perform queries
@@ -891,10 +896,37 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         .offset(offsetNum)
     ]);
 
-    const paginatedCalls = allCalls.map(call => ({
-      ...call,
-      // Normalize disposition display
-      disposition: DISPOSITION_DISPLAY_MAP[call.disposition || '']?.label || call.disposition || 'Unknown',
+    const paginatedCalls = await Promise.all(allCalls.map(async (call) => {
+      let recordingUrl: string | null = null;
+
+      if (call.recordingS3Key) {
+        try {
+          const signed = await getPresignedDownloadUrl(call.recordingS3Key, 7 * 24 * 60 * 60);
+          if (!signed.startsWith('gcs-internal://')) {
+            recordingUrl = signed;
+          }
+        } catch {
+          // Ignore and fall through to resolver
+        }
+      }
+
+      if (!recordingUrl) {
+        try {
+          const resolved = await getPlayableRecordingLink(call.id);
+          if (resolved?.source === 'gcs' && resolved.url && !resolved.url.startsWith('gcs-internal://')) {
+            recordingUrl = resolved.url;
+          }
+        } catch {
+          // Keep null when GCS URL cannot be resolved
+        }
+      }
+
+      return {
+        ...call,
+        recordingUrl,
+        // Normalize disposition display
+        disposition: DISPOSITION_DISPLAY_MAP[call.disposition || '']?.label || call.disposition || 'Unknown',
+      };
     }));
 
     const total = (legacyCount[0]?.count || 0) + (dialerCount[0]?.count || 0);

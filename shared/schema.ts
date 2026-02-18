@@ -7074,6 +7074,20 @@ export const clientAccounts = pgTable("client_accounts", {
     preferredWorkflows?: string[];
     reportingEmphasis?: string[];
     agentDefaults?: Record<string, any>; // Adapt agent behavior
+    tutorialVideos?: Array<{
+      id: string;
+      title: string;
+      description?: string | null;
+      url: string;
+      embedUrl?: string;
+      provider?: 'google_drive' | 'youtube' | 'loom' | 'vimeo' | 'other';
+      thumbnailUrl?: string | null;
+      durationSeconds?: number | null;
+      sortOrder?: number;
+      isActive?: boolean;
+      createdAt?: string;
+      updatedAt?: string;
+    }>;
   }>().default({}),
 
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),

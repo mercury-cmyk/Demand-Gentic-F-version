@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import {
   ChevronLeft, ChevronRight, Search, Filter, Download, Eye, Headphones,
   FileText, Loader2, UserCheck, ArrowUpDown, RefreshCw, MessageSquare, Sparkles,
-  TrendingUp, Building2,
+  TrendingUp, Building2, LayoutList,
 } from 'lucide-react';
 import { PushToShowcaseButton } from '@/components/showcase-calls/push-to-showcase-button';
 
@@ -113,6 +113,8 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
   const total = leadsResponse?.total || 0;
   const totalPages = Math.ceil(total / pageSize);
   const debugText = leadsResponse?.debug ? JSON.stringify(leadsResponse.debug, null, 2) : '';
+  const leadsWithRecordings = leads.filter((lead) => lead.hasRecording).length;
+  const leadsWithTranscripts = leads.filter((lead) => lead.hasTranscript).length;
 
   const handleSort = (column: string) => {
     if (sortBy === column) {
@@ -151,7 +153,7 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
   };
 
   return (
-    <Card className="shadow-lg border-0 bg-gradient-to-br from-white to-blue-50/30">
+    <Card className="shadow-lg border-0 bg-gradient-to-br from-white to-blue-50/30 overflow-hidden">
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6">
         <div className="space-y-1.5">
           <CardTitle className="text-2xl flex items-center gap-2">
@@ -164,8 +166,8 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
             <span className="text-muted-foreground">QA-approved leads from your campaigns</span>
           </CardDescription>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <div className="relative w-64">
+        <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2">
+          <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search leads..."
@@ -184,7 +186,7 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
               setPage(1);
             }}
           >
-            <SelectTrigger className="w-52 bg-white border-gray-200">
+            <SelectTrigger className="w-full sm:w-52 bg-white border-gray-200">
               <Filter className="h-4 w-4 mr-2 text-blue-600" />
               <SelectValue placeholder="All Campaigns" />
             </SelectTrigger>
@@ -208,14 +210,14 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
             variant="outline" 
             size="icon" 
             onClick={() => refetch()}
-            className="hover:bg-blue-50 hover:border-blue-300 transition-colors"
+            className="h-10 w-10 hover:bg-blue-50 hover:border-blue-300 transition-colors"
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button 
             variant="default" 
             onClick={onExport}
-            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md"
+            className="h-10 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md"
           >
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -223,6 +225,21 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
         </div>
       </CardHeader>
       <CardContent>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Current Page</p>
+            <p className="text-lg font-semibold text-slate-900">{leads.length.toLocaleString()} leads</p>
+          </div>
+          <div className="rounded-xl border border-blue-200/70 bg-blue-50/50 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-blue-700/70">With Recording</p>
+            <p className="text-lg font-semibold text-blue-700">{leadsWithRecordings.toLocaleString()}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/50 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-emerald-700/70">With Transcript</p>
+            <p className="text-lg font-semibold text-emerald-700">{leadsWithTranscripts.toLocaleString()}</p>
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="flex justify-center p-16">
             <div className="text-center space-y-3">
@@ -250,9 +267,14 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
           </div>
         ) : (
           <>
-            <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white">
-              <Table>
-                <TableHeader className="bg-gradient-to-r from-gray-50 to-blue-50/50">
+            <div className="rounded-xl border border-gray-200 shadow-sm bg-white overflow-hidden">
+              <div className="px-3 py-2 border-b bg-slate-50/70 flex items-center gap-2 text-xs text-slate-600">
+                <LayoutList className="h-3.5 w-3.5" />
+                <span>Scroll horizontally on smaller screens to view all columns.</span>
+              </div>
+              <div className="max-h-[65vh] overflow-auto">
+              <Table className="min-w-[980px]">
+                <TableHeader className="bg-gradient-to-r from-gray-50 to-blue-50/50 sticky top-0 z-10">
                   <TableRow className="border-b-2 border-gray-200">
                     <TableHead className="font-semibold">
                       <Button
@@ -392,14 +414,15 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </div>
 
             {/* Modern Pagination */}
-            <div className="flex items-center justify-between pt-6 border-t border-gray-200 mt-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-6 border-t border-gray-200 mt-4">
               <p className="text-sm text-muted-foreground font-medium">
                 Showing <span className="text-gray-900">{((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, total)}</span> of <span className="text-gray-900">{total.toLocaleString()}</span> leads
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 self-end md:self-auto">
                 <Button
                   variant="outline"
                   size="sm"

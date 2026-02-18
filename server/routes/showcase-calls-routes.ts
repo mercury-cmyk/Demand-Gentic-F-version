@@ -21,6 +21,7 @@ import { requireAuth } from "../auth";
 import { getCallSessionRecordingS3Key, storeCallSessionRecording, getCallSessionRecordingUrl } from "../services/recording-storage";
 import { streamFromS3, s3ObjectExists, readFromGCS } from "../lib/storage";
 import { getPlayableRecordingLink } from "../services/recording-link-resolver";
+import { canonicalizeGcsRecordingUrl } from "../lib/recording-url-policy";
 
 const router = Router();
 const SHOWCASE_MAX_CALLS = 50;
@@ -171,22 +172,6 @@ function noVoicemailTranscriptFilterSql() {
 /** Exclude known machine call-screening transcripts (e.g., Google Call Assist). */
 function noCallScreeningTranscriptFilterSql() {
   return sql`COALESCE(${callQualityRecords.fullTranscript}, '') !~* ${CALL_SCREENING_TRANSCRIPT_REGEX}`;
-}
-
-function hasRecordingIndicator(record: {
-  recordingStatus?: string | null;
-  recordingS3Key?: string | null;
-  recordingUrl?: string | null;
-  telnyxCallId?: string | null;
-  telnyxRecordingId?: string | null;
-}) {
-  return Boolean(
-    record.recordingS3Key ||
-    record.recordingUrl ||
-    record.telnyxRecordingId ||
-    record.telnyxCallId ||
-    record.recordingStatus === 'stored'
-  );
 }
 
 function buildFilters(query: any) {
@@ -355,11 +340,18 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       .offset(safeOffset);
 
     res.json({
-      calls: rows.map(r => ({
-        ...r,
-        hasRecording: hasRecordingIndicator(r),
-        agentPerformanceScore: Math.round(Number(r.agentPerformanceScore) || 0),
-      })),
+      calls: rows.map(r => {
+        const recordingUrl = canonicalizeGcsRecordingUrl({
+          recordingS3Key: r.recordingS3Key,
+          recordingUrl: r.recordingUrl,
+        });
+        return {
+          ...r,
+          recordingUrl,
+          hasRecording: Boolean(recordingUrl),
+          agentPerformanceScore: Math.round(Number(r.agentPerformanceScore) || 0),
+        };
+      }),
       pagination: {
         page,
         limit,
@@ -433,6 +425,10 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
 
     // Suggest a category for each candidate based on their highest dimension
     const enriched = candidates.map(c => {
+      const recordingUrl = canonicalizeGcsRecordingUrl({
+        recordingS3Key: c.recordingS3Key,
+        recordingUrl: c.recordingUrl,
+      });
       const dimensions: Record<string, number> = {
         objection_handling: c.objectionHandlingScore ?? 0,
         empathetic_response: c.empathyScore ?? 0,
@@ -444,7 +440,8 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
 
       return {
         ...c,
-        hasRecording: hasRecordingIndicator(c),
+        recordingUrl,
+        hasRecording: Boolean(recordingUrl),
         agentPerformanceScore: Math.round(Number(c.agentPerformanceScore) || 0),
         suggestedCategory: topDimension[0],
       };
@@ -649,12 +646,24 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
 
     // Resolve a direct GCS download URL for the recording instead of streaming.
     let downloadUrl: string | null = null;
+    const canonicalRecordingUrl = canonicalizeGcsRecordingUrl({
+      recordingS3Key: record.recordingS3Key,
+      recordingUrl: record.recordingUrl,
+    });
     let hasRecording = false;
     try {
       const gcsResult = await getCallSessionRecordingUrl(callSessionId, record.recordingUrl);
-      if (gcsResult.url) {
-        downloadUrl = gcsResult.url;
-        hasRecording = true;
+      if (
+        gcsResult.url &&
+        gcsResult.source === 'local' &&
+        !gcsResult.url.startsWith('gcs-internal://')
+      ) {
+        const canonicalDownloadUrl = canonicalizeGcsRecordingUrl({
+          recordingS3Key: record.recordingS3Key,
+          recordingUrl: gcsResult.url,
+        });
+        downloadUrl = canonicalDownloadUrl;
+        hasRecording = Boolean(canonicalDownloadUrl);
       }
     } catch {
       // Non-blocking: fall back to local indicator check below
@@ -663,14 +672,15 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
     // Fallback: check if recording exists even if we couldn't get a URL
     if (!hasRecording) {
       try {
-        hasRecording = Boolean(await getPlayableRecordingLink(callSessionId)) || hasRecordingIndicator(record);
+        hasRecording = Boolean(canonicalRecordingUrl) || Boolean(await getPlayableRecordingLink(callSessionId));
       } catch {
-        hasRecording = hasRecordingIndicator(record);
+        hasRecording = Boolean(canonicalRecordingUrl);
       }
     }
 
     res.json({
       ...record,
+      recordingUrl: canonicalRecordingUrl,
       playbackUrl: null,
       downloadUrl: downloadUrl,
       hasRecording,

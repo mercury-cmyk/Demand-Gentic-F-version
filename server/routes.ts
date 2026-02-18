@@ -131,6 +131,7 @@ import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
+import { canonicalizeGcsRecordingUrl } from "./lib/recording-url-policy";
 import * as schema from "@shared/schema";
 import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, callQualityRecords, passwordResetTokens, clientUsers, type InsertMailboxAccount, type Account } from "@shared/schema";
 import { transactionalEmailService } from "./services/transactional-email-service";
@@ -9537,7 +9538,15 @@ export function registerRoutes(app: Express) {
         filtered = filtered.filter(l => l.createdAt && new Date(l.createdAt) <= toDate);
       }
       
-      res.json(filtered);
+      const sanitized = filtered.map((lead) => ({
+        ...lead,
+        recordingUrl: canonicalizeGcsRecordingUrl({
+          recordingS3Key: lead.recordingS3Key,
+          recordingUrl: lead.recordingUrl,
+        }),
+      }));
+
+      res.json(sanitized);
     } catch (error) {
       console.error('Failed to fetch leads:', error);
       res.status(500).json({ message: "Failed to fetch leads" });
@@ -9548,7 +9557,15 @@ export function registerRoutes(app: Express) {
   app.get("/api/leads/deleted", requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const deletedLeads = await storage.getDeletedLeads();
-      res.json(deletedLeads);
+      const sanitized = deletedLeads.map((lead) => ({
+        ...lead,
+        recordingUrl: canonicalizeGcsRecordingUrl({
+          recordingS3Key: lead.recordingS3Key,
+          recordingUrl: lead.recordingUrl,
+        }),
+      }));
+
+      res.json(sanitized);
     } catch (error) {
       console.error('[LEADS-DELETED] Error fetching deleted leads:', error);
       res.status(500).json({ message: "Failed to fetch deleted leads" });
@@ -9626,6 +9643,10 @@ export function registerRoutes(app: Express) {
       // Flatten account data to match expected structure
       const responseData = {
         ...lead,
+        recordingUrl: canonicalizeGcsRecordingUrl({
+          recordingS3Key: lead.recordingS3Key,
+          recordingUrl: lead.recordingUrl,
+        }),
         account: lead.contact?.account || null,
       };
 
@@ -9734,6 +9755,10 @@ export function registerRoutes(app: Express) {
     try {
       const leadId = req.params.id;
       const approvedById = req.user!.userId;
+      const { allowQualityBypass = false, overrideReason } = (req.body || {}) as {
+        allowQualityBypass?: boolean;
+        overrideReason?: string;
+      };
 
       // Get current lead
       const [existingLead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
@@ -9743,10 +9768,16 @@ export function registerRoutes(app: Express) {
 
       // STRICT ENFORCEMENT: Check quality requirements before PM approval
       const qualityCheck = validateLeadQuality(existingLead);
-      if (!qualityCheck.valid) {
+      if (!qualityCheck.valid && !allowQualityBypass) {
         return res.status(400).json({ 
           message: "Cannot approve lead: Quality requirements not met", 
           errors: qualityCheck.errors 
+        });
+      }
+
+      if (!qualityCheck.valid && allowQualityBypass && !String(overrideReason || '').trim()) {
+        return res.status(400).json({
+          message: "overrideReason is required when allowQualityBypass is true",
         });
       }
 
@@ -9754,6 +9785,29 @@ export function registerRoutes(app: Express) {
       if (existingLead.qaStatus !== 'approved' && existingLead.qaStatus !== 'pending_pm_review') {
         return res.status(400).json({ message: "Only leads pending PM review can be approved" });
       }
+
+      const existingQaData = (existingLead.qaData ?? {}) as Record<string, unknown>;
+      const currentOverrides = Array.isArray(existingQaData.pmApprovalOverrides)
+        ? [...(existingQaData.pmApprovalOverrides as unknown[])]
+        : [];
+
+      const overrideAuditEntry = (!qualityCheck.valid && allowQualityBypass)
+        ? {
+            timestamp: new Date().toISOString(),
+            approvedById,
+            reason: String(overrideReason || '').trim(),
+            qualityErrors: qualityCheck.errors,
+            mode: 'single',
+          }
+        : null;
+
+      const nextQaData: Record<string, unknown> = overrideAuditEntry
+        ? {
+            ...existingQaData,
+            pmApprovalOverrides: [...currentOverrides, overrideAuditEntry],
+            lastPmApprovalOverride: overrideAuditEntry,
+          }
+        : existingQaData;
 
       // Update lead status to published
       const [updatedLead] = await db.update(leads)
@@ -9763,6 +9817,7 @@ export function registerRoutes(app: Express) {
           publishedBy: approvedById,
           pmApprovedAt: new Date(),
           pmApprovedBy: approvedById,
+          qaData: nextQaData,
           updatedAt: new Date(),
         })
         .where(eq(leads.id, leadId))
@@ -9837,18 +9892,35 @@ export function registerRoutes(app: Express) {
   // Bulk PM Approve - PM approves multiple leads at once
   app.post("/api/leads/pm-approve-bulk", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
-      const { leadIds } = req.body as { leadIds: string[] };
+      const {
+        leadIds,
+        allowQualityBypass = false,
+        overrideReason,
+      } = req.body as {
+        leadIds: string[];
+        allowQualityBypass?: boolean;
+        overrideReason?: string;
+      };
       const approvedById = req.user!.userId;
+      const MAX_FAILURE_DETAILS = 25;
 
       if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
         return res.status(400).json({ message: "leadIds array is required" });
+      }
+
+      if (allowQualityBypass && !String(overrideReason || '').trim()) {
+        return res.status(400).json({
+          message: "overrideReason is required when allowQualityBypass is true",
+        });
       }
 
       // STRICT ENFORCEMENT: Validate all leads against quality requirements
       const candidates = await db.select().from(leads).where(inArray(leads.id, leadIds));
       
       const validIds: string[] = [];
+      const validOverrideIds: string[] = [];
       const failedLeads: {id: string, errors: string[]}[] = [];
+      const overrideAuditByLeadId: Record<string, Record<string, unknown>> = {};
 
       for (const lead of candidates) {
         const check = validateLeadQuality(lead);
@@ -9857,6 +9929,28 @@ export function registerRoutes(app: Express) {
         
         if (check.valid && isStatusEligible) {
           validIds.push(lead.id);
+        } else if (!check.valid && isStatusEligible && allowQualityBypass) {
+          validIds.push(lead.id);
+          validOverrideIds.push(lead.id);
+
+          const existingQaData = (lead.qaData ?? {}) as Record<string, unknown>;
+          const currentOverrides = Array.isArray(existingQaData.pmApprovalOverrides)
+            ? [...(existingQaData.pmApprovalOverrides as unknown[])]
+            : [];
+
+          const overrideAuditEntry = {
+            timestamp: new Date().toISOString(),
+            approvedById,
+            reason: String(overrideReason || '').trim(),
+            qualityErrors: check.errors,
+            mode: 'bulk',
+          };
+
+          overrideAuditByLeadId[lead.id] = {
+            ...existingQaData,
+            pmApprovalOverrides: [...currentOverrides, overrideAuditEntry],
+            lastPmApprovalOverride: overrideAuditEntry,
+          };
         } else {
           const errors = check.errors;
           if (!isStatusEligible) errors.push(`Invalid status: ${lead.qaStatus}`);
@@ -9865,14 +9959,28 @@ export function registerRoutes(app: Express) {
       }
 
       if (validIds.length === 0) {
-        return res.status(400).json({ 
-          message: "No leads eligible for approval. All leads failed quality or status checks.",
-          failures: failedLeads
+        const failureSummary = failedLeads.reduce<Record<string, number>>((acc, failure) => {
+          for (const error of failure.errors) {
+            acc[error] = (acc[error] || 0) + 1;
+          }
+          return acc;
+        }, {});
+
+        return res.json({ 
+          message: "0 leads approved. All selected leads failed quality or status checks.",
+          approvedCount: 0,
+          failedCount: failedLeads.length,
+          failureSummary,
+          failures: failedLeads.slice(0, MAX_FAILURE_DETAILS),
+          failuresTruncated: failedLeads.length > MAX_FAILURE_DETAILS,
         });
       }
 
-      // Update all valid leads to published
-      const updatedLeads = await db.update(leads)
+      // Update valid non-override leads in one query
+      const validNonOverrideIds = validIds.filter((id) => !validOverrideIds.includes(id));
+
+      const updatedNonOverrideLeads = validNonOverrideIds.length > 0
+        ? await db.update(leads)
         .set({
           qaStatus: 'published',
           publishedAt: new Date(),
@@ -9881,8 +9989,32 @@ export function registerRoutes(app: Express) {
           pmApprovedBy: approvedById,
           updatedAt: new Date(),
         })
-        .where(inArray(leads.id, validIds))
+        .where(inArray(leads.id, validNonOverrideIds))
+        .returning()
+        : [];
+
+      // Update override-approved leads one-by-one to persist lead-specific audit trail
+      const updatedOverrideLeads = [] as typeof updatedNonOverrideLeads;
+      for (const overrideLeadId of validOverrideIds) {
+        const [updatedOverrideLead] = await db.update(leads)
+        .set({
+          qaStatus: 'published',
+          publishedAt: new Date(),
+          publishedBy: approvedById,
+          pmApprovedAt: new Date(),
+          pmApprovedBy: approvedById,
+          qaData: overrideAuditByLeadId[overrideLeadId],
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, overrideLeadId))
         .returning();
+
+        if (updatedOverrideLead) {
+          updatedOverrideLeads.push(updatedOverrideLead);
+        }
+      }
+
+      const updatedLeads = [...updatedNonOverrideLeads, ...updatedOverrideLeads];
 
       // Trigger lead delivery for all approved leads
       for (const lead of updatedLeads) {
@@ -9897,12 +10029,22 @@ export function registerRoutes(app: Express) {
       }
 
       console.log(`[PM-APPROVE-BULK] ${updatedLeads.length} leads approved by PM ${approvedById}. ${failedLeads.length} failed validation.`);
+      const failureSummary = failedLeads.reduce<Record<string, number>>((acc, failure) => {
+        for (const error of failure.errors) {
+          acc[error] = (acc[error] || 0) + 1;
+        }
+        return acc;
+      }, {});
+
       res.json({
         message: `${updatedLeads.length} leads approved and published successfully. ${failedLeads.length} failed validation.`,
         approvedCount: updatedLeads.length,
+        overrideApprovedCount: updatedOverrideLeads.length,
         failedCount: failedLeads.length,
         leads: updatedLeads,
-        failures: failedLeads
+        failureSummary,
+        failures: failedLeads.slice(0, MAX_FAILURE_DETAILS),
+        failuresTruncated: failedLeads.length > MAX_FAILURE_DETAILS,
       });
     } catch (error) {
       console.error('[PM-APPROVE-BULK] Error:', error);
@@ -11287,24 +11429,13 @@ export function registerRoutes(app: Express) {
       };
       const leadsData = await storage.getLeads(qaStatusFilter);
       
-      // Import S3 utilities to generate fresh presigned URLs for recordings
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
-
-      // Generate fresh presigned URLs for recordings stored in S3 (7-day validity)
+      // Export canonical GCS URLs only (no temporary S3/Telnyx links)
       const csvData = await Promise.all(leadsData.map(async (lead) => {
-        let recordingUrl = lead.recordingUrl || '';
-        
-        // If recording is stored in S3, generate a fresh 7-day presigned URL
-        if (lead.recordingS3Key) {
-          try {
-            const exists = await s3ObjectExists(lead.recordingS3Key);
-            if (exists) {
-              recordingUrl = await getPresignedDownloadUrl(lead.recordingS3Key, 7 * 24 * 60 * 60);
-            }
-          } catch (s3Error) {
-            console.error(`[Export] Failed to generate presigned URL for lead ${lead.id}:`, s3Error);
-          }
-        }
+        const recordingUrl =
+          canonicalizeGcsRecordingUrl({
+            recordingS3Key: (lead as any).recordingS3Key,
+            recordingUrl: lead.recordingUrl,
+          }) || '';
         
         // Build agent name from first/last name fields
         const agentName = [lead.agentFirstName, lead.agentLastName].filter(Boolean).join(' ') || '';
@@ -11435,26 +11566,15 @@ export function registerRoutes(app: Express) {
         .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
         .where(inArray(leads.id, validLeadIds));
 
-      // Import S3 utilities for fresh presigned URLs
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
-      
-      // Convert to CSV format with fresh presigned URLs for recordings
+      // Convert to CSV format with canonical GCS recording URLs only
       const PapaModule = await import('papaparse');
       const Papa = PapaModule.default;
       const csvData = await Promise.all(leadsData.map(async (lead) => {
-        let recordingUrl = lead.recordingUrl || '';
-        
-        // If recording is stored in S3, generate a fresh 7-day presigned URL
-        if (lead.recordingS3Key) {
-          try {
-            const exists = await s3ObjectExists(lead.recordingS3Key);
-            if (exists) {
-              recordingUrl = await getPresignedDownloadUrl(lead.recordingS3Key, 7 * 24 * 60 * 60);
-            }
-          } catch (s3Error) {
-            console.error(`[Export] Failed to generate presigned URL for lead ${lead.id}:`, s3Error);
-          }
-        }
+        const recordingUrl =
+          canonicalizeGcsRecordingUrl({
+            recordingS3Key: lead.recordingS3Key,
+            recordingUrl: lead.recordingUrl,
+          }) || '';
         
         return {
           'Lead ID': lead.id || '',
@@ -13783,111 +13903,72 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Get fresh recording URL for a lead (serves from S3 with 7-day presigned URLs)
+  // Get fresh recording URL for a lead (GCS-backed, durable URL only)
   app.get("/api/leads/:id/recording-url", requireAuth, async (req, res) => {
     try {
       const { leads } = await import('@shared/schema');
       const { getRecordingUrl, isRecordingStorageEnabled } = await import('./services/recording-storage');
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
+      const { syncRecordingForLead } = await import('./services/telnyx-recordings');
       
       const [lead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
       
       if (!lead) {
         return res.status(404).json({ message: "Lead not found" });
       }
-      
-      // Check if recording exists in S3 first (permanent storage)
-      if (lead.recordingS3Key) {
-        try {
-          const exists = await s3ObjectExists(lead.recordingS3Key);
-          if (exists) {
-            // Generate 7-day presigned URL for S3 recording
-            const url = await getPresignedDownloadUrl(lead.recordingS3Key, 7 * 24 * 60 * 60);
-            console.log(`[Recording URL] Serving from S3: ${lead.recordingS3Key}`);
-            return res.json({ url, source: 'local', expiresIn: '7 days' });
-          }
-        } catch (s3Error) {
-          console.error(`[Recording URL] S3 check failed for lead ${lead.id}:`, s3Error);
-        }
+
+      const existingCanonical = canonicalizeGcsRecordingUrl({
+        recordingS3Key: lead.recordingS3Key,
+        recordingUrl: lead.recordingUrl,
+      });
+      if (existingCanonical) {
+        return res.json({ url: existingCanonical, source: 'gcs', expiresIn: 'durable' });
       }
       
-      // No S3 recording - try to use the recording storage service
+      // No GCS recording key found in DB yet; try to store from source recording URL
       if (lead.recordingUrl && isRecordingStorageEnabled()) {
-        console.log(`[Recording URL] Attempting to store recording in S3 for lead ${lead.id}...`);
+        console.log(`[Recording URL] Attempting to store recording in GCS for lead ${lead.id}...`);
         const result = await getRecordingUrl(lead.id, lead.recordingUrl);
-        
-        if (result.url && result.source === 'local') {
-          console.log(`[Recording URL] Successfully stored and serving from S3 for lead ${lead.id}`);
-          return res.json({ url: result.url, source: 'local', expiresIn: '7 days' });
+
+        const canonicalAfterStore = canonicalizeGcsRecordingUrl({
+          recordingS3Key: lead.recordingS3Key,
+          recordingUrl: result.url,
+        });
+
+        if (canonicalAfterStore) {
+          console.log(`[Recording URL] Successfully stored and serving from GCS for lead ${lead.id}`);
+          return res.json({ url: canonicalAfterStore, source: 'gcs', expiresIn: 'durable' });
         }
       }
-      
-      // Fall back to original Telnyx URL if S3 storage failed or not configured
-      if (!lead.recordingUrl) {
-        return res.status(404).json({ message: "No recording URL available for this lead" });
-      }
-      
-      // Check if Telnyx URL has expired
-      const isUrlExpired = (url: string): boolean => {
-        try {
-          const urlObj = new URL(url);
-          const amzDate = urlObj.searchParams.get('X-Amz-Date');
-          const amzExpires = urlObj.searchParams.get('X-Amz-Expires');
-          
-          if (!amzDate || !amzExpires) return false;
-          
-          const year = parseInt(amzDate.substring(0, 4));
-          const month = parseInt(amzDate.substring(4, 6)) - 1;
-          const day = parseInt(amzDate.substring(6, 8));
-          const hour = parseInt(amzDate.substring(9, 11));
-          const minute = parseInt(amzDate.substring(11, 13));
-          const second = parseInt(amzDate.substring(13, 15));
-          
-          const signedAt = new Date(Date.UTC(year, month, day, hour, minute, second));
-          const expiresAt = new Date(signedAt.getTime() + parseInt(amzExpires) * 1000);
-          
-          return new Date() > expiresAt;
-        } catch {
-          return false;
-        }
-      };
-      
-      if (isUrlExpired(lead.recordingUrl)) {
-        console.log(`[Recording URL] Telnyx URL expired for lead ${lead.id}, attempting to refresh...`);
-        
-        try {
-          const { syncRecordingForLead } = await import('./services/telnyx-recordings');
-          const refreshed = await syncRecordingForLead(req.params.id);
-          
-          if (refreshed) {
-            const [updatedLead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
-            if (updatedLead?.recordingUrl) {
-              // Try to store the refreshed URL in S3 for permanent access
-              if (isRecordingStorageEnabled()) {
-                const result = await getRecordingUrl(lead.id, updatedLead.recordingUrl);
-                if (result.url && result.source === 'local') {
-                  return res.json({ url: result.url, source: 'local', expiresIn: '7 days' });
-                }
-              }
-              return res.json({ url: updatedLead.recordingUrl, source: 'telnyx' });
+
+      // Final attempt: refresh from Telnyx, then immediately persist to GCS
+      if (isRecordingStorageEnabled()) {
+        const refreshed = await syncRecordingForLead(req.params.id).catch(() => false);
+        if (refreshed) {
+          const [updatedLead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
+          const canonicalAfterSync = canonicalizeGcsRecordingUrl({
+            recordingS3Key: updatedLead?.recordingS3Key,
+            recordingUrl: updatedLead?.recordingUrl,
+          });
+          if (canonicalAfterSync) {
+            return res.json({ url: canonicalAfterSync, source: 'gcs', expiresIn: 'durable' });
+          }
+          if (updatedLead?.recordingUrl) {
+            const result = await getRecordingUrl(lead.id, updatedLead.recordingUrl);
+            const canonicalFromStoredResult = canonicalizeGcsRecordingUrl({
+              recordingS3Key: updatedLead.recordingS3Key,
+              recordingUrl: result.url,
+            });
+            if (canonicalFromStoredResult) {
+              return res.json({ url: canonicalFromStoredResult, source: 'gcs', expiresIn: 'durable' });
             }
           }
-          
-          return res.status(410).json({ 
-            message: "Recording URL has expired and could not be refreshed",
-            expired: true
-          });
-        } catch (refreshError) {
-          console.error(`[Recording URL] Refresh failed for lead ${lead.id}:`, refreshError);
-          return res.status(410).json({ 
-            message: "Recording URL has expired and refresh failed",
-            expired: true
-          });
         }
       }
-      
-      // Telnyx URL is still valid - return it but try to store in S3 in background
-      res.json({ url: lead.recordingUrl, source: 'telnyx', warning: 'URL expires in ~10 minutes' });
+
+      return res.status(404).json({
+        message: "GCS recording URL not available yet for this lead",
+        requiresSync: true,
+      });
     } catch (error) {
       console.error('Get recording URL error:', error);
       res.status(500).json({ message: "Failed to get recording URL" });
@@ -15816,6 +15897,10 @@ Provide JSON response with:
         // ===== HELPER: Transform a single session row into conversation format =====
         const transformSession = (session: typeof sessions[0]) => {
           const normalized = normalizeTranscript(session.transcript);
+          const canonicalRecordingUrl = canonicalizeGcsRecordingUrl({
+            recordingS3Key: session.recordingS3Key,
+            recordingUrl: session.recordingUrl,
+          });
 
           // Extract issues from analysis if available
           // HANDLE BOTH FORMATS: Old (nested under conversationQuality) and new (flat)
@@ -15871,13 +15956,13 @@ Provide JSON response with:
             };
           }
 
-          const hasRecording = !!(session.recordingS3Key || session.recordingUrl || session.telnyxRecordingId);
+          const hasRecording = !!(canonicalRecordingUrl || session.telnyxRecordingId);
           // If recordingStatus is explicitly set use it; otherwise infer from available data
           const inferredStatus = session.recordingS3Key ? 'stored'
             : (session.recordingUrl || session.telnyxRecordingId) ? 'stored'
             : 'none';
           const effectiveStatus = session.recordingStatus || inferredStatus;
-          const recordingAvailable = effectiveStatus === 'stored' || !!session.recordingUrl || !!session.telnyxRecordingId;
+          const recordingAvailable = effectiveStatus === 'stored' || !!canonicalRecordingUrl || !!session.telnyxRecordingId;
           const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact';
           const aiSettings = session.aiAgentSettings as any;
           const agentName = aiSettings?.persona?.name || aiSettings?.persona?.agentName || undefined;
@@ -15903,7 +15988,7 @@ Provide JSON response with:
             analysis: normalizedAnalysis,
             detectedIssues: detectedIssues.length > 0 ? detectedIssues : undefined,
             callSummary,
-            recordingUrl: session.recordingUrl || undefined,
+            recordingUrl: canonicalRecordingUrl || undefined,
             recordingS3Key: session.recordingS3Key || undefined,
             recordingStatus: effectiveStatus,
             telnyxRecordingId: session.telnyxRecordingId || undefined,
@@ -16023,7 +16108,7 @@ Provide JSON response with:
             detectedIssues: testCall.detectedIssues as any[] || undefined,
             callSummary: testCall.callSummary || undefined,
             testResult: testCall.testResult || undefined,
-            recordingUrl: testCall.recordingUrl || undefined,
+            recordingUrl: canonicalizeGcsRecordingUrl({ recordingUrl: testCall.recordingUrl }) || undefined,
             createdAt: testCall.createdAt?.toISOString() || new Date().toISOString(),
             isTestCall: true,
           });
@@ -16881,15 +16966,35 @@ Provide JSON response with:
     try {
       const { callSessionId } = req.params;
       const { getPlayableRecordingLink } = await import('./services/recording-link-resolver');
+      const { getCallSessionRecordingUrl } = await import('./services/recording-storage');
       const result = await getPlayableRecordingLink(callSessionId);
 
       if (!result || !result.url) {
         return res.status(404).json({ error: 'No recording found', url: null });
       }
 
+      // Enforce GCS-backed URLs for QA consumers.
+      if (result.source !== 'gcs') {
+        const gcsResult = await getCallSessionRecordingUrl(callSessionId, result.url).catch(() => ({ url: '', source: null as const }));
+        if (!gcsResult.url || gcsResult.source !== 'local' || gcsResult.url.startsWith('gcs-internal://')) {
+          return res.status(404).json({
+            error: 'GCS recording URL not available yet',
+            url: null,
+            requiresSync: true,
+          });
+        }
+
+        return res.json({
+          url: gcsResult.url,
+          source: 'gcs',
+          mimeType: 'audio/mpeg',
+          expiresInSeconds: 604800,
+        });
+      }
+
       res.json({
         url: result.url,
-        source: result.source,
+        source: 'gcs',
         mimeType: result.mimeType,
         expiresInSeconds: result.expiresInSeconds,
       });

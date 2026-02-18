@@ -15,6 +15,7 @@ import { db } from '../db';
 import { callSessions, campaigns, contacts, accounts, leads, dialerCallAttempts } from '@shared/schema';
 import { eq, desc, and, gte, lte, like, or, sql, isNotNull, count } from 'drizzle-orm';
 import { getCallSessionRecordingUrl, isRecordingStorageEnabled, getRecordingUrl } from '../services/recording-storage';
+import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
 
 const AGENT_TYPES = ['human', 'ai'] as const;
 const RECORDING_STATUSES = ['pending', 'failed', 'recording', 'uploading', 'stored'] as const;
@@ -233,33 +234,40 @@ router.get('/', async (req: Request, res: Response) => {
     });
 
     // Transform results
-    const items = dedupedRecordings.map(rec => ({
-      id: rec.id,
-      fromNumber: rec.fromNumber,
-      toNumber: rec.toNumber,
-      startedAt: rec.startedAt?.toISOString(),
-      endedAt: rec.endedAt?.toISOString() || null,
-      durationSec: rec.durationSec,
-      recordingDurationSec: rec.recordingDurationSec,
-      recordingStatus: rec.recordingStatus || (rec.recordingS3Key ? 'stored' : 'pending'),
-      recordingFormat: rec.recordingFormat || (rec.recordingS3Key?.endsWith('.wav') ? 'wav' : 'mp3'),
-      fileSizeBytes: rec.recordingFileSizeBytes,
-      hasRecording: !!(rec.recordingS3Key || rec.recordingUrl),
-      agentType: rec.agentType as 'ai' | 'human',
-      disposition: rec.aiDisposition || rec.disposition,
-      status: rec.status,
-      campaign: rec.campaignId ? {
-        id: rec.campaignId,
-        name: rec.campaignName,
-      } : null,
-      contact: rec.contactId ? {
-        id: rec.contactId,
-        name: [rec.contactFirstName, rec.contactLastName].filter(Boolean).join(' ') || null,
-        accountName: rec.accountName || null,
-      } : null,
-      aiAgentId: rec.aiAgentId || null,
-      hasTranscript: !!rec.transcript,
-    }));
+    const items = dedupedRecordings.map(rec => {
+      const recordingUrl = canonicalizeGcsRecordingUrl({
+        recordingS3Key: rec.recordingS3Key,
+        recordingUrl: rec.recordingUrl,
+      });
+      return {
+        id: rec.id,
+        fromNumber: rec.fromNumber,
+        toNumber: rec.toNumber,
+        startedAt: rec.startedAt?.toISOString(),
+        endedAt: rec.endedAt?.toISOString() || null,
+        durationSec: rec.durationSec,
+        recordingDurationSec: rec.recordingDurationSec,
+        recordingStatus: rec.recordingStatus || (rec.recordingS3Key ? 'stored' : 'pending'),
+        recordingFormat: rec.recordingFormat || (rec.recordingS3Key?.endsWith('.wav') ? 'wav' : 'mp3'),
+        fileSizeBytes: rec.recordingFileSizeBytes,
+        recordingUrl,
+        hasRecording: !!recordingUrl,
+        agentType: rec.agentType as 'ai' | 'human',
+        disposition: rec.aiDisposition || rec.disposition,
+        status: rec.status,
+        campaign: rec.campaignId ? {
+          id: rec.campaignId,
+          name: rec.campaignName,
+        } : null,
+        contact: rec.contactId ? {
+          id: rec.contactId,
+          name: [rec.contactFirstName, rec.contactLastName].filter(Boolean).join(' ') || null,
+          accountName: rec.accountName || null,
+        } : null,
+        aiAgentId: rec.aiAgentId || null,
+        hasTranscript: !!rec.transcript,
+      };
+    });
 
     res.json({
       success: true,
@@ -376,29 +384,36 @@ router.get('/qa', async (req: Request, res: Response) => {
     const total = countResult[0]?.count || 0;
     const totalPages = Math.ceil(total / limitNum);
 
-    const items = recordings.map(rec => ({
-      id: rec.id,
-      contactName: rec.contactName,
-      contactEmail: rec.contactEmail,
-      phone: rec.dialedNumber,
-      callTimestamp: rec.createdAt?.toISOString(),
-      callDuration: rec.callDuration,
-      hasRecording: !!(rec.recordingS3Key || rec.recordingUrl),
-      recordingStatus: rec.recordingS3Key ? 'stored' : (rec.recordingUrl ? 'pending' : 'none'),
-      hasTranscript: !!rec.transcript,
-      disposition: rec.callAttemptDisposition || rec.aiQualificationStatus,
-      qaStatus: rec.qaStatus,
-      aiScore: rec.aiScore,
-      aiQualificationStatus: rec.aiQualificationStatus,
-      agentType: rec.callAttemptAgentType || 'ai',
-      campaign: rec.campaignId ? {
-        id: rec.campaignId,
-        name: rec.campaignName,
-      } : null,
-      accountName: rec.accountName,
-      accountIndustry: rec.accountIndustry,
-      createdAt: rec.createdAt?.toISOString(),
-    }));
+    const items = recordings.map(rec => {
+      const recordingUrl = canonicalizeGcsRecordingUrl({
+        recordingS3Key: rec.recordingS3Key,
+        recordingUrl: rec.recordingUrl,
+      });
+      return {
+        id: rec.id,
+        contactName: rec.contactName,
+        contactEmail: rec.contactEmail,
+        phone: rec.dialedNumber,
+        callTimestamp: rec.createdAt?.toISOString(),
+        callDuration: rec.callDuration,
+        recordingUrl,
+        hasRecording: !!recordingUrl,
+        recordingStatus: rec.recordingS3Key ? 'stored' : (recordingUrl ? 'pending' : 'none'),
+        hasTranscript: !!rec.transcript,
+        disposition: rec.callAttemptDisposition || rec.aiQualificationStatus,
+        qaStatus: rec.qaStatus,
+        aiScore: rec.aiScore,
+        aiQualificationStatus: rec.aiQualificationStatus,
+        agentType: rec.callAttemptAgentType || 'ai',
+        campaign: rec.campaignId ? {
+          id: rec.campaignId,
+          name: rec.campaignName,
+        } : null,
+        accountName: rec.accountName,
+        accountIndustry: rec.accountIndustry,
+        createdAt: rec.createdAt?.toISOString(),
+      };
+    });
 
     res.json({
       success: true,
@@ -584,6 +599,10 @@ router.get('/all', async (req: Request, res: Response) => {
         const contactName = [rec.contactFirstName, rec.contactLastName].filter(Boolean).join(' ') || null;
         const aiSettings = rec.aiAgentSettings as any;
         const agentName = aiSettings?.persona?.name || aiSettings?.persona?.agentName || null;
+        const recordingUrl = canonicalizeGcsRecordingUrl({
+          recordingS3Key: rec.recordingS3Key,
+          recordingUrl: rec.recordingUrl,
+        });
 
         allRecordings.push({
           id: rec.id,
@@ -602,12 +621,12 @@ router.get('/all', async (req: Request, res: Response) => {
           recordingDurationSec: rec.recordingDurationSec || rec.durationSec,
           recordingStatus: rec.recordingStatus || (rec.recordingS3Key ? 'stored' : 'pending'),
           recordingFormat: rec.recordingFormat,
-          recordingUrl: rec.recordingUrl, // Include for direct playback
+          recordingUrl,
           recordingS3Key: rec.recordingS3Key, // Include to determine if stored in GCS
           agentType: rec.agentType,
           disposition: rec.aiDisposition,
           hasTranscript: !!rec.aiTranscript,
-          hasRecording: !!(rec.recordingS3Key || rec.recordingUrl),
+          hasRecording: !!recordingUrl,
           source: 'local',
           // Lead tracking - if this recording is already linked to a lead
           leadId: rec.leadId || null,
@@ -659,8 +678,15 @@ router.get('/all', async (req: Request, res: Response) => {
               continue;
             }
           }
+          const recordingUrl = canonicalizeGcsRecordingUrl({
+            recordingS3Key: (rec as any).recordingS3Key,
+            recordingUrl: (rec as any).recordingUrl,
+          });
+
           allRecordings.push({
             ...rec,
+            recordingUrl,
+            hasRecording: !!recordingUrl,
             contactName: null,
             contactPhone: rec.toNumber,
             campaignId: null,
@@ -686,7 +712,35 @@ router.get('/all', async (req: Request, res: Response) => {
     // Apply pagination
     const total = allRecordings.length;
     const totalPages = Math.ceil(total / limitNum);
-    const paginatedRecordings = allRecordings.slice(offset, offset + limitNum);
+    const paginatedRecordings = await Promise.all(
+      allRecordings.slice(offset, offset + limitNum).map(async (rec) => {
+        if (
+          rec.source === 'local' &&
+          !rec.recordingUrl &&
+          rec.id &&
+          rec.recordingStatus !== 'failed'
+        ) {
+          try {
+            const repaired = await getCallSessionRecordingUrl(rec.id, null);
+            if (
+              repaired?.url &&
+              repaired.source === 'local' &&
+              !repaired.url.startsWith('gcs-internal://')
+            ) {
+              return {
+                ...rec,
+                recordingUrl: repaired.url,
+                hasRecording: true,
+                recordingStatus: rec.recordingStatus || 'stored',
+              };
+            }
+          } catch {
+            // Keep original row when repair fails
+          }
+        }
+        return rec;
+      })
+    );
 
     res.json({
       success: true,
@@ -769,7 +823,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       if (callSession) {
         // Get presigned URL for playback
         let playbackUrl: string | null = null;
-        let playbackSource: string = 'unknown';
+        let playbackSource: string = 'none';
 
         if (callSession.recordingS3Key) {
           try {
@@ -779,9 +833,11 @@ router.get('/:id', async (req: Request, res: Response) => {
           } catch (err) {
             console.error('[Recordings API] Error getting presigned URL from call_sessions:', err);
           }
-        } else if (callSession.recordingUrl) {
-          playbackUrl = callSession.recordingUrl;
-          playbackSource = 'telnyx';
+        } else {
+          playbackUrl = canonicalizeGcsRecordingUrl({ recordingUrl: callSession.recordingUrl });
+          if (playbackUrl) {
+            playbackSource = 'gcs';
+          }
         }
 
         const contactName = [callSession.contactFirstName, callSession.contactLastName].filter(Boolean).join(' ') || null;
@@ -874,7 +930,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     // Get presigned URL for playback from GCS
     let playbackUrl: string | null = null;
-    let playbackSource: string = 'unknown';
+    let playbackSource: string = 'none';
 
     if (recording.recordingS3Key) {
       try {
@@ -884,9 +940,11 @@ router.get('/:id', async (req: Request, res: Response) => {
       } catch (err) {
         console.error('[Recordings API] Error getting presigned URL:', err);
       }
-    } else if (recording.recordingUrl) {
-      playbackUrl = recording.recordingUrl;
-      playbackSource = 'telnyx';
+    } else {
+      playbackUrl = canonicalizeGcsRecordingUrl({ recordingUrl: recording.recordingUrl });
+      if (playbackUrl) {
+        playbackSource = 'gcs';
+      }
     }
 
     // Build contact name from available data
@@ -949,7 +1007,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  * GET /api/recordings/:id/url
  * Get just the presigned URL for a recording (lightweight endpoint for audio player)
  *
- * UPDATED: Fetches fresh URLs from Telnyx API since stored URLs expire after 10 minutes
+ * UPDATED: Returns only canonical GCS URLs (no Telnyx temporary URLs).
  */
 router.get('/:id/url', async (req: Request, res: Response) => {
   try {
@@ -985,24 +1043,12 @@ router.get('/:id/url', async (req: Request, res: Response) => {
           }
         }
         
-        // Priority 2: Fetch fresh URL from Telnyx API (stored URLs expire)
-        if (!url && callSession.telnyxCallId) {
-          try {
-            const { fetchTelnyxRecording } = await import('../services/telnyx-recordings');
-            const freshUrl = await fetchTelnyxRecording(callSession.telnyxCallId);
-            if (freshUrl) {
-              url = freshUrl;
-              source = 'telnyx_fresh';
-            }
-          } catch (err) {
-            console.error('[Recordings API] Error fetching fresh URL from Telnyx:', err);
+        if (!url) {
+          const canonicalUrl = canonicalizeGcsRecordingUrl({ recordingUrl: callSession.recordingUrl });
+          if (canonicalUrl) {
+            url = canonicalUrl;
+            source = 'gcs';
           }
-        }
-        
-        // Priority 3: Try stored URL as fallback (might be expired)
-        if (!url && callSession.recordingUrl) {
-          url = callSession.recordingUrl;
-          source = 'telnyx_cached';
         }
       }
     }
@@ -1032,49 +1078,13 @@ router.get('/:id/url', async (req: Request, res: Response) => {
           }
         }
         
-        // Priority 2: Fetch fresh URL from Telnyx
-        if (!url && recording.telnyxCallId) {
-          try {
-            const { fetchTelnyxRecording } = await import('../services/telnyx-recordings');
-            const freshUrl = await fetchTelnyxRecording(recording.telnyxCallId);
-            if (freshUrl) {
-              url = freshUrl;
-              source = 'telnyx_fresh';
-            }
-          } catch (err) {
-            console.error('[Recordings API] Error fetching fresh URL from Telnyx:', err);
+        if (!url) {
+          const canonicalUrl = canonicalizeGcsRecordingUrl({ recordingUrl: recording.recordingUrl });
+          if (canonicalUrl) {
+            url = canonicalUrl;
+            source = 'gcs';
           }
         }
-        
-        // Priority 3: Stored URL as fallback
-        if (!url && recording.recordingUrl) {
-          url = recording.recordingUrl;
-          source = 'telnyx_cached';
-        }
-      }
-    }
-
-    // If still no URL, try fetching by ID as a Telnyx recording ID
-    if (!url) {
-      try {
-        const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-        if (TELNYX_API_KEY) {
-          const response = await fetch(`https://api.telnyx.com/v2/recordings/${id}`, {
-            headers: {
-              'Authorization': `Bearer ${TELNYX_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            url = data.data?.download_urls?.mp3 || data.data?.download_urls?.wav;
-            source = 'telnyx_direct';
-            dataSource = 'telnyx_api';
-          }
-        }
-      } catch (e) {
-        console.log('[Recordings API] Not a direct Telnyx recording ID:', id);
       }
     }
 
@@ -1091,7 +1101,7 @@ router.get('/:id/url', async (req: Request, res: Response) => {
         url,
         source,
         dataSource,
-        expiresIn: source === 'gcs' ? '7 days' : source.includes('fresh') ? '10 minutes' : 'may be expired',
+        expiresIn: '7 days',
       },
     });
   } catch (error: any) {
@@ -1471,7 +1481,7 @@ router.post('/telnyx/sync', async (req: Request, res: Response) => {
 router.get('/:id/gcs-url', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { getPresignedDownloadUrl, readFromGCS } = await import('../lib/storage');
+    const { getCallSessionRecordingUrl, getRecordingUrl } = await import('../services/recording-storage');
     const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
 
     // Try to resolve a playable recording link (GCS-first)
@@ -1481,8 +1491,8 @@ router.get('/:id/gcs-url', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Recording not found' });
     }
 
-    // If the source is GCS, the URL is already a presigned download URL
-    if (result.source === 'gcs') {
+    // If source is GCS and externally consumable, return directly
+    if (result.source === 'gcs' && !result.url.startsWith('gcs-internal://')) {
       return res.json({
         url: result.url,
         source: 'gcs',
@@ -1491,23 +1501,30 @@ router.get('/:id/gcs-url', async (req: Request, res: Response) => {
       });
     }
 
-    // If we got a gcs-internal URL, redirect to the stream endpoint instead
-    if (result.url.startsWith('gcs-internal://')) {
-      // Stream endpoint will handle it
+    // Non-GCS source: try to persist and re-resolve to GCS for both call_sessions and leads.
+    const sessionGcs = await getCallSessionRecordingUrl(id, result.url).catch(() => ({ url: '', source: null as const }));
+    if (sessionGcs.url && sessionGcs.source === 'local' && !sessionGcs.url.startsWith('gcs-internal://')) {
       return res.json({
-        url: `/api/recordings/${id}/stream`,
-        source: 'stream_proxy',
-        expiresInSeconds: 3600,
+        url: sessionGcs.url,
+        source: 'gcs',
+        expiresInSeconds: 604800,
         mimeType: result.mimeType,
       });
     }
 
-    // For any other source, return the resolved URL
-    return res.json({
-      url: result.url,
-      source: result.source,
-      expiresInSeconds: result.expiresInSeconds,
-      mimeType: result.mimeType,
+    const leadGcs = await getRecordingUrl(id, result.url).catch(() => ({ url: '', source: null as const }));
+    if (leadGcs.url && leadGcs.source === 'local' && !leadGcs.url.startsWith('gcs-internal://')) {
+      return res.json({
+        url: leadGcs.url,
+        source: 'gcs',
+        expiresInSeconds: 604800,
+        mimeType: result.mimeType,
+      });
+    }
+
+    return res.status(404).json({
+      error: 'GCS recording URL not available yet',
+      requiresSync: true,
     });
   } catch (error: any) {
     console.error(`[Recordings API] Error getting GCS URL for ${req.params.id}:`, error.message);

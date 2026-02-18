@@ -329,7 +329,7 @@ function applyCooldownAndRetryRules(contact: QueueContactRow): {
   status: 'queued' | 'removed' | null;
   removedReason: string | null;
 } {
-  const outcome = (contact.lastCallOutcome || '').toLowerCase().trim();
+  const outcome = normalizeOutcome(contact.lastCallOutcome);
   const now = new Date();
 
   // Default to current queue timing (respect existing scheduling)
@@ -343,7 +343,7 @@ function applyCooldownAndRetryRules(contact: QueueContactRow): {
     }
   }
 
-  if (outcome === 'invalid_data' || outcome === 'invalid number' || outcome === 'wrong_number') {
+  if (outcome === 'invalid_number') {
     return {
       nextActionAt,
       status: 'removed',
@@ -363,7 +363,7 @@ function applyCooldownAndRetryRules(contact: QueueContactRow): {
     };
   }
 
-  if (outcome === 'callback_requested' || outcome === 'callback-requested') {
+  if (outcome === 'callback_requested') {
     // If callback time exists in contact.nextCallEligibleAt it takes precedence
     if (contact.nextCallEligibleAt) {
       nextActionAt = new Date(contact.nextCallEligibleAt);
@@ -380,6 +380,26 @@ function applyCooldownAndRetryRules(contact: QueueContactRow): {
     status: null,
     removedReason: null,
   };
+}
+
+function normalizeOutcome(outcome: string | null | undefined): string {
+  const raw = (outcome || '').toLowerCase().trim();
+  if (!raw) return '';
+  const compact = raw.replace(/[^a-z]/g, '');
+
+  if (compact === 'invaliddata' || compact === 'invalidnumber' || compact === 'wrongnumber' || compact === 'badnumber') {
+    return 'invalid_number';
+  }
+  if (compact === 'voicemail') {
+    return 'voicemail';
+  }
+  if (compact === 'noanswer' || compact === 'notanswering') {
+    return 'no_answer';
+  }
+  if (compact === 'callbackrequested' || compact === 'callbackrequest' || compact === 'requestcallback') {
+    return 'callback_requested';
+  }
+  return raw;
 }
 
 function normalizeWeightedRules(input: any, defaults: UnifiedWeightedRule[]): UnifiedWeightedRule[] {
@@ -740,6 +760,11 @@ export async function getContactScores(
 
   // Build sort
   const sortColumn = getSortColumn(sortBy);
+  const orderByClause = sortBy === "score" || sortBy === "priority"
+    ? `${sortColumn} DESC, cq.next_attempt_at ASC NULLS FIRST`
+    : `${sortColumn} DESC`;
+  const campaign = await loadCampaignContext(campaignId);
+  const queueConfig = campaign ? loadUnifiedQueueConfig(campaign) : { routingThreshold: 800 };
 
   const countResult = await pool.query(
     `SELECT COUNT(*)::int AS total FROM campaign_queue cq WHERE cq.campaign_id = $1 AND cq.status = 'queued' AND cq.ai_priority_score IS NOT NULL${tierFilter}`,
@@ -753,6 +778,7 @@ export async function getContactScores(
       cq.contact_id,
       cq.ai_priority_score,
       cq.ai_score_breakdown,
+      cq.next_attempt_at,
       cq.priority AS final_priority,
       c.full_name AS contact_name,
       c.job_title,
@@ -766,7 +792,7 @@ export async function getContactScores(
       AND cq.status = 'queued'
       AND cq.ai_priority_score IS NOT NULL
       ${tierFilter}
-    ORDER BY ${sortColumn} DESC
+    ORDER BY ${orderByClause}
     LIMIT $2 OFFSET $3
     `,
     params
@@ -783,9 +809,19 @@ export async function getContactScores(
       seniorityLevel: r.seniority_level,
       accountName: r.account_name,
       industry: r.industry,
+      contact_id: r.contact_id,
+      PriorityScore: r.ai_priority_score,
+      execution_mode: r.ai_priority_score >= queueConfig.routingThreshold ? "HUMAN" : "AI",
+      reason_breakdown: {
+        exact_title_matches: r.ai_score_breakdown?.reason_breakdown?.exact_title_matches || [],
+        title_keyword_matches: r.ai_score_breakdown?.reason_breakdown?.title_keyword_matches || [],
+        industry_matches: r.ai_score_breakdown?.reason_breakdown?.industry_matches || [],
+        employee_size_match: r.ai_score_breakdown?.reason_breakdown?.employee_size_match || null,
+      },
       aiPriorityScore: r.ai_priority_score,
       breakdown: r.ai_score_breakdown || {},
       finalPriority: r.final_priority,
+      nextActionAt: r.next_attempt_at,
     })),
     pagination: {
       page,

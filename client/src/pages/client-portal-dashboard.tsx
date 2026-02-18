@@ -162,6 +162,17 @@ interface SupportTicket {
   lastReplyAt: string | null;
 }
 
+interface TutorialVideo {
+  id: string;
+  title: string;
+  description?: string | null;
+  url: string;
+  embedUrl: string;
+  provider: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
 interface ClientActivityLog {
   id: string;
   entityType: string;
@@ -711,6 +722,16 @@ export default function ClientPortalDashboard() {
     queryFn: async () => {
       const res = await fetch('/api/client-portal/projects', authHeaders);
       if (!res.ok) throw new Error('Failed to fetch projects');
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
+  const { data: tutorialVideosData, isLoading: tutorialVideosLoading } = useQuery<{ videos: TutorialVideo[]; count: number }>({
+    queryKey: ['client-portal-tutorial-videos', user?.clientAccountId],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/tutorial-videos', authHeaders);
+      if (!res.ok) return { videos: [], count: 0 };
       return res.json();
     },
     enabled: !!user,
@@ -2288,6 +2309,68 @@ export default function ClientPortalDashboard() {
               <IntelligenceFlowDiagram variant="full" className="mb-2" />
             )}
 
+            {/* Client Tutorial Videos */}
+            <Card className="rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm bg-white/90 dark:bg-slate-900/70">
+              <CardHeader className="flex flex-row items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <BookOpen className="h-5 w-5 text-indigo-600" />
+                    Training Videos
+                  </CardTitle>
+                  <CardDescription>Watch your team's assigned onboarding and workflow tutorials.</CardDescription>
+                </div>
+                {tutorialVideosData?.count ? (
+                  <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200">
+                    {tutorialVideosData.count} available
+                  </Badge>
+                ) : null}
+              </CardHeader>
+              <CardContent>
+                {tutorialVideosLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : (tutorialVideosData?.videos?.length || 0) > 0 ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    {tutorialVideosData!.videos.map((video) => (
+                      <div key={video.id} className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50/30 dark:bg-slate-900/40">
+                        <div className="aspect-video bg-black/90">
+                          <iframe
+                            className="h-full w-full"
+                            src={video.embedUrl}
+                            title={video.title}
+                            loading="lazy"
+                            allow="autoplay; encrypted-media; picture-in-picture"
+                            allowFullScreen
+                          />
+                        </div>
+                        <div className="p-4 space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100">{video.title}</h4>
+                            <Badge variant="outline" className="capitalize text-xs">{video.provider.replace('_', ' ')}</Badge>
+                          </div>
+                          {video.description ? (
+                            <p className="text-xs text-muted-foreground leading-relaxed">{video.description}</p>
+                          ) : null}
+                          <Button variant="ghost" size="sm" className="px-0 h-7 text-xs" asChild>
+                            <a href={video.url} target="_blank" rel="noreferrer">
+                              Open source video
+                              <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
+                    <BookOpen className="h-8 w-8 mx-auto mb-2 opacity-60" />
+                    <p className="text-sm">No training videos have been assigned for your account yet.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Recent Activity */}
             <div className="grid lg:grid-cols-2 gap-6">
               <Card className="rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm bg-white/90 dark:bg-slate-900/70">
@@ -2729,13 +2812,33 @@ export default function ClientPortalDashboard() {
 
         {/* ==================== LEADS TAB ==================== */}
         {activeTab === 'leads' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">Leads</h2>
-                <p className="text-muted-foreground">View your QA-approved qualified leads</p>
-              </div>
-            </div>
+          <div className="space-y-6 md:space-y-8 max-w-7xl mx-auto">
+            <Card className="rounded-2xl border border-emerald-200/80 dark:border-emerald-900/80 bg-gradient-to-r from-emerald-50/80 via-cyan-50/70 to-blue-50/80 dark:from-emerald-950/20 dark:via-cyan-950/10 dark:to-blue-950/20 shadow-sm">
+              <CardContent className="p-5 md:p-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <UserCheck className="h-6 w-6 text-emerald-600" />
+                      Qualified Leads
+                    </h2>
+                    <p className="text-sm md:text-base text-slate-700/80 dark:text-slate-300/80 max-w-3xl">
+                      Review all QA-approved leads in one place, open call details instantly, and export clean reports for your team.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs md:text-sm text-muted-foreground">
+                    <Badge variant="outline" className="bg-white/70 dark:bg-slate-900/50 border-emerald-200 dark:border-emerald-900 px-3 py-1">
+                      Fast filters
+                    </Badge>
+                    <Badge variant="outline" className="bg-white/70 dark:bg-slate-900/50 border-cyan-200 dark:border-cyan-900 px-3 py-1">
+                      Responsive table
+                    </Badge>
+                    <Badge variant="outline" className="bg-white/70 dark:bg-slate-900/50 border-blue-200 dark:border-blue-900 px-3 py-1">
+                      In-line playback
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             <QualifiedLeadsTable
               onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}

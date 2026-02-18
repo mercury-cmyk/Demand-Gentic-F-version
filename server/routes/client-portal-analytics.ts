@@ -24,6 +24,7 @@ import {
   emailEvents,
   emailTemplates,
 } from '@shared/schema';
+import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
 
@@ -194,6 +195,7 @@ router.get('/recordings', async (req: Request, res: Response) => {
         disposition: callSessions.aiDisposition,
         duration: callSessions.durationSec,
         recordingUrl: callSessions.recordingUrl,
+        recordingS3Key: callSessions.recordingS3Key,
         transcript: callSessions.aiTranscript,
         createdAt: callSessions.createdAt,
       })
@@ -216,7 +218,18 @@ router.get('/recordings', async (req: Request, res: Response) => {
       );
     }
 
-    res.json(filtered);
+    const normalizedRecordings = filtered.map((recording) => {
+      const normalizedRecordingUrl = canonicalizeGcsRecordingUrl({
+        recordingS3Key: recording.recordingS3Key,
+        recordingUrl: recording.recordingUrl,
+      });
+      return {
+        ...recording,
+        recordingUrl: normalizedRecordingUrl,
+      };
+    });
+
+    res.json(normalizedRecordings);
   } catch (error) {
     console.error('[CLIENT PORTAL] Recordings error:', error);
     res.status(500).json({ message: 'Failed to fetch recordings' });

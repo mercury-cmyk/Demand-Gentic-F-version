@@ -6,6 +6,7 @@ import { requireAuth } from '../auth';
 import jwt from 'jsonwebtoken';
 import { fetchTelnyxRecordings } from '../services/telnyx-sync-service';
 import { getPlayableRecordingLink } from '../services/recording-link-resolver';
+import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
@@ -90,6 +91,7 @@ router.get('/', requireAuth, async (req, res) => {
         aiScore: leads.aiScore,
         callDuration: leads.callDuration,
         recordingUrl: leads.recordingUrl,
+        recordingS3Key: leads.recordingS3Key,
         telnyxRecordingId: leads.telnyxRecordingId,
         telnyxCallId: leads.telnyxCallId,
         recordingProvider: leads.recordingProvider,
@@ -112,13 +114,20 @@ router.get('/', requireAuth, async (req, res) => {
     const total = countResult.length;
 
     res.json({
-      leads: leadsResult.map(l => ({
-        ...l,
-        hasRecording: !!l.recordingUrl,
-        hasTranscript: !!l.hasTranscript,
-        // Optionally, expose a "recordingAvailable" boolean for UI
-        recordingAvailable: !!l.recordingUrl && l.recordingStatus === 'completed',
-      })),
+      leads: leadsResult.map(l => {
+        const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+          recordingS3Key: l.recordingS3Key,
+          recordingUrl: l.recordingUrl,
+        });
+        return {
+          ...l,
+          recordingUrl: gcsRecordingUrl,
+          hasRecording: !!gcsRecordingUrl,
+          hasTranscript: !!l.hasTranscript,
+          // Optionally, expose a "recordingAvailable" boolean for UI
+          recordingAvailable: !!gcsRecordingUrl && l.recordingStatus === 'completed',
+        };
+      }),
       total,
       page,
       pageSize,

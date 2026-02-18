@@ -60,6 +60,7 @@ import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
 import { fetchTelnyxRecordings } from '../services/telnyx-sync-service';
 import { getPlayableRecordingLink } from '../services/recording-link-resolver';
+import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
 
@@ -110,6 +111,179 @@ interface ClientRecordingStreamTokenPayload {
   isClientRecordingStream: true;
 }
 
+type TutorialVideoProvider = 'google_drive' | 'youtube' | 'loom' | 'vimeo' | 'other';
+
+interface ClientTutorialVideo {
+  id: string;
+  title: string;
+  description?: string | null;
+  url: string;
+  embedUrl: string;
+  provider: TutorialVideoProvider;
+  thumbnailUrl?: string | null;
+  durationSeconds?: number | null;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function detectTutorialVideoProvider(url: string): TutorialVideoProvider {
+  const value = (url || '').toLowerCase();
+  if (value.includes('drive.google.com')) return 'google_drive';
+  if (value.includes('youtube.com') || value.includes('youtu.be')) return 'youtube';
+  if (value.includes('loom.com')) return 'loom';
+  if (value.includes('vimeo.com')) return 'vimeo';
+  return 'other';
+}
+
+function normalizeDriveEmbedUrl(url: string): string {
+  if (!url) return '';
+  if (!url.includes('drive.google.com')) return url;
+
+  const fileIdMatch = url.match(/\/file\/d\/([^/]+)/);
+  if (fileIdMatch?.[1]) {
+    return `https://drive.google.com/file/d/${fileIdMatch[1]}/preview`;
+  }
+
+  const idParamMatch = url.match(/[?&]id=([^&]+)/);
+  if (idParamMatch?.[1]) {
+    return `https://drive.google.com/file/d/${idParamMatch[1]}/preview`;
+  }
+
+  const ucIdMatch = url.match(/\/uc\?id=([^&]+)/);
+  if (ucIdMatch?.[1]) {
+    return `https://drive.google.com/file/d/${ucIdMatch[1]}/preview`;
+  }
+
+  return url;
+}
+
+function sanitizeTutorialVideo(input: unknown, fallbackSortOrder = 0): ClientTutorialVideo | null {
+  if (!input || typeof input !== 'object') return null;
+  const raw = input as Record<string, unknown>;
+
+  const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+  const url = typeof raw.url === 'string' ? raw.url.trim() : '';
+  if (!title || !url) return null;
+
+  const provider =
+    typeof raw.provider === 'string'
+      ? (raw.provider as TutorialVideoProvider)
+      : detectTutorialVideoProvider(url);
+  const embedUrlCandidate = typeof raw.embedUrl === 'string' ? raw.embedUrl.trim() : '';
+  const embedUrl = embedUrlCandidate || normalizeDriveEmbedUrl(url);
+
+  const nowIso = new Date().toISOString();
+  const sortOrderRaw = raw.sortOrder;
+  const sortOrder =
+    typeof sortOrderRaw === 'number' && Number.isFinite(sortOrderRaw)
+      ? sortOrderRaw
+      : fallbackSortOrder;
+
+  const durationRaw = raw.durationSeconds;
+  const durationSeconds =
+    typeof durationRaw === 'number' && Number.isFinite(durationRaw) && durationRaw >= 0
+      ? durationRaw
+      : null;
+
+  const isActive = typeof raw.isActive === 'boolean' ? raw.isActive : true;
+
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : crypto.randomUUID(),
+    title,
+    description: typeof raw.description === 'string' ? raw.description.trim() : null,
+    url,
+    embedUrl,
+    provider,
+    thumbnailUrl: typeof raw.thumbnailUrl === 'string' ? raw.thumbnailUrl.trim() : null,
+    durationSeconds,
+    sortOrder,
+    isActive,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : nowIso,
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : nowIso,
+  };
+}
+
+function getClientTutorialVideosFromSettings(settings: unknown): ClientTutorialVideo[] {
+  if (!settings || typeof settings !== 'object') return [];
+  const videosRaw = (settings as Record<string, unknown>).tutorialVideos;
+  if (!Array.isArray(videosRaw)) return [];
+
+  return videosRaw
+    .map((item, index) => sanitizeTutorialVideo(item, index))
+    .filter((item): item is ClientTutorialVideo => Boolean(item))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+const tutorialVideoInputSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(2000).optional().nullable(),
+  url: z.string().url(),
+  embedUrl: z.string().url().optional().nullable(),
+  thumbnailUrl: z.string().url().optional().nullable(),
+  durationSeconds: z.number().int().min(0).optional().nullable(),
+  sortOrder: z.number().int().optional(),
+  isActive: z.boolean().optional(),
+});
+
+function buildTutorialVideoFromInput(
+  input: z.infer<typeof tutorialVideoInputSchema>,
+  existing?: ClientTutorialVideo,
+  defaultSortOrder?: number,
+): ClientTutorialVideo {
+  const nowIso = new Date().toISOString();
+  const provider = detectTutorialVideoProvider(input.url);
+  const embedUrl = input.embedUrl?.trim() || normalizeDriveEmbedUrl(input.url.trim());
+
+  return {
+    id: existing?.id || crypto.randomUUID(),
+    title: input.title.trim(),
+    description: input.description?.trim() || null,
+    url: input.url.trim(),
+    embedUrl,
+    provider,
+    thumbnailUrl: input.thumbnailUrl?.trim() || null,
+    durationSeconds: input.durationSeconds ?? null,
+    sortOrder: input.sortOrder ?? existing?.sortOrder ?? defaultSortOrder ?? 0,
+    isActive: input.isActive ?? existing?.isActive ?? true,
+    createdAt: existing?.createdAt || nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+async function saveClientTutorialVideos(clientId: string, videos: ClientTutorialVideo[]) {
+  const [client] = await db
+    .select({ settings: clientAccounts.settings })
+    .from(clientAccounts)
+    .where(eq(clientAccounts.id, clientId))
+    .limit(1);
+
+  if (!client) {
+    return null;
+  }
+
+  const currentSettings = (client.settings as Record<string, unknown>) || {};
+  const nextSettings = {
+    ...currentSettings,
+    tutorialVideos: videos,
+  };
+
+  const [updated] = await db
+    .update(clientAccounts)
+    .set({
+      settings: nextSettings,
+      updatedAt: new Date(),
+    })
+    .where(eq(clientAccounts.id, clientId))
+    .returning({
+      id: clientAccounts.id,
+      settings: clientAccounts.settings,
+    });
+
+  return updated;
+}
+
 function normalizePhoneDigits(value: string | null | undefined): string {
   return (value || '').replace(/\D/g, '');
 }
@@ -125,6 +299,16 @@ function formatPhoneForTelnyx(value: string | null | undefined): string | undefi
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
   return `+${digits}`;
+}
+
+function resolveQualifiedLeadRecordingUrl(
+  recordingUrl: string | null | undefined,
+  recordingS3Key: string | null | undefined,
+): string | null {
+  return canonicalizeGcsRecordingUrl({
+    recordingUrl,
+    recordingS3Key,
+  });
 }
 
 declare global {
@@ -1322,6 +1506,8 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         campaignName: campaigns.name,
         aiScore: leads.aiScore,
         callDuration: leads.callDuration,
+        recordingUrl: leads.recordingUrl,
+        recordingS3Key: leads.recordingS3Key,
         hasRecording: sql<boolean>`${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL`,
         hasTranscript: sql<boolean>`${leads.transcript} IS NOT NULL AND ${leads.transcript} != ''`,
         callSessionId: dialerCallAttempts.callSessionId,
@@ -1353,15 +1539,24 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       });
     }
 
+    const normalizedLeadsData = leadsData.map((lead) => {
+      const normalizedRecordingUrl = resolveQualifiedLeadRecordingUrl(lead.recordingUrl, lead.recordingS3Key);
+      return {
+        ...lead,
+        recordingUrl: normalizedRecordingUrl,
+        hasRecording: Boolean(normalizedRecordingUrl),
+      };
+    });
+
     res.json({
-      leads: leadsData,
+      leads: normalizedLeadsData,
       total,
       page: pageNum,
       pageSize: pageSizeNum,
       debug: includeDebug ? {
         accessMode: 'db_leads',
         accessibleCampaignIdsCount: accessibleCampaignIds.length,
-        dbLeadsCount: leadsData.length,
+        dbLeadsCount: normalizedLeadsData.length,
       } : undefined,
     });
   } catch (error: any) {
@@ -1986,13 +2181,8 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
 
     // Include recording URL only if visibility is enabled
     if (visibilitySettings.showRecordings !== false) {
-      // Prefer S3 key (permanent storage) over Telnyx URL (may expire)
-      if (lead.recordingS3Key) {
-        // TODO: Generate signed S3 URL here
-        response.recordingUrl = lead.recordingUrl; // Fallback for now
-      } else {
-        response.recordingUrl = lead.recordingUrl;
-      }
+      // Always prefer canonical GCS URL when a storage key exists.
+      response.recordingUrl = resolveQualifiedLeadRecordingUrl(lead.recordingUrl, lead.recordingS3Key);
       response.transcript = lead.transcript;
       response.structuredTranscript = lead.structuredTranscript;
     }
@@ -2069,6 +2259,26 @@ router.get('/qualified-leads/:leadId/comments', requireClientAuth, async (req, r
   } catch (error) {
     console.error('[CLIENT PORTAL] Get lead comments error:', error);
     res.status(500).json({ message: "Failed to fetch comments" });
+  }
+});
+
+// ==================== CLIENT DASHBOARD TUTORIAL VIDEOS ====================
+
+router.get('/tutorial-videos', requireClientAuth, async (req, res) => {
+  try {
+    const [account] = await db
+      .select({ settings: clientAccounts.settings })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, req.clientUser!.clientAccountId))
+      .limit(1);
+
+    const allVideos = getClientTutorialVideosFromSettings(account?.settings);
+    const videos = allVideos.filter((video) => video.isActive);
+
+    res.json({ videos, count: videos.length });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get tutorial videos error:', error);
+    res.status(500).json({ message: 'Failed to fetch tutorial videos' });
   }
 });
 
@@ -2721,6 +2931,139 @@ router.patch('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_m
   } catch (error) {
     console.error('[CLIENT PORTAL] Update client error:', error);
     res.status(500).json({ message: "Failed to update client" });
+  }
+});
+
+router.get('/admin/clients/:id/tutorial-videos', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const [account] = await db
+      .select({ id: clientAccounts.id, settings: clientAccounts.settings })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, req.params.id))
+      .limit(1);
+
+    if (!account) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    const videos = getClientTutorialVideosFromSettings(account.settings);
+    res.json({ videos, count: videos.length });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get admin tutorial videos error:', error);
+    res.status(500).json({ message: 'Failed to fetch tutorial videos' });
+  }
+});
+
+router.put('/admin/clients/:id/tutorial-videos', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const parsed = z.array(tutorialVideoInputSchema).parse(req.body?.videos || []);
+    const videos = parsed.map((video, index) => buildTutorialVideoFromInput(video, undefined, index));
+
+    const updated = await saveClientTutorialVideos(req.params.id, videos);
+    if (!updated) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    res.json({ videos, count: videos.length });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Replace tutorial videos error:', error);
+    res.status(500).json({ message: 'Failed to save tutorial videos' });
+  }
+});
+
+router.post('/admin/clients/:id/tutorial-videos', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const parsed = tutorialVideoInputSchema.parse(req.body || {});
+
+    const [account] = await db
+      .select({ id: clientAccounts.id, settings: clientAccounts.settings })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, req.params.id))
+      .limit(1);
+
+    if (!account) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    const existingVideos = getClientTutorialVideosFromSettings(account.settings);
+    const nextVideo = buildTutorialVideoFromInput(parsed, undefined, existingVideos.length);
+    const videos = [...existingVideos, nextVideo].sort((a, b) => a.sortOrder - b.sortOrder);
+
+    await saveClientTutorialVideos(req.params.id, videos);
+    res.status(201).json(nextVideo);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Create tutorial video error:', error);
+    res.status(500).json({ message: 'Failed to create tutorial video' });
+  }
+});
+
+router.patch('/admin/clients/:id/tutorial-videos/:videoId', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const parsed = tutorialVideoInputSchema.partial().parse(req.body || {});
+
+    const [account] = await db
+      .select({ id: clientAccounts.id, settings: clientAccounts.settings })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, req.params.id))
+      .limit(1);
+
+    if (!account) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    const existingVideos = getClientTutorialVideosFromSettings(account.settings);
+    const existing = existingVideos.find((video) => video.id === req.params.videoId);
+    if (!existing) {
+      return res.status(404).json({ message: 'Tutorial video not found' });
+    }
+
+    const mergedInput = {
+      title: parsed.title ?? existing.title,
+      description: parsed.description ?? existing.description ?? null,
+      url: parsed.url ?? existing.url,
+      embedUrl: parsed.embedUrl ?? existing.embedUrl,
+      thumbnailUrl: parsed.thumbnailUrl ?? existing.thumbnailUrl ?? null,
+      durationSeconds: parsed.durationSeconds ?? existing.durationSeconds ?? null,
+      sortOrder: parsed.sortOrder ?? existing.sortOrder,
+      isActive: parsed.isActive ?? existing.isActive,
+    };
+
+    const updatedVideo = buildTutorialVideoFromInput(mergedInput, existing, existing.sortOrder);
+    const videos = existingVideos
+      .map((video) => (video.id === req.params.videoId ? updatedVideo : video))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+
+    await saveClientTutorialVideos(req.params.id, videos);
+    res.json(updatedVideo);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Update tutorial video error:', error);
+    res.status(500).json({ message: 'Failed to update tutorial video' });
+  }
+});
+
+router.delete('/admin/clients/:id/tutorial-videos/:videoId', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const [account] = await db
+      .select({ id: clientAccounts.id, settings: clientAccounts.settings })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, req.params.id))
+      .limit(1);
+
+    if (!account) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    const existingVideos = getClientTutorialVideosFromSettings(account.settings);
+    const videos = existingVideos.filter((video) => video.id !== req.params.videoId);
+    if (videos.length === existingVideos.length) {
+      return res.status(404).json({ message: 'Tutorial video not found' });
+    }
+
+    await saveClientTutorialVideos(req.params.id, videos);
+    res.status(204).send();
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Delete tutorial video error:', error);
+    res.status(500).json({ message: 'Failed to delete tutorial video' });
   }
 });
 

@@ -265,23 +265,6 @@ export function CallRecordingsView() {
       }
 
       if (!audioBlob) {
-        // Final fallback: play direct recording URL when available (legacy /client-portal/recordings response)
-        if (recording.recordingUrl) {
-          const audio = new Audio(recording.recordingUrl);
-          audio.onended = () => setActiveRecordingId(null);
-          audio.onerror = () => {
-            setActiveRecordingId(null);
-            toast({
-              title: 'Playback failed',
-              description: 'Could not play the recording URL.',
-              variant: 'destructive',
-            });
-          };
-          audioRef.current = audio;
-          await audio.play();
-          setActiveRecordingId(recordingId);
-          return;
-        }
         throw new Error(playbackErrorMessage);
       }
 

@@ -25,6 +25,7 @@ import { PhoneCampaignSuppressionManager } from "@/components/phone-campaign-sup
 import { CampaignKnowledgeConfig } from "@/components/campaigns/campaign-knowledge-config";
 import { CampaignAudienceSelector, type AudienceSelection } from "@/components/campaigns/CampaignAudienceSelector";
 import { CampaignContextEditor } from "@/components/campaigns/CampaignContextEditor";
+import { QueueIntelligenceConfig } from "@/components/campaigns/queue-intelligence-config";
 
 export default function PhoneCampaignEditPage() {
   const [, paramsA] = useRoute("/campaigns/phone/:id/edit");
@@ -814,6 +815,10 @@ export default function PhoneCampaignEditPage() {
             }}
             onChange={(data) => setQaParameters(data.qaParameters)}
             onNext={() => {}}
+          />
+          <QueueIntelligenceConfig
+            qaParameters={qaParameters}
+            onChange={(nextQa) => setQaParameters(nextQa)}
           />
         </TabsContent>
 

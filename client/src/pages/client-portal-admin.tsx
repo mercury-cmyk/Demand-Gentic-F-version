@@ -44,6 +44,7 @@ import {
   ShieldCheck,
   Trash2,
   LogIn,
+  Play,
 } from 'lucide-react';
 import type { ClientAccount, VerificationCampaign } from '@shared/schema';
 import {
@@ -723,6 +724,298 @@ const ClientPricingDocumentsManager = ({ clientId }: { clientId: string }) => {
   );
 };
 
+interface TutorialVideoItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  url: string;
+  embedUrl: string;
+  provider: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+const ClientTutorialVideosManager = ({ clientId }: { clientId: string }) => {
+  const { toast } = useToast();
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingVideo, setEditingVideo] = useState<TutorialVideoItem | null>(null);
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    url: '',
+    sortOrder: 0,
+    isActive: true,
+  });
+
+  const { data, isLoading, refetch } = useQuery<{ videos: TutorialVideoItem[]; count: number }>({
+    queryKey: ['client-tutorial-videos', clientId],
+    queryFn: async () => {
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/tutorial-videos`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch tutorial videos');
+      return res.json();
+    },
+    enabled: !!clientId,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (payload: typeof formData) => {
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/tutorial-videos`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('Failed to create tutorial video');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Tutorial video added' });
+      setIsDialogOpen(false);
+      setEditingVideo(null);
+      setFormData({ title: '', description: '', url: '', sortOrder: 0, isActive: true });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to add video', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ videoId, payload }: { videoId: string; payload: typeof formData }) => {
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/tutorial-videos/${videoId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('Failed to update tutorial video');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Tutorial video updated' });
+      setIsDialogOpen(false);
+      setEditingVideo(null);
+      setFormData({ title: '', description: '', url: '', sortOrder: 0, isActive: true });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to update video', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (videoId: string) => {
+      const res = await fetch(`/api/client-portal/admin/clients/${clientId}/tutorial-videos/${videoId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!res.ok) throw new Error('Failed to delete tutorial video');
+    },
+    onSuccess: () => {
+      toast({ title: 'Tutorial video removed' });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to remove video', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const openCreateDialog = () => {
+    setEditingVideo(null);
+    setFormData({
+      title: '',
+      description: '',
+      url: '',
+      sortOrder: (data?.videos?.length || 0),
+      isActive: true,
+    });
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (video: TutorialVideoItem) => {
+    setEditingVideo(video);
+    setFormData({
+      title: video.title,
+      description: video.description || '',
+      url: video.url,
+      sortOrder: video.sortOrder,
+      isActive: video.isActive,
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleSave = () => {
+    if (!formData.title.trim() || !formData.url.trim()) {
+      toast({ title: 'Title and URL are required', variant: 'destructive' });
+      return;
+    }
+
+    if (editingVideo) {
+      updateMutation.mutate({ videoId: editingVideo.id, payload: formData });
+      return;
+    }
+
+    createMutation.mutate(formData);
+  };
+
+  return (
+    <div className="space-y-4 pt-6">
+      <Separator />
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Play className="h-5 w-5" />
+            Dashboard Tutorial Videos
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Assign client-specific onboarding and training videos. Google Drive links are supported.
+          </p>
+        </div>
+        <Button size="sm" onClick={openCreateDialog}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Video
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : data?.videos?.length ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Title</TableHead>
+              <TableHead>Provider</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Order</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.videos.map((video) => (
+              <TableRow key={video.id}>
+                <TableCell>
+                  <div>
+                    <div className="font-medium">{video.title}</div>
+                    <div className="text-xs text-muted-foreground truncate max-w-[420px]">{video.url}</div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="capitalize">{video.provider.replace('_', ' ')}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={video.isActive ? 'default' : 'secondary'}>{video.isActive ? 'Active' : 'Hidden'}</Badge>
+                </TableCell>
+                <TableCell className="text-right">{video.sortOrder}</TableCell>
+                <TableCell className="text-right">
+                  <div className="flex gap-1 justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => window.open(video.url, '_blank')}>
+                      <ExternalLink className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => openEditDialog(video)}>
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-500 hover:text-red-700"
+                      onClick={() => deleteMutation.mutate(video.id)}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <div className="text-center py-6 text-muted-foreground border rounded-lg">
+          <Play className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <p>No tutorial videos configured yet.</p>
+          <p className="text-sm">Add one or more videos to power the client dashboard training section.</p>
+        </div>
+      )}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingVideo ? 'Edit Tutorial Video' : 'Add Tutorial Video'}</DialogTitle>
+            <DialogDescription>
+              Paste a Google Drive or public video URL. Drive links are automatically converted for embedded playback.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Video Title</Label>
+              <Input
+                value={formData.title}
+                onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
+                placeholder="e.g., Getting Started with Your Dashboard"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Video URL</Label>
+              <Input
+                value={formData.url}
+                onChange={(e) => setFormData((prev) => ({ ...prev, url: e.target.value }))}
+                placeholder="https://drive.google.com/file/d/..."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description (optional)</Label>
+              <Textarea
+                value={formData.description}
+                onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+                rows={3}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Sort Order</Label>
+                <Input
+                  type="number"
+                  value={formData.sortOrder}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, sortOrder: parseInt(e.target.value, 10) || 0 }))}
+                />
+              </div>
+              <div className="flex items-end pb-2">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="video-active"
+                    checked={formData.isActive}
+                    onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, isActive: checked }))}
+                  />
+                  <Label htmlFor="video-active">Visible to client</Label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              {editingVideo ? 'Save Changes' : 'Add Video'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 interface BillingConfig {
   clientAccountId: string;
   defaultBillingModel: string;
@@ -1358,6 +1651,7 @@ export default function ClientPortalAdmin() {
                     <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent mb-6">
                       <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Overview</TabsTrigger>
                       <TabsTrigger value="profile" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Profile</TabsTrigger>
+                      <TabsTrigger value="training" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Training</TabsTrigger>
                       <TabsTrigger value="pricing" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Pricing</TabsTrigger>
                       <TabsTrigger value="settings" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Settings</TabsTrigger>
                       <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Users & Access</TabsTrigger>
@@ -1374,6 +1668,10 @@ export default function ClientPortalAdmin() {
                     <TabsContent value="pricing">
                         <ClientCampaignPricingEditor clientId={selectedClient.id} />
                         <ClientPricingDocumentsManager clientId={selectedClient.id} />
+                    </TabsContent>
+
+                    <TabsContent value="training">
+                      <ClientTutorialVideosManager clientId={selectedClient.id} />
                     </TabsContent>
 
                     <TabsContent value="overview">
