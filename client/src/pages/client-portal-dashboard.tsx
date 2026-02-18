@@ -256,10 +256,6 @@ function resolveTab(tab: string | null): string {
   return TAB_ALIASES[tab] || tab;
 }
 
-function resolveLeadsView(view: string | null): 'recordings' | 'qualified' {
-  return view === 'qualified' ? 'qualified' : 'recordings';
-}
-
 export default function ClientPortalDashboard() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
@@ -270,9 +266,7 @@ export default function ClientPortalDashboard() {
 
   // URL-driven tab system
   const tabFromUrl = urlParams.get('tab');
-  const leadsViewFromUrl = urlParams.get('leadsView');
   const [activeTab, setActiveTabState] = useState(resolveTab(tabFromUrl));
-  const [leadsSubView, setLeadsSubViewState] = useState<'recordings' | 'qualified'>(resolveLeadsView(leadsViewFromUrl));
   const [targetMarketTab, setTargetMarketTab] = useState('accounts');
   const [showSupportDialog, setShowSupportDialog] = useState(false);
 
@@ -284,32 +278,12 @@ export default function ClientPortalDashboard() {
     }
   }, [tabFromUrl]);
 
-  // Sync leads sub-view with URL changes
-  useEffect(() => {
-    const resolved = resolveLeadsView(leadsViewFromUrl);
-    if (resolved !== leadsSubView) {
-      setLeadsSubViewState(resolved);
-    }
-  }, [leadsViewFromUrl]);
-
   // Update URL when activeTab changes internally
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
     const params = new URLSearchParams(searchString);
     params.set('tab', tab);
-    if (tab === 'leads') {
-      params.set('leadsView', leadsSubView);
-    } else {
-      params.delete('leadsView');
-    }
-    window.history.replaceState(null, '', `/client-portal/dashboard?${params.toString()}`);
-  };
-
-  const setLeadsSubView = (view: 'recordings' | 'qualified') => {
-    setLeadsSubViewState(view);
-    const params = new URLSearchParams(searchString);
-    params.set('tab', 'leads');
-    params.set('leadsView', view);
+    params.delete('leadsView');
     window.history.replaceState(null, '', `/client-portal/dashboard?${params.toString()}`);
   };
   
@@ -2759,21 +2733,14 @@ export default function ClientPortalDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-bold">Leads</h2>
-                <p className="text-muted-foreground">View Telnyx call recordings and QA-approved leads</p>
+                <p className="text-muted-foreground">View your QA-approved qualified leads</p>
               </div>
             </div>
 
-            <Tabs value={leadsSubView} onValueChange={(v) => setLeadsSubView(v as 'qualified')}>
-              <TabsList>
-                <TabsTrigger value="qualified">Qualified Leads</TabsTrigger>
-              </TabsList>
-              <TabsContent value="qualified" className="mt-4">
-                <QualifiedLeadsTable
-                  onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}
-                  onExport={() => setShowExportDialog(true)}
-                />
-              </TabsContent>
-            </Tabs>
+            <QualifiedLeadsTable
+              onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}
+              onExport={() => setShowExportDialog(true)}
+            />
           </div>
         )}
 
