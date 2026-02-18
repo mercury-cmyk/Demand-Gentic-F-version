@@ -303,12 +303,12 @@ export async function handleCallCompleted(
       await handleCarrierBlock(data.numberId, data.sipCode, data.sipReason);
     }
 
-    // Check if cooldown should be triggered
-    const cooldownCheck = await checkCooldownTriggers(data.numberId);
-    if (cooldownCheck.shouldCooldown && cooldownCheck.reason) {
-      console.log(`[NumberPoolIntegration] Cooldown triggered for ${data.numberId}: ${cooldownCheck.reason}`);
-      await triggerCooldown(data.numberId, cooldownCheck.reason, cooldownCheck.cooldownHours);
-    }
+    // Cooldown auto-trigger DISABLED per user request — no phone warm-up restrictions.
+    // const cooldownCheck = await checkCooldownTriggers(data.numberId);
+    // if (cooldownCheck.shouldCooldown && cooldownCheck.reason) {
+    //   console.log(`[NumberPoolIntegration] Cooldown triggered for ${data.numberId}: ${cooldownCheck.reason}`);
+    //   await triggerCooldown(data.numberId, cooldownCheck.reason, cooldownCheck.cooldownHours);
+    // }
 
   } catch (error) {
     console.error('[NumberPoolIntegration] Error handling call completion:', error);
@@ -407,12 +407,11 @@ async function getAgentAssignedNumber(
 }
 
 /**
- * Calculate jitter for agent-assigned numbers (simpler than pool routing)
+ * Calculate jitter for agent-assigned numbers — minimal since limits removed.
  */
-function calculateAgentJitter(numberId: string): number {
-  // Minimal jitter for agent-assigned numbers (30-60 seconds)
-  // These are dedicated numbers so less aggressive pacing needed
-  return 30000 + Math.random() * 30000;
+function calculateAgentJitter(_numberId: string): number {
+  // Minimal jitter — the 30s gap is enforced by releaseNumber()
+  return 500 + Math.random() * 1000;
 }
 
 /**

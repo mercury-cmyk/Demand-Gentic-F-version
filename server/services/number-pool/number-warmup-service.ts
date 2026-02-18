@@ -203,27 +203,9 @@ export function canMakeCallDuringWarmup(
     reputationBand?: string | null;
   }
 ): { canCall: boolean; reason?: string; warmupStatus: NumberWarmupStatus } {
+  // ALL WARMUP LIMITS REMOVED per user request.
+  // Numbers can make unlimited calls — only concurrent-call + 30s gap guards remain.
   const status = getNumberWarmupStatus(number);
-
-  const callsThisHour = number.callsThisHour ?? 0;
-  const callsToday = number.callsToday ?? 0;
-
-  if (callsThisHour >= status.effectiveMaxCallsPerHour) {
-    return {
-      canCall: false,
-      reason: `Warmup hourly limit reached (${callsThisHour}/${status.effectiveMaxCallsPerHour})`,
-      warmupStatus: status,
-    };
-  }
-
-  if (callsToday >= status.effectiveMaxCallsPerDay) {
-    return {
-      canCall: false,
-      reason: `Warmup daily limit reached (${callsToday}/${status.effectiveMaxCallsPerDay})`,
-      warmupStatus: status,
-    };
-  }
-
   return { canCall: true, warmupStatus: status };
 }
 

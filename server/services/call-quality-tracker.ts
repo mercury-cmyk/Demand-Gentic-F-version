@@ -162,8 +162,8 @@ export async function recordCallQuality(event: CallQualityEvent): Promise<void> 
     disconnectReason,
   });
 
-  // Check if number needs cooldown
-  await checkAndApplyCooldown(numberId);
+  // Cooldown auto-trigger DISABLED per user request — no phone warm-up restrictions.
+  // await checkAndApplyCooldown(numberId);
 }
 
 /**
