@@ -118,14 +118,20 @@ const TELNYX_FATAL_ERROR_CODES = [10010]; // Account-level policy/status errors
  * Check if an error indicates a Telnyx account-level issue that requires pausing
  * Returns the error code and detail if it's a fatal error, null otherwise
  */
-function isTelnyxFatalError(error: any): { code: number; detail: string; isWhitelist?: boolean } | null {
+function isTelnyxFatalError(error: any): { code: number; detail: string; isWhitelist?: boolean; isRateLimit?: boolean } | null {
   if (!error || !error.message) return null;
 
   const message = String(error.message);
 
   // Check for our enriched error format from telnyx-ai-bridge.ts
   if (message.includes('Telnyx Whitelist Error:')) {
-    return { code: 10010, detail: message.replace('Telnyx Whitelist Error: ', ''), isWhitelist: true };
+    const detail = message.replace('Telnyx Whitelist Error: ', '');
+    const lowerDetail = detail.toLowerCase();
+    const isRateLimit =
+      lowerDetail.includes('rate limit exceeded') ||
+      lowerDetail.includes('pricing rate') ||
+      lowerDetail.includes(' d24');
+    return { code: 10010, detail, isWhitelist: true, isRateLimit };
   }
 
   // Parse Telnyx API error format: "Telnyx API error: 403 - {"errors":[{"code":10010,"detail":"Account is disabled D17"}]}"
@@ -138,7 +144,12 @@ function isTelnyxFatalError(error: any): { code: number; detail: string; isWhite
       for (const err of errorData.errors) {
         if (err.code && TELNYX_FATAL_ERROR_CODES.includes(err.code)) {
           const isWhitelist = err.detail?.toLowerCase().includes('whitelist');
-          return { code: err.code, detail: err.detail || 'Unknown error', isWhitelist };
+          const lowerDetail = String(err.detail || '').toLowerCase();
+          const isRateLimit =
+            lowerDetail.includes('rate limit exceeded') ||
+            lowerDetail.includes('pricing rate') ||
+            lowerDetail.includes(' d24');
+          return { code: err.code, detail: err.detail || 'Unknown error', isWhitelist, isRateLimit };
         }
       }
     }
@@ -845,14 +856,14 @@ async function setOrchestratorStallReason(campaignId: string, reason: string | n
 async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
   // Guard: in dev, calls blocked by default — must be enabled in Telephony settings. Production always allows calls.
   if (process.env.NODE_ENV !== 'production' && process.env.CALL_EXECUTION_ENABLED !== 'true') {
-    await setOrchestratorStallReason(campaignId, 'Call execution disabled. Go to Settings > Telephony and enable call execution.');
+    console.log(`[AI Orchestrator] Dev call execution disabled for campaign ${campaignId}; skipping without mutating stall reason`);
     return { initiated: 0, skipped: 0 };
   }
 
   // Clear stale "call execution disabled" stall reason if execution is now allowed
   // (handles case where stall reason was set in dev and persists after deploying to production)
   const existingCampaign = await storage.getCampaign(campaignId);
-  if (existingCampaign?.lastStallReason?.includes('Call execution disabled')) {
+  if (process.env.NODE_ENV === 'production' && existingCampaign?.lastStallReason?.includes('Call execution disabled')) {
     await setOrchestratorStallReason(campaignId, null);
   }
 
@@ -1701,6 +1712,37 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // Check for Telnyx account-level errors (should pause campaign, not retry)
         const telnyxFatalError = isTelnyxFatalError(error);
         if (telnyxFatalError) {
+          if (telnyxFatalError.isWhitelist && telnyxFatalError.isRateLimit) {
+            console.error(`[AI Orchestrator] ⚠️ Telnyx outbound profile rate cap hit for contact: ${telnyxFatalError.detail}`);
+            console.error(`[AI Orchestrator] ⚠️ Pausing campaign ${campaignId} until outbound profile pricing cap is raised (D24)`);
+
+            try {
+              await storage.updateCampaign(campaignId, { status: 'paused' });
+              await setOrchestratorStallReason(
+                campaignId,
+                'Telnyx outbound profile rate cap exceeded (D24). Increase destination max rate/allowlist in Telnyx Mission Control, then resume campaign.'
+              );
+            } catch (pauseError) {
+              console.error(`[AI Orchestrator] Failed to pause campaign ${campaignId} after D24 rate limit:`, pauseError);
+            }
+
+            // Re-queue this contact so it can be retried once campaign is resumed
+            try {
+              await db.execute(sql`
+                UPDATE campaign_queue
+                SET status = 'queued',
+                    next_attempt_at = NOW() + INTERVAL '30 minutes',
+                    enqueued_reason = COALESCE(enqueued_reason, '') || '|telnyx_d24_rate_limit',
+                    updated_at = NOW()
+                WHERE id = ${item.id}
+              `);
+            } catch (updateError) {
+              console.error(`[AI Orchestrator] Failed to requeue queue item ${item.id} after D24 rate limit:`, updateError);
+            }
+
+            return { success: false, itemId: item.id, error, fatalError: true };
+          }
+
           if (telnyxFatalError.isWhitelist) {
             console.error(`[AI Orchestrator] ⚠️ Whitelist error for contact: ${telnyxFatalError.detail}`);
             // For whitelist errors, just remove the contact, DON'T pause the whole campaign
