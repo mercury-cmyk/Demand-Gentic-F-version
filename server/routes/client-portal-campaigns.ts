@@ -17,6 +17,7 @@ import {
   virtualAgents,
   campaignQueue,
   callAttempts,
+  dialerCallAttempts,
   leads,
   clientCampaignAccess,
   contacts,
@@ -234,52 +235,103 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const campaignsList = [...clientCampaigns, ...mappedIntakeCampaigns, ...directCampaigns];
+    const campaignIdList = campaignsList.map((c) => c.id);
 
-    // Enrich with Stats
-    const campaignsWithStats = await Promise.all(campaignsList.map(async (c) => {
-      try {
-        const [queueStats] = await db
-            .select({
-                total: sql<number>`count(*)::int`,
-                pending: sql<number>`sum(case when status = 'queued' or status = 'pending' then 1 else 0 end)::int`
-            })
-            .from(campaignQueue)
-            .where(eq(campaignQueue.campaignId, c.id));
-            
-        const [attemptStats] = await db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(callAttempts)
-            .where(eq(callAttempts.campaignId, c.id));
-            
-        const [leadStats] = await db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(leads)
-            .where(eq(leads.campaignId, c.id));
+    if (campaignIdList.length === 0) {
+      return res.json([]);
+    }
 
-        const totalQueue = Number(queueStats?.total || 0);
-        const remaining = Number(queueStats?.pending || 0);
-        const attempts = Number(attemptStats?.count || 0);
-        const leadCount = Number(leadStats?.count || 0);
+    // Enrich with stats using batched aggregate queries (avoid per-campaign N+1 query fanout)
+    const [queueStatsRows, attemptStatsRows, leadStatsRows, dialerCallStatsRows] = await Promise.all([
+      db
+        .select({
+          campaignId: campaignQueue.campaignId,
+          total: sql<number>`count(*)::int`,
+          pending: sql<number>`sum(case when status = 'queued' or status = 'pending' then 1 else 0 end)::int`,
+        })
+        .from(campaignQueue)
+        .where(inArray(campaignQueue.campaignId, campaignIdList))
+        .groupBy(campaignQueue.campaignId),
+      db
+        .select({
+          campaignId: callAttempts.campaignId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(callAttempts)
+        .where(inArray(callAttempts.campaignId, campaignIdList))
+        .groupBy(callAttempts.campaignId),
+      db
+        .select({
+          campaignId: leads.campaignId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(leads)
+        .where(inArray(leads.campaignId, campaignIdList))
+        .groupBy(leads.campaignId),
+      db
+        .select({
+          campaignId: dialerCallAttempts.campaignId,
+          callsMade: sql<number>`count(*)::int`,
+          connected: sql<number>`sum(case when ${dialerCallAttempts.connected} = true then 1 else 0 end)::int`,
+          qualified: sql<number>`sum(case when ${dialerCallAttempts.disposition} = 'qualified_lead' then 1 else 0 end)::int`,
+          voicemail: sql<number>`sum(case when ${dialerCallAttempts.disposition} = 'voicemail' then 1 else 0 end)::int`,
+          noAnswer: sql<number>`sum(case when ${dialerCallAttempts.disposition} = 'no_answer' then 1 else 0 end)::int`,
+          invalid: sql<number>`sum(case when ${dialerCallAttempts.disposition} = 'invalid_data' then 1 else 0 end)::int`,
+        })
+        .from(dialerCallAttempts)
+        .where(inArray(dialerCallAttempts.campaignId, campaignIdList))
+        .groupBy(dialerCallAttempts.campaignId),
+    ]);
 
-        return {
-            ...c,
-            eligibleCount: totalQueue,
-            verifiedCount: leadCount,
-            deliveredCount: attempts, 
-            totalContacts: totalQueue,
-            stats: {
-                attempts: attempts,
-                impressions: attempts, 
-                leads: leadCount,
-                targetAchieved: leadCount, 
-                remaining: remaining 
-            }
-        };
-      } catch (e) {
-        console.error('Error fetching stats for campaign ' + c.id, e);
-        return c;
-      }
-    }));
+    const queueStatsByCampaignId = new Map(
+      queueStatsRows.map((row) => [row.campaignId, row]),
+    );
+    const attemptStatsByCampaignId = new Map(
+      attemptStatsRows.map((row) => [row.campaignId, row]),
+    );
+    const leadStatsByCampaignId = new Map(
+      leadStatsRows.map((row) => [row.campaignId, row]),
+    );
+    const dialerCallStatsByCampaignId = new Map(
+      dialerCallStatsRows.map((row) => [row.campaignId, row]),
+    );
+
+    const campaignsWithStats = campaignsList.map((c) => {
+      const queueStats = queueStatsByCampaignId.get(c.id);
+      const attemptStats = attemptStatsByCampaignId.get(c.id);
+      const leadStats = leadStatsByCampaignId.get(c.id);
+      const dialerCallStats = dialerCallStatsByCampaignId.get(c.id);
+
+      const totalQueue = Number(queueStats?.total || 0);
+      const remaining = Number(queueStats?.pending || 0);
+      const attempts = Number(attemptStats?.count || 0);
+      const leadCount = Number(leadStats?.count || 0);
+      const callReport = {
+        callsMade: Number(dialerCallStats?.callsMade || 0),
+        connected: Number(dialerCallStats?.connected || 0),
+        qualified: Number(dialerCallStats?.qualified || 0),
+        voicemail: Number(dialerCallStats?.voicemail || 0),
+        noAnswer: Number(dialerCallStats?.noAnswer || 0),
+        invalid: Number(dialerCallStats?.invalid || 0),
+      };
+
+      return {
+        ...c,
+        eligibleCount: totalQueue,
+        verifiedCount: leadCount,
+        deliveredCount: attempts,
+        totalContacts: totalQueue,
+        callReport,
+        stats: {
+          attempts,
+          impressions: attempts,
+          leads: leadCount,
+          targetAchieved: leadCount,
+          remaining,
+          callReport,
+        },
+      };
+    });
 
     res.json(campaignsWithStats);
   } catch (error) {

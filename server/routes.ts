@@ -13843,8 +13843,8 @@ export function registerRoutes(app: Express) {
   // Fetch recording from Telnyx manually
   app.post("/api/leads/:id/fetch-recording", requireAuth, async (req, res) => {
     try {
-      const { updateLeadRecording } = await import('./services/telnyx-recordings');
-      const { leads, callAttempts } = await import('@shared/schema');
+      const { syncRecordingForLead } = await import('./services/telnyx-recordings');
+      const { leads } = await import('@shared/schema');
 
       // Get lead with call attempt details
       const [lead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
@@ -13853,21 +13853,21 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      if (!lead.callAttemptId) {
-        return res.status(400).json({ message: "No call attempt associated with this lead" });
+      const hasCallEvidence = !!(lead.callAttemptId || lead.telnyxCallId || lead.dialedNumber);
+      if (!hasCallEvidence) {
+        return res.status(400).json({ message: "No call evidence found for this lead" });
       }
 
-      // Get the call attempt to find Telnyx call ID
-      const [callAttempt] = await db.select().from(callAttempts).where(eq(callAttempts.id, lead.callAttemptId)).limit(1);
-
-      if (!callAttempt || !callAttempt.telnyxCallId) {
-        return res.status(400).json({ message: "No Telnyx call ID found for this lead" });
-      }
-
-      // Fetch recording in background
-      updateLeadRecording(lead.id, callAttempt.telnyxCallId).catch(err => {
-        console.error('Background recording fetch error:', err);
-      });
+      // Fetch recording in background using multi-strategy sync
+      syncRecordingForLead(lead.id)
+        .then((found) => {
+          if (!found) {
+            console.log(`[Lead Recording Fetch] No recording found yet for lead ${lead.id}`);
+          }
+        })
+        .catch(err => {
+          console.error('Background recording fetch error:', err);
+        });
 
       res.status(202).json({ message: "Recording fetch started - check back in a moment" });
     } catch (error) {

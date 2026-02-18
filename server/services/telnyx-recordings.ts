@@ -1,6 +1,6 @@
 import { eq, isNull, and, gte, lte, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { leads, calls, callAttempts, contacts } from '../../shared/schema';
+import { leads, calls, callAttempts, dialerCallAttempts, contacts } from '../../shared/schema';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
@@ -377,14 +377,35 @@ export async function syncMissingLeadRecordings(limit: number = 50): Promise<{
 /**
  * Update lead with recording URL and trigger transcription
  */
-async function updateLeadWithRecording(leadId: string, recordingUrl: string, durationSec: number): Promise<void> {
+async function updateLeadWithRecording(
+  leadId: string,
+  recordingUrl: string,
+  durationSec: number,
+  telnyxCallId?: string | null
+): Promise<void> {
   await db.update(leads)
     .set({
       recordingUrl,
       callDuration: durationSec,
       transcriptionStatus: 'pending',
+      recordingStatus: 'completed',
     })
     .where(eq(leads.id, leadId));
+
+  // Best-effort: persist the fetched recording in GCS/S3 for durable URL delivery
+  try {
+    const { isRecordingStorageEnabled, downloadAndStoreRecording } = await import('./recording-storage');
+    if (isRecordingStorageEnabled()) {
+      const recordingS3Key = await downloadAndStoreRecording(recordingUrl, leadId, telnyxCallId || null);
+      if (recordingS3Key) {
+        await db.update(leads)
+          .set({ recordingS3Key, recordingStatus: 'completed' })
+          .where(eq(leads.id, leadId));
+      }
+    }
+  } catch (error) {
+    console.warn(`[Telnyx-Sync] Recording persisted URL update skipped for lead ${leadId}:`, error);
+  }
 
   // Trigger transcription asynchronously (don't wait)
   import('./google-transcription')
@@ -403,11 +424,9 @@ export async function syncRecordingForLead(leadId: string): Promise<boolean> {
   const [lead] = await db
     .select({
       lead: leads,
-      attempt: callAttempts,
       contact: contacts,
     })
     .from(leads)
-    .leftJoin(callAttempts, eq(leads.callAttemptId, callAttempts.id))
     .leftJoin(contacts, eq(leads.contactId, contacts.id))
     .where(eq(leads.id, leadId))
     .limit(1);
@@ -416,10 +435,31 @@ export async function syncRecordingForLead(leadId: string): Promise<boolean> {
     throw new Error(`Lead not found: ${leadId}`);
   }
 
+  // Resolve call attempt from either legacy call_attempts or dialer_call_attempts
+  let legacyAttempt: any = null;
+  let dialerAttempt: any = null;
+  if (lead.lead.callAttemptId) {
+    [legacyAttempt] = await db
+      .select()
+      .from(callAttempts)
+      .where(eq(callAttempts.id, lead.lead.callAttemptId))
+      .limit(1);
+
+    [dialerAttempt] = await db
+      .select()
+      .from(dialerCallAttempts)
+      .where(eq(dialerCallAttempts.id, lead.lead.callAttemptId))
+      .limit(1);
+  }
+
+  const resolvedAttempt = legacyAttempt || dialerAttempt;
+  const resolvedAttemptTelnyxCallId: string | null = resolvedAttempt?.telnyxCallId || null;
+  const resolvedAttemptDuration: number = Number(resolvedAttempt?.duration || 0);
+
   // Early exit: Skip leads without evidence that an actual call was made
   // Contact phones alone don't count - they just mean we *could* call, not that we *did*
   const hasCallEvidence = !!(
-    lead.attempt?.telnyxCallId ||  // Call attempt has Telnyx call ID
+    resolvedAttemptTelnyxCallId || // Call attempt has Telnyx call ID
     lead.lead.telnyxCallId ||      // Lead has direct Telnyx call ID
     lead.lead.dialedNumber         // Lead has a dialed number recorded
   );
@@ -430,18 +470,25 @@ export async function syncRecordingForLead(leadId: string): Promise<boolean> {
   }
 
   // Strategy 1: Use telnyxCallId from call_attempts (legacy auto-dialer)
-  if (lead.attempt?.telnyxCallId) {
+  if (resolvedAttemptTelnyxCallId) {
     console.log(`[Telnyx-Sync] Trying Strategy 1a: Fetch by call_control_id (from attempt) for lead ${leadId}`);
-    const recordingUrl = await fetchTelnyxRecording(lead.attempt.telnyxCallId);
+    const recordingUrl = await fetchTelnyxRecording(resolvedAttemptTelnyxCallId);
     if (recordingUrl) {
       // These can throw - let them propagate as they're real errors
-      await updateLeadWithRecording(leadId, recordingUrl, lead.attempt.duration || 0);
+      await updateLeadWithRecording(leadId, recordingUrl, resolvedAttemptDuration, resolvedAttemptTelnyxCallId);
       
       // Also update call attempt with recording URL if not already set
-      if (!lead.attempt.recordingUrl) {
-        await db.update(callAttempts)
-          .set({ recordingUrl })
-          .where(eq(callAttempts.id, lead.attempt.id));
+      if (resolvedAttempt && !resolvedAttempt.recordingUrl) {
+        if (legacyAttempt) {
+          await db.update(callAttempts)
+            .set({ recordingUrl })
+            .where(eq(callAttempts.id, legacyAttempt.id));
+        }
+        if (dialerAttempt) {
+          await db.update(dialerCallAttempts)
+            .set({ recordingUrl, updatedAt: new Date() })
+            .where(eq(dialerCallAttempts.id, dialerAttempt.id));
+        }
       }
       
       console.log(`[Telnyx-Sync] ✅ Strategy 1a success: Updated lead ${leadId} with recording`);
@@ -456,7 +503,7 @@ export async function syncRecordingForLead(leadId: string): Promise<boolean> {
     const recordingUrl = await fetchTelnyxRecording(lead.lead.telnyxCallId);
     if (recordingUrl) {
       // These can throw - let them propagate as they're real errors
-      await updateLeadWithRecording(leadId, recordingUrl, lead.lead.callDuration || 0);
+      await updateLeadWithRecording(leadId, recordingUrl, lead.lead.callDuration || 0, lead.lead.telnyxCallId);
       
       console.log(`[Telnyx-Sync] ✅ Strategy 1b success: Updated lead ${leadId} with recording`);
       return true;
@@ -499,16 +546,26 @@ export async function syncRecordingForLead(leadId: string): Promise<boolean> {
         console.log(`[Telnyx-Sync] Found download URL: ${downloadUrl}`);
         const durationSec = Math.floor(recording.duration_millis / 1000);
         // These can throw - let them propagate as they're real errors
-        await updateLeadWithRecording(leadId, downloadUrl, durationSec);
+          await updateLeadWithRecording(leadId, downloadUrl, durationSec, recording.call_control_id);
         
         // Also update call attempt with telnyx metadata
-        if (lead.attempt) {
+          if (legacyAttempt) {
           await db.update(callAttempts)
             .set({
               telnyxCallId: recording.call_control_id,
               recordingUrl: downloadUrl,
             })
-            .where(eq(callAttempts.id, lead.attempt.id));
+              .where(eq(callAttempts.id, legacyAttempt.id));
+          }
+
+          if (dialerAttempt) {
+            await db.update(dialerCallAttempts)
+              .set({
+                telnyxCallId: recording.call_control_id,
+                recordingUrl: downloadUrl,
+                updatedAt: new Date(),
+              })
+              .where(eq(dialerCallAttempts.id, dialerAttempt.id));
         }
         
         console.log(`[Telnyx-Sync] ✅ Strategy 2 success: Updated lead ${leadId} with recording`);
@@ -521,8 +578,8 @@ export async function syncRecordingForLead(leadId: string): Promise<boolean> {
   console.log(`[Telnyx-Sync] ========================================`);
   console.log(`[Telnyx-Sync] ❌ NO RECORDING FOUND FOR LEAD: ${leadId}`);
   console.log(`[Telnyx-Sync] Diagnosis:`);
-  console.log(`[Telnyx-Sync]   - Has call attempt: ${!!lead.attempt ? 'YES' : 'NO'}`);
-  console.log(`[Telnyx-Sync]   - Has Telnyx call ID (attempt): ${!!lead.attempt?.telnyxCallId ? 'YES' : 'NO'}`);
+  console.log(`[Telnyx-Sync]   - Has call attempt: ${!!resolvedAttempt ? 'YES' : 'NO'}`);
+  console.log(`[Telnyx-Sync]   - Has Telnyx call ID (attempt): ${!!resolvedAttemptTelnyxCallId ? 'YES' : 'NO'}`);
   console.log(`[Telnyx-Sync]   - Has Telnyx call ID (lead): ${!!lead.lead.telnyxCallId ? 'YES' : 'NO'}`);
   console.log(`[Telnyx-Sync]   - Has dialed number (lead): ${!!lead.lead.dialedNumber ? 'YES' : 'NO'}`);
   console.log(`[Telnyx-Sync]   - Has dialed number (contact): ${!!dialedPhone ? 'YES' : 'NO'}`);

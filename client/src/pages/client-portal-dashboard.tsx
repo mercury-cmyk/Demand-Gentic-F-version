@@ -27,10 +27,10 @@ import {
 import {
   Building2, LogOut, Package, Plus, FileText, Users, Calendar, CalendarDays, ChevronRight,
   LayoutDashboard, Target, BarChart3, Download, CreditCard, MessageSquare,
-  Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingUp, TrendingDown, Brain,
+  Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingDown, Brain,
   FileDown, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
-  Filter, Search, RefreshCw, ExternalLink, Zap, Bot, X,
+  Filter, Search, RefreshCw, ExternalLink, Bot, X,
   Link as LinkIcon, Upload, Trash2, Mic, ShoppingCart, FileEdit, TestTube,
   ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
@@ -104,6 +104,14 @@ interface Campaign {
   orderNumber?: string;
   estimatedBudget?: string;
   approvedBudget?: string;
+  callReport?: {
+    callsMade: number;
+    connected: number;
+    qualified: number;
+    voicemail: number;
+    noAnswer: number;
+    invalid: number;
+  };
   stats?: {
     attempts: number;
     impressions: number;
@@ -115,6 +123,14 @@ interface Campaign {
       remaining: number;
       completed: number;
       failed: number;
+    };
+    callReport?: {
+      callsMade: number;
+      connected: number;
+      qualified: number;
+      voicemail: number;
+      noAnswer: number;
+      invalid: number;
     };
   };
 }
@@ -1571,6 +1587,26 @@ export default function ClientPortalDashboard() {
 
     return matchesStatus && matchesSearch && matchesType;
   });
+
+  const callCampaignReportTotals = filteredCampaigns.reduce((acc, campaign) => {
+    const report = campaign.callReport || campaign.stats?.callReport;
+    if (!report) return acc;
+
+    acc.callsMade += Number(report.callsMade || 0);
+    acc.connected += Number(report.connected || 0);
+    acc.qualified += Number(report.qualified || 0);
+    acc.voicemail += Number(report.voicemail || 0);
+    acc.noAnswer += Number(report.noAnswer || 0);
+    acc.invalid += Number(report.invalid || 0);
+    return acc;
+  }, {
+    callsMade: 0,
+    connected: 0,
+    qualified: 0,
+    voicemail: 0,
+    noAnswer: 0,
+    invalid: 0,
+  });
   
   // Filter projects (campaign requests)
   const filteredProjects = projects.filter(project => {
@@ -2593,105 +2629,42 @@ export default function ClientPortalDashboard() {
             </Card>
 
 
-            {/* Campaign Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {/* Active Campaigns */}
+            {/* Call Campaign Reports */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Active Campaigns</p>
-                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{filteredCampaigns.filter(c => c.status === 'active').length}</p>
-                      <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Mail className="h-3 w-3" />
-                          {filteredCampaigns.filter(c => c.status === 'active' && (c.type === 'email' || c.campaignType === 'email')).length}
-                        </span>
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Phone className="h-3 w-3" />
-                          {filteredCampaigns.filter(c => c.status === 'active' && (c.type === 'phone' || c.type === 'call' || c.campaignType === 'phone' || c.campaignType === 'call')).length}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-                      <Zap className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                  </div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Calls Made</p>
+                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.callsMade.toLocaleString()}</p>
                 </CardContent>
               </Card>
-
-              {/* Impressions - Email & Phone */}
               <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Impressions</p>
-                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{totalLeadsDelivered.toLocaleString()}</p>
-                      <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Mail className="h-3 w-3" />
-                          {Math.floor(totalLeadsDelivered * 0.6).toLocaleString()}
-                        </span>
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Phone className="h-3 w-3" />
-                          {Math.floor(totalLeadsDelivered * 0.4).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-                      <BarChart3 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                    </div>
-                  </div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Connected</p>
+                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.connected.toLocaleString()}</p>
                 </CardContent>
               </Card>
-
-              {/* Qualified Leads */}
               <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Qualified Leads</p>
-                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{Math.floor(totalLeadsDelivered * 0.042).toLocaleString()}</p>
-                      <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Mail className="h-3 w-3" />
-                          {Math.floor(totalLeadsDelivered * 0.042 * 0.55).toLocaleString()}
-                        </span>
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Phone className="h-3 w-3" />
-                          {Math.floor(totalLeadsDelivered * 0.042 * 0.45).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-                      <UserCheck className="h-5 w-5 text-violet-600 dark:text-violet-400" />
-                    </div>
-                  </div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Qualified</p>
+                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.qualified.toLocaleString()}</p>
                 </CardContent>
               </Card>
-
-              {/* Conversion Rate */}
               <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Conversion Rate</p>
-                      <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">4.2%</p>
-                      <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Mail className="h-3 w-3" />
-                          3.8%
-                        </span>
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Phone className="h-3 w-3" />
-                          4.7%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-11 w-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-                      <TrendingUp className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                    </div>
-                  </div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Voice Mail</p>
+                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.voicemail.toLocaleString()}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
+                <CardContent className="p-5">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">No Answer</p>
+                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.noAnswer.toLocaleString()}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
+                <CardContent className="p-5">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Invalid</p>
+                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.invalid.toLocaleString()}</p>
                 </CardContent>
               </Card>
             </div>

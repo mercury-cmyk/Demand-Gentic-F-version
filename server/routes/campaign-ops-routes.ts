@@ -336,4 +336,79 @@ router.get(
   }
 );
 
+// GET /api/campaigns/ops/ai-stalls
+// Provides a compact operational view of stalled AI campaigns and likely root cause.
+router.get(
+  '/campaigns/ops/ai-stalls',
+  requireAuth,
+  async (_req: Request, res: Response) => {
+    try {
+      const rows = await db
+        .select({
+          id: campaigns.id,
+          name: campaigns.name,
+          status: campaigns.status,
+          dialMode: campaigns.dialMode,
+          lastStallReason: campaigns.lastStallReason,
+          lastStallReasonAt: campaigns.lastStallReasonAt,
+          updatedAt: campaigns.updatedAt,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.dialMode, 'ai_agent'));
+
+      const normalized = rows.map((row) => {
+        const reason = row.lastStallReason || '';
+        const lower = reason.toLowerCase();
+        const isD24RateLimit =
+          lower.includes('d24') ||
+          lower.includes('rate cap') ||
+          lower.includes('rate limit exceeded') ||
+          lower.includes('pricing rate');
+        const isCallExecutionDisabledStale = lower.includes('call execution disabled');
+
+        let recommendedAction: string | null = null;
+        if (isD24RateLimit) {
+          recommendedAction =
+            'Increase destination max-rate/whitelist in Telnyx outbound profile, then resume campaign.';
+        } else if (isCallExecutionDisabledStale) {
+          recommendedAction =
+            'Likely stale dev marker. In production, verify NODE_ENV=production and re-run orchestrator tick.';
+        } else if (reason) {
+          recommendedAction = 'Review campaign stall reason and telephony provider health.';
+        }
+
+        return {
+          ...row,
+          flags: {
+            isD24RateLimit,
+            isCallExecutionDisabledStale,
+            hasStallReason: Boolean(reason),
+          },
+          recommendedAction,
+        };
+      });
+
+      const stalled = normalized.filter((c) => c.flags.hasStallReason);
+
+      res.json({
+        summary: {
+          totalAiCampaigns: normalized.length,
+          stalledCount: stalled.length,
+          d24RateLimitCount: stalled.filter((c) => c.flags.isD24RateLimit).length,
+          callExecutionDisabledMarkers: stalled.filter((c) => c.flags.isCallExecutionDisabledStale).length,
+        },
+        campaigns: normalized.sort((a, b) => {
+          const aTs = a.lastStallReasonAt ? new Date(a.lastStallReasonAt).getTime() : 0;
+          const bTs = b.lastStallReasonAt ? new Date(b.lastStallReasonAt).getTime() : 0;
+          return bTs - aTs;
+        }),
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      console.error('Error fetching AI stall status:', error);
+      res.status(500).json({ error: 'internal_server_error', message: error.message });
+    }
+  }
+);
+
 export default router;

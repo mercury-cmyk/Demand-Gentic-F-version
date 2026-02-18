@@ -311,6 +311,21 @@ function resolveQualifiedLeadRecordingUrl(
   });
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -1245,11 +1260,35 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     const buildTelnyxFallbackLeads = async () => {
       const phoneSearchDigits = typeof search === 'string' ? normalizePhoneDigits(search) : '';
       const telnyxPhoneFilter = typeof search === 'string' ? formatPhoneForTelnyx(search) : undefined;
-      const telnyxRecordings = await fetchTelnyxRecordings({
-        pageSize: Math.min(100, pageSizeNum),
-        maxPages: Math.max(10, pageNum),
-        phoneNumber: telnyxPhoneFilter,
-      });
+      let telnyxRecordings: Awaited<ReturnType<typeof fetchTelnyxRecordings>> = [];
+      try {
+        const telnyxFetchPageSize = Math.min(50, Math.max(10, pageSizeNum));
+        // Keep fallback fast: this path is best-effort only.
+        const telnyxFetchMaxPages = Math.min(2, Math.max(1, pageNum));
+        telnyxRecordings = await withTimeout(
+          fetchTelnyxRecordings({
+            pageSize: telnyxFetchPageSize,
+            maxPages: telnyxFetchMaxPages,
+            phoneNumber: telnyxPhoneFilter,
+          }),
+          10000,
+          'Telnyx fallback fetch'
+        );
+      } catch (error: any) {
+        console.warn('[CLIENT PORTAL] Telnyx fallback unavailable, returning DB-only empty fallback:', error?.message || error);
+        return {
+          leads: [],
+          total: 0,
+          debug: includeDebug ? {
+            source: 'telnyx-fallback',
+            reason: 'telnyx_fallback_timeout_or_error',
+            details: error?.message || 'unknown_telnyx_fallback_error',
+            search: typeof search === 'string' ? search : null,
+            normalizedSearchDigits: phoneSearchDigits || null,
+            telnyxPhoneFilter: telnyxPhoneFilter || null,
+          } : undefined,
+        };
+      }
 
       if (telnyxRecordings.length === 0) {
         return {
@@ -1867,16 +1906,33 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
     }
 
     // Limit Telnyx fetch scope to requested page/batch size to avoid loading huge recording sets.
-    const telnyxFetchPageSize = Math.min(100, pageSize);
-    const telnyxFetchMaxPages = Math.max(1, page);
+    const telnyxFetchPageSize = Math.min(50, Math.max(10, pageSize));
+    const telnyxFetchMaxPages = Math.min(2, Math.max(1, page));
 
-    const telnyxRecordings = await fetchTelnyxRecordings({
-      startDate,
-      endDate,
-      phoneNumber: telnyxPhoneFilter,
-      pageSize: telnyxFetchPageSize,
-      maxPages: telnyxFetchMaxPages,
-    });
+    let telnyxRecordings: Awaited<ReturnType<typeof fetchTelnyxRecordings>> = [];
+    try {
+      telnyxRecordings = await withTimeout(
+        fetchTelnyxRecordings({
+          startDate,
+          endDate,
+          phoneNumber: telnyxPhoneFilter,
+          pageSize: telnyxFetchPageSize,
+          maxPages: telnyxFetchMaxPages,
+        }),
+        10000,
+        'Telnyx recordings list fetch'
+      );
+    } catch (error: any) {
+      console.warn('[CLIENT PORTAL] Telnyx recordings fetch timed out, returning empty list:', error?.message || error);
+      return res.json({
+        total: 0,
+        page,
+        pageSize,
+        items: [],
+        source: 'telnyx',
+        degraded: true,
+      });
+    }
 
     const normalizedSearch = phone.replace(/\D/g, '');
     const filtered = telnyxRecordings
