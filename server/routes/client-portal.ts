@@ -58,8 +58,6 @@ import { ukefReportsRouter } from '../integrations/ukef_reports';
 import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
-import { fetchTelnyxRecordings } from '../services/telnyx-sync-service';
-import { getPlayableRecordingLink } from '../services/recording-link-resolver';
 import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
@@ -102,13 +100,6 @@ export interface ClientJWTPayload {
   lastName: string | null;
   isClient: true;
   isOwner?: boolean;
-}
-
-interface ClientRecordingStreamTokenPayload {
-  recordingId: string;
-  clientUserId: string;
-  clientAccountId: string;
-  isClientRecordingStream: true;
 }
 
 type TutorialVideoProvider = 'google_drive' | 'youtube' | 'loom' | 'vimeo' | 'other';
@@ -309,21 +300,6 @@ function resolveQualifiedLeadRecordingUrl(
     recordingUrl,
     recordingS3Key,
   });
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timeoutId: NodeJS.Timeout | null = null;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
 }
 
 declare global {
@@ -1257,215 +1233,14 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       .map(a => a.regularCampaignId)
       .filter((id): id is string => id !== null);
 
-    const buildTelnyxFallbackLeads = async () => {
-      const phoneSearchDigits = typeof search === 'string' ? normalizePhoneDigits(search) : '';
-      const telnyxPhoneFilter = typeof search === 'string' ? formatPhoneForTelnyx(search) : undefined;
-      let telnyxRecordings: Awaited<ReturnType<typeof fetchTelnyxRecordings>> = [];
-      try {
-        const telnyxFetchPageSize = Math.min(50, Math.max(10, pageSizeNum));
-        // Keep fallback fast: this path is best-effort only.
-        const telnyxFetchMaxPages = Math.min(2, Math.max(1, pageNum));
-        telnyxRecordings = await withTimeout(
-          fetchTelnyxRecordings({
-            pageSize: telnyxFetchPageSize,
-            maxPages: telnyxFetchMaxPages,
-            phoneNumber: telnyxPhoneFilter,
-          }),
-          10000,
-          'Telnyx fallback fetch'
-        );
-      } catch (error: any) {
-        console.warn('[CLIENT PORTAL] Telnyx fallback unavailable, returning DB-only empty fallback:', error?.message || error);
-        return {
-          leads: [],
-          total: 0,
-          debug: includeDebug ? {
-            source: 'telnyx-fallback',
-            reason: 'telnyx_fallback_timeout_or_error',
-            details: error?.message || 'unknown_telnyx_fallback_error',
-            search: typeof search === 'string' ? search : null,
-            normalizedSearchDigits: phoneSearchDigits || null,
-            telnyxPhoneFilter: telnyxPhoneFilter || null,
-          } : undefined,
-        };
-      }
-
-      if (telnyxRecordings.length === 0) {
-        return {
-          leads: [],
-          total: 0,
-          debug: includeDebug ? {
-            source: 'telnyx-fallback',
-            reason: 'no_telnyx_recordings_for_filter',
-            search: typeof search === 'string' ? search : null,
-            normalizedSearchDigits: phoneSearchDigits || null,
-            telnyxPhoneFilter: telnyxPhoneFilter || null,
-          } : undefined,
-        };
-      }
-
-      const candidateNumbers = new Set<string>();
-      for (const rec of telnyxRecordings) {
-        const fromDigits = normalizePhoneDigits(rec.from);
-        const toDigits = normalizePhoneDigits(rec.to);
-        if (fromDigits) {
-          candidateNumbers.add(fromDigits);
-          candidateNumbers.add(`+${fromDigits}`);
-        }
-        if (toDigits) {
-          candidateNumbers.add(toDigits);
-          candidateNumbers.add(`+${toDigits}`);
-        }
-      }
-
-      const candidateList = Array.from(candidateNumbers);
-      if (candidateList.length === 0) {
-        return {
-          leads: [],
-          total: 0,
-          debug: includeDebug ? {
-            source: 'telnyx-fallback',
-            reason: 'no_candidate_numbers_from_telnyx_recordings',
-            telnyxRecordingsFetched: telnyxRecordings.length,
-            search: typeof search === 'string' ? search : null,
-            normalizedSearchDigits: phoneSearchDigits || null,
-            telnyxPhoneFilter: telnyxPhoneFilter || null,
-          } : undefined,
-        };
-      }
-
-      const candidateLast10 = Array.from(
-        new Set(
-          candidateList
-            .map((value) => normalizePhoneDigits(value))
-            .filter((digits) => digits.length >= 10)
-            .map((digits) => digits.slice(-10))
-        )
-      );
-
-      const phoneMatchConditions = [
-        inArray(contacts.directPhoneE164, candidateList),
-        inArray(contacts.mobilePhoneE164, candidateList),
-        ...candidateLast10.map((digits) => like(contacts.directPhone, `%${digits}%`)),
-        ...candidateLast10.map((digits) => like(contacts.mobilePhone, `%${digits}%`)),
-      ];
-
-      const contactRows = await db
-        .select({
-          id: contacts.id,
-          firstName: contacts.firstName,
-          lastName: contacts.lastName,
-          email: contacts.email,
-          directPhoneE164: contacts.directPhoneE164,
-          mobilePhoneE164: contacts.mobilePhoneE164,
-          directPhoneRaw: contacts.directPhone,
-          mobilePhoneRaw: contacts.mobilePhone,
-          accountName: accounts.name,
-          accountIndustry: accounts.industryStandardized,
-        })
-        .from(contacts)
-        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
-        .where(or(...phoneMatchConditions)!);
-
-      const contactsByPhone = new Map<string, typeof contactRows[number]>();
-      for (const row of contactRows) {
-        const phoneValues = [
-          row.directPhoneE164,
-          row.mobilePhoneE164,
-          row.directPhoneRaw,
-          row.mobilePhoneRaw,
-        ];
-        for (const phoneValue of phoneValues) {
-          const digits = normalizePhoneDigits(phoneValue);
-          if (digits) {
-            contactsByPhone.set(digits, row);
-            if (digits.length >= 10) {
-              contactsByPhone.set(digits.slice(-10), row);
-            }
-          }
-        }
-      }
-
-      const fallbackRows = telnyxRecordings
-        .map((rec) => {
-          const fromDigits = normalizePhoneDigits(rec.from);
-          const toDigits = normalizePhoneDigits(rec.to);
-          const matchedContact = contactsByPhone.get(toDigits) || contactsByPhone.get(fromDigits);
-          const matchedContactName = matchedContact
-            ? [matchedContact.firstName, matchedContact.lastName].filter(Boolean).join(' ').trim() || null
-            : null;
-          const inferredPhone = rec.to || rec.from || null;
-          const contactName = matchedContactName || inferredPhone;
-          const durationSec = Math.floor((rec.duration_millis || 0) / 1000);
-          const matchedPhoneDigits =
-            (matchedContact
-              ? normalizePhoneDigits(matchedContact.directPhoneE164) ||
-                normalizePhoneDigits(matchedContact.mobilePhoneE164) ||
-                normalizePhoneDigits(matchedContact.directPhoneRaw) ||
-                normalizePhoneDigits(matchedContact.mobilePhoneRaw)
-              : null) ||
-            null;
-          return {
-            id: `telnyx-${rec.id}`,
-            contactName,
-            contactEmail: matchedContact?.email || null,
-            accountName: matchedContact?.accountName || null,
-            accountIndustry: matchedContact?.accountIndustry || null,
-            campaignId: null,
-            campaignName: matchedContact ? 'Telnyx Recording' : 'Telnyx Recording (Unmapped)',
-            aiScore: null,
-            callDuration: durationSec,
-            hasRecording: true,
-            hasTranscript: false,
-            qaStatus: 'approved',
-            createdAt: rec.created_at,
-            approvedAt: rec.recording_ended_at || rec.created_at,
-            matchedPhoneDigits,
-            recordingFrom: rec.from || null,
-            recordingTo: rec.to || null,
-          };
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null);
-
-      const filteredRows = (typeof search === 'string' && search.trim())
-        ? fallbackRows.filter((row) => {
-            const term = search.trim().toLowerCase();
-            return (
-              (row.contactName || '').toLowerCase().includes(term) ||
-              (row.contactEmail || '').toLowerCase().includes(term) ||
-              (row.accountName || '').toLowerCase().includes(term) ||
-              normalizePhoneDigits(row.recordingFrom || '').includes(phoneSearchDigits) ||
-              normalizePhoneDigits(row.recordingTo || '').includes(phoneSearchDigits) ||
-              normalizePhoneDigits(row.matchedPhoneDigits || '').includes(phoneSearchDigits)
-            );
-          })
-        : fallbackRows;
-
-      const total = filteredRows.length;
-      const offset = (pageNum - 1) * pageSizeNum;
-      const pagedRows = filteredRows.slice(offset, offset + pageSizeNum);
-      return {
-        leads: pagedRows,
-        total,
-        debug: includeDebug ? {
-          source: 'telnyx-fallback',
-          search: typeof search === 'string' ? search : null,
-          normalizedSearchDigits: phoneSearchDigits || null,
-          telnyxPhoneFilter: telnyxPhoneFilter || null,
-          telnyxRecordingsFetched: telnyxRecordings.length,
-          contactRowsMatchedByPhone: contactRows.length,
-          fallbackRowsBeforeSearch: fallbackRows.length,
-          fallbackRowsUnmapped: fallbackRows.filter((row) => !row.contactEmail && !row.accountName).length,
-          fallbackRowsAfterSearch: filteredRows.length,
-          candidatePhoneCount: candidateList.length,
-          sampleRecordingPhones: telnyxRecordings.slice(0, 5).map((rec) => ({
-            from: rec.from || null,
-            to: rec.to || null,
-          })),
-          reason: filteredRows.length === 0 ? 'recordings_found_but_no_contact_match_or_search_filter_excluded_all' : null,
-        } : undefined,
-      };
-    };
+    const buildTelnyxFallbackLeads = async () => ({
+      leads: [],
+      total: 0,
+      debug: includeDebug ? {
+        source: 'db-only',
+        reason: 'recording_fallback_disabled_gcs_only_policy',
+      } : undefined,
+    });
 
     if (accessibleCampaignIds.length === 0) {
       const fallback = await buildTelnyxFallbackLeads();
@@ -1475,7 +1250,7 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         page: pageNum,
         pageSize: pageSizeNum,
         debug: includeDebug ? {
-          accessMode: 'no_accessible_campaigns_using_telnyx_fallback',
+          accessMode: 'no_accessible_campaigns',
           accessibleCampaignIdsCount: accessibleCampaignIds.length,
           fallback: fallback.debug || null,
         } : undefined,
@@ -1570,7 +1345,7 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         page: pageNum,
         pageSize: pageSizeNum,
         debug: includeDebug ? {
-          accessMode: 'accessible_campaigns_present_but_db_leads_empty_using_telnyx_fallback',
+          accessMode: 'accessible_campaigns_present_but_db_leads_empty',
           accessibleCampaignIdsCount: accessibleCampaignIds.length,
           dbLeadsCount: leadsData.length,
           fallback: fallback.debug || null,
@@ -1803,14 +1578,13 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
   }
 });
 
-// List Telnyx call recordings for client portal Leads tab (scoped to client campaigns)
+// List call recordings for client portal Leads tab (GCS URL policy only)
 router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientAuth, async (req, res) => {
   try {
     const clientAccountId = req.clientUser!.clientAccountId;
     const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
     const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) || '25', 10)));
     const phone = typeof req.query.phone === 'string' ? req.query.phone.trim() : '';
-    const telnyxPhoneFilter = formatPhoneForTelnyx(phone);
 
     let startDate: Date | undefined;
     let endDate: Date | undefined;
@@ -1853,11 +1627,25 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
         page,
         pageSize,
         items: [],
-        source: 'telnyx',
+        source: 'gcs',
       });
     }
 
-    const callSessionConditions = [inArray(callSessions.campaignId, accessibleCampaignIds)];
+    const callSessionConditions: any[] = [
+      inArray(callSessions.campaignId, accessibleCampaignIds),
+      isNotNull(callSessions.recordingS3Key),
+    ];
+
+    if (phone) {
+      const phoneTerm = `%${phone}%`;
+      callSessionConditions.push(
+        or(
+          like(callSessions.toNumberE164, phoneTerm),
+          like(callSessions.fromNumber, phoneTerm)
+        )!
+      );
+    }
+
     if (startDate) {
       callSessionConditions.push(sql`${callSessions.createdAt} >= ${startDate}`);
     }
@@ -1871,6 +1659,11 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
         telnyxCallId: callSessions.telnyxCallId,
         toNumberE164: callSessions.toNumberE164,
         fromNumber: callSessions.fromNumber,
+        createdAt: callSessions.createdAt,
+        durationSec: callSessions.durationSec,
+        recordingStatus: callSessions.recordingStatus,
+        recordingS3Key: callSessions.recordingS3Key,
+        recordingUrl: callSessions.recordingUrl,
       })
       .from(callSessions)
       .where(and(...callSessionConditions))
@@ -1882,225 +1675,78 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
         page,
         pageSize,
         items: [],
-        source: 'telnyx',
+        source: 'gcs',
       });
     }
 
-    const scopedCallSessionIds = new Set(scopedSessions.map((session) => session.id));
-    const scopedTelnyxCallIds = new Set(
-      scopedSessions
-        .map((session) => session.telnyxCallId)
-        .filter((value): value is string => Boolean(value))
-    );
-    const scopedPhoneDigits = new Set<string>();
-    for (const session of scopedSessions) {
-      const sessionPhones = [session.toNumberE164, session.fromNumber];
-      for (const phoneValue of sessionPhones) {
-        const digits = normalizePhoneDigits(phoneValue);
-        if (!digits) continue;
-        scopedPhoneDigits.add(digits);
-        if (digits.length >= 10) {
-          scopedPhoneDigits.add(digits.slice(-10));
-        }
-      }
-    }
+    const items = scopedSessions
+      .map((session) => {
+        const recordingUrl = canonicalizeGcsRecordingUrl({
+          recordingS3Key: session.recordingS3Key,
+          recordingUrl: session.recordingUrl,
+        });
 
-    // Limit Telnyx fetch scope to requested page/batch size to avoid loading huge recording sets.
-    const telnyxFetchPageSize = Math.min(50, Math.max(10, pageSize));
-    const telnyxFetchMaxPages = Math.min(2, Math.max(1, page));
+        if (!recordingUrl) return null;
 
-    let telnyxRecordings: Awaited<ReturnType<typeof fetchTelnyxRecordings>> = [];
-    try {
-      telnyxRecordings = await withTimeout(
-        fetchTelnyxRecordings({
-          startDate,
-          endDate,
-          phoneNumber: telnyxPhoneFilter,
-          pageSize: telnyxFetchPageSize,
-          maxPages: telnyxFetchMaxPages,
-        }),
-        10000,
-        'Telnyx recordings list fetch'
-      );
-    } catch (error: any) {
-      console.warn('[CLIENT PORTAL] Telnyx recordings fetch timed out, returning empty list:', error?.message || error);
-      return res.json({
-        total: 0,
-        page,
-        pageSize,
-        items: [],
-        source: 'telnyx',
-        degraded: true,
-      });
-    }
-
-    const normalizedSearch = phone.replace(/\D/g, '');
-    const filtered = telnyxRecordings
-      .filter((recording) => {
-        const callSessionMatch = Boolean(recording.call_session_id) && scopedCallSessionIds.has(recording.call_session_id);
-        const callControlMatch = Boolean(recording.call_control_id) && scopedTelnyxCallIds.has(recording.call_control_id);
-        const fromDigits = normalizePhoneDigits(recording.from);
-        const toDigits = normalizePhoneDigits(recording.to);
-        const phoneMatch =
-          (fromDigits && (scopedPhoneDigits.has(fromDigits) || (fromDigits.length >= 10 && scopedPhoneDigits.has(fromDigits.slice(-10))))) ||
-          (toDigits && (scopedPhoneDigits.has(toDigits) || (toDigits.length >= 10 && scopedPhoneDigits.has(toDigits.slice(-10)))));
-
-        if (!callSessionMatch && !callControlMatch && !phoneMatch) {
-          return false;
-        }
-
-        if (!normalizedSearch) return true;
-        const from = fromDigits;
-        const to = toDigits;
-        return from.includes(normalizedSearch) || to.includes(normalizedSearch);
+        return {
+          id: session.id,
+          callControlId: session.telnyxCallId || null,
+          callLegId: null,
+          callSessionId: session.id,
+          createdAt: session.createdAt,
+          recordingStartedAt: null,
+          recordingEndedAt: null,
+          from: session.fromNumber || null,
+          to: session.toNumberE164 || null,
+          durationMillis: Number(session.durationSec || 0) * 1000,
+          durationSec: Number(session.durationSec || 0),
+          status: session.recordingStatus || 'stored',
+          channels: null,
+          hasMp3: recordingUrl.includes('.mp3'),
+          hasWav: recordingUrl.includes('.wav'),
+          primaryFormat: recordingUrl.includes('.wav') ? 'wav' : 'mp3',
+          recordingUrl,
+        };
       })
-      .sort((a, b) => {
-        const left = new Date(a.created_at).getTime();
-        const right = new Date(b.created_at).getTime();
-        return right - left;
-      });
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-    const total = filtered.length;
+    const total = items.length;
     const offset = (page - 1) * pageSize;
-    const items = filtered.slice(offset, offset + pageSize).map((recording) => ({
-      id: recording.id,
-      callControlId: recording.call_control_id || null,
-      callLegId: recording.call_leg_id || null,
-      callSessionId: recording.call_session_id || null,
-      createdAt: recording.created_at,
-      recordingStartedAt: recording.recording_started_at || null,
-      recordingEndedAt: recording.recording_ended_at || null,
-      from: recording.from || null,
-      to: recording.to || null,
-      durationMillis: recording.duration_millis || 0,
-      durationSec: Math.floor((recording.duration_millis || 0) / 1000),
-      status: recording.status,
-      channels: recording.channels || null,
-      hasMp3: Boolean(recording.download_urls?.mp3),
-      hasWav: Boolean(recording.download_urls?.wav),
-      primaryFormat: recording.download_urls?.mp3 ? 'mp3' : recording.download_urls?.wav ? 'wav' : null,
-    }));
+    const pagedItems = items.slice(offset, offset + pageSize);
 
     res.json({
       total,
       page,
       pageSize,
-      items,
-      source: 'telnyx',
+      items: pagedItems,
+      source: 'gcs',
     });
   } catch (error: any) {
-    console.error('[CLIENT PORTAL] Failed to list Telnyx recordings:', error);
+    console.error('[CLIENT PORTAL] Failed to list GCS recordings:', error);
     res.status(502).json({
-      message: 'Failed to fetch recordings from Telnyx',
+      message: 'Failed to fetch recordings',
       details: error?.message || 'Unknown error',
     });
   }
 });
 
-// Generate a short-lived tokenized stream URL for browser audio playback
+// Streaming disabled: client portal serves direct GCS URLs only.
 router.get(
   ['/qualified-leads/recordings/:recordingId/stream-token', '/telnyx-recordings/:recordingId/stream-token'],
   requireClientAuth,
-  async (req, res) => {
-  try {
-    const { recordingId } = req.params;
-    const payload: ClientRecordingStreamTokenPayload = {
-      recordingId,
-      clientUserId: req.clientUser!.clientUserId,
-      clientAccountId: req.clientUser!.clientAccountId,
-      isClientRecordingStream: true,
-    };
-    const streamToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
-    const streamUrl = `/api/client-portal/telnyx-recordings/${encodeURIComponent(recordingId)}/stream?token=${encodeURIComponent(streamToken)}`;
-    res.json({ streamUrl, expiresIn: 900 });
-  } catch (error: any) {
-    console.error('[CLIENT PORTAL] Failed to create recording stream token:', error);
-    res.status(500).json({ message: 'Failed to prepare recording playback' });
+  async (_req, res) => {
+    return res.status(410).json({
+      message: 'Recording streaming is disabled. Use GCS recordingUrl from lead/recordings APIs.',
+      gcsOnly: true,
+    });
   }
-});
+);
 
-// Stream recording audio via server-side proxy (no Telnyx portal redirect)
-router.get(['/qualified-leads/recordings/:recordingId/stream', '/telnyx-recordings/:recordingId/stream'], async (req, res) => {
-  try {
-    const { recordingId } = req.params;
-    const token = typeof req.query.token === 'string' ? req.query.token : '';
-    const authHeader = req.headers.authorization;
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
-
-    let authorized = false;
-
-    if (token) {
-      try {
-        const payload = jwt.verify(token, JWT_SECRET) as ClientRecordingStreamTokenPayload;
-        authorized = Boolean(payload?.isClientRecordingStream && payload.recordingId === recordingId);
-      } catch {
-        authorized = false;
-      }
-    }
-
-    if (!authorized && bearerToken && bearerToken !== 'null' && bearerToken !== 'undefined') {
-      try {
-        const payload = jwt.verify(bearerToken, JWT_SECRET) as ClientJWTPayload;
-        authorized = Boolean(payload?.isClient);
-      } catch {
-        authorized = false;
-      }
-    }
-
-    if (!authorized) {
-      res.setHeader('Content-Type', 'text/plain');
-      return res.status(401).send('Authentication required');
-    }
-
-    const resolved = await getPlayableRecordingLink(recordingId);
-    if (!resolved?.url) {
-      res.setHeader('Content-Type', 'text/plain');
-      return res.status(404).send('Recording audio not available');
-    }
-
-    const audioResponse = await fetch(resolved.url);
-    if (!audioResponse.ok) {
-      res.setHeader('Content-Type', 'text/plain');
-      return res.status(502).send('Failed to fetch recording audio');
-    }
-
-    const upstreamContentType = (audioResponse.headers.get('content-type') || '').toLowerCase();
-    const contentType =
-      upstreamContentType.startsWith('audio/')
-        ? upstreamContentType
-        : (resolved.mimeType || 'audio/mpeg');
-    const contentLength = audioResponse.headers.get('content-length');
-    res.setHeader('Content-Type', contentType);
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
-    }
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'private, max-age=300');
-
-    const reader = audioResponse.body?.getReader();
-    if (!reader) {
-      res.setHeader('Content-Type', 'text/plain');
-      return res.status(500).send('Failed to read audio stream');
-    }
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        res.write(value);
-      }
-    }
-
-    res.end();
-  } catch (error: any) {
-    console.error('[CLIENT PORTAL] Recording stream error:', error);
-    if (!res.headersSent) {
-      res.setHeader('Content-Type', 'text/plain');
-      res.status(500).send('Failed to stream recording');
-    } else {
-      res.end();
-    }
-  }
+router.get(['/qualified-leads/recordings/:recordingId/stream', '/telnyx-recordings/:recordingId/stream'], requireClientAuth, async (_req, res) => {
+  return res.status(410).json({
+    message: 'Recording streaming is disabled. Use GCS recordingUrl from lead/recordings APIs.',
+    gcsOnly: true,
+  });
 });
 
 // Get single lead details (with transcript and recording if visibility allowed)

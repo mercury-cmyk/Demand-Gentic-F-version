@@ -40,7 +40,7 @@ interface CallRecordingsResponse {
   page: number;
   pageSize: number;
   items: CallRecordingItem[];
-  source: 'telnyx';
+  source: 'gcs' | 'telnyx';
 }
 
 const getToken = () => localStorage.getItem('clientPortalToken');
@@ -54,7 +54,6 @@ function formatDuration(totalSeconds: number): string {
 export function CallRecordingsView() {
   const { toast } = useToast();
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioObjectUrlRef = useRef<string | null>(null);
   const page = 1;
   const pageSize = 10;
   const [phoneSearch, setPhoneSearch] = useState('');
@@ -80,6 +79,7 @@ export function CallRecordingsView() {
       const token = getToken();
       const endpoints = [
         `/api/client-portal/telnyx-recordings?${queryParams.toString()}`,
+        `/api/client-portal/qualified-leads/recordings?${queryParams.toString()}`,
         `/api/client-portal/recordings?${queryParams.toString()}`,
       ];
 
@@ -156,7 +156,7 @@ export function CallRecordingsView() {
             page,
             pageSize,
             items,
-            source: 'telnyx',
+            source: 'gcs',
           };
         }
 
@@ -178,10 +178,6 @@ export function CallRecordingsView() {
     audioRef.current.pause();
     audioRef.current.src = '';
     setActiveRecordingId(null);
-    if (audioObjectUrlRef.current) {
-      URL.revokeObjectURL(audioObjectUrlRef.current);
-      audioObjectUrlRef.current = null;
-    }
   };
 
   useEffect(() => {
@@ -189,10 +185,6 @@ export function CallRecordingsView() {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = '';
-      }
-      if (audioObjectUrlRef.current) {
-        URL.revokeObjectURL(audioObjectUrlRef.current);
-        audioObjectUrlRef.current = null;
       }
     };
   }, []);
@@ -208,75 +200,17 @@ export function CallRecordingsView() {
       setLoadingRecordingId(recordingId);
       stopPlayback();
 
-      const token = getToken();
-      const streamEndpoints = [
-        `/api/client-portal/telnyx-recordings/${encodeURIComponent(recordingId)}/stream`,
-        `/api/client-portal/qualified-leads/recordings/${encodeURIComponent(recordingId)}/stream`,
-      ];
-
-      let playbackErrorMessage = 'Unable to stream recording';
-      let audioBlob: Blob | null = null;
-
-      for (const streamEndpoint of streamEndpoints) {
-        const response = await fetch(streamEndpoint, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!response.ok) {
-          let message = `Playback failed (${response.status})`;
-          const contentType = response.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            const body = await response.json().catch(() => ({}));
-            if (body?.message) {
-              message = body.message;
-            }
-          } else {
-            const text = (await response.text()).trim();
-            if (text) {
-              message = `${message}: ${text.slice(0, 180)}`;
-            }
-          }
-          playbackErrorMessage = message;
-          continue;
-        }
-
-        const blob = await response.blob();
-        const blobType = (blob.type || '').toLowerCase();
-        const isClearlyNonAudio =
-          blobType.startsWith('text/') ||
-          blobType.includes('json') ||
-          blobType.includes('xml') ||
-          blobType.includes('html');
-        const isStreamBinaryType =
-          blobType === 'application/octet-stream' ||
-          blobType === 'binary/octet-stream' ||
-          blobType === 'binary/octate-stream' ||
-          blobType === '';
-        const isAudioBlob = blobType.startsWith('audio/') || isStreamBinaryType;
-        if (!isAudioBlob || isClearlyNonAudio) {
-          playbackErrorMessage = `Playback failed: unexpected media type (${blob.type || 'unknown'})`;
-          continue;
-        }
-
-        audioBlob = blob;
-        break;
+      if (!recording.recordingUrl) {
+        throw new Error('Recording URL not available');
       }
 
-      if (!audioBlob) {
-        throw new Error(playbackErrorMessage);
-      }
-
-      const objectUrl = URL.createObjectURL(audioBlob);
-      audioObjectUrlRef.current = objectUrl;
-      const audio = new Audio(objectUrl);
+      const audio = new Audio(recording.recordingUrl);
       audio.onended = () => setActiveRecordingId(null);
       audio.onerror = () => {
         setActiveRecordingId(null);
         toast({
           title: 'Playback failed',
-          description: 'Could not stream this recording from Telnyx.',
+          description: 'Could not play this GCS recording URL.',
           variant: 'destructive',
         });
       };
@@ -302,7 +236,7 @@ export function CallRecordingsView() {
         <div>
           <CardTitle>Call Recordings</CardTitle>
           <CardDescription>
-            {total.toLocaleString()} total from Telnyx
+            {total.toLocaleString()} total GCS recordings
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
