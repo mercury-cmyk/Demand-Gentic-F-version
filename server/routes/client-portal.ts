@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { db } from '../db';
-import { eq, and, desc, sql, or, like, isNotNull, asc, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql, or, like, isNotNull, asc, inArray, gte } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import {
@@ -1043,16 +1043,14 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     const includeDebug = debug === '1';
 
     // Get campaigns the client has access to (regular campaigns with QA leads)
+    // Don't filter by campaigns.approvalStatus here - the leads themselves are filtered by qaStatus
     const accessList = await db
       .select({ regularCampaignId: clientCampaignAccess.regularCampaignId })
       .from(clientCampaignAccess)
-      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          isNotNull(clientCampaignAccess.regularCampaignId),
-          eq(campaigns.approvalStatus, 'published'),
-          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
+          isNotNull(clientCampaignAccess.regularCampaignId)
         )
       );
 
@@ -1140,7 +1138,7 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
           directPhoneRaw: contacts.directPhone,
           mobilePhoneRaw: contacts.mobilePhone,
           accountName: accounts.name,
-          accountIndustry: accounts.industry,
+          accountIndustry: accounts.industryStandardized,
         })
         .from(contacts)
         .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -1262,11 +1260,21 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     }
 
     // Build where conditions
-    // Clients only see leads that are published AND submitted to client
-    const whereConditions = [
+    // Clients see leads that are:
+    //   1) QA approved/published AND submitted to client, OR
+    //   2) AI agent qualified with score >= 50 (showcase calls)
+    const whereConditions: any[] = [
       inArray(leads.campaignId, accessibleCampaignIds),
-      eq(leads.qaStatus, 'published'),
-      eq(leads.submittedToClient, true)
+      or(
+        and(
+          inArray(leads.qaStatus, ['approved', 'published']),
+          eq(leads.submittedToClient, true)
+        ),
+        and(
+          eq(leads.aiQualificationStatus, 'qualified'),
+          gte(sql`CAST(${leads.aiScore} AS numeric)`, sql`50`)
+        )
+      )
     ];
 
     // Filter by specific campaign if provided
@@ -1356,9 +1364,9 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         dbLeadsCount: leadsData.length,
       } : undefined,
     });
-  } catch (error) {
-    console.error('[CLIENT PORTAL] Get qualified leads error:', error);
-    res.status(500).json({ message: "Failed to fetch qualified leads" });
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Get qualified leads error:', error?.message || error);
+    res.status(500).json({ message: "Failed to fetch qualified leads", error: error?.message || String(error) });
   }
 });
 
@@ -1371,13 +1379,10 @@ router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
     const accessList = await db
       .select({ regularCampaignId: clientCampaignAccess.regularCampaignId })
       .from(clientCampaignAccess)
-      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          isNotNull(clientCampaignAccess.regularCampaignId),
-          eq(campaigns.approvalStatus, 'published'),
-          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
+          isNotNull(clientCampaignAccess.regularCampaignId)
         )
       );
 
@@ -1389,11 +1394,19 @@ router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
       return res.status(404).json({ message: "No campaigns found" });
     }
 
-    // Build where conditions - only published leads submitted to client
-    const whereConditions = [
+    // Build where conditions - QA approved/published submitted to client OR AI qualified with 50+ score
+    const whereConditions: any[] = [
       inArray(leads.campaignId, accessibleCampaignIds),
-      eq(leads.qaStatus, 'published'),
-      eq(leads.submittedToClient, true)
+      or(
+        and(
+          inArray(leads.qaStatus, ['approved', 'published']),
+          eq(leads.submittedToClient, true)
+        ),
+        and(
+          eq(leads.aiQualificationStatus, 'qualified'),
+          gte(sql`CAST(${leads.aiScore} AS numeric)`, sql`50`)
+        )
+      )
     ];
 
     if (campaignId && typeof campaignId === 'string') {
@@ -1515,7 +1528,7 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
 
     console.log('[CLIENT PORTAL] Found', accessList.length, 'campaigns with access');
 
-    // Get lead counts per campaign - only published leads submitted to client
+    // Get lead counts per campaign - QA approved/published submitted to client OR AI qualified 50+ score
     const campaignData = await Promise.all(
       accessList.map(async (row) => {
         const [count] = await db
@@ -1524,8 +1537,16 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
           .where(
             and(
               eq(leads.campaignId, row.id),
-              eq(leads.qaStatus, 'published'),
-              eq(leads.submittedToClient, true)
+              or(
+                and(
+                  inArray(leads.qaStatus, ['approved', 'published']),
+                  eq(leads.submittedToClient, true)
+                ),
+                and(
+                  eq(leads.aiQualificationStatus, 'qualified'),
+                  gte(sql`CAST(${leads.aiScore} AS numeric)`, sql`50`)
+                )
+              )
             )
           );
 
@@ -1900,13 +1921,11 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
     const [access] = await db
       .select()
       .from(clientCampaignAccess)
-      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
           eq(clientCampaignAccess.regularCampaignId, lead.campaignId!),
-          eq(campaigns.approvalStatus, 'published'),
-          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
+          isNotNull(clientCampaignAccess.regularCampaignId)
         )
       )
       .limit(1);
@@ -2584,7 +2603,16 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
         .where(
           and(
             inArray(leads.campaignId, regularCampaignIds),
-            inArray(leads.qaStatus, ['approved', 'published'])
+            or(
+              and(
+                inArray(leads.qaStatus, ['approved', 'published']),
+                eq(leads.submittedToClient, true)
+              ),
+              and(
+                eq(leads.aiQualificationStatus, 'qualified'),
+                gte(sql`CAST(${leads.aiScore} AS numeric)`, sql`50`)
+              )
+            )
           )
         )
         .groupBy(leads.campaignId);
