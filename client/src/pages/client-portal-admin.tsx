@@ -951,19 +951,16 @@ export default function ClientPortalAdmin() {
   });
 
   const sendInviteMutation = useMutation({
-    mutationFn: async ({ clientUserId }: { clientUserId: string }) => {
-      const res = await apiRequest('POST', '/api/communications/invitations/send-single', {
-        clientUserId,
-        portalBaseUrl: window.location.origin,
-      });
+    mutationFn: async ({ clientUserId, clientId }: { clientUserId: string; clientId: string }) => {
+      const res = await apiRequest('POST', `/api/client-portal/admin/clients/${clientId}/users/${clientUserId}/send-password-reset`);
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to send invitation');
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.message || 'Failed to send reset email');
       }
       return res.json();
     },
     onSuccess: (data) => {
-      toast({ title: 'Invitation sent', description: data.message || 'The user will receive an email with a setup link.' });
+      toast({ title: 'Reset email sent', description: data.message || 'The user will receive a password reset email shortly.' });
     },
     onError: (error: Error) => {
       toast({ title: 'Send failed', description: error.message, variant: 'destructive' });
@@ -1552,15 +1549,15 @@ export default function ClientPortalAdmin() {
                                     variant="ghost"
                                     size="sm"
                                     disabled={sendInviteMutation.isPending}
-                                    onClick={() => sendInviteMutation.mutate({ clientUserId: user.id })}
-                                    title="Send invitation email with portal setup link"
+                                    onClick={() => sendInviteMutation.mutate({ clientUserId: user.id, clientId: selectedClient!.id })}
+                                    title="Send password reset email"
                                   >
                                     {sendInviteMutation.isPending && sendInviteMutation.variables?.clientUserId === user.id ? (
                                       <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
                                     ) : (
                                       <Send className="h-3.5 w-3.5 mr-1" />
                                     )}
-                                    Invite
+                                    Send Reset
                                   </Button>
                                   <Button
                                     variant="ghost"

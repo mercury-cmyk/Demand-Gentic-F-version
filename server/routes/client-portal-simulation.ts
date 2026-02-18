@@ -1628,7 +1628,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
     }
 
-    const providerForClientState = voiceProvider === 'google' ? 'google' : 'openai_realtime';
+    const providerForClientState = voiceProvider === 'google' ? 'gemini_live' : 'openai_realtime';
     const providerForSession = voiceProvider === 'google' ? 'google' : 'openai';
 
     unifiedContext.voice = voice;
@@ -1657,13 +1657,18 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       },
     }).returning();
 
-    // Custom parameters for WebSocket
-    const customParams = {
+    // HACK: Explicitly include system_prompt in customParams (same as admin campaign-test-calls.ts)
+    // voice-dialer reads system_prompt from client_state params; without this, the AI has no prompt
+    // and test calls have no audio.
+    const customParams: Record<string, any> = {
       ...contextToClientStateParams(unifiedContext),
       is_preview_test: true,
       preview_session_id: session.id,
       provider: providerForClientState,
     };
+    if (unifiedContext.systemPrompt) {
+      customParams.system_prompt = unifiedContext.systemPrompt;
+    }
 
     // Store session in Redis
     const { callSessionStore } = await import('../services/call-session-store');
@@ -1705,15 +1710,22 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
-    // Webhook URL
-    let webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
-    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
-      try {
-        const u = new URL((process.env.TELNYX_WEBHOOK_URL || '').trim());
-        webhookHost = u.host;
-      } catch {}
+    // Webhook URL - match admin test call logic (campaign-test-calls.ts)
+    let webhookHost = '';
+    if (process.env.NODE_ENV !== 'production' && process.env.PUBLIC_WEBHOOK_HOST) {
+      webhookHost = process.env.PUBLIC_WEBHOOK_HOST;
+      console.log(`[Client Phone Test] Using ngrok tunnel host: ${webhookHost}`);
+    } else {
+      webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+      if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+        try {
+          const u = new URL((process.env.TELNYX_WEBHOOK_URL || '').trim());
+          webhookHost = u.host;
+        } catch {}
+      }
     }
-    webhookHost = webhookHost || 'localhost:5000';
+    // Ensure host doesn't have protocol (same as admin test call)
+    webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
 

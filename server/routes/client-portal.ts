@@ -33,10 +33,12 @@ import {
   clientProjectCampaigns,
   campaignIntakeRequests,
   clientCampaigns,
+  passwordResetTokens,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
 import { notificationService } from '../services/notification-service';
+import { transactionalEmailService } from '../services/transactional-email-service';
 
 // Import enhanced client portal route modules
 import clientPortalProjectsRouter from './client-portal-projects';
@@ -2839,6 +2841,79 @@ router.patch('/admin/clients/:clientId/users/:userId', requireAuth, requireRole(
   } catch (error) {
     console.error('[CLIENT PORTAL] Update user error:', error);
     res.status(500).json({ message: "Failed to update user" });
+  }
+});
+
+router.post('/admin/clients/:clientId/users/:userId/send-password-reset', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const [clientUser] = await db
+      .select({
+        id: clientUsers.id,
+        email: clientUsers.email,
+        firstName: clientUsers.firstName,
+        lastName: clientUsers.lastName,
+        isActive: clientUsers.isActive,
+        clientAccountId: clientUsers.clientAccountId,
+      })
+      .from(clientUsers)
+      .where(
+        and(
+          eq(clientUsers.id, req.params.userId),
+          eq(clientUsers.clientAccountId, req.params.clientId),
+        ),
+      )
+      .limit(1);
+
+    if (!clientUser) {
+      return res.status(404).json({ message: 'Client user not found' });
+    }
+
+    if (!clientUser.isActive) {
+      return res.status(400).json({ message: 'Client user is inactive' });
+    }
+
+    const email = clientUser.email.toLowerCase();
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await db.insert(passwordResetTokens).values({
+      token,
+      userId: null,
+      clientUserId: clientUser.id,
+      email,
+      userType: 'client',
+      expiresAt,
+    });
+
+    const requestBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const baseUrl = (PORTAL_BASE_URL || requestBaseUrl || 'http://localhost:5000').replace(/\/$/, '');
+    const resetLink = `${baseUrl}/reset-password?token=${token}&type=client`;
+
+    const resetEmailResult = await transactionalEmailService.triggerPasswordResetEmail(email, resetLink, '1 hour');
+    if (!resetEmailResult.success) {
+      console.error('[CLIENT PORTAL] Admin send reset email failed:', resetEmailResult.error);
+      return res.status(500).json({ message: 'Failed to send password reset email' });
+    }
+
+    await logClientPortalActivity({
+      clientAccountId: clientUser.clientAccountId,
+      clientUserId: clientUser.id,
+      entityType: 'user',
+      entityId: clientUser.id,
+      action: 'password_reset_email_sent',
+      details: {
+        initiatedBy: req.user?.userId || null,
+        recipientEmail: email,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Password reset email sent',
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Send password reset email error:', error);
+    res.status(500).json({ message: 'Failed to send password reset email' });
   }
 });
 

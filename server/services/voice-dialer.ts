@@ -1191,6 +1191,47 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               if (storedContext) {
                 customParams = storedContext;
                 console.log(`${LOG_PREFIX} ✅ Retrieved call context from pending-call-state for ${urlCallId}`);
+
+                // Also merge from Redis call-session-store to fill gaps (system_prompt, openai_config, etc.)
+                // This mirrors the Priority 1 merge logic and ensures test calls from Preview Studio
+                // and Client Portal have the same data as admin test calls.
+                const mergeCallId = customParams.call_id || customParams.test_call_id;
+                if (mergeCallId) {
+                  try {
+                    const { getCallParams } = await import('./call-session-store');
+                    const storedParams = await getCallParams(mergeCallId);
+                    if (storedParams) {
+                      if (!customParams.system_prompt && storedParams.system_prompt) {
+                        customParams.system_prompt = storedParams.system_prompt;
+                        console.log(`${LOG_PREFIX} Retrieved system_prompt from session store for ${mergeCallId}`);
+                      }
+                      if (!customParams.openai_config && storedParams.openai_config) {
+                        customParams.openai_config = storedParams.openai_config;
+                        console.log(`${LOG_PREFIX} Retrieved openai_config from session store for ${mergeCallId}`);
+                      }
+                      if (!customParams.first_message && storedParams.first_message) {
+                        customParams.first_message = storedParams.first_message;
+                        console.log(`${LOG_PREFIX} Retrieved first_message from session store for ${mergeCallId}`);
+                      }
+                      if (!customParams.voice && storedParams.voice) {
+                        customParams.voice = storedParams.voice;
+                        console.log(`${LOG_PREFIX} Retrieved voice from session store for ${mergeCallId}`);
+                      }
+                      if (!customParams.test_contact && storedParams.test_contact) {
+                        customParams.test_contact = storedParams.test_contact;
+                      }
+                      if (!customParams.agent_name && storedParams.agent_name) {
+                        customParams.agent_name = storedParams.agent_name;
+                      }
+                      if (!customParams.organization_name && storedParams.organization_name) {
+                        customParams.organization_name = storedParams.organization_name;
+                      }
+                      console.log(`${LOG_PREFIX} ✅ Merged session store params for pending-call-state`);
+                    }
+                  } catch (storeErr) {
+                    console.warn(`${LOG_PREFIX} Failed to merge from session store:`, storeErr);
+                  }
+                }
               } else {
                 console.warn(`${LOG_PREFIX} ⚠️ No pending call state found for ${urlCallId}, falling back to other methods`);
               }
