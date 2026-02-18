@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../db';
 import { leads, campaigns } from '@shared/schema';
-import { eq, and, isNotNull, desc, asc } from 'drizzle-orm';
+import { eq, and, isNotNull, desc, asc, inArray } from 'drizzle-orm';
 import { requireAuth } from '../auth';
 import jwt from 'jsonwebtoken';
 import { fetchTelnyxRecordings } from '../services/telnyx-sync-service';
@@ -71,7 +71,7 @@ router.get('/', requireAuth, async (req, res) => {
     const sortColumn = sortColumns[sortBy];
 
     const qualifiedLeadFilter = and(
-      eq(leads.qaStatus, 'approved'),
+      inArray(leads.qaStatus, ['approved', 'published']),
       eq(leads.submittedToClient, true),
       isNotNull(leads.contactId)
     );
