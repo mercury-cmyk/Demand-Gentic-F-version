@@ -58,7 +58,7 @@ import { ukefReportsRouter } from '../integrations/ukef_reports';
 import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
-import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
+import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
 
@@ -296,7 +296,7 @@ function resolveQualifiedLeadRecordingUrl(
   recordingUrl: string | null | undefined,
   recordingS3Key: string | null | undefined,
 ): string | null {
-  return canonicalizeGcsRecordingUrl({
+  return resolvePlayableRecordingUrl({
     recordingUrl,
     recordingS3Key,
   });
@@ -1633,7 +1633,10 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
 
     const callSessionConditions: any[] = [
       inArray(callSessions.campaignId, accessibleCampaignIds),
-      isNotNull(callSessions.recordingS3Key),
+      or(
+        isNotNull(callSessions.recordingS3Key),
+        isNotNull(callSessions.recordingUrl),
+      )!,
     ];
 
     if (phone) {
@@ -1681,7 +1684,7 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
 
     const items = scopedSessions
       .map((session) => {
-        const recordingUrl = canonicalizeGcsRecordingUrl({
+        const recordingUrl = resolvePlayableRecordingUrl({
           recordingS3Key: session.recordingS3Key,
           recordingUrl: session.recordingUrl,
         });
@@ -1923,13 +1926,24 @@ router.get('/qualified-leads/:leadId/comments', requireClientAuth, async (req, r
         and(
           eq(clientCampaignAccess.clientAccountId, clientAccountId),
           eq(clientCampaignAccess.regularCampaignId, lead.campaignId!),
-          eq(campaigns.approvalStatus, 'published'),
           eq(campaigns.clientAccountId, clientAccountId)
         )
       )
       .limit(1);
 
-    if (!access) {
+    // Backward-compatible ownership fallback for leads from client-owned campaigns
+    const [ownedCampaign] = await db
+      .select({ id: campaigns.id })
+      .from(campaigns)
+      .where(
+        and(
+          eq(campaigns.id, lead.campaignId!),
+          eq(campaigns.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!access && !ownedCampaign) {
       return res.status(403).json({ message: "You don't have access to this lead" });
     }
 
@@ -2015,13 +2029,23 @@ router.post('/qualified-leads/:leadId/comments', requireClientAuth, async (req, 
         and(
           eq(clientCampaignAccess.clientAccountId, clientAccountId),
           eq(clientCampaignAccess.regularCampaignId, lead.campaignId!),
-          eq(campaigns.approvalStatus, 'published'),
           eq(campaigns.clientAccountId, clientAccountId)
         )
       )
       .limit(1);
 
-    if (!access) {
+    const [ownedCampaign] = await db
+      .select({ id: campaigns.id })
+      .from(campaigns)
+      .where(
+        and(
+          eq(campaigns.id, lead.campaignId!),
+          eq(campaigns.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!access && !ownedCampaign) {
       return res.status(403).json({ message: "You don't have access to this lead" });
     }
 

@@ -971,20 +971,11 @@ router.get('/campaign-contacts', async (req: Request, res: Response) => {
       return res.json({ contacts: [], total: 0, limit: parseInt(limit as string), offset: parseInt(offset as string) });
     }
 
-    // Get distinct contact IDs from campaignQueue for these campaigns
-    const queueContactRows = await db
-      .selectDistinct({ contactId: campaignQueue.contactId })
-      .from(campaignQueue)
-      .where(inArray(campaignQueue.campaignId, campaignIds));
-
-    const contactIds = queueContactRows.map(r => r.contactId).filter((id): id is string => !!id);
-
-    if (contactIds.length === 0) {
-      return res.json({ contacts: [], total: 0, limit: parseInt(limit as string), offset: parseInt(offset as string) });
-    }
-
-    // Build conditions for contacts query
-    const conditions: any[] = [inArray(contacts.id, contactIds)];
+    // Build conditions for join-based query (avoid huge IN lists for large campaign queues)
+    const conditions: any[] = [
+      inArray(campaignQueue.campaignId, campaignIds),
+      sql`${campaignQueue.contactId} IS NOT NULL`,
+    ];
 
     if (search) {
       conditions.push(
@@ -998,7 +989,7 @@ router.get('/campaign-contacts', async (req: Request, res: Response) => {
 
     // Get contacts with account info
     const contactRows = await db
-      .select({
+      .selectDistinct({
         id: contacts.id,
         firstName: contacts.firstName,
         lastName: contacts.lastName,
@@ -1011,6 +1002,7 @@ router.get('/campaign-contacts', async (req: Request, res: Response) => {
         status: sql<string>`'active'`,
       })
       .from(contacts)
+      .innerJoin(campaignQueue, eq(campaignQueue.contactId, contacts.id))
       .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .where(and(...conditions))
       .orderBy(asc(contacts.lastName))
@@ -1019,8 +1011,9 @@ router.get('/campaign-contacts', async (req: Request, res: Response) => {
 
     // Get total count
     const [{ count }] = await db
-      .select({ count: sql<number>`count(*)` })
+      .select({ count: sql<number>`count(distinct ${contacts.id})` })
       .from(contacts)
+      .innerJoin(campaignQueue, eq(campaignQueue.contactId, contacts.id))
       .where(and(...conditions));
 
     res.json({

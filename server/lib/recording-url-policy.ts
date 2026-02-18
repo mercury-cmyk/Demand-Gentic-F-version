@@ -57,3 +57,45 @@ export function canonicalizeGcsRecordingUrl(params: {
 
   return isGcsPublicUrl(fallback) ? fallback : null;
 }
+
+/**
+ * Resolve the best playable recording URL for client-facing pages.
+ *
+ * The GCS bucket is **private** (no public object access), so raw
+ * `https://storage.googleapis.com/…` URLs return AccessDenied for browsers.
+ * We therefore prefer the original `recordingUrl` (typically an S3 Amazon or
+ * Telnyx URL that is publicly accessible) over an unsigned GCS public URL.
+ *
+ * For recordings that ONLY exist in GCS (no external URL), callers must use
+ * an async path (e.g. `getPresignedDownloadUrl` or a server-side stream
+ * proxy) because we cannot generate signed URLs synchronously here.
+ */
+export function resolvePlayableRecordingUrl(params: {
+  recordingS3Key?: string | null;
+  recordingUrl?: string | null;
+}): string | null {
+  // 1. Prefer the original recording URL if it's a valid, directly-playable
+  //    HTTP(S) URL (covers S3 Amazon, Telnyx, and any other external host).
+  const fallback = params.recordingUrl?.trim();
+  if (fallback && /^https?:\/\//i.test(fallback)) {
+    // If it's already a GCS *signed* URL (contains X-Goog-Signature or
+    // GoogleAccessId), keep it — it should still work.
+    // If it's an unsigned GCS public URL, skip it (bucket is private).
+    if (isGcsPublicUrl(fallback)) {
+      // Signed GCS URLs have query parameters with auth info
+      if (fallback.includes('X-Goog-Signature') || fallback.includes('GoogleAccessId')) {
+        return fallback;
+      }
+      // Unsigned GCS URL — don't return it; fall through to other options
+    } else {
+      // Non-GCS URL (S3 Amazon, Telnyx, etc.) — use it directly
+      return fallback;
+    }
+  }
+
+  // 2. If we have a GCS key but no working external URL, we cannot produce a
+  //    playable URL synchronously (bucket is private, needs signed URL or
+  //    server proxy). Return null so the caller can fall back to a stream
+  //    endpoint or async signed-URL resolver.
+  return null;
+}

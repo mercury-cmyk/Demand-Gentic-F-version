@@ -21,7 +21,6 @@ import { requireAuth } from "../auth";
 import { getCallSessionRecordingS3Key, storeCallSessionRecording, getCallSessionRecordingUrl } from "../services/recording-storage";
 import { streamFromS3, s3ObjectExists, readFromGCS } from "../lib/storage";
 import { getPlayableRecordingLink } from "../services/recording-link-resolver";
-import { canonicalizeGcsRecordingUrl } from "../lib/recording-url-policy";
 
 const router = Router();
 const SHOWCASE_MAX_CALLS = 50;
@@ -341,14 +340,14 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
 
     res.json({
       calls: rows.map(r => {
-        const recordingUrl = canonicalizeGcsRecordingUrl({
-          recordingS3Key: r.recordingS3Key,
-          recordingUrl: r.recordingUrl,
-        });
+        // Use stream proxy URL for playback — GCS bucket is private so
+        // direct public URLs return AccessDenied.
+        const hasRec = Boolean(r.recordingS3Key || r.recordingUrl || r.telnyxCallId || r.telnyxRecordingId);
+        const recordingUrl = hasRec ? `/api/showcase-calls/${r.callSessionId}/stream` : null;
         return {
           ...r,
           recordingUrl,
-          hasRecording: Boolean(recordingUrl),
+          hasRecording: hasRec,
           agentPerformanceScore: Math.round(Number(r.agentPerformanceScore) || 0),
         };
       }),
@@ -425,10 +424,8 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
 
     // Suggest a category for each candidate based on their highest dimension
     const enriched = candidates.map(c => {
-      const recordingUrl = canonicalizeGcsRecordingUrl({
-        recordingS3Key: c.recordingS3Key,
-        recordingUrl: c.recordingUrl,
-      });
+      const hasRec = Boolean(c.recordingS3Key || c.recordingUrl || c.telnyxCallId || c.telnyxRecordingId);
+      const recordingUrl = hasRec ? `/api/showcase-calls/${c.callSessionId}/stream` : null;
       const dimensions: Record<string, number> = {
         objection_handling: c.objectionHandlingScore ?? 0,
         empathetic_response: c.empathyScore ?? 0,
@@ -441,7 +438,7 @@ router.get("/auto-detect", requireAuth, async (req: Request, res: Response) => {
       return {
         ...c,
         recordingUrl,
-        hasRecording: Boolean(recordingUrl),
+        hasRecording: hasRec,
         agentPerformanceScore: Math.round(Number(c.agentPerformanceScore) || 0),
         suggestedCategory: topDimension[0],
       };
@@ -644,43 +641,57 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
       return res.status(404).json({ error: 'Call quality record not found' });
     }
 
-    // Resolve a direct GCS download URL for the recording instead of streaming.
+    // Resolve a working download URL for the recording.
+    // The GCS bucket is private — raw public URLs return AccessDenied.
+    // Use signed URLs from getCallSessionRecordingUrl() directly, or fall
+    // back to the server-side stream proxy endpoint.
     let downloadUrl: string | null = null;
-    const canonicalRecordingUrl = canonicalizeGcsRecordingUrl({
-      recordingS3Key: record.recordingS3Key,
-      recordingUrl: record.recordingUrl,
-    });
     let hasRecording = false;
+    const streamProxyUrl = `/api/showcase-calls/${callSessionId}/stream`;
+
     try {
       const gcsResult = await getCallSessionRecordingUrl(callSessionId, record.recordingUrl);
-      if (
-        gcsResult.url &&
-        gcsResult.source === 'local' &&
-        !gcsResult.url.startsWith('gcs-internal://')
-      ) {
-        const canonicalDownloadUrl = canonicalizeGcsRecordingUrl({
-          recordingS3Key: record.recordingS3Key,
-          recordingUrl: gcsResult.url,
-        });
-        downloadUrl = canonicalDownloadUrl;
-        hasRecording = Boolean(canonicalDownloadUrl);
+      if (gcsResult.url && gcsResult.source === 'local') {
+        if (gcsResult.url.startsWith('gcs-internal://')) {
+          // signBlob unavailable — use server stream proxy instead
+          downloadUrl = streamProxyUrl;
+        } else {
+          // Got a signed URL — use it directly (do NOT pass through
+          // canonicalizeGcsRecordingUrl which would strip the signature)
+          downloadUrl = gcsResult.url;
+        }
+        hasRecording = true;
       }
     } catch {
-      // Non-blocking: fall back to local indicator check below
+      // Non-blocking: fall back to stream proxy or playable link resolver
     }
 
-    // Fallback: check if recording exists even if we couldn't get a URL
+    // Fallback: try the recording link resolver
     if (!hasRecording) {
       try {
-        hasRecording = Boolean(canonicalRecordingUrl) || Boolean(await getPlayableRecordingLink(callSessionId));
+        const playableLink = await getPlayableRecordingLink(callSessionId);
+        if (playableLink?.url) {
+          hasRecording = true;
+          if (playableLink.url.startsWith('gcs-internal://')) {
+            downloadUrl = streamProxyUrl;
+          } else {
+            downloadUrl = playableLink.url;
+          }
+        }
       } catch {
-        hasRecording = Boolean(canonicalRecordingUrl);
+        // Last resort: check if we have any recording indicators
+        hasRecording = Boolean(record.recordingS3Key || record.recordingUrl || record.telnyxRecordingId || record.telnyxCallId);
       }
+    }
+
+    // If we know a recording exists but couldn't get a direct URL, use stream proxy
+    if (hasRecording && !downloadUrl) {
+      downloadUrl = streamProxyUrl;
     }
 
     res.json({
       ...record,
-      recordingUrl: canonicalRecordingUrl,
+      recordingUrl: downloadUrl, // Use the resolved working URL
       playbackUrl: null,
       downloadUrl: downloadUrl,
       hasRecording,

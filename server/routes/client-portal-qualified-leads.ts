@@ -4,7 +4,7 @@ import { leads, campaigns, callSessions, clientCampaignAccess } from '@shared/sc
 import { eq, and, isNotNull, desc, asc, inArray, like, or, sql } from 'drizzle-orm';
 import { requireAuth } from '../auth';
 import jwt from 'jsonwebtoken';
-import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
+import { resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
@@ -113,17 +113,16 @@ router.get('/', requireAuth, async (req, res) => {
 
     res.json({
       leads: leadsResult.map(l => {
-        const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+        const playableRecordingUrl = resolvePlayableRecordingUrl({
           recordingS3Key: l.recordingS3Key,
           recordingUrl: l.recordingUrl,
         });
         return {
           ...l,
-          recordingUrl: gcsRecordingUrl,
-          hasRecording: !!gcsRecordingUrl,
+          recordingUrl: playableRecordingUrl,
+          hasRecording: !!playableRecordingUrl,
           hasTranscript: !!l.hasTranscript,
-          // Optionally, expose a "recordingAvailable" boolean for UI
-          recordingAvailable: !!gcsRecordingUrl && l.recordingStatus === 'completed',
+          recordingAvailable: !!playableRecordingUrl,
         };
       }),
       total,
@@ -205,7 +204,10 @@ router.get('/recordings', requireClientAuth, async (req, res) => {
 
     const conditions: any[] = [
       inArray(callSessions.campaignId, accessibleCampaignIds),
-      isNotNull(callSessions.recordingS3Key),
+      or(
+        isNotNull(callSessions.recordingS3Key),
+        isNotNull(callSessions.recordingUrl),
+      )!,
     ];
 
     if (phone) {
@@ -244,7 +246,7 @@ router.get('/recordings', requireClientAuth, async (req, res) => {
 
     const mapped = rows
       .map((row) => {
-        const recordingUrl = canonicalizeGcsRecordingUrl({
+        const recordingUrl = resolvePlayableRecordingUrl({
           recordingS3Key: row.recordingS3Key,
           recordingUrl: row.recordingUrl,
         });

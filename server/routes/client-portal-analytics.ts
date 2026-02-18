@@ -24,7 +24,7 @@ import {
   emailEvents,
   emailTemplates,
 } from '@shared/schema';
-import { canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
+import { resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
 
@@ -219,7 +219,7 @@ router.get('/recordings', async (req: Request, res: Response) => {
     }
 
     const normalizedRecordings = filtered.map((recording) => {
-      const normalizedRecordingUrl = canonicalizeGcsRecordingUrl({
+      const normalizedRecordingUrl = resolvePlayableRecordingUrl({
         recordingS3Key: recording.recordingS3Key,
         recordingUrl: recording.recordingUrl,
       });
