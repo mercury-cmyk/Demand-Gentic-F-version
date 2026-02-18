@@ -106,8 +106,11 @@ export function DispositionDeepDive({ filters }: DispositionDeepDiveProps) {
 
             <ScrollArea className="h-[600px]">
               <div className="space-y-2 pr-3">
-                {data.calls.map(call => (
-                  <Card key={call.callSessionId} className={`${call.dispositionAccurate === false ? 'border-red-300' : ''}`}>
+                {data.calls.map((call, index) => (
+                  <Card
+                    key={`${call.callSessionId}-${call.callAttemptId || 'no-attempt'}-${call.createdAt}-${index}`}
+                    className={`${call.dispositionAccurate === false ? 'border-red-300' : ''}`}
+                  >
                     <CardContent className="p-3">
                       <div className="flex items-start justify-between mb-2">
                         <div>

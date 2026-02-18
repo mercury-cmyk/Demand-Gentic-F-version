@@ -1237,17 +1237,15 @@ export default function LeadsPage() {
                       <div className="flex items-center gap-2">
                         <Button
                           size="sm"
-                          variant={isPlayingRecording(lead.id) ? "default" : "ghost"}
+                          variant="ghost"
                           className="h-8 w-8 p-0"
                           onClick={() => handlePlayRecording(lead.id, lead.recordingUrl!)}
                           disabled={loadingRecordingId === lead.id}
                           data-testid={`button-play-recording-${lead.id}`}
-                          title={loadingRecordingId === lead.id ? "Loading..." : isPlayingRecording(lead.id) ? "Pause recording" : "Play recording"}
+                          title={loadingRecordingId === lead.id ? "Loading..." : "Play in new tab"}
                         >
                           {loadingRecordingId === lead.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : isPlayingRecording(lead.id) ? (
-                            <Pause className="h-4 w-4" />
                           ) : (
                             <Play className="h-4 w-4" />
                           )}
@@ -1589,48 +1587,26 @@ export default function LeadsPage() {
   };
 
   const handlePlayRecording = async (leadId: string, _recordingUrl: string) => {
-    // If same recording, toggle play/pause
-    if (playingLeadId === leadId && audioRef) {
-      if (audioRef.paused) {
-        audioRef.play();
-      } else {
-        audioRef.pause();
-      }
-      return;
-    }
-
-    // Stop current audio if playing different recording
-    if (audioRef) {
-      audioRef.pause();
-      audioRef.currentTime = 0;
-    }
-
-    // Use the stream proxy endpoint to bypass CORS and handle URL expiration
+    // Open GCS recording in a new tab
     setLoadingRecordingId(leadId);
     try {
-      const streamUrl = `/api/recordings/${leadId}/stream`;
-      const audio = new Audio(streamUrl);
-      audio.onended = () => setPlayingLeadId(null);
-      audio.onpause = () => {
-        if (audio.currentTime === 0) setPlayingLeadId(null);
-      };
-      audio.onerror = () => {
+      const res = await apiRequest('GET', `/api/recordings/${leadId}/gcs-url`);
+      if (!res.ok) throw new Error('Failed to get recording URL');
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      } else {
         toast({
-          title: "Playback Error",
-          description: "Failed to play recording. Please try syncing the recording again.",
+          title: "No Recording",
+          description: "No recording URL available for this lead.",
           variant: "destructive",
         });
-        setPlayingLeadId(null);
-      };
-
-      await audio.play();
-      setAudioRef(audio);
-      setPlayingLeadId(leadId);
+      }
     } catch (error: any) {
-      console.error('Failed to play recording:', error);
+      console.error('Failed to get recording URL:', error);
       toast({
         title: "Recording Error",
-        description: error.message || "Failed to load recording. Please try again.",
+        description: error.message || "Failed to get recording URL. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -1638,8 +1614,8 @@ export default function LeadsPage() {
     }
   };
 
-  const isPlayingRecording = (leadId: string) => {
-    return playingLeadId === leadId && audioRef && !audioRef.paused;
+  const isPlayingRecording = (_leadId: string) => {
+    return false; // No inline playback anymore
   };
 
   return (

@@ -22,6 +22,17 @@ const TRANSCRIPTION_JOB_INTERVAL = 120000; // Every 120 seconds (was 60s)
 const AI_ANALYSIS_JOB_INTERVAL = 120000; // Every 120 seconds (was 90s)
 const LOCK_SWEEPER_INTERVAL = 600000; // Every 10 minutes (was 5 min)
 const TELNYX_RECORDING_SYNC_INTERVAL = 300000; // Every 5 minutes - auto-fetch last 24h recordings
+const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
+
+/** Run a job with a safety timeout to prevent permanent guard flag deadlock */
+async function withJobTimeout<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`[Background Jobs] ${name} timed out after ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS)
+    ),
+  ]);
+}
 
 let transcriptionInterval: NodeJS.Timeout | null = null;
 let analysisInterval: NodeJS.Timeout | null = null;
@@ -129,12 +140,14 @@ export function startBackgroundJobs() {
 
       isTranscriptionRunning = true;
       try {
-        // Process legacy leads transcriptions (Google STT)
-        await processPendingTranscriptions();
+        await withJobTimeout('Transcription', async () => {
+          // Process legacy leads transcriptions (Google STT)
+          await processPendingTranscriptions();
 
-        // Process AI call transcripts that may be missing (fallback for Gemini Live)
-        // This catches any calls where real-time transcription failed
-        await processMissingTranscripts();
+          // Process AI call transcripts that may be missing (fallback for Gemini Live)
+          // This catches any calls where real-time transcription failed
+          await processMissingTranscripts();
+        });
       } catch (error) {
         console.error('[Background Jobs] Transcription job error:', error);
       } finally {
@@ -155,7 +168,7 @@ export function startBackgroundJobs() {
       const startTime = Date.now();
       try {
         console.log('[Background Jobs] Starting AI analysis job cycle...');
-        await processUnanalyzedLeads();
+        await withJobTimeout('AI Analysis', () => processUnanalyzedLeads());
         const duration = Date.now() - startTime;
         console.log(`[Background Jobs] AI analysis job completed in ${duration}ms`);
       } catch (error) {
@@ -175,7 +188,7 @@ export function startBackgroundJobs() {
 
       isLockSweeperRunning = true;
       try {
-        await sweepExpiredLocks();
+        await withJobTimeout('Lock Sweeper', () => sweepExpiredLocks());
       } catch (error) {
         console.error('[Background Jobs] Lock sweeper job error:', error);
       } finally {
@@ -194,10 +207,12 @@ export function startBackgroundJobs() {
       isTelnyxSyncRunning = true;
       try {
         console.log('[Background Jobs] Running initial Telnyx recording sync (last 1 hour)...');
-        const result = await syncTelnyxRecordingsToDatabase({
-          startDate: new Date(Date.now() - 60 * 60 * 1000), // Last 1 hour on startup
-          endDate: new Date(),
-        });
+        const result = await withJobTimeout('Telnyx Sync (initial)', () =>
+          syncTelnyxRecordingsToDatabase({
+            startDate: new Date(Date.now() - 60 * 60 * 1000), // Last 1 hour on startup
+            endDate: new Date(),
+          })
+        );
         console.log(`[Background Jobs] Initial Telnyx sync complete: ${result.newRecordings} new, ${result.updatedRecordings} updated`);
       } catch (error) {
         console.error('[Background Jobs] Initial Telnyx sync error:', error);

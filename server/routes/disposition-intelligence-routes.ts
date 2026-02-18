@@ -215,7 +215,7 @@ router.get("/deep-dive", requireAuth, async (req: Request, res: Response) => {
       .where(whereClause);
     const total = totalResult?.count || 0;
 
-    // Fetch calls
+    // Fetch calls (one row per call session)
     const rows = await db
       .select({
         callSessionId: callSessions.id,
@@ -226,19 +226,11 @@ router.get("/deep-dive", requireAuth, async (req: Request, res: Response) => {
         durationSeconds: callSessions.durationSec,
         transcript: callSessions.aiTranscript,
         createdAt: callSessions.createdAt,
-        // Quality data
-        qualityScore: callQualityRecords.overallQualityScore,
-        sentiment: callQualityRecords.sentiment,
-        dispositionAccurate: callQualityRecords.dispositionAccurate,
-        expectedDisposition: callQualityRecords.expectedDisposition,
-        dispositionNotes: callQualityRecords.dispositionNotes,
-        issues: callQualityRecords.issues,
       })
       .from(callSessions)
       .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
       .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
-      .leftJoin(callQualityRecords, eq(callSessions.id, callQualityRecords.callSessionId))
       .where(whereClause)
       .orderBy(desc(callSessions.createdAt))
       .limit(limitNum)
@@ -248,6 +240,14 @@ router.get("/deep-dive", requireAuth, async (req: Request, res: Response) => {
     const callSessionIds = rows.map(r => r.callSessionId);
     let voicemailMap: Record<string, boolean> = {};
     let attemptMap: Record<string, string> = {};
+    let qualityMap: Record<string, {
+      qualityScore: number | null;
+      sentiment: string | null;
+      dispositionAccurate: boolean | null;
+      expectedDisposition: string | null;
+      dispositionNotes: unknown;
+      issues: unknown;
+    }> = {};
     if (callSessionIds.length > 0) {
       const attempts = await db
         .select({
@@ -264,6 +264,34 @@ router.get("/deep-dive", requireAuth, async (req: Request, res: Response) => {
           attemptMap[a.callSessionId] = a.id;
         }
       }
+
+      // Load latest quality snapshot per call session to avoid duplicate rows from one-to-many joins
+      const qualityRows = await db
+        .select({
+          callSessionId: callQualityRecords.callSessionId,
+          qualityScore: callQualityRecords.overallQualityScore,
+          sentiment: callQualityRecords.sentiment,
+          dispositionAccurate: callQualityRecords.dispositionAccurate,
+          expectedDisposition: callQualityRecords.expectedDisposition,
+          dispositionNotes: callQualityRecords.dispositionNotes,
+          issues: callQualityRecords.issues,
+          createdAt: callQualityRecords.createdAt,
+        })
+        .from(callQualityRecords)
+        .where(sql`${callQualityRecords.callSessionId} IN (${sql.join(callSessionIds.map(id => sql`${id}`), sql`, `)})`)
+        .orderBy(desc(callQualityRecords.createdAt));
+
+      for (const qr of qualityRows) {
+        if (!qr.callSessionId || qualityMap[qr.callSessionId]) continue;
+        qualityMap[qr.callSessionId] = {
+          qualityScore: qr.qualityScore,
+          sentiment: qr.sentiment,
+          dispositionAccurate: qr.dispositionAccurate,
+          expectedDisposition: qr.expectedDisposition,
+          dispositionNotes: qr.dispositionNotes,
+          issues: qr.issues,
+        };
+      }
     }
 
     const calls = rows.map(r => ({
@@ -275,19 +303,19 @@ router.get("/deep-dive", requireAuth, async (req: Request, res: Response) => {
       disposition: r.disposition || disposition,
       durationSeconds: r.durationSeconds,
       transcriptSnippet: r.transcript ? r.transcript.slice(0, 200) : null,
-      dispositionAccurate: r.dispositionAccurate,
-      expectedDisposition: r.expectedDisposition,
-      qualityScore: r.qualityScore,
-      sentiment: r.sentiment,
+      dispositionAccurate: qualityMap[r.callSessionId]?.dispositionAccurate ?? null,
+      expectedDisposition: qualityMap[r.callSessionId]?.expectedDisposition ?? null,
+      qualityScore: qualityMap[r.callSessionId]?.qualityScore ?? null,
+      sentiment: qualityMap[r.callSessionId]?.sentiment ?? null,
       createdAt: r.createdAt?.toISOString() || '',
       voicemailDetected: voicemailMap[r.callSessionId] || false,
     }));
 
     // Aggregate patterns from issues
     const allIssues: Record<string, { count: number; severity: string }> = {};
-    for (const row of rows) {
-      if (Array.isArray(row.issues)) {
-        for (const issue of row.issues as any[]) {
+    for (const quality of Object.values(qualityMap)) {
+      if (Array.isArray(quality.issues)) {
+        for (const issue of quality.issues as any[]) {
           const key = issue.type || issue.description || 'unknown';
           if (!allIssues[key]) allIssues[key] = { count: 0, severity: issue.severity || 'medium' };
           allIssues[key].count++;
@@ -328,14 +356,17 @@ router.get("/deep-dive", requireAuth, async (req: Request, res: Response) => {
     }
 
     // Mismatched dispositions
-    const mismatchedDispositions = rows
-      .filter(r => r.dispositionAccurate === false && r.expectedDisposition)
-      .map(r => ({
-        callSessionId: r.callSessionId,
-        assigned: r.disposition || disposition as string,
-        expected: r.expectedDisposition || '',
-        notes: Array.isArray(r.dispositionNotes) ? (r.dispositionNotes as string[]) : [],
-      }));
+    const mismatchedDispositions = Object.entries(qualityMap)
+      .filter(([, q]) => q.dispositionAccurate === false && q.expectedDisposition)
+      .map(([callSessionId, q]) => {
+        const call = calls.find(c => c.callSessionId === callSessionId);
+        return {
+          callSessionId,
+          assigned: call?.disposition || disposition as string,
+          expected: q.expectedDisposition || '',
+          notes: Array.isArray(q.dispositionNotes) ? (q.dispositionNotes as string[]) : [],
+        };
+      });
 
     res.json({
       calls,

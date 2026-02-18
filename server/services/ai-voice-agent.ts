@@ -195,6 +195,7 @@ export class AiVoiceAgent extends EventEmitter {
   private currentPhase: ConversationPhase = "opening";
   private gatekeeperAttempts = 0;
   private conversationHistory: { role: "ai" | "human"; text: string }[] = [];
+  private readonly MAX_CONVERSATION_HISTORY = 30; // Keep last 30 turns to limit token usage
   private callId: string;
 
   constructor(settings: AiAgentSettings, context: CallContext) {
@@ -404,12 +405,21 @@ IMPORTANT:
     try {
         const systemPrompt = await this.buildSystemPrompt();
       
+      // Prune history to last N turns to prevent quadratic token growth
+      const historyForApi = this.conversationHistory.length > this.MAX_CONVERSATION_HISTORY
+        ? this.conversationHistory.slice(-this.MAX_CONVERSATION_HISTORY)
+        : this.conversationHistory;
+
       const aiResponse = await generateGeminiChatResponse(
         systemPrompt,
-        this.conversationHistory,
+        historyForApi,
         { maxTokens: 200, temperature: 0.7 }
       );
       this.conversationHistory.push({ role: "ai", text: aiResponse });
+      // Trim stored history to prevent memory growth
+      while (this.conversationHistory.length > this.MAX_CONVERSATION_HISTORY) {
+        this.conversationHistory.shift();
+      }
       this.emit("transcript:ai", aiResponse);
 
       this.updatePhaseFromResponse(humanText, aiResponse);

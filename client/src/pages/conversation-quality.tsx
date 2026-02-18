@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +29,9 @@ import {
   RefreshCw,
   Loader2,
   Zap,
-  Sparkles
+  Sparkles,
+  Play,
+  Download
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -299,63 +301,37 @@ function RecordingPlayer({
   transcribeMutation: any;
   reanalyzeMutation: any;
 }) {
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [audioSource, setAudioSource] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [loadingUrl, setLoadingUrl] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
-  const fetchRecordingUrl = async (conversationId: string) => {
-    setAudioUrl(null);
-    setAudioError(null);
+  const openRecordingInNewTab = async () => {
     setLoadingUrl(true);
-
+    setAudioError(null);
     try {
-      // Try the dedicated recording URL endpoint (resolves GCS presigned URL or Telnyx)
-      const token = localStorage.getItem('authToken');
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`/api/qa/recording-url/${conversationId}`, { headers, credentials: 'include' });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) {
-          setAudioUrl(data.url);
-          setAudioSource(data.source || null);
-          setLoadingUrl(false);
-          return;
-        }
+      const res = await apiRequest('GET', `/api/recordings/${conversation.id}/gcs-url`);
+      if (!res.ok) throw new Error('Failed to get recording URL');
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      } else {
+        setAudioError('No recording URL available');
       }
-
-      // Fallback: use the server-side stream proxy which reads directly from GCS
-      // This works even when signed URLs can't be generated
-      setAudioUrl(`/api/recordings/${conversationId}/stream`);
-      setAudioSource('stream');
-      setLoadingUrl(false);
     } catch {
-      // Final fallback: stream proxy
-      setAudioUrl(`/api/recordings/${conversationId}/stream`);
-      setAudioSource('stream');
+      setAudioError('Failed to get recording URL - click Retry Sync');
+    } finally {
       setLoadingUrl(false);
     }
   };
-
-  useEffect(() => {
-    fetchRecordingUrl(conversation.id);
-  }, [conversation.id]);
 
   const handleRetrySync = async () => {
     setRetrying(true);
     setAudioError(null);
     try {
-      // First trigger a server-side resync (downloads from Telnyx → stores in GCS)
       await apiRequest('POST', `/api/recordings/${conversation.id}/retry-sync`, { transcribe: false });
     } catch {
-      // Resync may fail if already stored or no Telnyx URL — still try to fetch URL
+      // Resync may fail if already stored or no Telnyx URL
     }
-    // Then fetch a fresh playback URL
-    fetchRecordingUrl(conversation.id);
     setRetrying(false);
   };
 
@@ -375,12 +351,6 @@ function RecordingPlayer({
         <h4 className="text-sm font-medium flex items-center gap-2">
           <Phone className="h-4 w-4" />
           Call Recording
-          {audioSource === 'gcs' && (
-            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">GCS Stored</Badge>
-          )}
-          {audioSource && audioSource !== 'gcs' && (
-            <Badge variant="outline" className="text-xs">{audioSource}</Badge>
-          )}
         </h4>
         <div className="flex items-center gap-2">
           {canPushToShowcase && (
@@ -423,12 +393,7 @@ function RecordingPlayer({
           )}
         </div>
       </div>
-      {loadingUrl ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground p-2">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading recording from storage...
-        </div>
-      ) : audioError ? (
+      {audioError ? (
         <div className="p-2 bg-muted rounded space-y-2">
           <div className="text-sm text-muted-foreground flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" />
@@ -448,20 +413,32 @@ function RecordingPlayer({
             Retry Sync
           </Button>
         </div>
-      ) : audioUrl ? (
-        <audio
-          key={`${conversation.id}-${audioUrl}`}
-          controls
-          className="w-full"
-          src={audioUrl}
-          onError={() => {
-            setAudioUrl(null);
-            setAudioError('Recording playback failed - click Retry Sync to fetch a fresh URL from storage');
-          }}
-        >
-          Your browser does not support the audio element.
-        </audio>
-      ) : null}
+      ) : (
+        <div className="flex items-center gap-2 p-2">
+          <Button
+            size="sm"
+            variant="default"
+            onClick={openRecordingInNewTab}
+            disabled={loadingUrl}
+          >
+            {loadingUrl ? (
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            ) : (
+              <Play className="h-3 w-3 mr-1" />
+            )}
+            Play in New Tab
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={openRecordingInNewTab}
+            disabled={loadingUrl}
+          >
+            <Download className="h-3 w-3 mr-1" />
+            Download
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

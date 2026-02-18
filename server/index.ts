@@ -109,7 +109,20 @@ app.use((req, res, next) => {
   if (shouldCaptureResponseBody) {
     const originalResJson = res.json;
     res.json = function (bodyJson, ...args) {
-      capturedJsonResponse = bodyJson;
+      // Only capture small responses to avoid holding large payloads in memory
+      if (bodyJson && typeof bodyJson === 'object') {
+        const keys = Object.keys(bodyJson);
+        // Skip capture for large array responses (list endpoints)
+        if (Array.isArray(bodyJson) && bodyJson.length > 50) {
+          capturedJsonResponse = { _truncated: true, count: bodyJson.length };
+        } else if (keys.length > 100) {
+          capturedJsonResponse = { _truncated: true, keys: keys.length };
+        } else {
+          capturedJsonResponse = bodyJson;
+        }
+      } else {
+        capturedJsonResponse = bodyJson;
+      }
       return originalResJson.apply(res, [bodyJson, ...args]);
     };
   }
@@ -143,6 +156,12 @@ app.use((req, res, next) => {
   // Create server with Express app as the default handler
   // WebSocket upgrades will be handled separately via server.on('upgrade')
   const server = createServer(app);
+
+  // PERFORMANCE: Set HTTP server timeouts to prevent resource exhaustion
+  server.requestTimeout = 120_000;   // 2 minutes max for entire request
+  server.headersTimeout = 60_000;    // 1 minute to receive headers
+  server.keepAliveTimeout = 65_000;  // 65s (must be > headersTimeout)
+  server.timeout = 300_000;          // 5 minutes overall socket timeout (allows long AI calls)
 
   // CRITICAL: Start listening FIRST so Cloud Run health check passes
   // Cloud Run requires the container to listen on PORT within the startup timeout

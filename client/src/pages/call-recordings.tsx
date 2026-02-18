@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import {
   Mic,
   Play,
-  Pause,
   Download,
   Search,
   Clock,
@@ -16,8 +15,6 @@ import {
   User,
   Bot,
   RefreshCw,
-  Volume2,
-  VolumeX,
   ChevronLeft,
   ChevronRight,
   FileAudio,
@@ -38,7 +35,7 @@ import {
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
-import { Slider } from "@/components/ui/slider";
+
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -141,189 +138,67 @@ interface RecordingStats {
   totalFileSizeBytes: number;
 }
 
-// Audio player component with full controls
-function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: string; recordingUrl?: string | null; onClose: () => void }) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [isLoading, setIsLoading] = useState(true);
+// Recording actions component — opens GCS recording in new tab or downloads
+function RecordingActions({ recordingId, onClose }: { recordingId: string; recordingUrl?: string | null; onClose: () => void }) {
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Use a blob URL for audio to allow Authorization header
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-    const fetchAudio = async () => {
-      setIsLoading(true);
-      setError(null);
-      setBlobUrl(null);
-      let triedRefresh = false;
-      while (true) {
-        try {
-          // Use apiRequest for consistent auth and refresh logic
-          const res = await apiRequest('GET', `/api/recordings/${recordingId}/stream`, undefined, { timeout: 60000 });
-          if (res.status === 401) {
-            if (!triedRefresh && typeof window !== 'undefined' && window.location) {
-              // If your app has a refresh flow, trigger it here (simulate by reloading)
-              triedRefresh = true;
-              // Optionally, call your refresh logic here
-              // await refreshToken();
-              // continue;
-              break;
-            }
-            setError('Session expired / not authorized. Please re-login.');
-            setIsLoading(false);
-            return;
-          }
-          if (!res.ok) throw new Error('Failed to fetch audio');
-          const blob = await res.blob();
-          if (!isMounted) return;
-          const url = URL.createObjectURL(blob);
-          setBlobUrl(url);
-          break;
-        } catch (err: any) {
-          if (!isMounted) return;
-          setError('Failed to load audio');
-          break;
-        } finally {
-          if (isMounted) setIsLoading(false);
-        }
+  const openRecording = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await apiRequest('GET', `/api/recordings/${recordingId}/gcs-url`);
+      if (!res.ok) throw new Error('Failed to get recording URL');
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      } else {
+        setError('No recording URL available');
       }
-    };
-    fetchAudio();
-    return () => {
-      isMounted = false;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordingId]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const handleDurationChange = () => setDuration(audio.duration);
-    const handleCanPlay = () => setIsLoading(false);
-    const handleEnded = () => setIsPlaying(false);
-    const handleError = () => {
-      setError('Failed to load audio');
+    } catch (err: any) {
+      setError(err.message || 'Failed to get recording URL');
+    } finally {
       setIsLoading(false);
-    };
-      <audio ref={audioRef} preload="metadata" src={blobUrl || undefined} />
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('durationchange', handleDurationChange);
-    audio.addEventListener('canplay', handleCanPlay);
-    audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('error', handleError);
-
-    return () => {
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('durationchange', handleDurationChange);
-      audio.removeEventListener('canplay', handleCanPlay);
-      audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('error', handleError);
-    };
-  }, []);
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
     }
-    setIsPlaying(!isPlaying);
   };
-
-  const toggleMute = () => {
-    if (!audioRef.current) return;
-    audioRef.current.muted = !isMuted;
-    setIsMuted(!isMuted);
-  };
-
-  const handleSeek = (value: number[]) => {
-    if (!audioRef.current) return;
-    audioRef.current.currentTime = value[0];
-    setCurrentTime(value[0]);
-  };
-
-  const handleVolumeChange = (value: number[]) => {
-    if (!audioRef.current) return;
-    audioRef.current.volume = value[0];
-    setVolume(value[0]);
-  };
-
-  // Only show loading if we're setting up audio
-  if (isLoading && !blobUrl) {
-    return (
-      <div className="flex items-center justify-center p-4 bg-muted rounded-lg">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" />
-        <span>Loading audio...</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center p-4 bg-destructive/10 rounded-lg text-destructive">
-        <div className="flex items-center mb-2">
-          <AlertCircle className="h-5 w-5 mr-2" />
-          <span>{error || 'Failed to load recording'}</span>
-        </div>
-        {error.includes('re-login') && (
-          <Button variant="outline" size="sm" onClick={() => window.location.href = '/login'}>
-            Re-authenticate
-          </Button>
-        )}
-        <Button variant="ghost" size="sm" onClick={onClose} className="mt-2">
-          Close
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <div className="bg-muted p-4 rounded-lg space-y-3">
-      <audio ref={audioRef} preload="metadata" src={blobUrl || undefined} />
-      {/* Progress bar */}
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-muted-foreground w-12">
-          {formatDuration(currentTime)}
-        </span>
-        <Slider
-          value={[currentTime]}
-          max={duration || 100}
-          step={0.1}
-          onValueChange={handleSeek}
-          className="flex-1"
-        />
-        <span className="text-sm text-muted-foreground w-12">
-          {formatDuration(duration)}
-        </span>
-      </div>
-      {/* Controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Button
+            variant="default"
+            size="sm"
+            onClick={openRecording}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4 mr-1" />
+            )}
+            Play in New Tab
+          </Button>
+          <Button
             variant="outline"
             size="sm"
-            asChild
+            onClick={openRecording}
+            disabled={isLoading}
           >
-            <a href={blobUrl || undefined} download target="_blank" rel="noopener noreferrer">
-              <Download className="h-4 w-4 mr-1" />
-              Download
-            </a>
+            <Download className="h-4 w-4 mr-1" />
+            Download
           </Button>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Close
           </Button>
         </div>
       </div>
+      {error && (
+        <div className="flex items-center text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 mr-1" />
+          {error}
+        </div>
+      )}
     </div>
   );
 }
@@ -1029,22 +904,11 @@ function CallRecordingsPage() {
                     </div>
                   </div>
 
-                  {/* Expanded audio player */}
+                  {/* Expanded recording actions */}
                   {expandedRecording === recording.id && (
                     <div className="mt-4">
-                      <AudioPlayer
+                      <RecordingActions
                         recordingId={recording.id}
-                        // Use direct URL in these cases:
-                        // 1. GCS storage (recordingS3Key present) - permanent URL
-                        // 2. Telnyx source - URL was just fetched from Telnyx API
-                        // Only fetch fresh URL for local recordings without GCS storage
-                        recordingUrl={
-                          recording.recordingS3Key 
-                            ? recording.recordingUrl 
-                            : recording.source === 'telnyx' 
-                              ? recording.recordingUrl 
-                              : undefined
-                        }
                         onClose={() => setExpandedRecording(null)}
                       />
                       

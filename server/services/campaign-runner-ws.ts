@@ -269,13 +269,13 @@ class CampaignRunnerService {
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", async () => {
       const runner = this.runners.get(ws);
       if (runner) {
         console.log(`${LOG_PREFIX} Runner disconnected: ${runner.username}`);
         // Return any active task to queue
         if (runner.currentTask) {
-          this.requeueTask(runner.currentTask);
+          await this.requeueTask(runner.currentTask);
         }
         this.runners.delete(ws);
       }
@@ -370,12 +370,52 @@ class CampaignRunnerService {
 
     const task = this.getNextTask(runner);
     if (task) {
-      runner.currentTask = task;
+      const hydratedTask = await this.hydrateTaskCallerId(task);
+      runner.currentTask = hydratedTask;
       runner.activeCallCount++;
-      this.sendMessage(ws, { type: 'task', task });
+      this.sendMessage(ws, { type: 'task', task: hydratedTask });
     } else {
       this.sendMessage(ws, { type: 'no_tasks' });
     }
+  }
+
+  /**
+   * Resolve caller ID/number-pool selection right before dispatching a task.
+   *
+   * IMPORTANT: Do NOT lock number-pool DIDs during task preloading,
+   * otherwise queued-but-not-yet-assigned tasks can hold locks for minutes.
+   */
+  private async hydrateTaskCallerId(task: CampaignTask): Promise<CampaignTask> {
+    let fromNumber = task.fromNumber;
+    let callerNumberId: string | null = task.callerNumberId || null;
+    let callerNumberDecisionId: string | null = task.callerNumberDecisionId || null;
+
+    try {
+      const callerIdResult = await getCallerIdForCall({
+        campaignId: task.campaignId,
+        prospectNumber: task.phoneNumber,
+        virtualAgentId: task.virtualAgentId || undefined,
+        callType: 'campaign_runner_ws',
+      });
+
+      fromNumber = callerIdResult.callerId;
+      callerNumberId = callerIdResult.numberId;
+      callerNumberDecisionId = callerIdResult.decisionId;
+
+      if (callerIdResult.jitterDelayMs > 0) {
+        await numberPoolSleep(callerIdResult.jitterDelayMs);
+      }
+    } catch (poolError) {
+      // Keep precomputed/fallback caller ID so the task can still proceed.
+      console.warn(`${LOG_PREFIX} Number pool selection failed at dispatch time, keeping fallback caller ID:`, poolError);
+    }
+
+    return {
+      ...task,
+      fromNumber,
+      callerNumberId,
+      callerNumberDecisionId,
+    };
   }
 
   private handleTaskStarted(ws: WebSocket, message: IncomingMessage): void {
@@ -833,106 +873,105 @@ class CampaignRunnerService {
       const tasks: CampaignTask[] = [];
       const maxTasks = 50; // Limit tasks per batch
 
-      for (const { item } of prioritizedItems.slice(0, maxTasks)) {
-        const phoneResult = getBestPhoneForContact(item.contact);
-        if (!phoneResult.phone) continue;
+      // Cast agent to any for optional extended fields
+      const agentExt = agent as any;
+      const fromNumber = campaignExt.fromNumber || process.env.TELNYX_FROM_NUMBER || '';
 
-        // Cast agent to any for optional extended fields
-        const agentExt = agent as any;
+      // PERFORMANCE: Build contexts in parallel instead of sequentially
+      const PARALLEL_BATCH_SIZE = 10; // Process 10 at a time to avoid overwhelming DB
+      const itemsToProcess = prioritizedItems.slice(0, maxTasks);
 
-        let fromNumber = campaignExt.fromNumber || process.env.TELNYX_FROM_NUMBER || '';
-        let callerNumberId: string | null = null;
-        let callerNumberDecisionId: string | null = null;
+      for (let batchStart = 0; batchStart < itemsToProcess.length; batchStart += PARALLEL_BATCH_SIZE) {
+        const batch = itemsToProcess.slice(batchStart, batchStart + PARALLEL_BATCH_SIZE);
 
-        try {
-          const callerIdResult = await getCallerIdForCall({
-            campaignId,
-            prospectNumber: phoneResult.phone,
-            virtualAgentId: agent?.id || undefined,
-            callType: 'campaign_runner_ws',
-          });
-          fromNumber = callerIdResult.callerId;
-          callerNumberId = callerIdResult.numberId;
-          callerNumberDecisionId = callerIdResult.decisionId;
+        const batchResults = await Promise.allSettled(
+          batch.map(async ({ item }) => {
+            const phoneResult = getBestPhoneForContact(item.contact);
+            if (!phoneResult.phone) return null;
 
-          if (callerIdResult.jitterDelayMs > 0) {
-            await numberPoolSleep(callerIdResult.jitterDelayMs);
+            const callerNumberId: string | null = null;
+            const callerNumberDecisionId: string | null = null;
+
+            const unifiedCtx = await buildUnifiedCallContext({
+              campaignId,
+              queueItemId: item.queueItem.id,
+              contactId: item.contact.id,
+              calledNumber: phoneResult.phone,
+              fromNumber,
+              callerNumberId,
+              callerNumberDecisionId,
+              contactName: `${item.contact.firstName} ${item.contact.lastName}`,
+              contactFirstName: item.contact.firstName,
+              contactLastName: item.contact.lastName,
+              contactEmail: item.contact.email,
+              contactJobTitle: item.contact.jobTitle,
+              accountName: item.account?.name,
+              isTestCall: false,
+              provider: 'google',
+            });
+
+            if (!unifiedCtx) {
+              console.warn(`${LOG_PREFIX} Failed to build unified context for item ${item.queueItem.id}, skipping`);
+              return null;
+            }
+
+            const task: CampaignTask = {
+              taskId: `${campaignId}-${item.queueItem.id}-${Date.now()}`,
+              campaignId,
+              queueItemId: item.queueItem.id,
+              contactId: item.contact.id,
+              contactFirstName: item.contact.firstName,
+              contactLastName: item.contact.lastName,
+              contactEmail: item.contact.email,
+              contactTitle: item.contact.jobTitle,
+              phoneNumber: phoneResult.phone,
+              companyName: item.account?.name || null,
+              accountId: item.contact.accountId,
+              aiSettings: {
+                persona: {
+                  name: unifiedCtx.agentName,
+                  companyName: unifiedCtx.organizationName,
+                  systemPrompt: unifiedCtx.systemPrompt || '',
+                  voice: unifiedCtx.voice,
+                },
+                objective: {
+                  type: agentExt?.primaryGoal || 'qualify',
+                  qualificationQuestions: agentExt?.qualifyingQuestions as string[] || [],
+                  meetingLink: agentExt?.calendlyLink || undefined,
+                },
+                handoff: {
+                  enabled: !!agentExt?.humanHandoffEnabled,
+                  transferNumber: agentExt?.humanHandoffNumber || undefined,
+                  handoffTriggers: agentExt?.humanHandoffTriggers as string[] || [],
+                },
+                callRecording: {
+                  enabled: true,
+                },
+              },
+              fromNumber,
+              callerNumberId,
+              callerNumberDecisionId,
+              virtualAgentId: unifiedCtx.virtualAgentId,
+              agentName: unifiedCtx.agentName,
+              agentFullName: unifiedCtx.agentName,
+            };
+
+            // Mark as in_progress
+            await db.update(campaignQueue)
+              .set({ status: 'in_progress', updatedAt: new Date() })
+              .where(eq(campaignQueue.id, item.queueItem.id));
+
+            return task;
+          })
+        );
+
+        for (const result of batchResults) {
+          if (result.status === 'fulfilled' && result.value) {
+            tasks.push(result.value);
+          } else if (result.status === 'rejected') {
+            console.error(`${LOG_PREFIX} Task build failed:`, result.reason);
           }
-        } catch (poolError) {
-          console.warn(`${LOG_PREFIX} Number pool selection failed, using legacy caller ID:`, poolError);
         }
-
-        // Use Unified Call Context to ensure consistency with test calls
-        const unifiedCtx = await buildUnifiedCallContext({
-          campaignId,
-          queueItemId: item.queueItem.id,
-          contactId: item.contact.id,
-          calledNumber: phoneResult.phone,
-          fromNumber,
-          callerNumberId,
-          callerNumberDecisionId,
-          contactName: `${item.contact.firstName} ${item.contact.lastName}`,
-          contactFirstName: item.contact.firstName,
-          contactLastName: item.contact.lastName,
-          contactEmail: item.contact.email,
-          contactJobTitle: item.contact.jobTitle,
-          accountName: item.account?.name,
-          isTestCall: false,
-          provider: 'google', // Preferred provider for production
-        });
-
-        if (!unifiedCtx) {
-          console.warn(`${LOG_PREFIX} Failed to build unified context for item ${item.queueItem.id}, skipping`);
-          continue;
-        }
-
-        const task: CampaignTask = {
-          taskId: `${campaignId}-${item.queueItem.id}-${Date.now()}`,
-          campaignId,
-          queueItemId: item.queueItem.id,
-          contactId: item.contact.id,
-          contactFirstName: item.contact.firstName,
-          contactLastName: item.contact.lastName,
-          contactEmail: item.contact.email,
-          contactTitle: item.contact.jobTitle,
-          phoneNumber: phoneResult.phone,
-          companyName: item.account?.name || null,
-          accountId: item.contact.accountId,
-          aiSettings: {
-            persona: {
-              name: unifiedCtx.agentName,
-              companyName: unifiedCtx.organizationName,
-              systemPrompt: unifiedCtx.systemPrompt || '',
-              voice: unifiedCtx.voice,
-            },
-            objective: {
-              type: agentExt?.primaryGoal || 'qualify',
-              qualificationQuestions: agentExt?.qualifyingQuestions as string[] || [],
-              meetingLink: agentExt?.calendlyLink || undefined,
-            },
-            handoff: {
-              enabled: !!agentExt?.humanHandoffEnabled,
-              transferNumber: agentExt?.humanHandoffNumber || undefined,
-              handoffTriggers: agentExt?.humanHandoffTriggers as string[] || [],
-            },
-            callRecording: {
-              enabled: true,
-            },
-          },
-          fromNumber,
-          callerNumberId,
-          callerNumberDecisionId,
-          virtualAgentId: unifiedCtx.virtualAgentId,
-          agentName: unifiedCtx.agentName,
-          agentFullName: unifiedCtx.agentName,
-        };
-
-        tasks.push(task);
-
-        // Mark as in_progress
-        await db.update(campaignQueue)
-          .set({ status: 'in_progress', updatedAt: new Date() })
-          .where(eq(campaignQueue.id, item.queueItem.id));
       }
 
       if (tasks.length > 0) {
@@ -983,9 +1022,10 @@ class CampaignRunnerService {
     }
 
     if (task) {
-      runner.currentTask = task;
+      const hydratedTask = await this.hydrateTaskCallerId(task);
+      runner.currentTask = hydratedTask;
       runner.activeCallCount++;
-      this.sendMessage(runner.ws, { type: 'task', task });
+      this.sendMessage(runner.ws, { type: 'task', task: hydratedTask });
     } else {
       // Check if any campaigns are complete
       for (const campaignId of runner.activeCampaigns) {
@@ -1007,7 +1047,11 @@ class CampaignRunnerService {
     return (result?.count || 0) > 0;
   }
 
-  private requeueTask(task: CampaignTask): void {
+  private async requeueTask(task: CampaignTask): Promise<void> {
+    // If this task already held a pool number lock, release it before re-queueing.
+    // This prevents stale number locks when runners disconnect mid-task.
+    releaseNumberWithoutOutcome(task.callerNumberId || null);
+
     // Put task back in queue
     const tasks = this.taskQueue.get(task.campaignId) || [];
     tasks.unshift(task);
@@ -1015,14 +1059,17 @@ class CampaignRunnerService {
 
     // Reset status in database
     // CRITICAL FIX: Add cooldown to prevent immediate retry (back-to-back calls)
-    db.update(campaignQueue)
-      .set({
-        status: 'queued',
-        nextAttemptAt: new Date(Date.now() + 2 * 60 * 1000), // 2 minute cooldown
-        updatedAt: new Date()
-      })
-      .where(eq(campaignQueue.id, task.queueItemId))
-      .catch(err => console.error(`${LOG_PREFIX} Failed to requeue task:`, err));
+    try {
+      await db.update(campaignQueue)
+        .set({
+          status: 'queued',
+          nextAttemptAt: new Date(Date.now() + 2 * 60 * 1000), // 2 minute cooldown
+          updatedAt: new Date()
+        })
+        .where(eq(campaignQueue.id, task.queueItemId));
+    } catch (err) {
+      console.error(`${LOG_PREFIX} Failed to requeue task:`, err);
+    }
   }
 
   private lastPriorityRefresh = Date.now();
@@ -1058,7 +1105,7 @@ class CampaignRunnerService {
         if (now - runner.lastHeartbeat.getTime() > 30000) {
           console.log(`${LOG_PREFIX} Removing stale runner: ${runner.username}`);
           if (runner.currentTask) {
-            this.requeueTask(runner.currentTask);
+            await this.requeueTask(runner.currentTask);
           }
           this.runners.delete(ws);
           ws.close();

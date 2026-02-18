@@ -18,7 +18,7 @@ import {
 } from "@shared/schema";
 import { eq, and, or, ne, desc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
 import { requireAuth } from "../auth";
-import { getCallSessionRecordingS3Key, storeCallSessionRecording } from "../services/recording-storage";
+import { getCallSessionRecordingS3Key, storeCallSessionRecording, getCallSessionRecordingUrl } from "../services/recording-storage";
 import { streamFromS3, s3ObjectExists, readFromGCS } from "../lib/storage";
 import { getPlayableRecordingLink } from "../services/recording-link-resolver";
 
@@ -647,27 +647,32 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
       return res.status(404).json({ error: 'Call quality record not found' });
     }
 
-    // Resolve recording capability through the centralized resolver first.
-    // This catches cases where metadata exists in dialer_call_attempts (linked by call_session_id)
-    // even if call_sessions itself does not have recording fields populated yet.
-    let resolvedRecording = false;
+    // Resolve a direct GCS download URL for the recording instead of streaming.
+    let downloadUrl: string | null = null;
+    let hasRecording = false;
     try {
-      resolvedRecording = Boolean(await getPlayableRecordingLink(callSessionId));
+      const gcsResult = await getCallSessionRecordingUrl(callSessionId, record.recordingUrl);
+      if (gcsResult.url) {
+        downloadUrl = gcsResult.url;
+        hasRecording = true;
+      }
     } catch {
       // Non-blocking: fall back to local indicator check below
     }
 
-    // Get playback URL with fallback to stream if needed
-    // ALWAYS use the showcase-specific stream endpoint which proxies correctly
-    // Note: The frontend uses this URL directly in an <audio> tag, so it must work with cookies
-    const playbackUrl = `/api/showcase-calls/${callSessionId}/stream`;
-
-    // Check if we actually have any source content (S3 key, Telnyx ID, URL, or resolver-discovered source)
-    const hasRecording = resolvedRecording || hasRecordingIndicator(record);
+    // Fallback: check if recording exists even if we couldn't get a URL
+    if (!hasRecording) {
+      try {
+        hasRecording = Boolean(await getPlayableRecordingLink(callSessionId)) || hasRecordingIndicator(record);
+      } catch {
+        hasRecording = hasRecordingIndicator(record);
+      }
+    }
 
     res.json({
       ...record,
-      playbackUrl: hasRecording ? playbackUrl : null,
+      playbackUrl: null,
+      downloadUrl: downloadUrl,
       hasRecording,
       agentPerformanceScore: Math.round(Number(record.agentPerformanceScore) || 0),
     });

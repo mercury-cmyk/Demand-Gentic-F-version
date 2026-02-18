@@ -26,19 +26,18 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
-  Play,
-  Pause,
   BarChart3,
   Heart,
   MessageSquare,
   Shield,
   Zap,
   Target,
+  Download,
+  FileAudio,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { ShowcaseCallCard, type ShowcaseCall } from "@/components/showcase-calls/showcase-call-card";
 import { PinShowcaseDialog } from "@/components/showcase-calls/pin-showcase-dialog";
-import { AudioPlayerEnhanced } from "@/components/call-intelligence";
 import { TranscriptDisplay } from "@/components/call-intelligence";
 import { useToast } from "@/hooks/use-toast";
 
@@ -95,6 +94,7 @@ interface CallDetails {
   campaignName: string | null;
   fullTranscript: string | null;
   playbackUrl: string | null;
+  downloadUrl: string | null;
   hasRecording: boolean;
   durationSec: number | null;
   startedAt: string | null;
@@ -283,46 +283,6 @@ export default function ShowcaseCallsPage() {
     },
   });
 
-  const retrySyncMutation = useMutation({
-    mutationFn: async (callSessionId: string) => {
-      // Fast path: backfill Telnyx recording ID first when possible.
-      try {
-        const resyncRes = await apiRequest("POST", `/api/recordings/${callSessionId}/resync`);
-        const resyncData = await resyncRes.json();
-        if (resyncData?.success) {
-          return { mode: "resync", ...resyncData };
-        }
-      } catch {
-        // Fallback to full retry-sync below
-      }
-
-      const retryRes = await apiRequest("POST", `/api/recordings/${callSessionId}/retry-sync`, {
-        transcribe: false,
-      });
-      const retryData = await retryRes.json();
-      return { mode: "retry-sync", ...retryData };
-    },
-    onSuccess: (data: any) => {
-      toast({
-        title: "Recording sync requested",
-        description:
-          data?.mode === "resync"
-            ? "Recording link refreshed. Retrying playback now."
-            : "Trying to fetch a fresh recording copy now.",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls/details", detailCallId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/showcase-calls/auto-detect"] });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Recording sync failed",
-        description: error?.message || "Could not fetch a fresh recording right now.",
-        variant: "destructive",
-      });
-    },
-  });
-
   // ---- Handlers ----
 
   const handlePin = (call: ShowcaseCall) => {
@@ -337,11 +297,6 @@ export default function ShowcaseCallsPage() {
 
   const handleUnpin = (callSessionId: string) => {
     unpinMutation.mutate(callSessionId);
-  };
-
-  const handleRetrySync = () => {
-    if (!detailCallId) return;
-    retrySyncMutation.mutate(detailCallId);
   };
 
   const pagination = showcasedData?.pagination;
@@ -694,22 +649,32 @@ export default function ShowcaseCallsPage() {
                   </CardContent>
                 </Card>
 
-                {/* Recording Player */}
-                {detailData.playbackUrl && (
+                {/* Recording Download */}
+                {detailData.hasRecording && (
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm">Recording</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <AudioPlayerEnhanced
-                        recordingId={detailData.callSessionId}
-                        // Intentionally use the generic recordings stream resolver path
-                        // (/api/recordings/:id/stream) which is token-optional and already
-                        // hardened for cached URL refresh + multi-source fallback.
-                        recordingUrl={null}
-                        onRetrySync={handleRetrySync}
-                        isRetrying={retrySyncMutation.isPending}
-                      />
+                      {detailData.downloadUrl ? (
+                        <a
+                          href={detailData.downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download
+                          className="inline-flex items-center gap-2"
+                        >
+                          <Button variant="outline" className="gap-2">
+                            <Download className="h-4 w-4" />
+                            Download Recording
+                          </Button>
+                        </a>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <FileAudio className="h-4 w-4" />
+                          <span>Recording not available for download</span>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 )}

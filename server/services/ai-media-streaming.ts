@@ -50,14 +50,26 @@ const streamIdToCallId = new Map<string, string>();
 function enqueueTelnyxOutboundAudio(session: MediaSession, audioBytes: Buffer): void {
   if (!audioBytes?.length) return;
 
-  session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.length
-    ? Buffer.concat([session.telnyxOutboundBuffer, audioBytes])
-    : audioBytes;
-
-  if (session.telnyxOutboundBuffer.length > TELNYX_MAX_BUFFER_BYTES) {
-    const dropped = session.telnyxOutboundBuffer.length - TELNYX_MAX_BUFFER_BYTES;
-    session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.subarray(dropped);
-    console.warn(`[AiMediaStreaming] WARN: outbound buffer capped (dropped ${dropped} bytes) call=${session.callId}`);
+  if (!session.telnyxOutboundBuffer.length) {
+    session.telnyxOutboundBuffer = audioBytes;
+  } else {
+    // Only allocate a new buffer if the existing one can't hold the data
+    const needed = session.telnyxOutboundBuffer.length + audioBytes.length;
+    if (needed <= TELNYX_MAX_BUFFER_BYTES) {
+      const combined = Buffer.allocUnsafe(needed);
+      session.telnyxOutboundBuffer.copy(combined, 0);
+      audioBytes.copy(combined, session.telnyxOutboundBuffer.length);
+      session.telnyxOutboundBuffer = combined;
+    } else {
+      // Cap the buffer — keep the newest data
+      const dropped = needed - TELNYX_MAX_BUFFER_BYTES;
+      const remaining = session.telnyxOutboundBuffer.subarray(dropped);
+      const combined = Buffer.allocUnsafe(TELNYX_MAX_BUFFER_BYTES);
+      remaining.copy(combined, 0);
+      audioBytes.copy(combined, remaining.length);
+      session.telnyxOutboundBuffer = combined;
+      console.warn(`[AiMediaStreaming] WARN: outbound buffer capped (dropped ${dropped} bytes) call=${session.callId}`);
+    }
   }
 }
 
@@ -924,16 +936,38 @@ function cleanupSession(callId: string): void {
     session.isActive = false;
 
     stopTelnyxOutboundPacer(session);
-    
+
     if (session.openaiWs) {
       session.openaiWs.close();
     }
-    
+
+    // Clear outbound buffer to free memory immediately
+    session.telnyxOutboundBuffer = Buffer.alloc(0);
+    session.audioBuffer.length = 0;
+
     streamIdToCallId.delete(session.streamId);
     activeSessions.delete(callId);
     console.log(`[AiMediaStreaming] Session cleaned up for call: ${callId}`);
   }
 }
+
+// STALE SESSION CLEANUP: Periodically remove sessions that have been inactive for >15 minutes.
+// Protects against WebSocket close events that never fire (network disconnects, etc.)
+const STALE_SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [callId, session] of activeSessions.entries()) {
+    if (now - session.lastActivity.getTime() > STALE_SESSION_TIMEOUT_MS) {
+      console.warn(`[AiMediaStreaming] 🧹 Removing stale session: ${callId} (inactive for ${Math.round((now - session.lastActivity.getTime()) / 1000)}s)`);
+      cleanupSession(callId);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[AiMediaStreaming] 🧹 Cleaned ${cleaned} stale sessions. ${activeSessions.size} remaining.`);
+  }
+}, 5 * 60 * 1000); // Check every 5 minutes
 
 export function getActiveSessionCount(): number {
   return activeSessions.size;

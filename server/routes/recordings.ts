@@ -1463,6 +1463,59 @@ router.post('/telnyx/sync', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/recordings/:id/gcs-url
+ * Returns a GCS presigned download URL for the recording.
+ * Used by the frontend to open/download recordings in a new browser tab.
+ * Falls back to recording-link-resolver if no direct GCS key is available.
+ */
+router.get('/:id/gcs-url', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { getPresignedDownloadUrl, readFromGCS } = await import('../lib/storage');
+    const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
+
+    // Try to resolve a playable recording link (GCS-first)
+    const result = await getPlayableRecordingLink(id);
+
+    if (!result) {
+      return res.status(404).json({ error: 'Recording not found' });
+    }
+
+    // If the source is GCS, the URL is already a presigned download URL
+    if (result.source === 'gcs') {
+      return res.json({
+        url: result.url,
+        source: 'gcs',
+        expiresInSeconds: result.expiresInSeconds,
+        mimeType: result.mimeType,
+      });
+    }
+
+    // If we got a gcs-internal URL, redirect to the stream endpoint instead
+    if (result.url.startsWith('gcs-internal://')) {
+      // Stream endpoint will handle it
+      return res.json({
+        url: `/api/recordings/${id}/stream`,
+        source: 'stream_proxy',
+        expiresInSeconds: 3600,
+        mimeType: result.mimeType,
+      });
+    }
+
+    // For any other source, return the resolved URL
+    return res.json({
+      url: result.url,
+      source: result.source,
+      expiresInSeconds: result.expiresInSeconds,
+      mimeType: result.mimeType,
+    });
+  } catch (error: any) {
+    console.error(`[Recordings API] Error getting GCS URL for ${req.params.id}:`, error.message);
+    return res.status(500).json({ error: 'Failed to generate recording URL' });
+  }
+});
+
+/**
  * POST /api/recordings/:id/recording-link
  * Validate & warm a fresh recording URL on the server side.
  *

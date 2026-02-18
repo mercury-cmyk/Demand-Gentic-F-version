@@ -21,7 +21,6 @@ import {
   Briefcase,
   Download, 
   Play,
-  Pause,
   CheckCircle, 
   XCircle,
   Sparkles,
@@ -38,7 +37,7 @@ import {
   Trash2,
   Loader2
 } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -49,29 +48,11 @@ export default function LeadDetailPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState("");
-
-  // Suppress unhandled promise rejections from expired/invalid audio URLs
-  useEffect(() => {
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      if (event.reason?.message?.includes('Failed to load') || 
-          event.reason?.message?.includes('no supported source')) {
-        event.preventDefault();
-        console.warn('Audio loading failed (likely expired presigned URL):', event.reason);
-      }
-    };
-
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-    return () => window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-  }, []);
 
   const { data: lead, isLoading, isError, error } = useQuery({
     queryKey: ['/api/leads', id],
@@ -281,25 +262,40 @@ export default function LeadDetailPage() {
     },
   });
 
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
+  const [isLoadingGcsUrl, setIsLoadingGcsUrl] = useState(false);
+
+  const openRecordingInNewTab = async () => {
+    setIsLoadingGcsUrl(true);
+    try {
+      const res = await apiRequest('GET', `/api/recordings/${id}/gcs-url`);
+      if (!res.ok) throw new Error('Failed to get recording URL');
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
       } else {
-        audioRef.current.play();
+        toast({
+          title: "No Recording",
+          description: "No recording URL available.",
+          variant: "destructive",
+        });
       }
-      setIsPlaying(!isPlaying);
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to get recording URL",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingGcsUrl(false);
     }
   };
 
   const handleDownload = async () => {
-    if (activeRecordingUrl) {
-      window.open(activeRecordingUrl, '_blank');
-      toast({
-        title: "Download Started",
-        description: "Call recording download has started.",
-      });
-    }
+    await openRecordingInNewTab();
+    toast({
+      title: "Download Started",
+      description: "Call recording opened in new tab for download.",
+    });
   };
 
   const formatDuration = (seconds: number) => {
@@ -439,12 +435,13 @@ export default function LeadDetailPage() {
           {lead.recordingUrl && (
             <Button
               variant="outline"
-              onClick={togglePlay}
+              onClick={openRecordingInNewTab}
+              disabled={isLoadingGcsUrl}
               data-testid="button-quick-play"
-              title={isPlaying ? "Pause recording" : "Play recording"}
+              title="Play recording in new tab"
             >
-              {isPlaying ? <Pause className="h-4 w-4 mr-2" /> : <Play className="h-4 w-4 mr-2" />}
-              {isPlaying ? 'Pause' : 'Play'} Recording
+              {isLoadingGcsUrl ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+              Play Recording
             </Button>
           )}
           <Button
@@ -1066,24 +1063,13 @@ export default function LeadDetailPage() {
             <div className="flex items-center gap-4">
               <Button
                 variant="outline"
-                size="icon"
-                onClick={togglePlay}
-                data-testid="button-play-pause"
+                onClick={openRecordingInNewTab}
+                disabled={isLoadingGcsUrl}
+                data-testid="button-play-new-tab"
               >
-                {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                {isLoadingGcsUrl ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+                Play in New Tab
               </Button>
-              <div className="flex-1">
-                <div className="relative h-2 bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className="absolute left-0 top-0 h-full bg-primary"
-                    style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
-                  />
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                  <span>{formatDuration(currentTime)}</span>
-                  <span>{formatDuration(duration)}</span>
-                </div>
-              </div>
               <Button
                 variant="outline"
                 onClick={handleDownload}
@@ -1119,23 +1105,6 @@ export default function LeadDetailPage() {
                 </Button>
               </div>
             </div>
-            {activeRecordingUrl && activeRecordingUrl.startsWith('http') && (
-              <audio
-                ref={audioRef}
-                src={activeRecordingUrl}
-                preload="none"
-                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-                onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-                onEnded={() => setIsPlaying(false)}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onError={(e) => {
-                  console.warn('Audio loading failed for URL:', activeRecordingUrl);
-                  setIsPlaying(false);
-                  e.preventDefault();
-                }}
-              />
-            )}
           </CardContent>
         )}
       </Card>

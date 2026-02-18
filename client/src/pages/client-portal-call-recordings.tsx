@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +17,6 @@ import {
 import {
   Mic,
   Play,
-  Pause,
   Search,
   Loader2,
   Clock,
@@ -50,8 +49,7 @@ interface Recording {
 export default function ClientPortalCallRecordings() {
   const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
   const [search, setSearch] = useState('');
-  const [playingId, setPlayingId] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [loadingRecordingId, setLoadingRecordingId] = useState<string | null>(null);
 
   // Fetch campaigns
   const { data: campaignsData } = useQuery({
@@ -85,21 +83,26 @@ export default function ClientPortalCallRecordings() {
     },
   });
 
-  const handlePlay = (recording: Recording) => {
-    if (playingId === recording.id) {
-      audioRef.current?.pause();
-      setPlayingId(null);
-      return;
-    }
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    if (recording.recordingUrl) {
-      const audio = new Audio(recording.recordingUrl);
-      audio.play();
-      audio.onended = () => setPlayingId(null);
-      audioRef.current = audio;
-      setPlayingId(recording.id);
+  const handlePlay = async (recording: Recording) => {
+    if (!recording.recordingUrl) return;
+    setLoadingRecordingId(recording.id);
+    try {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`/api/recordings/${recording.id}/gcs-url`, { headers });
+      if (!res.ok) throw new Error('Failed to get recording URL');
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      // Fallback: try opening the direct recording URL
+      if (recording.recordingUrl) {
+        window.open(recording.recordingUrl, '_blank', 'noopener,noreferrer');
+      }
+    } finally {
+      setLoadingRecordingId(null);
     }
   };
 
@@ -214,9 +217,10 @@ export default function ClientPortalCallRecordings() {
                             variant="ghost"
                             size="sm"
                             onClick={() => handlePlay(rec)}
+                            disabled={loadingRecordingId === rec.id}
                           >
-                            {playingId === rec.id ? (
-                              <Pause className="h-4 w-4" />
+                            {loadingRecordingId === rec.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <Play className="h-4 w-4" />
                             )}

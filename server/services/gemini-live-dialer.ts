@@ -752,6 +752,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     timestamp: number;
   }
   const transcriptTurns: TranscriptTurn[] = [];
+  const MAX_TRANSCRIPT_TURNS = 200; // Rolling window to prevent unbounded memory growth
 
   // REPETITION DETECTION: Catch AI stuck in a loop saying the same thing
   // (e.g., "let me check" over and over when gatekeeper puts on hold)
@@ -896,6 +897,68 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let absoluteSafetyTimer: NodeJS.Timeout | null = null;
   let reconnectAttempts = 0;
   let geminiConnected = false;
+
+  function parseMaxCallDurationSeconds(value: unknown): number | null {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.floor(parsed);
+  }
+
+  function getEffectiveMaxCallDurationSeconds(): number | null {
+    return parseMaxCallDurationSeconds(callContext.maxCallDurationSeconds);
+  }
+
+  function startMaxCallDurationTimer(): void {
+    if (maxCallDurationTimer) return;
+
+    const maxDurationSeconds = getEffectiveMaxCallDurationSeconds();
+    if (!maxDurationSeconds) return;
+
+    const maxDurationMs = maxDurationSeconds * 1000;
+    console.log(`[Gemini Live] ⏱️ Starting max call duration timer: ${maxDurationSeconds}s`);
+
+    maxCallDurationTimer = setTimeout(async () => {
+      console.log(`[Gemini Live] ⏱️ MAX CALL DURATION REACHED (${maxDurationSeconds}s) - Auto-hanging up`);
+
+      const hangupIds = [callControlId, callId].filter((id): id is string => !!id && id.trim().length > 0);
+      let hangupSucceeded = false;
+
+      for (const hangupId of hangupIds) {
+        try {
+          const response = await fetch(`https://api.telnyx.com/v2/calls/${hangupId}/actions/hangup`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            hangupSucceeded = true;
+            console.log(`[Gemini Live] ⏱️ Auto-hangup executed successfully using ID: ${hangupId}`);
+            break;
+          }
+
+          const errText = await response.text().catch(() => 'Unknown error');
+          console.warn(`[Gemini Live] ⏱️ Auto-hangup failed for ID ${hangupId}: ${response.status} ${errText}`);
+        } catch (error) {
+          console.error(`[Gemini Live] ⏱️ Failed to execute auto-hangup for ID ${hangupId}:`, error);
+        }
+      }
+
+      if (!hangupSucceeded && !callControlId) {
+        console.warn('[Gemini Live] ⏱️ No callControlId available for auto-hangup; forcing WebSocket close as fallback');
+      }
+
+      // Force close both sides to stop any lingering stream if Telnyx hangup was unavailable.
+      cleanup();
+      try {
+        ws.close(1000, 'Max call duration reached');
+      } catch {
+        // Ignore close errors
+      }
+    }, maxDurationMs);
+  }
 
   // ABSOLUTE SAFETY TIMEOUT: Unconditionally kill this call after 10 minutes
   // This prevents zombie calls when Telnyx streams stay open but call is never answered
@@ -1143,8 +1206,18 @@ Instructions:
           console.log(`[Gemini Live] 🔍 msg.start.custom_parameters: ${JSON.stringify(msg.start?.custom_parameters || {})}`);
 
           streamSid = msg.stream_id || msg.start?.stream_id;
-          callId = msg.start?.call_id;
-          callControlId = msg.start?.call_control_id;
+          callId =
+            msg.start?.call_id ||
+            msg.call_id ||
+            msg.start?.callId ||
+            msg.callId ||
+            callId;
+          callControlId =
+            msg.start?.call_control_id ||
+            msg.call_control_id ||
+            msg.start?.callControlId ||
+            msg.callControlId ||
+            callControlId;
 
           if (callId) {
             audioQualityMonitor.startCall(callId);
@@ -1291,8 +1364,9 @@ Instructions:
               console.log(`[Gemini Live] Call ${config.call_id} started. Voice: ${voiceName}`);
               console.log(`[Gemini Live] Contact: ${callContext.contactName || 'Unknown'}, Title: ${callContext.contactJobTitle || 'N/A'}, Company: ${callContext.accountName || 'N/A'}`);
               console.log(`[Gemini Live] Organization: ${callContext.organizationName || 'DemandGentic.ai By Pivotal B2B'}`);
-              if (callContext.maxCallDurationSeconds) {
-                console.log(`[Gemini Live] ⏱️ Max call duration: ${callContext.maxCallDurationSeconds}s`);
+              const effectiveMaxDuration = getEffectiveMaxCallDurationSeconds();
+              if (effectiveMaxDuration) {
+                console.log(`[Gemini Live] ⏱️ Max call duration configured: ${effectiveMaxDuration}s`);
               }
               if (callContext.firstMessage) {
                 console.log(`[Gemini Live] Custom first_message: "${callContext.firstMessage.substring(0, 100)}..."`);
@@ -1301,6 +1375,10 @@ Instructions:
               console.error('[Gemini Live] Failed to parse client_state', e);
             }
           }
+
+          // Start max duration timer as soon as we have start metadata.
+          // This guarantees enforcement even if answer detection is delayed.
+          startMaxCallDurationTimer();
 
           // Initialize connection to Google
           connectToGemini();
@@ -1332,35 +1410,8 @@ Instructions:
               logDiagnosticState('waiting_for_opening');
             }, 3000);
 
-            // Start max call duration timer if configured
-            if (callContext.maxCallDurationSeconds && callContext.maxCallDurationSeconds > 0) {
-              const maxDurationMs = callContext.maxCallDurationSeconds * 1000;
-              console.log(`[Gemini Live] ⏱️ Starting max call duration timer: ${callContext.maxCallDurationSeconds}s`);
-
-              maxCallDurationTimer = setTimeout(async () => {
-                console.log(`[Gemini Live] ⏱️ MAX CALL DURATION REACHED (${callContext.maxCallDurationSeconds}s) - Auto-hanging up`);
-
-                if (callControlId) {
-                  try {
-                    await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
-                        'Content-Type': 'application/json'
-                      }
-                    });
-                    console.log(`[Gemini Live] ⏱️ Auto-hangup executed successfully`);
-                  } catch (error) {
-                    console.error('[Gemini Live] ⏱️ Failed to execute auto-hangup:', error);
-                  }
-                } else {
-                  console.warn('[Gemini Live] ⏱️ No callControlId available for auto-hangup');
-                }
-
-                // Cleanup after hangup
-                cleanup();
-              }, maxDurationMs);
-            }
+            // Safety re-check in case timer wasn't started earlier for any reason.
+            startMaxCallDurationTimer();
             
             // 🎙️ START RECORDING: Initialize call recording when call is answered
             // This captures both inbound (contact) and outbound (AI) audio for later playback
@@ -1465,30 +1516,28 @@ Instructions:
 
                       // Process disposition immediately as voicemail
                       if (callContext.callAttemptId && !dispositionProcessed) {
-                        processDisposition(callContext.callAttemptId, 'voicemail', 'amd_detection')
-                          .then(() => {
-                            dispositionProcessed = true;
-                            console.log(`[Gemini Live] ✅ Voicemail disposition processed for call attempt ${callContext.callAttemptId}`);
-                          })
-                          .catch(dispErr => {
-                            console.error('[Gemini Live] Failed to process voicemail disposition:', dispErr);
-                          });
+                        try {
+                          await processDisposition(callContext.callAttemptId, 'voicemail', 'amd_detection');
+                          dispositionProcessed = true;
+                          console.log(`[Gemini Live] ✅ Voicemail disposition processed for call attempt ${callContext.callAttemptId}`);
+                        } catch (dispErr) {
+                          console.error('[Gemini Live] Failed to process voicemail disposition:', dispErr);
+                        }
 
                         // Update queue item status
                         if (callContext.queueItemId) {
-                          db.update(campaignQueue)
-                            .set({
-                              status: 'queued', // Re-queue for retry
-                              updatedAt: new Date(),
-                              enqueuedReason: `AMD voicemail: ${pendingResult.result} (confidence: ${pendingResult.confidence})`,
-                            })
-                            .where(eq(campaignQueue.id, callContext.queueItemId))
-                            .then(() => {
-                              console.log(`[Gemini Live] ✅ Queue item ${callContext.queueItemId} re-queued for retry`);
-                            })
-                            .catch(qErr => {
-                              console.error('[Gemini Live] Failed to update queue item:', qErr);
-                            });
+                          try {
+                            await db.update(campaignQueue)
+                              .set({
+                                status: 'queued', // Re-queue for retry
+                                updatedAt: new Date(),
+                                enqueuedReason: `AMD voicemail: ${pendingResult.result} (confidence: ${pendingResult.confidence})`,
+                              })
+                              .where(eq(campaignQueue.id, callContext.queueItemId));
+                            console.log(`[Gemini Live] ✅ Queue item ${callContext.queueItemId} re-queued for retry`);
+                          } catch (qErr) {
+                            console.error('[Gemini Live] Failed to update queue item:', qErr);
+                          }
                         }
                       }
 
@@ -2194,6 +2243,8 @@ Instructions:
               text: agentText,
               timestamp: Date.now()
             });
+            // Cap transcript array to prevent unbounded memory growth
+            while (transcriptTurns.length > MAX_TRANSCRIPT_TURNS) transcriptTurns.shift();
             lastTranscriptionReceivedAt = Date.now();
             audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Agent transcript captured: "${agentText.substring(0, 100)}${agentText.length > 100 ? '...' : ''}"`);
@@ -2244,6 +2295,7 @@ Instructions:
                   text: fallbackText,
                   timestamp: Date.now()
                 });
+                while (transcriptTurns.length > MAX_TRANSCRIPT_TURNS) transcriptTurns.shift();
                 console.log(`[Gemini Live] 📝 Agent transcript (fallback from text part): "${fallbackText.substring(0, 100)}${fallbackText.length > 100 ? '...' : ''}"`);
               }
             }
@@ -2273,6 +2325,7 @@ Instructions:
               text: contactText,
               timestamp: Date.now()
             });
+            while (transcriptTurns.length > MAX_TRANSCRIPT_TURNS) transcriptTurns.shift();
             lastTranscriptionReceivedAt = Date.now();
             lastContactSpeechAt = Date.now(); // Reset hold timer — contact is speaking
             audioChunksWithoutTranscription = 0; // Reset counter

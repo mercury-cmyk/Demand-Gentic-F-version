@@ -153,7 +153,10 @@ export class TelnyxAiBridge extends EventEmitter {
   private readonly CARRIER_RETRY_WINDOW_MS = 3600_000; // 1 hour window
   
   // Audio cache for legacy TTS audio files (temporary storage)
-  private audioCache: Map<string, Buffer> = new Map();
+  private audioCache: Map<string, { buffer: Buffer; createdAt: number }> = new Map();
+
+  // Periodic cleanup interval reference
+  private _cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -165,6 +168,9 @@ export class TelnyxAiBridge extends EventEmitter {
     const configuredMax = Number(process.env.TELNYX_MAX_CONCURRENT_CALLS || 50);
     this.MAX_CONCURRENT_CALLS = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 50;
     this.semaphore = new Semaphore(this.MAX_CONCURRENT_CALLS);
+
+    // PERIODIC CLEANUP: Prevent memory leaks from stale Map entries
+    this._cleanupInterval = setInterval(() => this.cleanupStaleMaps(), 5 * 60 * 1000); // Every 5 minutes
 
     // CARRIER FAILURE RETRY HANDLER (per Telnyx support Feb 2026)
     // Sub-500ms call failures with no media exchange are carrier/routing issues.
@@ -217,7 +223,59 @@ export class TelnyxAiBridge extends EventEmitter {
   
   // Get cached audio by ID (for serving to Telnyx)
   getAudio(audioId: string): Buffer | undefined {
-    return this.audioCache.get(audioId);
+    const entry = this.audioCache.get(audioId);
+    return entry?.buffer;
+  }
+
+  // Cache audio with timestamp for TTL-based cleanup
+  setAudio(audioId: string, buffer: Buffer): void {
+    this.audioCache.set(audioId, { buffer, createdAt: Date.now() });
+  }
+
+  /**
+   * Periodic cleanup of stale Map entries to prevent memory leaks.
+   * - callStateByControlId: Remove entries for calls no longer in activeCalls
+   * - audioCache: Remove entries older than 30 minutes
+   * - carrierFailureCounts: Remove entries older than the retry window
+   */
+  private cleanupStaleMaps(): void {
+    const now = Date.now();
+    const activeControlIds = new Set<string>();
+    for (const call of this.activeCalls.values()) {
+      activeControlIds.add(call.callControlId);
+    }
+
+    // Clean callStateByControlId - remove entries for ended calls
+    let cleanedCallState = 0;
+    for (const controlId of this.callStateByControlId.keys()) {
+      if (!activeControlIds.has(controlId)) {
+        this.callStateByControlId.delete(controlId);
+        cleanedCallState++;
+      }
+    }
+
+    // Clean audioCache - remove entries older than 30 minutes
+    let cleanedAudio = 0;
+    const AUDIO_TTL_MS = 30 * 60 * 1000;
+    for (const [id, entry] of this.audioCache.entries()) {
+      if (now - entry.createdAt > AUDIO_TTL_MS) {
+        this.audioCache.delete(id);
+        cleanedAudio++;
+      }
+    }
+
+    // Clean carrierFailureCounts - remove entries outside retry window
+    let cleanedCarrier = 0;
+    for (const [dest, data] of this.carrierFailureCounts.entries()) {
+      if (now - data.lastAttempt > this.CARRIER_RETRY_WINDOW_MS) {
+        this.carrierFailureCounts.delete(dest);
+        cleanedCarrier++;
+      }
+    }
+
+    if (cleanedCallState > 0 || cleanedAudio > 0 || cleanedCarrier > 0) {
+      console.log(`[TelnyxAiBridge] 🧹 Cleanup: removed ${cleanedCallState} stale callState, ${cleanedAudio} expired audio, ${cleanedCarrier} expired carrier entries. Remaining: callState=${this.callStateByControlId.size}, audio=${this.audioCache.size}, carrier=${this.carrierFailureCounts.size}`);
+    }
   }
 
   // Get current metrics
