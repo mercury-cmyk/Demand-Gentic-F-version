@@ -54,7 +54,40 @@ export function normalizeToE164(phoneNumber: string): string {
 }
 
 export function isValidE164(phoneNumber: string): boolean {
-  return /^\+[1-9]\d{7,14}$/.test(phoneNumber);
+  if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber)) return false;
+  // Reject obviously invalid/placeholder numbers
+  if (isObviouslyInvalidPhone(phoneNumber)) return false;
+  return true;
+}
+
+/**
+ * Detect obviously fake/placeholder phone numbers that pass E.164 format checks
+ * e.g. +44000000000, +10000000000, +44123456789 (sequential), repeated digits etc.
+ */
+export function isObviouslyInvalidPhone(phone: string): boolean {
+  const digits = phone.replace(/[^\d]/g, '');
+  if (digits.length < 7) return true;
+
+  // Extract subscriber part (digits after country code)
+  // Common country code lengths: 1 digit (US/CA=1), 2 digits (UK=44, DE=49, etc.), 3 digits
+  let subscriberDigits = digits;
+  if (digits.startsWith('1') && digits.length >= 11) {
+    subscriberDigits = digits.substring(1); // US/CA: 1 + 10 digits
+  } else if (digits.length >= 10) {
+    // Try 2-digit country code (most common: 44, 49, 33, etc.)
+    subscriberDigits = digits.substring(2);
+  }
+
+  // All zeros in subscriber part → placeholder (e.g. +44000000000)
+  if (/^0+$/.test(subscriberDigits)) return true;
+
+  // Subscriber is a single repeated digit (e.g. +44111111111, +44999999999)
+  if (subscriberDigits.length >= 7 && /^(.)\1+$/.test(subscriberDigits)) return true;
+
+  // Entire number (minus +) is all zeros
+  if (/^0+$/.test(digits)) return true;
+
+  return false;
 }
 
 /**

@@ -299,13 +299,41 @@ function normalizePhoneToE164(phone: string | null, country: string = 'US'): str
   }
 
   // Last resort: if number starts with + and has reasonable length, return as-is
+  // But reject obviously invalid/placeholder numbers (all zeros, repeated digits)
   if (cleanedPhone.startsWith('+') && cleanedPhone.length >= 10 && cleanedPhone.length <= 16) {
+    if (isObviouslyInvalidPhone(cleanedPhone)) {
+      console.log('❌ Rejecting placeholder/invalid phone number:', cleanedPhone);
+      return null;
+    }
     console.log('⚠️ Returning unvalidated E.164 format:', cleanedPhone);
     return cleanedPhone;
   }
 
   console.log('❌ Could not normalize phone number');
   return null;
+}
+
+// Detect obviously fake/placeholder phone numbers (all zeros, repeated digits, etc.)
+function isObviouslyInvalidPhone(phone: string): boolean {
+  const digits = phone.replace(/[^\d]/g, '');
+  if (digits.length < 7) return true;
+
+  // Extract subscriber part (after country code)
+  let subscriberDigits = digits;
+  if (digits.startsWith('1') && digits.length >= 11) {
+    subscriberDigits = digits.substring(1);
+  } else if (digits.length >= 10) {
+    subscriberDigits = digits.substring(2);
+  }
+
+  // All zeros in subscriber part (e.g. +44000000000)
+  if (/^0+$/.test(subscriberDigits)) return true;
+  // Single repeated digit (e.g. +44111111111)
+  if (subscriberDigits.length >= 7 && /^(.)\1+$/.test(subscriberDigits)) return true;
+  // Entire number is all zeros
+  if (/^0+$/.test(digits)) return true;
+
+  return false;
 }
 
 // Get phone type label using standardized field labels
@@ -805,6 +833,12 @@ export default function AgentConsolePage() {
   // Compute valid phone options from queue item (already has best phone selected)
   const validPhoneOptions = useMemo(() => {
     if (!currentQueueItem?.contactPhone) return [];
+
+    // Reject obviously invalid/placeholder phone numbers (e.g. 44 000000000)
+    if (isObviouslyInvalidPhone(currentQueueItem.contactPhone)) {
+      console.warn('⚠️ Skipping invalid/placeholder phone:', currentQueueItem.contactPhone);
+      return [];
+    }
 
     const options: Array<{ type: 'direct' | 'company' | 'manual'; number: string; label: string }> = [];
 

@@ -2015,6 +2015,12 @@ export class DatabaseStorage implements IStorage {
       
       const dialedNumber = getBestPhoneForContact(contact).phone || null;
 
+      // Skip contacts with no valid phone number
+      if (!dialedNumber) {
+        console.log(`[Enqueue] Skipping contact ${contactId} — no valid phone number`);
+        return null;
+      }
+
       const [queueItem] = await tx.insert(campaignQueue).values({
         campaignId,
         contactId,
@@ -2109,7 +2115,7 @@ export class DatabaseStorage implements IStorage {
         console.log(`[Bulk Enqueue] Auto-normalized ${contactUpdates.length} contacts (phones/timezone)`);
       }
 
-      // Insert queue items with dialed numbers (separate small transaction)
+      // Insert queue items with dialed numbers — skip contacts with no valid phone
       const queueValues = batch.map(c => {
         const contact = contactMap.get(c.contactId);
         const dialedNumber = contact ? getBestPhoneForContact(contact).phone || null : null;
@@ -2122,10 +2128,16 @@ export class DatabaseStorage implements IStorage {
           priority: c.priority ?? 0,
           status: 'queued' as const,
         };
-      });
+      }).filter(v => v.dialedNumber !== null);
 
-      await db.insert(campaignQueue).values(queueValues).onConflictDoNothing();
-      totalEnqueued += batch.length;
+      if (queueValues.length > 0) {
+        await db.insert(campaignQueue).values(queueValues).onConflictDoNothing();
+      }
+      const skippedCount = batch.length - queueValues.length;
+      if (skippedCount > 0) {
+        console.log(`[Bulk Enqueue] Skipped ${skippedCount} contacts with no valid phone number`);
+      }
+      totalEnqueued += queueValues.length;
 
       // Accumulate account counts
       for (const item of batch) {

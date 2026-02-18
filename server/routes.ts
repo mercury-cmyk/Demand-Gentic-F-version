@@ -7368,7 +7368,7 @@ export function registerRoutes(app: Express) {
             console.log(`[AGENT QUEUE] Admin fallback: ${allAgentsQueue.length} total -> ${manualQueue.length} deduplicated contacts`);
           }
 
-          // Process each queue item to get best phone
+          // Process each queue item to get best phone — filter out contacts with no valid phone
           const processedQueue = manualQueue.map(item => {
             const bestPhone = getBestPhoneForContact({
               directPhone: item.contactDirectPhone,
@@ -7406,9 +7406,9 @@ export function registerRoutes(app: Express) {
               } : null,
               account: item.accountName ? { name: item.accountName } : null,
             };
-          });
+          }).filter(item => item.contactPhone !== null);
 
-          console.log(`[AGENT QUEUE] Manual queue returned ${processedQueue.length} items`);
+          console.log(`[AGENT QUEUE] Manual queue returned ${processedQueue.length} items (filtered from ${manualQueue.length})`);
           return res.json(processedQueue);
         } else if (campaign?.dialMode === 'hybrid' || campaign?.dialMode === 'power') {
           // HYBRID MODE (humans + AI share queue) or POWER MODE: query campaign_queue (auto-assigned queue)
@@ -7449,7 +7449,7 @@ export function registerRoutes(app: Express) {
             )
             .orderBy(desc(campaignQueue.priority), campaignQueue.createdAt);
 
-          // Process each queue item to get best phone
+          // Process each queue item to get best phone — filter out contacts with no valid phone
           const processedQueue = sharedQueue.map(item => {
             const bestPhone = getBestPhoneForContact({
               directPhone: item.contactDirectPhone,
@@ -7487,9 +7487,9 @@ export function registerRoutes(app: Express) {
               } : null,
               account: item.accountName ? { name: item.accountName } : null,
             };
-          });
+          }).filter(item => item.contactPhone !== null);
 
-          console.log(`[AGENT QUEUE] ${campaign?.dialMode === 'hybrid' ? 'Hybrid' : 'AI'} queue returned ${processedQueue.length} items`);
+          console.log(`[AGENT QUEUE] ${campaign?.dialMode === 'hybrid' ? 'Hybrid' : 'AI'} queue returned ${processedQueue.length} items (filtered from ${sharedQueue.length})`);
           return res.json(processedQueue);
         }
       }

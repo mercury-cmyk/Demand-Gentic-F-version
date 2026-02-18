@@ -1496,7 +1496,7 @@ Instructions:
                 const amdStartTime = Date.now();
                 let amdCheckCount = 0;
 
-                const checkAmdResult = () => {
+                const checkAmdResult = async () => {
                   amdCheckCount++;
                   const elapsed = Date.now() - amdStartTime;
 
