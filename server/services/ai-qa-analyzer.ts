@@ -240,9 +240,37 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       }
     }
 
+    // Compute weighted score fallback from criterion-level scores when top-level score is missing
+    const scoreFromResponse = rawAnalysis.score ?? rawAnalysis.ai_score;
+    const criterionWeights = qaParams.scoring_weights || {
+      content_interest: 25,
+      permission_given: 30,
+      compliance_consent: 15,
+      qualification_answers: 15,
+      data_accuracy: 10,
+      email_deliverable: 5,
+    };
+
+    const criterionKeys: Array<keyof QAParameters['scoring_weights']> = [
+      'content_interest',
+      'permission_given',
+      'compliance_consent',
+      'qualification_answers',
+      'data_accuracy',
+      'email_deliverable',
+    ];
+
+    const fallbackWeightedScore = Math.round(
+      criterionKeys.reduce((acc, key) => {
+        const criterionScore = Number(rawAnalysis?.analysis?.[key]?.score ?? 0);
+        const weight = Number(criterionWeights[key] ?? 0);
+        return acc + (criterionScore * weight);
+      }, 0) / 100
+    );
+
     // Normalize response format (dynamic prompts return ai_score/ai_qualification_status, legacy returns score/qualification_status)
     const normalizedAnalysis: AIAnalysisResult = {
-      score: rawAnalysis.score ?? rawAnalysis.ai_score ?? 0,
+      score: Number.isFinite(Number(scoreFromResponse)) ? Number(scoreFromResponse) : fallbackWeightedScore,
       qualification_status: rawAnalysis.qualification_status ?? rawAnalysis.ai_qualification_status ?? 'needs_review',
       analysis: rawAnalysis.analysis ?? {},
       missing_info: rawAnalysis.missing_info ?? [],

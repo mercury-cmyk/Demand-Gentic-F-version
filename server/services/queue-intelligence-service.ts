@@ -15,11 +15,23 @@ const LOG_PREFIX = "[QueueIntelligence]";
 // ============================================
 
 interface ScoreBreakdown {
+  // Legacy keys kept for dashboard compatibility
   industry: number;
   topic: number;
   accountFit: number;
   roleFit: number;
   historical: number;
+  // Unified queue model fields
+  titleExactScore: number;
+  titleKeywordScore: number;
+  industryKeywordScore: number;
+  employeeSizeScore: number;
+  reason_breakdown: {
+    exact_title_matches: string[];
+    title_keyword_matches: string[];
+    industry_matches: string[];
+    employee_size_match: string | null;
+  };
 }
 
 interface QueueContactRow {
@@ -42,6 +54,9 @@ interface QueueContactRow {
   revenueRange: string | null;
   accountIntentTopics: string[] | null;
   techStack: string[] | null;
+  lastCallOutcome: string | null;
+  nextCallEligibleAt: Date | null;
+  queueNextActionAt: Date | null;
 }
 
 interface CampaignContext {
@@ -51,6 +66,26 @@ interface CampaignContext {
   qaParameters: any;
   talkingPoints: any;
   productServiceInfo: string | null;
+}
+
+interface UnifiedWeightedRule {
+  value: string;
+  score: number;
+}
+
+interface EmployeeSizeRule {
+  label: string;
+  min: number | null;
+  max: number | null;
+  score: number;
+}
+
+interface UnifiedQueueConfig {
+  prioritizedExactTitles: UnifiedWeightedRule[];
+  prioritizedTitleKeywords: UnifiedWeightedRule[];
+  prioritizedIndustryKeywords: UnifiedWeightedRule[];
+  prioritizedEmployeeSizeRanges: EmployeeSizeRule[];
+  routingThreshold: number;
 }
 
 interface HistoricalConversionData {
@@ -84,55 +119,39 @@ export async function scoreQueueContacts(
     return { scored: 0, avgScore: 0, duration: 0 };
   }
 
-  // 3. Load historical conversion data for this tenant
-  const historical = await loadHistoricalData(campaignId, tenantId);
+  // 3. Load unified queue config
+  const queueConfig = loadUnifiedQueueConfig(campaign);
 
-  // 4. Parse campaign targeting info
-  const targetIndustries = extractTargetIndustries(campaign);
-  const targetKeywords = extractTargetKeywords(campaign);
-  const targetRoles = extractTargetRoles(campaign);
-  const targetCompanySize = extractTargetCompanySize(campaign);
-
-  // 5. Check pipeline account scores
-  const accountIds = [...new Set(contacts.map(c => c.accountId))];
-  const pipelineScores = await loadPipelineScores(accountIds);
-
-  // 6. Score each contact
-  const scoredContacts: Array<{ queueId: string; score: number; breakdown: ScoreBreakdown }> = [];
+  // 4. Score each contact using unified model
+  const scoredContacts: Array<{
+    queueId: string;
+    score: number;
+    breakdown: ScoreBreakdown;
+    targetAgentType: 'human' | 'ai' | 'any';
+    nextAttemptAt: Date | null;
+    status: 'queued' | 'removed' | null;
+    removedReason: string | null;
+  }> = [];
   let totalScore = 0;
 
   for (const contact of contacts) {
-    const industryScore = calculateIndustryScore(contact, targetIndustries, historical);
-    const topicScore = calculateTopicScore(contact, targetKeywords);
-    const accountFitScore = calculateAccountFitScore(contact, targetCompanySize, pipelineScores);
-    const roleFitScore = calculateRoleFitScore(contact, targetRoles);
-    const historicalScore = calculateHistoricalScore(contact, historical);
-
-    // Weighted composite (each sub-score 0-200) → composite 0-200 → scale to 0-1000
-    const composite = Math.round(
-      industryScore * 0.25 +
-      topicScore * 0.20 +
-      accountFitScore * 0.25 +
-      roleFitScore * 0.15 +
-      historicalScore * 0.15
-    );
-    const finalScore = Math.min(1000, composite * 5);
+    const scoring = computeUnifiedPriorityScore(contact, queueConfig);
+    const routingMode: 'human' | 'ai' = scoring.priorityScore >= queueConfig.routingThreshold ? 'human' : 'ai';
+    const cooldownUpdate = applyCooldownAndRetryRules(contact);
 
     scoredContacts.push({
       queueId: contact.queueId,
-      score: finalScore,
-      breakdown: {
-        industry: industryScore,
-        topic: topicScore,
-        accountFit: accountFitScore,
-        roleFit: roleFitScore,
-        historical: historicalScore,
-      },
+      score: scoring.priorityScore,
+      breakdown: scoring.breakdown,
+      targetAgentType: cooldownUpdate.status === 'removed' ? 'any' : routingMode,
+      nextAttemptAt: cooldownUpdate.nextActionAt,
+      status: cooldownUpdate.status,
+      removedReason: cooldownUpdate.removedReason,
     });
-    totalScore += finalScore;
+    totalScore += scoring.priorityScore;
   }
 
-  // 7. Batch update campaign_queue
+  // 5. Batch update campaign_queue
   await batchUpdateScores(scoredContacts);
 
   const avgScore = Math.round(totalScore / scoredContacts.length);
@@ -141,9 +160,10 @@ export async function scoreQueueContacts(
     `${LOG_PREFIX} Scored ${scoredContacts.length} campaign_queue contacts for campaign ${campaignId} (avg: ${avgScore}, took ${duration}ms)`
   );
 
-  // 8. UNIFIED QUEUE: Also score agent_queue contacts for the same campaign
+  // 6. UNIFIED QUEUE: Also score agent_queue contacts for the same campaign
   //    This ensures human agents in manual dial mode get the same intelligent ordering
   let agentQueueScored = 0;
+  let agentQueueTotalScore = 0;
   let agentQueueContacts: QueueContactRow[] = [];
   try {
     agentQueueContacts = await loadAgentQueueContacts(campaignId);
@@ -151,41 +171,34 @@ export async function scoreQueueContacts(
     console.warn(`${LOG_PREFIX} agent_queue query failed, skipping:`, err.message || err);
   }
   if (agentQueueContacts.length > 0) {
-    const agentScoredContacts: Array<{ queueId: string; score: number; breakdown: ScoreBreakdown }> = [];
+    const agentScoredContacts: Array<{
+      queueId: string;
+      score: number;
+      breakdown: ScoreBreakdown;
+      scheduledFor: Date | null;
+      queueState: 'queued' | 'removed' | null;
+      removedReason: string | null;
+    }> = [];
     let agentTotalScore = 0;
 
     for (const contact of agentQueueContacts) {
-      const industryScore = calculateIndustryScore(contact, targetIndustries, historical);
-      const topicScore = calculateTopicScore(contact, targetKeywords);
-      const accountFitScore = calculateAccountFitScore(contact, targetCompanySize, pipelineScores);
-      const roleFitScore = calculateRoleFitScore(contact, targetRoles);
-      const historicalScore = calculateHistoricalScore(contact, historical);
-
-      const composite = Math.round(
-        industryScore * 0.25 +
-        topicScore * 0.20 +
-        accountFitScore * 0.25 +
-        roleFitScore * 0.15 +
-        historicalScore * 0.15
-      );
-      const finalScore = Math.min(1000, composite * 5);
+      const scoring = computeUnifiedPriorityScore(contact, queueConfig);
+      const cooldownUpdate = applyCooldownAndRetryRules(contact);
 
       agentScoredContacts.push({
         queueId: contact.queueId,
-        score: finalScore,
-        breakdown: {
-          industry: industryScore,
-          topic: topicScore,
-          accountFit: accountFitScore,
-          roleFit: roleFitScore,
-          historical: historicalScore,
-        },
+        score: scoring.priorityScore,
+        breakdown: scoring.breakdown,
+        scheduledFor: cooldownUpdate.nextActionAt,
+        queueState: cooldownUpdate.status,
+        removedReason: cooldownUpdate.removedReason,
       });
-      agentTotalScore += finalScore;
+      agentTotalScore += scoring.priorityScore;
     }
 
     await batchUpdateAgentQueueScores(agentScoredContacts);
     agentQueueScored = agentScoredContacts.length;
+    agentQueueTotalScore = agentTotalScore;
     const agentAvg = agentScoredContacts.length > 0 ? Math.round(agentTotalScore / agentScoredContacts.length) : 0;
     console.log(
       `${LOG_PREFIX} Scored ${agentQueueScored} agent_queue contacts for campaign ${campaignId} (avg: ${agentAvg})`
@@ -193,13 +206,304 @@ export async function scoreQueueContacts(
   }
 
   const totalScored = scoredContacts.length + agentQueueScored;
-  const combinedAvg = totalScored > 0 ? Math.round(totalScore / scoredContacts.length) : 0;
+  const combinedAvg = totalScored > 0 ? Math.round((totalScore + agentQueueTotalScore) / totalScored) : 0;
   const durationFinal = Date.now() - startTime;
   console.log(
     `${LOG_PREFIX} Unified scoring complete: ${totalScored} total contacts (${scoredContacts.length} campaign_queue + ${agentQueueScored} agent_queue) in ${durationFinal}ms`
   );
 
   return { scored: totalScored, avgScore: combinedAvg, duration: durationFinal };
+}
+
+function loadUnifiedQueueConfig(campaign: CampaignContext): UnifiedQueueConfig {
+  const qa = campaign.qaParameters && typeof campaign.qaParameters === 'string'
+    ? safeJsonParse(campaign.qaParameters)
+    : (campaign.qaParameters || {});
+
+  const q = qa?.queueIntelligence || qa?.queue_intelligence || qa || {};
+
+  return {
+    prioritizedExactTitles: normalizeWeightedRules(
+      q.prioritized_exact_titles ?? q.prioritizedExactTitles,
+      [
+        { value: 'chief revenue officer', score: 300 },
+        { value: 'vp marketing', score: 250 },
+      ]
+    ),
+    prioritizedTitleKeywords: normalizeWeightedRules(
+      q.prioritized_title_keywords ?? q.prioritizedTitleKeywords,
+      [
+        { value: 'demand generation', score: 180 },
+        { value: 'abm', score: 160 },
+        { value: 'operations', score: 60 },
+      ]
+    ),
+    prioritizedIndustryKeywords: normalizeWeightedRules(
+      q.prioritized_industry_keywords ?? q.prioritizedIndustryKeywords,
+      [
+        { value: 'saas', score: 140 },
+        { value: 'cybersecurity', score: 150 },
+        { value: 'healthcare', score: 80 },
+      ]
+    ),
+    prioritizedEmployeeSizeRanges: normalizeEmployeeSizeRules(
+      q.prioritized_employee_size_ranges ?? q.prioritizedEmployeeSizeRanges
+    ),
+    routingThreshold: Number(q.routing_threshold ?? q.routingThreshold ?? 800),
+  };
+}
+
+function computeUnifiedPriorityScore(
+  contact: QueueContactRow,
+  config: UnifiedQueueConfig
+): { priorityScore: number; breakdown: ScoreBreakdown } {
+  const jobTitle = (contact.jobTitle || '').toLowerCase().trim();
+  const industry = (contact.industryStandardized || '').toLowerCase().trim();
+
+  let titleExactScore = 0;
+  let titleKeywordScore = 0;
+  let industryKeywordScore = 0;
+  let employeeSizeScore = 0;
+
+  const exactTitleMatches: string[] = [];
+  const titleKeywordMatches: string[] = [];
+  const industryMatches: string[] = [];
+  let employeeSizeMatch: string | null = null;
+
+  for (const rule of config.prioritizedExactTitles) {
+    if (jobTitle === rule.value.toLowerCase()) {
+      titleExactScore += rule.score;
+      exactTitleMatches.push(rule.value);
+    }
+  }
+
+  for (const rule of config.prioritizedTitleKeywords) {
+    if (jobTitle.includes(rule.value.toLowerCase())) {
+      titleKeywordScore += rule.score;
+      titleKeywordMatches.push(rule.value);
+    }
+  }
+
+  for (const rule of config.prioritizedIndustryKeywords) {
+    if (industry.includes(rule.value.toLowerCase())) {
+      industryKeywordScore += rule.score;
+      industryMatches.push(rule.value);
+    }
+  }
+
+  const employeeCount = resolveEmployeeCount(contact);
+  for (const rule of config.prioritizedEmployeeSizeRanges) {
+    if (matchesEmployeeRange(employeeCount, rule)) {
+      employeeSizeScore += rule.score;
+      if (!employeeSizeMatch) employeeSizeMatch = rule.label;
+    }
+  }
+
+  const priorityScore = titleExactScore + titleKeywordScore + industryKeywordScore + employeeSizeScore;
+
+  const breakdown: ScoreBreakdown = {
+    // legacy dashboard fields
+    industry: industryKeywordScore,
+    topic: titleKeywordScore,
+    accountFit: employeeSizeScore,
+    roleFit: titleExactScore,
+    historical: 0,
+    // unified fields
+    titleExactScore,
+    titleKeywordScore,
+    industryKeywordScore,
+    employeeSizeScore,
+    reason_breakdown: {
+      exact_title_matches: exactTitleMatches,
+      title_keyword_matches: titleKeywordMatches,
+      industry_matches: industryMatches,
+      employee_size_match: employeeSizeMatch,
+    },
+  };
+
+  return { priorityScore, breakdown };
+}
+
+function applyCooldownAndRetryRules(contact: QueueContactRow): {
+  nextActionAt: Date | null;
+  status: 'queued' | 'removed' | null;
+  removedReason: string | null;
+} {
+  const outcome = (contact.lastCallOutcome || '').toLowerCase().trim();
+  const now = new Date();
+
+  // Default to current queue timing (respect existing scheduling)
+  let nextActionAt: Date | null = contact.queueNextActionAt ? new Date(contact.queueNextActionAt) : null;
+
+  // Never violate contact-level cooldown
+  if (contact.nextCallEligibleAt) {
+    const contactCooldown = new Date(contact.nextCallEligibleAt);
+    if (!nextActionAt || contactCooldown > nextActionAt) {
+      nextActionAt = contactCooldown;
+    }
+  }
+
+  if (outcome === 'invalid_data' || outcome === 'invalid number' || outcome === 'wrong_number') {
+    return {
+      nextActionAt,
+      status: 'removed',
+      removedReason: 'Removed by queue intelligence: invalid number',
+    };
+  }
+
+  if (outcome === 'voicemail' || outcome === 'no_answer') {
+    const sevenDays = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    if (!nextActionAt || sevenDays > nextActionAt) {
+      nextActionAt = sevenDays;
+    }
+    return {
+      nextActionAt,
+      status: 'queued',
+      removedReason: null,
+    };
+  }
+
+  if (outcome === 'callback_requested' || outcome === 'callback-requested') {
+    // If callback time exists in contact.nextCallEligibleAt it takes precedence
+    if (contact.nextCallEligibleAt) {
+      nextActionAt = new Date(contact.nextCallEligibleAt);
+    }
+    return {
+      nextActionAt,
+      status: 'queued',
+      removedReason: null,
+    };
+  }
+
+  return {
+    nextActionAt,
+    status: null,
+    removedReason: null,
+  };
+}
+
+function normalizeWeightedRules(input: any, defaults: UnifiedWeightedRule[]): UnifiedWeightedRule[] {
+  if (!input) return defaults;
+
+  // Map/object form: {"vp marketing":250}
+  if (!Array.isArray(input) && typeof input === 'object') {
+    return Object.entries(input)
+      .map(([value, score]) => ({ value: String(value), score: Number(score) }))
+      .filter(r => r.value && Number.isFinite(r.score));
+  }
+
+  // Array form
+  if (Array.isArray(input)) {
+    const parsed = input
+      .map((item: any): UnifiedWeightedRule | null => {
+        if (typeof item === 'string') return { value: item, score: 100 };
+        if (item && typeof item === 'object') {
+          const value = item.value ?? item.keyword ?? item.title ?? item.name;
+          const score = item.score ?? item.weight ?? item.points ?? 100;
+          if (!value) return null;
+          return { value: String(value), score: Number(score) };
+        }
+        return null;
+      })
+      .filter((r: UnifiedWeightedRule | null): r is UnifiedWeightedRule => !!r && !!r.value && Number.isFinite(r.score));
+    return parsed.length > 0 ? parsed : defaults;
+  }
+
+  return defaults;
+}
+
+function normalizeEmployeeSizeRules(input: any): EmployeeSizeRule[] {
+  const defaults: EmployeeSizeRule[] = [
+    { label: '200-1000', min: 200, max: 1000, score: 120 },
+    { label: '1001-5000', min: 1001, max: 5000, score: 90 },
+    { label: '1-50', min: 1, max: 50, score: -50 },
+  ];
+
+  if (!input) return defaults;
+
+  if (Array.isArray(input)) {
+    const parsed = input
+      .map((item: any): EmployeeSizeRule | null => {
+        if (typeof item === 'string') {
+          const range = parseRangeLabel(item);
+          return range ? { ...range, score: 0 } : null;
+        }
+        if (item && typeof item === 'object') {
+          const label = String(item.label ?? item.range ?? `${item.min ?? ''}-${item.max ?? ''}`).trim();
+          const score = Number(item.score ?? item.weight ?? item.points ?? 0);
+          const parsedRange = parseRangeLabel(label) || {
+            label,
+            min: item.min ?? null,
+            max: item.max ?? null,
+          };
+          if (!parsedRange.label) return null;
+          return {
+            label: parsedRange.label,
+            min: parsedRange.min !== undefined ? Number(parsedRange.min) : null,
+            max: parsedRange.max !== undefined ? Number(parsedRange.max) : null,
+            score,
+          };
+        }
+        return null;
+      })
+      .filter((r: EmployeeSizeRule | null): r is EmployeeSizeRule => !!r && Number.isFinite(r.score));
+
+    return parsed.length > 0 ? parsed : defaults;
+  }
+
+  return defaults;
+}
+
+function parseRangeLabel(label: string): { label: string; min: number | null; max: number | null } | null {
+  const normalized = label.replace(/employees?/gi, '').replace(/\s+/g, '').toLowerCase();
+
+  const plusMatch = normalized.match(/^(\d+)\+$/);
+  if (plusMatch) {
+    return { label, min: Number(plusMatch[1]), max: null };
+  }
+
+  const rangeMatch = normalized.match(/^(\d+)-(\d+)$/);
+  if (rangeMatch) {
+    return { label, min: Number(rangeMatch[1]), max: Number(rangeMatch[2]) };
+  }
+
+  return null;
+}
+
+function resolveEmployeeCount(contact: QueueContactRow): number | null {
+  if (contact.staffCount && Number.isFinite(contact.staffCount)) {
+    return contact.staffCount;
+  }
+
+  const range = (contact.employeesSizeRange || '').toLowerCase();
+  const match = range.match(/(\d[\d,]*)\s*-\s*(\d[\d,]*)/);
+  if (match) {
+    const min = Number(match[1].replace(/,/g, ''));
+    const max = Number(match[2].replace(/,/g, ''));
+    return Math.round((min + max) / 2);
+  }
+
+  const plus = range.match(/(\d[\d,]*)\s*\+/);
+  if (plus) {
+    return Number(plus[1].replace(/,/g, ''));
+  }
+
+  return null;
+}
+
+function matchesEmployeeRange(count: number | null, rule: EmployeeSizeRule): boolean {
+  if (count === null) return false;
+  const min = rule.min ?? Number.MIN_SAFE_INTEGER;
+  const max = rule.max ?? Number.MAX_SAFE_INTEGER;
+  return count >= min && count <= max;
+}
+
+function safeJsonParse(value: string): any {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
 }
 
 // ============================================
@@ -545,7 +849,10 @@ async function loadQueuedContacts(campaignId: string): Promise<QueueContactRow[]
       a.employees_size_range,
       a.revenue_range,
       a.intent_topics AS account_intent_topics,
-      a.tech_stack
+      a.tech_stack,
+      c.last_call_outcome,
+      c.next_call_eligible_at,
+      cq.next_attempt_at
     FROM campaign_queue cq
     INNER JOIN contacts c ON c.id = cq.contact_id
     INNER JOIN accounts a ON a.id = cq.account_id
@@ -575,6 +882,9 @@ async function loadQueuedContacts(campaignId: string): Promise<QueueContactRow[]
     revenueRange: r.revenue_range,
     accountIntentTopics: r.account_intent_topics,
     techStack: r.tech_stack,
+    lastCallOutcome: r.last_call_outcome,
+    nextCallEligibleAt: r.next_call_eligible_at,
+    queueNextActionAt: r.next_attempt_at,
   }));
 }
 
@@ -604,7 +914,10 @@ async function loadAgentQueueContacts(campaignId: string): Promise<QueueContactR
       a.employees_size_range,
       a.revenue_range,
       a.intent_topics AS account_intent_topics,
-      a.tech_stack
+      a.tech_stack,
+      c.last_call_outcome,
+      c.next_call_eligible_at,
+      aq.scheduled_for
     FROM agent_queue aq
     INNER JOIN contacts c ON c.id = aq.contact_id
     LEFT JOIN accounts a ON a.id = COALESCE(aq.account_id, c.account_id)
@@ -634,6 +947,9 @@ async function loadAgentQueueContacts(campaignId: string): Promise<QueueContactR
     revenueRange: r.revenue_range,
     accountIntentTopics: r.account_intent_topics,
     techStack: r.tech_stack,
+    lastCallOutcome: r.last_call_outcome,
+    nextCallEligibleAt: r.next_call_eligible_at,
+    queueNextActionAt: r.scheduled_for,
   }));
 }
 
@@ -1124,7 +1440,15 @@ function extractTargetCompanySize(campaign: CampaignContext): {
 // ============================================
 
 async function batchUpdateScores(
-  scores: Array<{ queueId: string; score: number; breakdown: ScoreBreakdown }>
+  scores: Array<{
+    queueId: string;
+    score: number;
+    breakdown: ScoreBreakdown;
+    targetAgentType: 'human' | 'ai' | 'any';
+    nextAttemptAt: Date | null;
+    status: 'queued' | 'removed' | null;
+    removedReason: string | null;
+  }>
 ): Promise<void> {
   if (scores.length === 0) return;
 
@@ -1138,9 +1462,17 @@ async function batchUpdateScores(
     const valueClauses: string[] = [];
 
     batch.forEach((s, idx) => {
-      const baseIdx = idx * 3;
-      valueClauses.push(`($${baseIdx + 1}::text, $${baseIdx + 2}::integer, $${baseIdx + 3}::jsonb)`);
-      values.push(s.queueId, s.score, JSON.stringify(s.breakdown));
+      const baseIdx = idx * 7;
+      valueClauses.push(`($${baseIdx + 1}::text, $${baseIdx + 2}::integer, $${baseIdx + 3}::jsonb, $${baseIdx + 4}::text, $${baseIdx + 5}::timestamptz, $${baseIdx + 6}::text, $${baseIdx + 7}::text)`);
+      values.push(
+        s.queueId,
+        s.score,
+        JSON.stringify(s.breakdown),
+        s.targetAgentType,
+        s.nextAttemptAt,
+        s.status,
+        s.removedReason,
+      );
     });
 
     await pool.query(
@@ -1150,14 +1482,13 @@ async function batchUpdateScores(
         ai_priority_score = v.score,
         ai_scored_at = NOW(),
         ai_score_breakdown = v.breakdown,
-        priority = v.score + COALESCE(
-          CASE
-            WHEN cq.priority > 0 AND cq.priority <= 200 THEN cq.priority
-            ELSE 0
-          END, 0
-        ),
+        target_agent_type = v.target_agent_type::queue_target_agent_type,
+        priority = v.score,
+        next_attempt_at = COALESCE(v.next_attempt_at, cq.next_attempt_at),
+        status = COALESCE(v.new_status::queue_status, cq.status),
+        removed_reason = COALESCE(v.removed_reason, cq.removed_reason),
         updated_at = NOW()
-      FROM (VALUES ${valueClauses.join(", ")}) AS v(id, score, breakdown)
+      FROM (VALUES ${valueClauses.join(", ")}) AS v(id, score, breakdown, target_agent_type, next_attempt_at, new_status, removed_reason)
       WHERE cq.id = v.id
         AND v.score IS NOT NULL
       `,
@@ -1171,7 +1502,14 @@ async function batchUpdateScores(
  * Mirrors batchUpdateScores but targets agent_queue table
  */
 async function batchUpdateAgentQueueScores(
-  scores: Array<{ queueId: string; score: number; breakdown: ScoreBreakdown }>
+  scores: Array<{
+    queueId: string;
+    score: number;
+    breakdown: ScoreBreakdown;
+    scheduledFor: Date | null;
+    queueState: 'queued' | 'removed' | null;
+    removedReason: string | null;
+  }>
 ): Promise<void> {
   if (scores.length === 0) return;
 
@@ -1183,9 +1521,16 @@ async function batchUpdateAgentQueueScores(
     const valueClauses: string[] = [];
 
     batch.forEach((s, idx) => {
-      const baseIdx = idx * 3;
-      valueClauses.push(`($${baseIdx + 1}::text, $${baseIdx + 2}::integer, $${baseIdx + 3}::jsonb)`);
-      values.push(s.queueId, s.score, JSON.stringify(s.breakdown));
+      const baseIdx = idx * 6;
+      valueClauses.push(`($${baseIdx + 1}::text, $${baseIdx + 2}::integer, $${baseIdx + 3}::jsonb, $${baseIdx + 4}::timestamptz, $${baseIdx + 5}::text, $${baseIdx + 6}::text)`);
+      values.push(
+        s.queueId,
+        s.score,
+        JSON.stringify(s.breakdown),
+        s.scheduledFor,
+        s.queueState,
+        s.removedReason,
+      );
     });
 
     await pool.query(
@@ -1195,14 +1540,12 @@ async function batchUpdateAgentQueueScores(
         ai_priority_score = v.score,
         ai_scored_at = NOW(),
         ai_score_breakdown = v.breakdown,
-        priority = v.score + COALESCE(
-          CASE
-            WHEN aq.priority > 0 AND aq.priority <= 200 THEN aq.priority
-            ELSE 0
-          END, 0
-        ),
+        priority = v.score,
+        scheduled_for = COALESCE(v.scheduled_for, aq.scheduled_for),
+        queue_state = COALESCE(v.new_queue_state::manual_queue_state, aq.queue_state),
+        removed_reason = COALESCE(v.removed_reason, aq.removed_reason),
         updated_at = NOW()
-      FROM (VALUES ${valueClauses.join(", ")}) AS v(id, score, breakdown)
+      FROM (VALUES ${valueClauses.join(", ")}) AS v(id, score, breakdown, scheduled_for, new_queue_state, removed_reason)
       WHERE aq.id = v.id
         AND v.score IS NOT NULL
       `,

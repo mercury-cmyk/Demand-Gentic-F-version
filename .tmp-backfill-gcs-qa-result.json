@@ -1,0 +1,51 @@
+{
+  "executedAt": "2026-02-18T14:58:06.671Z",
+  "bucket": "demandgentic-storage",
+  "updatedRows": 102,
+  "before": [
+    {
+      "qa_status": "new",
+      "total": 18,
+      "with_s3_key": 12,
+      "with_gcs_url": 1,
+      "needs_update": 11
+    },
+    {
+      "qa_status": "under_review",
+      "total": 163,
+      "with_s3_key": 69,
+      "with_gcs_url": 0,
+      "needs_update": 69
+    },
+    {
+      "qa_status": "approved",
+      "total": 30,
+      "with_s3_key": 22,
+      "with_gcs_url": 0,
+      "needs_update": 22
+    }
+  ],
+  "after": [
+    {
+      "qa_status": "new",
+      "total": 18,
+      "with_s3_key": 12,
+      "with_gcs_url": 12,
+      "still_needs_update": 0
+    },
+    {
+      "qa_status": "under_review",
+      "total": 163,
+      "with_s3_key": 69,
+      "with_gcs_url": 69,
+      "still_needs_update": 0
+    },
+    {
+      "qa_status": "approved",
+      "total": 30,
+      "with_s3_key": 22,
+      "with_gcs_url": 22,
+      "still_needs_update": 0
+    }
+  ]
+}
