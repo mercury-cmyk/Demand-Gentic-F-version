@@ -82,7 +82,12 @@ export default function LandingPageTab({
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/generative-studio/generate/landing-page", data);
+      const res = await apiRequest(
+        "POST",
+        "/api/generative-studio/generate/landing-page",
+        data,
+        { timeout: 180000 }
+      );
       return await res.json();
     },
     onSuccess: (data) => {

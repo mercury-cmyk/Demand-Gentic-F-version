@@ -645,7 +645,7 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
         .set({ status: 'published', updatedAt: new Date() })
         .where(eq(generativeStudioProjects.id, project.id));
 
-      return res.json({ publishedPage: updated, url: `/api/generative-studio/public/${updated.slug}` });
+      return res.json({ publishedPage: updated, url: `/generative-studio/public/${updated.slug}` });
     }
 
     // Create new published page
@@ -667,7 +667,7 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
       .set({ status: 'published', updatedAt: new Date() })
       .where(eq(generativeStudioProjects.id, project.id));
 
-    res.json({ publishedPage: published, url: `/api/generative-studio/public/${pageSlug}` });
+    res.json({ publishedPage: published, url: `/generative-studio/public/${pageSlug}` });
   } catch (error: any) {
     return sendGenerativeStudioError(res, error, "publish");
   }

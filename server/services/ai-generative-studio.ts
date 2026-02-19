@@ -318,6 +318,40 @@ function enforceLeadCaptureForm(
         var form = document.getElementById('lead-capture-form');
         if (!form) return;
 
+        var nameInput = document.getElementById('lead-name');
+        var emailInput = document.getElementById('lead-business-email');
+        var assetInput = form.querySelector('input[name="asset_url"]');
+
+        var currentParams = new URLSearchParams(window.location.search || '');
+
+        function firstNonEmpty(keys) {
+          for (var i = 0; i < keys.length; i += 1) {
+            var value = String(currentParams.get(keys[i]) || '').trim();
+            if (value) return value;
+          }
+          return '';
+        }
+
+        var fullName = firstNonEmpty(['name', 'full_name', 'fullname', 'contact_name']);
+        var firstName = firstNonEmpty(['first_name', 'firstname', 'first']);
+        var lastName = firstNonEmpty(['last_name', 'lastname', 'last']);
+        var businessEmail = firstNonEmpty(['business_email', 'email', 'work_email']);
+        var assetFromQuery = firstNonEmpty(['asset_url', 'asset', 'download_url']);
+
+        if (!fullName && (firstName || lastName)) {
+          fullName = (firstName + ' ' + lastName).trim();
+        }
+
+        if (nameInput && !String(nameInput.value || '').trim() && fullName) {
+          nameInput.value = fullName;
+        }
+        if (emailInput && !String(emailInput.value || '').trim() && businessEmail) {
+          emailInput.value = businessEmail;
+        }
+        if (assetInput && assetFromQuery) {
+          assetInput.value = assetFromQuery;
+        }
+
         form.addEventListener('submit', function (event) {
           event.preventDefault();
 
@@ -331,6 +365,18 @@ function enforceLeadCaptureForm(
           query.set('name', name);
           query.set('business_email', email);
           if (assetUrl) query.set('asset_url', assetUrl);
+
+          var passthroughKeys = [
+            'contact_id', 'campaign_id', 'campaign_name',
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'
+          ];
+          for (var i = 0; i < passthroughKeys.length; i += 1) {
+            var key = passthroughKeys[i];
+            var val = String(currentParams.get(key) || '').trim();
+            if (val && !query.has(key)) {
+              query.set(key, val);
+            }
+          }
 
           var separator = action.indexOf('?') >= 0 ? '&' : '?';
           window.location.href = action + separator + query.toString();

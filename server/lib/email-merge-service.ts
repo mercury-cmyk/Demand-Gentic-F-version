@@ -50,7 +50,8 @@ export const MERGE_TAGS = {
   
   // Campaign fields
   'campaign.name': 'Campaign Name',
-  'campaign.landing_page': 'Landing Page URL',
+  'campaign.landing_page': 'Landing Page URL (prefilled for this contact)',
+  'campaign.landing_page_raw': 'Landing Page URL (raw)',
   'campaign.landing_page_prefilled': 'Landing Page with Prefilled Contact Info',
   
   // Sender fields
@@ -154,7 +155,8 @@ export async function getMergeDataForContact(
     campaign: campaign ? {
       id: campaign.id,
       name: campaign.name || '',
-      landing_page: campaign.landingPageUrl || '',
+      // Keep raw URL for legacy/explicit use
+      landing_page_raw: campaign.landingPageUrl || '',
       // Generate prefilled landing page URL with contact details for form auto-fill
       landing_page_prefilled: campaign.landingPageUrl
         ? generateTrackingUrl(campaign.landingPageUrl, {
@@ -163,6 +165,23 @@ export async function getMergeDataForContact(
             lastName: contact.lastName || undefined,
             company: account?.name || undefined,
             jobTitle: contact.jobTitle || undefined,
+            phone: contactPhone || undefined,
+            campaignId: campaign.id,
+            campaignName: campaign.name || undefined,
+            utmSource: 'demandgentic',
+            utmMedium: 'email',
+            utmCampaign: campaign.name || undefined,
+          })
+        : '',
+      // Default tag now resolves to personalized URL for better conversion tracking and prefill
+      landing_page: campaign.landingPageUrl
+        ? generateTrackingUrl(campaign.landingPageUrl, {
+            email: contact.email || undefined,
+            firstName: contact.firstName || undefined,
+            lastName: contact.lastName || undefined,
+            company: account?.name || undefined,
+            jobTitle: contact.jobTitle || undefined,
+            phone: contactPhone || undefined,
             campaignId: campaign.id,
             campaignName: campaign.name || undefined,
             utmSource: 'demandgentic',
