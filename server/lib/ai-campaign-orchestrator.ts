@@ -49,7 +49,7 @@ const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CAL
 const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10);
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches (prevents burst overload)
 const PARALLEL_CALL_BATCH_SIZE = 10; // Smaller batches to avoid DB pool exhaustion
-const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
+const STUCK_ITEM_TIMEOUT_MS = 120000; // 2 minutes - much more aggressive to catch stuck calls quickly, calls should complete in <90s
 const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_EMPTY_RECHECK_SECONDS || 60));
 const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
 const ACTIVE_POOL_CACHE_TTL_MS = 30000;
@@ -945,7 +945,22 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     return { initiated: 0, skipped: 0 };
   }
 
-  // Get current in-progress count
+  // SAFETY: Emergency reset for items that are stuck but haven't hit the watchdog timeout yet
+  // If an item is in_progress for 90+ seconds (normal calls complete in 60-90s), reset it immediately
+  const emergencyResetCount = await db.execute(sql`
+    UPDATE campaign_queue
+    SET status = 'queued', updated_at = NOW(), enqueued_reason = 'emergency_reset|stuck_for_90s'
+    WHERE campaign_id = ${campaignId}
+      AND status = 'in_progress'
+      AND updated_at < NOW() - INTERVAL '90 seconds'
+    RETURNING id
+  `);
+  
+  if (emergencyResetCount && (emergencyResetCount as any).rowCount > 0) {
+    console.warn(`[AI Orchestrator] EMERGENCY RESET: ${(emergencyResetCount as any).rowCount} stuck items (90+ sec) for campaign ${campaignId}`);
+  }
+
+  // Get current in-progress count (after emergency resets)
   const inProgressCount = await getInProgressCount(campaignId);
   const { defaultMax } = await getConcurrencyLimits();
   const maxConcurrent = (aiSettings as any).maxConcurrentCalls || defaultMax;

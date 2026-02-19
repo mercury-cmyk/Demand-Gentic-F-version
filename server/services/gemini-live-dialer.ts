@@ -3387,27 +3387,36 @@ Instructions:
         await processDisposition(callContext.callAttemptId, fallbackDisposition, 'gemini_live_close');
         dispositionProcessed = true;
 
-        // Update campaign queue item status
+            // Update campaign queue item status with enhanced error handling
         if (callContext.queueItemId) {
           const queueStatus = getQueueStatusFromDisposition(fallbackDisposition);
-          await db.update(campaignQueue)
-            .set({
-              status: queueStatus,
-              updatedAt: new Date(),
-              enqueuedReason: fallbackReason,
-            })
-            .where(eq(campaignQueue.id, callContext.queueItemId));
-          console.log(`[Gemini Live] ✅ Queue item ${callContext.queueItemId} updated to status: ${queueStatus} (on close)`);
+          try {
+            const result = await db.update(campaignQueue)
+              .set({
+                status: queueStatus,
+                updatedAt: new Date(),
+                enqueuedReason: fallbackReason,
+              })
+              .where(eq(campaignQueue.id, callContext.queueItemId));
+            console.log(`[Gemini Live] ✅ Queue item ${callContext.queueItemId} updated to status: ${queueStatus} (on close)`);
+          } catch (updateErr) {
+            console.error(`[Gemini Live] ❌ CRITICAL: Failed to update queue item ${callContext.queueItemId} to ${queueStatus}:`, updateErr);
+            // Log this incident for monitoring
+            try {
+              await db.execute(sql`INSERT INTO system_alerts (alert_type, severity, message) VALUES ('stuck_queue_item', 'critical', ${`Failed to mark queue ${callContext.queueItemId} complete after call ended with ${fallbackDisposition}`})`).catch(() => null);
+            } catch {}
+          }
         }
       } catch (closeError) {
         console.error('[Gemini Live] ❌ Failed to process disposition on close:', closeError);
 
-        // LAST RESORT: If disposition processing failed, at least mark queue item as 'queued' for retry
+        // LAST RESORT: If disposition processing failed, FORCE mark queue item as 'done' anyway
         if (callContext.queueItemId) {
           try {
+            console.warn(`[Gemini Live] ⚠️ Disposition processing failed, force-marking queue item as 'done' (call completed on${callAnswered ? ' answered' : ' unanswered'} line)`);
             await db.update(campaignQueue)
               .set({
-                status: 'queued',
+                status: 'done',
                 updatedAt: new Date(),
                 enqueuedReason: 'Error during disposition processing - re-queued for retry',
               })
