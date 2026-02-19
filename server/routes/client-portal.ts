@@ -2903,13 +2903,30 @@ router.patch('/admin/clients/:clientId/users/:userId', requireAuth, requireRole(
     const { firstName, lastName, isActive, password } = req.body;
 
     const updateData: any = {
-      firstName,
-      lastName,
-      isActive,
       updatedAt: new Date(),
     };
 
-    if (password) {
+    if (firstName !== undefined) {
+      updateData.firstName = firstName;
+    }
+
+    if (lastName !== undefined) {
+      updateData.lastName = lastName;
+    }
+
+    if (isActive !== undefined) {
+      updateData.isActive = isActive;
+    }
+
+    if (password !== undefined) {
+      if (typeof password !== 'string' || password.length < 8) {
+        return res.status(400).json({ message: 'Password must be at least 8 characters' });
+      }
+
+      if (password.length > 128) {
+        return res.status(400).json({ message: 'Password must be 128 characters or fewer' });
+      }
+
       updateData.password = await bcrypt.hash(password, 10);
     }
 

@@ -17,26 +17,57 @@ const router = Router();
 
 // List all promo pages for the tenant
 router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
+  const tenantId = (req as any).user?.tenantId || "default-tenant";
+  const userId =
+    (req as any).user?.id ||
+    (req as any).user?.userId ||
+    (req as any).user?.clientUserId;
+  const { status } = req.query;
+  const requestedStatus = typeof status === "string" ? status : undefined;
+
   try {
-    const tenantId = (req as any).user?.tenantId || "default-tenant";
-    const userId =
-      (req as any).user?.id ||
-      (req as any).user?.userId ||
-      (req as any).user?.clientUserId;
-    const { status } = req.query;
-    const requestedStatus = typeof status === "string" ? status : undefined;
+    // Fetch content-promotion pages from both scopes (tenant + creator) and merge.
+    const sourceErrors: Array<{ source: string; message: string }> = [];
 
-    let conditions = [eq(contentPromotionPages.tenantId, tenantId)];
-
-    if (status && typeof status === "string") {
-      conditions.push(eq(contentPromotionPages.status, status as any));
+    let tenantScopedPages: any[] = [];
+    if (tenantId && tenantId !== "default-tenant") {
+      const tenantConditions: any[] = [eq(contentPromotionPages.tenantId, tenantId)];
+      if (requestedStatus) {
+        tenantConditions.push(eq(contentPromotionPages.status, requestedStatus as any));
+      }
+      try {
+        tenantScopedPages = await db
+          .select()
+          .from(contentPromotionPages)
+          .where(and(...tenantConditions))
+          .orderBy(desc(contentPromotionPages.createdAt));
+      } catch (err: any) {
+        sourceErrors.push({ source: "contentPromotionPages.tenant", message: err?.message || String(err) });
+      }
     }
 
-    const pages = await db
-      .select()
-      .from(contentPromotionPages)
-      .where(and(...conditions))
-      .orderBy(desc(contentPromotionPages.createdAt));
+    let userScopedPages: any[] = [];
+    if (userId) {
+      const userConditions: any[] = [eq(contentPromotionPages.createdBy, userId)];
+      if (requestedStatus) {
+        userConditions.push(eq(contentPromotionPages.status, requestedStatus as any));
+      }
+      try {
+        userScopedPages = await db
+          .select()
+          .from(contentPromotionPages)
+          .where(and(...userConditions))
+          .orderBy(desc(contentPromotionPages.createdAt));
+      } catch (err: any) {
+        sourceErrors.push({ source: "contentPromotionPages.user", message: err?.message || String(err) });
+      }
+    }
+
+    const pagesById = new Map<string, any>();
+    for (const page of [...tenantScopedPages, ...userScopedPages]) {
+      if (page?.id) pagesById.set(page.id, page);
+    }
+    const pages = Array.from(pagesById.values());
 
     // Also surface published Content Studio landing pages so both modules
     // follow the same listing route in Content Promotion manager.
@@ -47,41 +78,98 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
 
     let studioPages: any[] = [];
     if (shouldIncludeStudioPublishedPages) {
-      const studioConditions: any[] = [
-        eq(generativeStudioPublishedPages.contentType, "landing_page" as any),
-        eq(generativeStudioPublishedPages.isPublished, true),
-      ];
+      const studioPagesById = new Map<string, any>();
 
       if (tenantId && tenantId !== "default-tenant") {
-        studioConditions.push(eq(generativeStudioPublishedPages.tenantId, tenantId));
-      } else if (userId) {
-        studioConditions.push(eq(generativeStudioPublishedPages.ownerId, userId));
+        try {
+          const tenantStudioPages = await db
+            .select()
+            .from(generativeStudioPublishedPages)
+            .where(
+              and(
+                eq(generativeStudioPublishedPages.contentType, "landing_page" as any),
+                eq(generativeStudioPublishedPages.isPublished, true),
+                eq(generativeStudioPublishedPages.tenantId, tenantId)
+              )
+            )
+            .orderBy(desc(generativeStudioPublishedPages.createdAt));
+          for (const page of tenantStudioPages) {
+            if (page?.id) studioPagesById.set(page.id, page);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioPublishedPages.tenant", message: err?.message || String(err) });
+        }
       }
 
-      studioPages = await db
-        .select()
-        .from(generativeStudioPublishedPages)
-        .where(and(...studioConditions))
-        .orderBy(desc(generativeStudioPublishedPages.createdAt));
+      if (userId) {
+        try {
+          const userStudioPages = await db
+            .select()
+            .from(generativeStudioPublishedPages)
+            .where(
+              and(
+                eq(generativeStudioPublishedPages.contentType, "landing_page" as any),
+                eq(generativeStudioPublishedPages.isPublished, true),
+                eq(generativeStudioPublishedPages.ownerId, userId)
+              )
+            )
+            .orderBy(desc(generativeStudioPublishedPages.createdAt));
+          for (const page of userStudioPages) {
+            if (page?.id) studioPagesById.set(page.id, page);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioPublishedPages.user", message: err?.message || String(err) });
+        }
+      }
+
+      studioPages = Array.from(studioPagesById.values());
     }
 
     let studioProjects: any[] = [];
     if (shouldIncludeStudioDraftProjects) {
-      const studioProjectConditions: any[] = [
-        eq(generativeStudioProjects.contentType, "landing_page" as any),
-      ];
+      const studioProjectsById = new Map<string, any>();
 
       if (tenantId && tenantId !== "default-tenant") {
-        studioProjectConditions.push(eq(generativeStudioProjects.tenantId, tenantId));
-      } else if (userId) {
-        studioProjectConditions.push(eq(generativeStudioProjects.ownerId, userId));
+        try {
+          const tenantStudioProjects = await db
+            .select()
+            .from(generativeStudioProjects)
+            .where(
+              and(
+                eq(generativeStudioProjects.contentType, "landing_page" as any),
+                eq(generativeStudioProjects.tenantId, tenantId)
+              )
+            )
+            .orderBy(desc(generativeStudioProjects.createdAt));
+          for (const project of tenantStudioProjects) {
+            if (project?.id) studioProjectsById.set(project.id, project);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioProjects.tenant", message: err?.message || String(err) });
+        }
       }
 
-      studioProjects = await db
-        .select()
-        .from(generativeStudioProjects)
-        .where(and(...studioProjectConditions))
-        .orderBy(desc(generativeStudioProjects.createdAt));
+      if (userId) {
+        try {
+          const userStudioProjects = await db
+            .select()
+            .from(generativeStudioProjects)
+            .where(
+              and(
+                eq(generativeStudioProjects.contentType, "landing_page" as any),
+                eq(generativeStudioProjects.ownerId, userId)
+              )
+            )
+            .orderBy(desc(generativeStudioProjects.createdAt));
+          for (const project of userStudioProjects) {
+            if (project?.id) studioProjectsById.set(project.id, project);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioProjects.user", message: err?.message || String(err) });
+        }
+      }
+
+      studioProjects = Array.from(studioProjectsById.values());
     }
 
     const publishedProjectIds = new Set(
@@ -142,7 +230,7 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
         id: `studio-project:${project.id}`,
         tenantId: project.tenantId || tenantId,
         title: project.title,
-        slug: `studio-${project.id.slice(0, 8)}`,
+        slug: `studio-${typeof project.id === "string" ? project.id.slice(0, 8) : "project"}`,
         pageType: "gated_download",
         status: "draft",
         templateTheme: "modern_gradient",
@@ -185,10 +273,25 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
       return bTime - aTime;
     });
 
+    if (sourceErrors.length > 0) {
+      console.warn("[Content Promotion] Partial source failures while listing pages:", sourceErrors);
+    }
+
     res.json(unifiedPages);
   } catch (error: any) {
     console.error("[Content Promotion] Error listing pages:", error);
-    res.status(500).json({ error: "Failed to list content promotion pages" });
+    // Last-resort fallback: do not break page load entirely.
+    try {
+      const fallback = await db
+        .select()
+        .from(contentPromotionPages)
+        .where(eq(contentPromotionPages.tenantId, tenantId))
+        .orderBy(desc(contentPromotionPages.createdAt));
+      return res.json(fallback);
+    } catch (fallbackError: any) {
+      console.error("[Content Promotion] Fallback list failed:", fallbackError);
+      return res.json([]);
+    }
   }
 });
 

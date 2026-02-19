@@ -306,6 +306,30 @@ export function detectContactTimezone(contact: ContactTimezoneInfo): string | nu
     if (countryTimezoneMap[countryUpper]) {
       return countryTimezoneMap[countryUpper];
     }
+    
+    // CRITICAL FALLBACK: For major calling regions with broken/typo country data,
+    // assume reasonable defaults to prevent contacts from being filtered out
+    // This handles data quality issues where country is "United Kingdom (UK)" or similar
+    const normalizedCountry = countryUpper.replace(/[^A-Z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    
+    // UK variations
+    if (normalizedCountry.includes('UNITED') && normalizedCountry.includes('KINGDOM')) {
+      return 'Europe/London';
+    }
+    if (normalizedCountry.includes('ENGLAND') || normalizedCountry.includes('SCOTLAND') || normalizedCountry.includes('WALES')) {
+      return 'Europe/London';
+    }
+    
+    // US variations
+    if ((normalizedCountry.includes('UNITED') || normalizedCountry.includes('STATES')) && 
+        (normalizedCountry.includes('STATES') || normalizedCountry.includes('AMERICA'))) {
+      return 'America/New_York';
+    }
+    
+    // Canada variations
+    if (normalizedCountry.includes('CANADA') || normalizedCountry === 'CA') {
+      return 'America/Toronto';
+    }
   }
 
   return null; // Unknown timezone

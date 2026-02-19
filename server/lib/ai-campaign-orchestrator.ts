@@ -172,13 +172,31 @@ function isContactWithinBusinessHours(contact: { country?: string | null; state?
   localTime: string;
   reason?: string;
 } {
-  const contactTz = detectContactTimezone({ 
+  let contactTz = detectContactTimezone({ 
     country: contact.country || undefined, 
     state: contact.state || undefined,
     timezone: contact.timezone || undefined
   });
   
-  // CRITICAL: If timezone cannot be detected, do NOT call - skip this contact
+  // FALLBACK: If timezone detection failed, try to infer from country
+  // This handles cases where country data exists but detectContactTimezone couldn't map it
+  if (!contactTz && contact.country) {
+    const countryUpper = String(contact.country).toUpperCase().trim();
+    // UK fallback
+    if (['GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES'].includes(countryUpper)) {
+      contactTz = 'Europe/London';
+    }
+    // US fallback
+    else if (['US', 'USA', 'UNITED STATES'].includes(countryUpper)) {
+      contactTz = 'America/New_York';
+    }
+    // Canada fallback
+    else if (['CA', 'CANADA'].includes(countryUpper)) {
+      contactTz = 'America/Toronto';
+    }
+  }
+  
+  // CRITICAL: If timezone still cannot be detected, do NOT call - skip this contact
   if (!contactTz) {
     return {
       canCall: false,
@@ -1141,6 +1159,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       continue;
     }
     
+    // DEBUG: Log UK contacts passing business hours check
+    if (bizHoursCheck.timezone === 'Europe/London' && tzStat.total <= 5) {
+      console.log(`[AI Orchestrator] ✅ UK contact within business hours (${bizHoursCheck.localTime})`);
+    }
+    
     tzStat.callable++;
     
     // Prioritize mobile over direct
@@ -1254,7 +1277,39 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   console.log(`[AI Orchestrator] After compliance: ${eligibleItems.length} eligible, ${skipped} removed`);
   
   if (eligibleItems.length === 0) {
-    await setOrchestratorStallReason(campaignId, 'All contacts filtered (business hours/compliance). Calls will resume automatically.');
+    // Build detailed stall reason
+    let stallReason = 'All contacts filtered: ';
+    const reasons: string[] = [];
+    
+    if (countryNotEnabled > 0) {
+      const topRejected = Array.from(rejectedCountries.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([c, n]) => `${c}(${n})`)
+        .join(', ');
+      reasons.push(`${countryNotEnabled} region-disabled (${topRejected})`);
+    }
+    
+    if (outsideBusinessHours > 0) {
+      const tzBreakdown = Array.from(timezoneStats.entries())
+        .filter(([_, stats]) => stats.total > 0)
+        .map(([tz, stats]) => `${tz}:${stats.callable}/${stats.total}`)
+        .join(', ');
+      reasons.push(`${outsideBusinessHours} outside hours (${tzBreakdown})`);
+    }
+    
+    if (noPhone > 0) {
+      reasons.push(`${noPhone} no-phone`);
+    }
+    
+    if (skipped > 0) {
+      reasons.push(`${skipped} compliance-removed`);
+    }
+    
+    stallReason += reasons.length > 0 ? reasons.join(' + ') : 'unknown reason';
+    stallReason += '. Calls will resume automatically.';
+    
+    await setOrchestratorStallReason(campaignId, stallReason);
     return { initiated: 0, skipped };
   }
 

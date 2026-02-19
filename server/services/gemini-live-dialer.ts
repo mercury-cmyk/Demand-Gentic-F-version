@@ -1187,8 +1187,9 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
       return;
     }
 
+    // Track opening message timing for diagnostics
+    let openingMessageSentAt = Date.now();
     openingMessageSent = true;
-    openingMessageSentAt = Date.now();
     logDiagnosticState('opening_sent');
 
     // Build the canonical opening message with all contact variables
@@ -1270,7 +1271,6 @@ Instructions:
     console.log(`[Gemini Live] 📢 Opening message queued: "${openingText}"`);
 
     // DIAGNOSTIC: Check if Gemini responds within 10 seconds after opening message
-    const openingMessageSentAt = Date.now();
     setTimeout(() => {
       if (metrics.totalBytesReceived === 0 && !voicemailDetected) {
         console.error(`[Gemini Live] 🚨 CRITICAL: No audio received from Gemini 10s after opening message!`);

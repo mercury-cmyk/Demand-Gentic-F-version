@@ -28,6 +28,7 @@ import {
   DollarSign,
   CreditCard,
   Send,
+  KeyRound,
   Download,
   Upload,
   Loader2,
@@ -1081,6 +1082,10 @@ export default function ClientPortalAdmin() {
   const [inviteEnabled, setInviteEnabled] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+  const [showSetPasswordDialog, setShowSetPasswordDialog] = useState(false);
+  const [passwordTargetUser, setPasswordTargetUser] = useState<any | null>(null);
+  const [newClientUserPassword, setNewClientUserPassword] = useState('');
+  const [confirmClientUserPassword, setConfirmClientUserPassword] = useState('');
 
   // Queries
   const { data: clients, isLoading: clientsLoading } = useQuery<ClientAccount[]>({
@@ -1257,6 +1262,30 @@ export default function ClientPortalAdmin() {
     },
     onError: (error: Error) => {
       toast({ title: 'Send failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const setClientUserPasswordMutation = useMutation({
+    mutationFn: async ({ clientId, clientUserId, password }: { clientId: string; clientUserId: string; password: string }) => {
+      const res = await apiRequest('PATCH', `/api/client-portal/admin/clients/${clientId}/users/${clientUserId}`, { password });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.message || 'Failed to update password');
+      }
+      return res.json();
+    },
+    onSuccess: async () => {
+      if (selectedClient) {
+        await fetchClientDetail(selectedClient.id);
+      }
+      setShowSetPasswordDialog(false);
+      setPasswordTargetUser(null);
+      setNewClientUserPassword('');
+      setConfirmClientUserPassword('');
+      toast({ title: 'Password updated', description: 'Client user password was changed successfully.' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Update failed', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1860,6 +1889,19 @@ export default function ClientPortalAdmin() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
+                                    onClick={() => {
+                                      setPasswordTargetUser(user);
+                                      setNewClientUserPassword('');
+                                      setConfirmClientUserPassword('');
+                                      setShowSetPasswordDialog(true);
+                                    }}
+                                  >
+                                    <KeyRound className="h-3.5 w-3.5 mr-1" />
+                                    Set Password
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
                                     disabled={loginAsClientMutation.isPending}
                                     onClick={() => loginAsClientMutation.mutate({ clientId: selectedClient!.id, userId: user.id })}
                                   >
@@ -2378,6 +2420,82 @@ export default function ClientPortalAdmin() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Set Client User Password Dialog */}
+      <Dialog
+        open={showSetPasswordDialog}
+        onOpenChange={(open) => {
+          setShowSetPasswordDialog(open);
+          if (!open) {
+            setPasswordTargetUser(null);
+            setNewClientUserPassword('');
+            setConfirmClientUserPassword('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Client User Password</DialogTitle>
+            <DialogDescription>
+              {passwordTargetUser
+                ? `Set a new password for ${passwordTargetUser.email}`
+                : 'Set a new password for this client user'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="newClientUserPassword">New Password *</Label>
+              <Input
+                id="newClientUserPassword"
+                type="password"
+                minLength={8}
+                value={newClientUserPassword}
+                onChange={(e) => setNewClientUserPassword(e.target.value)}
+                placeholder="Minimum 8 characters"
+              />
+            </div>
+            <div>
+              <Label htmlFor="confirmClientUserPassword">Confirm Password *</Label>
+              <Input
+                id="confirmClientUserPassword"
+                type="password"
+                minLength={8}
+                value={confirmClientUserPassword}
+                onChange={(e) => setConfirmClientUserPassword(e.target.value)}
+                placeholder="Re-enter password"
+              />
+            </div>
+            {confirmClientUserPassword.length > 0 && newClientUserPassword !== confirmClientUserPassword && (
+              <p className="text-xs text-red-500">Passwords do not match.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSetPasswordDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                setClientUserPasswordMutation.isPending ||
+                !selectedClient ||
+                !passwordTargetUser ||
+                newClientUserPassword.length < 8 ||
+                newClientUserPassword !== confirmClientUserPassword
+              }
+              onClick={() => {
+                if (!selectedClient || !passwordTargetUser) return;
+                setClientUserPasswordMutation.mutate({
+                  clientId: selectedClient.id,
+                  clientUserId: passwordTargetUser.id,
+                  password: newClientUserPassword,
+                });
+              }}
+            >
+              {setClientUserPasswordMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Update Password
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
