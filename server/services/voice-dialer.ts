@@ -2122,6 +2122,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
   console.log(`${LOG_PREFIX} ðŸ”‘ Using OpenAI API Key: ${maskedKey} (Length: ${apiKey.length})`);
 
   try {
+    await ensureSessionCampaignId(session);
     const campaignConfig = await getCampaignConfig(session.campaignId);
     console.log(`${LOG_PREFIX} 🔍 Fetched Campaign Config for ${session.campaignId}:`, {
         found: !!campaignConfig,
@@ -2767,6 +2768,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
   console.log(`${LOG_PREFIX} Gemini config: apiKey=${apiKey ? 'present' : 'missing'}, projectId=${projectId || 'not set'}`);
 
   try {
+    await ensureSessionCampaignId(session);
+
     // Dynamically import to avoid circular dependencies
     const { GeminiLiveProvider } = await import("./voice-providers/gemini-live-provider");
     const { mapVoiceToProvider } = await import("./voice-providers/voice-provider.interface");
@@ -8242,6 +8245,56 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
     return null;
   }
+}
+
+/**
+ * Ensure session has a campaignId even when Telnyx custom params are incomplete.
+ * This is critical for loading campaign max call duration and enforcing runtime limits.
+ */
+async function ensureSessionCampaignId(session: OpenAIRealtimeSession): Promise<void> {
+  if (session.campaignId && session.campaignId.trim().length > 0) {
+    return;
+  }
+
+  // Try resolving from call attempt first (most reliable source)
+  if (session.callAttemptId && !session.callAttemptId.startsWith('attempt-')) {
+    try {
+      const [attempt] = await db
+        .select({ campaignId: dialerCallAttempts.campaignId })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, session.callAttemptId))
+        .limit(1);
+
+      if (attempt?.campaignId) {
+        session.campaignId = attempt.campaignId;
+        console.log(`${LOG_PREFIX} ✅ Recovered missing campaignId from callAttempt ${session.callAttemptId}: ${session.campaignId}`);
+        return;
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Failed to recover campaignId from callAttempt ${session.callAttemptId}:`, error);
+    }
+  }
+
+  // Fallback: resolve from queue item
+  if (session.queueItemId && !session.queueItemId.startsWith('queue-test-') && !session.queueItemId.startsWith('test-queue-')) {
+    try {
+      const [queueRecord] = await db
+        .select({ campaignId: campaignQueue.campaignId })
+        .from(campaignQueue)
+        .where(eq(campaignQueue.id, session.queueItemId))
+        .limit(1);
+
+      if (queueRecord?.campaignId) {
+        session.campaignId = queueRecord.campaignId;
+        console.log(`${LOG_PREFIX} ✅ Recovered missing campaignId from queueItem ${session.queueItemId}: ${session.campaignId}`);
+        return;
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Failed to recover campaignId from queueItem ${session.queueItemId}:`, error);
+    }
+  }
+
+  console.warn(`${LOG_PREFIX} ⚠️ Could not recover campaignId for call ${session.callId}. Campaign max duration enforcement may be unavailable.`);
 }
 
 async function getContactInfo(contactId: string): Promise<any> {

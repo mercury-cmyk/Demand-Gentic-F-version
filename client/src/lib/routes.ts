@@ -44,6 +44,7 @@ export const ROUTES = {
   AI_STUDIO_AGENTS: '/ai-studio/agents',
   AI_STUDIO_AGENT_CREATE: '/ai-studio/agents/create',
   AI_STUDIO_AGENT_EDIT: '/ai-studio/agents/:id/edit',
+  AI_STUDIO_CAMPAIGN_MANAGER: '/ai-studio/campaign-manager',
   AI_STUDIO_CAMPAIGN_INTELLIGENCE: '/ai-studio/campaign-intelligence',
   AI_STUDIO_OPERATOR: '/ai-studio/operator',
   PREVIEW_STUDIO: '/preview-studio',

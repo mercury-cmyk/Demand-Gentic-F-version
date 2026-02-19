@@ -1915,9 +1915,18 @@ export async function getContactsByDisposition(
   console.log(`${LOG_PREFIX} Getting contacts for disposition: ${disposition}, limit=${limit}, offset=${offset}`);
 
   // Build conditions
-  const conditions: any[] = [
-    eq(callSessions.aiDisposition, disposition),
-  ];
+  const isPotentialIssues = disposition === "potential_issues";
+  const baseDispositionCondition = isPotentialIssues
+    ? sql`(
+        (${callSessions.aiDisposition} = 'not_interested' AND ${callSessions.durationSec} > 60)
+        OR
+        (${callSessions.aiDisposition} = 'no_answer' AND ${callSessions.aiTranscript} IS NOT NULL AND length(${callSessions.aiTranscript}) > 100)
+        OR
+        (${callSessions.aiDisposition} = 'voicemail' AND ${callSessions.durationSec} > 90)
+      )`
+    : eq(callSessions.aiDisposition, disposition);
+
+  const conditions: any[] = [baseDispositionCondition];
   if (filters.campaignId) conditions.push(eq(callSessions.campaignId, filters.campaignId));
   if (filters.dateFrom) conditions.push(gte(callSessions.startedAt, new Date(filters.dateFrom)));
   if (filters.dateTo) conditions.push(lte(callSessions.startedAt, new Date(filters.dateTo)));

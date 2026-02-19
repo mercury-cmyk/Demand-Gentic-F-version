@@ -31,6 +31,32 @@ import jwt from 'jsonwebtoken';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 
+function sendGenerativeStudioError(res: Response, error: any, context: string) {
+  const requestId = crypto.randomUUID();
+  const candidateStatus =
+    error?.statusCode ?? error?.status ?? error?.httpStatus;
+  const statusCode =
+    typeof candidateStatus === "number" && candidateStatus >= 400 && candidateStatus <= 599
+      ? candidateStatus
+      : 500;
+
+  console.error(`[GenerativeStudio] ${context} requestId=${requestId}`, error);
+
+  res.status(statusCode).json({
+    error: error?.message || "Internal Server Error",
+    code: error?.code,
+    requestId,
+  });
+}
+
+function getAuthedUserContext(req: Request): { userId: string; tenantId?: string } {
+  const user = (req as any).user as any;
+  return {
+    userId: user?.id || user?.userId || user?.clientUserId || "system",
+    tenantId: user?.tenantId,
+  };
+}
+
 /**
  * Dual auth middleware - accepts both main app tokens and client portal tokens.
  * Sets req.user for main app users, or synthesizes a compatible req.user for client portal users.
@@ -152,8 +178,7 @@ router.get("/org-projects", requireDualAuth, async (req: Request, res: Response)
 
     res.json({ projects });
   } catch (error: any) {
-    console.error('Error listing org projects:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "list org projects");
   }
 });
 
@@ -164,9 +189,7 @@ router.get("/org-projects", requireDualAuth, async (req: Request, res: Response)
 router.get("/projects", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const { contentType, status, limit = '50', offset = '0' } = req.query;
-    const user = (req as any).user;
-    const userId = user.id;
-    const tenantId = user.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
     const organizationId = normalizeOptionalId(req.query.organizationId);
     const clientProjectId = normalizeOptionalId(req.query.clientProjectId);
 
@@ -206,8 +229,7 @@ router.get("/projects", requireDualAuth, async (req: Request, res: Response) => 
 
     res.json({ projects: filtered, total: filtered.length });
   } catch (error: any) {
-    console.error('Error listing projects:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "list projects");
   }
 });
 
@@ -240,8 +262,7 @@ router.get("/projects/:id", requireDualAuth, async (req: Request, res: Response)
 
     res.json(project);
   } catch (error: any) {
-    console.error('Error getting project:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "get project");
   }
 });
 
@@ -283,8 +304,7 @@ router.patch("/projects/:id", requireDualAuth, async (req: Request, res: Respons
 
     res.json(updated);
   } catch (error: any) {
-    console.error('Error updating project:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "update project");
   }
 });
 
@@ -311,8 +331,7 @@ router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Respon
       .where(eq(generativeStudioProjects.id, req.params.id));
     res.json({ success: true });
   } catch (error: any) {
-    console.error('Error deleting project:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "delete project");
   }
 });
 
@@ -325,9 +344,7 @@ router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Respon
  */
 router.post("/generate/landing-page", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user.id || 'system';
-    const tenantId = user.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
 
     const result = await generateLandingPage({
       ...req.body,
@@ -336,8 +353,7 @@ router.post("/generate/landing-page", requireDualAuth, async (req: Request, res:
     });
     res.json(result);
   } catch (error: any) {
-    console.error('Error generating landing page:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "generate landing page");
   }
 });
 
@@ -346,9 +362,7 @@ router.post("/generate/landing-page", requireDualAuth, async (req: Request, res:
  */
 router.post("/generate/email-template", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user.id || 'system';
-    const tenantId = user.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
 
     const result = await generateEmailTemplate({
       ...req.body,
@@ -357,8 +371,7 @@ router.post("/generate/email-template", requireDualAuth, async (req: Request, re
     });
     res.json(result);
   } catch (error: any) {
-    console.error('Error generating email template:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "generate email template");
   }
 });
 
@@ -367,9 +380,7 @@ router.post("/generate/email-template", requireDualAuth, async (req: Request, re
  */
 router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user.id || 'system';
-    const tenantId = user.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
 
     const result = await generateBlogPost({
       ...req.body,
@@ -378,8 +389,7 @@ router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Re
     });
     res.json(result);
   } catch (error: any) {
-    console.error('Error generating blog post:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "generate blog post");
   }
 });
 
@@ -388,9 +398,7 @@ router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Re
  */
 router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user.id || 'system';
-    const tenantId = user.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
 
     const result = await generateEbook({
       ...req.body,
@@ -399,8 +407,7 @@ router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Respon
     });
     res.json(result);
   } catch (error: any) {
-    console.error('Error generating ebook:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "generate ebook");
   }
 });
 
@@ -409,9 +416,7 @@ router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Respon
  */
 router.post("/generate/solution-brief", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user.id || 'system';
-    const tenantId = user.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
 
     const result = await generateSolutionBrief({
       ...req.body,
@@ -420,8 +425,7 @@ router.post("/generate/solution-brief", requireDualAuth, async (req: Request, re
     });
     res.json(result);
   } catch (error: any) {
-    console.error('Error generating solution brief:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "generate solution brief");
   }
 });
 
@@ -431,9 +435,7 @@ router.post("/generate/solution-brief", requireDualAuth, async (req: Request, re
  */
 router.post("/refine/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user.id || 'system';
-    const tenantId = user.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
     const { instructions } = req.body;
     const organizationId = normalizeOptionalId(req.query.organizationId);
     const clientProjectId = normalizeOptionalId(req.query.clientProjectId);
@@ -453,8 +455,7 @@ router.post("/refine/:id", requireDualAuth, async (req: Request, res: Response) 
     const result = await refineContent(req.params.id, instructions, userId);
     res.json(result);
   } catch (error: any) {
-    console.error('Error refining content:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "refine content");
   }
 });
 
@@ -468,7 +469,7 @@ router.post("/refine/:id", requireDualAuth, async (req: Request, res: Response) 
  */
 router.post("/chat", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id || 'system';
+    const { userId } = getAuthedUserContext(req);
     const { sessionId, message, projectId } = req.body;
     const organizationId = normalizeOptionalId(req.body.organizationId);
 
@@ -490,8 +491,7 @@ router.post("/chat", requireDualAuth, async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (error: any) {
-    console.error('Error in chat:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "chat");
   }
 });
 
@@ -501,7 +501,7 @@ router.post("/chat", requireDualAuth, async (req: Request, res: Response) => {
  */
 router.get("/chat/sessions", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const { userId } = getAuthedUserContext(req);
     const organizationId = normalizeOptionalId(req.query.organizationId);
 
     const conditions: any[] = [eq(generativeStudioChatMessages.ownerId, userId)];
@@ -526,8 +526,7 @@ router.get("/chat/sessions", requireDualAuth, async (req: Request, res: Response
 
     res.json({ sessions });
   } catch (error: any) {
-    console.error('Error listing chat sessions:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "list chat sessions");
   }
 });
 
@@ -537,7 +536,7 @@ router.get("/chat/sessions", requireDualAuth, async (req: Request, res: Response
  */
 router.get("/chat/sessions/:sessionId", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const { userId } = getAuthedUserContext(req);
     const organizationId = normalizeOptionalId(req.query.organizationId);
     if (organizationId && !req.params.sessionId.startsWith(`${organizationId}::`)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -552,8 +551,7 @@ router.get("/chat/sessions/:sessionId", requireDualAuth, async (req: Request, re
 
     res.json({ messages });
   } catch (error: any) {
-    console.error('Error getting chat session:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "get chat session");
   }
 });
 
@@ -563,7 +561,7 @@ router.get("/chat/sessions/:sessionId", requireDualAuth, async (req: Request, re
  */
 router.delete("/chat/sessions/:sessionId", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const { userId } = getAuthedUserContext(req);
     const organizationId = normalizeOptionalId(req.query.organizationId);
     if (organizationId && !req.params.sessionId.startsWith(`${organizationId}::`)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -576,8 +574,7 @@ router.delete("/chat/sessions/:sessionId", requireDualAuth, async (req: Request,
       ));
     res.json({ success: true });
   } catch (error: any) {
-    console.error('Error deleting chat session:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "delete chat session");
   }
 });
 
@@ -672,8 +669,7 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
 
     res.json({ publishedPage: published, url: `/api/generative-studio/public/${pageSlug}` });
   } catch (error: any) {
-    console.error('Error publishing:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "publish");
   }
 });
 
@@ -719,8 +715,7 @@ router.post("/unpublish/:id", requireDualAuth, async (req: Request, res: Respons
 
     res.json({ success: true });
   } catch (error: any) {
-    console.error('Error unpublishing:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "unpublish");
   }
 });
 
@@ -779,8 +774,7 @@ router.post("/save-as-asset/:id", requireDualAuth, async (req: Request, res: Res
 
     res.json({ asset });
   } catch (error: any) {
-    console.error('Error saving as asset:', error);
-    res.status(500).json({ error: error.message });
+    return sendGenerativeStudioError(res, error, "save as asset");
   }
 });
 

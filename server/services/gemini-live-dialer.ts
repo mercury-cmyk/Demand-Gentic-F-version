@@ -180,6 +180,24 @@ const AMD_CHECK_INTERVAL_MS = 50; // Check for AMD result every 50ms (faster pol
 // total time-to-first-word is ~2.5s which retains natural flow while keeping contacts engaged.
 const WAIT_FOR_HUMAN_SPEECH_MS = 1500; // Wait up to 1.5 seconds for human to speak first
 
+// EARLY VOICEMAIL ABORT: Detect voicemail cues within the first ~3 seconds
+// of contact speech and terminate immediately to avoid pitching to voicemail.
+const EARLY_VOICEMAIL_WINDOW_MS = 3000;
+const EARLY_VOICEMAIL_PATTERNS: RegExp[] = [
+  /leave (a )?message/i,
+  /after the (beep|tone)/i,
+  /voicemail/i,
+  /voice\s*mail/i,
+  /record your message/i,
+  /mailbox( is)? full/i,
+  /mailbox (is )?not (set up|configured)/i,
+  /not available/i,
+  /cannot (take|accept) your call/i,
+  /you('?ve| have) reached/i,
+  /please leave/i,
+  /call screening/i,
+];
+
 // EARLY AUDIO QUALITY GATE - DISABLED
 // Was causing false-positive disconnects ~6s after answer due to connection_drop
 // issues during Gemini voice negotiation being counted against quality score.
@@ -501,14 +519,18 @@ Identity is confirmed when they either:
 
 After receiving explicit confirmation, respond promptly:
 
-1. First: Acknowledge - "Thanks for confirming!"
-2. Then: Introduce yourself - "I'm calling on behalf of ${orgRef}."
-3. Then: Set expectations - "I'll keep this brief."
-4. Then: State why you're calling (VALUE TO THEM, not your internal goal): "${reasonForCalling}"
-5. Then: Ask an open-ended question to start the conversation.
+1. Give a very brief acknowledgment (optional): "Thanks for confirming."
+2. IMMEDIATELY deliver identity + purpose in the same turn (no filler, no small talk):
+  "This is [Agent] calling on behalf of ${orgRef}. Quick reason for my call: ${reasonForCalling}"
+3. Ask one concise engagement question.
+
+TIMING RULE (NON-NEGOTIABLE):
+- The purpose statement must start within ~700ms after identity confirmation.
+- Do NOT insert rapport or small talk between confirmation and purpose.
+- Never pause after "Thanks for confirming" before stating purpose.
 
 If you're not sure what to say after confirmation, default to:
-"Thanks for confirming! I'm calling on behalf of ${orgRef}. ${reasonForCalling}. Would you have a quick moment to chat?"
+"Thanks for confirming. This is ${orgRef} calling on behalf of UK Export Finance. Quick reason for my call: we're offering a free 'Leading with Finance' white paper. Would you have a quick moment?"
 
 **COMPLIANCE GATE:** You MUST complete BOTH the introduction and the purpose statement BEFORE asking any discovery questions or proceeding to subsequent steps.
 
@@ -845,6 +867,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let humanHasSpoken: boolean = false;
   let waitingForHumanSpeech: boolean = true; // Set to false to have AI speak first
   let humanSpeechWaitTimer: NodeJS.Timeout | null = null;
+  let firstContactSpeechAt: number | null = null;
 
   // POST-GREETING COOLDOWN: After the agent finishes its opening greeting,
   // enforce a silence period to prevent the agent from self-responding to
@@ -1026,6 +1049,67 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (geminiWs) {
       geminiWs.close();
       geminiWs = null;
+    }
+  }
+
+  function isEarlyVoicemailCue(text: string): boolean {
+    if (!text) return false;
+    return EARLY_VOICEMAIL_PATTERNS.some((pattern) => pattern.test(text));
+  }
+
+  function inEarlyVoicemailWindow(): boolean {
+    if (!firstContactSpeechAt) return false;
+    return Date.now() - firstContactSpeechAt <= EARLY_VOICEMAIL_WINDOW_MS;
+  }
+
+  async function triggerEarlyVoicemailAbort(reason: string, detectedText: string): Promise<void> {
+    if (voicemailDetected) return;
+    voicemailDetected = true;
+    console.log(`[Gemini Live] 📮 Early voicemail cue detected (${reason}) - aborting script immediately. Text: "${detectedText.substring(0, 120)}"`);
+
+    if (callContext.callAttemptId && !dispositionProcessed) {
+      try {
+        callContext.disposition = 'voicemail';
+        await processDisposition(callContext.callAttemptId, 'voicemail', 'early_voicemail_cue');
+        dispositionProcessed = true;
+      } catch (dispErr) {
+        console.error('[Gemini Live] Failed to process early voicemail disposition:', dispErr);
+      }
+    }
+
+    if (callContext.queueItemId) {
+      try {
+        await db.update(campaignQueue)
+          .set({
+            status: 'queued',
+            updatedAt: new Date(),
+            enqueuedReason: `Early voicemail cue: ${detectedText.substring(0, 180)}`,
+          })
+          .where(eq(campaignQueue.id, callContext.queueItemId));
+      } catch (qErr) {
+        console.error('[Gemini Live] Failed to update queue item after early voicemail detection:', qErr);
+      }
+    }
+
+    if (callControlId) {
+      try {
+        await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      } catch (hangErr) {
+        console.error('[Gemini Live] Failed Telnyx hangup for early voicemail abort:', hangErr);
+      }
+    }
+
+    cleanup();
+    try {
+      ws.close(1000, 'Early voicemail detected');
+    } catch {
+      // Ignore close errors
     }
   }
 
@@ -2320,6 +2404,10 @@ Instructions:
         if (inputTranscription?.text) {
           const contactText = inputTranscription.text.trim();
           if (contactText) {
+            if (!firstContactSpeechAt) {
+              firstContactSpeechAt = Date.now();
+            }
+
             transcriptTurns.push({
               role: 'contact',
               text: contactText,
@@ -2330,6 +2418,13 @@ Instructions:
             lastContactSpeechAt = Date.now(); // Reset hold timer — contact is speaking
             audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Contact transcript captured: "${contactText.substring(0, 100)}${contactText.length > 100 ? '...' : ''}"`);
+
+            // EARLY VOICEMAIL ABORT: if we hear voicemail-like cues in the first ~3s
+            // of contact speech, terminate immediately before conversational scripting continues.
+            if (inEarlyVoicemailWindow() && isEarlyVoicemailCue(contactText)) {
+              await triggerEarlyVoicemailAbort('transcription_cue', contactText);
+              return;
+            }
 
             // Clear post-greeting cooldown when human actually speaks
             if (greetingCooldownUntil > 0) {

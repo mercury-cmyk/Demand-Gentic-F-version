@@ -337,7 +337,9 @@ function AuthenticatedApp() {
               
               {/* Campaigns - Unified Hub */}
               <Route path="/campaigns" component={CampaignsPage} />
-              <Route path="/campaign-manager" component={CampaignManagerPage} />
+              <Route path="/campaign-manager">
+                <Redirect to="/ai-studio/campaign-manager" />
+              </Route>
               <Route path="/campaigns/create" component={CampaignCreatePage} />
               <Route path="/campaigns/:campaignId/test" component={CampaignTestPage} />
               <Route path="/campaigns/:id/config" component={CampaignConfigPage} />
@@ -512,6 +514,7 @@ function AuthenticatedApp() {
               <Route path="/ai-studio/agents" component={AIAgentsPage} />
               <Route path="/ai-studio/operator" component={AgenticCRMOperatorPage} />
               <Route path="/ai-studio/agent-prompts" component={AgentPromptsPage} />
+              <Route path="/ai-studio/campaign-manager" component={CampaignManagerPage} />
               <Route path="/ai-studio/campaign-intelligence" component={CampaignIntelligencePage} />
               <Route path="/create-ai-agent" component={CreateAIAgentPage} />
               

@@ -41,6 +41,10 @@ import {
 } from "lucide-react";
 import {
   BRAND, TAGLINE, STATS,
+  DATA_SECTION,
+  CONTENT_STUDIO,
+  PRINCIPLES,
+  FOUNDER_QUOTES,
   FOOTER,
 } from "@shared/brand-messaging";
 

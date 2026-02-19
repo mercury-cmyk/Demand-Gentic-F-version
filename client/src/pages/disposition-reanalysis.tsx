@@ -291,6 +291,7 @@ interface ClientSampleValidationResponse {
 }
 
 const DISPOSITION_LABELS: Record<string, string> = {
+  potential_issues: 'Potential Issues',
   qualified_lead: 'Qualified Lead',
   not_interested: 'Not Interested',
   do_not_call: 'Do Not Call',
@@ -887,11 +888,14 @@ export default function DispositionReanalysisPage() {
     setContactsMaxDuration('');
     setContactsMinTurns('');
     setContactsMaxTurns('');
-    setContactsDateFrom('');
-    setContactsDateTo('');
+    // Keep Contacts drill-down aligned with Overview/Stats context.
+    // This prevents confusing mismatches where a stats count is non-zero
+    // but contacts tab appears empty due to a different date window.
+    setContactsDateFrom(dateFrom || '');
+    setContactsDateTo(dateTo || '');
     setContactsFiltersExpanded(false);
     setActiveTab('contacts');
-  }, []);
+  }, [dateFrom, dateTo]);
 
   const activeContactsFilterCount = useMemo(() => {
     let count = 0;
@@ -1037,8 +1041,14 @@ export default function DispositionReanalysisPage() {
                   <AlertTriangle className="h-4 w-4 text-amber-500" />
                   <span className="text-sm text-muted-foreground">Potential Issues</span>
                 </div>
-                <p className="text-2xl font-bold mt-1 text-amber-600">
-                  {stats?.potentialMisclassifications?.toLocaleString() || '0'}
+                <p className="mt-1">
+                  <button
+                    onClick={() => handleDispositionCountClick('potential_issues')}
+                    className="text-2xl font-bold text-amber-600 hover:underline cursor-pointer"
+                    title="View exact contacts included in Potential Issues"
+                  >
+                    {stats?.potentialMisclassifications?.toLocaleString() || '0'}
+                  </button>
                 </p>
               </CardContent>
             </Card>

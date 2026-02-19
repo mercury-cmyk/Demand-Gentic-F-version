@@ -19,9 +19,38 @@ import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { withAiConcurrency } from "../lib/ai-concurrency";
 import { BRAND_VOICE, TAGLINE } from "@shared/brand-messaging";
 
+class AiIntegrationConfigError extends Error {
+  statusCode: number;
+  code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "AiIntegrationConfigError";
+    this.statusCode = 503;
+    this.code = code;
+  }
+}
+
+const openaiApiKey =
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+const openaiBaseUrl =
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
+  process.env.OPENAI_BASE_URL ||
+  "https://api.openai.com/v1";
+
+function assertOpenAiConfigured() {
+  if (!openaiApiKey) {
+    throw new AiIntegrationConfigError(
+      "OpenAI is not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY.",
+      "AI_OPENAI_KEY_MISSING",
+    );
+  }
+}
+
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  // Guarded by assertOpenAiConfigured() before every call, but keep constructor safe.
+  apiKey: openaiApiKey || "missing",
+  baseURL: openaiBaseUrl,
   timeout: 120_000,
   maxRetries: 2,
 });
@@ -320,6 +349,7 @@ async function getOrganizationContext(organizationId?: string): Promise<string> 
 // ============================================================================
 
 export async function generateLandingPage(params: LandingPageParams): Promise<GenerationResult> {
+  assertOpenAiConfigured();
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
   const orgContext = await getOrganizationContext(params.organizationId);
@@ -429,6 +459,7 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
 // ============================================================================
 
 export async function generateEmailTemplate(params: EmailTemplateParams): Promise<GenerationResult> {
+  assertOpenAiConfigured();
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
   const orgContext = await getOrganizationContext(params.organizationId);
@@ -523,6 +554,7 @@ Output as JSON:
 // ============================================================================
 
 export async function generateBlogPost(params: BlogPostParams): Promise<GenerationResult> {
+  assertOpenAiConfigured();
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
   const orgContext = await getOrganizationContext(params.organizationId);
@@ -627,6 +659,7 @@ Output as JSON:
 // ============================================================================
 
 export async function generateEbook(params: EbookParams): Promise<GenerationResult> {
+  assertOpenAiConfigured();
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
   const orgContext = await getOrganizationContext(params.organizationId);
@@ -746,6 +779,7 @@ Output as JSON:
 // ============================================================================
 
 export async function generateSolutionBrief(params: SolutionBriefParams): Promise<GenerationResult> {
+  assertOpenAiConfigured();
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
   const orgContext = await getOrganizationContext(params.organizationId);
@@ -864,6 +898,7 @@ export async function chat(params: ChatParams): Promise<{
   sessionId: string;
   tokensUsed: number;
 }> {
+  assertOpenAiConfigured();
   const sessionId = params.sessionId || (params.organizationId ? `${params.organizationId}::${crypto.randomUUID()}` : crypto.randomUUID());
 
   // Get previous messages for context
@@ -966,6 +1001,7 @@ export async function refineContent(
   instructions: string,
   ownerId: string
 ): Promise<GenerationResult> {
+  assertOpenAiConfigured();
   const [project] = await db.select().from(generativeStudioProjects)
     .where(eq(generativeStudioProjects.id, projectId)).limit(1);
 

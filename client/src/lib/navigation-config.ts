@@ -144,6 +144,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: ['admin'],
             description: 'Manage agent prompts by role',
           },
+          {
+            id: 'campaign-manager',
+            title: 'Campaign Manager',
+            url: '/ai-studio/campaign-manager',
+            roles: MANAGEMENT_ROLES,
+            badge: { text: 'New', variant: 'new' as BadgeVariant },
+            description: 'AI quarterly planning, approvals, and channel orchestration',
+          },
         ],
       },
       {
@@ -300,15 +308,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'Megaphone',
         roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
         description: 'Unified campaign management for email and phone',
-      },
-      {
-        id: 'campaign-manager',
-        title: 'Campaign Manager',
-        url: '/campaign-manager',
-        icon: 'Target',
-        roles: MANAGEMENT_ROLES,
-        badge: { text: 'New', variant: 'new' as BadgeVariant },
-        description: 'AI quarterly planning, approvals, and channel orchestration',
       },
       {
         id: 'agent-console',
