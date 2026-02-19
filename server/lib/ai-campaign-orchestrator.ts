@@ -729,15 +729,14 @@ async function resetStuckItems(): Promise<number> {
  * Includes contact country/state for business hours checking
  * Excludes contacts already called today (Telnyx daily limit protection)
  * Uses contact_id match for reliable filtering even when phone numbers change
+ * 
+ * SIMPLIFIED: Let JavaScript handle ALL business hours logic - don't compute within_hours in SQL
  */
 async function getQueuedItems(campaignId: string, limit: number): Promise<any[]> {
   const now = new Date();
   
-  // Fetch queue items with contact data including country for timezone resolution
-  // IMPORTANT: Excludes contacts already called today to avoid Telnyx D66 daily limits
-  // Uses contact_id matching (more reliable than phone matching for retries/updates)
-  // Compute business hours eligibility in SQL using contact's timezone
-  // Prioritize contacts currently within their local business hours
+  // Fetch queue items with contact data - simplified to just get the DATA, not compute business hours in SQL
+  // JavaScript will handle all business hours logic to ensure consistency
   const result = await db.execute(sql`
     SELECT cq.*, 
       c.direct_phone_e164,
@@ -762,38 +761,6 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
           ELSE NULL
         END
       ) as inferred_timezone,
-      -- Compute if contact is within business hours (Mon-Fri 9am-5pm local time)
-      -- Uses explicit timezone, or infers from country/phone prefix
-      CASE 
-        WHEN c.timezone IS NOT NULL 
-             AND EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = c.timezone)
-        THEN (
-          EXTRACT(DOW FROM NOW() AT TIME ZONE c.timezone) BETWEEN 1 AND 5
-          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE c.timezone) BETWEEN 9 AND 16
-        )
-        -- UK (from country or phone)
-        WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'UNITED KINGDOM UK', 'ENGLAND', 'SCOTLAND', 'WALES')
-             OR c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%'
-        THEN (
-          EXTRACT(DOW FROM NOW() AT TIME ZONE 'Europe/London') BETWEEN 1 AND 5
-          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE 'Europe/London') BETWEEN 9 AND 16
-        )
-        -- USA (from country or phone) - use Eastern as default, most business
-        WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA')
-             OR (c.mobile_phone_e164 LIKE '+1%' AND LENGTH(c.mobile_phone_e164) = 12)
-             OR (c.direct_phone_e164 LIKE '+1%' AND LENGTH(c.direct_phone_e164) = 12)
-        THEN (
-          EXTRACT(DOW FROM NOW() AT TIME ZONE 'America/New_York') BETWEEN 1 AND 5
-          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE 'America/New_York') BETWEEN 9 AND 16
-        )
-        -- Canada (from country)
-        WHEN UPPER(c.country) IN ('CA', 'CANADA')
-        THEN (
-          EXTRACT(DOW FROM NOW() AT TIME ZONE 'America/Toronto') BETWEEN 1 AND 5
-          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE 'America/Toronto') BETWEEN 9 AND 16
-        )
-        ELSE false
-      END as within_hours,
       CASE 
         -- UK mobile (highest priority)
         WHEN c.mobile_phone_e164 LIKE '+447%' THEN 1
@@ -833,7 +800,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
           AND dca.contact_id = cq.contact_id
           AND dca.campaign_id = ${campaignId}
       )
-    ORDER BY within_hours DESC, cq.ai_priority_score DESC NULLS LAST, phone_priority ASC, cq.priority DESC, cq.created_at ASC
+    ORDER BY cq.ai_priority_score DESC NULLS LAST, phone_priority ASC, cq.priority DESC, cq.created_at ASC
     LIMIT ${limit * 3}
   `);
   
@@ -979,6 +946,16 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   // Get queued items
   const queueItems = await getQueuedItems(campaignId, slotsAvailable);
   console.log(`[AI Orchestrator] Found ${queueItems.length} queued items for campaign ${campaignId}`);
+  
+  // DEBUG: Log first few items to see what data we're working with
+  if (queueItems.length > 0) {
+    console.log(`[AI Orchestrator] Sample queue items (first 3):`);
+    for (let i = 0; i < Math.min(3, queueItems.length); i++) {
+      const item = queueItems[i];
+      console.log(`  [${i}] country="${item.country}" timezone="${item.timezone}" inferred_tz="${item.inferred_timezone}" mobile="${item.mobile_phone_e164}" direct="${item.direct_phone_e164}"`);
+    }
+  }
+  
   if (queueItems.length === 0) {
     await setOrchestratorStallReason(campaignId, 'No contacts remaining in the queue.');
     return { initiated: 0, skipped: 0 };
@@ -1145,6 +1122,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       // Track which countries are being rejected
       const countryKey = effectiveCountry ? String(effectiveCountry).toUpperCase() : 'NULL/EMPTY';
       rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
+      
+      // DEBUG: Log first few country rejections
+      if (countryNotEnabled <= 3) {
+        console.log(`[AI Orchestrator] ❌ Contact ${item.contact_id} rejected: country='${country}' normaliz='${normalizedCountry}' inferred='${inferredCountry}' phone='${geoPhone}'`);
+      }
       continue; // Skip contacts from disabled regions
     }
     
@@ -1168,8 +1150,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       outsideBusinessHours++;
       // Don't remove from queue - just skip for now (will be tried next time during their business hours)
       // Log reason for first few skips of each timezone
-      if (tzStat.total <= 3) {
-        console.log(`[AI Orchestrator] Skipping contact (${bizHoursCheck.reason})`);
+      if (tzStat.total <= 5) {
+        console.log(`[AI Orchestrator] ⏰ Contact ${item.contact_id} outside hours: ${bizHoursCheck.reason}`);
       }
       continue;
     }
@@ -1217,6 +1199,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     // Skip contacts without valid phone numbers
     if (!phone) {
       noPhone++;
+      if (noPhone <= 2) {
+        console.log(`[AI Orchestrator] 📵 Contact ${item.contact_id} has no phone (mobile="${mobilePhone}" direct="${directPhone}")`);
+      }
       continue;
     }
 
@@ -1233,6 +1218,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     if (item.contactId && suppressionResults.get(item.contactId)) {
       await db.execute(sql`UPDATE campaign_queue SET status = 'removed', removed_reason = 'suppressed', updated_at = NOW() WHERE id = ${item.id}`);
       skipped++;
+      if (skipped <= 2) {
+        console.log(`[AI Orchestrator] 🚫 Contact ${item.contact_id} suppressed`);
+      }
       continue;
     }
 
@@ -1240,6 +1228,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     if (dncPhones.has(e164)) {
       await db.execute(sql`UPDATE campaign_queue SET status = 'removed', removed_reason = 'dnc', updated_at = NOW() WHERE id = ${item.id}`);
       skipped++;
+      if (skipped <= 2) {
+        console.log(`[AI Orchestrator] 📵 Contact ${item.contact_id} on DNC (phone: ${e164})`);
+      }
       continue;
     }
 
@@ -1247,6 +1238,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     if (item.accountId && suppressedAccountIds.has(item.accountId)) {
       await db.execute(sql`UPDATE campaign_queue SET status = 'removed', removed_reason = 'account_suppressed', updated_at = NOW() WHERE id = ${item.id}`);
       skipped++;
+      if (skipped <= 2) {
+        console.log(`[AI Orchestrator] 🏢 Account ${item.accountId} suppressed`);
+      }
       continue;
     }
 
@@ -1292,8 +1286,10 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   console.log(`[AI Orchestrator] After compliance: ${eligibleItems.length} eligible, ${skipped} removed`);
   
   if (eligibleItems.length === 0) {
-    // Build detailed stall reason
-    let stallReason = 'All contacts filtered: ';
+    // Build detailed stall reason with full breakdown
+    let stallReason = 'All contacts filtered from ';
+    const startCount = countryNotEnabled + outsideBusinessHours + noPhone + skipped + (candidateItems.length - eligibleItems.length);
+    stallReason += `${queueItems.length} items: `;
     const reasons: string[] = [];
     
     if (countryNotEnabled > 0) {
@@ -1309,6 +1305,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       const tzBreakdown = Array.from(timezoneStats.entries())
         .filter(([_, stats]) => stats.total > 0)
         .map(([tz, stats]) => `${tz}:${stats.callable}/${stats.total}`)
+        .slice(0, 5)
         .join(', ');
       reasons.push(`${outsideBusinessHours} outside hours (${tzBreakdown})`);
     }
