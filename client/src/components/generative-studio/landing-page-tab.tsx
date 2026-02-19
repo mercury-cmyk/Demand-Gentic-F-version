@@ -32,10 +32,21 @@ export default function LandingPageTab({
   const [result, setResult] = useState<any>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   const [ctaGoal, setCtaGoal] = useState("");
   const [thankYouPageUrl, setThankYouPageUrl] = useState("/thank-you");
   const [assetUrl, setAssetUrl] = useState("");
   const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
+
+  const { data: submissionStats, isLoading: submissionsLoading } = useQuery<any>({
+    queryKey: ["/api/generative-studio/published", publishedSlug, "submissions"],
+    enabled: !!publishedSlug,
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/generative-studio/published/${encodeURIComponent(publishedSlug as string)}/submissions?limit=10`);
+      return res.json();
+    },
+  });
 
   const { data: campaignDetails } = useQuery<any>({
     queryKey: ["/api/campaigns", campaignId],
@@ -80,6 +91,13 @@ export default function LandingPageTab({
 
   const derivedAssetUrl = campaignDetails?.projectFileUrl || "";
 
+  const parsePublishedSlug = (url: string | undefined | null): string | null => {
+    const raw = String(url || "").trim();
+    if (!raw) return null;
+    const matched = raw.match(/\/generative-studio\/public\/([^/?#]+)/i) || raw.match(/\/api\/generative-studio\/public\/([^/?#]+)/i);
+    return matched?.[1] ? decodeURIComponent(matched[1]) : null;
+  };
+
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
       const res = await apiRequest(
@@ -112,6 +130,9 @@ export default function LandingPageTab({
     },
     onSuccess: (data) => {
       setPublishOpen(false);
+      const url = String(data?.url || "").trim();
+      setPublishedUrl(url || null);
+      setPublishedSlug(parsePublishedSlug(url));
       toast({ title: "Landing page published!", description: `Available at ${data.url}` });
     },
     onError: (error: any) => {
@@ -201,6 +222,48 @@ export default function LandingPageTab({
             </div>
           }
         />
+
+        {publishedUrl && (
+          <div className="mt-4 rounded-lg border bg-background p-3 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Published Landing Page</p>
+            <a
+              href={publishedUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm text-primary underline break-all"
+            >
+              {publishedUrl}
+            </a>
+
+            <div className="pt-2 border-t mt-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Form Submissions</p>
+                <span className="text-sm font-semibold">{submissionStats?.totalSubmissions ?? 0}</span>
+              </div>
+
+              {submissionsLoading ? (
+                <p className="text-xs text-muted-foreground">Loading submissions...</p>
+              ) : (submissionStats?.recentSubmissions?.length ?? 0) > 0 ? (
+                <div className="space-y-2 max-h-44 overflow-y-auto">
+                  {submissionStats.recentSubmissions.map((row: any) => {
+                    const displayName = [row?.visitorFirstName, row?.visitorLastName].filter(Boolean).join(' ') || row?.formData?.submitterName || 'Unknown';
+                    return (
+                      <div key={row.id} className="rounded border p-2 bg-muted/30">
+                        <p className="text-xs font-medium truncate">{displayName}</p>
+                        <p className="text-xs text-muted-foreground truncate">{row?.visitorEmail || row?.formData?.submitterEmail || 'No email'}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {new Date(row.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No submissions yet.</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right panel - Preview */}
@@ -211,7 +274,7 @@ export default function LandingPageTab({
           contentType="landing_page"
           metadata={result ? { metaTitle: result.metaTitle, metaDescription: result.metaDescription } : undefined}
           projectId={projectId || undefined}
-          status={projectId ? "generated" : undefined}
+          status={publishedUrl ? "published" : projectId ? "generated" : undefined}
           onPublish={() => setPublishOpen(true)}
           onSaveAsAsset={projectId ? () => saveAsAssetMutation.mutate() : undefined}
         />

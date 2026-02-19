@@ -780,6 +780,75 @@ router.post("/save-as-asset/:id", requireDualAuth, async (req: Request, res: Res
 });
 
 /**
+ * GET /published/:slug/submissions
+ * Internal analytics endpoint for latest landing page form submissions
+ */
+router.get("/published/:slug/submissions", requireDualAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const limitRaw = Number.parseInt(String(req.query.limit ?? '10'), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 10;
+
+    const [page] = await db.select().from(generativeStudioPublishedPages)
+      .where(eq(generativeStudioPublishedPages.slug, req.params.slug))
+      .limit(1);
+
+    if (!page) {
+      return res.status(404).json({ error: 'Published page not found' });
+    }
+
+    if (tenantId && page.tenantId !== tenantId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!tenantId && page.ownerId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [totalRow] = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          eq(contentPromotionPageViews.pageId, page.id),
+          eq(contentPromotionPageViews.eventType, 'form_submit')
+        )
+      );
+
+    const recentRows = await db
+      .select({
+        id: contentPromotionPageViews.id,
+        createdAt: contentPromotionPageViews.createdAt,
+        visitorEmail: contentPromotionPageViews.visitorEmail,
+        visitorFirstName: contentPromotionPageViews.visitorFirstName,
+        visitorLastName: contentPromotionPageViews.visitorLastName,
+        visitorCompany: contentPromotionPageViews.visitorCompany,
+        utmSource: contentPromotionPageViews.utmSource,
+        utmMedium: contentPromotionPageViews.utmMedium,
+        utmCampaign: contentPromotionPageViews.utmCampaign,
+        formData: contentPromotionPageViews.formData,
+      })
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          eq(contentPromotionPageViews.pageId, page.id),
+          eq(contentPromotionPageViews.eventType, 'form_submit')
+        )
+      )
+      .orderBy(desc(contentPromotionPageViews.createdAt))
+      .limit(limit);
+
+    return res.json({
+      slug: page.slug,
+      title: page.title,
+      totalSubmissions: totalRow?.count || 0,
+      recentSubmissions: recentRows,
+    });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, 'get published submissions');
+  }
+});
+
+/**
  * GET /public/:slug
  * Serve published page (NO AUTH - public endpoint)
  */
