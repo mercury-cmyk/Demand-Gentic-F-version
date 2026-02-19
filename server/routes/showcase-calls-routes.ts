@@ -17,7 +17,7 @@ import {
   accounts,
 } from "@shared/schema";
 import { eq, and, or, ne, desc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
-import { requireAuth } from "../auth";
+import { generateToken, requireAuth } from "../auth";
 import { getCallSessionRecordingS3Key, storeCallSessionRecording, getCallSessionRecordingUrl } from "../services/recording-storage";
 import { streamFromS3, s3ObjectExists, readFromGCS } from "../lib/storage";
 import { getPlayableRecordingLink } from "../services/recording-link-resolver";
@@ -648,13 +648,24 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
     let downloadUrl: string | null = null;
     let hasRecording = false;
     const streamProxyUrl = `/api/showcase-calls/${callSessionId}/stream`;
+    const streamToken = generateToken(
+      {
+        id: req.user!.userId,
+        username: req.user!.username,
+        email: req.user!.email,
+        role: req.user!.role,
+      } as any,
+      (req.user as any)?.roles || [req.user!.role],
+      "15m",
+    );
+    const tokenizedStreamProxyUrl = `${streamProxyUrl}?token=${encodeURIComponent(streamToken)}`;
 
     try {
       const gcsResult = await getCallSessionRecordingUrl(callSessionId, record.recordingUrl);
       if (gcsResult.url && gcsResult.source === 'local') {
         if (gcsResult.url.startsWith('gcs-internal://')) {
           // signBlob unavailable — use server stream proxy instead
-          downloadUrl = streamProxyUrl;
+          downloadUrl = tokenizedStreamProxyUrl;
         } else {
           // Got a signed URL — use it directly (do NOT pass through
           // canonicalizeGcsRecordingUrl which would strip the signature)
@@ -673,7 +684,7 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
         if (playableLink?.url) {
           hasRecording = true;
           if (playableLink.url.startsWith('gcs-internal://')) {
-            downloadUrl = streamProxyUrl;
+            downloadUrl = tokenizedStreamProxyUrl;
           } else {
             downloadUrl = playableLink.url;
           }
@@ -686,7 +697,7 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
 
     // If we know a recording exists but couldn't get a direct URL, use stream proxy
     if (hasRecording && !downloadUrl) {
-      downloadUrl = streamProxyUrl;
+      downloadUrl = tokenizedStreamProxyUrl;
     }
 
     res.json({
@@ -694,6 +705,7 @@ router.get("/:callSessionId/details", requireAuth, async (req: Request, res: Res
       recordingUrl: downloadUrl, // Use the resolved working URL
       playbackUrl: null,
       downloadUrl: downloadUrl,
+      streamUrl: tokenizedStreamProxyUrl,
       hasRecording,
       agentPerformanceScore: Math.round(Number(record.agentPerformanceScore) || 0),
     });

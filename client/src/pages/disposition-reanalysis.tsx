@@ -1949,10 +1949,10 @@ export default function DispositionReanalysisPage() {
               </div>
 
               {/* Recording */}
-              {activeCallDetail.recordingUrl && (
+              {(activeCallDetail.recordingUrl || activeCallDetail.callSessionId) && (
                 <div>
                   <Label className="text-xs text-muted-foreground">Recording</Label>
-                  <audio controls className="w-full mt-1" src={activeCallDetail.recordingUrl} />
+                  <audio controls className="w-full mt-1" src={`/api/recordings/${activeCallDetail.callSessionId}/stream`} />
                 </div>
               )}
 
@@ -2170,9 +2170,9 @@ export default function DispositionReanalysisPage() {
                 </TabsList>
 
                 <TabsContent value="transcript">
-                  {selectedContactDetail.recordingUrl && (
+                  {(selectedContactDetail.recordingUrl || selectedContactDetail.callSessionId) && (
                     <div className="mb-3">
-                      <audio controls className="w-full" src={selectedContactDetail.recordingUrl} />
+                      <audio controls className="w-full" src={`/api/recordings/${selectedContactDetail.callSessionId}/stream`} />
                     </div>
                   )}
                   <ScrollArea className="h-[300px] border rounded-md p-3 bg-muted/30">

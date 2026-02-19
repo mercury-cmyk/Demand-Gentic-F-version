@@ -35,10 +35,13 @@ import {
   Wand2,
   BookOpen,
   LayoutDashboard,
+  Eye,
+  ClipboardCheck,
+  MessageSquare,
 } from "lucide-react";
 import {
-  BRAND, TAGLINE, STATS, PROBLEM_FRAMEWORK, PRINCIPLES,
-  FOOTER, DATA_SECTION, CONTENT_STUDIO, FOUNDER_QUOTES,
+  BRAND, TAGLINE, STATS,
+  FOOTER,
 } from "@shared/brand-messaging";
 
 export default function LandingPage() {
@@ -58,13 +61,13 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
-              <span className="text-[10px] text-muted-foreground font-medium">{TAGLINE.full}</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Agentic Account-Based Marketing for B2B</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
-            <a href="#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Platform</a>
-            <a href="#services" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Services</a>
-            <a href="#data" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Data</a>
+            <a href="#how-it-works" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
+            <a href="#capabilities" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Capabilities</a>
+            <a href="#built-for-you" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">For Your Team</a>
             <a href="/resources-centre" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Resources</a>
             <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">About</a>
           </div>
@@ -73,111 +76,69 @@ export default function LandingPage() {
               Client Login
             </Button>
             <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
-              Schedule Demo
+              Book a Demo
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
+      {/* ─── HERO SECTION ─────────────────────────────────────────────── */}
       <section className="pt-32 pb-24 px-6 relative overflow-hidden">
-        {/* Background Elements */}
         <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-background to-blue-50" />
         <div className="absolute top-20 right-0 w-[800px] h-[800px] bg-gradient-to-br from-violet-500/10 to-indigo-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-to-tr from-blue-500/10 to-cyan-500/10 rounded-full blur-3xl" />
-
-        {/* Grid Pattern Overlay */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#8882_1px,transparent_1px),linear-gradient(to_bottom,#8882_1px,transparent_1px)] bg-[size:14px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
 
         <div className="max-w-7xl mx-auto relative">
           <div className="text-center max-w-4xl mx-auto">
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
-              {TAGLINE.full}
+              Agentic ABM for B2B Vendors
             </Badge>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               <span className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 bg-clip-text text-transparent">
-                The End of Algorithmic Noise.
+                Agentic Account-Based Marketing
               </span>
               <br />
               <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 bg-clip-text text-transparent">
-                The Era of Agentic ABM Demand Reasoning.
+                for B2B Vendors
               </span>
             </h1>
 
-            <p className="text-xl md:text-2xl text-muted-foreground mb-8 leading-relaxed max-w-3xl mx-auto">
-              Problem Intelligence. Solution Mapping. Pinpoint Context.
-              A B2B demand engine trained on 11+ years of front-line experience —
-              where no interaction happens without reasoning first, and no interaction is ever forgotten.
+            <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed max-w-3xl mx-auto font-medium">
+              Human-led ABM strategy. Reasoning-first AI execution. Brand-controlled demand.
             </p>
 
-            {/* Stats Pills */}
-            <div className="flex flex-wrap justify-center gap-3 mb-10">
-              <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Brain className="h-4 w-4 text-violet-600" />
-                <span className="text-sm font-semibold">Problem Intelligence</span>
-              </div>
-              <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Target className="h-4 w-4 text-indigo-600" />
-                <span className="text-sm font-semibold">Solution Mapping</span>
-              </div>
-              <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Search className="h-4 w-4 text-blue-600" />
-                <span className="text-sm font-semibold">Pinpoint Context</span>
-              </div>
-              <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Shield className="h-4 w-4 text-emerald-600" />
-                <span className="text-sm font-semibold">Compliance First</span>
-              </div>
-            </div>
+            <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed max-w-3xl mx-auto">
+              DemandGentic turns your ABM strategy into coordinated outreach across email, voice,
+              and workflows—so you generate higher-quality pipeline from target accounts without
+              sacrificing compliance, accuracy, or brand integrity.
+            </p>
+
+            {/* Trust Line */}
+            <p className="text-sm text-muted-foreground mb-10 italic">
+              Built for CMOs, VP Demand, RevOps, and ABM teams running precision ABM motions.
+            </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button size="lg" onClick={() => setLocation("/book/admin/strategy")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
-                Schedule Strategy Call
+              <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
+                Book a Demo
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
-              <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2">
+              <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2" onClick={() => {
+                document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
+              }}>
                 <Play className="mr-2 h-5 w-5" />
-                See Platform in Action
+                See How It Works
               </Button>
-            </div>
-          </div>
-
-          {/* Trust Indicators */}
-          <div className="mt-16 pt-8 border-t">
-            <div className="flex flex-wrap justify-center items-center gap-8 md:gap-16">
-              <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">{STATS.leadsGenerated}</p>
-                <p className="text-sm text-muted-foreground">Leads Generated</p>
-              </div>
-              <div className="h-8 w-px bg-slate-200 hidden md:block" />
-              <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">{STATS.enterpriseClients}</p>
-                <p className="text-sm text-muted-foreground">Enterprise Clients</p>
-              </div>
-              <div className="h-8 w-px bg-slate-200 hidden md:block" />
-              <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">{STATS.contentEngines}</p>
-                <p className="text-sm text-muted-foreground">Content Generation Engines</p>
-              </div>
-              <div className="h-8 w-px bg-slate-200 hidden md:block" />
-              <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">{STATS.yearsExperience}</p>
-                <p className="text-sm text-muted-foreground">Years B2B Expertise</p>
-              </div>
-              <div className="h-8 w-px bg-slate-200 hidden md:block" />
-              <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">{STATS.industriesServed}</p>
-                <p className="text-sm text-muted-foreground">Industries Served</p>
-              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Problem Section */}
+      {/* ─── PROBLEM / REFRAME ────────────────────────────────────────── */}
       <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
 
@@ -185,678 +146,382 @@ export default function LandingPage() {
           <div className="text-center mb-16">
             <Badge className="mb-4 bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/10">
               <AlertTriangle className="h-3.5 w-3.5 mr-2" />
-              The Problem
+              The Shift
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              The World is Drowning in{" "}
-              <span className="text-red-400">Unintelligent Outreach.</span>
+              Traditional demand generation optimizes for{" "}
+              <span className="text-red-400">volume.</span>
+              <br />
+              ABM wins with{" "}
+              <span className="text-emerald-400">precision.</span>
             </h2>
-            <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-              {PROBLEM_FRAMEWORK.subheadline}
+            <p className="text-xl text-slate-400 max-w-3xl mx-auto">
+              DemandGentic is built for the reality of modern B2B buying: committees, long cycles,
+              strict compliance, and brand risk.
             </p>
           </div>
 
+          {/* Outcomes */}
           <div className="grid md:grid-cols-3 gap-8 mb-16">
-            {/* Problem Card 1 */}
             <Card className="bg-white/5 border-white/10 backdrop-blur">
               <CardContent className="p-8">
-                <div className="h-14 w-14 rounded-2xl bg-red-500/10 flex items-center justify-center mb-6">
-                  <Volume2 className="h-7 w-7 text-red-400" />
+                <div className="h-14 w-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-6">
+                  <Calendar className="h-7 w-7 text-emerald-400" />
                 </div>
-                <div className="text-xs font-bold uppercase tracking-wider text-red-400 mb-2">01 — The Noise</div>
-                <h3 className="text-xl font-bold mb-3 text-white">Volume Over Intent</h3>
-                <p className="text-slate-400 mb-4">
-                  Automated spam erodes buyer trust. Spray-and-pray tactics ignore context,
-                  damage brands, and train prospects to delete without reading.
+                <h3 className="text-xl font-bold mb-3 text-white">More Qualified Meetings</h3>
+                <p className="text-slate-400">
+                  Create more qualified meetings in target accounts with coordinated,
+                  contextual outreach that reaches the right people at the right time.
                 </p>
-                <div className="flex items-center gap-2 text-red-400">
-                  <XCircle className="h-4 w-4" />
-                  <span className="text-sm font-medium">91% of B2B emails ignored</span>
-                </div>
               </CardContent>
             </Card>
 
-            {/* Problem Card 2 */}
-            <Card className="bg-white/5 border-white/10 backdrop-blur">
-              <CardContent className="p-8">
-                <div className="h-14 w-14 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-6">
-                  <Database className="h-7 w-7 text-amber-400" />
-                </div>
-                <div className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">02 — The Waste</div>
-                <h3 className="text-xl font-bold mb-3 text-white">Dirty Data, Hollow Metrics</h3>
-                <p className="text-slate-400 mb-4">
-                  Decisions made on outdated contacts and vanity metrics. Generic sequences
-                  that fail to reason or adapt to real buyer signals.
-                </p>
-                <div className="flex items-center gap-2 text-amber-400">
-                  <XCircle className="h-4 w-4" />
-                  <span className="text-sm font-medium">30% of B2B data decays yearly</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Problem Card 3 */}
             <Card className="bg-white/5 border-white/10 backdrop-blur">
               <CardContent className="p-8">
                 <div className="h-14 w-14 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-6">
-                  <Target className="h-7 w-7 text-blue-400" />
+                  <Users className="h-7 w-7 text-blue-400" />
                 </div>
-                <div className="text-xs font-bold uppercase tracking-wider text-blue-400 mb-2">03 — The Loss</div>
-                <h3 className="text-xl font-bold mb-3 text-white">Solutions Miss Their Audience</h3>
-                <p className="text-slate-400 mb-4">
-                  Real solutions never reach the right ear because they lack the right story,
-                  the right timing, and the right context.
+                <h3 className="text-xl font-bold mb-3 text-white">Multi-Thread Buying Committees</h3>
+                <p className="text-slate-400">
+                  Multi-thread buying committees with coordinated, contextual follow-up
+                  across every stakeholder in the account.
                 </p>
-                <div className="flex items-center gap-2 text-blue-400">
-                  <XCircle className="h-4 w-4" />
-                  <span className="text-sm font-medium">67% of journeys happen pre-sales</span>
-                </div>
               </CardContent>
             </Card>
-          </div>
 
-          {/* Summary Statement */}
-          <div className="text-center">
-            <div className="inline-block p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur">
-              <p className="text-lg text-slate-300 mb-4">
-                CRMs store data. Marketing tools send messages. SDRs chase activity.
-                Content teams scramble to keep up. None of them truly reason.
-              </p>
-              <p className="text-2xl font-bold text-white mb-3">
-                No <span className="text-violet-400">problem intelligence</span>.{" "}
-                No <span className="text-emerald-400">solution mapping</span>.{" "}
-                No <span className="text-blue-400">pinpoint context</span>.
-              </p>
-              <p className="text-sm text-slate-400">
-                Every interaction happens without reasoning. Every conversation is forgotten at the contact and account level.
-              </p>
-            </div>
+            <Card className="bg-white/5 border-white/10 backdrop-blur">
+              <CardContent className="p-8">
+                <div className="h-14 w-14 rounded-2xl bg-violet-500/10 flex items-center justify-center mb-6">
+                  <Shield className="h-7 w-7 text-violet-400" />
+                </div>
+                <h3 className="text-xl font-bold mb-3 text-white">Scale with Governance</h3>
+                <p className="text-slate-400">
+                  Scale execution while keeping governance, approvals, and traceability
+                  at every step of the process.
+                </p>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>
 
-      {/* Solution Section */}
+      {/* ─── WHAT DEMANDGENTIC IS ─────────────────────────────────────── */}
       <section className="py-24 px-6 relative overflow-hidden" id="platform">
         <div className="absolute inset-0 bg-gradient-to-b from-slate-50 to-white" />
 
-        <div className="max-w-7xl mx-auto relative">
+        <div className="max-w-5xl mx-auto relative text-center">
+          <Badge className="mb-4 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
+            <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
+            What DemandGentic Is
+          </Badge>
+          <h2 className="text-4xl md:text-5xl font-bold mb-6">
+            A Reasoning-First{" "}
+            <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+              Agentic System
+            </span>
+          </h2>
+          <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
+            A reasoning-first agentic system that plans and executes ABM plays—guided by your
+            team's strategy and constrained by your brand, rules, and approvals.
+          </p>
+
+          {/* One-liner definition */}
+          <div className="inline-block p-6 rounded-2xl bg-violet-50 border border-violet-200">
+            <div className="flex items-center gap-3 justify-center mb-2">
+              <Lightbulb className="h-5 w-5 text-violet-600" />
+              <span className="text-sm font-bold uppercase tracking-wider text-violet-600">Reasoning-First Defined</span>
+            </div>
+            <p className="text-lg text-violet-900 font-medium max-w-2xl">
+              Every action is justified before it runs—and can be reviewed after it happens.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── HOW IT WORKS ─────────────────────────────────────────────── */}
+      <section className="py-24 px-6 bg-slate-50" id="how-it-works">
+        <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
-            <Badge className="mb-4 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
-              <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
-              Our Solution
+            <Badge className="mb-4 bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-200">
+              How It Works
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              The Problem Solvers.{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                Your Agentic Execution Partner.
-              </span>
+              Three Layers.{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">One System.</span>
             </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              We are not just a platform — we are {TAGLINE.identity}. Human-led strategy and
-              intelligence work as one foundation. From there, agentic execution activates every
-              conversation, content flow, and pipeline decision. Our generative AI is guided exclusively
-              by your brand, purpose-built for your organization, and fully customizable to your goals,
-              rules, and operating model.
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              Human strategy, agentic execution, and persistent memory—working together under your control.
             </p>
           </div>
 
-          {/* Four Pillars */}
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
-            {/* Pillar 1 */}
+          <div className="grid md:grid-cols-3 gap-8">
+            {/* Layer 1 */}
             <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-white shadow-xl shadow-violet-500/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-6 relative">
+              <CardContent className="p-8 relative">
+                <div className="text-xs font-bold uppercase tracking-wider text-violet-500 mb-4">Layer 01</div>
                 <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-500/25">
                   <Users className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-3 bg-violet-100 text-violet-700 border-none">The Problem Solvers</Badge>
-                <h3 className="text-xl font-bold mb-2">Human-Led Strategy + Intelligence</h3>
+                <h3 className="text-xl font-bold mb-3">Human-Led Strategy Layer</h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  11+ years of front-line B2B demand expertise fused with organization intelligence.
-                  We combine strategic human judgment, problem mapping, and empathy into one operating core
-                  before any AI action begins.
+                  Problem intelligence → solution mapping → organizational context, before automation.
                 </p>
-                <div className="p-3 rounded-xl bg-violet-50 border border-violet-100">
-                  <p className="text-xs font-medium text-violet-900">
-                    "Human strategy and intelligence are one system — truth and empathy lead every move."
+                <ul className="space-y-2">
+                  {["ICP & account strategy", "Solution-to-problem mapping", "Brand & compliance guardrails"].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                      <CheckCircle2 className="h-4 w-4 text-violet-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+
+            {/* Layer 2 */}
+            <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-xl shadow-indigo-500/5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl" />
+              <CardContent className="p-8 relative">
+                <div className="text-xs font-bold uppercase tracking-wider text-indigo-500 mb-4">Layer 02</div>
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center mb-5 shadow-lg shadow-indigo-500/25">
+                  <Brain className="h-7 w-7 text-white" />
+                </div>
+                <h3 className="text-xl font-bold mb-3">Agentic Execution Layer</h3>
+                <p className="text-muted-foreground text-sm mb-4">
+                  Purpose-built agents research, draft, sequence, and follow up across channels—coordinated under one system.
+                </p>
+                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+                  <p className="text-xs font-medium text-indigo-900">
+                    The Agentic Demand Council — every move reasoned, every action accountable.
                   </p>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Layer 3 */}
+            <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl" />
+              <CardContent className="p-8 relative">
+                <div className="text-xs font-bold uppercase tracking-wider text-emerald-500 mb-4">Layer 03</div>
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center mb-5 shadow-lg shadow-emerald-500/25">
+                  <Database className="h-7 w-7 text-white" />
+                </div>
+                <h3 className="text-xl font-bold mb-3">Memory + Accountability</h3>
+                <p className="text-muted-foreground text-sm mb-4">
+                  Account/contact memory keeps every interaction consistent, contextual, and measurable.
+                </p>
+                <ul className="space-y-2">
+                  {["No scattered tools", "No lost context", "Full audit trail"].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── CORE CAPABILITIES (4 PILLARS) ────────────────────────────── */}
+      <section className="py-24 px-6" id="capabilities">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-16">
+            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
+              Core Capabilities
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+              Four Pillars of{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Precision ABM</span>
+            </h2>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Pillar 1 */}
+            <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-white shadow-xl shadow-violet-500/5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl" />
+              <CardContent className="p-8 relative">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-500/25">
+                  <Search className="h-7 w-7 text-white" />
+                </div>
+                <Badge className="mb-3 bg-violet-100 text-violet-700 border-none">Intelligence</Badge>
+                <h3 className="text-2xl font-bold mb-3">Account & Buying Committee Intelligence</h3>
+                <p className="text-muted-foreground mb-4">
+                  Research, roles, triggers, and context to inform messaging and plays.
+                </p>
+                <ul className="space-y-2">
+                  {["Buying committee mapping", "Trigger event detection", "Account-level research briefs"].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm">
+                      <CheckCircle2 className="h-4 w-4 text-violet-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
 
             {/* Pillar 2 */}
             <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-xl shadow-indigo-500/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-6 relative">
+              <CardContent className="p-8 relative">
                 <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center mb-5 shadow-lg shadow-indigo-500/25">
-                  <Brain className="h-7 w-7 text-white" />
+                  <Zap className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">The Agentic Demand Council</Badge>
-                <h3 className="text-xl font-bold mb-2">Agentic Execution</h3>
-                <p className="text-muted-foreground text-sm mb-4">
-                  Purpose-built agents execute across voice, email, and workflows with reasoning-first,
-                  compliance-first behavior. Every interaction is coordinated with account and contact memory,
-                  so execution stays context-aware and precise.
+                <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">Orchestration</Badge>
+                <h3 className="text-2xl font-bold mb-3">Reasoning-First Outreach Orchestration</h3>
+                <p className="text-muted-foreground mb-4">
+                  Email + conversational voice outreach + workflow coordination with compliance-first behavior.
                 </p>
-                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
-                  <p className="text-xs font-medium text-indigo-900">
-                    "Agentic execution starts with reasoning and ends with accountable outcomes."
-                  </p>
-                </div>
+                <ul className="space-y-2">
+                  {["Multi-channel coordination", "Compliance-first execution", "Contextual follow-up sequencing"].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm">
+                      <CheckCircle2 className="h-4 w-4 text-indigo-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
 
             {/* Pillar 3 */}
             <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-6 relative">
+              <CardContent className="p-8 relative">
                 <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center mb-5 shadow-lg shadow-emerald-500/25">
                   <Wand2 className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-3 bg-emerald-100 text-emerald-700 border-none">Content Studio</Badge>
-                <h3 className="text-xl font-bold mb-2">Brand-Exclusive Generative AI</h3>
-                <p className="text-muted-foreground text-sm mb-4">
-                  Generate landing pages, emails, blogs, eBooks, solution briefs, and images with AI that is
-                  guided exclusively by your brand. Built specifically for your organization, with full customization
-                  across voice, structure, workflows, and publishing controls.
+                <Badge className="mb-3 bg-emerald-100 text-emerald-700 border-none">Content</Badge>
+                <h3 className="text-2xl font-bold mb-3">Brand-Exclusive Content Studio</h3>
+                <p className="text-muted-foreground mb-4">
+                  Landing pages, emails, briefs, blogs, eBooks—generated in your voice with your
+                  structure, guardrails, and approvals.
                 </p>
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                  <p className="text-xs font-medium text-emerald-900">
-                    "Generative AI, exclusively your brand — fully customizable for your organization."
-                  </p>
-                </div>
+                <ul className="space-y-2">
+                  {["Your brand voice & guidelines", "Full approval workflows", "One-click publishing"].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
 
             {/* Pillar 4 */}
             <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white shadow-xl shadow-blue-500/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-6 relative">
+              <CardContent className="p-8 relative">
                 <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/25">
-                  <Database className="h-7 w-7 text-white" />
+                  <TrendingUp className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Precision ABM Data</Badge>
-                <h3 className="text-xl font-bold mb-2">Precision ABM Data</h3>
-                <p className="text-muted-foreground text-sm mb-4">
-                  ABM-ready intelligence with 70M+ verified contacts across 195 countries,
-                  buying committee context, intent and firmographic signals, and 98% email accuracy.
-                  Weekly refresh and multi-source verification keep targeting precise.
+                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Quality</Badge>
+                <h3 className="text-2xl font-bold mb-3">Quality & Performance Analysis</h3>
+                <p className="text-muted-foreground mb-4">
+                  Quality checks and iteration loops to improve messaging, targeting, and outcomes over time.
                 </p>
-                <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
-                  <p className="text-xs font-medium text-blue-900">
-                    "Precision ABM data powers precision pipeline outcomes."
-                  </p>
-                </div>
+                <ul className="space-y-2">
+                  {["Automated quality scoring", "Continuous improvement loops", "Performance analytics"].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm">
+                      <CheckCircle2 className="h-4 w-4 text-blue-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
           </div>
-
-          {/* Flow Diagram */}
-          <div className="p-8 rounded-3xl bg-slate-900 text-white">
-            <div className="text-center mb-8">
-              <h3 className="text-2xl font-bold mb-2">How It Comes Together</h3>
-              <p className="text-slate-400">{TAGLINE.full} — from reasoning to qualified pipeline</p>
-            </div>
-            <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
-              {[
-                { icon: Target, label: "Your Goals", color: "violet" },
-                { icon: Users, label: "Strategists Design", color: "violet" },
-                { icon: Search, label: "AI Agents Research", color: "indigo" },
-                { icon: Database, label: "Data Fuels Targeting", color: "blue" },
-                { icon: Wand2, label: "Content Generated", color: "emerald" },
-                { icon: Phone, label: "Voice & Email Execute", color: "amber" },
-                { icon: TrendingUp, label: "Qualified Pipeline", color: "emerald" },
-              ].map((step, i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <div className="flex flex-col items-center">
-                    <div className={`h-12 w-12 rounded-xl bg-${step.color}-500/20 flex items-center justify-center mb-2`}>
-                      <step.icon className={`h-6 w-6 text-${step.color}-400`} />
-                    </div>
-                    <span className="text-sm text-center text-slate-300 max-w-[100px]">{step.label}</span>
-                  </div>
-                  {i < 6 && (
-                    <ChevronRight className="h-5 w-5 text-slate-600 hidden lg:block" />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </section>
 
-      {/* How It Works Section */}
-      <section className="py-24 px-6 bg-slate-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-200">
-              The Process
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              From Intelligence to Pipeline.{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Delivered.</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              A proven six-step process where human intelligence leads the strategy and AI agents execute with reasoning, compliance, and context.
-            </p>
-          </div>
-
-          {/* Process Steps */}
-          <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-6">
-            {[
-              {
-                step: "01",
-                icon: Lightbulb,
-                title: "Discovery & Strategy",
-                description: "Our strategists map your solutions to buyer problems. We define ICP, build frameworks, and design campaign architecture.",
-                deliverable: "Custom campaign strategy",
-                color: "violet",
-              },
-              {
-                step: "02",
-                icon: Search,
-                title: "Intelligence Activation",
-                description: "AI agents scan our 70M+ database, research accounts, verify facts, and match prospects to your problem framework.",
-                deliverable: "Verified target accounts",
-                color: "indigo",
-              },
-              {
-                step: "03",
-                icon: Wand2,
-                title: "Content Generation",
-                description: "AI creates landing pages, emails, blogs, eBooks, and solution briefs — all in your brand voice, ready to publish.",
-                deliverable: "Full campaign content suite",
-                color: "emerald",
-              },
-              {
-                step: "04",
-                icon: Zap,
-                title: "Multi-Channel Execution",
-                description: "Voice agents hold live conversations. Email sequences deploy intelligently. Content publishes to branded pages.",
-                deliverable: "Active campaign execution",
-                color: "blue",
-              },
-              {
-                step: "05",
-                icon: LayoutDashboard,
-                title: "Pipeline Management",
-                description: "Accounts flow through intelligent pipeline stages. AI assigns reps, tracks buyer journeys, and surfaces ready-to-close opportunities.",
-                deliverable: "Managed pipeline with AE assignment",
-                color: "amber",
-              },
-              {
-                step: "06",
-                icon: TrendingUp,
-                title: "Optimization & Handoff",
-                description: "Continuous analysis identifies what's working. AI optimizes in real-time. Qualified leads delivered to your sales team.",
-                deliverable: "BANT-qualified leads",
-                color: "rose",
-              },
-            ].map((item, i) => (
-              <div key={i} className="relative">
-                <Card className="h-full border-2 hover:shadow-lg transition-shadow bg-white">
-                  <CardContent className="p-6">
-                    <div className={`h-12 w-12 rounded-xl bg-gradient-to-br from-${item.color}-500 to-${item.color}-600 flex items-center justify-center mb-4 shadow-lg`}>
-                      <item.icon className="h-6 w-6 text-white" />
-                    </div>
-                    <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Step {item.step}</div>
-                    <h3 className="font-bold text-lg mb-2">{item.title}</h3>
-                    <p className="text-sm text-muted-foreground mb-4">{item.description}</p>
-                    <div className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className={`h-4 w-4 text-${item.color}-500`} />
-                      <span className="font-medium">{item.deliverable}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-                {i < 5 && (
-                  <ChevronRight className="hidden lg:block absolute top-1/2 -right-4 transform -translate-y-1/2 h-6 w-6 text-slate-300 z-10" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Data Section */}
-      <section className="py-24 px-6 bg-gradient-to-br from-blue-950 via-indigo-950 to-violet-950 text-white relative overflow-hidden" id="data">
+      {/* ─── THE AGENTIC DEMAND COUNCIL & ORGANIZATION EXCLUSIVE AI STUDIO ── */}
+      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
 
         <div className="max-w-7xl mx-auto relative">
+          {/* ── Header ── */}
           <div className="text-center mb-16">
-            <Badge className="mb-4 bg-white/10 text-white border-white/20 hover:bg-white/10">
-              <Database className="h-3.5 w-3.5 mr-2" />
-              Our Data Advantage
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              {DATA_SECTION.headline.split(' on ')[0]}{" "}
-              <span className="text-blue-400">on the Planet.</span>
-            </h2>
-            <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-              {DATA_SECTION.subheadline}
-            </p>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid md:grid-cols-4 gap-6 mb-16">
-            {[
-              { number: STATS.verifiedContacts, label: "Verified B2B Contacts", sublabel: "Decision-makers across every industry", icon: Users },
-              { number: STATS.countriesCovered, label: "Countries Covered", sublabel: "True global reach for campaigns", icon: Globe },
-              { number: STATS.emailAccuracy, label: "Email Accuracy", sublabel: "Real-time verification before send", icon: Target },
-              { number: STATS.dataRefresh, label: "Data Refresh", sublabel: "Continuous hygiene eliminates decay", icon: RefreshCw },
-            ].map((stat, i) => (
-              <Card key={i} className="bg-white/5 border-white/10 backdrop-blur text-center">
-                <CardContent className="p-6">
-                  <div className="h-12 w-12 rounded-xl bg-blue-500/20 flex items-center justify-center mx-auto mb-4">
-                    <stat.icon className="h-6 w-6 text-blue-400" />
-                  </div>
-                  <p className="text-4xl font-bold text-white mb-1">{stat.number}</p>
-                  <p className="font-semibold text-white mb-1">{stat.label}</p>
-                  <p className="text-sm text-slate-400">{stat.sublabel}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* Data Capabilities */}
-          <div className="grid md:grid-cols-3 gap-8">
-            <Card className="bg-white/5 border-white/10 backdrop-blur">
-              <CardContent className="p-8">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-10 w-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white">Verification</h3>
-                </div>
-                <ul className="space-y-3">
-                  {[
-                    "Multi-source contact validation",
-                    "Real-time email verification",
-                    "Phone number confirmation",
-                    "LinkedIn profile matching",
-                    "Company record cross-reference",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-slate-300">
-                      <CircleDot className="h-3 w-3 text-emerald-400" />
-                      <span className="text-sm">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-white/10 backdrop-blur">
-              <CardContent className="p-8">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-10 w-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                    <Layers className="h-5 w-5 text-blue-400" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white">Enrichment</h3>
-                </div>
-                <ul className="space-y-3">
-                  {[
-                    "Firmographics (revenue, size, industry)",
-                    "Technographics (tech stack detection)",
-                    "Intent data (buying signals)",
-                    "Organizational hierarchy mapping",
-                    "Recent news and trigger events",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-slate-300">
-                      <CircleDot className="h-3 w-3 text-blue-400" />
-                      <span className="text-sm">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-white/10 backdrop-blur">
-              <CardContent className="p-8">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-10 w-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                    <Brain className="h-5 w-5 text-violet-400" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white">Intelligence</h3>
-                </div>
-                <ul className="space-y-3">
-                  {[
-                    "Buying committee identification",
-                    "Problem-to-account matching",
-                    "Confidence scoring on all data",
-                    "Source attribution for verification",
-                    "Continuous data hygiene",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-slate-300">
-                      <CircleDot className="h-3 w-3 text-violet-400" />
-                      <span className="text-sm">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Data Promise */}
-          <div className="mt-12 p-8 rounded-2xl bg-white/5 border border-white/10 text-center">
-            <h3 className="text-2xl font-bold text-white mb-4">
-              {DATA_SECTION.promise.headline}
-            </h3>
-            <p className="text-slate-400 max-w-2xl mx-auto">
-              {DATA_SECTION.promise.description}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Services Section */}
-      <section className="py-24 px-6" id="services">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
-              Our Services
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Full-Service Demand Generation.{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">AI-Powered Results.</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              We don't just provide tools — we deliver results. Choose the services that match your pipeline goals.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {[
-              {
-                icon: Target,
-                badge: "ABM",
-                title: "AI-Led Account-Based Marketing",
-                description: "Target, engage, and convert high-value accounts with intelligence-driven orchestration across email, voice, and content.",
-                features: ["Buying committee mapping", "Cross-channel orchestration", "Account-level reasoning"],
-                ideal: "Enterprise & mid-market B2B",
-                color: "violet",
-              },
-              {
-                icon: Phone,
-                badge: "Voice AI",
-                title: "Conversational AI Voice Agents",
-                description: "AI agents that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.",
-                features: ["Live phone conversations", "Real-time qualification", "Gatekeeper navigation"],
-                ideal: "Outbound at scale without headcount",
-                color: "amber",
-              },
-              {
-                icon: Mail,
-                badge: "Email Marketing",
-                title: "Intelligent Email Marketing",
-                description: "AI-crafted email campaigns with persona-specific sequences, smart send-time optimization, and reply sentiment analysis — every email reasoned before it's sent.",
-                features: ["Persona-specific sequences", "Send-time optimization", "Reply sentiment analysis"],
-                ideal: "Nurture & conversion at scale",
-                color: "sky",
-              },
-              {
-                icon: Wand2,
-                badge: "Content Studio",
-                title: "Generative Content Creation",
-                description: "A full AI-powered content studio that generates landing pages, email campaigns, blog posts, eBooks, solution briefs, and images — all in your brand voice.",
-                features: ["7 content generation engines", "One-click publishing", "AI-powered refinement"],
-                ideal: "Campaign content at speed",
-                color: "emerald",
-              },
-              {
-                icon: Bot,
-                badge: "AI SDR",
-                title: "AI SDR-as-a-Service",
-                description: "Autonomous AI agents conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.",
-                features: ["24/7 autonomous engagement", "Human strategist oversight", "Intelligent escalation"],
-                ideal: "Scale without headcount",
-                color: "blue",
-              },
-              {
-                icon: LayoutDashboard,
-                badge: "Pipeline",
-                title: "Intelligent Pipeline Management",
-                description: "Manage your entire top-of-funnel with AI-driven account staging, automated AE assignment, and buyer journey tracking.",
-                features: ["AI-powered AE assignment", "Buyer journey stages", "Account intelligence scoring"],
-                ideal: "Pipeline visibility & control",
-                color: "indigo",
-              },
-              {
-                icon: Calendar,
-                badge: "Appointments",
-                title: "Qualified Appointment Generation",
-                description: "We deliver BANT-qualified sales appointments directly to your team's calendar through multi-channel outreach.",
-                features: ["Full top-of-funnel management", "Multi-channel outreach", "No-show follow-up"],
-                ideal: "Sales efficiency",
-                color: "rose",
-              },
-              {
-                icon: Search,
-                badge: "Intelligence",
-                title: "Market & Account Intelligence",
-                description: "Deep research, enrichment, and analysis of accounts and industries to power better GTM decisions.",
-                features: ["ICP refinement", "Competitive landscape", "Buying signal detection"],
-                ideal: "GTM strategy",
-                color: "cyan",
-              },
-              {
-                icon: Database,
-                badge: "Data",
-                title: "B2B Data & Enrichment",
-                description: "Access our 70M+ verified contact database or enrich your existing data with our verification engine.",
-                features: ["Custom list building", "Database enrichment", "Continuous hygiene"],
-                ideal: "Campaign fuel",
-                color: "slate",
-              },
-            ].map((service, i) => (
-              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
-                <CardContent className="p-8">
-                  <div className={`h-14 w-14 rounded-2xl bg-gradient-to-br from-${service.color}-500 to-${service.color}-600 flex items-center justify-center mb-6 shadow-lg`}>
-                    <service.icon className="h-7 w-7 text-white" />
-                  </div>
-                  <Badge className={`mb-4 bg-${service.color}-50 text-${service.color}-700 border-none`}>{service.badge}</Badge>
-                  <h3 className="text-xl font-bold mb-3">{service.title}</h3>
-                  <p className="text-muted-foreground mb-4">{service.description}</p>
-                  <ul className="space-y-2 mb-6">
-                    {service.features.map((feature, j) => (
-                      <li key={j} className="flex items-center gap-2 text-sm">
-                        <CheckCircle2 className={`h-4 w-4 text-${service.color}-500`} />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="pt-4 border-t">
-                    <p className="text-xs text-muted-foreground">
-                      <span className="font-semibold">Ideal for:</span> {service.ideal}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* AI Agents Section */}
-      <section className="py-24 px-6 bg-slate-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
+            <Badge className="mb-4 bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/10">
               <Bot className="h-3.5 w-3.5 mr-2" />
-              The Agentic Demand Council
+              The Agentic Demand Council & Organization Exclusive AI Studio
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
               Purpose-Built Agents.{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Reasoning First.</span>
+              <span className="text-violet-400">Your Exclusive AI Studio.</span>
             </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Not generic AI. Specialized agents trained on 11+ years of front-line B2B demand experience —
-              powered by Organization Intelligence, governed by compliance, driven by empathy.
+            <p className="text-xl text-slate-400 max-w-3xl mx-auto">
+              Purpose-built agents research, draft, sequence, and follow up across channels—coordinated
+              under one system. Your organization's exclusive content studio generates campaign assets
+              in your brand voice. Every action is justified before it runs.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+          {/* ── Agent Cards ── */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
             {[
               {
                 icon: Search,
                 title: "Research Agent",
-                subtitle: "Demand Intel",
-                description: "Autonomous fact-gathering and strategic synthesis. Researches accounts, verifies data, and generates actionable intelligence briefs.",
-                capabilities: ["Multi-source verification", "Problem-to-account matching", "Confidence scoring"],
+                subtitle: "Account Intelligence",
+                description: "Autonomous research across accounts, roles, triggers, and buying signals to build actionable intelligence briefs.",
+                capabilities: ["Multi-source verification", "Buying committee mapping", "Trigger event detection"],
                 color: "emerald",
               },
               {
                 icon: Phone,
                 title: "Voice Agent",
-                subtitle: "Live Conversations",
-                description: "AI that makes real phone calls with natural speech, live objection handling, and the ability to book meetings mid-conversation.",
-                capabilities: ["Natural live conversations", "Gatekeeper navigation", "Real-time BANT qualification"],
+                subtitle: "Conversational Outreach",
+                description: "AI that conducts real phone conversations with natural speech, live objection handling, and mid-call meeting booking.",
+                capabilities: ["Natural live conversations", "Gatekeeper navigation", "Real-time qualification"],
                 color: "amber",
               },
               {
                 icon: Mail,
                 title: "Email Agent",
-                subtitle: "Demand Engage",
-                description: "AI trained on millions of B2B campaigns. Crafts persona-specific sequences that know when to push and when to nurture.",
-                capabilities: ["Persona-specific copy", "Sequence optimization", "Reply sentiment analysis"],
+                subtitle: "Sequence Orchestration",
+                description: "Persona-specific email sequences with contextual follow-up, send-time optimization, and reply sentiment analysis.",
+                capabilities: ["Persona-specific copy", "Contextual follow-up", "Reply sentiment analysis"],
                 color: "blue",
               },
               {
                 icon: Wand2,
                 title: "Content Agent",
-                subtitle: "Creative Studio",
-                description: "Creates complete campaign assets — landing pages, email templates, blog posts, eBooks, solution briefs, and images — all in your brand voice.",
-                capabilities: ["7 content engines", "One-click publish", "AI-powered refinement"],
+                subtitle: "Brand-Exclusive Studio",
+                description: "Generates landing pages, emails, blogs, eBooks, and briefs—all in your brand voice with your structure and approvals.",
+                capabilities: ["Your brand guidelines", "Full approval workflows", "One-click publishing"],
                 color: "violet",
               },
               {
                 icon: LayoutDashboard,
                 title: "Pipeline Agent",
-                subtitle: "Account Intelligence",
-                description: "Manages your top-of-funnel pipeline. Scores accounts, tracks buyer journeys through stages, and intelligently assigns reps to opportunities.",
-                capabilities: ["AI-driven AE assignment", "Buyer journey tracking", "Account stage automation"],
+                subtitle: "Account Orchestration",
+                description: "Manages account flow through pipeline stages, tracks buyer journeys, and coordinates multi-threaded engagement.",
+                capabilities: ["Account stage automation", "Buyer journey tracking", "Multi-thread coordination"],
                 color: "indigo",
               },
               {
                 icon: Shield,
                 title: "QA Agent",
                 subtitle: "Compliance & Quality",
-                description: "Real-time auditing across every interaction for quality, accuracy, and compliance. Ensures every touchpoint meets your standards.",
-                capabilities: ["Real-time monitoring", "Policy enforcement", "Audit trail generation"],
+                description: "Real-time auditing across every interaction for quality, accuracy, and compliance—ensuring every touchpoint meets your standards.",
+                capabilities: ["Real-time monitoring", "Policy enforcement", "Full audit trail"],
                 color: "rose",
               },
             ].map((agent, i) => (
-              <Card key={i} className="border-2 bg-white hover:shadow-lg transition-shadow">
+              <Card key={i} className="bg-white/5 border-white/10 backdrop-blur hover:bg-white/10 transition-colors">
                 <CardContent className="p-6">
-                  <div className={`h-12 w-12 rounded-xl bg-gradient-to-br from-${agent.color}-500 to-${agent.color}-600 flex items-center justify-center mb-4`}>
-                    <agent.icon className="h-6 w-6 text-white" />
+                  <div className={`h-12 w-12 rounded-xl bg-${agent.color}-500/20 flex items-center justify-center mb-4`}>
+                    <agent.icon className={`h-6 w-6 text-${agent.color}-400`} />
                   </div>
-                  <div className="mb-4">
-                    <h3 className="font-bold text-lg">{agent.title}</h3>
-                    <p className={`text-sm text-${agent.color}-600`}>{agent.subtitle}</p>
+                  <div className="mb-3">
+                    <h3 className="font-bold text-lg text-white">{agent.title}</h3>
+                    <p className={`text-sm text-${agent.color}-400`}>{agent.subtitle}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-4">{agent.description}</p>
-                  <ul className="space-y-1">
+                  <p className="text-sm text-slate-400 mb-4">{agent.description}</p>
+                  <ul className="space-y-1.5">
                     {agent.capabilities.map((cap, j) => (
-                      <li key={j} className="flex items-center gap-2 text-xs text-slate-600">
-                        <CheckCircle2 className={`h-3 w-3 text-${agent.color}-500`} />
+                      <li key={j} className="flex items-center gap-2 text-xs text-slate-300">
+                        <CheckCircle2 className={`h-3 w-3 text-${agent.color}-400`} />
                         {cap}
                       </li>
                     ))}
@@ -866,314 +531,367 @@ export default function LandingPage() {
             ))}
           </div>
 
-          {/* Agent Intelligence */}
-          <Card className="bg-slate-900 text-white border-none">
-            <CardContent className="p-8">
-              <div className="grid md:grid-cols-2 gap-8 items-center">
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <Layers className="h-5 w-5 text-violet-400" />
-                    <span className="text-sm font-bold uppercase tracking-wider text-violet-400">The Agentic Demand Council</span>
-                  </div>
-                  <h3 className="text-2xl font-bold mb-4">Reasoning First. Compliance First. Nothing Forgotten.</h3>
-                  <p className="text-slate-400 mb-6">
-                    Every agent in The Agentic Demand Council is powered by Organization Intelligence — your DNA, your rules, your truth.
-                    No interaction happens without reasoning first. No interaction is ever forgotten at the contact
-                    or account level. Compliance isn't a checkbox — it's woven into every layer.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {["Organization Intelligence", "Problem Framework", "Compliance First", "Reasoning First", "Brand Voice"].map((item, i) => (
-                      <Badge key={i} className="bg-white/10 border-white/20 text-white">{item}</Badge>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                    <div className="flex items-center gap-3 mb-2">
-                      <Bot className="h-5 w-5 text-slate-400" />
-                      <span className="font-semibold">Foundation — Reasoning Layer</span>
-                    </div>
-                    <p className="text-sm text-slate-400">Problem intelligence, solution mapping, pinpoint context — every action is reasoned before execution</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-indigo-500/20 border border-indigo-500/30">
-                    <div className="flex items-center gap-3 mb-2">
-                      <Brain className="h-5 w-5 text-indigo-400" />
-                      <span className="font-semibold">+ Organization Intelligence</span>
-                    </div>
-                    <p className="text-sm text-slate-300">Your identity, ICP, brand voice, problem frameworks, compliance policies, and empathy guidelines</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-violet-500/20 border border-violet-500/30">
-                    <div className="flex items-center gap-3 mb-2">
-                      <Target className="h-5 w-5 text-violet-400" />
-                      <span className="font-semibold">+ Campaign & Memory Context</span>
-                    </div>
-                    <p className="text-sm text-slate-300">Account history, contact interactions, talking points, qualification rules — nothing is ever forgotten</p>
-                  </div>
-                </div>
+          {/* ── Organization Exclusive AI Studio ── */}
+          <div className="mb-16">
+            <div className="text-center mb-10">
+              <div className="flex items-center gap-2 justify-center mb-3">
+                <Wand2 className="h-5 w-5 text-violet-400" />
+                <span className="text-sm font-bold uppercase tracking-wider text-violet-400">Organization Exclusive AI Studio</span>
               </div>
-            </CardContent>
-          </Card>
+              <h3 className="text-3xl font-bold mb-4 text-white">
+                Your Organization's{" "}
+                <span className="text-violet-400">Exclusive Content Engine</span>
+              </h3>
+              <p className="text-lg text-slate-400 max-w-2xl mx-auto">
+                {CONTENT_STUDIO.subheadline}
+              </p>
+            </div>
+
+            {/* Content Engines */}
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+              {[
+                { icon: Globe, title: "Landing Pages", description: "Full responsive landing pages with forms, CTAs, and SEO — generated and published with a single click.", color: "violet" },
+                { icon: Mail, title: "Email Campaigns", description: "Persona-targeted email templates and sequences that match your tone, your offer, and your audience's pain points.", color: "blue" },
+                { icon: FileText, title: "Blog Posts", description: "SEO-optimized thought leadership content that positions your brand as the authority in your space.", color: "indigo" },
+                { icon: BookOpen, title: "eBooks & Briefs", description: "Long-form eBooks and solution briefs designed to educate buyers and drive high-intent lead capture.", color: "emerald" },
+              ].map((engine, i) => (
+                <Card key={i} className="bg-white/5 border-white/10 backdrop-blur hover:bg-white/10 transition-colors">
+                  <CardContent className="p-6">
+                    <div className={`h-12 w-12 rounded-xl bg-${engine.color}-500/20 flex items-center justify-center mb-4`}>
+                      <engine.icon className={`h-6 w-6 text-${engine.color}-400`} />
+                    </div>
+                    <h3 className="font-bold text-lg mb-2 text-white">{engine.title}</h3>
+                    <p className="text-sm text-slate-400">{engine.description}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Workflow: Generate → Refine → Publish */}
+            <div className="grid md:grid-cols-3 gap-8">
+              {[
+                { icon: Sparkles, title: "Generate", description: "Describe what you need. The AI creates complete, publication-ready content with your brand voice, value propositions, and audience context built in.", color: "violet" },
+                { icon: PenTool, title: "Refine", description: "Chat with the AI to iterate. Adjust tone, expand sections, add CTAs, or rework entire pieces — all through natural conversation.", color: "emerald" },
+                { icon: Globe, title: "Publish", description: "One click to go live. Landing pages publish to branded URLs with full SEO. Content saves to your asset library for campaign use across all channels.", color: "blue" },
+              ].map((step, i) => (
+                <div key={i} className="text-center">
+                  <div className={`h-16 w-16 rounded-2xl bg-${step.color}-500/20 flex items-center justify-center mx-auto mb-4`}>
+                    <step.icon className={`h-8 w-8 text-${step.color}-400`} />
+                  </div>
+                  <h3 className="text-xl font-bold mb-2 text-white">{step.title}</h3>
+                  <p className="text-sm text-slate-400">{step.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Council Summary ── */}
+          <div className="p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur">
+            <div className="grid md:grid-cols-2 gap-8 items-center">
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Layers className="h-5 w-5 text-violet-400" />
+                  <span className="text-sm font-bold uppercase tracking-wider text-violet-400">Coordinated Under One System</span>
+                </div>
+                <h3 className="text-2xl font-bold mb-4 text-white">Every Agent Shares Memory. Every Action Is Reasoned.</h3>
+                <p className="text-slate-400">
+                  Account and contact memory keeps every interaction consistent, contextual, and measurable
+                  across all agents. No scattered tools. No lost context. Full traceability.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center md:justify-end">
+                {["Reasoning First", "Shared Memory", "Compliance Built-In", "Brand Governed", "Full Audit Trail", "Exclusive AI Studio"].map((item, i) => (
+                  <Badge key={i} className="bg-white/10 border-white/20 text-white">{item}</Badge>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* Generative Content Studio Showcase */}
-      <section className="py-24 px-6 bg-gradient-to-br from-emerald-950 via-slate-900 to-indigo-950 text-white relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
+      {/* ─── DATA & INTELLIGENCE ─────────────────────────────────────── */}
+      <section className="py-24 px-6 relative overflow-hidden" id="data">
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-50 to-white" />
 
         <div className="max-w-7xl mx-auto relative">
           <div className="text-center mb-16">
-            <Badge className="mb-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">
-              <Wand2 className="h-3.5 w-3.5 mr-2" />
-              Generative Content Studio
+            <Badge className="mb-4 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-50">
+              <Database className="h-3.5 w-3.5 mr-2" />
+              Data & Intelligence
             </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Create Entire Campaigns.{" "}
-              <span className="text-emerald-400">In Minutes, Not Months.</span>
-            </h2>
-            <p className="text-xl text-slate-400 max-w-3xl mx-auto">
-              {CONTENT_STUDIO.subheadline}
-            </p>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">{DATA_SECTION.headline}</h2>
+            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">{DATA_SECTION.subheadline}</p>
           </div>
 
-          {/* Content Engines Grid */}
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-16">
             {[
-              {
-                icon: Globe,
-                title: "Landing Pages",
-                description: "Full responsive landing pages with forms, CTAs, and SEO — generated and published with a single click.",
-                color: "violet",
-              },
-              {
-                icon: Mail,
-                title: "Email Campaigns",
-                description: "Persona-targeted email templates and sequences that match your tone, your offer, and your audience's pain points.",
-                color: "blue",
-              },
-              {
-                icon: FileText,
-                title: "Blog Posts",
-                description: "SEO-optimized thought leadership content that positions your brand as the authority in your space.",
-                color: "indigo",
-              },
-              {
-                icon: BookOpen,
-                title: "eBooks & Briefs",
-                description: "Long-form eBooks and solution briefs designed to educate buyers and drive high-intent lead capture.",
-                color: "emerald",
-              },
-            ].map((engine, i) => (
-              <Card key={i} className="bg-white/5 border-white/10 backdrop-blur hover:bg-white/10 transition-colors">
+              { icon: Users, number: STATS.verifiedContacts, label: "Verified B2B Contacts", sublabel: "Decision-makers across every industry", color: "violet" },
+              { icon: Globe, number: STATS.countriesCovered, label: "Countries Covered", sublabel: "True global reach for campaigns", color: "blue" },
+              { icon: Target, number: STATS.emailAccuracy, label: "Email Accuracy", sublabel: "Real-time verification before send", color: "emerald" },
+              { icon: RefreshCw, number: STATS.dataRefresh, label: "Data Refresh", sublabel: "Continuous hygiene eliminates decay", color: "amber" },
+            ].map((stat, i) => (
+              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white text-center">
                 <CardContent className="p-6">
-                  <div className={`h-12 w-12 rounded-xl bg-${engine.color}-500/20 flex items-center justify-center mb-4`}>
-                    <engine.icon className={`h-6 w-6 text-${engine.color}-400`} />
+                  <div className={`h-14 w-14 rounded-2xl bg-${stat.color}-100 flex items-center justify-center mx-auto mb-4`}>
+                    <stat.icon className={`h-7 w-7 text-${stat.color}-600`} />
                   </div>
-                  <h3 className="font-bold text-lg text-white mb-2">{engine.title}</h3>
-                  <p className="text-sm text-slate-400">{engine.description}</p>
+                  <div className="text-3xl font-bold mb-1">{stat.number}</div>
+                  <div className="font-semibold text-sm mb-1">{stat.label}</div>
+                  <div className="text-xs text-muted-foreground">{stat.sublabel}</div>
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          {/* Studio Capabilities Banner */}
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-center">
-              <div className="h-12 w-12 rounded-xl bg-violet-500/20 flex items-center justify-center mx-auto mb-4">
-                <Sparkles className="h-6 w-6 text-violet-400" />
-              </div>
-              <h3 className="font-bold text-lg text-white mb-2">Generate</h3>
-              <p className="text-sm text-slate-400">
-                Describe what you need. The AI creates complete, publication-ready content
-                with your brand voice, value propositions, and audience context built in.
-              </p>
+          {/* Data Capabilities */}
+          <div className="grid md:grid-cols-3 gap-8 mb-12">
+            {[
+              { icon: CheckCircle2, title: "Verification Engine", description: "Every contact verified against multiple sources before entering your campaign. Real-time bounce prediction ensures deliverability.", color: "emerald" },
+              { icon: Database, title: "Enrichment & Hygiene", description: "Continuous data enrichment adds firmographics, technographics, and intent signals. Weekly refresh eliminates decay before it impacts results.", color: "blue" },
+              { icon: Search, title: "Intelligence Layer", description: "AI-driven research briefs, buying signals, and competitive intelligence layered on top of verified contact data for precision targeting.", color: "violet" },
+            ].map((cap, i) => (
+              <Card key={i} className="border hover:shadow-lg transition-all bg-white">
+                <CardContent className="p-8">
+                  <div className={`h-12 w-12 rounded-xl bg-${cap.color}-100 flex items-center justify-center mb-4`}>
+                    <cap.icon className={`h-6 w-6 text-${cap.color}-600`} />
+                  </div>
+                  <h3 className="text-lg font-bold mb-2">{cap.title}</h3>
+                  <p className="text-sm text-muted-foreground">{cap.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Data Promise */}
+          <div className="p-8 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-center">
+            <div className="flex items-center gap-2 justify-center mb-2">
+              <Shield className="h-5 w-5 text-blue-600" />
+              <span className="text-sm font-bold uppercase tracking-wider text-blue-600">Our Data Promise</span>
             </div>
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-center">
-              <div className="h-12 w-12 rounded-xl bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
-                <PenTool className="h-6 w-6 text-emerald-400" />
-              </div>
-              <h3 className="font-bold text-lg text-white mb-2">Refine</h3>
-              <p className="text-sm text-slate-400">
-                Chat with the AI to iterate. Adjust tone, expand sections, add CTAs,
-                or rework entire pieces — all through natural conversation.
-              </p>
-            </div>
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-center">
-              <div className="h-12 w-12 rounded-xl bg-blue-500/20 flex items-center justify-center mx-auto mb-4">
-                <Globe className="h-6 w-6 text-blue-400" />
-              </div>
-              <h3 className="font-bold text-lg text-white mb-2">Publish</h3>
-              <p className="text-sm text-slate-400">
-                One click to go live. Landing pages publish to branded URLs with full SEO.
-                Content saves to your asset library for campaign use across all channels.
-              </p>
-            </div>
+            <h3 className="text-2xl font-bold mb-2">{DATA_SECTION.promise.headline}</h3>
+            <p className="text-muted-foreground max-w-2xl mx-auto">{DATA_SECTION.promise.description}</p>
           </div>
         </div>
       </section>
 
-      {/* Philosophy Section */}
-      <section className="py-24 px-6">
+      {/* ─── SERVICES GRID ────────────────────────────────────────────── */}
+      <section className="py-24 px-6 bg-slate-50" id="services">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
-            <Badge className="mb-4 bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-100">
-              Our Beliefs
+            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
+              <Layers className="h-3.5 w-3.5 mr-2" />
+              Services
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              The Principles of{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">{TAGLINE.identity}.</span>
+              Full-Stack{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+                Demand Services
+              </span>
             </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              These principles define who we are — not just what we build. They inform every agent we deploy,
-              every conversation we hold, and every campaign we run.
+            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
+              Every service powered by reasoning-first AI, coordinated under one system, and governed by your brand.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
-              {
-                number: "01",
-                title: "Reasoning First",
-                description: "No interaction happens without reasoning first. Every touchpoint is researched, contextualized, and justified before it reaches a human being.",
-                icon: Brain,
-              },
-              {
-                number: "02",
-                title: "Nothing Forgotten",
-                description: "No interaction is ever forgotten at the contact or account level. Every conversation, every signal, every response — remembered and reasoned upon.",
-                icon: Database,
-              },
-              {
-                number: "03",
-                title: "Compliance First",
-                description: "Trust is earned through transparency. Every agent operates within compliance boundaries. Every data point is sourced, verified, and governed.",
-                icon: Shield,
-              },
-              {
-                number: "04",
-                title: "Truth & Empathy",
-                description: "Human-to-human connection and empathy always come first. We believe in truth over vanity metrics, real conversations over automated noise.",
-                icon: UserCheck,
-              },
-            ].map((principle, i) => (
-              <Card key={i} className="border-2 hover:shadow-lg transition-shadow bg-white">
-                <CardContent className="p-8">
-                  <div className="text-4xl font-bold text-slate-200 mb-4">{principle.number}</div>
-                  <div className="h-12 w-12 rounded-xl bg-slate-100 flex items-center justify-center mb-4">
-                    <principle.icon className="h-6 w-6 text-slate-700" />
+              { icon: Target, badge: "ABM", title: "AI-Led Account-Based Marketing", description: "Target, engage, and convert high-value accounts with intelligence-driven orchestration across email, voice, and content.", features: ["Buying committee mapping", "Cross-channel orchestration", "Account-level reasoning"], color: "violet" },
+              { icon: Phone, badge: "Voice AI", title: "Conversational AI Voice Agents", description: "AI agents that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.", features: ["Live phone conversations", "Real-time qualification", "Gatekeeper navigation"], color: "amber" },
+              { icon: Mail, badge: "Email Marketing", title: "Intelligent Email Marketing", description: "AI-crafted email campaigns with persona-specific sequences, smart send-time optimization, and reply sentiment analysis.", features: ["Persona-specific sequences", "Send-time optimization", "Reply sentiment analysis"], color: "sky" },
+              { icon: Wand2, badge: "Content Studio", title: "Generative Content Creation", description: "A full AI-powered content studio that generates landing pages, email campaigns, blog posts, eBooks, solution briefs, and images — all in your brand voice.", features: ["7 content generation engines", "One-click publishing", "AI-powered refinement"], color: "emerald" },
+              { icon: Bot, badge: "AI SDR", title: "AI SDR-as-a-Service", description: "Autonomous AI agents conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.", features: ["24/7 autonomous engagement", "Human strategist oversight", "Intelligent escalation"], color: "blue" },
+              { icon: LayoutDashboard, badge: "Pipeline", title: "Intelligent Pipeline Management", description: "Manage your entire top-of-funnel with AI-driven account staging, automated AE assignment, and buyer journey tracking.", features: ["AI-powered AE assignment", "Buyer journey stages", "Account intelligence scoring"], color: "indigo" },
+              { icon: Calendar, badge: "Appointments", title: "Qualified Appointment Generation", description: "We deliver BANT-qualified sales appointments directly to your team's calendar through multi-channel outreach.", features: ["Full top-of-funnel management", "Multi-channel outreach", "No-show follow-up"], color: "rose" },
+              { icon: Search, badge: "Intelligence", title: "Market & Account Intelligence", description: "Deep research, enrichment, and analysis of accounts and industries to power better GTM decisions.", features: ["ICP refinement", "Competitive landscape", "Buying signal detection"], color: "cyan" },
+              { icon: Database, badge: "Data", title: "B2B Data & Enrichment", description: "Access our 70M+ verified contact database or enrich your existing data with our verification engine.", features: ["Custom list building", "Database enrichment", "Continuous hygiene"], color: "slate" },
+            ].map((service, i) => (
+              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={`h-12 w-12 rounded-xl bg-${service.color}-100 flex items-center justify-center shrink-0`}>
+                      <service.icon className={`h-6 w-6 text-${service.color}-600`} />
+                    </div>
+                    <Badge className={`bg-${service.color}-50 text-${service.color}-700 border-${service.color}-200`}>
+                      {service.badge}
+                    </Badge>
                   </div>
-                  <h3 className="text-xl font-bold mb-3">{principle.title}</h3>
-                  <p className="text-muted-foreground">{principle.description}</p>
+                  <h3 className="text-lg font-bold mb-2">{service.title}</h3>
+                  <p className="text-sm text-muted-foreground mb-4">{service.description}</p>
+                  <ul className="space-y-1.5">
+                    {service.features.map((feature, j) => (
+                      <li key={j} className="flex items-center gap-2 text-xs text-slate-600">
+                        <CheckCircle2 className={`h-3 w-3 text-${service.color}-500`} />
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
             ))}
           </div>
+        </div>
+      </section>
 
-          <div className="text-center p-8 rounded-2xl bg-slate-900 text-white">
-            <p className="text-2xl font-bold">
-              {TAGLINE.full}{" "}
-              <span className="text-violet-400">We are {TAGLINE.identity}.</span>
+
+
+      {/* ─── PHILOSOPHY / PRINCIPLES ──────────────────────────────────── */}
+      <section className="py-24 px-6 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-white to-slate-50" />
+
+        <div className="max-w-7xl mx-auto relative">
+          <div className="text-center mb-16">
+            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
+              <Brain className="h-3.5 w-3.5 mr-2" />
+              Our Principles
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+              {TAGLINE.identity}:{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+                Our Philosophy
+              </span>
+            </h2>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+            {PRINCIPLES.map((principle, i) => {
+              const icons: Record<string, any> = { Brain, Database, Shield, UserCheck };
+              const PrincipleIcon = icons[principle.iconName] || Brain;
+              const colors = ["violet", "indigo", "emerald", "blue"];
+              const color = colors[i % colors.length];
+              return (
+                <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
+                  <CardContent className="p-8 text-center">
+                    <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4">{principle.number}</div>
+                    <div className={`h-14 w-14 rounded-2xl bg-${color}-100 flex items-center justify-center mx-auto mb-5`}>
+                      <PrincipleIcon className={`h-7 w-7 text-${color}-600`} />
+                    </div>
+                    <h3 className="text-lg font-bold mb-3">{principle.title}</h3>
+                    <p className="text-sm text-muted-foreground">{principle.description}</p>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Identity Banner */}
+          <div className="p-8 rounded-2xl bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 text-center">
+            <p className="text-2xl font-bold mb-2">
+              We are{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+                {TAGLINE.identity}
+              </span>
             </p>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">{TAGLINE.full}</p>
           </div>
         </div>
       </section>
 
-      {/* Founder Section */}
+      {/* ─── FOUNDER / ABOUT ──────────────────────────────────────────── */}
       <section className="py-24 px-6 bg-slate-50" id="about">
-        <div className="max-w-5xl mx-auto">
-          <div className="grid md:grid-cols-5 gap-12 items-center">
-            <div className="md:col-span-2">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-violet-500 to-indigo-600 rounded-3xl transform rotate-3"></div>
-                <div className="relative bg-slate-900 rounded-3xl p-8 text-white">
-                  <Quote className="h-10 w-10 text-violet-400 mb-6" />
-                  <div className="space-y-4">
-                    <div className="text-4xl font-bold">{STATS.yearsExperience}</div>
-                    <div className="text-slate-400">Years in B2B</div>
-                    <div className="h-px bg-slate-700 my-4" />
-                    <div className="text-4xl font-bold">{STATS.leadsGenerated}</div>
-                    <div className="text-slate-400">Leads Generated</div>
-                    <div className="h-px bg-slate-700 my-4" />
-                    <div className="text-4xl font-bold">{STATS.enterpriseClients}</div>
-                    <div className="text-slate-400">Enterprise Clients</div>
-                  </div>
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-16">
+            <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
+              <Quote className="h-3.5 w-3.5 mr-2" />
+              Our Story
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+              Built by{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+                {TAGLINE.identity}
+              </span>
+            </h2>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8 items-start">
+            {/* Stats Sidebar */}
+            <div className="space-y-4">
+              {[
+                { label: "Years of Experience", value: STATS.yearsExperience },
+                { label: "B2B Leads Generated", value: STATS.leadsGenerated },
+                { label: "Enterprise Clients", value: STATS.enterpriseClients },
+                { label: "Industries Served", value: STATS.industriesServed },
+                { label: "Global Campaigns", value: STATS.globalCampaigns },
+              ].map((stat, i) => (
+                <div key={i} className="p-4 rounded-xl bg-white border hover:shadow-md transition-shadow">
+                  <div className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">{stat.value}</div>
+                  <div className="text-sm text-muted-foreground">{stat.label}</div>
                 </div>
-              </div>
+              ))}
             </div>
-            <div className="md:col-span-3">
-              <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200">Our Story</Badge>
-              <h2 className="text-3xl md:text-4xl font-bold mb-6">
-                The Problem Solvers.{" "}
-                <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Built for Truth.</span>
-              </h2>
-              <blockquote className="text-xl text-muted-foreground mb-6 border-l-4 border-violet-500 pl-6 italic">
-                "{FOUNDER_QUOTES.landing}"
-              </blockquote>
-              <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xl">
-                  {BRAND.founder.initials}
-                </div>
-                <div>
-                  <p className="font-bold">{BRAND.founder.name}</p>
-                  <p className="text-muted-foreground">{BRAND.founder.title}</p>
-                </div>
-              </div>
-              <p className="mt-6 text-muted-foreground">
-                {BRAND.company.productName} is built by {BRAND.company.shortName} — a B2B marketing and demand team trained on {STATS.yearsExperience} years
-                of first-hand front-line experience. We love to be called {TAGLINE.identity}.
-                From Afghanistan to enterprise clients worldwide, we didn't build theory. We built what actually works.
-              </p>
+
+            {/* Founder Quote & Story */}
+            <div className="md:col-span-2">
+              <Card className="border-2 bg-white shadow-xl">
+                <CardContent className="p-10">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+                      <span className="text-2xl font-bold text-white">{BRAND.founder.initials}</span>
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold">{BRAND.founder.name}</h3>
+                      <p className="text-sm text-muted-foreground">{BRAND.founder.title}</p>
+                      <p className="text-xs text-muted-foreground">Founded in {BRAND.company.foundedLocation}, {BRAND.company.foundedYear}</p>
+                    </div>
+                  </div>
+
+                  <blockquote className="relative mb-8">
+                    <Quote className="h-8 w-8 text-violet-200 absolute -top-2 -left-2" />
+                    <p className="text-lg text-muted-foreground italic pl-8 leading-relaxed">
+                      {FOUNDER_QUOTES.landing}
+                    </p>
+                  </blockquote>
+
+                  <div className="pt-6 border-t">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      From {BRAND.company.foundedLocation} to {BRAND.company.location}, Pivotal B2B has grown from a bootstrapped startup
+                      into a reasoning-first demand generation platform serving enterprise B2B vendors worldwide.
+                      With {STATS.yearsExperience} years of front-line experience, {STATS.leadsGenerated} leads generated,
+                      and {STATS.enterpriseClients} enterprise clients, we've learned that every interaction counts—and
+                      every interaction should be reasoned before it runs.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
+
+
+      {/* ─── POSITIONING CLOSE ────────────────────────────────────────── */}
+      <section className="py-20 px-6">
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-3xl md:text-4xl font-bold mb-6">
+            This isn't traditional demand generation.
+          </h2>
+          <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
+            It's{" "}
+            <span className="font-semibold text-foreground">Human-Led Strategy</span> +{" "}
+            <span className="font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+              Agentic ABM Execution
+            </span>
+            —guided by your brand and built for what's next.
+          </p>
+        </div>
+      </section>
+
+      {/* ─── FINAL CTA ────────────────────────────────────────────────── */}
       <section className="py-24 px-6 bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-600 text-white relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIyIi8+PC9nPjwvZz48L3N2Zz4=')] opacity-50" />
 
         <div className="max-w-4xl mx-auto text-center relative">
-          <Badge className="mb-6 bg-white/20 text-white border-white/30 hover:bg-white/20">
-            Get Started
-          </Badge>
           <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            Ready to Build Demand That Actually Converts?
+            Ready to run precision ABM with reasoning-first agents?
           </h2>
-          <p className="text-xl text-white/80 mb-8 max-w-2xl mx-auto">
-            Join the revenue teams replacing algorithmic noise with agentic reasoning. See how
-            Problem Intelligence, Solution Mapping, and Pinpoint Context — powered by 11+ years
-            of front-line experience — transform your demand engine.
-          </p>
-
-          {/* Value Pills */}
-          <div className="flex flex-wrap justify-center gap-3 mb-10">
-            {[
-              "Problem Intelligence",
-              "Solution Mapping",
-              "Reasoning First",
-              "Compliance First",
-              "The Problem Solvers",
-            ].map((pill, i) => (
-              <div key={i} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/20">
-                <CheckCircle2 className="h-4 w-4" />
-                <span className="text-sm font-medium">{pill}</span>
-              </div>
-            ))}
-          </div>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-            <Button size="lg" className="text-base h-14 px-8 bg-white text-violet-700 hover:bg-white/90 shadow-lg">
-              Schedule Strategy Call
+            <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-white text-violet-700 hover:bg-white/90 shadow-lg">
+              Book a Demo
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
-            <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2 border-white/30 text-white hover:bg-white/10">
-              <Play className="mr-2 h-5 w-5" />
-              See the Platform
-            </Button>
           </div>
-
-          <p className="text-white/60 text-sm">
-            No pressure. No pitch decks. Just a conversation about your pipeline goals.
-          </p>
         </div>
       </section>
 

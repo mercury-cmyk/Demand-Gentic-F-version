@@ -107,6 +107,18 @@ export default function CampaignManagerPage() {
     if (typeof savedPlanData.plan?.meta?.scope === "string") {
       setInternalOnly(savedPlanData.plan.meta.scope === "internal-first");
     }
+
+    if (savedPlanData.plan?.campaignSourceContext?.campaignObjective) {
+      setPrimaryGoal(savedPlanData.plan.campaignSourceContext.campaignObjective);
+    }
+
+    if (savedPlanData.plan?.campaignSourceContext?.productServiceInfo) {
+      setValueProposition(savedPlanData.plan.campaignSourceContext.productServiceInfo);
+    }
+
+    if (savedPlanData.plan?.campaignSourceContext?.inheritedTalkingPoints?.length) {
+      setKeyChallenges(savedPlanData.plan.campaignSourceContext.inheritedTalkingPoints.join("; "));
+    }
   }, [savedPlanData]);
 
   const selectedCampaign = useMemo(
@@ -385,6 +397,20 @@ export default function CampaignManagerPage() {
               </p>
             </div>
 
+            <div className="rounded-lg border p-4">
+              <h4 className="font-semibold mb-2">Product optimization focus</h4>
+              <p className="text-sm text-muted-foreground mb-2">
+                {generatedPlan?.productPositioning?.summary || "No product summary available."}
+              </p>
+              {(generatedPlan?.productPositioning?.keyProductMessages || []).length > 0 ? (
+                <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                  {(generatedPlan?.productPositioning?.keyProductMessages || []).slice(0, 6).map((message: string, index: number) => (
+                    <li key={`product-message-${index}`}>{message}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-lg border p-4">
                 <h4 className="font-semibold mb-2">Key themes</h4>
@@ -401,9 +427,19 @@ export default function CampaignManagerPage() {
                   <li><strong>Email:</strong> {generatedPlan?.channelOptimizationGuidance?.email}</li>
                   <li><strong>Phone:</strong> {generatedPlan?.channelOptimizationGuidance?.phone}</li>
                   <li><strong>Automation:</strong> {generatedPlan?.channelOptimizationGuidance?.automation}</li>
+                  <li><strong>Social:</strong> {generatedPlan?.channelOptimizationGuidance?.social}</li>
                 </ul>
               </div>
             </div>
+
+            {generatedPlan?.outcomeModel?.primarySuccessCriteria ? (
+              <div className="rounded-lg border p-4">
+                <h4 className="font-semibold mb-2">Outcome model</h4>
+                <p className="text-sm text-muted-foreground">
+                  <strong>Primary success criteria:</strong> {generatedPlan.outcomeModel.primarySuccessCriteria}
+                </p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       )}

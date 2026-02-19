@@ -16,9 +16,51 @@ import {
   exportCallQualityData,
   getCallIntelligence,
 } from "../services/call-intelligence-logger";
-import { canonicalizeGcsRecordingUrl } from "../lib/recording-url-policy";
+import { resolvePlayableRecordingUrl } from "../lib/recording-url-policy";
+import { BUCKET, getPresignedDownloadUrl } from "../lib/storage";
 
 const router = Router();
+
+function extractGcsKeyFromRecordingUrl(recordingUrl: string | null | undefined): string | null {
+  if (!recordingUrl) return null;
+  const trimmed = recordingUrl.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("gcs-internal://")) {
+    return trimmed.replace(/^gcs-internal:\/\/[^/]+\//, "");
+  }
+
+  if (trimmed.startsWith("gs://")) {
+    const withoutScheme = trimmed.slice("gs://".length);
+    const firstSlash = withoutScheme.indexOf("/");
+    if (firstSlash <= 0) return null;
+    const bucket = withoutScheme.slice(0, firstSlash);
+    const objectPath = withoutScheme.slice(firstSlash + 1);
+    if (!objectPath) return null;
+    if (bucket && bucket !== BUCKET) return null;
+    return objectPath;
+  }
+
+  const m = trimmed.match(/^https?:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/i);
+  if (m) {
+    const bucket = m[1];
+    const objectPath = m[2];
+    if (!objectPath) return null;
+    if (bucket && bucket !== BUCKET) return null;
+    try {
+      return decodeURIComponent(objectPath);
+    } catch {
+      return objectPath;
+    }
+  }
+
+  if (!/^https?:\/\//i.test(trimmed)) {
+    const normalized = trimmed.replace(/^\/+/, "");
+    return normalized ? normalized : null;
+  }
+
+  return null;
+}
 
 /**
  * GET /api/call-intelligence/records/:callSessionId
@@ -640,9 +682,10 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
 
     // Transform dialer results to unified format
     const dialerCalls = dialerResults.map((row) => {
-      const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+      const playableUrl = resolvePlayableRecordingUrl({
         recordingUrl: row.recordingUrl,
       });
+      const hasRecording = !!(playableUrl || row.recordingUrl);
       return {
       id: row.id,
       source: 'dialer' as const,
@@ -668,9 +711,10 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         name: row.campaignName || "No Campaign",
       },
       recording: {
-        available: !!gcsRecordingUrl,
-        url: gcsRecordingUrl,
-        status: gcsRecordingUrl ? "stored" : "pending",
+        available: hasRecording,
+        url: playableUrl,
+        streamUrl: hasRecording ? `/api/recordings/${row.id}/stream` : null,
+        status: hasRecording ? "stored" : "pending",
         format: "mp3",
         durationSec: row.callDurationSeconds,
         fileSizeBytes: undefined,
@@ -708,10 +752,11 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
 
     // Transform session results to unified format
     const sessionCalls = sessionResults.map((row) => {
-      const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+      const playableUrl = resolvePlayableRecordingUrl({
         recordingS3Key: row.recordingS3Key,
         recordingUrl: row.recordingUrl,
       });
+      const hasRecording = !!(playableUrl || row.recordingS3Key);
       return {
       id: row.id,
       source: 'session' as const,
@@ -737,8 +782,9 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         name: row.campaignName || "No Campaign",
       },
       recording: {
-        available: !!gcsRecordingUrl,
-        url: gcsRecordingUrl,
+        available: hasRecording,
+        url: playableUrl,
+        streamUrl: hasRecording ? `/api/recordings/${row.id}/stream` : null,
         status: row.recordingStatus || "pending",
         format: row.recordingFormat,
         durationSec: row.recordingDurationSec,
@@ -927,10 +973,23 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
       .limit(1);
 
     if (sessionResult) {
-      const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
-        recordingS3Key: sessionResult.recordingS3Key,
-        recordingUrl: sessionResult.recordingUrl,
-      });
+      // Generate signed URL for single-record detail endpoint
+      let recordingUrl: string | null = null;
+      if (sessionResult.recordingS3Key) {
+        try {
+          const signed = await getPresignedDownloadUrl(sessionResult.recordingS3Key, 3600);
+          if (signed && !signed.startsWith('gcs-internal://')) {
+            recordingUrl = signed;
+          }
+        } catch (e) { /* fall through */ }
+      }
+      if (!recordingUrl) {
+        recordingUrl = resolvePlayableRecordingUrl({
+          recordingS3Key: sessionResult.recordingS3Key,
+          recordingUrl: sessionResult.recordingUrl,
+        });
+      }
+      const hasRecording = !!(recordingUrl || sessionResult.recordingS3Key);
       return res.json({
         success: true,
         data: {
@@ -958,8 +1017,9 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
             name: sessionResult.campaignName || "No Campaign",
           },
           recording: {
-            available: !!gcsRecordingUrl,
-            url: gcsRecordingUrl,
+            available: hasRecording,
+            url: recordingUrl,
+            streamUrl: `/api/recordings/${sessionResult.id}/stream`,
             status: sessionResult.recordingStatus || "pending",
             format: sessionResult.recordingFormat,
             durationSec: sessionResult.recordingDurationSec,
@@ -1061,9 +1121,24 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
       });
     }
 
-    const gcsRecordingUrl = canonicalizeGcsRecordingUrl({
+    let playableUrl = resolvePlayableRecordingUrl({
       recordingUrl: dialerResult.recordingUrl,
     });
+
+    if (!playableUrl) {
+      const gcsKey = extractGcsKeyFromRecordingUrl(dialerResult.recordingUrl);
+      if (gcsKey) {
+        try {
+          const signed = await getPresignedDownloadUrl(gcsKey, 3600);
+          if (signed && !signed.startsWith("gcs-internal://")) {
+            playableUrl = signed;
+          }
+        } catch {
+          // fall through
+        }
+      }
+    }
+    const hasDialerRecording = !!(playableUrl || dialerResult.recordingUrl);
 
     res.json({
       success: true,
@@ -1092,9 +1167,11 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
           name: dialerResult.campaignName || "No Campaign",
         },
         recording: {
-          available: !!gcsRecordingUrl,
-          url: gcsRecordingUrl,
-          status: gcsRecordingUrl ? "stored" : "pending",
+          available: hasDialerRecording,
+          url: playableUrl,
+          streamUrl: `/api/recordings/${dialerResult.id}/stream`,
+          streamTokenUrl: `/api/recordings/${dialerResult.id}/stream-token`,
+          status: hasDialerRecording ? "stored" : "pending",
           format: "mp3",
           durationSec: dialerResult.callDurationSeconds,
           fileSizeBytes: undefined,

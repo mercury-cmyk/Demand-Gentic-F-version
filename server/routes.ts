@@ -130,8 +130,8 @@ import {
 import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
-import { uploadToS3 } from "./lib/storage";
-import { canonicalizeGcsRecordingUrl } from "./lib/recording-url-policy";
+import { uploadToS3, getPresignedDownloadUrl } from "./lib/storage";
+import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from "./lib/recording-url-policy";
 import * as schema from "@shared/schema";
 import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, callQualityRecords, passwordResetTokens, clientUsers, type InsertMailboxAccount, type Account } from "@shared/schema";
 import { transactionalEmailService } from "./services/transactional-email-service";
@@ -9540,10 +9540,11 @@ export function registerRoutes(app: Express) {
       
       const sanitized = filtered.map((lead) => ({
         ...lead,
-        recordingUrl: canonicalizeGcsRecordingUrl({
+        recordingUrl: resolvePlayableRecordingUrl({
           recordingS3Key: lead.recordingS3Key,
           recordingUrl: lead.recordingUrl,
         }),
+        hasGcsRecording: !!(lead.recordingS3Key),
       }));
 
       res.json(sanitized);
@@ -9559,10 +9560,11 @@ export function registerRoutes(app: Express) {
       const deletedLeads = await storage.getDeletedLeads();
       const sanitized = deletedLeads.map((lead) => ({
         ...lead,
-        recordingUrl: canonicalizeGcsRecordingUrl({
+        recordingUrl: resolvePlayableRecordingUrl({
           recordingS3Key: lead.recordingS3Key,
           recordingUrl: lead.recordingUrl,
         }),
+        hasGcsRecording: !!(lead.recordingS3Key),
       }));
 
       res.json(sanitized);
@@ -9641,12 +9643,28 @@ export function registerRoutes(app: Express) {
       }
 
       // Flatten account data to match expected structure
+      // Generate signed URL for GCS recordings (single lead, async is fine)
+      let recordingUrl = resolvePlayableRecordingUrl({
+        recordingS3Key: lead.recordingS3Key,
+        recordingUrl: lead.recordingUrl,
+      });
+      
+      // If no playable URL but we have a GCS key, generate a signed URL
+      if (!recordingUrl && lead.recordingS3Key) {
+        try {
+          const signedUrl = await getPresignedDownloadUrl(lead.recordingS3Key, 3600);
+          if (signedUrl && !signedUrl.startsWith('gcs-internal://')) {
+            recordingUrl = signedUrl;
+          }
+        } catch (e) {
+          // Signed URL generation failed; leave recordingUrl as null
+        }
+      }
+
       const responseData = {
         ...lead,
-        recordingUrl: canonicalizeGcsRecordingUrl({
-          recordingS3Key: lead.recordingS3Key,
-          recordingUrl: lead.recordingUrl,
-        }),
+        recordingUrl,
+        hasGcsRecording: !!(lead.recordingS3Key),
         account: lead.contact?.account || null,
       };
 
@@ -11429,13 +11447,25 @@ export function registerRoutes(app: Express) {
       };
       const leadsData = await storage.getLeads(qaStatusFilter);
       
-      // Export canonical GCS URLs only (no temporary S3/Telnyx links)
+      // Export signed GCS URLs (7-day expiry) for CSV download
       const csvData = await Promise.all(leadsData.map(async (lead) => {
-        const recordingUrl =
-          canonicalizeGcsRecordingUrl({
-            recordingS3Key: (lead as any).recordingS3Key,
+        let recordingUrl = '';
+        const s3Key = (lead as any).recordingS3Key;
+        if (s3Key) {
+          try {
+            const signed = await getPresignedDownloadUrl(s3Key, 604800);
+            if (signed && !signed.startsWith('gcs-internal://')) {
+              recordingUrl = signed;
+            }
+          } catch (e) { /* skip */ }
+        }
+        if (!recordingUrl) {
+          // Fall back to non-GCS playable URL (Telnyx, S3 Amazon, etc.)
+          recordingUrl = resolvePlayableRecordingUrl({
+            recordingS3Key: s3Key,
             recordingUrl: lead.recordingUrl,
           }) || '';
+        }
         
         // Build agent name from first/last name fields
         const agentName = [lead.agentFirstName, lead.agentLastName].filter(Boolean).join(' ') || '';
@@ -11566,15 +11596,25 @@ export function registerRoutes(app: Express) {
         .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
         .where(inArray(leads.id, validLeadIds));
 
-      // Convert to CSV format with canonical GCS recording URLs only
+      // Convert to CSV format with signed GCS recording URLs
       const PapaModule = await import('papaparse');
       const Papa = PapaModule.default;
       const csvData = await Promise.all(leadsData.map(async (lead) => {
-        const recordingUrl =
-          canonicalizeGcsRecordingUrl({
+        let recordingUrl = '';
+        if (lead.recordingS3Key) {
+          try {
+            const signed = await getPresignedDownloadUrl(lead.recordingS3Key, 604800);
+            if (signed && !signed.startsWith('gcs-internal://')) {
+              recordingUrl = signed;
+            }
+          } catch (e) { /* skip */ }
+        }
+        if (!recordingUrl) {
+          recordingUrl = resolvePlayableRecordingUrl({
             recordingS3Key: lead.recordingS3Key,
             recordingUrl: lead.recordingUrl,
           }) || '';
+        }
         
         return {
           'Lead ID': lead.id || '',
@@ -13903,7 +13943,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Get fresh recording URL for a lead (GCS-backed, durable URL only)
+  // Get fresh recording URL for a lead (GCS-backed, signed URL)
   app.get("/api/leads/:id/recording-url", requireAuth, async (req, res) => {
     try {
       const { leads } = await import('@shared/schema');
@@ -13916,12 +13956,16 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      const existingCanonical = canonicalizeGcsRecordingUrl({
-        recordingS3Key: lead.recordingS3Key,
-        recordingUrl: lead.recordingUrl,
-      });
-      if (existingCanonical) {
-        return res.json({ url: existingCanonical, source: 'gcs', expiresIn: 'durable' });
+      // If we have a GCS key, generate a signed URL (7-day expiry)
+      if (lead.recordingS3Key) {
+        try {
+          const signedUrl = await getPresignedDownloadUrl(lead.recordingS3Key, 604800);
+          if (signedUrl && !signedUrl.startsWith('gcs-internal://')) {
+            return res.json({ url: signedUrl, source: 'gcs', expiresIn: 604800 });
+          }
+        } catch (e) {
+          console.warn(`[Recording URL] Signed URL generation failed for lead ${lead.id}, trying fallback`);
+        }
       }
       
       // No GCS recording key found in DB yet; try to store from source recording URL
@@ -13929,14 +13973,9 @@ export function registerRoutes(app: Express) {
         console.log(`[Recording URL] Attempting to store recording in GCS for lead ${lead.id}...`);
         const result = await getRecordingUrl(lead.id, lead.recordingUrl);
 
-        const canonicalAfterStore = canonicalizeGcsRecordingUrl({
-          recordingS3Key: lead.recordingS3Key,
-          recordingUrl: result.url,
-        });
-
-        if (canonicalAfterStore) {
+        if (result.url && !result.url.startsWith('gcs-internal://')) {
           console.log(`[Recording URL] Successfully stored and serving from GCS for lead ${lead.id}`);
-          return res.json({ url: canonicalAfterStore, source: 'gcs', expiresIn: 'durable' });
+          return res.json({ url: result.url, source: 'gcs', expiresIn: 604800 });
         }
       }
 
@@ -13945,21 +13984,18 @@ export function registerRoutes(app: Express) {
         const refreshed = await syncRecordingForLead(req.params.id).catch(() => false);
         if (refreshed) {
           const [updatedLead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
-          const canonicalAfterSync = canonicalizeGcsRecordingUrl({
-            recordingS3Key: updatedLead?.recordingS3Key,
-            recordingUrl: updatedLead?.recordingUrl,
-          });
-          if (canonicalAfterSync) {
-            return res.json({ url: canonicalAfterSync, source: 'gcs', expiresIn: 'durable' });
+          if (updatedLead?.recordingS3Key) {
+            try {
+              const signedUrl = await getPresignedDownloadUrl(updatedLead.recordingS3Key, 604800);
+              if (signedUrl && !signedUrl.startsWith('gcs-internal://')) {
+                return res.json({ url: signedUrl, source: 'gcs', expiresIn: 604800 });
+              }
+            } catch (e) { /* fall through */ }
           }
           if (updatedLead?.recordingUrl) {
             const result = await getRecordingUrl(lead.id, updatedLead.recordingUrl);
-            const canonicalFromStoredResult = canonicalizeGcsRecordingUrl({
-              recordingS3Key: updatedLead.recordingS3Key,
-              recordingUrl: result.url,
-            });
-            if (canonicalFromStoredResult) {
-              return res.json({ url: canonicalFromStoredResult, source: 'gcs', expiresIn: 'durable' });
+            if (result.url && !result.url.startsWith('gcs-internal://')) {
+              return res.json({ url: result.url, source: 'gcs', expiresIn: 604800 });
             }
           }
         }
@@ -15897,7 +15933,7 @@ Provide JSON response with:
         // ===== HELPER: Transform a single session row into conversation format =====
         const transformSession = (session: typeof sessions[0]) => {
           const normalized = normalizeTranscript(session.transcript);
-          const canonicalRecordingUrl = canonicalizeGcsRecordingUrl({
+          const canonicalRecordingUrl = resolvePlayableRecordingUrl({
             recordingS3Key: session.recordingS3Key,
             recordingUrl: session.recordingUrl,
           });
@@ -16108,7 +16144,7 @@ Provide JSON response with:
             detectedIssues: testCall.detectedIssues as any[] || undefined,
             callSummary: testCall.callSummary || undefined,
             testResult: testCall.testResult || undefined,
-            recordingUrl: canonicalizeGcsRecordingUrl({ recordingUrl: testCall.recordingUrl }) || undefined,
+            recordingUrl: resolvePlayableRecordingUrl({ recordingUrl: testCall.recordingUrl }) || undefined,
             createdAt: testCall.createdAt?.toISOString() || new Date().toISOString(),
             isTestCall: true,
           });

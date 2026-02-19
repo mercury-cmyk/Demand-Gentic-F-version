@@ -46,12 +46,79 @@ function getQuarterWindow(quarter?: number, year?: number) {
   };
 }
 
-function buildPlan(input: z.infer<typeof generateQuarterlyPlanSchema>, campaignContext?: { id: string; name: string; type: string }) {
+function normalizeListFromText(value?: string | null): string[] {
+  if (!value) return [];
+  return value
+    .split(/\r?\n|;|\|/g)
+    .map((item) => item.replace(/^[-*•\d.\s]+/, '').trim())
+    .filter(Boolean);
+}
+
+function uniqueOrdered(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    if (!value) continue;
+    const normalized = value.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(normalized);
+  }
+  return output;
+}
+
+function buildProductMessages(
+  valueProposition: string,
+  campaignProductInfo?: string | null,
+  campaignTalkingPoints?: string[] | null,
+): string[] {
+  const productInfoPoints = normalizeListFromText(campaignProductInfo);
+  const valuePropChunks = normalizeListFromText(valueProposition);
+  const pointsFromValueProp = valuePropChunks.length > 0 ? valuePropChunks : [valueProposition.trim()];
+
+  return uniqueOrdered([
+    ...productInfoPoints,
+    ...(campaignTalkingPoints || []),
+    ...pointsFromValueProp,
+  ]).slice(0, 8);
+}
+
+function buildPlan(
+  input: z.infer<typeof generateQuarterlyPlanSchema>,
+  campaignContext?: {
+    id: string;
+    name: string;
+    type: string;
+    campaignObjective?: string | null;
+    productServiceInfo?: string | null;
+    talkingPoints?: string[] | null;
+    successCriteria?: string | null;
+  },
+) {
   const quarterWindow = getQuarterWindow(input.quarter, input.year);
   const marketFocus = input.targetMarket;
   const campaignName = input.campaignName || campaignContext?.name || `Quarterly Campaign - ${quarterWindow.label}`;
+  const primaryGoal = campaignContext?.campaignObjective || input.primaryGoal;
+  const productMessages = buildProductMessages(
+    input.valueProposition,
+    campaignContext?.productServiceInfo,
+    campaignContext?.talkingPoints ?? null,
+  );
 
-  const coreNarrative = `${input.valueProposition}. We execute with ${TAGLINE.primary} for ${marketFocus}.`;
+  const proofPoints = uniqueOrdered([
+    ...productMessages.slice(0, 4),
+    'Reasoning-first engagement model',
+    'Multi-channel orchestration across voice, email, and automation',
+    'Compliance-first execution with full memory of interactions',
+  ]).slice(0, 7);
+
+  const successCriteria =
+    campaignContext?.successCriteria ||
+    `Qualified meetings generated with buying-team alignment by end of ${quarterWindow.label}`;
+
+  const coreNarrative = `${input.valueProposition}. We execute with ${TAGLINE.primary} for ${marketFocus} using product-led messaging tied to measurable commercial outcomes.`;
 
   return {
     meta: {
@@ -70,6 +137,7 @@ function buildPlan(input: z.infer<typeof generateQuarterlyPlanSchema>, campaignC
         name: campaignName,
         type: campaignContext?.type ?? null,
       },
+      productSignalsCount: productMessages.length,
     },
     brandPositioningAlignment: {
       brand: BRAND.company.parentBrand,
@@ -82,12 +150,8 @@ function buildPlan(input: z.infer<typeof generateQuarterlyPlanSchema>, campaignC
     messagingArchitecture: {
       coreNarrative,
       messageHouse: {
-        heroMessage: input.primaryGoal,
-        proofPoints: [
-          'Reasoning-first engagement model',
-          'Multi-channel orchestration across voice, email, and automation',
-          'Compliance-first execution with full memory of interactions',
-        ],
+        heroMessage: primaryGoal,
+        proofPoints,
         challengeFraming: input.keyChallenges,
       },
       personaAngles: [
@@ -105,10 +169,22 @@ function buildPlan(input: z.infer<typeof generateQuarterlyPlanSchema>, campaignC
     },
     keyThemes: [
       `Problem-first demand for ${marketFocus}`,
+      ...(productMessages.length > 0 ? [`Product-led value narrative: ${productMessages[0]}`] : []),
       'Reasoning-led outbound with compliance by design',
       'Pipeline quality over activity vanity metrics',
       'Cross-channel consistency from first touch to booked meeting',
-    ],
+    ].slice(0, 5),
+    productPositioning: {
+      summary:
+        campaignContext?.productServiceInfo ||
+        `Position ${BRAND.company.productName} as the operational system for consistent demand generation outcomes.`,
+      keyProductMessages: productMessages,
+      differentiationFocus: [
+        'Unified channel orchestration across outbound motions',
+        'Reasoning-first execution over static script-based outreach',
+        'Governed approval flow with campaign-level consistency controls',
+      ],
+    },
     emailCampaignStructures: [
       {
         format: 'Problem-led sequence',
@@ -145,6 +221,7 @@ function buildPlan(input: z.infer<typeof generateQuarterlyPlanSchema>, campaignC
         'How are you currently addressing this operational gap?',
         'What happens if this remains unresolved next quarter?',
         'Which stakeholders are involved in evaluating alternatives?',
+        ...(productMessages[0] ? [`How are you currently solving around "${productMessages[0]}" today?`] : []),
       ],
       objectionPlaybookThemes: ['Status quo comfort', 'Timing hesitation', 'Resource constraints'],
       callbackAndFollowUp: 'Every call disposition maps to next best action and sequence branch.',
@@ -163,6 +240,7 @@ function buildPlan(input: z.infer<typeof generateQuarterlyPlanSchema>, campaignC
       email: 'Lead with role-specific problem framing, keep CTA singular, test angle not just subject line.',
       phone: 'Use concise value hypotheses and consistent objection coding for optimization.',
       automation: 'Prioritize intent-driven branching over fixed linear cadences.',
+      social: 'Align company and individual narrative with product outcomes and buyer pains for the quarter.',
       crossChannel: 'Maintain one narrative spine and one disposition taxonomy across all channels.',
     },
     socialMessagingPack: {
@@ -198,6 +276,20 @@ function buildPlan(input: z.infer<typeof generateQuarterlyPlanSchema>, campaignC
       lifecycle: ['draft', 'internal_review', 'approved', 'launch_ready', 'active', 'optimizing'],
       approvalRequired: true,
     },
+    outcomeModel: {
+      primarySuccessCriteria: successCriteria,
+      secondarySignals: [
+        'Higher meeting acceptance rate from target personas',
+        'Improved qualified-conversation to meeting conversion',
+        'Consistent talking-point coverage across channels',
+      ],
+    },
+    campaignSourceContext: {
+      campaignObjective: campaignContext?.campaignObjective || null,
+      productServiceInfo: campaignContext?.productServiceInfo || null,
+      inheritedTalkingPoints: campaignContext?.talkingPoints || [],
+      inheritedSuccessCriteria: campaignContext?.successCriteria || null,
+    },
   };
 }
 
@@ -207,10 +299,28 @@ router.post('/plans/generate', async (req: Request, res: Response) => {
   try {
     const input = generateQuarterlyPlanSchema.parse(req.body);
 
-    let campaignContext: { id: string; name: string; type: string } | undefined;
+    let campaignContext:
+      | {
+          id: string;
+          name: string;
+          type: string;
+          campaignObjective?: string | null;
+          productServiceInfo?: string | null;
+          talkingPoints?: string[] | null;
+          successCriteria?: string | null;
+        }
+      | undefined;
     if (input.campaignId) {
       const [campaign] = await db
-        .select({ id: campaigns.id, name: campaigns.name, type: campaigns.type })
+        .select({
+          id: campaigns.id,
+          name: campaigns.name,
+          type: campaigns.type,
+          campaignObjective: campaigns.campaignObjective,
+          productServiceInfo: campaigns.productServiceInfo,
+          talkingPoints: campaigns.talkingPoints,
+          successCriteria: campaigns.successCriteria,
+        })
         .from(campaigns)
         .where(eq(campaigns.id, input.campaignId))
         .limit(1);
@@ -325,10 +435,39 @@ router.post('/campaigns/:campaignId/plan', async (req: Request, res: Response) =
         plan?.messagingArchitecture?.messageHouse?.heroMessage ||
         plan?.meta?.window?.label ||
         null;
-      baseUpdate.successCriteria = 'Aligned execution across email, phone, and automation with approved narrative consistency';
-      baseUpdate.talkingPoints = Array.isArray(plan?.keyThemes)
-        ? plan.keyThemes
-        : null;
+      baseUpdate.successCriteria =
+        plan?.outcomeModel?.primarySuccessCriteria ||
+        'Aligned execution across email, phone, and automation with approved narrative consistency';
+      baseUpdate.talkingPoints = Array.isArray(plan?.productPositioning?.keyProductMessages)
+        ? plan.productPositioning.keyProductMessages
+        : Array.isArray(plan?.keyThemes)
+          ? plan.keyThemes
+          : null;
+      baseUpdate.productServiceInfo =
+        plan?.productPositioning?.summary ||
+        (Array.isArray(plan?.productPositioning?.keyProductMessages)
+          ? plan.productPositioning.keyProductMessages.slice(0, 4).join('; ')
+          : null);
+    }
+
+    if (syncCampaignFields && baseUpdate.productServiceInfo && typeof baseUpdate.productServiceInfo !== 'string') {
+      baseUpdate.productServiceInfo = JSON.stringify(baseUpdate.productServiceInfo);
+    }
+
+    if (syncCampaignFields && Array.isArray(baseUpdate.talkingPoints)) {
+      baseUpdate.talkingPoints = baseUpdate.talkingPoints.slice(0, 12);
+    }
+
+    if (syncCampaignFields && typeof baseUpdate.campaignObjective === 'string') {
+      baseUpdate.campaignObjective = baseUpdate.campaignObjective.slice(0, 1200);
+    }
+
+    if (syncCampaignFields && typeof baseUpdate.successCriteria === 'string') {
+      baseUpdate.successCriteria = baseUpdate.successCriteria.slice(0, 1200);
+    }
+
+    if (syncCampaignFields && typeof baseUpdate.productServiceInfo === 'string') {
+      baseUpdate.productServiceInfo = baseUpdate.productServiceInfo.slice(0, 4000);
     }
 
     await db.update(campaigns).set(baseUpdate).where(eq(campaigns.id, campaignId));
@@ -337,6 +476,14 @@ router.post('/campaigns/:campaignId/plan', async (req: Request, res: Response) =
       success: true,
       message: 'Campaign plan saved successfully',
       campaignId,
+      syncedFields: syncCampaignFields
+        ? {
+            campaignObjective: baseUpdate.campaignObjective ?? null,
+            successCriteria: baseUpdate.successCriteria ?? null,
+            hasProductServiceInfo: Boolean(baseUpdate.productServiceInfo),
+            talkingPointsCount: Array.isArray(baseUpdate.talkingPoints) ? baseUpdate.talkingPoints.length : 0,
+          }
+        : null,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

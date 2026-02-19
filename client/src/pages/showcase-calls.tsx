@@ -95,6 +95,7 @@ interface CallDetails {
   fullTranscript: string | null;
   playbackUrl: string | null;
   downloadUrl: string | null;
+  streamUrl?: string | null;
   hasRecording: boolean;
   durationSec: number | null;
   startedAt: string | null;
@@ -656,9 +657,9 @@ export default function ShowcaseCallsPage() {
                       <CardTitle className="text-sm">Recording</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      {detailData.downloadUrl ? (
+                      {detailData.downloadUrl || detailData.streamUrl || detailData.recordingUrl ? (
                         <a
-                          href={detailData.downloadUrl}
+                          href={(detailData.downloadUrl || detailData.streamUrl || detailData.recordingUrl) as string}
                           target="_blank"
                           rel="noopener noreferrer"
                           download
@@ -763,4 +764,3 @@ export default function ShowcaseCallsPage() {
     </div>
   );
 }
-

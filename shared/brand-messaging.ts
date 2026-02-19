@@ -111,7 +111,7 @@ export const PILLARS = [
 export const STATS = {
   yearsExperience: '11+',
   leadsGenerated: '2M+',
-  enterpriseClients: '500+',
+  enterpriseClients: '50+',
   contentEngines: '7',
   industriesServed: '40+',
   verifiedContacts: '70M+',
