@@ -859,6 +859,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   // For outbound calls, receiving audio means the call was answered
   let callAnswered: boolean = false;
   let openingMessageSent: boolean = false;
+  let openingMessageSentAt: number | null = null;
   let incomingAudioCount: number = 0;
   const AUDIO_CHUNKS_BEFORE_SPEAKING = 3; // Wait for a few audio chunks to confirm call is connected
 
@@ -1187,6 +1188,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     }
 
     openingMessageSent = true;
+    openingMessageSentAt = Date.now();
     logDiagnosticState('opening_sent');
 
     // Build the canonical opening message with all contact variables
@@ -1849,6 +1851,7 @@ Instructions:
               // - Audio chunks received > 400 (indicates real back-and-forth)
               const callDurationSec = (Date.now() - metrics.startTime) / 1000;
               const hadMeaningfulConversation = callDurationSec > 45 || metrics.audioChunksSent > 400;
+              const openingNotDelivered = callAnswered && !openingMessageSent && callDurationSec < 20;
 
               // Default to 'no_answer' which allows retry (valid canonical: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data)
               let fallbackDisposition: CanonicalDisposition = 'no_answer';
@@ -1875,6 +1878,9 @@ Instructions:
               } else if (!callAnswered) {
                 fallbackDisposition = 'no_answer';
                 fallbackReason = 'Call was not answered';
+              } else if (openingNotDelivered) {
+                fallbackDisposition = 'no_answer';
+                fallbackReason = `Opening not delivered before early disconnect (${Math.round(callDurationSec)}s)`;
               } else if (incomingAudioCount < AUDIO_CHUNKS_BEFORE_SPEAKING) {
                 fallbackDisposition = 'no_answer';
                 fallbackReason = 'Minimal audio received';
@@ -3272,6 +3278,7 @@ Instructions:
         // Determine fallback disposition based on call state and metrics
         const callDurationSec = (Date.now() - metrics.startTime) / 1000;
         const hadMeaningfulConversation = callDurationSec > 60 || metrics.audioChunksSent > 500;
+        const openingNotDelivered = callAnswered && !openingMessageSent && callDurationSec < 20;
 
         let fallbackDisposition: CanonicalDisposition = 'no_answer';
         let fallbackReason = `WebSocket error: ${error.code || error.message}`;
@@ -3284,6 +3291,9 @@ Instructions:
         } else if (amdResult && (amdResult.result.startsWith('machine') || amdResult.result === 'fax')) {
           fallbackDisposition = 'voicemail';
           fallbackReason = `AMD voicemail + connection error`;
+        } else if (openingNotDelivered) {
+          fallbackDisposition = 'no_answer';
+          fallbackReason = `Connection error before opening delivery (${Math.round(callDurationSec)}s)`;
         }
 
         console.log(`[Gemini Live] 📊 Error fallback disposition: ${fallbackDisposition} - ${fallbackReason}`);
@@ -3342,6 +3352,7 @@ Instructions:
         // CRITICAL: A call with significant activity should be marked 'done' not re-queued
         const callDurationSec = (Date.now() - metrics.startTime) / 1000;
         const hadMeaningfulConversation = callDurationSec > 60 || metrics.audioChunksSent > 500;
+        const openingNotDelivered = callAnswered && !openingMessageSent && callDurationSec < 20;
 
         let fallbackDisposition: CanonicalDisposition = 'no_answer';
         let fallbackReason = 'Connection closed without disposition';
@@ -3360,6 +3371,9 @@ Instructions:
         } else if (!callAnswered) {
           fallbackDisposition = 'no_answer';
           fallbackReason = 'Call was not answered';
+        } else if (openingNotDelivered) {
+          fallbackDisposition = 'no_answer';
+          fallbackReason = `Connection closed before opening delivery (${Math.round(callDurationSec)}s)`;
         } else if (hadMeaningfulConversation) {
           // CRITICAL FIX: Meaningful conversation should be 'done' even without AMD
           fallbackDisposition = 'not_interested';

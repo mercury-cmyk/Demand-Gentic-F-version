@@ -118,6 +118,7 @@ import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import ClientPortalSimulations from "@/pages/client-portal-simulations";
 import ClientPortalVoiceSimulation from "@/pages/client-portal-voice-simulation";
 import ClientPortalEmailSimulation from "@/pages/client-portal-email-simulation";
+import ClientPortalOrderDetail from "@/pages/client-portal-order-detail";
 import ClientServices from "@/pages/client-portal/client-services";
 import ClientPortalPreviewStudio from "@/pages/client-portal-preview-studio";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
@@ -734,6 +735,11 @@ function Router() {
       <Route path="/client-portal/email-campaigns">
         <ClientPortalProtectedRoute>
           <ClientPortalEmailCampaigns />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/orders/:id">
+        <ClientPortalProtectedRoute>
+          <ClientPortalOrderDetail />
         </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/create-campaign">

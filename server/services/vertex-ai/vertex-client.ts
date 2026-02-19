@@ -58,6 +58,33 @@ const defaultConfig: VertexAIConfig = {
 let vertexAIInstance: VertexAI | null = null;
 let currentConfig: VertexAIConfig = defaultConfig;
 
+// Deep Think circuit breaker (prevents repeated 429 storms)
+const DEEP_THINK_COOLDOWN_MS = Math.max(10000, Number(process.env.VERTEX_DEEP_THINK_COOLDOWN_MS || 120000));
+let deepThinkCooldownUntil = 0;
+
+function isRateLimitError(error: any): boolean {
+  const msg = error?.message || error?.toString?.() || "";
+  const code = error?.code;
+  return (
+    code === 8 ||
+    code === 429 ||
+    msg.includes("RESOURCE_EXHAUSTED") ||
+    msg.includes("Rate exceeded") ||
+    msg.includes("Quota exceeded") ||
+    msg.includes("429") ||
+    msg.includes("Too Many Requests")
+  );
+}
+
+function getDeepThinkCooldownRemainingMs(): number {
+  return Math.max(0, deepThinkCooldownUntil - Date.now());
+}
+
+function openDeepThinkCooldown(reason: string): void {
+  deepThinkCooldownUntil = Date.now() + DEEP_THINK_COOLDOWN_MS;
+  console.warn(`[VertexAI] Deep Think cooldown enabled for ${Math.round(DEEP_THINK_COOLDOWN_MS / 1000)}s (${reason}).`);
+}
+
 /**
  * Initialize or get the Vertex AI client
  */
@@ -207,16 +234,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
     try {
       return await fn();
     } catch (error: any) {
-      const msg = error?.message || error?.toString?.() || "";
-      const code = error?.code;
-      const isRetryable =
-        code === 8 ||
-        code === 429 ||
-        msg.includes("RESOURCE_EXHAUSTED") ||
-        msg.includes("Rate exceeded") ||
-        msg.includes("Quota exceeded") ||
-        msg.includes("429") ||
-        msg.includes("Too Many Requests");
+      const isRetryable = isRateLimitError(error);
 
       if (!isRetryable || attempt === maxRetries) {
         throw error;
@@ -431,6 +449,28 @@ export async function reason(
   const modelId = currentConfig.models.reasoning;
   const isGemini3 = modelId.includes("gemini-3");
 
+  const cooldownRemainingMs = getDeepThinkCooldownRemainingMs();
+  if (cooldownRemainingMs > 0) {
+    console.warn(`[VertexAI] Deep Think cooldown active (${Math.ceil(cooldownRemainingMs / 1000)}s remaining). Using standard reasoning model.`);
+    const model = getReasoningModel();
+    const result = await withRetry(() =>
+      model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: options.temperature ?? 0.3,
+          maxOutputTokens: options.maxTokens ?? 16384,
+          topP: options.topP ?? 0.95,
+        },
+      })
+    );
+    const response = result.response;
+    const fullText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const thinkingMatch = fullText.match(/<thinking>([\s\S]*?)<\/thinking>/);
+    const thinking = thinkingMatch ? thinkingMatch[1].trim() : "";
+    const answer = fullText.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
+    return { thinking, answer };
+  }
+
   // For older thinking models (gemini-2.x), use the SDK path
   if (!isGemini3) {
     const model = getReasoningModel();
@@ -527,6 +567,12 @@ export async function deepAnalyzeJSON<T>(
   const modelId = currentConfig.models.reasoning;
   const isGemini3 = modelId.includes("gemini-3");
 
+  const cooldownRemainingMs = getDeepThinkCooldownRemainingMs();
+  if (cooldownRemainingMs > 0) {
+    console.warn(`[VertexAI] Deep Think cooldown active (${Math.ceil(cooldownRemainingMs / 1000)}s remaining). Using Gemini Flash JSON fallback.`);
+    return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
+  }
+
   // Fallback to standard generateJSON if not on Gemini 3
   if (!isGemini3) {
     return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
@@ -570,6 +616,9 @@ export async function deepAnalyzeJSON<T>(
       return res.json();
     });
   } catch (error: any) {
+    if (isRateLimitError(error)) {
+      openDeepThinkCooldown('rate-limit/429');
+    }
     console.warn(`[VertexAI] Deep Think request failed (${error.message}). Falling back to standard Gemini Flash model.`);
     return generateJSON<T>(prompt, { ...options, responseFormat: "json" });
   }

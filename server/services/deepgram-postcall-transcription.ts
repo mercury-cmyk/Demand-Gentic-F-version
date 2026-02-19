@@ -181,13 +181,16 @@ export async function submitStructuredTranscription(
   let lastError: unknown;
 
   const attempts: string[] = [];
-  if (audioUrl) attempts.push(audioUrl);
 
   const inferredS3Key = options?.recordingS3Key || extractStorageKeyFromUrl(audioUrl);
 
   const s3RefreshedUrl = await getRefreshedUrlFromS3(inferredS3Key);
   if (s3RefreshedUrl && !attempts.includes(s3RefreshedUrl)) {
     attempts.push(s3RefreshedUrl);
+  }
+
+  if (audioUrl && !attempts.includes(audioUrl)) {
+    attempts.push(audioUrl);
   }
 
   const telnyxRefreshedUrl = await getRefreshedUrlFromTelnyx(options?.telnyxCallId);

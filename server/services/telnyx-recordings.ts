@@ -25,6 +25,10 @@ interface TelnyxRecording {
   status: 'completed' | 'processing' | 'partial';
 }
 
+function looksLikeUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 /**
  * Sleep helper for retry delays
  */
@@ -110,15 +114,18 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
         );
     }
 
-    // Attempt 3: call_session_id
+    // Attempt 3: call_session_id (only valid for UUID-like session IDs)
     if (!recordingsResponse.ok || (await isResponseEmpty(recordingsResponse))) {
-        // Only try session ID if the ID looks like a UUID (v2 style), not v3
-        // Actually, just try it.
-        console.log(`[Telnyx] No recordings found with call_leg_id, trying call_session_id: ${callControlId}`);
-        recordingsResponse = await fetchWithRetry(
-            `${TELNYX_API_BASE}/recordings?filter[call_session_id]=${encodeURIComponent(callControlId)}`,
-            { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
-        );
+      if (!looksLikeUuid(callControlId)) {
+        console.log(`[Telnyx] Skipping call_session_id lookup (non-UUID identifier): ${callControlId}`);
+        return null;
+      }
+
+      console.log(`[Telnyx] No recordings found with call_leg_id, trying call_session_id: ${callControlId}`);
+      recordingsResponse = await fetchWithRetry(
+        `${TELNYX_API_BASE}/recordings?filter[call_session_id]=${encodeURIComponent(callControlId)}`,
+        { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
+      );
     }
 
     if (recordingsResponse.status === 404) {
