@@ -350,6 +350,33 @@ function getPhoneTypeLabel(phoneType: 'direct' | 'mobile' | 'hq' | null): string
   }
 }
 
+function normalizeDispositionForSubmit(rawDisposition: string): string {
+  const normalized = rawDisposition.trim().toLowerCase();
+  const map: Record<string, string> = {
+    'callback-requested': 'callback-requested',
+    'callback_requested': 'callback-requested',
+    'call back': 'callback-requested',
+    'call_back': 'callback-requested',
+    'not_interested': 'not_interested',
+    'not-interested': 'not_interested',
+    'dnc-request': 'dnc-request',
+    'do_not_call': 'dnc-request',
+    'do-not-call': 'dnc-request',
+    'invalid_data': 'invalid_data',
+    'invalid-data': 'invalid_data',
+    'no_answer': 'no-answer',
+    'no-answer': 'no-answer',
+    'wrong_number': 'wrong_number',
+    'wrong-number': 'wrong_number',
+    'busy': 'busy',
+    'voicemail': 'voicemail',
+    'qualified': 'qualified',
+    'lead': 'lead',
+  };
+
+  return map[normalized] || normalized;
+}
+
 // Format phone number for human-readable display using libphonenumber-js
 // e.g., "+441908802874" → "+44 1908 802874", "+12025551234" → "+1 202 555 1234"
 function formatPhoneForDisplay(phone: string | null, country?: string | null): string {
@@ -428,6 +455,8 @@ export default function AgentConsolePage() {
   const [notes, setNotes] = useState('');
   const [qualificationData, setQualificationData] = useState<any>({});
   const [dispositionSaved, setDispositionSaved] = useState(false);
+  const [dispositionSubmitState, setDispositionSubmitState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [dispositionSubmitMessage, setDispositionSubmitMessage] = useState('');
   const [callMadeToContact, setCallMadeToContact] = useState(false);
   const [showKeypad, setShowKeypad] = useState(false);
 
@@ -1275,11 +1304,24 @@ export default function AgentConsolePage() {
   // Reset state when contact changes
   useEffect(() => {
     setDispositionSaved(false);
+    setDispositionSubmitState('idle');
+    setDispositionSubmitMessage('');
     setCallMadeToContact(false);
     setDisposition('');
     setNotes('');
     setQualificationData({});
   }, [currentQueueItem?.id]);
+
+  useEffect(() => {
+    if (dispositionSubmitState !== 'success') return;
+
+    const timer = setTimeout(() => {
+      setDispositionSubmitState('idle');
+      setDispositionSubmitMessage('');
+    }, 3500);
+
+    return () => clearTimeout(timer);
+  }, [dispositionSubmitState]);
 
   // Mutation for creating call attempt when call connects
   const createCallAttemptMutation = useMutation({
@@ -1305,11 +1347,18 @@ export default function AgentConsolePage() {
     mutationFn: async (dispositionData: any) => {
       return await apiRequest('POST', '/api/calls/disposition', dispositionData);
     },
+    onMutate: () => {
+      setDispositionSubmitState('saving');
+      setDispositionSubmitMessage('Saving disposition...');
+    },
     onSuccess: () => {
       toast({
         title: "Disposition saved",
         description: "Call disposition has been recorded successfully.",
       });
+
+      setDispositionSubmitState('success');
+      setDispositionSubmitMessage('Disposition saved. Loading next contact...');
 
       setDispositionSaved(true);
       setDisposition('');
@@ -1324,6 +1373,8 @@ export default function AgentConsolePage() {
       refetchQueue();
     },
     onError: (error: any) => {
+      setDispositionSubmitState('error');
+      setDispositionSubmitMessage(error?.message || 'Failed to save disposition. Please try again.');
       toast({
         title: "Error",
         description: error.message || "Failed to save disposition",
@@ -1461,8 +1512,10 @@ export default function AgentConsolePage() {
     hangup();
   };
 
-  const handleSaveDisposition = () => {
+  const handleSaveDisposition = async () => {
     if (!disposition) {
+      setDispositionSubmitState('error');
+      setDispositionSubmitMessage('Please select a disposition before saving.');
       toast({
         title: "Disposition required",
         description: "Please select a call disposition before proceeding.",
@@ -1472,6 +1525,8 @@ export default function AgentConsolePage() {
     }
 
     if (!currentQueueItem) {
+      setDispositionSubmitState('error');
+      setDispositionSubmitMessage('No contact selected. Please refresh and try again.');
       toast({
         title: "Error",
         description: "No contact selected",
@@ -1480,17 +1535,29 @@ export default function AgentConsolePage() {
       return;
     }
 
-    hangup();
+    if (saveDispositionMutation.isPending) {
+      return;
+    }
+
+    setDispositionSubmitState('idle');
+    setDispositionSubmitMessage('');
+
+    const dispositionForSubmit = normalizeDispositionForSubmit(disposition);
+    const hasActiveCall = ['connecting', 'ringing', 'active', 'held'].includes(callStatus);
+
+    if (hasActiveCall) {
+      await hangup();
+    }
 
     saveDispositionMutation.mutate({
       queueItemId: currentQueueItem.id,
       campaignId: currentQueueItem.campaignId,
       contactId: switchedContact?.id || currentQueueItem.contactId, // Use switched contact if present
-      disposition,
+      disposition: dispositionForSubmit,
       duration: activeCallDuration,
       notes,
       qualificationData: Object.keys(qualificationData).length > 0 ? qualificationData : null,
-      callbackRequested: disposition === 'callback-requested',
+      callbackRequested: dispositionForSubmit === 'callback-requested',
       telnyxCallId: telnyxCallId || callControlId, // Prefer WebRTC call ID for recording lookup
       callControlId: callControlId, // Retain for fallback compatibility
       dialedNumber: dialedPhoneNumber, // Include dialed phone number for recording sync
@@ -1515,6 +1582,11 @@ export default function AgentConsolePage() {
   };
 
   const isCallActive = ['connecting', 'ringing', 'active', 'held'].includes(callStatus);
+
+  const displayContactName = switchedContact?.fullName || fullContactDetails?.fullName || currentQueueItem?.contactName || 'Unknown Contact';
+  const displayJobTitle = fullContactDetails?.jobTitle || contactDetails?.jobTitle || 'No title';
+  const displayCompanyName = fullContactDetails?.account?.name || currentQueueItem?.accountName || 'No company';
+  const displayEmail = fullContactDetails?.email || currentQueueItem?.contactEmail || contactDetails?.email || 'No email';
 
   const getStatusBadge = () => {
     if (!isConnected && !webrtcConnected) {
@@ -1638,7 +1710,7 @@ export default function AgentConsolePage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="min-h-screen lg:h-screen flex flex-col bg-background">
       {/* Hidden remote audio element for WebRTC calls - CRITICAL for audio playback */}
       <audio 
         id="remoteAudio"
@@ -1706,6 +1778,17 @@ export default function AgentConsolePage() {
               data-testid="button-refresh"
             >
               <RefreshCw className="h-4 w-4" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowAudioSettings(true)}
+              className="h-10 w-10 p-0 text-white hover:bg-white/10"
+              data-testid="button-audio-settings-mobile"
+              title="Audio Device Settings"
+            >
+              <Settings className="h-4 w-4" />
             </Button>
           </div>
 
@@ -1807,9 +1890,9 @@ export default function AgentConsolePage() {
       </div>
 
       {/* MAIN BODY GRID */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         {/* LEFT SIDEBAR: Queue - Modern Glass Design */}
-        <div className="w-full lg:w-64 xl:w-72 border-b lg:border-b-0 lg:border-r flex flex-col bg-gradient-to-b from-primary/5 to-card max-h-96 lg:max-h-none">
+        <div className="w-full lg:w-64 xl:w-72 border-b lg:border-b-0 lg:border-r flex flex-col bg-gradient-to-b from-primary/5 to-card max-h-[40vh] lg:max-h-none">
           <div className="p-4 border-b relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%)' }}>
             <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent"></div>
             <div className="relative">
@@ -1850,7 +1933,7 @@ export default function AgentConsolePage() {
           </div>
 
           {/* Queue List - No scrolling, fits viewport */}
-          <div className="flex-1 p-2 space-y-1 min-h-0">
+          <div className="flex-1 p-2 space-y-1 min-h-0 overflow-y-auto">
             {queueLoading ? (
               <div className="text-center py-8">
                 <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2 text-muted-foreground" />
@@ -1903,7 +1986,7 @@ export default function AgentConsolePage() {
         </div>
 
         {/* RIGHT MAIN SECTION (82% width) */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-y-auto lg:overflow-hidden">
           {/* CONTACT INFORMATION BAR - Premium Card Design - IMPROVED RESPONSIVE */}
           {currentQueueItem ? (
             <div className="border-b relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)' }}>
@@ -1922,12 +2005,12 @@ export default function AgentConsolePage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <h2 className="text-base font-semibold truncate" data-testid="text-contact-name">
-                      {currentQueueItem.contactName || 'Unknown Contact'}
+                      {displayContactName}
                     </h2>
                     <div className="flex items-center gap-1.5 text-xs text-white/90">
                       <Briefcase className="h-3 w-3 flex-shrink-0" />
                       <span className="truncate" data-testid="text-contact-title">
-                        {contactDetails?.jobTitle || 'No title'}
+                        {displayJobTitle}
                       </span>
                     </div>
                   </div>
@@ -1938,13 +2021,13 @@ export default function AgentConsolePage() {
                   <div className="flex items-center gap-1.5 text-xs text-white/90">
                     <Building2 className="h-3 w-3 flex-shrink-0" />
                     <span className="truncate" data-testid="text-contact-company">
-                      {currentQueueItem.accountName || 'No company'}
+                      {displayCompanyName}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 text-xs text-white/90">
                     <Mail className="h-3 w-3 flex-shrink-0" />
                     <span className="truncate" data-testid="text-contact-email">
-                      {currentQueueItem.contactEmail || contactDetails?.email || 'No email'}
+                      {displayEmail}
                     </span>
                   </div>
                 </div>
@@ -1997,7 +2080,7 @@ export default function AgentConsolePage() {
                     size="sm"
                     onClick={handleToggleMute}
                     disabled={!isCallActive}
-                    className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs"
+                    className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs flex-1 sm:flex-none"
                     data-testid="button-mute"
                   >
                     {isCurrentlyMuted ? (
@@ -2013,7 +2096,7 @@ export default function AgentConsolePage() {
                     size="sm"
                     onClick={handleToggleHold}
                     disabled={!isCallActive}
-                    className={`h-9 backdrop-blur-sm text-xs ${
+                    className={`h-9 backdrop-blur-sm text-xs flex-1 sm:flex-none ${
                       isCurrentlyHeld
                         ? 'bg-amber-500/30 hover:bg-amber-500/40 border-amber-400/50 text-amber-100'
                         : 'bg-white/20 hover:bg-white/30 border-white/30 text-white'
@@ -2033,7 +2116,7 @@ export default function AgentConsolePage() {
                     size="sm"
                     onClick={() => setShowTransferDialog(true)}
                     disabled={!isCallActive}
-                    className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs"
+                    className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs flex-1 sm:flex-none"
                     data-testid="button-transfer"
                   >
                     <PhoneForwarded className="h-3 w-3 mr-1" />
@@ -2045,7 +2128,7 @@ export default function AgentConsolePage() {
                       variant="outline"
                       size="sm"
                       onClick={() => setShowContactMismatch(true)}
-                      className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs"
+                      className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs flex-1 sm:flex-none"
                       data-testid="button-wrong-person"
                     >
                       <User className="h-3 w-3 mr-1" />
@@ -2053,7 +2136,7 @@ export default function AgentConsolePage() {
                     </Button>
                   )}
 
-                  <div className="flex-1 min-w-[120px]">
+                  <div className="w-full sm:flex-1 sm:min-w-[120px]">
                     {!isCallActive && callStatus !== 'wrap-up' && (
                       <Button
                         size="lg"
@@ -2138,7 +2221,7 @@ export default function AgentConsolePage() {
                 <div className="flex-1 flex flex-col gap-2 min-w-0">
                   {/* Contact Name */}
                   <h2 className="text-xl font-semibold truncate" data-testid="text-contact-name">
-                    {currentQueueItem.contactName || 'Unknown Contact'}
+                    {displayContactName}
                   </h2>
 
                   {/* Contact Details Grid */}
@@ -2147,14 +2230,14 @@ export default function AgentConsolePage() {
                     <div className="flex items-center gap-2 text-sm text-white/90">
                       <Briefcase className="h-3.5 w-3.5 flex-shrink-0" />
                       <span className="truncate" data-testid="text-contact-title">
-                        {contactDetails?.jobTitle || 'No title'}
+                        {displayJobTitle}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2 text-sm text-white/90">
                       <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
                       <span className="truncate" data-testid="text-contact-company">
-                        {currentQueueItem.accountName || 'No company'}
+                        {displayCompanyName}
                       </span>
                     </div>
 
@@ -2162,7 +2245,7 @@ export default function AgentConsolePage() {
                     <div className="flex items-center gap-2 text-sm text-white/90">
                       <Mail className="h-3.5 w-3.5 flex-shrink-0" />
                       <span className="truncate" data-testid="text-contact-email">
-                        {currentQueueItem.contactEmail || contactDetails?.email || 'No email'}
+                        {displayEmail}
                       </span>
                     </div>
 
@@ -2315,7 +2398,7 @@ export default function AgentConsolePage() {
           )}
 
           {/* BOTTOM SPLIT: Script | Dispositions - Premium Design */}
-          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
+          <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-h-0">
             {/* LEFT: SCRIPT PANEL - Clean & Readable */}
             <div className="w-full lg:flex-[2] border-b lg:border-b-0 lg:border-r bg-white dark:bg-background min-h-[300px] lg:min-h-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-auto">
@@ -2507,7 +2590,13 @@ export default function AgentConsolePage() {
                   <CardContent className="space-y-3 pt-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="disposition" className="text-xs">Outcome {callStatus === 'wrap-up' && '*'}</Label>
-                      <Select value={disposition} onValueChange={setDisposition}>
+                      <Select value={disposition} onValueChange={(value) => {
+                        setDisposition(value);
+                        if (dispositionSubmitState === 'error') {
+                          setDispositionSubmitState('idle');
+                          setDispositionSubmitMessage('');
+                        }
+                      }}>
                         <SelectTrigger id="disposition" className="h-9" data-testid="select-disposition">
                           <SelectValue placeholder="Select..." />
                         </SelectTrigger>
@@ -2598,6 +2687,21 @@ export default function AgentConsolePage() {
                       </Button>
                     )}
 
+                    {dispositionSubmitState !== 'idle' && dispositionSubmitMessage && (
+                      <div
+                        className={`rounded-lg px-3 py-2 text-xs font-medium border ${
+                          dispositionSubmitState === 'success'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : dispositionSubmitState === 'error'
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                        }`}
+                        data-testid="text-disposition-submit-status"
+                      >
+                        {dispositionSubmitMessage}
+                      </div>
+                    )}
+
                     {activeCallDuration > 0 && (
                       <div className="text-sm text-muted-foreground">
                         Call duration: {Math.floor(activeCallDuration / 60)}:{(activeCallDuration % 60).toString().padStart(2, '0')}
@@ -2636,16 +2740,17 @@ export default function AgentConsolePage() {
             setShowVerificationModal(false);
           }}
           onVerificationComplete={() => {
+            const dispositionForSubmit = normalizeDispositionForSubmit(disposition);
             // Only save disposition AFTER successful verification
             saveDispositionMutation.mutate({
               queueItemId: currentQueueItem.id,
               campaignId: currentQueueItem.campaignId,
               contactId: switchedContact?.id || currentQueueItem.contactId,
-              disposition,
+              disposition: dispositionForSubmit,
               duration: activeCallDuration,
               notes,
               qualificationData: Object.keys(qualificationData).length > 0 ? qualificationData : null,
-              callbackRequested: false,
+              callbackRequested: dispositionForSubmit === 'callback-requested',
               callControlId: callControlId,
               dialedNumber: dialedPhoneNumber,
               callAttemptId: activeCallAttemptId,
@@ -2655,9 +2760,9 @@ export default function AgentConsolePage() {
             });
           }}
           leadId={verificationLeadId}
-          contactName={switchedContact?.fullName || currentQueueItem.contactName}
-          companyName={currentQueueItem.accountName || ''}
-          jobTitle={contactDetails?.jobTitle}
+          contactName={displayContactName}
+          companyName={displayCompanyName || ''}
+          jobTitle={displayJobTitle}
           agentId={user.id}
           campaignId={currentQueueItem.campaignId}
           contactId={switchedContact?.id || currentQueueItem.contactId}

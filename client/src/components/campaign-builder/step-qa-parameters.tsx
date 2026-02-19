@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Bot, Sparkles, Target, CheckCircle2, ChevronRight, ListChecks } from "lucide-react";
+import { QueueIntelligenceConfig } from "@/components/campaigns/queue-intelligence-config";
 
 interface QAParametersStepProps {
   data: any;
@@ -14,7 +15,13 @@ interface QAParametersStepProps {
 }
 
 export function StepQAParameters({ data, onChange, onNext }: QAParametersStepProps) {
+  const [qaParameters, setQaParameters] = useState<any>(data.qaParameters || {});
   const [minScore, setMinScore] = useState(data.qaParameters?.min_score || 70);
+
+  useEffect(() => {
+    setQaParameters(data.qaParameters || {});
+    setMinScore(data.qaParameters?.min_score || 70);
+  }, [data.qaParameters]);
 
   // Get campaign context from previous steps
   const campaignObjective = data.campaignObjective || "";
@@ -24,12 +31,15 @@ export function StepQAParameters({ data, onChange, onNext }: QAParametersStepPro
   const successCriteria = data.successCriteria || "";
 
   const handleNext = () => {
+    const mergedQa = {
+      ...(qaParameters || {}),
+      min_score: minScore,
+      use_campaign_context: true,
+    };
+
     onNext({
       ...data,
-      qaParameters: {
-        min_score: minScore,
-        use_campaign_context: true,
-      },
+      qaParameters: mergedQa,
     });
   };
 
@@ -150,6 +160,17 @@ export function StepQAParameters({ data, onChange, onNext }: QAParametersStepPro
           )}
         </CardContent>
       </Card>
+
+      <QueueIntelligenceConfig
+        qaParameters={qaParameters}
+        onChange={(nextQa) => {
+          setQaParameters(nextQa);
+          onChange({
+            ...data,
+            qaParameters: nextQa,
+          });
+        }}
+      />
 
       {/* Qualification Threshold */}
       <Card>

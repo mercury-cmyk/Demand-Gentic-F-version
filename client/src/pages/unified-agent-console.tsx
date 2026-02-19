@@ -364,7 +364,7 @@ export default function UnifiedAgentConsolePage() {
   const recycleEligible = dashboardStats?.recycleJobs.find(r => r.status === 'eligible')?.count || 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-1 sm:px-0">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Unified Agent Console</h1>
@@ -372,9 +372,9 @@ export default function UnifiedAgentConsolePage() {
             Manage AI and human agents in a unified queue with shared governance
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-            <SelectTrigger className="w-[200px]" data-testid="select-campaign-filter">
+            <SelectTrigger className="w-full sm:w-[200px]" data-testid="select-campaign-filter">
               <SelectValue placeholder="All Campaigns" />
             </SelectTrigger>
             <SelectContent>
@@ -429,24 +429,24 @@ export default function UnifiedAgentConsolePage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview" data-testid="tab-overview">
+        <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
+          <TabsTrigger value="overview" className="shrink-0" data-testid="tab-overview">
             <BarChart3 className="h-4 w-4 mr-2" />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="qc-queue" data-testid="tab-qc-queue">
+          <TabsTrigger value="qc-queue" className="shrink-0" data-testid="tab-qc-queue">
             <ClipboardList className="h-4 w-4 mr-2" />
             QC Queue
           </TabsTrigger>
-          <TabsTrigger value="recycle" data-testid="tab-recycle">
+          <TabsTrigger value="recycle" className="shrink-0" data-testid="tab-recycle">
             <RefreshCw className="h-4 w-4 mr-2" />
             Recycle Jobs
           </TabsTrigger>
-          <TabsTrigger value="governance" data-testid="tab-governance">
+          <TabsTrigger value="governance" className="shrink-0" data-testid="tab-governance">
             <Shield className="h-4 w-4 mr-2" />
             Governance Log
           </TabsTrigger>
-          <TabsTrigger value="rules" data-testid="tab-rules">
+          <TabsTrigger value="rules" className="shrink-0" data-testid="tab-rules">
             <Settings2 className="h-4 w-4 mr-2" />
             Disposition Rules
           </TabsTrigger>
@@ -520,7 +520,7 @@ export default function UnifiedAgentConsolePage() {
                 </div>
               ) : (
                 <ScrollArea className="h-[400px]">
-                  <Table>
+                  <Table className="min-w-[980px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Campaign</TableHead>
@@ -585,7 +585,7 @@ export default function UnifiedAgentConsolePage() {
                 </div>
               ) : (
                 <ScrollArea className="h-[400px]">
-                  <Table>
+                  <Table className="min-w-[860px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Campaign</TableHead>
@@ -643,7 +643,7 @@ export default function UnifiedAgentConsolePage() {
                 </div>
               ) : (
                 <ScrollArea className="h-[400px]">
-                  <Table>
+                  <Table className="min-w-[980px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Action</TableHead>
@@ -717,7 +717,7 @@ export default function UnifiedAgentConsolePage() {
                 </div>
               ) : (
                 <ScrollArea className="h-[400px]">
-                  <Table>
+                  <Table className="min-w-[860px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Name</TableHead>

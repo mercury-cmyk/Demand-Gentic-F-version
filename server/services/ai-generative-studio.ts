@@ -31,12 +31,32 @@ class AiIntegrationConfigError extends Error {
   }
 }
 
+const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+
 const openaiApiKey =
   process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-const openaiBaseUrl =
-  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
-  process.env.OPENAI_BASE_URL ||
-  "https://api.openai.com/v1";
+
+function resolveOpenAiBaseUrl(): string {
+  const candidate =
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    OPENAI_DEFAULT_BASE_URL;
+
+  const trimmed = String(candidate || "").trim();
+  if (!trimmed) return OPENAI_DEFAULT_BASE_URL;
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    console.warn(
+      `[GenerativeStudio] Invalid OpenAI base URL \"${trimmed}\". Falling back to ${OPENAI_DEFAULT_BASE_URL}.`
+    );
+    return OPENAI_DEFAULT_BASE_URL;
+  }
+}
+
+const openaiBaseUrl = resolveOpenAiBaseUrl();
 
 function assertOpenAiConfigured() {
   if (!openaiApiKey) {
@@ -188,6 +208,50 @@ function escapeHtmlAttribute(value: string): string {
     .replace(/'/g, '&#39;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function normalizeThankYouPageUrl(input?: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) return '/thank-you';
+
+  if (raw.startsWith('/')) return raw;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    // Try adding https:// below
+  }
+
+  try {
+    const parsed = new URL(`https://${raw}`);
+    return parsed.toString();
+  } catch {
+    return '/thank-you';
+  }
+}
+
+function normalizeAssetUrl(input?: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) return '';
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    // Try adding https:// below
+  }
+
+  try {
+    const parsed = new URL(`https://${raw}`);
+    return parsed.toString();
+  } catch {
+    return '';
+  }
 }
 
 function enforceLeadCaptureForm(
@@ -368,13 +432,16 @@ export async function generateLandingPage(params: LandingPageParams): Promise<Ge
     systemPrompt = 'You are an expert content creation AI assistant.';
   }
 
+  const resolvedThankYouUrl = normalizeThankYouPageUrl(params.thankYouPageUrl);
+  const resolvedAssetUrl = normalizeAssetUrl(params.assetUrl);
+
   const userPrompt = `Generate a complete, responsive landing page based on the following requirements.
 
 Title: ${params.title}
 Requirements: ${params.prompt}
 ${params.ctaGoal ? `CTA Goal: ${params.ctaGoal}` : ''}
-Thank You Page URL: ${params.thankYouPageUrl || '/thank-you'}
-Asset Download/View URL: ${params.assetUrl || 'https://example.com/asset-download'}
+Thank You Page URL: ${resolvedThankYouUrl}
+Asset Download/View URL: ${resolvedAssetUrl || 'https://example.com/asset-download'}
 ${baseContext}
 ${brandContext}
 
@@ -417,7 +484,7 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
   }), 'generative-studio');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
-  result.html = enforceLeadCaptureForm(result.html || '', params.thankYouPageUrl, params.assetUrl);
+  result.html = enforceLeadCaptureForm(result.html || '', resolvedThankYouUrl, resolvedAssetUrl);
   const tokensUsed = completion.usage?.total_tokens || 0;
   const duration = Date.now() - startTime;
 
@@ -439,8 +506,8 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
       css: result.css,
       sections: result.sections,
       ctaGoal: params.ctaGoal,
-      thankYouPageUrl: params.thankYouPageUrl || '/thank-you',
-      assetUrl: params.assetUrl || null,
+      thankYouPageUrl: resolvedThankYouUrl,
+      assetUrl: resolvedAssetUrl || null,
       organizationId: params.organizationId,
       clientProjectId: params.clientProjectId,
     },
