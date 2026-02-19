@@ -70,6 +70,9 @@ interface ContentPromotionPage {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  sourceType?: 'content_promotion' | 'content_studio';
+  sourceProjectId?: string | null;
+  previewPath?: string | null;
 }
 
 function formatNumber(num: number): string {
@@ -287,12 +290,21 @@ export default function ContentPromotionManager() {
   };
 
   const handleEdit = (page: ContentPromotionPage) => {
+    if (page.sourceType === "content_studio") {
+      toast({
+        title: "Managed in Content Studio",
+        description: "This landing page was created in Content Studio. Open Content Studio to edit it.",
+      });
+      window.open("/generative-studio", "_blank");
+      return;
+    }
     setEditingPage(page);
     setShowBuilder(true);
   };
 
-  const handlePreview = (slug: string) => {
-    window.open(`/promo/${slug}`, "_blank");
+  const handlePreview = (page: ContentPromotionPage) => {
+    const path = page.previewPath || `/promo/${page.slug}`;
+    window.open(path, "_blank");
   };
 
   const handleArchive = (page: ContentPromotionPage) => {
@@ -454,6 +466,7 @@ export default function ContentPromotionManager() {
             const pageTypeInfo = PAGE_TYPE_CONFIG[page.pageType] || PAGE_TYPE_CONFIG.gated_download;
             const themeName = THEME_LABELS[page.templateTheme] || page.templateTheme;
             const conversionRate = parseFloat(page.conversionRate || "0");
+            const isStudioPage = page.sourceType === "content_studio";
 
             return (
               <Card key={page.id} className="flex flex-col">
@@ -471,6 +484,11 @@ export default function ContentPromotionManager() {
                           {pageTypeInfo.icon}
                           {pageTypeInfo.label}
                         </Badge>
+                        {isStudioPage && (
+                          <Badge variant="outline" className="text-xs bg-violet-50 text-violet-700 border-violet-200">
+                            Content Studio
+                          </Badge>
+                        )}
                         <Badge variant="outline" className="text-xs">
                           {themeName}
                         </Badge>
@@ -482,7 +500,7 @@ export default function ContentPromotionManager() {
                   {/* Slug */}
                   <div className="flex items-center gap-1 text-sm text-muted-foreground">
                     <ExternalLink className="h-3 w-3 flex-shrink-0" />
-                    <span className="font-mono text-xs truncate">/promo/{page.slug}</span>
+                    <span className="font-mono text-xs truncate">{page.previewPath || `/promo/${page.slug}`}</span>
                   </div>
 
                   {/* Stats Row */}
@@ -511,46 +529,59 @@ export default function ContentPromotionManager() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handlePreview(page.slug)}
+                      onClick={() => handlePreview(page)}
                     >
                       <Eye className="h-3.5 w-3.5 mr-1" />
                       Preview
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEdit(page)}
-                    >
-                      <Pencil className="h-3.5 w-3.5 mr-1" />
-                      Edit
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => duplicateMutation.mutate(page.id)}
-                      disabled={duplicateMutation.isPending}
-                    >
-                      <Copy className="h-3.5 w-3.5 mr-1" />
-                      Duplicate
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handlePublishToggle(page)}
-                      disabled={publishMutation.isPending || unpublishMutation.isPending}
-                    >
-                      <Globe className="h-3.5 w-3.5 mr-1" />
-                      {page.status === "published" ? "Unpublish" : "Publish"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleArchive(page)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Archive className="h-3.5 w-3.5 mr-1" />
-                      Archive
-                    </Button>
+                    {isStudioPage ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open('/generative-studio', '_blank')}
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1" />
+                        Manage in Studio
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEdit(page)}
+                        >
+                          <Pencil className="h-3.5 w-3.5 mr-1" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => duplicateMutation.mutate(page.id)}
+                          disabled={duplicateMutation.isPending}
+                        >
+                          <Copy className="h-3.5 w-3.5 mr-1" />
+                          Duplicate
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePublishToggle(page)}
+                          disabled={publishMutation.isPending || unpublishMutation.isPending}
+                        >
+                          <Globe className="h-3.5 w-3.5 mr-1" />
+                          {page.status === "published" ? "Unpublish" : "Publish"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleArchive(page)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Archive className="h-3.5 w-3.5 mr-1" />
+                          Archive
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
