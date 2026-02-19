@@ -11,6 +11,7 @@ import {
   generativeStudioProjects,
   generativeStudioChatMessages,
   generativeStudioPublishedPages,
+  contentPromotionPageViews,
   contentAssets,
   clientProjects,
 } from "@shared/schema";
@@ -823,6 +824,76 @@ ${page.htmlContent}
   } catch (error: any) {
     console.error('Error serving public page:', error);
     res.status(500).send('<html><body><h1>Server Error</h1></body></html>');
+  }
+});
+
+/**
+ * POST /public/:slug/track-submit
+ * Track landing page form submissions for published Generative Studio pages
+ * (public endpoint, no auth)
+ */
+router.post("/public/:slug/track-submit", async (req: Request, res: Response) => {
+  try {
+    const [page] = await db.select().from(generativeStudioPublishedPages)
+      .where(
+        and(
+          eq(generativeStudioPublishedPages.slug, req.params.slug),
+          eq(generativeStudioPublishedPages.isPublished, true)
+        )
+      ).limit(1);
+
+    if (!page) {
+      return res.status(404).json({ error: "Page not found" });
+    }
+
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const ipAddress =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
+      req.socket.remoteAddress ||
+      null;
+    const userAgent = req.headers["user-agent"] || null;
+    const referrer = req.headers.referer || null;
+
+    const submitterEmail = String(body.business_email || body.email || '').trim() || null;
+    const submitterName = String(body.name || body.full_name || '').trim() || null;
+    const firstName = String(body.first_name || body.firstname || '').trim() || null;
+    const lastName = String(body.last_name || body.lastname || '').trim() || null;
+    const company = String(body.company || '').trim() || null;
+
+    await db.insert(contentPromotionPageViews).values({
+      pageId: page.id,
+      visitorEmail: submitterEmail,
+      visitorFirstName: firstName,
+      visitorLastName: lastName,
+      visitorCompany: company,
+      ipAddress,
+      userAgent,
+      referrer,
+      utmSource: body.utm_source || null,
+      utmMedium: body.utm_medium || null,
+      utmCampaign: body.utm_campaign || null,
+      utmTerm: body.utm_term || null,
+      utmContent: body.utm_content || null,
+      eventType: "form_submit",
+      formData: {
+        submitterName,
+        submitterEmail,
+        company,
+        jobTitle: body.job_title || null,
+        phone: body.phone || null,
+        contactId: body.contact_id || null,
+        campaignId: body.campaign_id || null,
+        campaignName: body.campaign_name || null,
+        sourceUrl: body.source_url || null,
+        assetUrl: body.asset_url || null,
+      },
+      convertedAt: new Date(),
+    } as any);
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('[GenerativeStudio] form tracking error:', error);
+    return res.status(500).json({ error: 'Failed to track submission' });
   }
 });
 

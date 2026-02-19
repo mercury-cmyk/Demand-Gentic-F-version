@@ -378,6 +378,44 @@ function enforceLeadCaptureForm(
             }
           }
 
+          var pathMatch = String(window.location.pathname || '').match(/\/public\/([^/?#]+)/i);
+          var slug = pathMatch && pathMatch[1] ? decodeURIComponent(pathMatch[1]) : '';
+          var trackUrl = slug ? ('/api/generative-studio/public/' + encodeURIComponent(slug) + '/track-submit') : '';
+
+          var payload = {
+            name: name,
+            business_email: email,
+            asset_url: assetUrl,
+            source_url: window.location.href,
+            contact_id: String(query.get('contact_id') || currentParams.get('contact_id') || '').trim() || null,
+            campaign_id: String(query.get('campaign_id') || currentParams.get('campaign_id') || '').trim() || null,
+            campaign_name: String(query.get('campaign_name') || currentParams.get('campaign_name') || '').trim() || null,
+            utm_source: String(query.get('utm_source') || currentParams.get('utm_source') || '').trim() || null,
+            utm_medium: String(query.get('utm_medium') || currentParams.get('utm_medium') || '').trim() || null,
+            utm_campaign: String(query.get('utm_campaign') || currentParams.get('utm_campaign') || '').trim() || null,
+            utm_term: String(query.get('utm_term') || currentParams.get('utm_term') || '').trim() || null,
+            utm_content: String(query.get('utm_content') || currentParams.get('utm_content') || '').trim() || null,
+          };
+
+          if (trackUrl) {
+            try {
+              var payloadText = JSON.stringify(payload);
+              if (navigator.sendBeacon) {
+                var blob = new Blob([payloadText], { type: 'application/json' });
+                navigator.sendBeacon(trackUrl, blob);
+              } else {
+                fetch(trackUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: payloadText,
+                  keepalive: true,
+                }).catch(function () {});
+              }
+            } catch (e) {
+              // best-effort tracking only
+            }
+          }
+
           var separator = action.indexOf('?') >= 0 ? '&' : '?';
           window.location.href = action + separator + query.toString();
         });
