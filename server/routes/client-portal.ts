@@ -59,6 +59,8 @@ import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
+import { getRecordingUrl } from '../services/recording-storage';
+import { getPlayableRecordingLink } from '../services/recording-link-resolver';
 
 const router = Router();
 
@@ -86,6 +88,7 @@ async function logClientPortalActivity(params: {
 
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 const JWT_EXPIRES_IN = "7d";
+const CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS = 15 * 60;
 const PORTAL_BASE_URL =
   process.env.CLIENT_PORTAL_BASE_URL ||
   process.env.APP_BASE_URL ||
@@ -346,6 +349,32 @@ function generateClientToken(clientUser: typeof clientUsers.$inferSelect, isOwne
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
+interface ClientRecordingStreamTokenPayload {
+  type: 'client_portal_lead_recording_stream';
+  leadId: string;
+  clientUserId: string;
+  clientAccountId: string;
+}
+
+function createClientRecordingStreamToken(payload: ClientRecordingStreamTokenPayload): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS });
+}
+
+function verifyClientRecordingStreamToken(token: string): ClientRecordingStreamTokenPayload | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as ClientRecordingStreamTokenPayload;
+    if (!decoded || decoded.type !== 'client_portal_lead_recording_stream') {
+      return null;
+    }
+    if (!decoded.leadId || !decoded.clientAccountId || !decoded.clientUserId) {
+      return null;
+    }
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
 function requireClientAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
@@ -370,6 +399,73 @@ function requireClientAuth(req: Request, res: Response, next: NextFunction) {
   } catch {
     return res.status(401).json({ message: "Invalid or expired token" });
   }
+}
+
+async function hasClientAccessToCampaign(clientAccountId: string, campaignId: string): Promise<boolean> {
+  const accessChecks = await Promise.all([
+    db
+      .select({ id: clientCampaignAccess.id })
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          eq(clientCampaignAccess.regularCampaignId, campaignId)
+        )
+      )
+      .limit(1),
+    db
+      .select({ id: clientCampaignAccess.id })
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          eq(clientCampaignAccess.campaignId, campaignId)
+        )
+      )
+      .limit(1),
+    db
+      .select({ id: workOrders.id })
+      .from(workOrders)
+      .where(
+        and(
+          eq(workOrders.clientAccountId, clientAccountId),
+          eq(workOrders.campaignId, campaignId)
+        )
+      )
+      .limit(1),
+    db
+      .select({ id: campaignIntakeRequests.id })
+      .from(campaignIntakeRequests)
+      .where(
+        and(
+          eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+          eq(campaignIntakeRequests.campaignId, campaignId)
+        )
+      )
+      .limit(1),
+    db
+      .select({ id: campaigns.id })
+      .from(campaigns)
+      .where(
+        and(
+          eq(campaigns.id, campaignId),
+          eq(campaigns.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1),
+    db
+      .select({ id: clientCampaigns.id })
+      .from(clientCampaigns)
+      .where(
+        and(
+          eq(clientCampaigns.id, campaignId),
+          eq(clientCampaigns.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1),
+  ]);
+
+  return accessChecks.some((rows) => rows.length > 0);
 }
 
 function generateOrderNumber(): string {
@@ -862,31 +958,41 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
 
     const enrichedVerificationCampaigns = await Promise.all(
       verificationAccessList.map(async ({ campaign }) => {
-        const eligibleCount = await db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(verificationContacts)
-          .where(
-            and(
-              eq(verificationContacts.campaignId, campaign.id),
-              eq(verificationContacts.eligibilityStatus, 'Eligible'),
-              eq(verificationContacts.reservedSlot, true)
-            )
-          );
+        let eligibleCountValue = 0;
+        try {
+          const eligibleCount = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(verificationContacts)
+            .where(
+              and(
+                eq(verificationContacts.campaignId, campaign.id),
+                eq(verificationContacts.eligibilityStatus, 'Eligible'),
+                eq(verificationContacts.reservedSlot, true)
+              )
+            );
+          eligibleCountValue = eligibleCount[0]?.count || 0;
+        } catch (err: any) {
+          console.warn(`[CLIENT PORTAL] verification eligible count fallback for campaign ${campaign.id}: ${err?.message || err}`);
+        }
 
         // Look up project enabledFeatures via junction table
         let enabledFeatures = null;
-        const [projectLink] = await db
-          .select({ enabledFeatures: clientProjects.enabledFeatures })
-          .from(clientProjectCampaigns)
-          .innerJoin(clientProjects, eq(clientProjectCampaigns.projectId, clientProjects.id))
-          .where(eq(clientProjectCampaigns.campaignId, campaign.id))
-          .limit(1);
-        if (projectLink) enabledFeatures = projectLink.enabledFeatures;
+        try {
+          const [projectLink] = await db
+            .select({ enabledFeatures: clientProjects.enabledFeatures })
+            .from(clientProjectCampaigns)
+            .innerJoin(clientProjects, eq(clientProjectCampaigns.projectId, clientProjects.id))
+            .where(eq(clientProjectCampaigns.campaignId, campaign.id))
+            .limit(1);
+          if (projectLink) enabledFeatures = projectLink.enabledFeatures;
+        } catch (err: any) {
+          console.warn(`[CLIENT PORTAL] verification project feature lookup fallback for campaign ${campaign.id}: ${err?.message || err}`);
+        }
 
         return {
           ...campaign,
           type: 'verification',
-          eligibleCount: eligibleCount[0]?.count || 0,
+          eligibleCount: eligibleCountValue,
           enabledFeatures,
         };
       })
@@ -910,8 +1016,26 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
         )
       );
 
+    // Legacy/alternate mapping: some client-accessible regular campaigns are stored in campaignId.
+    const mappedCampaignAccessList = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        projectId: campaigns.projectId,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.campaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          isNotNull(clientCampaignAccess.campaignId)
+        )
+      );
+
     // 3. Fetch campaigns from additional access paths (workOrders, intakeRequests, direct, clientCampaigns)
-    const seenIds = new Set(regularAccessList.map(c => c.id));
+    const seenIds = new Set([...regularAccessList, ...mappedCampaignAccessList].map(c => c.id));
 
     // 3a. Via workOrders
     const workOrderCampaigns = await db
@@ -962,7 +1086,7 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
       .where(eq(clientCampaigns.clientAccountId, clientAccountId));
 
     // Merge all regular campaigns, deduplicating by ID
-    const allRegularCampaigns = [...regularAccessList];
+    const allRegularCampaigns = [...regularAccessList, ...mappedCampaignAccessList.filter(c => !regularAccessList.some(r => r.id === c.id))];
     for (const c of [...workOrderCampaigns, ...intakeCampaigns, ...directCampaigns]) {
       if (!seenIds.has(c.id)) {
         seenIds.add(c.id);
@@ -1358,7 +1482,7 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       return {
         ...lead,
         recordingUrl: normalizedRecordingUrl,
-        hasRecording: Boolean(normalizedRecordingUrl),
+        hasRecording: Boolean(normalizedRecordingUrl || lead.recordingS3Key),
       };
     });
 
@@ -1752,6 +1876,174 @@ router.get(['/qualified-leads/recordings/:recordingId/stream', '/telnyx-recordin
   });
 });
 
+async function getLeadRecordingContextForClientPortal(leadId: string, clientAccountId: string) {
+  const [lead] = await db
+    .select({
+      id: leads.id,
+      campaignId: leads.campaignId,
+      recordingUrl: leads.recordingUrl,
+      recordingS3Key: leads.recordingS3Key,
+      callSessionId: dialerCallAttempts.callSessionId,
+    })
+    .from(leads)
+    .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
+    .where(eq(leads.id, leadId))
+    .limit(1);
+
+  if (!lead) {
+    return { ok: false as const, status: 404, message: 'Lead not found' };
+  }
+
+  let accessCampaignId = lead.campaignId;
+  if (!accessCampaignId && lead.callSessionId) {
+    const [session] = await db
+      .select({ campaignId: callSessions.campaignId })
+      .from(callSessions)
+      .where(eq(callSessions.id, lead.callSessionId))
+      .limit(1);
+    accessCampaignId = session?.campaignId || null;
+  }
+
+  if (!accessCampaignId) {
+    return { ok: false as const, status: 404, message: 'Lead campaign mapping not found for recording access' };
+  }
+
+  const hasAccess = await hasClientAccessToCampaign(clientAccountId, accessCampaignId);
+  if (!hasAccess) {
+    return { ok: false as const, status: 403, message: "You don't have access to this lead" };
+  }
+
+  if (!lead.recordingS3Key && !lead.recordingUrl && !lead.callSessionId) {
+    return {
+      ok: false as const,
+      status: 404,
+      message: 'No recording available (missing recording_s3_key, recording_url, and call_session_id)',
+    };
+  }
+
+  return { ok: true as const, lead };
+}
+
+async function getLeadRecordingSourceHint(lead: {
+  id: string;
+  recordingUrl: string | null;
+  recordingS3Key: string | null;
+  callSessionId: string | null;
+}) {
+  if (lead.recordingS3Key) {
+    const gcs = await getRecordingUrl(lead.id, lead.recordingUrl || undefined).catch(() => ({ url: '', source: null as 'local' | 'telnyx' | null }));
+    if (gcs.url && gcs.source === 'local') {
+      return {
+        source: 'gcs',
+        mimeType: 'audio/mpeg',
+      } as const;
+    }
+  }
+
+  if (lead.callSessionId) {
+    const sessionLink = await getPlayableRecordingLink(lead.callSessionId, { skipCached: true });
+    if (sessionLink?.url) {
+      return {
+        source: sessionLink.source,
+        mimeType: sessionLink.mimeType,
+      } as const;
+    }
+  }
+
+  const leadLink = await getPlayableRecordingLink(lead.id, { skipCached: true });
+  if (leadLink?.url) {
+    return {
+      source: leadLink.source,
+      mimeType: leadLink.mimeType,
+    } as const;
+  }
+
+  return null;
+}
+
+// Resolve a fresh recording URL for a specific lead.
+// Returns a platform stream URL (never raw storage links) for both Play and Download.
+router.get('/qualified-leads/:id/recording-link', requireClientAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const context = await getLeadRecordingContextForClientPortal(id, req.clientUser!.clientAccountId);
+    if (!context.ok) {
+      return res.status(context.status).json({
+        success: false,
+        message: context.message,
+      });
+    }
+
+    const sourceHint = await getLeadRecordingSourceHint(context.lead).catch(() => null);
+
+    const streamToken = createClientRecordingStreamToken({
+      type: 'client_portal_lead_recording_stream',
+      leadId: id,
+      clientUserId: req.clientUser!.clientUserId,
+      clientAccountId: req.clientUser!.clientAccountId,
+    });
+
+    const streamUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording-stream?token=${encodeURIComponent(streamToken)}`;
+    if (streamUrl.includes('s3.amazonaws.com') || streamUrl.includes('telephony-recorder-prod')) {
+      return res.status(500).json({
+        success: false,
+        message: 'Invalid recording stream URL generated',
+      });
+    }
+
+    console.log(`[CLIENT PORTAL] Lead recording-link resolved | lead=${id} source=${sourceHint?.source || 'unresolved'} via=platform-stream`);
+
+    return res.json({
+      success: true,
+      url: streamUrl,
+      streamUrl,
+      source: sourceHint?.source || 'stream_proxy',
+      mimeType: sourceHint?.mimeType || 'audio/mpeg',
+      expiresInSeconds: CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS,
+    });
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Get lead recording-link error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to resolve recording link',
+      error: error?.message || String(error),
+    });
+  }
+});
+
+// Stream lead recording audio through platform endpoint using a short-lived token.
+router.get('/qualified-leads/:id/recording-stream', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = String(req.query.token || '');
+    if (!token) {
+      return res.status(401).type('text/plain').send('Missing recording stream token');
+    }
+
+    const payload = verifyClientRecordingStreamToken(token);
+    if (!payload) {
+      return res.status(401).type('text/plain').send('Invalid or expired recording stream token');
+    }
+
+    if (payload.leadId !== id) {
+      return res.status(403).type('text/plain').send('Recording stream token does not match lead');
+    }
+
+    const context = await getLeadRecordingContextForClientPortal(id, payload.clientAccountId);
+    if (!context.ok) {
+      return res.status(context.status).type('text/plain').send(context.message);
+    }
+
+    console.log(`[CLIENT PORTAL] Lead recording stream request | lead=${id} user=${payload.clientUserId} account=${payload.clientAccountId}`);
+    const { streamRecording } = await import('./recordings');
+    return streamRecording(req as Request, res as Response);
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Lead recording stream error:', error);
+    return res.status(500).type('text/plain').send('Failed to stream recording audio');
+  }
+});
+
 // Get single lead details (with transcript and recording if visibility allowed)
 router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
   try {
@@ -1818,19 +2110,8 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
     }
 
     // Verify client has access to this lead's campaign
-    const [access] = await db
-      .select()
-      .from(clientCampaignAccess)
-      .where(
-        and(
-          eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          eq(clientCampaignAccess.regularCampaignId, lead.campaignId!),
-          isNotNull(clientCampaignAccess.regularCampaignId)
-        )
-      )
-      .limit(1);
-
-    if (!access) {
+    const hasAccess = await hasClientAccessToCampaign(req.clientUser!.clientAccountId, lead.campaignId!);
+    if (!hasAccess) {
       return res.status(403).json({ message: "You don't have access to this lead" });
     }
 
@@ -1878,6 +2159,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
       callDuration: lead.callDuration,
       dialedNumber: lead.dialedNumber,
       callSessionId: lead.callSessionId,
+      hasRecording: Boolean(lead.recordingS3Key || lead.recordingUrl || lead.callSessionId),
       // Timestamps
       createdAt: lead.createdAt,
       approvedAt: lead.approvedAt,
@@ -1888,6 +2170,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
     if (visibilitySettings.showRecordings !== false) {
       // Always prefer canonical GCS URL when a storage key exists.
       response.recordingUrl = resolveQualifiedLeadRecordingUrl(lead.recordingUrl, lead.recordingS3Key);
+      response.recordingS3Key = lead.recordingS3Key;
       response.transcript = lead.transcript;
       response.structuredTranscript = lead.structuredTranscript;
     }

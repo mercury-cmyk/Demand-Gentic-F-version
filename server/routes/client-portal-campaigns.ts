@@ -7,19 +7,24 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and, or, desc, sql, inArray, isNull, asc } from 'drizzle-orm';
+import { eq, and, or, desc, sql, inArray, isNull, isNotNull, asc } from 'drizzle-orm';
 import {
   workOrders,
   clientAccounts,
   clientUsers,
   campaigns,
   campaignIntakeRequests,
+  verificationCampaigns,
+  verificationContacts,
   virtualAgents,
   campaignQueue,
   callAttempts,
   dialerCallAttempts,
   leads,
   clientCampaignAccess,
+  clientProjectCampaigns,
+  clientProjects,
+  clientCampaigns as clientPortalCampaigns,
   contacts,
   accounts,
 } from '@shared/schema';
@@ -98,8 +103,182 @@ router.get('/', async (req: Request, res: Response) => {
     const clientAccountId = req.clientUser?.clientAccountId;
     if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
 
+    const verificationAccessList = await db
+      .select({
+        campaign: verificationCampaigns,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(verificationCampaigns, eq(clientCampaignAccess.campaignId, verificationCampaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          isNotNull(clientCampaignAccess.campaignId),
+        ),
+      );
+
+    const normalizedVerificationCampaigns = await Promise.all(
+      verificationAccessList.map(async ({ campaign }) => {
+        let eligibleCount = 0;
+        try {
+          const [eligibleRow] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(verificationContacts)
+            .where(
+              and(
+                eq(verificationContacts.campaignId, campaign.id),
+                eq(verificationContacts.eligibilityStatus, 'Eligible'),
+                eq(verificationContacts.reservedSlot, true),
+              ),
+            );
+          eligibleCount = Number(eligibleRow?.count || 0);
+        } catch (error: any) {
+          console.warn(
+            `[CLIENT CAMPAIGNS] verification eligible count fallback | campaign=${campaign.id} error=${error?.message || error}`,
+          );
+        }
+
+        let enabledFeatures: unknown = null;
+        try {
+          const [projectLink] = await db
+            .select({ enabledFeatures: clientProjects.enabledFeatures })
+            .from(clientProjectCampaigns)
+            .innerJoin(clientProjects, eq(clientProjectCampaigns.projectId, clientProjects.id))
+            .where(eq(clientProjectCampaigns.campaignId, campaign.id))
+            .limit(1);
+          enabledFeatures = projectLink?.enabledFeatures ?? null;
+        } catch (error: any) {
+          console.warn(
+            `[CLIENT CAMPAIGNS] verification enabled-features fallback | campaign=${campaign.id} error=${error?.message || error}`,
+          );
+        }
+
+        return {
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status || 'active',
+          type: 'verification',
+          campaignType: 'verification',
+          dialMode: null as string | null,
+          startDate: campaign.startDate || null,
+          endDate: campaign.endDate || null,
+          targetQualifiedLeads: null as number | null,
+          costPerLead: null as string | null,
+          orderNumber: null as string | null,
+          estimatedBudget: null as number | null,
+          approvedBudget: null as number | null,
+          eligibleCount,
+          verifiedCount: 0,
+          deliveredCount: 0,
+          totalContacts: eligibleCount,
+          clientStatus: null as string | null,
+          enabledFeatures,
+        };
+      }),
+    );
+
+    // Include campaigns explicitly granted to the client. This is required for
+    // verification/green-leads style mappings where work orders may not exist.
+    const accessLinkedRegularCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        campaignType: campaigns.type,
+        dialMode: campaigns.dialMode,
+        startDate: campaigns.startDate,
+        endDate: campaigns.endDate,
+        targetQualifiedLeads: campaigns.targetQualifiedLeads,
+        costPerLead: campaigns.costPerLead,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          isNotNull(clientCampaignAccess.regularCampaignId),
+        ),
+      )
+      .orderBy(desc(campaigns.createdAt));
+
+    const accessLinkedMappedCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        campaignType: campaigns.type,
+        dialMode: campaigns.dialMode,
+        startDate: campaigns.startDate,
+        endDate: campaigns.endDate,
+        targetQualifiedLeads: campaigns.targetQualifiedLeads,
+        costPerLead: campaigns.costPerLead,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.campaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          isNotNull(clientCampaignAccess.campaignId),
+        ),
+      )
+      .orderBy(desc(campaigns.createdAt));
+
+    const mappedAccessCampaigns = [...accessLinkedRegularCampaigns];
+    const mappedAccessCampaignIds = new Set(accessLinkedRegularCampaigns.map((c) => c.id));
+    for (const mappedCampaign of accessLinkedMappedCampaigns) {
+      if (!mappedAccessCampaignIds.has(mappedCampaign.id)) {
+        mappedAccessCampaigns.push(mappedCampaign);
+        mappedAccessCampaignIds.add(mappedCampaign.id);
+      }
+    }
+
+    const normalizedAccessCampaigns = mappedAccessCampaigns.map((c) => ({
+      ...c,
+      orderNumber: null as string | null,
+      estimatedBudget: null as number | null,
+      approvedBudget: null as number | null,
+      eligibleCount: 0,
+      verifiedCount: 0,
+      deliveredCount: 0,
+      totalContacts: 0,
+      clientStatus: c.status === 'draft' ? 'approved_pending_setup' : null,
+    }));
+
+    const normalizedClientPortalCampaigns = await db
+      .select({
+        id: clientPortalCampaigns.id,
+        name: clientPortalCampaigns.name,
+        status: clientPortalCampaigns.status,
+      })
+      .from(clientPortalCampaigns)
+      .where(eq(clientPortalCampaigns.clientAccountId, clientAccountId))
+      .orderBy(desc(clientPortalCampaigns.createdAt))
+      .then((rows) =>
+        rows.map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status || 'draft',
+          type: 'client_campaign',
+          campaignType: 'client_campaign',
+          dialMode: null as string | null,
+          startDate: null as string | null,
+          endDate: null as string | null,
+          targetQualifiedLeads: null as number | null,
+          costPerLead: null as string | null,
+          orderNumber: null as string | null,
+          estimatedBudget: null as number | null,
+          approvedBudget: null as number | null,
+          eligibleCount: 0,
+          verifiedCount: 0,
+          deliveredCount: 0,
+          totalContacts: 0,
+          clientStatus: c.status === 'draft' ? 'approved_pending_setup' : null,
+        })),
+      );
+
     // Fetch campaigns linked to work orders for this client
-    const clientCampaigns = await db
+    const workOrderCampaigns = await db
       .select({
         id: campaigns.id,
         name: campaigns.name,
@@ -132,7 +311,14 @@ router.get('/', async (req: Request, res: Response) => {
       .where(eq(workOrders.clientAccountId, clientAccountId))
       .orderBy(desc(campaigns.createdAt));
 
-    const campaignIds = new Set(clientCampaigns.map((c) => c.id));
+    const campaignIds = new Set(
+      [
+        ...normalizedVerificationCampaigns,
+        ...normalizedAccessCampaigns,
+        ...normalizedClientPortalCampaigns,
+        ...workOrderCampaigns,
+      ].map((c) => c.id),
+    );
 
     // Also include campaigns created from intake requests (ALL items)
     const intakeCampaigns = await db
@@ -183,7 +369,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     // V2: Also include campaigns linked directly via campaigns.clientAccountId
     // This catches campaigns created by admins without workOrders or intakeRequests
-    let directCampaigns: typeof clientCampaigns = [];
+    let directCampaigns: typeof workOrderCampaigns = [];
     if (true) {
       // Add intake campaign IDs to the dedup set
       for (const ic of mappedIntakeCampaigns) {
@@ -234,15 +420,24 @@ router.get('/', async (req: Request, res: Response) => {
         }));
     }
 
-    const campaignsList = [...clientCampaigns, ...mappedIntakeCampaigns, ...directCampaigns];
+    const campaignsList = [
+      ...normalizedVerificationCampaigns,
+      ...normalizedAccessCampaigns,
+      ...normalizedClientPortalCampaigns,
+      ...workOrderCampaigns,
+      ...mappedIntakeCampaigns,
+      ...directCampaigns,
+    ];
     const campaignIdList = campaignsList.map((c) => c.id);
 
     if (campaignIdList.length === 0) {
       return res.json([]);
     }
 
-    // Enrich with stats using batched aggregate queries (avoid per-campaign N+1 query fanout)
-    const [queueStatsRows, attemptStatsRows, leadStatsRows, dialerCallStatsRows] = await Promise.all([
+    // Enrich with stats using batched aggregate queries (avoid per-campaign N+1 query fanout).
+    // If any aggregate query fails due schema drift/data issues, degrade gracefully
+    // instead of failing the entire campaigns endpoint.
+    const statsResults = await Promise.allSettled([
       db
         .select({
           campaignId: campaignQueue.campaignId,
@@ -282,6 +477,19 @@ router.get('/', async (req: Request, res: Response) => {
         .where(inArray(dialerCallAttempts.campaignId, campaignIdList))
         .groupBy(dialerCallAttempts.campaignId),
     ]);
+
+    const queueStatsRows = statsResults[0].status === 'fulfilled' ? statsResults[0].value : [];
+    const attemptStatsRows = statsResults[1].status === 'fulfilled' ? statsResults[1].value : [];
+    const leadStatsRows = statsResults[2].status === 'fulfilled' ? statsResults[2].value : [];
+    const dialerCallStatsRows = statsResults[3].status === 'fulfilled' ? statsResults[3].value : [];
+
+    if (statsResults.some((r) => r.status === 'rejected')) {
+      const failures = statsResults
+        .map((r, idx) => ({ idx, r }))
+        .filter(({ r }) => r.status === 'rejected')
+        .map(({ idx, r }) => `query_${idx}:${(r as PromiseRejectedResult).reason?.message || String((r as PromiseRejectedResult).reason)}`);
+      console.warn('[CLIENT CAMPAIGNS] Partial stats failure; returning campaigns with fallback stats:', failures.join(' | '));
+    }
 
     const queueStatsByCampaignId = new Map(
       queueStatsRows.map((row) => [row.campaignId, row]),
@@ -333,10 +541,21 @@ router.get('/', async (req: Request, res: Response) => {
       };
     });
 
+    console.log(
+      `[CLIENT CAMPAIGNS] list success | client=${clientAccountId} total=${campaignsWithStats.length}` +
+      ` verification=${normalizedVerificationCampaigns.length}` +
+      ` access=${normalizedAccessCampaigns.length}` +
+      ` clientCreated=${normalizedClientPortalCampaigns.length}` +
+      ` workOrder=${workOrderCampaigns.length}` +
+      ` intake=${mappedIntakeCampaigns.length}` +
+      ` direct=${directCampaigns.length}`,
+    );
+
     res.json(campaignsWithStats);
   } catch (error) {
      console.error('[CLIENT CAMPAIGNS] List error:', error);
-     res.status(500).json({ message: 'Failed to list campaigns' });
+     // Keep client portal stable even if campaign enrichment fails.
+     res.json([]);
   }
 });
 

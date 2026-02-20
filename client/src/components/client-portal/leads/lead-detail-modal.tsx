@@ -21,6 +21,7 @@ import { PushToShowcaseButton } from '@/components/showcase-calls/push-to-showca
 interface LeadDetail {
   id: string;
   callSessionId?: string | null;
+  hasRecording?: boolean;
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
@@ -130,7 +131,7 @@ export function LeadDetailModal({ leadId, open, onClose }: LeadDetailModalProps)
                   <FileText className="h-4 w-4 mr-2" />
                   Transcript
                 </TabsTrigger>
-                <TabsTrigger value="recording" disabled={!lead.recordingUrl}>
+                <TabsTrigger value="recording" disabled={!lead.hasRecording}>
                   <Headphones className="h-4 w-4 mr-2" />
                   Recording
                 </TabsTrigger>
@@ -273,7 +274,7 @@ export function LeadDetailModal({ leadId, open, onClose }: LeadDetailModalProps)
                             <Headphones className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm">Recording</span>
                           </div>
-                          {lead.recordingUrl ? (
+                          {lead.hasRecording ? (
                             <Badge className="bg-green-100 text-green-800">Available</Badge>
                           ) : (
                             <Badge variant="outline">Not Available</Badge>
@@ -392,8 +393,8 @@ export function LeadDetailModal({ leadId, open, onClose }: LeadDetailModalProps)
                 </TabsContent>
 
                 <TabsContent value="recording" className="mt-0">
-                  {lead.recordingUrl && (
-                    <RecordingPlayer recordingUrl={lead.recordingUrl} />
+                  {lead.hasRecording && (
+                    <RecordingPlayer leadId={lead.id} recordingUrl={lead.recordingUrl} />
                   )}
                 </TabsContent>
               </ScrollArea>

@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   Loader2, User, Building2, Mail, Phone, Linkedin, Clock, Calendar, Target, 
-  FileText, Headphones, MessageSquare, Send, Trash2, Edit, Sparkles,
+  FileText, MessageSquare, Send, Trash2, Edit, Sparkles,
   CheckCircle, Star, TrendingUp,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -37,6 +37,8 @@ interface LeadComment {
 interface LeadDetail {
   id: string;
   callSessionId?: string | null;
+  hasRecording?: boolean;
+  recordingS3Key?: string | null;
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
@@ -180,6 +182,13 @@ export function EnhancedLeadDetailModal({ leadId, open, onClose }: EnhancedLeadD
     if (!firstName && !lastName) return '?';
     return `${(firstName || '').charAt(0)}${(lastName || '').charAt(0)}`.toUpperCase();
   };
+
+  const hasAnyRecordingEvidence = Boolean(
+    lead?.hasRecording ||
+    lead?.recordingUrl ||
+    lead?.recordingS3Key ||
+    lead?.callSessionId,
+  );
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -356,8 +365,8 @@ export function EnhancedLeadDetailModal({ leadId, open, onClose }: EnhancedLeadD
                     </div>
                   )}
 
-                  {lead.recordingUrl && (
-                    <RecordingPlayer recordingUrl={lead.recordingUrl} />
+                  {hasAnyRecordingEvidence && (
+                    <RecordingPlayer leadId={lead.id} recordingUrl={lead.recordingUrl} />
                   )}
                   
                   {lead.transcript && (
@@ -367,7 +376,7 @@ export function EnhancedLeadDetailModal({ leadId, open, onClose }: EnhancedLeadD
                     />
                   )}
 
-                  {!lead.recordingUrl && !lead.transcript && (
+                  {!hasAnyRecordingEvidence && !lead.transcript && (
                     <Card>
                       <CardContent className="p-12 text-center">
                         <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />

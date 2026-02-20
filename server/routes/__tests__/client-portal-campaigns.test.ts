@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { db } from '../../db';
-import { campaigns, campaignIntakeRequests, clientAccounts, workOrders } from '../../../shared/schema';
+import { campaigns, campaignIntakeRequests, clientAccounts, workOrders, clientCampaignAccess, clientCampaigns } from '../../../shared/schema';
 import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 
 // ─── Feature Flag Definition Tests ───────────────────────────────────────────
@@ -54,6 +54,8 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
   const createdCampaignIds: string[] = [];
   const createdWorkOrderIds: string[] = [];
   const createdIntakeIds: string[] = [];
+  const createdAccessIds: string[] = [];
+  const createdClientCampaignIds: string[] = [];
   const createdClientAccountIds: string[] = [];
 
   let clientAId: string;
@@ -80,6 +82,12 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
     for (const id of createdIntakeIds) {
       await db.delete(campaignIntakeRequests).where(eq(campaignIntakeRequests.id, id)).catch(() => {});
     }
+    for (const id of createdAccessIds) {
+      await db.delete(clientCampaignAccess).where(eq(clientCampaignAccess.id, id)).catch(() => {});
+    }
+    for (const id of createdClientCampaignIds) {
+      await db.delete(clientCampaigns).where(eq(clientCampaigns.id, id)).catch(() => {});
+    }
     for (const id of createdWorkOrderIds) {
       await db.execute(sql`DELETE FROM work_orders WHERE id = ${id}`).catch(() => {});
     }
@@ -92,6 +100,8 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
     createdCampaignIds.length = 0;
     createdWorkOrderIds.length = 0;
     createdIntakeIds.length = 0;
+    createdAccessIds.length = 0;
+    createdClientCampaignIds.length = 0;
     createdClientAccountIds.length = 0;
   });
 
@@ -100,6 +110,40 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
    * This mirrors the three-path approach: workOrders -> intakeRequests -> direct clientAccountId
    */
   async function simulateCampaignListing(clientAccountId: string, flagEnabled: boolean) {
+    // Path 0: Access table links (regularCampaignId + campaignId)
+    const accessRegularCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
+      .where(eq(clientCampaignAccess.clientAccountId, clientAccountId))
+      .orderBy(desc(campaigns.createdAt));
+
+    const accessMappedCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.campaignId, campaigns.id))
+      .where(eq(clientCampaignAccess.clientAccountId, clientAccountId))
+      .orderBy(desc(campaigns.createdAt));
+
+    const accessCampaigns = [...accessRegularCampaigns];
+    const accessIds = new Set(accessRegularCampaigns.map((c) => c.id));
+    for (const c of accessMappedCampaigns) {
+      if (!accessIds.has(c.id)) {
+        accessCampaigns.push(c);
+        accessIds.add(c.id);
+      }
+    }
+
     // Path 1: Work orders
     const woCampaigns = await db
       .select({
@@ -113,7 +157,7 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
       .where(eq(workOrders.clientAccountId, clientAccountId))
       .orderBy(desc(campaigns.createdAt));
 
-    const campaignIds = new Set(woCampaigns.map(c => c.id));
+    const campaignIds = new Set([...accessCampaigns, ...woCampaigns].map(c => c.id));
 
     // Path 2: Intake requests
     const approvedIntakeStatuses = ['approved', 'qso_approved', 'in_progress', 'completed'] as const;
@@ -168,10 +212,30 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
         }));
     }
 
+    // Path 4: Client-created campaigns from clientCampaigns table
+    const clientOwnedCampaigns = await db
+      .select({
+        id: clientCampaigns.id,
+        name: clientCampaigns.name,
+        status: clientCampaigns.status,
+      })
+      .from(clientCampaigns)
+      .where(eq(clientCampaigns.clientAccountId, clientAccountId));
+
+    const mappedClientOwned = clientOwnedCampaigns
+      .filter(c => !campaignIds.has(c.id))
+      .map(c => ({
+        ...c,
+        type: 'client_campaign' as const,
+        source: 'clientCampaign' as const,
+      }));
+
     return [
+      ...accessCampaigns.map(c => ({ ...c, source: 'campaignAccess' as const })),
       ...woCampaigns.map(c => ({ ...c, source: 'workOrder' as const })),
       ...mappedIntake,
       ...directLinked,
+      ...mappedClientOwned,
     ];
   }
 
@@ -190,6 +254,32 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
     expect(result.find(c => c.id === campaign.id)?.source).toBe('direct');
   });
 
+  it('includes Green Leads campaign when linked via clientCampaignAccess.campaignId', async () => {
+    const greenCampaignResult = await db.execute(sql`
+      INSERT INTO campaigns (type, name, status)
+      VALUES (${'green_leads'}, ${'Green Leads Alpha'}, ${'active'})
+      RETURNING id
+    `);
+    const greenCampaignId = greenCampaignResult.rows[0].id as string;
+    createdCampaignIds.push(greenCampaignId);
+
+    const [access] = await db
+      .insert(clientCampaignAccess)
+      .values({
+        clientAccountId: clientAId,
+        campaignId: greenCampaignId,
+      } as any)
+      .returning();
+    createdAccessIds.push(access.id);
+
+    const result = await simulateCampaignListing(clientAId, true);
+    const found = result.find((c) => c.id === greenCampaignId);
+
+    expect(found).toBeTruthy();
+    expect(found?.type).toBe('green_leads');
+    expect(found?.source).toBe('campaignAccess');
+  });
+
   it('does NOT find direct campaigns when V2 is disabled', async () => {
     const [campaign] = await db
       .insert(campaigns)
@@ -200,6 +290,24 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
     const result = await simulateCampaignListing(clientAId, false);
     const ids = result.map(c => c.id);
     expect(ids).not.toContain(campaign.id);
+  });
+
+  it('includes client-created campaigns from clientCampaigns table', async () => {
+    const [clientCampaign] = await db
+      .insert(clientCampaigns)
+      .values({
+        clientAccountId: clientAId,
+        name: 'Client Created Campaign',
+        status: 'active',
+      } as any)
+      .returning();
+    createdClientCampaignIds.push(clientCampaign.id);
+
+    const result = await simulateCampaignListing(clientAId, true);
+    const found = result.find((c) => c.id === clientCampaign.id);
+
+    expect(found).toBeTruthy();
+    expect(found?.source).toBe('clientCampaign');
   });
 
   // ─── Deduplication Tests ────────────────────────────────────────────────────

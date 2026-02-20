@@ -137,8 +137,42 @@ router.get('/', requireAuth, async (req, res) => {
 // GET /api/client-portal/qualified-leads/campaigns
 router.get('/campaigns', requireAuth, async (req, res) => {
   try {
-    // Get all campaigns with at least one approved/submitted lead
-    const campaignsData = await db
+    // Get client account id from token
+    const authHeader = req.headers.authorization;
+    let clientAccountId: string | undefined;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      try {
+        const payload = jwt.verify(token, JWT_SECRET) as ClientJWTPayload;
+        clientAccountId = payload.clientAccountId;
+      } catch {}
+    }
+
+    // Get campaigns with at least one approved/submitted lead and accessible to client
+    const campaignWhereClauses = [isNotNull(campaigns.id)];
+
+    // If clientAccountId is present, filter by access
+    if (clientAccountId) {
+      const accessRows = await db
+        .select({ campaignId: clientCampaignAccess.regularCampaignId })
+        .from(clientCampaignAccess)
+        .where(
+          and(
+            eq(clientCampaignAccess.clientAccountId, clientAccountId),
+            isNotNull(clientCampaignAccess.regularCampaignId)
+          )
+        );
+      const accessibleCampaignIds = accessRows
+        .map((row) => row.campaignId)
+        .filter((id): id is string => Boolean(id));
+      if (accessibleCampaignIds.length > 0) {
+        campaignWhereClauses.push(inArray(campaigns.id, accessibleCampaignIds));
+      } else {
+        return res.json([]);
+      }
+    }
+
+    const campaignsQuery = db
       .select({
         id: campaigns.id,
         name: campaigns.name,
@@ -146,8 +180,24 @@ router.get('/campaigns', requireAuth, async (req, res) => {
         status: campaigns.status,
       })
       .from(campaigns)
-      .where(isNotNull(campaigns.id));
-    res.json(campaignsData);
+      .where(and(...campaignWhereClauses));
+
+    // Only return campaigns with at least one approved/submitted lead
+    const leadsResult = await db
+      .select({ campaignId: leads.campaignId })
+      .from(leads)
+      .where(
+        and(
+          inArray(leads.qaStatus, ['approved', 'published']),
+          eq(leads.submittedToClient, true),
+          isNotNull(leads.contactId)
+        )
+      );
+    const campaignIdsWithLeads = new Set(leadsResult.map(l => l.campaignId));
+
+    const campaignsData = await campaignsQuery;
+    const filteredCampaigns = campaignsData.filter(c => campaignIdsWithLeads.has(c.id));
+    res.json(filteredCampaigns);
   } catch (err) {
     res.status(500).json({ message: 'Failed to fetch campaigns', error: err instanceof Error ? err.message : err });
   }

@@ -8,10 +8,11 @@ import {
 } from 'lucide-react';
 
 interface RecordingPlayerProps {
-  recordingUrl: string;
+  recordingUrl?: string | null;
+  leadId?: string;
 }
 
-export function RecordingPlayer({ recordingUrl }: RecordingPlayerProps) {
+export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -20,6 +21,64 @@ export function RecordingPlayer({ recordingUrl }: RecordingPlayerProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(recordingUrl ?? null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveUrl = async () => {
+      setError(null);
+      setIsLoading(true);
+      setResolvedUrl(null);
+
+      if (!leadId) {
+        setError('Recording playback requires a lead identifier.');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('clientPortalToken');
+        const res = await fetch(`/api/client-portal/qualified-leads/${encodeURIComponent(leadId)}/recording-link`, {
+          headers: {
+            Authorization: `Bearer ${token || ''}`,
+          },
+        });
+
+        if (res.ok) {
+          const body = await res.json();
+          const streamUrl = body?.streamUrl || body?.url || null;
+          if (!cancelled && streamUrl) {
+            setResolvedUrl(streamUrl);
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        if (!cancelled) {
+          let details = 'Failed to load a fresh recording link.';
+          try {
+            const body = await res.json();
+            details = body?.message || body?.error || details;
+          } catch {
+            // ignore JSON parse failures
+          }
+          setError(details);
+          setIsLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setError('Failed to contact recording service.');
+          setIsLoading(false);
+        }
+      }
+    };
+
+    resolveUrl();
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -61,7 +120,7 @@ export function RecordingPlayer({ recordingUrl }: RecordingPlayerProps) {
       audio.removeEventListener('error', handleError);
       audio.removeEventListener('canplay', handleCanPlay);
     };
-  }, []);
+  }, [resolvedUrl]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -121,7 +180,11 @@ export function RecordingPlayer({ recordingUrl }: RecordingPlayerProps) {
   };
 
   const downloadRecording = () => {
-    window.open(recordingUrl, '_blank');
+    if (!resolvedUrl) {
+      setError('Recording URL is not available.');
+      return;
+    }
+    window.open(resolvedUrl, '_blank');
   };
 
   return (
@@ -137,7 +200,7 @@ export function RecordingPlayer({ recordingUrl }: RecordingPlayerProps) {
         </Button>
       </CardHeader>
       <CardContent>
-        <audio ref={audioRef} src={recordingUrl} preload="metadata" />
+        <audio ref={audioRef} src={resolvedUrl || undefined} preload="metadata" />
 
         {error ? (
           <div className="text-center py-8 text-muted-foreground">

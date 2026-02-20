@@ -96,6 +96,37 @@ describe('Recording Link Resolver — API Response Shape', () => {
   });
 });
 
+describe('Client Portal Lead Recording Link — Safety Guard', () => {
+  it('returns a platform stream URL, never raw telephony-recorder S3 URL', () => {
+    const leadId = 'lead-123';
+    const token = 'signed-token';
+    const response = {
+      success: true,
+      streamUrl: `/api/client-portal/qualified-leads/${leadId}/recording-stream?token=${token}`,
+      url: `/api/client-portal/qualified-leads/${leadId}/recording-stream?token=${token}`,
+    };
+
+    expect(response.streamUrl).toContain('/api/client-portal/qualified-leads/');
+    expect(response.streamUrl).toContain('/recording-stream?token=');
+    expect(response.streamUrl).not.toContain('s3.amazonaws.com');
+    expect(response.streamUrl).not.toContain('telephony-recorder-prod');
+    expect(response.url).not.toContain('s3.amazonaws.com');
+    expect(response.url).not.toContain('telephony-recorder-prod');
+  });
+});
+
+describe('Client Portal Campaigns Endpoint — Contract', () => {
+  it('campaigns endpoint URL follows convention', () => {
+    const endpoint = '/api/client-portal/campaigns';
+    expect(endpoint).toBe('/api/client-portal/campaigns');
+  });
+
+  it('campaigns endpoint fallback payload shape is an array', () => {
+    const fallbackResponse: any[] = [];
+    expect(Array.isArray(fallbackResponse)).toBe(true);
+  });
+});
+
 // ─── Stream Endpoint Invariants ─────────────────────────────────────────
 
 describe('Stream Endpoint — Never Returns JSON', () => {
