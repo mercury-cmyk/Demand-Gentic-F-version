@@ -1781,19 +1781,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         if (telnyxFatalError) {
           if (telnyxFatalError.isWhitelist && telnyxFatalError.isRateLimit) {
             console.error(`[AI Orchestrator] ⚠️ Telnyx outbound profile rate cap hit for contact: ${telnyxFatalError.detail}`);
-            console.error(`[AI Orchestrator] ⚠️ Pausing campaign ${campaignId} until outbound profile pricing cap is raised (D24)`);
+            console.warn(`[AI Orchestrator] ℹ️ Contact queued for retry in 30 minutes (rate limit is temporary)`);
 
-            try {
-              await storage.updateCampaign(campaignId, { status: 'paused' });
-              await setOrchestratorStallReason(
-                campaignId,
-                'Telnyx outbound profile rate cap exceeded (D24). Increase destination max rate/allowlist in Telnyx Mission Control, then resume campaign.'
-              );
-            } catch (pauseError) {
-              console.error(`[AI Orchestrator] Failed to pause campaign ${campaignId} after D24 rate limit:`, pauseError);
-            }
-
-            // Re-queue this contact so it can be retried once campaign is resumed
+            // Don't pause campaign - just queue for later retry. D24 is temporary.
             try {
               await db.execute(sql`
                 UPDATE campaign_queue
@@ -1807,7 +1797,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
               console.error(`[AI Orchestrator] Failed to requeue queue item ${item.id} after D24 rate limit:`, updateError);
             }
 
-            return { success: false, itemId: item.id, error, fatalError: true };
+            return { success: false, itemId: item.id, error, fatalError: false };
           }
 
           if (telnyxFatalError.isWhitelist) {

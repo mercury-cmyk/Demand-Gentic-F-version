@@ -4,10 +4,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Sparkles, Loader2 } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
+interface CampaignContext {
+  campaignObjective?: string;
+  productServiceInfo?: string;
+  targetAudienceDescription?: string;
+  successCriteria?: string;
+  talkingPoints?: string[];
+}
 
 interface QueueIntelligenceConfigProps {
   qaParameters: any;
   onChange: (nextQaParameters: any) => void;
+  campaignContext?: CampaignContext;
 }
 
 interface WeightedRule {
@@ -29,19 +41,6 @@ const DEFAULT_SIZE_RANGES = "200-2000|120\n50-199|70\n1-49|-40";
 const DEFAULT_PROBLEM_KEYWORDS = "high call volume\nlong hold times\nabandonment\ncustomer churn\nnetwork downtime\npacket loss\npoor call quality\nservice latency";
 const DEFAULT_SOLUTION_KEYWORDS = "contact center optimization\nccaas\nworkforce management\nsip trunking\nvoip\nnetwork monitoring\nnoc automation\ntelecom optimization";
 
-const TRADITIONAL_TELECOM_PRESET = {
-  exact: "Head of Contact Center|320\nDirector of Customer Service|310\nCustomer Service Director|300\nContact Center Manager|290\nNetwork Operations Manager|300\nNOC Manager|290\nTelecom Manager|300\nVoice Engineer|270\nUnified Communications Manager|280",
-  titleKeywords: "contact center|240\ncustomer service|230\ncall center|220\nnetwork|210\ntelecom|220\nnoc|210\nvoice|180\nsip|170\nvoip|170\ncarrier|180",
-  industryKeywords: "manufacturing|220\nlogistics|210\nutilities|200\nconstruction|180\nautomotive|170\ntelecommunications|260\ntelecom|260\ncarrier|240",
-  problemKeywords: "high call volume\nlong hold times\nabandonment\nsla breach\nnetwork downtime\npacket loss\ncall quality\nservice latency\ncustomer churn",
-  solutionKeywords: "ccaas\ncontact center optimization\nworkforce management\nsip trunking\nvoip\nnetwork monitoring\nnoc automation\nquality of service\ntelecom optimization",
-  titleWeight: 1.35,
-  industryWeight: 1.2,
-  accountFitWeight: 0.9,
-  problemSolutionWeight: 1.3,
-  recentOutcomeWeight: 1.0,
-  routingThreshold: 820,
-};
 
 function normalizeWeightedRules(input: any): WeightedRule[] {
   if (!input) return [];
@@ -171,7 +170,9 @@ function parseKeywordLines(raw: string): string[] {
     .filter(Boolean);
 }
 
-export function QueueIntelligenceConfig({ qaParameters, onChange }: QueueIntelligenceConfigProps) {
+export function QueueIntelligenceConfig({ qaParameters, onChange, campaignContext }: QueueIntelligenceConfigProps) {
+  const { toast } = useToast();
+  const [isGenerating, setIsGenerating] = useState(false);
   const normalizedQa = useMemo(() => (qaParameters && typeof qaParameters === "object" ? qaParameters : {}), [qaParameters]);
   const q = normalizedQa.queueIntelligence || normalizedQa.queue_intelligence || {};
 
@@ -260,32 +261,61 @@ export function QueueIntelligenceConfig({ qaParameters, onChange }: QueueIntelli
     setRecentOutcomeWeight(Number(nextQ.recent_outcome_weight ?? nextQ.recentOutcomeWeight ?? 1.0));
   }, [normalizedQa]);
 
-  const applyTraditionalTelecomPreset = () => {
-    setExactLines(TRADITIONAL_TELECOM_PRESET.exact);
-    setTitleKeywordLines(TRADITIONAL_TELECOM_PRESET.titleKeywords);
-    setIndustryKeywordLines(TRADITIONAL_TELECOM_PRESET.industryKeywords);
-    setProblemKeywordLines(TRADITIONAL_TELECOM_PRESET.problemKeywords);
-    setSolutionKeywordLines(TRADITIONAL_TELECOM_PRESET.solutionKeywords);
-    setTitleWeight(TRADITIONAL_TELECOM_PRESET.titleWeight);
-    setIndustryWeight(TRADITIONAL_TELECOM_PRESET.industryWeight);
-    setAccountFitWeight(TRADITIONAL_TELECOM_PRESET.accountFitWeight);
-    setProblemSolutionWeight(TRADITIONAL_TELECOM_PRESET.problemSolutionWeight);
-    setRecentOutcomeWeight(TRADITIONAL_TELECOM_PRESET.recentOutcomeWeight);
-    setRoutingThreshold(TRADITIONAL_TELECOM_PRESET.routingThreshold);
+  const generateFromCampaignContext = async () => {
+    const hasContext =
+      campaignContext?.campaignObjective ||
+      campaignContext?.productServiceInfo ||
+      campaignContext?.targetAudienceDescription ||
+      campaignContext?.successCriteria ||
+      (campaignContext?.talkingPoints?.length ?? 0) > 0;
 
-    emitChange({
-      exactLines: TRADITIONAL_TELECOM_PRESET.exact,
-      titleKeywordLines: TRADITIONAL_TELECOM_PRESET.titleKeywords,
-      industryKeywordLines: TRADITIONAL_TELECOM_PRESET.industryKeywords,
-      problemKeywordLines: TRADITIONAL_TELECOM_PRESET.problemKeywords,
-      solutionKeywordLines: TRADITIONAL_TELECOM_PRESET.solutionKeywords,
-      titleWeight: TRADITIONAL_TELECOM_PRESET.titleWeight,
-      industryWeight: TRADITIONAL_TELECOM_PRESET.industryWeight,
-      accountFitWeight: TRADITIONAL_TELECOM_PRESET.accountFitWeight,
-      problemSolutionWeight: TRADITIONAL_TELECOM_PRESET.problemSolutionWeight,
-      recentOutcomeWeight: TRADITIONAL_TELECOM_PRESET.recentOutcomeWeight,
-      routingThreshold: TRADITIONAL_TELECOM_PRESET.routingThreshold,
-    });
+    if (!hasContext) {
+      toast({
+        title: "No campaign context",
+        description: "Add campaign context in the Messaging step first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const res = await apiRequest("POST", "/api/queue-intelligence/generate-config", campaignContext);
+      const data = await res.json();
+      const c = data.config;
+
+      setExactLines(c.exact ?? exactLines);
+      setTitleKeywordLines(c.titleKeywords ?? titleKeywordLines);
+      setIndustryKeywordLines(c.industryKeywords ?? industryKeywordLines);
+      setProblemKeywordLines(c.problemKeywords ?? problemKeywordLines);
+      setSolutionKeywordLines(c.solutionKeywords ?? solutionKeywordLines);
+      setTitleWeight(c.titleWeight ?? titleWeight);
+      setIndustryWeight(c.industryWeight ?? industryWeight);
+      setAccountFitWeight(c.accountFitWeight ?? accountFitWeight);
+      setProblemSolutionWeight(c.problemSolutionWeight ?? problemSolutionWeight);
+      setRecentOutcomeWeight(c.recentOutcomeWeight ?? recentOutcomeWeight);
+      setRoutingThreshold(c.routingThreshold ?? routingThreshold);
+
+      emitChange({
+        exactLines: c.exact ?? exactLines,
+        titleKeywordLines: c.titleKeywords ?? titleKeywordLines,
+        industryKeywordLines: c.industryKeywords ?? industryKeywordLines,
+        problemKeywordLines: c.problemKeywords ?? problemKeywordLines,
+        solutionKeywordLines: c.solutionKeywords ?? solutionKeywordLines,
+        titleWeight: c.titleWeight ?? titleWeight,
+        industryWeight: c.industryWeight ?? industryWeight,
+        accountFitWeight: c.accountFitWeight ?? accountFitWeight,
+        problemSolutionWeight: c.problemSolutionWeight ?? problemSolutionWeight,
+        recentOutcomeWeight: c.recentOutcomeWeight ?? recentOutcomeWeight,
+        routingThreshold: c.routingThreshold ?? routingThreshold,
+      });
+
+      toast({ title: "Routing rules generated", description: "AI has configured queue intelligence based on your campaign context." });
+    } catch (err: any) {
+      toast({ title: "Generation failed", description: err.message || "Could not generate config.", variant: "destructive" });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -298,8 +328,19 @@ export function QueueIntelligenceConfig({ qaParameters, onChange }: QueueIntelli
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={applyTraditionalTelecomPreset} data-testid="button-apply-traditional-telecom-preset">
-            Apply Traditional + Contact Center + Telecom Preset
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={generateFromCampaignContext}
+            disabled={isGenerating}
+            data-testid="button-ai-generate-queue-config"
+          >
+            {isGenerating ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-2" />
+            )}
+            {isGenerating ? "Generating..." : "AI Generate from Campaign Context"}
           </Button>
         </div>
 

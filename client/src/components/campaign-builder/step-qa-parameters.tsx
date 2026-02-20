@@ -163,6 +163,13 @@ export function StepQAParameters({ data, onChange, onNext }: QAParametersStepPro
 
       <QueueIntelligenceConfig
         qaParameters={qaParameters}
+        campaignContext={{
+          campaignObjective,
+          productServiceInfo,
+          targetAudienceDescription,
+          successCriteria,
+          talkingPoints,
+        }}
         onChange={(nextQa) => {
           setQaParameters(nextQa);
           onChange({

@@ -282,7 +282,9 @@ export default function CloudLogsMonitor() {
     if (autoScroll && logScrollContainerRef.current) {
       const container = logScrollContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
       if (container) {
-        container.scrollTop = container.scrollHeight;
+        requestAnimationFrame(() => {
+          if (container) container.scrollTop = container.scrollHeight;
+        });
       }
     }
   }, [allLogs, autoScroll]);
