@@ -106,7 +106,7 @@ interface ContentBlock {
   };
 }
 
-// Types
+// Types - extends to include project/org context from Step 1
 interface CampaignIntent {
   campaignName: string;
   senderProfileId: string;
@@ -114,6 +114,13 @@ interface CampaignIntent {
   fromEmail: string;
   replyToEmail: string;
   subject: string;
+  // Project & org context (from Step 1 selection)
+  clientAccountId?: string;
+  clientName?: string;
+  projectId?: string;
+  projectName?: string;
+  projectDescription?: string;
+  campaignOrganizationId?: string;
 }
 
 interface TemplateData {
@@ -584,7 +591,14 @@ export function SimpleTemplateBuilder({
   // AgentX state
   const [outreachType, setOutreachType] = useState("cold-outreach");
   const [tone, setTone] = useState("professional");
-  const [aiContext, setAiContext] = useState("");
+  // Pre-populate context with project details when available
+  const [aiContext, setAiContext] = useState(() => {
+    const parts: string[] = [];
+    if (campaignIntent.projectName) parts.push(`Project: ${campaignIntent.projectName}`);
+    if (campaignIntent.projectDescription) parts.push(campaignIntent.projectDescription);
+    if (campaignIntent.clientName) parts.push(`Client: ${campaignIntent.clientName}`);
+    return parts.join("\n\n");
+  });
   const [aiGenerating, setAiGenerating] = useState(false);
   const [ctaUrl, setCtaUrl] = useState("https://example.com");
   const [brandPalette, setBrandPalette] = useState<BrandPaletteKey>("indigo");
@@ -1032,7 +1046,12 @@ export function SimpleTemplateBuilder({
         senderName: campaignIntent.senderName,
         companyName: orgName,
         ctaUrl: ctaUrl?.trim() ? ctaUrl.trim() : undefined,
-        brandPalette
+        brandPalette,
+        // Project & org context for intelligent email generation
+        organizationId: campaignIntent.campaignOrganizationId,
+        projectName: campaignIntent.projectName,
+        projectDescription: campaignIntent.projectDescription,
+        clientName: campaignIntent.clientName,
       });
       const data = await res.json();
       const copy = buildCopy(data?.rawContent || data?.content || {});
@@ -1174,6 +1193,25 @@ export function SimpleTemplateBuilder({
                   </div>
                 </SheetHeader>
                 <div className="mt-6 space-y-6">
+                  {/* Project Context Banner */}
+                  {(campaignIntent.projectName || campaignIntent.clientName) && (
+                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-1">
+                      <p className="text-xs font-semibold text-blue-800">Campaign context</p>
+                      {campaignIntent.clientName && (
+                        <p className="text-xs text-blue-600">Client: {campaignIntent.clientName}</p>
+                      )}
+                      {campaignIntent.projectName && (
+                        <p className="text-xs text-blue-600">Project: {campaignIntent.projectName}</p>
+                      )}
+                      {campaignIntent.campaignOrganizationId && (
+                        <p className="text-xs text-blue-500 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" />
+                          Org intelligence will be used for generation
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* AI Form */}
                   <div className="space-y-4">
                     <div className="space-y-2">

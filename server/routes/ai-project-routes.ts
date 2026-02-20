@@ -9,10 +9,11 @@ import { db } from '../db';
 import { aiProjectIntents, insertAiProjectIntentSchema, type InsertAiProjectIntent } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { expensiveOperationLimiter } from '../middleware/security';
-import { 
-  extractProjectFromNaturalLanguage, 
-  redactPII 
+import {
+  extractProjectFromNaturalLanguage,
+  redactPII
 } from '../services/ai-project-orchestrator';
+import { getOrganizationById } from '../services/problem-intelligence/organization-service';
 
 const router = Router();
 
@@ -260,6 +261,11 @@ const generateEmailSchema = z.object({
   companyName: z.string().optional().default(''),
   ctaUrl: z.string().optional().default(''),
   brandPalette: z.string().optional(),
+  // Project & org context for intelligent generation
+  organizationId: z.string().optional(),
+  projectName: z.string().optional(),
+  projectDescription: z.string().optional(),
+  clientName: z.string().optional(),
 });
 
 /**
@@ -275,15 +281,59 @@ router.post(
       
       console.log('[AI Email] Generating email for:', params.campaignName);
 
+      // Load org intelligence if an organizationId is provided
+      let orgContext = '';
+      if (params.organizationId) {
+        try {
+          const org = await getOrganizationById(params.organizationId);
+          if (org) {
+            const parts: string[] = [];
+            if (org.compiledOrgContext) {
+              parts.push(org.compiledOrgContext);
+            } else {
+              if (org.identity) {
+                const identity = org.identity as any;
+                if (identity.description) parts.push(`Organization: ${identity.description}`);
+                if (identity.industry) parts.push(`Industry: ${identity.industry}`);
+              }
+              if (org.offerings) {
+                const offerings = org.offerings as any;
+                if (offerings.coreProducts?.length) parts.push(`Products/Services: ${offerings.coreProducts.join(', ')}`);
+                if (offerings.problemsSolved?.length) parts.push(`Problems solved: ${offerings.problemsSolved.join(', ')}`);
+                if (offerings.differentiators?.length) parts.push(`Differentiators: ${offerings.differentiators.join(', ')}`);
+              }
+              if (org.positioning) {
+                const pos = org.positioning as any;
+                if (pos.valueProposition) parts.push(`Value proposition: ${pos.valueProposition}`);
+              }
+              if (org.outreach) {
+                const outreach = org.outreach as any;
+                if (outreach.emailAngles?.length) parts.push(`Proven email angles: ${outreach.emailAngles.join(', ')}`);
+              }
+            }
+            orgContext = parts.join('\n');
+          }
+        } catch (e) {
+          console.warn('[AI Email] Could not load org intelligence:', e);
+        }
+      }
+
+      // Build project context section
+      const projectContext = [
+        params.clientName ? `Client: ${params.clientName}` : '',
+        params.projectName ? `Project: ${params.projectName}` : '',
+        params.projectDescription ? `Project description: ${params.projectDescription}` : '',
+      ].filter(Boolean).join('\n');
+
       // Try to use DeepSeek AI first
       let content;
       let usedAi = false;
-      
+
       try {
         // Dynamically import to avoid startup failures if not configured
         const { generateEmailContent } = await import('../lib/deepseek-email-service');
-        
-        const prompt = `Create a strategic, high-converting B2B ${params.outreachType} email for campaign "${params.campaignName}". 
+
+        const prompt = `Create a strategic, high-converting B2B ${params.outreachType} email for campaign "${params.campaignName}".
 Tone: ${params.tone}. Company: ${params.companyName || "the sender"}.
 
 Requirements:
@@ -295,10 +345,12 @@ Requirements:
 - Keep the intro 2-3 sentences, then 3 concise value bullets.
 - Include a CTA label that sounds like a low-friction next step.
 - If provided, use this CTA URL: ${params.ctaUrl || "https://example.com"}.
+${projectContext ? `\nProject Context:\n${projectContext}` : ''}
+${orgContext ? `\nOrganization Intelligence (use this to make the email highly relevant):\n${orgContext}` : ''}
 
-Context:
+Additional Context:
 ${params.context || "No additional context provided."}`;
-        
+
         content = await generateEmailContent(prompt, {
           tone: params.tone as any,
           templateType: params.outreachType,
@@ -308,7 +360,6 @@ ${params.context || "No additional context provided."}`;
         console.log('[AI Email] Successfully generated with DeepSeek AI');
       } catch (aiError: any) {
         console.log('[AI Email] AI unavailable, using styled fallback:', aiError.message);
-        // Use styled fallback template
         content = generateFallbackContent(params);
       }
 
@@ -344,6 +395,74 @@ ${params.context || "No additional context provided."}`;
         success: false,
         message: error.message || 'Failed to generate email',
       });
+    }
+  }
+);
+
+/**
+ * POST /api/ai/suggest-subject
+ * Generate AI-suggested email subject lines using project/org context
+ */
+router.post(
+  '/suggest-subject',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { campaignName, projectName, projectDescription, organizationId, clientName } = req.body;
+
+      if (!campaignName) {
+        return res.status(400).json({ success: false, message: 'campaignName is required' });
+      }
+
+      // Load org intelligence if available
+      let orgContext = '';
+      if (organizationId) {
+        try {
+          const org = await getOrganizationById(organizationId);
+          if (org) {
+            const outreach = org.outreach as any;
+            const positioning = org.positioning as any;
+            if (outreach?.emailAngles?.length) orgContext += `Email angles: ${outreach.emailAngles.join(', ')}. `;
+            if (positioning?.valueProposition) orgContext += `Value prop: ${positioning.valueProposition}. `;
+          }
+        } catch (e) {
+          // Non-fatal
+        }
+      }
+
+      const contextParts = [
+        clientName ? `Client: ${clientName}` : '',
+        projectName ? `Project: ${projectName}` : '',
+        projectDescription ? projectDescription : '',
+        orgContext,
+      ].filter(Boolean).join(' | ');
+
+      try {
+        const { generateEmailContent } = await import('../lib/deepseek-email-service');
+        const prompt = `Generate a concise, compelling B2B cold email subject line for:
+Campaign: "${campaignName}"
+${contextParts ? `Context: ${contextParts}` : ''}
+
+Requirements:
+- Under 60 characters
+- No spam words (free, urgent, guaranteed)
+- Creates curiosity or addresses a specific pain point
+- Professional tone
+
+Return ONLY the subject line text, nothing else.`;
+
+        const result = await generateEmailContent(prompt, { tone: 'professional', templateType: 'subject-only' });
+        const subject = result?.subject || result?.heroTitle || `${campaignName} — a quick note`;
+
+        return res.json({ success: true, subject: subject.replace(/^["']|["']$/g, '').trim() });
+      } catch (aiError) {
+        // Fallback subject
+        const words = campaignName.split(' ').slice(0, 4).join(' ');
+        return res.json({ success: true, subject: `Quick question about ${words}` });
+      }
+    } catch (error: any) {
+      console.error('[AI Subject] Error:', error);
+      res.status(500).json({ success: false, message: error.message || 'Failed to suggest subject' });
     }
   }
 );

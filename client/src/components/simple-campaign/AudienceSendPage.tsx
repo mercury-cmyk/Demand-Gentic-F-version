@@ -54,6 +54,12 @@ interface CampaignIntent {
   fromEmail: string;
   replyToEmail: string;
   subject: string;
+  // Project & org context carried from Step 1
+  clientAccountId?: string;
+  clientName?: string;
+  projectId?: string;
+  projectName?: string;
+  campaignOrganizationId?: string;
 }
 
 interface TemplateData {
@@ -130,11 +136,11 @@ export function AudienceSendPage({
   const [audienceCount, setAudienceCount] = useState<number>(0);
   const [countingAudience, setCountingAudience] = useState(false);
 
-  // Client/project linkage
+  // Client/project linkage - pre-populated from Step 1
   const [clientAccounts, setClientAccounts] = useState<ClientAccount[]>([]);
   const [clientProjects, setClientProjects] = useState<ClientProject[]>([]);
-  const [selectedClientId, setSelectedClientId] = useState<string>("");
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [selectedClientId, setSelectedClientId] = useState<string>(campaignIntent.clientAccountId || "");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(campaignIntent.projectId || "");
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
   
@@ -222,7 +228,10 @@ export function AudienceSendPage({
           const projects = data?.projects || [];
           setClientProjects(projects);
           if (projects.length > 0) {
-            setSelectedProjectId((prev) => (prev && projects.some((p: ClientProject) => p.id === prev) ? prev : projects[0].id));
+            // Keep pre-populated projectId if valid, otherwise pick first
+            setSelectedProjectId((prev) =>
+              prev && projects.some((p: ClientProject) => p.id === prev) ? prev : projects[0].id
+            );
           } else {
             setSelectedProjectId("");
           }
@@ -440,7 +449,11 @@ export function AudienceSendPage({
               </div>
               <div>
                 <CardTitle className="text-base">Client & Project</CardTitle>
-                <CardDescription className="text-xs">Link this campaign to a client and project</CardDescription>
+                <CardDescription className="text-xs">
+                  {campaignIntent.clientAccountId
+                    ? "Pre-filled from campaign setup — change if needed"
+                    : "Link this campaign to a client and project"}
+                </CardDescription>
               </div>
             </div>
           </CardHeader>
