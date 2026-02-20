@@ -4924,7 +4924,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Client users can only view campaigns assigned to their account
-      const isClient = req.user?.role === 'client';
+      const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
       if (isClient) {
         const clientAccountId = (req.user as any).clientAccountId || (req.user as any).tenantId;
         if (campaign.clientAccountId !== clientAccountId) {
@@ -5550,7 +5550,7 @@ export function registerRoutes(app: Express) {
 
       // Client users can only update campaigns assigned to their account
       // and are limited to certain fields (voice settings, AI agent settings)
-      const isClient = req.user?.role === 'client';
+      const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
       if (isClient) {
         const clientAccountId = (req.user as any).clientAccountId || (req.user as any).tenantId;
         if (existingCampaign.clientAccountId !== clientAccountId) {

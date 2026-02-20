@@ -87,7 +87,7 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
   try {
     const { campaignId } = req.params;
     const userId = req.user?.userId;
-    const isClient = req.user?.role === 'client';
+    const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
     const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
     const isWorkOrderSource = req.query.source === 'work_order';
 
@@ -512,7 +512,7 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
 router.get("/:campaignId/test-calls", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const isClient = req.user?.role === 'client';
+    const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
     const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
 
     // Client ownership check: verify client has access to this campaign
@@ -580,7 +580,7 @@ router.get("/:campaignId/test-calls", requireDualAuth, requireRole("admin", "cam
 router.get("/:campaignId/test-calls/:testCallId", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
-    const isClient = req.user?.role === 'client';
+    const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
     const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
 
     // Client ownership check
@@ -634,7 +634,7 @@ router.get("/:campaignId/test-calls/:testCallId", requireDualAuth, requireRole("
 router.post("/:campaignId/test-calls/:testCallId/analyze", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
-    const isClient = req.user?.role === 'client';
+    const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
     const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
 
     // Client ownership check
@@ -851,7 +851,7 @@ Return ONLY valid JSON, no other text.`;
 router.patch("/:campaignId/test-calls/:testCallId", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
-    const isClient = req.user?.role === 'client';
+    const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
     const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
 
     // Client ownership check
@@ -1062,7 +1062,7 @@ router.post("/webhook", async (req, res) => {
 router.get("/:campaignId/test-calls-summary", requireDualAuth, requireRole("admin", "campaign_manager", "client", "client_user"), async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const isClient = req.user?.role === 'client';
+    const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
     const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
 
     // Client ownership check
