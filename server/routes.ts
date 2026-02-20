@@ -9936,6 +9936,93 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // ==================== BACKFILL: Align lead statuses with QA quality outcomes ====================
+  // 1. Leads with qaStatus='approved' → set aiQualificationStatus='qualified' if not already set
+  // 2. Leads with qaStatus='new' that have completed AI analysis → move to correct status
+  //    (approved / under_review / rejected) based on aiQualificationStatus + aiScore
+  app.post("/api/leads/backfill-qualified-status", requireAuth, requireRole('admin', 'quality_analyst'), async (req, res) => {
+    try {
+      const { campaignId } = req.body as { campaignId?: string };
+
+      const baseWhere = campaignId
+        ? eq(leads.campaignId, campaignId)
+        : sql`1=1`;
+
+      // ── Pass 1: Mark approved leads as aiQualificationStatus='qualified' ──────────────
+      const approvedLeads = await db
+        .select({ id: leads.id, aiQualificationStatus: leads.aiQualificationStatus })
+        .from(leads)
+        .where(and(eq(leads.qaStatus, 'approved'), baseWhere));
+
+      let backfilledQualified = 0;
+      for (const lead of approvedLeads) {
+        if (lead.aiQualificationStatus !== 'qualified') {
+          await db
+            .update(leads)
+            .set({ aiQualificationStatus: 'qualified', updatedAt: new Date() })
+            .where(eq(leads.id, lead.id));
+          backfilledQualified++;
+        }
+      }
+
+      // ── Pass 2: Move 'new' leads out of new based on AI quality outcome ───────────────
+      // These are leads where AI analysis ran but qaStatus was never updated from 'new'
+      const newLeads = await db
+        .select({
+          id: leads.id,
+          aiQualificationStatus: leads.aiQualificationStatus,
+          aiScore: leads.aiScore,
+        })
+        .from(leads)
+        .where(and(eq(leads.qaStatus, 'new'), isNotNull(leads.aiQualificationStatus), baseWhere));
+
+      let movedToApproved = 0;
+      let movedToReview = 0;
+      let movedToRejected = 0;
+
+      for (const lead of newLeads) {
+        const score = Number(lead.aiScore ?? 0);
+        const status = lead.aiQualificationStatus;
+
+        let nextStatus: 'approved' | 'under_review' | 'rejected';
+        let qaDecision: string;
+
+        if (status === 'qualified' && score >= 70) {
+          nextStatus = 'approved';
+          qaDecision = `Backfill: Auto-approved — AI score ${score}/100`;
+          movedToApproved++;
+        } else if (status === 'not_qualified' && score < 30) {
+          nextStatus = 'rejected';
+          qaDecision = `Backfill: Auto-rejected — AI score ${score}/100`;
+          movedToRejected++;
+        } else {
+          nextStatus = 'under_review';
+          qaDecision = `Backfill: Moved to review — AI score ${score}/100, status: ${status}`;
+          movedToReview++;
+        }
+
+        await db
+          .update(leads)
+          .set({ qaStatus: nextStatus, qaDecision, updatedAt: new Date() })
+          .where(eq(leads.id, lead.id));
+      }
+
+      const summary = {
+        approvedLeadsBackfilledQualified: backfilledQualified,
+        newLeadsProcessed: newLeads.length,
+        movedToApproved,
+        movedToUnderReview: movedToReview,
+        movedToRejected,
+      };
+
+      console.log('[BACKFILL] Qualified status backfill complete:', summary);
+      res.json({ success: true, ...summary });
+    } catch (error) {
+      console.error('[BACKFILL] Error:', error);
+      res.status(500).json({ message: "Backfill failed", error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   // Bulk PM Approve - PM approves multiple leads at once
   app.post("/api/leads/pm-approve-bulk", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
