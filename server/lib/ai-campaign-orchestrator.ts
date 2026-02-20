@@ -498,6 +498,9 @@ function inferCountryFromPhone(phone: string | null | undefined): string | null 
     if (e164.startsWith('971')) e164 = `+${e164}`;
     else if (e164.startsWith('44')) e164 = `+${e164}`;
     else if (e164.startsWith('1')) e164 = `+${e164}`;
+    // 10-digit NANP (US/Canada): area code starts 2-9, no country code prefix.
+    // Very common in US CRM data where contacts are stored without the +1.
+    else if (/^[2-9]\d{9}$/.test(e164)) return 'US';
   }
   if (!e164.startsWith('+')) return null;
 
@@ -772,14 +775,19 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       c.job_title as contact_job_title,
       a.name as account_name,
       -- Infer timezone from: explicit timezone > country > phone prefix
+      -- 10-digit phones (NANP/US format stored without +1) are treated as US
       COALESCE(
         c.timezone,
-        CASE 
+        CASE
           WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'UNITED KINGDOM UK', 'ENGLAND', 'SCOTLAND', 'WALES') THEN 'Europe/London'
-          WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA') THEN 'America/New_York'
+          WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA', 'UNITED STATES OF AMERICA') THEN 'America/New_York'
           WHEN UPPER(c.country) IN ('CA', 'CANADA') THEN 'America/Toronto'
           WHEN c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%' THEN 'Europe/London'
           WHEN c.mobile_phone_e164 LIKE '+1%' OR c.direct_phone_e164 LIKE '+1%' THEN 'America/New_York'
+          -- 10-digit NANP (US contacts stored without +1 country code)
+          WHEN c.mobile_phone_e164 ~ '^[2-9][0-9]{9}$' OR c.direct_phone_e164 ~ '^[2-9][0-9]{9}$' THEN 'America/New_York'
+          -- 11-digit US (1XXXXXXXXXX stored without +)
+          WHEN c.mobile_phone_e164 ~ '^1[2-9][0-9]{9}$' OR c.direct_phone_e164 ~ '^1[2-9][0-9]{9}$' THEN 'America/New_York'
           ELSE NULL
         END
       ) as inferred_timezone,
