@@ -123,16 +123,24 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onOp
   const config = statusConfig[status] || statusConfig.active;
   const StatusIcon = config.icon;
 
-  // Calculate progress
-  const targetCount = campaign.targetCount || campaign.eligibleCount || 100;
-  const deliveredCount = campaign.deliveredCount || 0;
-  const progressPercent = Math.min(Math.round((deliveredCount / targetCount) * 100), 100);
-  const queueCount = campaign.stats?.queueStats?.total ?? campaign.totalContacts ?? campaign.eligibleCount ?? 0;
-  const remainingCount = campaign.stats?.remaining ?? Math.max(targetCount - deliveredCount, 0);
-  const attemptsCount = campaign.stats?.attempts ?? campaign.deliveredCount ?? 0;
+  // Resolve call report (prefer top-level callReport, fall back to stats.callReport)
+  const report = campaign.callReport || campaign.stats?.callReport;
+
+  // Stats from callReport (true calls placed by the AI dialer)
+  const callsMade = Number(report?.callsMade || 0);
+  const connected = Number(report?.connected || 0);
+  const qualified = Number(report?.qualified || 0);
+  const voicemail = Number(report?.voicemail || 0);
+
   const leadsCount = campaign.stats?.leads ?? campaign.verifiedCount ?? 0;
+  const queueCount = campaign.stats?.queueStats?.total ?? campaign.totalContacts ?? campaign.eligibleCount ?? 0;
+
+  // Progress towards target qualified leads
+  const targetCount = campaign.targetQualifiedLeads || campaign.targetCount || campaign.eligibleCount || 100;
+  const progressPercent = Math.min(Math.round((leadsCount / targetCount) * 100), 100);
+
   const campaignTypeLabel = campaign.type || campaign.campaignType || 'campaign';
-  const dialModeLabel = campaign.dialMode ? campaign.dialMode.replace('_', ' ') : 'standard';
+
   const statusAccent =
     status === 'active'
       ? 'bg-emerald-500'
@@ -142,90 +150,104 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onOp
           ? 'bg-blue-500'
           : status === 'pending'
             ? 'bg-amber-500'
-            : 'bg-slate-500';
+            : 'bg-slate-400';
 
   return (
-    <Card className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/95">
-      <div className={`absolute inset-y-0 left-0 w-1 ${statusAccent}`} />
+    <Card className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-950/95">
+      <div className={`absolute inset-y-0 left-0 w-[3px] ${statusAccent}`} />
 
-      <CardHeader className="pb-4 pt-5">
+      {/* Header */}
+      <CardHeader className="pb-3 pt-5 pl-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
-            <div className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 flex items-center justify-center">
-              <Target className="h-5 w-5" />
+            <div className="h-9 w-9 shrink-0 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 text-slate-600 dark:border-slate-700 dark:from-slate-800 dark:to-slate-900 dark:text-slate-300 flex items-center justify-center">
+              <Target className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <CardTitle className="text-base md:text-lg leading-tight truncate text-slate-900 dark:text-slate-100">
+              <CardTitle className="text-sm font-semibold leading-snug text-slate-900 dark:text-slate-100 truncate">
                 {campaign.name}
               </CardTitle>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline" className="capitalize border-slate-300/80 bg-slate-100/70 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{campaignTypeLabel}</Badge>
-                <Badge variant="outline" className="capitalize border-slate-300/80 bg-slate-100/70 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{dialModeLabel}</Badge>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <Badge variant="outline" className="h-5 px-1.5 text-[10px] capitalize border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+                  {campaignTypeLabel.replace(/_/g, ' ')}
+                </Badge>
                 {campaign.startDate && (
-                  <span className="font-medium text-slate-500 dark:text-slate-400">
-                    {new Date(campaign.startDate).toLocaleDateString()}
-                    {campaign.endDate ? ` – ${new Date(campaign.endDate).toLocaleDateString()}` : ''}
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                    {new Date(campaign.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                    {campaign.endDate ? ` – ${new Date(campaign.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
                   </span>
                 )}
               </div>
             </div>
           </div>
-          <Badge variant="outline" className={`${config.tone} gap-1.5 whitespace-nowrap text-xs font-semibold`}>
+          <Badge variant="outline" className={`${config.tone} shrink-0 gap-1 text-[10px] font-semibold px-2 h-6`}>
             <StatusIcon className="h-3 w-3" />
             {config.label}
           </Badge>
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-5">
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-800 dark:bg-slate-900/60">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Queue</p>
-            <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{queueCount.toLocaleString()}</p>
+      <CardContent className="space-y-4 px-5 pb-4">
+        {/* Call Stats Row — sourced from dialerCallAttempts (matches admin) */}
+        <div className="grid grid-cols-4 gap-2">
+          <div className="flex flex-col items-center rounded-lg border border-slate-100 bg-slate-50/80 py-2 px-1 dark:border-slate-800 dark:bg-slate-900/50">
+            <PhoneCall className="h-3.5 w-3.5 text-emerald-500 mb-1" />
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{callsMade.toLocaleString()}</p>
+            <p className="text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">Calls</p>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-800 dark:bg-slate-900/60">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Remaining</p>
-            <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{remainingCount.toLocaleString()}</p>
+          <div className="flex flex-col items-center rounded-lg border border-slate-100 bg-slate-50/80 py-2 px-1 dark:border-slate-800 dark:bg-slate-900/50">
+            <PhoneCall className="h-3.5 w-3.5 text-blue-500 mb-1" />
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{connected.toLocaleString()}</p>
+            <p className="text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">Connected</p>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-800 dark:bg-slate-900/60">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Attempts</p>
-            <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{attemptsCount.toLocaleString()}</p>
+          <div className="flex flex-col items-center rounded-lg border border-slate-100 bg-slate-50/80 py-2 px-1 dark:border-slate-800 dark:bg-slate-900/50">
+            <UserCheck className="h-3.5 w-3.5 text-violet-500 mb-1" />
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{qualified.toLocaleString()}</p>
+            <p className="text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">Qualified</p>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-800 dark:bg-slate-900/60">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Leads</p>
-            <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{leadsCount.toLocaleString()}</p>
+          <div className="flex flex-col items-center rounded-lg border border-slate-100 bg-slate-50/80 py-2 px-1 dark:border-slate-800 dark:bg-slate-900/50">
+            <Voicemail className="h-3.5 w-3.5 text-amber-500 mb-1" />
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{voicemail.toLocaleString()}</p>
+            <p className="text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">Voicemail</p>
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-          <div className="mb-2 flex items-center justify-between text-xs">
-            <span className="text-muted-foreground uppercase tracking-wide">Delivery Progress</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">{progressPercent}%</span>
+        {/* Progress bar */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="text-slate-400 uppercase tracking-wide">Qualified leads progress</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">{leadsCount.toLocaleString()} / {targetCount.toLocaleString()}</span>
           </div>
-          <Progress value={progressPercent} className="h-2" />
-          <div className="mt-2 text-[11px] text-muted-foreground">
-            {deliveredCount.toLocaleString()} delivered of {targetCount.toLocaleString()} target
-          </div>
+          <Progress value={progressPercent} className="h-1.5" />
         </div>
+
+        {/* Queue indicator */}
+        {queueCount > 0 && (
+          <div className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50/60 px-3 py-1.5 dark:border-slate-800 dark:bg-slate-900/40">
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              <List className="h-3.5 w-3.5" />
+              <span>{queueCount.toLocaleString()} contacts in queue</span>
+            </div>
+            {onViewQueue && (
+              <button
+                onClick={() => onViewQueue(campaign.id)}
+                className="text-[10px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                View →
+              </button>
+            )}
+          </div>
+        )}
       </CardContent>
 
-      <CardFooter className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50/80 pt-3 dark:border-slate-800 dark:bg-slate-900/70">
+      {/* Actions Footer */}
+      <CardFooter className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-3 dark:border-slate-800 dark:bg-slate-900/40">
+        {/* Primary actions */}
         <div className="flex gap-2 w-full">
-          {onViewQueue && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 gap-1.5 border-slate-300 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
-              onClick={() => onViewQueue(campaign.id)}
-            >
-              <List className="h-3.5 w-3.5" />
-              Queue
-            </Button>
-          )}
           <Button
-            variant="outline"
+            variant="default"
             size="sm"
-            className="flex-1 gap-1.5 border-slate-300 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
+            className="flex-1 h-8 gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs dark:bg-slate-100 dark:hover:bg-slate-200 dark:text-slate-900"
             onClick={() => onRequestMoreLeads(campaign.id)}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -233,48 +255,47 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onOp
           </Button>
           {onViewDetails && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="px-2 hover:bg-slate-200/70 dark:hover:bg-slate-800"
+              className="h-8 px-3 gap-1.5 border-slate-200 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
               onClick={() => onViewDetails(campaign.id)}
             >
-              <BarChart3 className="h-4 w-4" />
+              <BarChart3 className="h-3.5 w-3.5" />
+              Details
             </Button>
           )}
         </div>
-        {(onOpenPreviewStudio || onSelectVoice) && (
+
+        {/* Preview Studio actions */}
+        {onOpenPreviewStudio && (
           <div className="flex gap-2 w-full">
-            {onOpenPreviewStudio && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
-                  onClick={() => onOpenPreviewStudio(campaign.id, 'phone')}
-                >
-                  <Phone className="h-3.5 w-3.5" />
-                  Test Call
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                  onClick={() => onOpenPreviewStudio(campaign.id, 'email')}
-                >
-                  <Mail className="h-3.5 w-3.5" />
-                  Test Email
-                </Button>
-              </>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 h-8 gap-1.5 border-emerald-200 bg-emerald-50/60 text-emerald-700 hover:bg-emerald-100 text-xs dark:border-emerald-800/60 dark:bg-emerald-950/20 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+              onClick={() => onOpenPreviewStudio(campaign.id, 'phone')}
+            >
+              <Phone className="h-3.5 w-3.5" />
+              Test Call
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 h-8 gap-1.5 border-blue-200 bg-blue-50/60 text-blue-700 hover:bg-blue-100 text-xs dark:border-blue-800/60 dark:bg-blue-950/20 dark:text-blue-400 dark:hover:bg-blue-950/40"
+              onClick={() => onOpenPreviewStudio(campaign.id, 'email')}
+            >
+              <Mail className="h-3.5 w-3.5" />
+              Test Email
+            </Button>
             {onSelectVoice && (
               <Button
                 variant="outline"
                 size="sm"
-                className="flex-1 gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="h-8 px-3 gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-100 text-xs dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
                 onClick={() => onSelectVoice(campaign.id)}
+                title="Change voice"
               >
                 <Mic className="h-3.5 w-3.5" />
-                Voice
               </Button>
             )}
           </div>
