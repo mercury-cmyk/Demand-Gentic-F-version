@@ -4924,7 +4924,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Client users can only view campaigns assigned to their account
-      const isClient = req.user?.role === 'client';
+      const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
       if (isClient) {
         const clientAccountId = (req.user as any).clientAccountId || (req.user as any).tenantId;
         if (campaign.clientAccountId !== clientAccountId) {
@@ -5090,7 +5090,19 @@ export function registerRoutes(app: Express) {
       // Combine human + AI stats
       const callsMade = (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0);
       const callsConnected = (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0);
-      const leadsQualified = (humanCallStats?.leadsQualified || 0) + (aiCallStats?.leadsQualified || 0);
+
+      // Leads Qualified: query the leads table directly so manual QA overrides are included.
+      // callSessions.aiDisposition never changes when a reviewer manually approves a needs_review lead,
+      // so counting from call dispositions alone would under-count.
+      const [leadsQualifiedResult] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(leads)
+        .where(and(
+          eq(leads.campaignId, campaignId),
+          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
+        ));
+      const leadsQualified = leadsQualifiedResult?.count || 0;
+
       const dncRequests = (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0);
       const notInterested = (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0);
       const noAnswer = (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0);
@@ -5128,6 +5140,23 @@ export function registerRoutes(app: Express) {
       if (!campaignIds?.length) return res.json({});
 
       const results: Record<string, any> = {};
+
+      // Bulk query: leads qualified per campaign from leads table (includes manual QA overrides).
+      // Done once before the per-campaign loop to avoid N+1 queries.
+      const leadsQualifiedRows = await db
+        .select({
+          campaignId: leads.campaignId,
+          count: sql<number>`COUNT(*)::int`,
+        })
+        .from(leads)
+        .where(and(
+          inArray(leads.campaignId, campaignIds),
+          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
+        ))
+        .groupBy(leads.campaignId);
+      const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
+        leadsQualifiedRows.map((r) => [r.campaignId, r.count])
+      );
 
       // Process campaigns in parallel (server-side, single request from client)
       await Promise.all(campaignIds.map(async (campaignId) => {
@@ -5208,7 +5237,7 @@ export function registerRoutes(app: Express) {
               contactsInQueue: queueStats.queued,
               callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
               callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
-              leadsQualified: (humanCallStats?.leadsQualified || 0) + (aiCallStats?.leadsQualified || 0),
+              leadsQualified: leadsQualifiedByCampaign[campaignId] || 0,
               dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
               notInterested: (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0),
               noAnswer: (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0),
@@ -5521,7 +5550,7 @@ export function registerRoutes(app: Express) {
 
       // Client users can only update campaigns assigned to their account
       // and are limited to certain fields (voice settings, AI agent settings)
-      const isClient = req.user?.role === 'client';
+      const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
       if (isClient) {
         const clientAccountId = (req.user as any).clientAccountId || (req.user as any).tenantId;
         if (existingCampaign.clientAccountId !== clientAccountId) {
@@ -9904,6 +9933,93 @@ export function registerRoutes(app: Express) {
     } catch (error) {
       console.error('[PM-REJECT] Error:', error);
       res.status(500).json({ message: "Failed to reject lead", error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // ==================== BACKFILL: Align lead statuses with QA quality outcomes ====================
+  // 1. Leads with qaStatus='approved' → set aiQualificationStatus='qualified' if not already set
+  // 2. Leads with qaStatus='new' that have completed AI analysis → move to correct status
+  //    (approved / under_review / rejected) based on aiQualificationStatus + aiScore
+  app.post("/api/leads/backfill-qualified-status", requireAuth, requireRole('admin', 'quality_analyst'), async (req, res) => {
+    try {
+      const { campaignId } = req.body as { campaignId?: string };
+
+      const baseWhere = campaignId
+        ? eq(leads.campaignId, campaignId)
+        : sql`1=1`;
+
+      // ── Pass 1: Mark approved leads as aiQualificationStatus='qualified' ──────────────
+      const approvedLeads = await db
+        .select({ id: leads.id, aiQualificationStatus: leads.aiQualificationStatus })
+        .from(leads)
+        .where(and(eq(leads.qaStatus, 'approved'), baseWhere));
+
+      let backfilledQualified = 0;
+      for (const lead of approvedLeads) {
+        if (lead.aiQualificationStatus !== 'qualified') {
+          await db
+            .update(leads)
+            .set({ aiQualificationStatus: 'qualified', updatedAt: new Date() })
+            .where(eq(leads.id, lead.id));
+          backfilledQualified++;
+        }
+      }
+
+      // ── Pass 2: Move 'new' leads out of new based on AI quality outcome ───────────────
+      // These are leads where AI analysis ran but qaStatus was never updated from 'new'
+      const newLeads = await db
+        .select({
+          id: leads.id,
+          aiQualificationStatus: leads.aiQualificationStatus,
+          aiScore: leads.aiScore,
+        })
+        .from(leads)
+        .where(and(eq(leads.qaStatus, 'new'), isNotNull(leads.aiQualificationStatus), baseWhere));
+
+      let movedToApproved = 0;
+      let movedToReview = 0;
+      let movedToRejected = 0;
+
+      for (const lead of newLeads) {
+        const score = Number(lead.aiScore ?? 0);
+        const status = lead.aiQualificationStatus;
+
+        let nextStatus: 'approved' | 'under_review' | 'rejected';
+        let qaDecision: string;
+
+        if (status === 'qualified' && score >= 70) {
+          nextStatus = 'approved';
+          qaDecision = `Backfill: Auto-approved — AI score ${score}/100`;
+          movedToApproved++;
+        } else if (status === 'not_qualified' && score < 30) {
+          nextStatus = 'rejected';
+          qaDecision = `Backfill: Auto-rejected — AI score ${score}/100`;
+          movedToRejected++;
+        } else {
+          nextStatus = 'under_review';
+          qaDecision = `Backfill: Moved to review — AI score ${score}/100, status: ${status}`;
+          movedToReview++;
+        }
+
+        await db
+          .update(leads)
+          .set({ qaStatus: nextStatus, qaDecision, updatedAt: new Date() })
+          .where(eq(leads.id, lead.id));
+      }
+
+      const summary = {
+        approvedLeadsBackfilledQualified: backfilledQualified,
+        newLeadsProcessed: newLeads.length,
+        movedToApproved,
+        movedToUnderReview: movedToReview,
+        movedToRejected,
+      };
+
+      console.log('[BACKFILL] Qualified status backfill complete:', summary);
+      res.json({ success: true, ...summary });
+    } catch (error) {
+      console.error('[BACKFILL] Error:', error);
+      res.status(500).json({ message: "Backfill failed", error: error instanceof Error ? error.message : String(error) });
     }
   });
 

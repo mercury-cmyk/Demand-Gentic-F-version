@@ -119,12 +119,18 @@ export function requireDualAuth(req: Request, res: Response, next: NextFunction)
   // Normalize user object
   // Client tokens might use different field names (e.g. sub vs userId)
   const isClient = payload.isClient || !!payload.clientAccountId || !!payload.tenantId;
+  const normalizedRole = payload.role || (isClient ? 'client' : 'user');
+  const normalizedRoles = Array.isArray(payload.roles) && payload.roles.length > 0
+    ? payload.roles
+    : [normalizedRole];
   req.user = {
     ...payload,
     userId: payload.userId || payload.sub || payload.id || payload.clientUserId,
-    role: payload.role || (isClient ? 'client' : 'user'),
-    roles: payload.roles || (isClient ? ['client'] : [payload.role || 'user']),
-    tenantId: payload.tenantId || payload.clientAccountId
+    role: normalizedRole,
+    roles: normalizedRoles,
+    tenantId: payload.tenantId || payload.clientAccountId,
+    clientAccountId: payload.clientAccountId || payload.tenantId,
+    id: payload.id || payload.userId || payload.sub || payload.clientUserId
   };
 
   next();

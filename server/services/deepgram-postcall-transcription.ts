@@ -83,7 +83,9 @@ async function getRefreshedUrlFromS3(recordingS3Key: string | null | undefined):
   }
 
   try {
-    return await getPresignedDownloadUrl(recordingS3Key, 3600);
+    // Use 24-hour TTL for transcription URLs (Deepgram jobs may queue for hours)
+    const TTL_24_HOURS = 24 * 60 * 60;
+    return await getPresignedDownloadUrl(recordingS3Key, TTL_24_HOURS);
   } catch (error) {
     console.warn(`${LOG_PREFIX} Failed to refresh audio URL from S3 key ${recordingS3Key}: ${getErrorMessage(error)}`);
     return null;

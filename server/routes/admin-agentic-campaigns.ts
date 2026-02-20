@@ -29,6 +29,25 @@ import { chat as vertexChat, streamChat, generateJSON } from '../services/vertex
 
 const router = Router();
 
+// Admin-only surface (admin + campaign manager)
+router.use(requireAuth, requireRole('admin', 'campaign_manager'));
+
+function getActorContext(req: Request) {
+  const user = (req as any).user || {};
+  const actorId = user.userId || user.id || null;
+  const roles = Array.isArray(user.roles) && user.roles.length > 0
+    ? user.roles
+    : [user.role].filter(Boolean);
+  const isAdmin = roles.includes('admin');
+  return { actorId, isAdmin };
+}
+
+function canAccessSession(req: Request, session: AgenticCampaignSession) {
+  const { actorId, isAdmin } = getActorContext(req);
+  if (isAdmin) return true;
+  return !!actorId && session.createdBy === actorId;
+}
+
 // ==================== CAMPAIGN INTAKE MANAGEMENT ====================
 
 /**
@@ -186,13 +205,13 @@ router.get('/campaign-intake/:id', requireAuth, async (req: Request, res: Respon
 router.post('/campaign-intake/:id/approve', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = (req as any).user?.id;
+    const { actorId } = getActorContext(req);
 
     const [updated] = await db
       .update(campaignIntakeRequests)
       .set({
         status: 'approved',
-        approvedById: userId,
+        approvedById: actorId,
         approvedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -243,14 +262,14 @@ router.post('/campaign-intake/:id/reject', requireAuth, async (req: Request, res
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    const userId = (req as any).user?.id;
+    const { actorId } = getActorContext(req);
 
     const [updated] = await db
       .update(campaignIntakeRequests)
       .set({
         status: 'rejected',
         rejectionReason: reason,
-        approvedById: userId,
+        approvedById: actorId,
         approvedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -309,7 +328,7 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
   try {
     const { id } = req.params;
     const { action, notes } = req.body; // action: 'submit' | 'approve'
-    const userId = (req as any).user?.id;
+    const { actorId } = getActorContext(req);
 
     let newStatus: string;
     if (action === 'submit') {
@@ -326,7 +345,7 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
     };
 
     if (action === 'approve') {
-      updateData.qsoReviewedById = userId;
+      updateData.qsoReviewedById = actorId;
       updateData.qsoReviewedAt = new Date();
       updateData.qsoNotes = notes;
     }
@@ -373,7 +392,7 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
               regions: context.geographies || [],
             }),
             startDate: (updated.requestedStartDate || new Date()).toISOString().split('T')[0],
-            createdBy: userId,
+            createdBy: actorId,
           })
           .returning();
 
@@ -426,7 +445,10 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
 router.post('/agentic-campaign/start', requireAuth, async (req: Request, res: Response) => {
   try {
     const { intakeRequestId, clientAccountId, campaignType } = req.body;
-    const userId = (req as any).user?.id;
+    const { actorId } = getActorContext(req);
+    if (!actorId) {
+      return res.status(401).json({ success: false, message: 'Authentication context missing' });
+    }
 
     // If starting from intake request, update its status
     if (intakeRequestId) {
@@ -450,7 +472,7 @@ router.post('/agentic-campaign/start', requireAuth, async (req: Request, res: Re
           timestamp: new Date().toISOString(),
         }],
         approvals: {},
-        createdBy: userId,
+        createdBy: actorId,
       })
       .returning();
 
@@ -475,6 +497,9 @@ router.get('/agentic-campaign/:id', requireAuth, async (req: Request, res: Respo
 
     if (!session) {
       return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+    if (!canAccessSession(req, session)) {
+      return res.status(403).json({ success: false, message: 'Access denied: session does not belong to you' });
     }
 
     res.json({ success: true, data: session });
@@ -504,6 +529,9 @@ router.post('/agentic-campaign/:id/chat', requireAuth, async (req: Request, res:
 
     if (!session) {
       return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+    if (!canAccessSession(req, session)) {
+      return res.status(403).json({ success: false, message: 'Access denied: session does not belong to you' });
     }
 
     // Build conversation context
@@ -592,6 +620,9 @@ router.post('/agentic-campaign/:id/chat/stream', requireAuth, async (req: Reques
     if (!session) {
       return res.status(404).json({ success: false, message: 'Session not found' });
     }
+    if (!canAccessSession(req, session)) {
+      return res.status(403).json({ success: false, message: 'Access denied: session does not belong to you' });
+    }
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -660,6 +691,9 @@ router.post('/agentic-campaign/:id/step/:step/generate', requireAuth, async (req
     if (!session) {
       return res.status(404).json({ success: false, message: 'Session not found' });
     }
+    if (!canAccessSession(req, session)) {
+      return res.status(403).json({ success: false, message: 'Access denied: session does not belong to you' });
+    }
 
     // Generate step-specific configuration
     const config = await generateStepConfiguration(session, step);
@@ -689,7 +723,7 @@ router.post('/agentic-campaign/:id/step/:step/approve', requireAuth, async (req:
   try {
     const { id, step } = req.params;
     const { edits } = req.body; // Optional edits to apply before approval
-    const userId = (req as any).user?.id;
+    const { actorId } = getActorContext(req);
 
     const [session] = await db
       .select()
@@ -698,6 +732,9 @@ router.post('/agentic-campaign/:id/step/:step/approve', requireAuth, async (req:
 
     if (!session) {
       return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+    if (!canAccessSession(req, session)) {
+      return res.status(403).json({ success: false, message: 'Access denied: session does not belong to you' });
     }
 
     const stepConfigKey = `${step}Config` as keyof AgenticCampaignSession;
@@ -709,14 +746,14 @@ router.post('/agentic-campaign/:id/step/:step/approve', requireAuth, async (req:
       ...edits,
       _approved: true,
       _approvedAt: new Date().toISOString(),
-      _approvedBy: userId,
+      _approvedBy: actorId,
     };
 
     // Update approvals object
     const approvals = (session.approvals as any) || {};
     approvals[step] = {
       approved: true,
-      by: userId,
+      by: actorId,
       at: new Date().toISOString(),
     };
 
@@ -754,7 +791,7 @@ router.post('/agentic-campaign/:id/step/:step/approve', requireAuth, async (req:
 router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = (req as any).user?.id;
+    const { actorId } = getActorContext(req);
 
     const [session] = await db
       .select()
@@ -763,6 +800,9 @@ router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, 
 
     if (!session) {
       return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+    if (!canAccessSession(req, session)) {
+      return res.status(403).json({ success: false, message: 'Access denied: session does not belong to you' });
     }
 
     // Validate all required steps are approved
@@ -826,7 +866,7 @@ router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, 
         } : null,
         intakeRequestId: session.intakeRequestId,
         creationMode: 'agentic',
-        ownerId: userId,
+        ownerId: actorId,
       })
       .returning();
 
@@ -894,24 +934,29 @@ Extract and return JSON with:
       .from(agenticCampaignSessions)
       .where(eq(agenticCampaignSessions.id, id));
 
-    if (session) {
-      const contextSources = (session as any).contextSources || { urls: [], documents: [], inputs: [] };
-      contextSources.urls = [...(contextSources.urls || []), url];
-
-      const contextConfig = (session.contextConfig as Record<string, unknown>) || {};
-
-      await db
-        .update(agenticCampaignSessions)
-        .set({
-          contextConfig: {
-            ...contextConfig,
-            productServiceInfo: analysis?.productOrService || contextConfig.productServiceInfo,
-            objective: analysis?.suggestedObjective || contextConfig.objective,
-          },
-          updatedAt: new Date(),
-        })
-        .where(eq(agenticCampaignSessions.id, id));
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
     }
+    if (!canAccessSession(req, session)) {
+      return res.status(403).json({ success: false, message: 'Access denied: session does not belong to you' });
+    }
+
+    const contextSources = (session as any).contextSources || { urls: [], documents: [], inputs: [] };
+    contextSources.urls = [...(contextSources.urls || []), url];
+
+    const contextConfig = (session.contextConfig as Record<string, unknown>) || {};
+
+    await db
+      .update(agenticCampaignSessions)
+      .set({
+        contextConfig: {
+          ...contextConfig,
+          productServiceInfo: analysis?.productOrService || contextConfig.productServiceInfo,
+          objective: analysis?.suggestedObjective || contextConfig.objective,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(agenticCampaignSessions.id, id));
 
     res.json({ success: true, data: analysis });
   } catch (error: any) {
@@ -1161,7 +1206,7 @@ router.get('/migration/status', requireAuth, async (req: Request, res: Response)
 router.post('/migration/run', requireAuth, async (req: Request, res: Response) => {
   try {
     const { dryRun = false } = req.body;
-    const userId = (req as any).user?.id;
+    const { actorId } = getActorContext(req);
 
     console.log(`[Migration] Starting campaign migration (dryRun: ${dryRun})`);
 
@@ -1334,7 +1379,7 @@ router.post('/migration/run', requireAuth, async (req: Request, res: Response) =
                   originalCampaignName: camp.name,
                   originalCampaignType: camp.type,
                   migratedAt: new Date().toISOString(),
-                  migratedBy: userId,
+                  migratedBy: actorId,
                 },
                 extractedContext: {
                   objective: camp.campaignObjective || 'Migrated campaign - objective not specified',

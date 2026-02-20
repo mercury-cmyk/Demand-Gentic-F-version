@@ -124,10 +124,20 @@ export function isTollFreeOrServiceNumber(phone: string): boolean {
 }
 
 /**
- * Get the best phone number for a contact with fallback logic
- * Prioritizes: direct phone > mobile phone > HQ phone
+ * Get the best phone number for a contact with fallback logic.
+ *
+ * Priority:
+ *   1. dialingPhoneE164  – pre-computed unified field set at upload time (fastest path)
+ *   2. directPhoneE164   – normalised direct phone
+ *   3. directPhone       – raw direct phone (normalised on the fly)
+ *   4. mobilePhoneE164   – normalised mobile phone
+ *   5. mobilePhone       – raw mobile phone (normalised on the fly)
+ *   6. hqPhoneE164 / hqPhone – account HQ phone (last resort)
+ *
+ * Toll-free / service numbers are always skipped.
  */
 export function getBestPhoneForContact(contact: {
+  dialingPhoneE164?: string | null;  // unified pre-computed field
   directPhone?: string | null;
   directPhoneE164?: string | null;
   mobilePhone?: string | null;
@@ -147,6 +157,19 @@ export function getBestPhoneForContact(contact: {
     // Fallback to heuristic normalization
     const heuristic = normalizeToE164(phone);
     return isValidE164(heuristic) ? heuristic : null;
+  }
+
+  // FAST PATH: use the pre-computed unified dialing phone stored at upload time
+  if (contact.dialingPhoneE164 && isValidE164(contact.dialingPhoneE164) && !isTollFreeOrServiceNumber(contact.dialingPhoneE164)) {
+    // Determine the original type for caller awareness (direct takes precedence)
+    const type = (contact.directPhoneE164 === contact.dialingPhoneE164 ||
+                  normalize(contact.directPhone || '') === contact.dialingPhoneE164)
+      ? 'direct'
+      : (contact.mobilePhoneE164 === contact.dialingPhoneE164 ||
+         normalize(contact.mobilePhone || '') === contact.dialingPhoneE164)
+        ? 'mobile'
+        : 'direct'; // default to 'direct' when origin is ambiguous
+    return { phone: contact.dialingPhoneE164, type };
   }
 
   // Try direct phone: prefer pre-normalized E164, then normalize raw

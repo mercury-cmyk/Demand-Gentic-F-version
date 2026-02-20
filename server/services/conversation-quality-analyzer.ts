@@ -313,6 +313,54 @@ function detectRepeatedAgentPhrase(agentLines: string[], transcriptLower: string
   return null;
 }
 
+function detectAudioCheckIssue(agentLines: string[]): boolean {
+  // Only flag UNPROMPTED audio checks — explicit phrases that suggest the agent
+  // broke script to run an audio check when there was no real connectivity issue.
+  // "sorry about that" is intentionally excluded: it is a generic apology used in
+  // many contexts and is perfectly appropriate when a genuine connection problem exists.
+  const audioCheckPhrases = [
+    "quick audio check",
+    "audio check",
+    "can you hear me clearly",
+    "can you hear me ok",
+    "are you able to hear me",
+  ];
+  return agentLines.some((line) =>
+    audioCheckPhrases.some((phrase) => line.toLowerCase().includes(phrase))
+  );
+}
+
+function detectClosingLoop(agentLines: string[]): boolean {
+  // Detect when closing phrases appear multiple times across all agent turns,
+  // or when a single agent turn contains a closing phrase repeated more than once.
+  const closingPhrases = [
+    "have a great day",
+    "have a great",
+    "thank you so much for your time",
+    "thanks so much for your time",
+    "you'll receive that shortly",
+    "you will receive that shortly",
+  ];
+
+  // Check within a single agent line for repeated closing phrases
+  for (const line of agentLines) {
+    const lower = line.toLowerCase();
+    for (const phrase of closingPhrases) {
+      const matches = lower.split(phrase).length - 1;
+      if (matches >= 2) return true;
+    }
+  }
+
+  // Check across all agent lines for closing phrase appearing 3+ times total
+  const allAgentText = agentLines.join(" ").toLowerCase();
+  for (const phrase of closingPhrases) {
+    const matches = allAgentText.split(phrase).length - 1;
+    if (matches >= 3) return true;
+  }
+
+  return false;
+}
+
 function detectTopChallengeIssues(
   input: ConversationQualityInput,
   transcript: string
@@ -391,6 +439,14 @@ function detectTopChallengeIssues(
     "distorted",
     "poor connection",
     "audio is bad",
+    "reception is",        // e.g. "reception is very bad"
+    "signal is",           // e.g. "signal is poor"
+    "poor signal",
+    "bad signal",
+    "no signal",
+    "very bad signal",
+    "patchy",
+    "in and out",
   ]);
 
   const bookingObjective = (input.campaignObjective || "").toLowerCase();
@@ -483,6 +539,31 @@ function detectTopChallengeIssues(
         "Agent repeated \"Let me check that\" twice, creating an unnatural conversational pattern that may have contributed to the contact's AI detection.",
       recommendation:
         "Review system logic to prevent repetitive phrases during verification pauses. Ensure the agent persists through initial objections to deliver at least the core value proposition, even when not speaking to the primary contact.",
+    });
+  }
+
+  // Only flag audio-check interruption when the contact did NOT report a connectivity
+  // problem. If the contact complained about reception/signal/cutting-out, the agent's
+  // "can you hear me" phrases are an appropriate response, not a script deviation.
+  if (detectAudioCheckIssue(parsed.agentLines) && !hasAudioComplaint) {
+    pushIssue({
+      type: "audio_check_interruption",
+      severity: "medium",
+      description:
+        "The agent broke out of its opening script to perform an unprompted audio check mid-conversation. This disrupts the call flow and can make the agent sound uncertain or mechanical to the contact.",
+      recommendation:
+        "Remove or gate the audio-check recovery routine so it only triggers when there is genuine one-way audio (i.e., no contact speech detected at all). A contact saying 'Hello?' twice should not trigger an audio check if the agent's greeting has already been delivered.",
+    });
+  }
+
+  if (detectClosingLoop(parsed.agentLines)) {
+    pushIssue({
+      type: "closing_loop",
+      severity: "high",
+      description:
+        "The agent repeated its closing farewell multiple times in the same turn or across consecutive turns. This indicates a flow/state machine bug where the closing sequence fired more than once before the call disconnected.",
+      recommendation:
+        "Add a guard flag in the agent's closing state so the farewell block can only execute once per call. Ensure the call-disconnect signal is sent immediately after the first closing phrase completes.",
     });
   }
 
@@ -687,12 +768,16 @@ CRITICAL RULES FOR ANALYSIS — DO NOT VIOLATE:
 5. NEVER suggest "bundled openings" or combining the greeting and introduction into one sentence. The agent's opening flow is intentionally two-step by design: (1) first confirm identity by asking for the contact by name, (2) THEN introduce the purpose after confirmation. This is the correct sales methodology — do NOT recommend changing it.
 6. The agent says "calling on behalf of [Organization]" — this is intentional. NEVER suggest changing to "calling from [Organization]". The agent represents the organization, it is not an employee of the organization.
 7. ALWAYS score ALL 6 quality dimensions (engagement, clarity, empathy, objectionHandling, qualification, closing) for EVERY conversation. NEVER return 0 for any dimension. Even if the call was too short for qualification or closing to occur, evaluate based on what the agent attempted or how they handled the available opportunity. For qualification: score the agent's effort to gather qualifying information or set up qualification — minimum 20 if the call had any meaningful exchange. For closing: score the agent's attempt to advance the conversation toward a next step or conclusion — minimum 20 if the agent made any effort to direct the call. A score of 0 should ONLY be used if the agent actively failed or did the opposite of what was expected in that dimension.
+8. CAMPAIGN-OBJECTIVE ALIGNMENT FOR ISSUES — THIS IS MANDATORY: Every issue you raise in the "issues" array MUST be directly tied to the campaign's stated objective and success criteria shown in the Context section above. Ask yourself: "Was achieving this thing explicitly required by this campaign's objective or success criteria?" If the answer is NO, do NOT raise it as an issue. For example: if the campaign objective is to offer a white paper and obtain email consent, do NOT raise "Missed Opportunity" for not booking a follow-up call unless a follow-up call was explicitly listed in the success criteria. Do NOT invent secondary objectives that are not stated.
+9. WHAT COUNTS AS A VALID ISSUE: An issue is only valid if (a) it relates to something the campaign's success criteria or objective required, AND (b) the agent failed or partially failed to deliver it. If the agent successfully completed all stated success criteria, the issues array should be EMPTY or contain only HIGH-severity technical failures (audio, data capture errors). Do NOT fill the issues array with generic coaching points or "nice to have" improvements that have no bearing on whether this specific call succeeded according to the defined criteria.
 
 Context:
 ${contextLines.join("\n")}
 
 Transcript:
 ${transcriptText}
+
+ISSUES CONSTRAINT (apply before generating the issues array): Only raise an issue if it is a direct, concrete failure against the campaign's stated objective or success criteria above. If the call successfully achieved all stated criteria, return "issues": []. Never raise issues for behaviours not required by the campaign.
 
 Return JSON with this exact shape and no extra keys:
 {

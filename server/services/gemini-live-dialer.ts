@@ -20,6 +20,7 @@ import { GoogleAuth } from 'google-auth-library';
 import { db } from "../db";
 import { contacts, campaigns, campaignQueue, dialerCallAttempts, callSessions, type CanonicalDisposition } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
+import { createCallSessionSafely } from '../lib/call-session-factory';
 import { audioQualityMonitor } from "./audio-quality-monitor";
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format, createTranscoderState } from "./voice-providers/audio-transcoder";
 import { peekAmdResult, consumeAmdResult } from "./voice-dialer";
@@ -1783,10 +1784,10 @@ Instructions:
               let callSessionId: string | null = attemptDetails?.callSessionId || null;
               const callDurationSec = Math.round((Date.now() - metrics.startTime) / 1000);
 
-              // ✅ CRITICAL: If no call session exists, CREATE one now
+              // ✅ CRITICAL: If no call session exists, CREATE one now (with FK safety)
               if (!callSessionId && attemptDetails) {
                 try {
-                  const [newSession] = await db.insert(callSessions).values({
+                  const newSession = await createCallSessionSafely({
                     telnyxCallId: callControlId || undefined,
                     toNumberE164: attemptDetails.phoneDialed || callContext.phoneNumber || 'unknown',
                     startedAt: attemptDetails.callStartedAt || new Date(metrics.startTime),
@@ -1796,18 +1797,24 @@ Instructions:
                     agentType: 'ai' as const,
                     aiAgentId: attemptDetails.virtualAgentId || 'gemini-live',
                     aiDisposition: (callContext.disposition || 'completed') as CanonicalDisposition,
-                    campaignId: attemptDetails.campaignId || callContext.campaignId,
+                    campaignId: attemptDetails.campaignId || callContext.campaignId || null,
                     contactId: attemptDetails.contactId || callContext.contactId || null,
                     queueItemId: attemptDetails.queueItemId || callContext.queueItemId || null,
-                  }).returning();
+                    validateCampaignId: true,
+                    validateContactId: true,
+                  });
 
-                  callSessionId = newSession.id;
+                  if (newSession) {
+                    callSessionId = newSession.id;
 
-                  await db.update(dialerCallAttempts)
-                    .set({ callSessionId: newSession.id })
-                    .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
+                    await db.update(dialerCallAttempts)
+                      .set({ callSessionId: newSession.id })
+                      .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
 
-                  console.log(`[Gemini Live] ✅ Created new call session ${callSessionId}`);
+                    console.log(`[Gemini Live] ✅ Created new call session ${callSessionId}`);
+                  } else {
+                    console.error(`[Gemini Live] ❌ Failed to create call session - factory returned null`);
+                  }
                 } catch (createError) {
                   console.error(`[Gemini Live] ❌ Failed to create call session:`, createError);
                 }

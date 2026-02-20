@@ -264,7 +264,12 @@ router.post('/chat', async (req: Request, res: Response) => {
       const [existing] = await db
         .select()
         .from(agentConversations)
-        .where(eq(agentConversations.id, data.conversationId))
+        .where(
+          and(
+            eq(agentConversations.id, data.conversationId),
+            eq(agentConversations.userId, userId)
+          )
+        )
         .limit(1);
       conversation = existing;
     }
@@ -482,7 +487,12 @@ router.post('/execute/:planId', async (req: Request, res: Response) => {
     const [plan] = await db
       .select()
       .from(agentExecutionPlans)
-      .where(eq(agentExecutionPlans.id, planId))
+      .where(
+        and(
+          eq(agentExecutionPlans.id, planId),
+          eq(agentExecutionPlans.userId, userId)
+        )
+      )
       .limit(1);
 
     if (!plan) {
@@ -503,7 +513,12 @@ router.post('/execute/:planId', async (req: Request, res: Response) => {
         userModifications: (data.modifications as any) || null,
         executionStartedAt: new Date(),
       })
-      .where(eq(agentExecutionPlans.id, planId));
+      .where(
+        and(
+          eq(agentExecutionPlans.id, planId),
+          eq(agentExecutionPlans.userId, userId)
+        )
+      );
 
     // Execute steps (mock execution for now)
     const executedSteps: Array<{
@@ -538,7 +553,12 @@ router.post('/execute/:planId', async (req: Request, res: Response) => {
         executedSteps,
         executionCompletedAt: new Date(),
       })
-      .where(eq(agentExecutionPlans.id, planId));
+      .where(
+        and(
+          eq(agentExecutionPlans.id, planId),
+          eq(agentExecutionPlans.userId, userId)
+        )
+      );
 
     res.json({
       planId,
@@ -566,7 +586,12 @@ router.post('/reject/:planId', async (req: Request, res: Response) => {
     const [plan] = await db
       .select()
       .from(agentExecutionPlans)
-      .where(eq(agentExecutionPlans.id, planId))
+      .where(
+        and(
+          eq(agentExecutionPlans.id, planId),
+          eq(agentExecutionPlans.userId, userId)
+        )
+      )
       .limit(1);
 
     if (!plan) {
@@ -579,7 +604,12 @@ router.post('/reject/:planId', async (req: Request, res: Response) => {
         status: 'rejected',
         rejectionReason: reason || 'User rejected the plan',
       })
-      .where(eq(agentExecutionPlans.id, planId));
+      .where(
+        and(
+          eq(agentExecutionPlans.id, planId),
+          eq(agentExecutionPlans.userId, userId)
+        )
+      );
 
     res.json({
       planId,
@@ -625,7 +655,7 @@ router.get('/conversation/:id', async (req: Request, res: Response) => {
 
 router.get('/conversations', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.user!.userId;
     const limit = parseInt(req.query.limit as string) || 20;
 
     const conversations = await db
@@ -652,7 +682,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
 router.delete('/conversation/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = (req as any).userId;
+    const userId = req.user!.userId;
 
     await db
       .update(agentConversations)

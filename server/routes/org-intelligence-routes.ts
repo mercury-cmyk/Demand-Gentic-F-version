@@ -8,7 +8,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { requireAuth, requireRole, verifyToken } from "../auth";
 import { db } from "../db";
 import { accounts, contacts, accountIntelligence, campaignOrganizations, clientOrganizationLinks } from "@shared/schema";
-import { ilike, or, inArray, desc, sql, eq } from "drizzle-orm";
+import { ilike, or, inArray, desc, sql, eq, and } from "drizzle-orm";
 import { collectWebsiteContent, type WebsitePageSummary } from "../lib/website-research";
 import crypto from "crypto";
 import jwt from 'jsonwebtoken';
@@ -45,13 +45,19 @@ function requireDualAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const clientPayload = jwt.verify(token, JWT_SECRET) as any;
     if (clientPayload.isClient) {
+      const normalizedRole = clientPayload.role || 'client';
+      const normalizedRoles = Array.isArray(clientPayload.roles) && clientPayload.roles.length > 0
+        ? clientPayload.roles
+        : [normalizedRole];
       // Synthesize a compatible req.user for endpoints
       req.user = {
         id: clientPayload.clientUserId,
         username: clientPayload.email,
-        role: 'client',
+        role: normalizedRole,
+        roles: normalizedRoles,
         email: clientPayload.email,
         tenantId: clientPayload.clientAccountId,
+        clientAccountId: clientPayload.clientAccountId,
       } as any;
       return next();
     }
@@ -60,6 +66,17 @@ function requireDualAuth(req: Request, res: Response, next: NextFunction) {
   }
 
   return res.status(401).json({ message: "Invalid or expired token" });
+}
+
+function hasAnyRole(user: any, allowedRoles: string[]): boolean {
+  const roles = Array.isArray(user?.roles) && user.roles.length > 0
+    ? user.roles
+    : [user?.role].filter(Boolean);
+  return roles.some((role: string) => allowedRoles.includes(role));
+}
+
+function isClientScopedUser(user: any): boolean {
+  return hasAnyRole(user, ["client", "client_user"]);
 }
 
 // Types for intelligence profiles
@@ -777,9 +794,7 @@ router.post("/analyze", requireDualAuth, async (req: Request, res: Response) => 
   try {
     const user = (req as any).user;
     // Allow Clients to run analysis
-    const allowAccess = 
-      ['admin', 'campaign_manager'].includes(user.role) || 
-      user.role === 'client';
+    const allowAccess = hasAnyRole(user, ['admin', 'campaign_manager', 'client', 'client_user']);
     
     if (!allowAccess) {
       return res.status(403).json({ error: "Insufficient permissions" });
@@ -1457,9 +1472,7 @@ Return ONLY valid JSON in this format:
 router.post("/analyze-deep", requireDualAuth, async (req: Request, res: Response) => {
     const user = (req as any).user;
     // Allow Clients to run analysis
-    const allowAccess = 
-      ['admin', 'campaign_manager'].includes(user.role) || 
-      user.role === 'client';
+    const allowAccess = hasAnyRole(user, ['admin', 'campaign_manager', 'client', 'client_user']);
     
     if (!allowAccess) {
       // For SSE we can't return JSON status easily if headers flushed, but here we haven't flushed yet
@@ -1654,9 +1667,7 @@ router.post("/save", requireDualAuth, async (req: Request, res: Response) => {
     const { domain, profile, models, reasoning, orgIntelligence, compliancePolicy, platformPolicies, agentVoiceDefaults } = req.body;
 
     // RBAC Check: Must be Admin/CampaignManager OR Client
-    const allowAccess = 
-      ['admin', 'campaign_manager'].includes(user.role) || 
-      user.role === 'client'; // Clients allowed
+    const allowAccess = hasAnyRole(user, ['admin', 'campaign_manager', 'client', 'client_user']); // Clients allowed
     
     if (!allowAccess) {
       return res.status(403).json({ error: "Insufficient permissions" });
@@ -1701,7 +1712,7 @@ router.post("/save", requireDualAuth, async (req: Request, res: Response) => {
 
       // Resolve Target Organization
       let existingOrg: any = null;
-      const clientTenantId = user.role === 'client' ? user.tenantId : null;
+      const clientTenantId = isClientScopedUser(user) ? user.tenantId : null;
       
       if (clientTenantId) {
          const [link] = await db.select()
@@ -1714,7 +1725,7 @@ router.post("/save", requireDualAuth, async (req: Request, res: Response) => {
          }
       }
 
-      if (!existingOrg) {
+      if (!existingOrg && !clientTenantId) {
         // Fallback or Admin: Match by domain
         [existingOrg] = await db.select()
           .from(campaignOrganizations)
@@ -1804,6 +1815,7 @@ router.get("/profile", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const tenantId = user.tenantId; // Will be set for clients in Dual Auth mode
+    const isPrivileged = hasAnyRole(user, ['admin', 'campaign_manager']);
     let organizationId = req.query.organizationId as string | undefined;
 
     // For clients (Dual Auth), resolve their linked organization
@@ -1823,96 +1835,59 @@ router.get("/profile", requireDualAuth, async (req: Request, res: Response) => {
        }
     }
 
-    // If no organization ID is resolved yet (internal user didn't provide one), return empty or error
-    // (Existing logic handled optional organizationId, so we follow suit, but typically internal access passes it)
-    if (organizationId) {
-      const [org] = await db.select()
-        .from(campaignOrganizations)
-        .where(eq(campaignOrganizations.id, organizationId))
-        .limit(1);
-
-      if (!org) {
-        return res.json({ profile: null });
-      }
-
-      // If client, ensure they own this org (mock check for now as schema isn't fully visible for links)
-      // if (tenantId && org.tenantId !== tenantId) ... 
-
-      // Also try to find the matching accountIntelligence record by domain for metadata
-      let metadata: any = { id: org.id, createdAt: org.createdAt, updatedAt: org.updatedAt };
-      if (org.domain) {
-        const [aiProfile] = await db.select()
-          .from(accountIntelligence)
-          .where(eq(accountIntelligence.domain, org.domain))
-          .orderBy(desc(accountIntelligence.createdAt))
-          .limit(1);
-        if (aiProfile) {
-          metadata = {
-            id: aiProfile.id,
-            createdAt: aiProfile.createdAt,
-            updatedAt: aiProfile.updatedAt,
-            confidenceScore: aiProfile.confidenceScore,
-            modelVersion: aiProfile.modelVersion,
-          };
-        }
-      }
-
-
-      const offerings = (org.offerings && typeof org.offerings === "object") ? org.offerings : {};
-      const normalizedOfferings = {
-        ...offerings,
-        problemsSolved: (offerings as any).problemsSolved || createField("Problems solved pending analysis", "system_default", 0.6),
-      };
-
-      return res.json({
-        success: true,
-        profile: {
-          domain: org.domain,
-          identity: org.identity,
-          offerings: normalizedOfferings,
-          icp: org.icp,
-          positioning: org.positioning,
-          outreach: org.outreach,
-        },
-        metadata,
-      });
+    if (!tenantId && !isPrivileged) {
+      return res.status(403).json({ error: "Insufficient permissions" });
     }
 
-    // Fallback: Get the most recent organization intelligence profile
-    const [profile] = await db.select()
-      .from(accountIntelligence)
-      .orderBy(desc(accountIntelligence.createdAt))
+    if (!organizationId) {
+      return res.status(400).json({ error: "organizationId is required" });
+    }
+
+    const [org] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.id, organizationId))
       .limit(1);
 
-    if (!profile) {
+    if (!org) {
       return res.json({ profile: null });
     }
 
-    const offerings = (profile.offerings && typeof profile.offerings === "object")
-      ? profile.offerings
-      : {};
+    // Also try to find the matching accountIntelligence record by domain for metadata
+    let metadata: any = { id: org.id, createdAt: org.createdAt, updatedAt: org.updatedAt };
+    if (org.domain) {
+      const [aiProfile] = await db.select()
+        .from(accountIntelligence)
+        .where(eq(accountIntelligence.domain, org.domain))
+        .orderBy(desc(accountIntelligence.createdAt))
+        .limit(1);
+      if (aiProfile) {
+        metadata = {
+          id: aiProfile.id,
+          createdAt: aiProfile.createdAt,
+          updatedAt: aiProfile.updatedAt,
+          confidenceScore: aiProfile.confidenceScore,
+          modelVersion: aiProfile.modelVersion,
+        };
+      }
+    }
+
+    const offerings = (org.offerings && typeof org.offerings === "object") ? org.offerings : {};
     const normalizedOfferings = {
       ...offerings,
       problemsSolved: (offerings as any).problemsSolved || createField("Problems solved pending analysis", "system_default", 0.6),
     };
 
-    res.json({
+    return res.json({
       success: true,
       profile: {
-        domain: profile.domain,
-        identity: profile.identity,
+        domain: org.domain,
+        identity: org.identity,
         offerings: normalizedOfferings,
-        icp: profile.icp,
-        positioning: profile.positioning,
-        outreach: profile.outreach,
+        icp: org.icp,
+        positioning: org.positioning,
+        outreach: org.outreach,
       },
-      metadata: {
-        id: profile.id,
-        createdAt: profile.createdAt,
-        updatedAt: profile.updatedAt,
-        confidenceScore: profile.confidenceScore,
-        modelVersion: profile.modelVersion,
-      },
+      metadata,
     });
 
   } catch (error: any) {
@@ -1980,43 +1955,70 @@ router.post("/enrich", requireAuth, requireRole('admin', 'campaign_manager'), as
  * GET /api/org-intelligence/prompt-optimization
  * Retrieves the prompt optimization intelligence from the organization profile
  */
-router.get("/prompt-optimization", requireAuth, async (req: Request, res: Response) => {
+router.get("/prompt-optimization", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const organizationId = req.query.organizationId as string | undefined;
+    const user = (req as any).user;
+    const tenantId = user?.tenantId as string | undefined;
+    const isPrivileged = hasAnyRole(user, ['admin', 'campaign_manager']);
+    let organizationId = req.query.organizationId as string | undefined;
 
-    // If organizationId is provided, find profile by org's domain
-    let profile: any = null;
-    if (organizationId) {
-      const [org] = await db.select()
-        .from(campaignOrganizations)
-        .where(eq(campaignOrganizations.id, organizationId))
+    if (tenantId) {
+      const [link] = await db
+        .select()
+        .from(clientOrganizationLinks)
+        .where(eq(clientOrganizationLinks.clientAccountId, tenantId))
         .limit(1);
-      if (org?.domain) {
-        const [found] = await db.select()
-          .from(accountIntelligence)
-          .where(eq(accountIntelligence.domain, org.domain))
-          .orderBy(desc(accountIntelligence.createdAt))
-          .limit(1);
-        profile = found || null;
+
+      if (!link) {
+        return res.json({
+          orgIntelligence: { raw: "", parsed: [] },
+          compliancePolicy: { raw: "", parsed: [] },
+          platformPolicies: { raw: "", parsed: [] },
+          agentVoiceDefaults: { raw: "", parsed: [] },
+          source: 'database',
+          hasData: false,
+        });
       }
+
+      if (organizationId && organizationId !== link.campaignOrganizationId) {
+        return res.status(403).json({ error: "Access denied for requested organization" });
+      }
+      organizationId = link.campaignOrganizationId;
+    } else if (!isPrivileged) {
+      return res.status(403).json({ error: "Insufficient permissions" });
     }
 
-    // Fallback: Get the most recent organization intelligence profile
-    if (!profile) {
-      const [found] = await db.select()
-        .from(accountIntelligence)
-        .orderBy(desc(accountIntelligence.createdAt))
-        .limit(1);
-      profile = found || null;
+    if (!organizationId) {
+      return res.status(400).json({ error: "organizationId is required" });
     }
 
-    // Always use database values - no env fallback
+    const [org] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.id, organizationId))
+      .limit(1);
+
+    if (!org?.domain) {
+      return res.json({
+        orgIntelligence: { raw: "", parsed: [] },
+        compliancePolicy: { raw: "", parsed: [] },
+        platformPolicies: { raw: "", parsed: [] },
+        agentVoiceDefaults: { raw: "", parsed: [] },
+        source: 'database',
+        hasData: false,
+      });
+    }
+
+    const [profile] = await db.select()
+      .from(accountIntelligence)
+      .where(eq(accountIntelligence.domain, org.domain))
+      .orderBy(desc(accountIntelligence.createdAt))
+      .limit(1);
+
     const orgIntelligence = profile?.orgIntelligence || "";
     const compliancePolicy = profile?.compliancePolicy || "";
     const platformPolicies = profile?.platformPolicies || "";
     const agentVoiceDefaults = profile?.agentVoiceDefaults || "";
 
-    // Parse the multi-line strings into arrays
     const parseLines = (text: string): string[] => {
       return text
         .split("\n")
@@ -2024,7 +2026,7 @@ router.get("/prompt-optimization", requireAuth, async (req: Request, res: Respon
         .filter((line) => line.length > 0);
     };
 
-    res.json({
+    return res.json({
       orgIntelligence: {
         raw: orgIntelligence,
         parsed: parseLines(orgIntelligence),
@@ -2046,15 +2048,7 @@ router.get("/prompt-optimization", requireAuth, async (req: Request, res: Respon
     });
   } catch (error: any) {
     console.error("[Org-Intelligence] Prompt optimization fetch error:", error);
-    // Return empty data instead of error to allow the UI to work
-    res.json({
-      orgIntelligence: { raw: "", parsed: [] },
-      compliancePolicy: { raw: "", parsed: [] },
-      platformPolicies: { raw: "", parsed: [] },
-      agentVoiceDefaults: { raw: "", parsed: [] },
-      source: 'fallback',
-      hasData: false,
-    });
+    res.status(500).json({ error: "Failed to load prompt optimization intelligence" });
   }
 });
 
@@ -2129,12 +2123,36 @@ router.put("/prompt-optimization", requireAuth, requireRole("admin"), async (req
  * Fetch organization intelligence and convert it to campaign context format
  * This allows users to populate campaign context from organization data when creating a campaign
  */
-router.get("/campaign-context/:organizationId", requireAuth, async (req: Request, res: Response) => {
+router.get("/campaign-context/:organizationId", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const { organizationId } = req.params;
+    const user = (req as any).user;
+    const tenantId = user?.tenantId as string | undefined;
+    const isPrivileged = hasAnyRole(user, ['admin', 'campaign_manager']);
 
     if (!organizationId) {
       return res.status(400).json({ error: "Organization ID is required" });
+    }
+
+    if (!isPrivileged) {
+      if (!tenantId) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+
+      const [link] = await db
+        .select()
+        .from(clientOrganizationLinks)
+        .where(
+          and(
+            eq(clientOrganizationLinks.clientAccountId, tenantId),
+            eq(clientOrganizationLinks.campaignOrganizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (!link) {
+        return res.status(403).json({ error: "Access denied for requested organization" });
+      }
     }
 
     // Fetch the campaign organization

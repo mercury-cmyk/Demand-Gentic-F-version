@@ -642,15 +642,16 @@ async function applyDispositionChange(
         if (!existingLeadId && attempt) {
           const newLeadId = await createLeadForReanalysis(session, attempt);
           if (newLeadId) {
-            action += ` | New lead created (${newLeadId}) → QA queue`;
+            action += ` | New lead created (${newLeadId}) → QA queue (new)`;
           }
         } else if (existingLeadId) {
-          // Update existing lead QA status
+          // Move existing lead into the standard QA entry point ('new')
+          // so it goes through the full QA workflow rather than bypassing it
           await db
             .update(leads)
-            .set({ qaStatus: "under_review", updatedAt: new Date() })
+            .set({ qaStatus: "new", updatedAt: new Date() })
             .where(eq(leads.id, existingLeadId));
-          action += ` | Existing lead ${existingLeadId} moved to QA under_review`;
+          action += ` | Existing lead ${existingLeadId} moved to QA new (pending review)`;
         }
 
         // Update campaign queue to done/qualified
@@ -988,8 +989,8 @@ async function createLeadForReanalysis(
         contactName,
         contactEmail: contactInfo?.email || undefined,
         accountName: contactInfo?.companyName || undefined,
-        qaStatus: "under_review",
-        qaDecision: "Created via disposition reanalysis — requires QA review",
+        qaStatus: "new",
+        qaDecision: "Created via disposition reanalysis override — pending QA review",
         dialedNumber: attempt.phoneDialed,
         recordingUrl: session.recordingUrl,
         transcript: session.aiTranscript || undefined,

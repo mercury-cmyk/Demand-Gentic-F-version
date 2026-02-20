@@ -284,48 +284,181 @@ function hasCountryCode(phone: string, countryCode: string): boolean {
 }
 
 /**
- * Map country name to ISO country code
+ * Map country name / abbreviation to ISO-2 country code for libphonenumber-js.
+ * Covers all countries in COUNTRY_DIAL_CODES plus common aliases.
  */
 function getCountryCode(countryName: string | null | undefined): CountryCode | null {
   if (!countryName) return null;
-  
-  const normalized = countryName.toLowerCase().trim();
-  
-  // Check if already a 2-letter code
-  if (normalized.length === 2) {
+
+  const normalized = countryName
+    .toLowerCase()
+    .trim()
+    .replace(/[()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // If already a valid 2-letter ISO code, return it directly
+  if (/^[a-z]{2}$/.test(normalized)) {
     return normalized.toUpperCase() as CountryCode;
   }
-  
-  // Map common country names to ISO codes
+
   const countryMap: Record<string, CountryCode> = {
-    'united kingdom': 'GB',
-    'uk': 'GB',
-    'united states': 'US',
-    'usa': 'US',
-    'us': 'US',
-    'germany': 'DE',
-    'france': 'FR',
-    'italy': 'IT',
-    'spain': 'ES',
+    // British Isles / UK variants
+    'united kingdom': 'GB', 'united kingdom uk': 'GB', 'great britain': 'GB',
+    'england': 'GB', 'scotland': 'GB', 'wales': 'GB', 'northern ireland': 'GB', 'uk': 'GB',
+    // United States variants
+    'united states': 'US', 'united states of america': 'US', 'united states usa': 'US',
+    'united states us': 'US', 'usa': 'US', 'us': 'US', 'america': 'US',
+    // North America
     'canada': 'CA',
+    'mexico': 'MX', 'méxico': 'MX',
+    // Oceania
     'australia': 'AU',
+    'new zealand': 'NZ',
+    // Western Europe
+    'germany': 'DE', 'deutschland': 'DE',
+    'france': 'FR',
+    'italy': 'IT', 'italia': 'IT',
+    'spain': 'ES', 'espana': 'ES', 'españa': 'ES',
+    'netherlands': 'NL', 'holland': 'NL', 'the netherlands': 'NL',
+    'belgium': 'BE', 'belgique': 'BE',
+    'switzerland': 'CH', 'schweiz': 'CH', 'suisse': 'CH',
+    'austria': 'AT', 'österreich': 'AT',
+    'portugal': 'PT',
+    'ireland': 'IE',
+    'luxembourg': 'LU',
+    'monaco': 'MC',
+    'liechtenstein': 'LI',
+    'andorra': 'AD',
+    'malta': 'MT',
+    'cyprus': 'CY',
+    // Nordic
+    'sweden': 'SE', 'sverige': 'SE',
+    'norway': 'NO', 'norge': 'NO',
+    'denmark': 'DK', 'danmark': 'DK',
+    'finland': 'FI', 'suomi': 'FI',
+    'iceland': 'IS',
+    // Eastern Europe / Balkans
+    'poland': 'PL',
+    'czech republic': 'CZ', 'czechia': 'CZ',
+    'slovakia': 'SK',
+    'hungary': 'HU',
+    'romania': 'RO',
+    'bulgaria': 'BG',
+    'croatia': 'HR',
+    'slovenia': 'SI',
+    'serbia': 'RS',
+    'bosnia and herzegovina': 'BA', 'bosnia': 'BA',
+    'montenegro': 'ME',
+    'north macedonia': 'MK', 'macedonia': 'MK',
+    'albania': 'AL',
+    'greece': 'GR',
+    'ukraine': 'UA',
+    'russia': 'RU', 'russian federation': 'RU',
+    'belarus': 'BY',
+    'moldova': 'MD',
+    'estonia': 'EE',
+    'latvia': 'LV',
+    'lithuania': 'LT',
+    // Middle East
+    'united arab emirates': 'AE', 'uae': 'AE', 'dubai': 'AE',
+    'saudi arabia': 'SA', 'ksa': 'SA',
+    'israel': 'IL',
+    'jordan': 'JO',
+    'lebanon': 'LB',
+    'iraq': 'IQ',
+    'iran': 'IR',
+    'kuwait': 'KW',
+    'qatar': 'QA',
+    'bahrain': 'BH',
+    'oman': 'OM',
+    'yemen': 'YE',
+    'turkey': 'TR', 'turkiye': 'TR',
+    'syria': 'SY',
+    'palestine': 'PS',
+    // South & Southeast Asia
     'india': 'IN',
+    'pakistan': 'PK',
+    'bangladesh': 'BD',
+    'sri lanka': 'LK',
+    'nepal': 'NP',
+    'bhutan': 'BT',
+    'maldives': 'MV',
+    'afghanistan': 'AF',
+    'singapore': 'SG',
+    'malaysia': 'MY',
+    'indonesia': 'ID',
+    'philippines': 'PH',
+    'thailand': 'TH',
+    'vietnam': 'VN', 'viet nam': 'VN',
+    'cambodia': 'KH',
+    'laos': 'LA',
+    'myanmar': 'MM', 'burma': 'MM',
+    // East Asia
     'china': 'CN',
     'japan': 'JP',
-    'south korea': 'KR',
-    'netherlands': 'NL',
-    'belgium': 'BE',
-    'switzerland': 'CH',
-    'austria': 'AT',
-    'sweden': 'SE',
-    'norway': 'NO',
-    'denmark': 'DK',
-    'poland': 'PL',
-    'ireland': 'IE',
-    'portugal': 'PT',
-    'greece': 'GR',
+    'south korea': 'KR', 'korea south': 'KR', 'korea': 'KR',
+    'north korea': 'KP',
+    'hong kong': 'HK',
+    'macau': 'MO', 'macao': 'MO',
+    'taiwan': 'TW',
+    'mongolia': 'MN',
+    // Central Asia
+    'kazakhstan': 'KZ',
+    'uzbekistan': 'UZ',
+    'turkmenistan': 'TM',
+    'kyrgyzstan': 'KG',
+    'tajikistan': 'TJ',
+    // Africa
+    'south africa': 'ZA',
+    'nigeria': 'NG',
+    'kenya': 'KE',
+    'ghana': 'GH',
+    'egypt': 'EG',
+    'morocco': 'MA',
+    'algeria': 'DZ',
+    'tunisia': 'TN',
+    'libya': 'LY',
+    'ethiopia': 'ET',
+    'tanzania': 'TZ',
+    'uganda': 'UG',
+    'rwanda': 'RW',
+    'cameroon': 'CM',
+    'ivory coast': 'CI', "cote d'ivoire": 'CI',
+    'senegal': 'SN',
+    'angola': 'AO',
+    'mozambique': 'MZ',
+    'zambia': 'ZM',
+    'zimbabwe': 'ZW',
+    'botswana': 'BW',
+    'namibia': 'NA',
+    'mauritius': 'MU',
+    // Latin America
+    'brazil': 'BR', 'brasil': 'BR',
+    'argentina': 'AR',
+    'colombia': 'CO',
+    'chile': 'CL',
+    'peru': 'PE',
+    'venezuela': 'VE',
+    'ecuador': 'EC',
+    'bolivia': 'BO',
+    'paraguay': 'PY',
+    'uruguay': 'UY',
+    'panama': 'PA',
+    'costa rica': 'CR',
+    'guatemala': 'GT',
+    'honduras': 'HN',
+    'el salvador': 'SV',
+    'nicaragua': 'NI',
+    'cuba': 'CU',
+    'dominican republic': 'DO',
+    'jamaica': 'JM',
+    'trinidad and tobago': 'TT', 'trinidad': 'TT',
+    'haiti': 'HT',
+    'guyana': 'GY',
+    'suriname': 'SR',
   };
-  
+
   return countryMap[normalized] || null;
 }
 

@@ -265,6 +265,13 @@ export function QueueIntelligenceView({ campaignId }: Props) {
             <QueueIntelligenceConfig
               qaParameters={queueQaParameters}
               onChange={setQueueQaParameters}
+              campaignContext={{
+                campaignObjective: campaign?.campaignObjective,
+                productServiceInfo: campaign?.productServiceInfo,
+                targetAudienceDescription: campaign?.targetAudienceDescription,
+                successCriteria: campaign?.successCriteria,
+                talkingPoints: campaign?.talkingPoints,
+              }}
             />
           </div>
 

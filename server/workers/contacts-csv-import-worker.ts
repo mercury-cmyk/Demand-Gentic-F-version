@@ -16,6 +16,8 @@ import { eq, and, sql, inArray } from 'drizzle-orm';
 import { normalizeName, normalizePhoneE164 } from '../normalization';
 import { from as copyFrom } from 'pg-copy-streams';
 import { pipeline } from 'stream/promises';
+import { detectContactTimezone } from '../utils/business-hours';
+import { getBestPhoneForContact, isValidE164 } from '../lib/phone-utils';
 
 /**
  * Contacts CSV Import Job Data
@@ -170,45 +172,71 @@ async function processBatchWithCOPY(
     // STEP 2: Prepare contacts for COPY (with surrogate ID for deduplication)
     const uniqueContacts = new Map<string, any>();
     const { randomUUID } = await import('crypto');
-    
+
     for (const record of records) {
       let accountId: string | null = null;
 
       if (isUnifiedFormat && record.account?.name) {
         const normalizedAccountName = normalizeName(record.account.name);
         if (normalizedAccountName) {
-          accountId = accountCache.get(normalizedAccountName) || 
-                     newCacheEntries.get(normalizedAccountName) || 
+          accountId = accountCache.get(normalizedAccountName) ||
+                     newCacheEntries.get(normalizedAccountName) ||
                      null;
         }
       }
+
+      // Normalize both phone numbers with country-aware E.164 formatting
+      const directPhoneE164 = record.contact.directPhone
+        ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
+        : record.contact.directPhoneE164 || null;
+
+      const mobilePhoneE164 = record.contact.mobilePhone
+        ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
+        : record.contact.mobilePhoneE164 || null;
+
+      // Auto-detect timezone from location data if not explicitly provided in the CSV
+      const timezone = record.contact.timezone || detectContactTimezone({
+        timezone: null,
+        city: record.contact.city || null,
+        state: record.contact.stateAbbr || record.contact.state || null,
+        country: record.contact.country || null,
+      }) || null;
+
+      // Compute unified dialing phone: pre-select best phone so the call queue
+      // has a single, validated E.164 number without runtime re-computation.
+      const dialingResult = getBestPhoneForContact({
+        directPhone: record.contact.directPhone || null,
+        directPhoneE164,
+        mobilePhone: record.contact.mobilePhone || null,
+        mobilePhoneE164,
+        hqPhone: null,
+        hqPhoneE164: null,
+        country: record.contact.country || null,
+      });
 
       const contactData = {
         ...record.contact,
         accountId,
         emailNormalized: record.contact.email?.toLowerCase().trim() || null,
-        // Normalize phone numbers using contact's country for correct country code
-        directPhoneE164: record.contact.directPhone
-          ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
-          : record.contact.directPhoneE164 || null,
-        mobilePhoneE164: record.contact.mobilePhone
-          ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
-          : record.contact.mobilePhoneE164 || null,
+        directPhoneE164,
+        mobilePhoneE164,
+        timezone,
+        dialingPhoneE164: dialingResult.phone || null,
       };
 
       // Generate surrogate ID for deduplication: email_normalized if present, otherwise UUID
       const surrogateId = contactData.emailNormalized || randomUUID();
-      
+
       // Track missing emails
       if (!contactData.email || !contactData.emailNormalized) {
         result.missingEmail++;
       }
-      
+
       // Track duplicate emails (when same email appears multiple times in batch)
       if (contactData.emailNormalized && uniqueContacts.has(surrogateId)) {
         result.duplicateEmail++;
       }
-      
+
       // Always include contact (even without email)
       uniqueContacts.set(surrogateId, {
         ...contactData,
@@ -218,9 +246,9 @@ async function processBatchWithCOPY(
 
     // STEP 3: Use PostgreSQL COPY for ultra-fast bulk insert (same transaction)
     const contactsArray = Array.from(uniqueContacts.values());
-    
+
     if (contactsArray.length > 0) {
-      // Create temp table (within same transaction)
+      // Create temp table with ALL important contact fields (within same transaction)
       await pgClient.query(`
         CREATE TEMP TABLE temp_contacts_import (
           email text,
@@ -232,6 +260,24 @@ async function processBatchWithCOPY(
           direct_phone text,
           direct_phone_e164 text,
           phone_extension text,
+          mobile_phone text,
+          mobile_phone_e164 text,
+          dialing_phone_e164 text,
+          country text,
+          timezone text,
+          city text,
+          state text,
+          state_abbr text,
+          county text,
+          postal_code text,
+          contact_location text,
+          seniority_level text,
+          department text,
+          address text,
+          linkedin_url text,
+          list text,
+          source_system text,
+          source_record_id text,
           account_id varchar(255)
         ) ON COMMIT DROP
       `);
@@ -241,14 +287,14 @@ async function processBatchWithCOPY(
         copyFrom('COPY temp_contacts_import FROM STDIN WITH (FORMAT csv, DELIMITER \',\', NULL \'\\N\')')
       );
 
-      // Build CSV data
+      // Build CSV data — column order MUST match temp table definition above
       const csvData = contactsArray.map(c => {
         const escape = (val: any) => {
           if (val === null || val === undefined) return '\\N';
           const str = String(val).replace(/\\/g, '\\\\').replace(/"/g, '""');
           return `"${str}"`;
         };
-        
+
         return [
           escape(c.email),
           escape(c.emailNormalized),
@@ -259,6 +305,24 @@ async function processBatchWithCOPY(
           escape(c.directPhone),
           escape(c.directPhoneE164),
           escape(c.phoneExtension),
+          escape(c.mobilePhone),
+          escape(c.mobilePhoneE164),
+          escape(c.dialingPhoneE164),
+          escape(c.country),
+          escape(c.timezone),
+          escape(c.city),
+          escape(c.state),
+          escape(c.stateAbbr),
+          escape(c.county),
+          escape(c.postalCode),
+          escape(c.contactLocation),
+          escape(c.seniorityLevel),
+          escape(c.department),
+          escape(c.address),
+          escape(c.linkedinUrl),
+          escape(c.list),
+          escape(c.sourceSystem),
+          escape(c.sourceRecordId),
           escape(c.accountId),
         ].join(',');
       }).join('\n') + '\n';
@@ -271,21 +335,33 @@ async function processBatchWithCOPY(
         copyStream.end();
       });
 
-      // Merge from temp table into main contacts table
+      // Merge from temp table into main contacts table.
       // Split into two operations:
-      // 1. Contacts WITH emails - use upsert (ON CONFLICT)
-      // 2. Contacts WITHOUT emails - simple insert (no conflict possible)
-      
+      //   1. Contacts WITH emails  → upsert (ON CONFLICT on email_normalized)
+      //   2. Contacts WITHOUT emails → simple insert (no conflict key available)
+
       // PART 1: Upsert contacts with emails
       const upsertResult = await pgClient.query(`
         INSERT INTO contacts (
           email, email_normalized, full_name, first_name, last_name,
-          job_title, direct_phone, direct_phone_e164, phone_extension, account_id,
+          job_title,
+          direct_phone, direct_phone_e164, phone_extension,
+          mobile_phone, mobile_phone_e164, dialing_phone_e164,
+          country, timezone, city, state, state_abbr, county, postal_code, contact_location,
+          seniority_level, department, address, linkedin_url,
+          list, source_system, source_record_id,
+          account_id,
           created_at, updated_at
         )
         SELECT
           email, email_normalized, full_name, first_name, last_name,
-          job_title, direct_phone, direct_phone_e164, phone_extension, account_id,
+          job_title,
+          direct_phone, direct_phone_e164, phone_extension,
+          mobile_phone, mobile_phone_e164, dialing_phone_e164,
+          country, timezone, city, state, state_abbr, county, postal_code, contact_location,
+          seniority_level, department, address, linkedin_url,
+          list, source_system, source_record_id,
+          account_id,
           NOW(), NOW()
         FROM temp_contacts_import
         WHERE email_normalized IS NOT NULL
@@ -298,6 +374,24 @@ async function processBatchWithCOPY(
           direct_phone = EXCLUDED.direct_phone,
           direct_phone_e164 = EXCLUDED.direct_phone_e164,
           phone_extension = EXCLUDED.phone_extension,
+          mobile_phone = EXCLUDED.mobile_phone,
+          mobile_phone_e164 = EXCLUDED.mobile_phone_e164,
+          dialing_phone_e164 = EXCLUDED.dialing_phone_e164,
+          country = EXCLUDED.country,
+          timezone = COALESCE(EXCLUDED.timezone, contacts.timezone),
+          city = EXCLUDED.city,
+          state = EXCLUDED.state,
+          state_abbr = EXCLUDED.state_abbr,
+          county = EXCLUDED.county,
+          postal_code = EXCLUDED.postal_code,
+          contact_location = EXCLUDED.contact_location,
+          seniority_level = EXCLUDED.seniority_level,
+          department = EXCLUDED.department,
+          address = EXCLUDED.address,
+          linkedin_url = EXCLUDED.linkedin_url,
+          list = EXCLUDED.list,
+          source_system = EXCLUDED.source_system,
+          source_record_id = EXCLUDED.source_record_id,
           account_id = EXCLUDED.account_id,
           updated_at = NOW()
         RETURNING id, (xmax = 0) as is_new
@@ -311,23 +405,35 @@ async function processBatchWithCOPY(
           result.updated++;
         }
       }
-      
+
       // PART 2: Insert contacts without emails (always new, no conflict)
       const insertNoEmailResult = await pgClient.query(`
         INSERT INTO contacts (
           email, email_normalized, full_name, first_name, last_name,
-          job_title, direct_phone, direct_phone_e164, phone_extension, account_id,
+          job_title,
+          direct_phone, direct_phone_e164, phone_extension,
+          mobile_phone, mobile_phone_e164, dialing_phone_e164,
+          country, timezone, city, state, state_abbr, county, postal_code, contact_location,
+          seniority_level, department, address, linkedin_url,
+          list, source_system, source_record_id,
+          account_id,
           created_at, updated_at
         )
         SELECT
           email, email_normalized, full_name, first_name, last_name,
-          job_title, direct_phone, direct_phone_e164, phone_extension, account_id,
+          job_title,
+          direct_phone, direct_phone_e164, phone_extension,
+          mobile_phone, mobile_phone_e164, dialing_phone_e164,
+          country, timezone, city, state, state_abbr, county, postal_code, contact_location,
+          seniority_level, department, address, linkedin_url,
+          list, source_system, source_record_id,
+          account_id,
           NOW(), NOW()
         FROM temp_contacts_import
         WHERE email_normalized IS NULL
         RETURNING id
       `);
-      
+
       // All contacts without emails are new
       result.created += insertNoEmailResult.rows.length;
     }
@@ -560,18 +666,43 @@ export async function processContactsCSVImport(
               }
             }
 
+            // Normalize phone numbers with country-aware E.164 formatting
+            const directPhoneE164 = record.contact.directPhone
+              ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
+              : record.contact.directPhoneE164 || null;
+
+            const mobilePhoneE164 = record.contact.mobilePhone
+              ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
+              : record.contact.mobilePhoneE164 || null;
+
+            // Auto-detect timezone from location data if not explicitly provided
+            const timezone = record.contact.timezone || detectContactTimezone({
+              timezone: null,
+              city: record.contact.city || null,
+              state: record.contact.stateAbbr || record.contact.state || null,
+              country: record.contact.country || null,
+            }) || null;
+
+            // Compute unified dialing phone
+            const dialingResult = getBestPhoneForContact({
+              directPhone: record.contact.directPhone || null,
+              directPhoneE164,
+              mobilePhone: record.contact.mobilePhone || null,
+              mobilePhoneE164,
+              hqPhone: null,
+              hqPhoneE164: null,
+              country: record.contact.country || null,
+            });
+
             // Prepare contact data
             const contactData = {
               ...record.contact,
               accountId,
               emailNormalized: record.contact.email ? record.contact.email.toLowerCase().trim() : null,
-              // Normalize phone numbers using contact's country for correct country code
-              directPhoneE164: record.contact.directPhone
-                ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
-                : record.contact.directPhoneE164 || null,
-              mobilePhoneE164: record.contact.mobilePhone
-                ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
-                : record.contact.mobilePhoneE164 || null,
+              directPhoneE164,
+              mobilePhoneE164,
+              timezone,
+              dialingPhoneE164: dialingResult.phone || null,
             };
 
             // Generate surrogate ID for deduplication: email_normalized if present, otherwise UUID
@@ -612,33 +743,38 @@ export async function processContactsCSVImport(
         const contactsWithoutEmail = contactsToUpsert.filter(c => !c.emailNormalized);
         
         if (contactsWithEmail.length > 0) {
+          // Helper: safely quote a string value for raw SQL
+          const q = (val: any) => val ? `'${String(val).replace(/'/g, "''")}'` : 'NULL';
+
           // Build VALUES clause for contacts with emails
-          const valueClauses = contactsWithEmail.map(c => 
+          const valueClauses = contactsWithEmail.map(c =>
             `(${[
-              c.email ? `'${c.email.replace(/'/g, "''")}'` : 'NULL',
-              c.emailNormalized ? `'${c.emailNormalized.replace(/'/g, "''")}'` : 'NULL',
-              c.fullName ? `'${c.fullName.replace(/'/g, "''")}'` : 'NULL',
-              c.firstName ? `'${c.firstName.replace(/'/g, "''")}'` : 'NULL',
-              c.lastName ? `'${c.lastName.replace(/'/g, "''")}'` : 'NULL',
-              c.jobTitle ? `'${c.jobTitle.replace(/'/g, "''")}'` : 'NULL',
-              c.directPhone ? `'${c.directPhone.replace(/'/g, "''")}'` : 'NULL',
-              c.directPhoneE164 ? `'${c.directPhoneE164.replace(/'/g, "''")}'` : 'NULL',
-              c.phoneExtension ? `'${c.phoneExtension.replace(/'/g, "''")}'` : 'NULL',
-              c.accountId ? `'${c.accountId}'` : 'NULL',
-              'NOW()',
-              'NOW()'
+              q(c.email), q(c.emailNormalized),
+              q(c.fullName), q(c.firstName), q(c.lastName), q(c.jobTitle),
+              q(c.directPhone), q(c.directPhoneE164), q(c.phoneExtension),
+              q(c.mobilePhone), q(c.mobilePhoneE164), q(c.dialingPhoneE164),
+              q(c.country), q(c.timezone), q(c.city), q(c.state), q(c.stateAbbr),
+              q(c.county), q(c.postalCode), q(c.contactLocation),
+              q(c.seniorityLevel), q(c.department), q(c.address), q(c.linkedinUrl),
+              q(c.list), q(c.sourceSystem), q(c.sourceRecordId),
+              q(c.accountId),
+              'NOW()', 'NOW()'
             ].join(', ')})`
           ).join(', ');
 
           // Perform bulk upsert for contacts with emails
           const upsertResults = await tx.execute(sql.raw(`
             INSERT INTO contacts (
-              email, email_normalized, full_name, first_name, last_name, 
-              job_title, direct_phone, direct_phone_e164, phone_extension, account_id,
-              created_at, updated_at
+              email, email_normalized, full_name, first_name, last_name, job_title,
+              direct_phone, direct_phone_e164, phone_extension,
+              mobile_phone, mobile_phone_e164, dialing_phone_e164,
+              country, timezone, city, state, state_abbr, county, postal_code, contact_location,
+              seniority_level, department, address, linkedin_url,
+              list, source_system, source_record_id,
+              account_id, created_at, updated_at
             )
             VALUES ${valueClauses}
-            ON CONFLICT (email_normalized) 
+            ON CONFLICT (email_normalized)
             DO UPDATE SET
               full_name = EXCLUDED.full_name,
               first_name = EXCLUDED.first_name,
@@ -647,6 +783,24 @@ export async function processContactsCSVImport(
               direct_phone = EXCLUDED.direct_phone,
               direct_phone_e164 = EXCLUDED.direct_phone_e164,
               phone_extension = EXCLUDED.phone_extension,
+              mobile_phone = EXCLUDED.mobile_phone,
+              mobile_phone_e164 = EXCLUDED.mobile_phone_e164,
+              dialing_phone_e164 = EXCLUDED.dialing_phone_e164,
+              country = EXCLUDED.country,
+              timezone = COALESCE(EXCLUDED.timezone, contacts.timezone),
+              city = EXCLUDED.city,
+              state = EXCLUDED.state,
+              state_abbr = EXCLUDED.state_abbr,
+              county = EXCLUDED.county,
+              postal_code = EXCLUDED.postal_code,
+              contact_location = EXCLUDED.contact_location,
+              seniority_level = EXCLUDED.seniority_level,
+              department = EXCLUDED.department,
+              address = EXCLUDED.address,
+              linkedin_url = EXCLUDED.linkedin_url,
+              list = EXCLUDED.list,
+              source_system = EXCLUDED.source_system,
+              source_record_id = EXCLUDED.source_record_id,
               account_id = EXCLUDED.account_id,
               updated_at = NOW()
             RETURNING id, (xmax = 0) as is_new
@@ -668,29 +822,33 @@ export async function processContactsCSVImport(
         
         // PART 2: Contacts WITHOUT emails - simple insert (always new, no conflict)
         if (contactsWithoutEmail.length > 0) {
-          const valueClauses = contactsWithoutEmail.map(c => 
+          const q = (val: any) => val ? `'${String(val).replace(/'/g, "''")}'` : 'NULL';
+
+          const valueClauses = contactsWithoutEmail.map(c =>
             `(${[
-              'NULL', // email
-              'NULL', // email_normalized
-              c.fullName ? `'${c.fullName.replace(/'/g, "''")}'` : 'NULL',
-              c.firstName ? `'${c.firstName.replace(/'/g, "''")}'` : 'NULL',
-              c.lastName ? `'${c.lastName.replace(/'/g, "''")}'` : 'NULL',
-              c.jobTitle ? `'${c.jobTitle.replace(/'/g, "''")}'` : 'NULL',
-              c.directPhone ? `'${c.directPhone.replace(/'/g, "''")}'` : 'NULL',
-              c.directPhoneE164 ? `'${c.directPhoneE164.replace(/'/g, "''")}'` : 'NULL',
-              c.phoneExtension ? `'${c.phoneExtension.replace(/'/g, "''")}'` : 'NULL',
-              c.accountId ? `'${c.accountId}'` : 'NULL',
-              'NOW()',
-              'NOW()'
+              'NULL', 'NULL', // email, email_normalized
+              q(c.fullName), q(c.firstName), q(c.lastName), q(c.jobTitle),
+              q(c.directPhone), q(c.directPhoneE164), q(c.phoneExtension),
+              q(c.mobilePhone), q(c.mobilePhoneE164), q(c.dialingPhoneE164),
+              q(c.country), q(c.timezone), q(c.city), q(c.state), q(c.stateAbbr),
+              q(c.county), q(c.postalCode), q(c.contactLocation),
+              q(c.seniorityLevel), q(c.department), q(c.address), q(c.linkedinUrl),
+              q(c.list), q(c.sourceSystem), q(c.sourceRecordId),
+              q(c.accountId),
+              'NOW()', 'NOW()'
             ].join(', ')})`
           ).join(', ');
 
           // Simple insert for contacts without emails (no conflict possible)
           const insertResults = await tx.execute(sql.raw(`
             INSERT INTO contacts (
-              email, email_normalized, full_name, first_name, last_name, 
-              job_title, direct_phone, direct_phone_e164, phone_extension, account_id,
-              created_at, updated_at
+              email, email_normalized, full_name, first_name, last_name, job_title,
+              direct_phone, direct_phone_e164, phone_extension,
+              mobile_phone, mobile_phone_e164, dialing_phone_e164,
+              country, timezone, city, state, state_abbr, county, postal_code, contact_location,
+              seniority_level, department, address, linkedin_url,
+              list, source_system, source_record_id,
+              account_id, created_at, updated_at
             )
             VALUES ${valueClauses}
             RETURNING id

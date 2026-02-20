@@ -88,7 +88,7 @@ router.get('/status/:callAttemptId', requireAuth, async (req: Request, res: Resp
  * POST /api/transcription/retry/:callAttemptId
  * Manually trigger fallback transcription for a call
  */
-router.post('/retry/:callAttemptId', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.post('/retry/:callAttemptId', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { callAttemptId } = req.params;
 
@@ -214,7 +214,7 @@ router.get('/stats/:campaignId', requireAuth, async (req: Request, res: Response
  * POST /api/transcription/process-missing
  * Manually trigger processing of all missing transcripts
  */
-router.post('/process-missing', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.post('/process-missing', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     console.log('[Transcription API] Manual trigger: Processing missing transcripts');
 
@@ -238,7 +238,7 @@ router.post('/process-missing', requireAuth, requireRole(['admin']), async (req:
  * GET /api/transcription/calls-without-transcripts
  * List recent calls that are missing transcripts
  */
-router.get('/calls-without-transcripts', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.get('/calls-without-transcripts', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 

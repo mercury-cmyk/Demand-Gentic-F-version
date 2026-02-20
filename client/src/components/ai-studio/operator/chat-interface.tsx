@@ -271,11 +271,16 @@ export function ChatInterface() {
     }
   }, [messages, isTyping]);
 
-  // Auto-resize textarea
+  // Auto-resize textarea - batch DOM operations to avoid forced reflows
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = "inherit";
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "inherit";
+          const scrollHeight = textareaRef.current.scrollHeight;
+          textareaRef.current.style.height = `${scrollHeight}px`;
+        }
+      });
     }
   }, [input]);
 

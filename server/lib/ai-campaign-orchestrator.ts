@@ -7,7 +7,7 @@
  */
 
 import { Queue, Worker, Job } from 'bullmq';
-import { createQueue, createWorker, isQueueAvailable } from './queue';
+import { createQueue, createWorker, isQueueAvailable, getRedisConnection } from './queue';
 import { storage } from '../storage';
 import { getTelnyxAiBridge } from '../services/telnyx-ai-bridge';
 import * as sipDialer from '../services/sip';
@@ -608,9 +608,31 @@ async function getGlobalInProgressCount(): Promise<number> {
 /**
  * STARTUP RESUME: Reset ALL in_progress items immediately on server start
  * This ensures campaigns can continue after a server restart/crash
+ * Uses Redis lock to prevent race conditions during deployment scaling
  */
 async function startupResumeStuckCalls(): Promise<void> {
   try {
+    // Use Redis lock to ensure only ONE instance runs startup resume during scaling
+    // This prevents race conditions where multiple instances try to update campaign state simultaneously
+    const lockKey = 'orchestrator:startup-resume:lock';
+    const lockValue = `instance-${Date.now()}-${Math.random()}`;
+    const lockTTL = 30; // 30 seconds - enough time to complete reset
+
+    // Try to acquire the lock (only succeeds if key doesn't exist)
+    const redisClient = getRedisConnection();
+    if (!redisClient) {
+      console.warn('[AI Orchestrator] Redis not available for distributed lock - proceeding without lock (may cause race conditions during scaling)');
+    } else {
+      const lockAcquired = await redisClient.set(lockKey, lockValue, 'EX', lockTTL, 'NX');
+      
+      if (!lockAcquired) {
+        console.log('[AI Orchestrator] STARTUP: Another instance is running startup resume - skipping to prevent race condition');
+        return;
+      }
+
+      console.log('[AI Orchestrator] STARTUP: Acquired distributed lock for startup resume');
+    }
+
     // Reset all in_progress items back to queued (server restart means all active calls are dead)
     const result = await db.execute(sql`
       UPDATE campaign_queue 
@@ -1781,19 +1803,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         if (telnyxFatalError) {
           if (telnyxFatalError.isWhitelist && telnyxFatalError.isRateLimit) {
             console.error(`[AI Orchestrator] ⚠️ Telnyx outbound profile rate cap hit for contact: ${telnyxFatalError.detail}`);
-            console.error(`[AI Orchestrator] ⚠️ Pausing campaign ${campaignId} until outbound profile pricing cap is raised (D24)`);
+            console.warn(`[AI Orchestrator] ℹ️ Contact queued for retry in 30 minutes (rate limit is temporary)`);
 
-            try {
-              await storage.updateCampaign(campaignId, { status: 'paused' });
-              await setOrchestratorStallReason(
-                campaignId,
-                'Telnyx outbound profile rate cap exceeded (D24). Increase destination max rate/allowlist in Telnyx Mission Control, then resume campaign.'
-              );
-            } catch (pauseError) {
-              console.error(`[AI Orchestrator] Failed to pause campaign ${campaignId} after D24 rate limit:`, pauseError);
-            }
-
-            // Re-queue this contact so it can be retried once campaign is resumed
+            // Don't pause campaign - just queue for later retry. D24 is temporary.
             try {
               await db.execute(sql`
                 UPDATE campaign_queue
@@ -1807,7 +1819,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
               console.error(`[AI Orchestrator] Failed to requeue queue item ${item.id} after D24 rate limit:`, updateError);
             }
 
-            return { success: false, itemId: item.id, error, fatalError: true };
+            return { success: false, itemId: item.id, error, fatalError: false };
           }
 
           if (telnyxFatalError.isWhitelist) {
