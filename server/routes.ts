@@ -5090,7 +5090,19 @@ export function registerRoutes(app: Express) {
       // Combine human + AI stats
       const callsMade = (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0);
       const callsConnected = (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0);
-      const leadsQualified = (humanCallStats?.leadsQualified || 0) + (aiCallStats?.leadsQualified || 0);
+
+      // Leads Qualified: query the leads table directly so manual QA overrides are included.
+      // callSessions.aiDisposition never changes when a reviewer manually approves a needs_review lead,
+      // so counting from call dispositions alone would under-count.
+      const [leadsQualifiedResult] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(leads)
+        .where(and(
+          eq(leads.campaignId, campaignId),
+          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
+        ));
+      const leadsQualified = leadsQualifiedResult?.count || 0;
+
       const dncRequests = (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0);
       const notInterested = (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0);
       const noAnswer = (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0);
@@ -5128,6 +5140,23 @@ export function registerRoutes(app: Express) {
       if (!campaignIds?.length) return res.json({});
 
       const results: Record<string, any> = {};
+
+      // Bulk query: leads qualified per campaign from leads table (includes manual QA overrides).
+      // Done once before the per-campaign loop to avoid N+1 queries.
+      const leadsQualifiedRows = await db
+        .select({
+          campaignId: leads.campaignId,
+          count: sql<number>`COUNT(*)::int`,
+        })
+        .from(leads)
+        .where(and(
+          inArray(leads.campaignId, campaignIds),
+          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
+        ))
+        .groupBy(leads.campaignId);
+      const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
+        leadsQualifiedRows.map((r) => [r.campaignId, r.count])
+      );
 
       // Process campaigns in parallel (server-side, single request from client)
       await Promise.all(campaignIds.map(async (campaignId) => {
@@ -5208,7 +5237,7 @@ export function registerRoutes(app: Express) {
               contactsInQueue: queueStats.queued,
               callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
               callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
-              leadsQualified: (humanCallStats?.leadsQualified || 0) + (aiCallStats?.leadsQualified || 0),
+              leadsQualified: leadsQualifiedByCampaign[campaignId] || 0,
               dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
               notInterested: (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0),
               noAnswer: (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0),
