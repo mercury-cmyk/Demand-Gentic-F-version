@@ -17016,7 +17016,7 @@ Provide JSON response with:
 
       // Enforce GCS-backed URLs for QA consumers.
       if (result.source !== 'gcs') {
-        const gcsResult = await getCallSessionRecordingUrl(callSessionId, result.url).catch(() => ({ url: '', source: null as const }));
+        const gcsResult = await getCallSessionRecordingUrl(callSessionId, result.url).catch(() => ({ url: '', source: null }));
         if (!gcsResult.url || gcsResult.source !== 'local' || gcsResult.url.startsWith('gcs-internal://')) {
           return res.status(404).json({
             error: 'GCS recording URL not available yet',
