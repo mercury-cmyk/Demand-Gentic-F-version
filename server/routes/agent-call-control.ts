@@ -18,6 +18,7 @@ import { db } from "../db";
 import { dialerCallAttempts, callSessions } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { getCallerIdForCall, handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
+import { createCallSessionSafely } from "../lib/call-session-factory";
 
 const router = Router();
 const LOG_PREFIX = "[AgentCallControl]";
@@ -264,24 +265,25 @@ router.post("/start", requireAuth, async (req: Request, res: ExpressResponse) =>
     // CRITICAL: Create call_sessions record so recording appears in Call Recordings dashboard
     // This enables the recording.completed webhook to update with recording URL
     try {
-      const [newSession] = await db
-        .insert(callSessions)
-        .values({
-          telnyxCallId: callControlId,
-          fromNumber: fromNumber,
-          toNumberE164: to,
-          startedAt: new Date(),
-          status: 'connecting',
-          agentType: 'human',
-          agentUserId: agentId,
-          campaignId: campaignId || null,
-          contactId: contactId || null,
-          queueItemId: queueItemId || null,
-          recordingStatus: 'pending',
-        })
-        .returning({ id: callSessions.id });
+      const newSession = await createCallSessionSafely({
+        telnyxCallId: callControlId,
+        fromNumber: fromNumber,
+        toNumberE164: to,
+        startedAt: new Date(),
+        status: 'connecting',
+        agentType: 'human',
+        agentUserId: agentId,
+        campaignId: campaignId || null,
+        contactId: contactId || null,
+        queueItemId: queueItemId || null,
+        recordingStatus: 'pending',
+        validateCampaignId: true,
+        validateContactId: true,
+      });
 
-      console.log(`${LOG_PREFIX} Created call_sessions record ${newSession.id} for agent call ${callControlId}`);
+      if (newSession) {
+        console.log(`${LOG_PREFIX} Created call_sessions record ${newSession.id} for agent call ${callControlId}`);
+      }
     } catch (sessionErr) {
       // Don't fail the call if session creation fails, but log the error
       console.error(`${LOG_PREFIX} Failed to create call_sessions record:`, sessionErr);

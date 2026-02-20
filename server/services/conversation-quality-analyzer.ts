@@ -313,6 +313,51 @@ function detectRepeatedAgentPhrase(agentLines: string[], transcriptLower: string
   return null;
 }
 
+function detectAudioCheckIssue(agentLines: string[]): boolean {
+  const audioCheckPhrases = [
+    "quick audio check",
+    "audio check",
+    "can you hear me clearly",
+    "can you hear me ok",
+    "are you able to hear me",
+    "sorry about that",
+  ];
+  return agentLines.some((line) =>
+    audioCheckPhrases.some((phrase) => line.toLowerCase().includes(phrase))
+  );
+}
+
+function detectClosingLoop(agentLines: string[]): boolean {
+  // Detect when closing phrases appear multiple times across all agent turns,
+  // or when a single agent turn contains a closing phrase repeated more than once.
+  const closingPhrases = [
+    "have a great day",
+    "have a great",
+    "thank you so much for your time",
+    "thanks so much for your time",
+    "you'll receive that shortly",
+    "you will receive that shortly",
+  ];
+
+  // Check within a single agent line for repeated closing phrases
+  for (const line of agentLines) {
+    const lower = line.toLowerCase();
+    for (const phrase of closingPhrases) {
+      const matches = lower.split(phrase).length - 1;
+      if (matches >= 2) return true;
+    }
+  }
+
+  // Check across all agent lines for closing phrase appearing 3+ times total
+  const allAgentText = agentLines.join(" ").toLowerCase();
+  for (const phrase of closingPhrases) {
+    const matches = allAgentText.split(phrase).length - 1;
+    if (matches >= 3) return true;
+  }
+
+  return false;
+}
+
 function detectTopChallengeIssues(
   input: ConversationQualityInput,
   transcript: string
@@ -483,6 +528,28 @@ function detectTopChallengeIssues(
         "Agent repeated \"Let me check that\" twice, creating an unnatural conversational pattern that may have contributed to the contact's AI detection.",
       recommendation:
         "Review system logic to prevent repetitive phrases during verification pauses. Ensure the agent persists through initial objections to deliver at least the core value proposition, even when not speaking to the primary contact.",
+    });
+  }
+
+  if (detectAudioCheckIssue(parsed.agentLines)) {
+    pushIssue({
+      type: "audio_check_interruption",
+      severity: "medium",
+      description:
+        "The agent broke out of its opening script to perform an unprompted audio check mid-conversation. This disrupts the call flow and can make the agent sound uncertain or mechanical to the contact.",
+      recommendation:
+        "Remove or gate the audio-check recovery routine so it only triggers when there is genuine one-way audio (i.e., no contact speech detected at all). A contact saying 'Hello?' twice should not trigger an audio check if the agent's greeting has already been delivered.",
+    });
+  }
+
+  if (detectClosingLoop(parsed.agentLines)) {
+    pushIssue({
+      type: "closing_loop",
+      severity: "high",
+      description:
+        "The agent repeated its closing farewell multiple times in the same turn or across consecutive turns. This indicates a flow/state machine bug where the closing sequence fired more than once before the call disconnected.",
+      recommendation:
+        "Add a guard flag in the agent's closing state so the farewell block can only execute once per call. Ensure the call-disconnect signal is sent immediately after the first closing phrase completes.",
     });
   }
 

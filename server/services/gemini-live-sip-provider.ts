@@ -52,6 +52,7 @@ export class GeminiLiveSIPProvider {
   private sequenceNumber: number = 0;
   private timestamp: number = Math.floor(Math.random() * 0xffffffff);
   private g711Format: G711Format = 'ulaw';
+  private healthCheckInterval: NodeJS.Timeout | null = null;
 
   constructor(
     callId: string,
@@ -190,21 +191,74 @@ export class GeminiLiveSIPProvider {
   }
 
   /**
-   * Connect to Gemini Live WebSocket
+   * Connect to Gemini Live WebSocket with retry logic
    */
   private async connectToGeminiLive(): Promise<boolean> {
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 second
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const connected = await this.connectWithTimeout();
+        if (connected) {
+          return true;
+        }
+
+        // Exponential backoff before retry
+        if (attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          log(`Retrying Gemini connection (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      } catch (error) {
+        logError(`Gemini connection attempt ${attempt}/${maxRetries} failed: ${error}`, error);
+      }
+    }
+
+    logError(`Failed to connect to Gemini Live after ${maxRetries} attempts for ${this.callId}`);
+    return false;
+  }
+
+  /**
+   * Connect to Gemini with configurable timeout
+   */
+  private connectWithTimeout(timeoutMs: number = 15000): Promise<boolean> {
     return new Promise((resolve) => {
       try {
         const geminiWsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${this.config.geminiApiKey}`;
 
-        this.geminiWs = new WebSocket(geminiWsUrl);
+        this.geminiWs = new WebSocket(geminiWsUrl, {
+          rejectUnauthorized: false,
+          handshakeTimeout: timeoutMs,
+        });
+
+        let resolved = false;
+        const timeoutId = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            logError(`Gemini connection timeout (${timeoutMs}ms) for ${this.callId}`);
+            if (this.geminiWs) {
+              this.geminiWs.close();
+              this.geminiWs = null;
+            }
+            resolve(false);
+          }
+        }, timeoutMs);
 
         this.geminiWs.on('open', () => {
-          log(`✓ Connected to Gemini Live for call ${this.callId}`);
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            log(`✓ Connected to Gemini Live for call ${this.callId}`);
 
-          // Send setup message
-          this.sendGeminiSetup();
-          resolve(true);
+            // Send setup message
+            this.sendGeminiSetup();
+
+            // Start health check ping
+            this.startHealthMonitoring();
+
+            resolve(true);
+          }
         });
 
         this.geminiWs.on('message', (data: Buffer) => {
@@ -212,22 +266,23 @@ export class GeminiLiveSIPProvider {
         });
 
         this.geminiWs.on('error', (error: Error) => {
-          logError(`Gemini WebSocket error for ${this.callId}`, error);
-          resolve(false);
+          logError(`Gemini WebSocket error for ${this.callId}: ${error.message}`, error);
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            resolve(false);
+          }
         });
 
         this.geminiWs.on('close', () => {
+          if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+            this.healthCheckInterval = null;
+          }
           log(`Gemini WebSocket closed for call ${this.callId}`);
         });
-
-        setTimeout(() => {
-          if (this.geminiWs?.readyState !== WebSocket.OPEN) {
-            logError(`Gemini connection timeout for ${this.callId}`);
-            resolve(false);
-          }
-        }, 5000);
       } catch (error) {
-        logError(`Failed to connect to Gemini Live for ${this.callId}`, error);
+        logError(`Failed to initialize Gemini connection for ${this.callId}: ${error}`, error);
         resolve(false);
       }
     });
@@ -264,14 +319,26 @@ export class GeminiLiveSIPProvider {
   }
 
   /**
-   * Send audio to Gemini Live
+   * Send audio to Gemini Live with error handling
    */
   private sendAudioToGemini(audioBuffer: Buffer): void {
-    if (!this.geminiWs || this.geminiWs.readyState !== WebSocket.OPEN) {
+    if (!this.geminiWs) {
+      logError(`Gemini WebSocket not initialized for ${this.callId}`);
+      return;
+    }
+
+    if (this.geminiWs.readyState !== WebSocket.OPEN) {
+      logError(`Gemini WebSocket not open (state: ${this.geminiWs.readyState}) for ${this.callId}`);
       return;
     }
 
     if (audioBuffer.length === 0) {
+      return; // Silently skip empty buffers
+    }
+
+    // Validate audio is PCM format
+    if (audioBuffer.length % 2 !== 0) {
+      logError(`Invalid audio buffer length (not even): ${audioBuffer.length} for ${this.callId}`);
       return;
     }
 
@@ -289,8 +356,36 @@ export class GeminiLiveSIPProvider {
     try {
       this.geminiWs.send(JSON.stringify(audioMessage));
     } catch (error) {
-      logError(`Failed to send audio to Gemini for ${this.callId}`, error);
+      logError(`Failed to send audio to Gemini for ${this.callId}: ${error}`, error);
     }
+  }
+
+  /**
+   * Start health monitoring - ping Gemini every 30 seconds
+   */
+  private startHealthMonitoring(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+
+    this.healthCheckInterval = setInterval(() => {
+      if (!this.geminiWs || this.geminiWs.readyState !== WebSocket.OPEN) {
+        logError(`Health check failed: WebSocket not open for ${this.callId}`);
+        if (this.healthCheckInterval) {
+          clearInterval(this.healthCheckInterval);
+          this.healthCheckInterval = null;
+        }
+        return;
+      }
+
+      try {
+        // Send keep-alive ping
+        const pingMessage = { clientContent: { turns: [] } };
+        this.geminiWs.send(JSON.stringify(pingMessage));
+      } catch (error) {
+        logError(`Health check ping failed for ${this.callId}: ${error}`);
+      }
+    }, 30000); // Every 30 seconds
   }
 
   /**
@@ -377,15 +472,29 @@ export class GeminiLiveSIPProvider {
   async stop(): Promise<void> {
     log(`Stopping media bridge for call ${this.callId}`);
 
+    // Stop health monitoring
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
     // Close RTP socket
     if (this.rtpSocket) {
-      this.rtpSocket.close();
+      try {
+        this.rtpSocket.close();
+      } catch (error) {
+        logError(`Error closing RTP socket for ${this.callId}`, error);
+      }
       this.rtpSocket = null;
     }
 
     // Close Gemini WebSocket
     if (this.geminiWs) {
-      this.geminiWs.close();
+      try {
+        this.geminiWs.close();
+      } catch (error) {
+        logError(`Error closing Gemini WebSocket for ${this.callId}`, error);
+      }
       this.geminiWs = null;
     }
 
@@ -419,12 +528,14 @@ export async function createGeminiLiveSIPProvider(
 
     if (await provider.start()) {
       activeProviders.set(callId, provider);
+      log(`✓ Gemini Live SIP provider created and started for call ${callId}`);
       return provider;
     }
 
+    logError(`Failed to start Gemini Live SIP provider for call ${callId}`);
     return null;
   } catch (error) {
-    logError(`Failed to create Gemini Live SIP provider for ${callId}`, error);
+    logError(`Failed to create Gemini Live SIP provider for ${callId}: ${error}`, error);
     return null;
   }
 }

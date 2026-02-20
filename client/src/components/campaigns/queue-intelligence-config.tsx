@@ -280,7 +280,7 @@ export function QueueIntelligenceConfig({ qaParameters, onChange, campaignContex
 
     setIsGenerating(true);
     try {
-      const res = await apiRequest("POST", "/api/queue-intelligence/generate-config", campaignContext);
+      const res = await apiRequest("POST", "/api/queue-intelligence/generate-config", campaignContext, { timeout: 90_000 });
       const data = await res.json();
       const c = data.config;
 
