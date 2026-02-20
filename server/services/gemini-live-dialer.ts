@@ -19,7 +19,7 @@ import { Buffer } from 'buffer';
 import { GoogleAuth } from 'google-auth-library';
 import { db } from "../db";
 import { contacts, campaigns, campaignQueue, dialerCallAttempts, callSessions, type CanonicalDisposition } from "@shared/schema";
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { createCallSessionSafely } from '../lib/call-session-factory';
 import { audioQualityMonitor } from "./audio-quality-monitor";
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format, createTranscoderState } from "./voice-providers/audio-transcoder";
