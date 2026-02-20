@@ -7,7 +7,7 @@
  */
 
 import { Queue, Worker, Job } from 'bullmq';
-import { createQueue, createWorker, isQueueAvailable } from './queue';
+import { createQueue, createWorker, isQueueAvailable, getRedisConnection } from './queue';
 import { storage } from '../storage';
 import { getTelnyxAiBridge } from '../services/telnyx-ai-bridge';
 import * as sipDialer from '../services/sip';
@@ -608,9 +608,31 @@ async function getGlobalInProgressCount(): Promise<number> {
 /**
  * STARTUP RESUME: Reset ALL in_progress items immediately on server start
  * This ensures campaigns can continue after a server restart/crash
+ * Uses Redis lock to prevent race conditions during deployment scaling
  */
 async function startupResumeStuckCalls(): Promise<void> {
   try {
+    // Use Redis lock to ensure only ONE instance runs startup resume during scaling
+    // This prevents race conditions where multiple instances try to update campaign state simultaneously
+    const lockKey = 'orchestrator:startup-resume:lock';
+    const lockValue = `instance-${Date.now()}-${Math.random()}`;
+    const lockTTL = 30; // 30 seconds - enough time to complete reset
+
+    // Try to acquire the lock (only succeeds if key doesn't exist)
+    const redisClient = getRedisConnection();
+    if (!redisClient) {
+      console.warn('[AI Orchestrator] Redis not available for distributed lock - proceeding without lock (may cause race conditions during scaling)');
+    } else {
+      const lockAcquired = await redisClient.set(lockKey, lockValue, 'EX', lockTTL, 'NX');
+      
+      if (!lockAcquired) {
+        console.log('[AI Orchestrator] STARTUP: Another instance is running startup resume - skipping to prevent race condition');
+        return;
+      }
+
+      console.log('[AI Orchestrator] STARTUP: Acquired distributed lock for startup resume');
+    }
+
     // Reset all in_progress items back to queued (server restart means all active calls are dead)
     const result = await db.execute(sql`
       UPDATE campaign_queue 
