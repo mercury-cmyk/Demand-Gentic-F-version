@@ -1137,7 +1137,18 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         state: state || undefined,
       });
     }
-    
+
+    // If country resolves to US but the timezone is clearly non-US (e.g. Asia/*, Europe/*, Australia/*),
+    // override with a safe US default. This corrects contacts imported with wrong timezone metadata.
+    if (effectiveCountry) {
+      const normalizedEffectiveCountry = effectiveCountry.toUpperCase().trim();
+      const isUsCountry = ['US', 'USA', 'UNITED STATES', 'UNITED STATES OF AMERICA', 'AMERICA'].includes(normalizedEffectiveCountry);
+      if (isUsCountry && effectiveTimezone && !effectiveTimezone.startsWith('America/') && !effectiveTimezone.startsWith('US/')) {
+        console.log(`[AI Orchestrator] ⚠️ Contact ${item.contact_id} has US country but non-US timezone '${effectiveTimezone}' — overriding to America/New_York`);
+        effectiveTimezone = 'America/New_York';
+      }
+    }
+
     // Check if country is in enabled calling regions
     if (!isCountryEnabled(effectiveCountry)) {
       countryNotEnabled++;
