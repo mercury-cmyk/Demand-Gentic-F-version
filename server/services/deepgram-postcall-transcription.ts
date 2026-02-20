@@ -36,20 +36,39 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function mapSpeakerLabel(speaker: string | number | undefined): string {
+/**
+ * CRITICAL FIX: Map speaker to "agent" or "contact" using channel information
+ * 
+ * Our recording system creates stereo WAV files with:
+ * - Channel 0 (Left) = Inbound audio (Contact)
+ * - Channel 1 (Right) = Outbound audio (Agent)
+ * 
+ * Deepgram's diarization sometimes fails on phone calls, so we use channel
+ * information as the authoritative source for speaker attribution.
+ */
+function mapSpeakerLabel(speaker: string | number | undefined, channel: number | undefined): string {
+  // PRIMARY: Use channel information if available (most reliable)
+  if (typeof channel === "number") {
+    return channel === 0 ? "contact" : "agent";
+  }
+
+  // FALLBACK: Parse speaker label if channel not provided
   if (typeof speaker === "number") {
-    return `Speaker ${speaker + 1}`;
+    // Deepgram speaker ID - map to agent/contact based on speaker count
+    return speaker === 0 ? "contact" : "agent";
   }
 
   if (typeof speaker === "string" && speaker.trim().length > 0) {
     const numeric = Number(speaker);
     if (!Number.isNaN(numeric)) {
-      return `Speaker ${numeric + 1}`;
+      return numeric === 0 ? "contact" : "agent";
     }
-    return speaker;
+    // Named speaker - default to contact
+    return "contact";
   }
 
-  return "Speaker 1";
+  // Absolute fallback
+  return "contact";
 }
 
 function extractStorageKeyFromUrl(url: string | null | undefined): string | null {
@@ -150,7 +169,7 @@ async function submitToDeepgram(audioUrl: string): Promise<StructuredTranscript 
   const utterances = rawUtterances
     .filter((u) => typeof u?.transcript === "string" && u.transcript.trim().length > 0)
     .map((u) => ({
-      speaker: mapSpeakerLabel(u.speaker),
+      speaker: mapSpeakerLabel(u.speaker, u.channel),
       channelTag: typeof u.channel === "number" ? u.channel : undefined,
       text: (u.transcript || "").trim(),
       start: typeof u.start === "number" ? u.start : 0,
@@ -158,9 +177,10 @@ async function submitToDeepgram(audioUrl: string): Promise<StructuredTranscript 
     }));
 
   // Deepgram may return only a flat transcript in edge cases.
+  // Fallback: attribute to contact if single speaker
   if (utterances.length === 0 && transcriptText.length > 0) {
     utterances.push({
-      speaker: "Speaker 1",
+      speaker: "contact",
       channelTag: undefined,
       text: transcriptText,
       start: 0,

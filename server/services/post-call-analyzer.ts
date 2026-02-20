@@ -151,12 +151,23 @@ function extractStorageKeyFromUrl(url: string | null | undefined): string | null
 
 /**
  * Identify which speaker is the "agent" from structured utterances.
- * Do not assume first utterance is agent (prospect often answers first with "Hello").
+ * 
+ * Now that Deepgram transcription uses channel-based attribution:
+ * - Utterances are labeled as "agent" or "contact" based on stereo channels
+ * - Return "agent" directly if properly attributed
+ * - Fall back to heuristic-based identification for older data
  */
 function identifyAgentSpeaker(utterances: StructuredTranscript["utterances"]): string {
-  if (utterances.length === 0) return "Speaker 1";
+  if (utterances.length === 0) return "agent";
 
   const uniqueSpeakers = Array.from(new Set(utterances.map(u => u.speaker)));
+  
+  // QUICK WIN: If "agent" speaker is present, return it (channel-based attribution)
+  if (uniqueSpeakers.includes("agent")) {
+    return "agent";
+  }
+  
+  // FALLBACK: Old data may have "Speaker 1", "Speaker 2" labels
   if (uniqueSpeakers.length === 1) return uniqueSpeakers[0];
 
   const scores = new Map<string, number>();
