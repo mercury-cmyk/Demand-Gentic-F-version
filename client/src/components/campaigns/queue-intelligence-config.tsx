@@ -34,12 +34,6 @@ interface EmployeeSizeRule {
   score: number;
 }
 
-const DEFAULT_EXACT = "Contact Center Manager|380\nContact Center Director|420";
-const DEFAULT_TITLE_KEYWORDS = "contact center|220\ncustomer service|180\ncall center|170";
-const DEFAULT_INDUSTRY_KEYWORDS = "BPO|120\nTelecommunications|90";
-const DEFAULT_SIZE_RANGES = "200-2000|120\n50-199|70\n1-49|-40";
-const DEFAULT_PROBLEM_KEYWORDS = "high call volume\nlong hold times\nabandonment\ncustomer churn\nnetwork downtime\npacket loss\npoor call quality\nservice latency";
-const DEFAULT_SOLUTION_KEYWORDS = "contact center optimization\nccaas\nworkforce management\nsip trunking\nvoip\nnetwork monitoring\nnoc automation\ntelecom optimization";
 
 
 function normalizeWeightedRules(input: any): WeightedRule[] {
@@ -177,12 +171,12 @@ export function QueueIntelligenceConfig({ qaParameters, onChange, campaignContex
   const q = normalizedQa.queueIntelligence || normalizedQa.queue_intelligence || {};
 
   const [routingThreshold, setRoutingThreshold] = useState<number>(Number(q.routing_threshold ?? q.routingThreshold ?? 800));
-  const [exactLines, setExactLines] = useState<string>(DEFAULT_EXACT);
-  const [titleKeywordLines, setTitleKeywordLines] = useState<string>(DEFAULT_TITLE_KEYWORDS);
-  const [industryKeywordLines, setIndustryKeywordLines] = useState<string>(DEFAULT_INDUSTRY_KEYWORDS);
-  const [sizeLines, setSizeLines] = useState<string>(DEFAULT_SIZE_RANGES);
-  const [problemKeywordLines, setProblemKeywordLines] = useState<string>(DEFAULT_PROBLEM_KEYWORDS);
-  const [solutionKeywordLines, setSolutionKeywordLines] = useState<string>(DEFAULT_SOLUTION_KEYWORDS);
+  const [exactLines, setExactLines] = useState<string>("");
+  const [titleKeywordLines, setTitleKeywordLines] = useState<string>("");
+  const [industryKeywordLines, setIndustryKeywordLines] = useState<string>("");
+  const [sizeLines, setSizeLines] = useState<string>("");
+  const [problemKeywordLines, setProblemKeywordLines] = useState<string>("");
+  const [solutionKeywordLines, setSolutionKeywordLines] = useState<string>("");
   const [titleWeight, setTitleWeight] = useState<number>(1.0);
   const [industryWeight, setIndustryWeight] = useState<number>(1.0);
   const [accountFitWeight, setAccountFitWeight] = useState<number>(1.0);
@@ -248,12 +242,12 @@ export function QueueIntelligenceConfig({ qaParameters, onChange, campaignContex
     const problems = normalizeKeywordList(nextQ.problem_keywords ?? nextQ.problemKeywords);
     const solutions = normalizeKeywordList(nextQ.solution_keywords ?? nextQ.solutionKeywords);
 
-    setExactLines(exact.length > 0 ? weightedRulesToLines(exact) : DEFAULT_EXACT);
-    setTitleKeywordLines(title.length > 0 ? weightedRulesToLines(title) : DEFAULT_TITLE_KEYWORDS);
-    setIndustryKeywordLines(industry.length > 0 ? weightedRulesToLines(industry) : DEFAULT_INDUSTRY_KEYWORDS);
-    setSizeLines(size.length > 0 ? employeeRulesToLines(size) : DEFAULT_SIZE_RANGES);
-    setProblemKeywordLines(problems.length > 0 ? keywordsToLines(problems) : DEFAULT_PROBLEM_KEYWORDS);
-    setSolutionKeywordLines(solutions.length > 0 ? keywordsToLines(solutions) : DEFAULT_SOLUTION_KEYWORDS);
+    setExactLines(exact.length > 0 ? weightedRulesToLines(exact) : "");
+    setTitleKeywordLines(title.length > 0 ? weightedRulesToLines(title) : "");
+    setIndustryKeywordLines(industry.length > 0 ? weightedRulesToLines(industry) : "");
+    setSizeLines(size.length > 0 ? employeeRulesToLines(size) : "");
+    setProblemKeywordLines(problems.length > 0 ? keywordsToLines(problems) : "");
+    setSolutionKeywordLines(solutions.length > 0 ? keywordsToLines(solutions) : "");
     setTitleWeight(Number(nextQ.title_weight ?? nextQ.titleWeight ?? 1.0));
     setIndustryWeight(Number(nextQ.industry_weight ?? nextQ.industryWeight ?? 1.0));
     setAccountFitWeight(Number(nextQ.account_fit_weight ?? nextQ.accountFitWeight ?? 1.0));
