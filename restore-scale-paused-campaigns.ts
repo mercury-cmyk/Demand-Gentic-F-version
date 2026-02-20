@@ -28,7 +28,7 @@ async function main() {
       ORDER BY c.updated_at DESC
     `);
 
-    const campaigns = (recentlyPaused as any[]);
+    const campaigns = (recentlyPaused as any)?.rows || [];
     
     if (campaigns.length === 0) {
       console.log('✅ No campaigns paused in the last 5 minutes. All campaigns are in good state.');
@@ -60,7 +60,7 @@ async function main() {
       RETURNING id, name, status
     `);
 
-    const restored = (restoreResult as any).rows || [];
+    const restored = (restoreResult as any)?.rows || [];
     console.log(`✅ Successfully restored ${restored.length} campaigns!\n`);
 
     for (const campaign of restored) {
