@@ -118,7 +118,9 @@ async function downloadAudio(
       // 1) Prefer the permanent copy if we have it.
       if (options?.recordingS3Key && isS3Configured()) {
         try {
-          const presigned = await getPresignedDownloadUrl(options.recordingS3Key, 3600);
+          // Use 24-hour TTL for transcription URLs (jobs may queue/retry for hours)
+          const TTL_24_HOURS = 24 * 60 * 60;
+          const presigned = await getPresignedDownloadUrl(options.recordingS3Key, TTL_24_HOURS);
           // If signBlob is unavailable, presigned will be gcs-internal:// — read directly from GCS
           if (presigned.startsWith('gcs-internal://')) {
             const gcsResult = await downloadAudio(presigned, { throwOnError: true });
@@ -540,7 +542,7 @@ export async function transcribeLeadCall(leadId: string): Promise<boolean> {
       return false;
     }
 
-    const audioUrl = lead.recordingUrl || (lead.recordingS3Key ? await getPresignedDownloadUrl(lead.recordingS3Key, 3600) : null);
+    const audioUrl = lead.recordingUrl || (lead.recordingS3Key ? await getPresignedDownloadUrl(lead.recordingS3Key, 24 * 60 * 60) : null);
     if (!audioUrl) {
       console.log('[Transcription] No usable audio URL for lead:', leadId);
       return false;
@@ -912,7 +914,7 @@ export async function transcribeCallSession(callSessionId: string): Promise<bool
       return false;
     }
 
-    const audioUrl = call.recordingUrl || (call.recordingS3Key ? await getPresignedDownloadUrl(call.recordingS3Key, 3600) : null);
+    const audioUrl = call.recordingUrl || (call.recordingS3Key ? await getPresignedDownloadUrl(call.recordingS3Key, 24 * 60 * 60) : null);
     if (!audioUrl) {
       console.log('[Transcription] No usable audio URL for call session:', callSessionId);
       return false;

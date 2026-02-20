@@ -495,7 +495,9 @@ export async function runPostCallAnalysis(
     // Prefer S3/GCS recording (our own recording is stereo — inbound + outbound)
     if (!audioUrl && session.recordingS3Key && isS3Configured()) {
       try {
-        audioUrl = await getPresignedDownloadUrl(session.recordingS3Key, 3600);
+        // Use 24-hour TTL for transcription URLs (Deepgram jobs may queue for hours)
+        const TTL_24_HOURS = 24 * 60 * 60;
+        audioUrl = await getPresignedDownloadUrl(session.recordingS3Key, TTL_24_HOURS);
         console.log(`${LOG_PREFIX} Using S3 recording: ${session.recordingS3Key}`);
       } catch (e: any) {
         console.warn(`${LOG_PREFIX} Failed to get S3 presigned URL: ${e.message}`);
@@ -512,7 +514,9 @@ export async function runPostCallAnalysis(
         const derivedKey = extractStorageKeyFromUrl(session.recordingUrl);
         if (derivedKey) {
           try {
-            const signedUrl = await getPresignedDownloadUrl(derivedKey, 3600);
+            // Use 24-hour TTL for transcription URLs (Deepgram jobs may queue for hours)
+            const TTL_24_HOURS = 24 * 60 * 60;
+            const signedUrl = await getPresignedDownloadUrl(derivedKey, TTL_24_HOURS);
             if (signedUrl) {
               audioUrl = signedUrl;
               console.log(`${LOG_PREFIX} Refreshed existing recording URL via derived key: ${derivedKey}`);
