@@ -130,6 +130,13 @@ export default function ContentPromotionManager() {
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [pageToArchive, setPageToArchive] = useState<ContentPromotionPage | null>(null);
 
+  // Get context from URL or parent
+  const searchParams = new URLSearchParams(window.location.search);
+  const campaignId = searchParams.get('campaignId') || undefined;
+  const projectId = searchParams.get('projectId') || undefined;
+  const organizationId = searchParams.get('organizationId') || undefined;
+  const clientId = searchParams.get('clientId') || undefined;
+
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -596,6 +603,10 @@ export default function ContentPromotionManager() {
         onOpenChange={setShowBuilder}
         editingPage={editingPage}
         onSuccess={handleBuilderSuccess}
+        campaignId={campaignId}
+        projectId={projectId}
+        organizationId={organizationId}
+        clientId={clientId}
       />
 
       {/* Archive Confirmation Dialog */}

@@ -315,6 +315,38 @@ router.get("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
   }
 });
 
+// Generate landing page with AI based on context
+router.post("/api/content-promotion/pages/generate", requireAuth, async (req, res) => {
+  try {
+    const { campaignId, projectId, organizationId, clientId } = req.body;
+    
+    // Get campaign or project context
+    let contextData: any = {};
+    
+    // TODO: Fetch campaign details from campaigns table if campaignId provided
+    // TODO: Fetch project details from projects table if projectId provided
+    // TODO: Use org intelligence for tone, industry, etc.
+    
+    // For now, return a basic response that the frontend can use
+    // In a real implementation, this would call Claude or another LLM
+    // to generate landing page content based on the context
+    
+    res.json({
+      title: "Generated Landing Page",
+      contextUsed: {
+        campaignId,
+        projectId,
+        organizationId,
+        clientId,
+      },
+      message: "AI generation endpoint ready. Connect to LLM provider to generate content.",
+    });
+  } catch (error: any) {
+    console.error("[Content Promotion] Error generating with AI:", error);
+    res.status(500).json({ error: "Failed to generate with AI" });
+  }
+});
+
 // Create new page
 router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
   try {
