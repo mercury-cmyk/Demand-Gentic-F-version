@@ -1623,6 +1623,7 @@ export const contacts = pgTable("contacts", {
   phoneAiConfidence: numeric("phone_ai_confidence", { precision: 5, scale: 2 }), // AI confidence score (0-100%)
   mobilePhone: text("mobile_phone"),
   mobilePhoneE164: text("mobile_phone_e164"),
+  dialingPhoneE164: text("dialing_phone_e164"), // Unified pre-computed best phone for dialing (directE164 ?? mobileE164 ?? hqE164)
   seniorityLevel: text("seniority_level"),
   department: text("department"),
   address: text("address"),
@@ -1688,6 +1689,7 @@ export const contacts = pgTable("contacts", {
   emailNormalizedUniqueIdx: uniqueIndex("contacts_email_normalized_unique_idx").on(table.emailNormalized).where(sql`deleted_at IS NULL AND email_normalized IS NOT NULL`),
   accountIdx: index("contacts_account_idx").on(table.accountId),
   phoneIdx: index("contacts_phone_idx").on(table.directPhoneE164),
+  dialingPhoneIdx: index("contacts_dialing_phone_idx").on(table.dialingPhoneE164),
   ownerIdx: index("contacts_owner_idx").on(table.ownerId),
   tagsGinIdx: index("contacts_tags_gin_idx").using('gin', table.tags),
   timezoneIdx: index("contacts_timezone_idx").on(table.timezone),
