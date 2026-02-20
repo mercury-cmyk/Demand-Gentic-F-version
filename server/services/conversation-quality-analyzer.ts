@@ -314,13 +314,16 @@ function detectRepeatedAgentPhrase(agentLines: string[], transcriptLower: string
 }
 
 function detectAudioCheckIssue(agentLines: string[]): boolean {
+  // Only flag UNPROMPTED audio checks — explicit phrases that suggest the agent
+  // broke script to run an audio check when there was no real connectivity issue.
+  // "sorry about that" is intentionally excluded: it is a generic apology used in
+  // many contexts and is perfectly appropriate when a genuine connection problem exists.
   const audioCheckPhrases = [
     "quick audio check",
     "audio check",
     "can you hear me clearly",
     "can you hear me ok",
     "are you able to hear me",
-    "sorry about that",
   ];
   return agentLines.some((line) =>
     audioCheckPhrases.some((phrase) => line.toLowerCase().includes(phrase))
@@ -436,6 +439,14 @@ function detectTopChallengeIssues(
     "distorted",
     "poor connection",
     "audio is bad",
+    "reception is",        // e.g. "reception is very bad"
+    "signal is",           // e.g. "signal is poor"
+    "poor signal",
+    "bad signal",
+    "no signal",
+    "very bad signal",
+    "patchy",
+    "in and out",
   ]);
 
   const bookingObjective = (input.campaignObjective || "").toLowerCase();
@@ -531,7 +542,10 @@ function detectTopChallengeIssues(
     });
   }
 
-  if (detectAudioCheckIssue(parsed.agentLines)) {
+  // Only flag audio-check interruption when the contact did NOT report a connectivity
+  // problem. If the contact complained about reception/signal/cutting-out, the agent's
+  // "can you hear me" phrases are an appropriate response, not a script deviation.
+  if (detectAudioCheckIssue(parsed.agentLines) && !hasAudioComplaint) {
     pushIssue({
       type: "audio_check_interruption",
       severity: "medium",
