@@ -500,7 +500,35 @@ export async function runPostCallAnalysis(
     const disposition = options?.disposition || session.aiDisposition || null;
     const callDurationSec = options?.callDurationSec || session.durationSec || 0;
 
-    // 2. Get audio URL for transcription
+    // 🔥 CRITICAL: For live Gemini calls, use native transcript — skip Deepgram entirely
+    // Gemini Live provides built-in speaker attribution, no post-call processing needed
+    let structuredTranscript: StructuredTranscript | null = null;
+    if (options?.geminiTranscript && options.geminiTranscript.trim().length > 50) {
+      console.log(`${LOG_PREFIX} ✅ Using native Gemini Live transcript (${options.geminiTranscript.length} chars) — skipping Deepgram post-call processing`);
+      // Parse Gemini transcript format: "Agent: text\nContact: text\n..."
+      const lines = options.geminiTranscript.split('\n').filter(l => l.trim().length > 0);
+      const utterances = lines.map((line, idx) => {
+        const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+        if (match) {
+          return {
+            speaker: match[1].toLowerCase() === 'agent' ? 'agent' : 'contact',
+            text: match[2].trim(),
+            start: 0,
+            end: 0,
+          };
+        }
+        return null;
+      }).filter(Boolean) as Array<{speaker: string; text: string; start: number; end: number; channelTag?: number}>;
+      
+      if (utterances.length > 0) {
+        structuredTranscript = {
+          text: options.geminiTranscript,
+          utterances,
+        };
+      }
+    }
+
+    // 2. Get audio URL for transcription (only if Gemini transcript not available)
     let audioUrl: string | null = options?.gcsUri || null;
 
     // Prefer S3/GCS recording (our own recording is stereo — inbound + outbound)
@@ -539,17 +567,16 @@ export async function runPostCallAnalysis(
       }
     }
 
-    // 3. Transcribe with structured diarization
-    let structuredTranscript: StructuredTranscript | null = null;
-
-    if (audioUrl) {
+    // 3. Transcribe with structured diarization (skip if native Gemini transcript available)
+    if (!structuredTranscript && audioUrl) {
       try {
-        structuredTranscript = await submitStructuredTranscription(audioUrl, {
+        const deepgramResult = await submitStructuredTranscription(audioUrl, {
           telnyxCallId: session.telnyxCallId || undefined,
           recordingS3Key: session.recordingS3Key || undefined,
         });
 
-        if (structuredTranscript) {
+        if (deepgramResult) {
+          structuredTranscript = deepgramResult;
           console.log(`${LOG_PREFIX} ✅ Structured transcription completed: ${structuredTranscript.utterances.length} utterances, ${structuredTranscript.text.length} chars`);
         }
       } catch (transcriptionError: any) {
