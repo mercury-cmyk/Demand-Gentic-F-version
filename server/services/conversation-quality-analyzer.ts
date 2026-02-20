@@ -687,12 +687,16 @@ CRITICAL RULES FOR ANALYSIS — DO NOT VIOLATE:
 5. NEVER suggest "bundled openings" or combining the greeting and introduction into one sentence. The agent's opening flow is intentionally two-step by design: (1) first confirm identity by asking for the contact by name, (2) THEN introduce the purpose after confirmation. This is the correct sales methodology — do NOT recommend changing it.
 6. The agent says "calling on behalf of [Organization]" — this is intentional. NEVER suggest changing to "calling from [Organization]". The agent represents the organization, it is not an employee of the organization.
 7. ALWAYS score ALL 6 quality dimensions (engagement, clarity, empathy, objectionHandling, qualification, closing) for EVERY conversation. NEVER return 0 for any dimension. Even if the call was too short for qualification or closing to occur, evaluate based on what the agent attempted or how they handled the available opportunity. For qualification: score the agent's effort to gather qualifying information or set up qualification — minimum 20 if the call had any meaningful exchange. For closing: score the agent's attempt to advance the conversation toward a next step or conclusion — minimum 20 if the agent made any effort to direct the call. A score of 0 should ONLY be used if the agent actively failed or did the opposite of what was expected in that dimension.
+8. CAMPAIGN-OBJECTIVE ALIGNMENT FOR ISSUES — THIS IS MANDATORY: Every issue you raise in the "issues" array MUST be directly tied to the campaign's stated objective and success criteria shown in the Context section above. Ask yourself: "Was achieving this thing explicitly required by this campaign's objective or success criteria?" If the answer is NO, do NOT raise it as an issue. For example: if the campaign objective is to offer a white paper and obtain email consent, do NOT raise "Missed Opportunity" for not booking a follow-up call unless a follow-up call was explicitly listed in the success criteria. Do NOT invent secondary objectives that are not stated.
+9. WHAT COUNTS AS A VALID ISSUE: An issue is only valid if (a) it relates to something the campaign's success criteria or objective required, AND (b) the agent failed or partially failed to deliver it. If the agent successfully completed all stated success criteria, the issues array should be EMPTY or contain only HIGH-severity technical failures (audio, data capture errors). Do NOT fill the issues array with generic coaching points or "nice to have" improvements that have no bearing on whether this specific call succeeded according to the defined criteria.
 
 Context:
 ${contextLines.join("\n")}
 
 Transcript:
 ${transcriptText}
+
+ISSUES CONSTRAINT (apply before generating the issues array): Only raise an issue if it is a direct, concrete failure against the campaign's stated objective or success criteria above. If the call successfully achieved all stated criteria, return "issues": []. Never raise issues for behaviours not required by the campaign.
 
 Return JSON with this exact shape and no extra keys:
 {
