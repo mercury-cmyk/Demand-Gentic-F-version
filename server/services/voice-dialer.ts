@@ -138,6 +138,11 @@ type DispositionCode = CanonicalDisposition;
 
 
 const LOG_PREFIX = "[Voice-Dialer]";
+const VOICE_DIALER_DEBUG = process.env.VOICE_DIALER_DEBUG === "true";
+
+function debugLog(...args: unknown[]): void {
+  if (VOICE_DIALER_DEBUG) console.log(...args);
+}
 
 // Telnyx media streaming expects real-time G.711 packetization.
 // For 8kHz μ-law: 20ms == 160 bytes.
@@ -1162,7 +1167,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
       called_number: url.searchParams.get('called_number'),
       virtual_agent_id: url.searchParams.get('virtual_agent_id'),
     };
-    console.log(`${LOG_PREFIX} URL params:`, urlParams);
+    debugLog(`${LOG_PREFIX} URL params:`, urlParams);
     
     let sessionId: string | null = null;
     let session: OpenAIRealtimeSession | null = null;
@@ -1264,8 +1269,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
 
             if (parsedState) {
               customParams = parsedState.params;
-              console.log(`${LOG_PREFIX} Decoded client_state (${parsedState.format}) from ${clientStateOrigin}:`, customParams);
-              console.log(`${LOG_PREFIX} 🔍 client_state campaign_id value:`, customParams.campaign_id, `(type: ${typeof customParams.campaign_id})`);
+              debugLog(`${LOG_PREFIX} Decoded client_state (${parsedState.format}) from ${clientStateOrigin}:`, customParams);
+              debugLog(`${LOG_PREFIX} 🔍 client_state campaign_id value:`, customParams.campaign_id, `(type: ${typeof customParams.campaign_id})`);
 
               // Try to fetch additional params from call session store (system_prompt, openai_config, etc.)
               if (customParams.call_id || customParams.test_call_id) {
@@ -1281,7 +1286,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                     }
                     if (!customParams.openai_config && storedParams.openai_config) {
                       customParams.openai_config = storedParams.openai_config;
-                      console.log(`${LOG_PREFIX} Retrieved openai_config from session store for ${callId}:`, storedParams.openai_config);
+                      debugLog(`${LOG_PREFIX} Retrieved openai_config from session store for ${callId}:`, storedParams.openai_config);
                     }
                     if (!customParams.first_message && storedParams.first_message) {
                       customParams.first_message = storedParams.first_message;
@@ -1293,7 +1298,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                     }
                     if (!customParams.test_contact && storedParams.test_contact) {
                       customParams.test_contact = storedParams.test_contact;
-                      console.log(`${LOG_PREFIX} Retrieved test_contact from session store for ${callId}:`, storedParams.test_contact);
+                      debugLog(`${LOG_PREFIX} Retrieved test_contact from session store for ${callId}:`, storedParams.test_contact);
                     }
                     // CRITICAL: Retrieve agent_name and organization_name for template interpolation
                     // These are set by test calls and should work the same for queue calls
@@ -1376,9 +1381,9 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             console.log(`${LOG_PREFIX} 📞 Telnyx call_control_id captured: ${telnyxCallControlId}`);
           }
 
-          console.log(`${LOG_PREFIX} 🔍 Raw customParams keys:`, Object.keys(customParams));
-          console.log(`${LOG_PREFIX} 🔍 Raw urlParams:`, JSON.stringify(urlParams));
-          console.log(`${LOG_PREFIX} 🔍 Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
+          debugLog(`${LOG_PREFIX} 🔍 Raw customParams keys:`, Object.keys(customParams));
+          debugLog(`${LOG_PREFIX} 🔍 Raw urlParams:`, JSON.stringify(urlParams));
+          debugLog(`${LOG_PREFIX} 🔍 Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
 
           const calledNumber = (customParams as any).called_number || (urlParams as any).called_number || null;
           const fromNumber = (customParams as any).from_number || (customParams as any).fromNumber || null;
@@ -6282,7 +6287,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
         // The greeting text is only used as a fallback nudge if Gemini stays silent too long.
         console.log(`${LOG_PREFIX} 🎙️ First audio detected - Gemini is listening, will respond naturally`);
       } else if (session.telnyxInboundFrames % 25 === 0) {
-        console.log(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId} (Gemini)`);
+        debugLog(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId} (Gemini)`);
       }
 
       // Send audio to Gemini provider (transcoding handled internally)
@@ -6335,7 +6340,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
           },
           onTranscript: (segment) => {
             if (segment.isFinal && segment.text.trim().length > 0) {
-              console.log(`${LOG_PREFIX} [Deepgram] ${segment.speaker}: "${segment.text}" (${(segment.confidence * 100).toFixed(0)}%)`);
+                debugLog(`${LOG_PREFIX} [Deepgram] ${segment.speaker}: "${segment.text}" (${(segment.confidence * 100).toFixed(0)}%)`);
 
               if (segment.speaker === 'agent') {
                 // Push Deepgram agent transcripts into session.transcripts
@@ -6387,7 +6392,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                 // - Post-call analytics
                 // - Transcript storage
                 // - Human detection/identity confirmation (below)
-                console.log(`${LOG_PREFIX} [Deepgram] Contact: "${segment.text.substring(0, 50)}..." (stored, NOT sent to Gemini - native audio handles it)`);
+                debugLog(`${LOG_PREFIX} [Deepgram] Contact: "${segment.text.substring(0, 50)}..." (stored, NOT sent to Gemini - native audio handles it)`);
 
 
                 // Track human detection and identity confirmation (same as Gemini STT path)
@@ -6439,7 +6444,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
       if ((session as any).deepgramSession) {
         const sent = sendInboundAudio(session.callId, audioBuffer);
         if (session.telnyxInboundFrames === 1 || session.telnyxInboundFrames % 100 === 0) {
-          console.log(`${LOG_PREFIX} [Deepgram] Sent inbound audio frame #${session.telnyxInboundFrames}: ${audioBuffer.length} bytes, success=${sent}`);
+          debugLog(`${LOG_PREFIX} [Deepgram] Sent inbound audio frame #${session.telnyxInboundFrames}: ${audioBuffer.length} bytes, success=${sent}`);
         }
       }
 
@@ -6457,8 +6462,8 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
         session.openaiAppendLastLogTime = new Date();
       } else {
         const elapsed = now - session.openaiAppendLastLogTime.getTime();
-        if (elapsed >= 1000) {
-          console.log(`${LOG_PREFIX} Gemini audio rate: ${session.openaiAppendsSinceLastLog} frames / ${session.openaiAppendBytesSinceLastLog} bytes over ${elapsed}ms for call: ${session.callId}`);
+        if (elapsed >= 5000) {
+          debugLog(`${LOG_PREFIX} Gemini audio rate: ${session.openaiAppendsSinceLastLog} frames / ${session.openaiAppendBytesSinceLastLog} bytes over ${elapsed}ms for call: ${session.callId}`);
           session.openaiAppendsSinceLastLog = 0;
           session.openaiAppendBytesSinceLastLog = 0;
           session.openaiAppendLastLogTime = new Date(now);
@@ -6494,7 +6499,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
       }
     } else if (session.telnyxInboundFrames % 25 === 0) {
       const first8Hex = audioBytes.subarray(0, 8).toString('hex');
-      console.log(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} bytes=${audioBytes.length} first8=${first8Hex} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId}`);
+      debugLog(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} bytes=${audioBytes.length} first8=${first8Hex} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId}`);
     }
 
     const audioMessage = {
@@ -6505,7 +6510,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
 
     // Track how many frames/bytes we push to OpenAI between logs
     const now = Date.now();
-    const bytes = Buffer.from(message.media.payload, 'base64').length;
+    const bytes = audioBytes.length;
     session.openaiAppendsSinceLastLog += 1;
     session.openaiAppendBytesSinceLastLog += bytes;
     session.audioBytesSent += bytes;
@@ -6517,8 +6522,8 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
       session.openaiAppendLastLogTime = new Date();
     } else {
       const elapsed = now - session.openaiAppendLastLogTime.getTime();
-      if (elapsed >= 1000) {
-        console.log(`${LOG_PREFIX} OpenAI append rate: ${session.openaiAppendsSinceLastLog} frames / ${session.openaiAppendBytesSinceLastLog} bytes over ${elapsed}ms (stream ${session.streamSid}) for call: ${session.callId}`);
+      if (elapsed >= 5000) {
+        debugLog(`${LOG_PREFIX} OpenAI append rate: ${session.openaiAppendsSinceLastLog} frames / ${session.openaiAppendBytesSinceLastLog} bytes over ${elapsed}ms (stream ${session.streamSid}) for call: ${session.callId}`);
         session.openaiAppendsSinceLastLog = 0;
         session.openaiAppendBytesSinceLastLog = 0;
         session.openaiAppendLastLogTime = new Date(now);
@@ -10053,6 +10058,5 @@ export {
   createOutOfBandResponse,
   handleUserInterruption,
 };
-
 
 
