@@ -59,10 +59,21 @@ function mapSpeakerLabel(speaker: string | number | undefined, channel: number |
   }
 
   if (typeof speaker === "string" && speaker.trim().length > 0) {
+    const trimmed = speaker.trim().toLowerCase();
+    
+    // Handle "Speaker 0", "Speaker 1", etc. format from Deepgram
+    const speakerMatch = trimmed.match(/speaker\s*(\d+)/);
+    if (speakerMatch) {
+      const speakerId = parseInt(speakerMatch[1], 10);
+      return speakerId === 0 ? "contact" : "agent";
+    }
+    
+    // Try direct numeric parse
     const numeric = Number(speaker);
     if (!Number.isNaN(numeric)) {
       return numeric === 0 ? "contact" : "agent";
     }
+    
     // Named speaker - default to contact
     return "contact";
   }
