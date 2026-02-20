@@ -31,12 +31,32 @@ class AiIntegrationConfigError extends Error {
   }
 }
 
+const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+
 const openaiApiKey =
   process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-const openaiBaseUrl =
-  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
-  process.env.OPENAI_BASE_URL ||
-  "https://api.openai.com/v1";
+
+function resolveOpenAiBaseUrl(): string {
+  const candidate =
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    OPENAI_DEFAULT_BASE_URL;
+
+  const trimmed = String(candidate || "").trim();
+  if (!trimmed) return OPENAI_DEFAULT_BASE_URL;
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    console.warn(
+      `[GenerativeStudio] Invalid OpenAI base URL \"${trimmed}\". Falling back to ${OPENAI_DEFAULT_BASE_URL}.`
+    );
+    return OPENAI_DEFAULT_BASE_URL;
+  }
+}
+
+const openaiBaseUrl = resolveOpenAiBaseUrl();
 
 function assertOpenAiConfigured() {
   if (!openaiApiKey) {
@@ -190,6 +210,50 @@ function escapeHtmlAttribute(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function normalizeThankYouPageUrl(input?: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) return '/thank-you';
+
+  if (raw.startsWith('/')) return raw;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    // Try adding https:// below
+  }
+
+  try {
+    const parsed = new URL(`https://${raw}`);
+    return parsed.toString();
+  } catch {
+    return '/thank-you';
+  }
+}
+
+function normalizeAssetUrl(input?: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) return '';
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    // Try adding https:// below
+  }
+
+  try {
+    const parsed = new URL(`https://${raw}`);
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
 function enforceLeadCaptureForm(
   html: string,
   thankYouPageUrl?: string,
@@ -254,6 +318,40 @@ function enforceLeadCaptureForm(
         var form = document.getElementById('lead-capture-form');
         if (!form) return;
 
+        var nameInput = document.getElementById('lead-name');
+        var emailInput = document.getElementById('lead-business-email');
+        var assetInput = form.querySelector('input[name="asset_url"]');
+
+        var currentParams = new URLSearchParams(window.location.search || '');
+
+        function firstNonEmpty(keys) {
+          for (var i = 0; i < keys.length; i += 1) {
+            var value = String(currentParams.get(keys[i]) || '').trim();
+            if (value) return value;
+          }
+          return '';
+        }
+
+        var fullName = firstNonEmpty(['name', 'full_name', 'fullname', 'contact_name']);
+        var firstName = firstNonEmpty(['first_name', 'firstname', 'first']);
+        var lastName = firstNonEmpty(['last_name', 'lastname', 'last']);
+        var businessEmail = firstNonEmpty(['business_email', 'email', 'work_email']);
+        var assetFromQuery = firstNonEmpty(['asset_url', 'asset', 'download_url']);
+
+        if (!fullName && (firstName || lastName)) {
+          fullName = (firstName + ' ' + lastName).trim();
+        }
+
+        if (nameInput && !String(nameInput.value || '').trim() && fullName) {
+          nameInput.value = fullName;
+        }
+        if (emailInput && !String(emailInput.value || '').trim() && businessEmail) {
+          emailInput.value = businessEmail;
+        }
+        if (assetInput && assetFromQuery) {
+          assetInput.value = assetFromQuery;
+        }
+
         form.addEventListener('submit', function (event) {
           event.preventDefault();
 
@@ -267,6 +365,56 @@ function enforceLeadCaptureForm(
           query.set('name', name);
           query.set('business_email', email);
           if (assetUrl) query.set('asset_url', assetUrl);
+
+          var passthroughKeys = [
+            'contact_id', 'campaign_id', 'campaign_name',
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'
+          ];
+          for (var i = 0; i < passthroughKeys.length; i += 1) {
+            var key = passthroughKeys[i];
+            var val = String(currentParams.get(key) || '').trim();
+            if (val && !query.has(key)) {
+              query.set(key, val);
+            }
+          }
+
+          var pathMatch = String(window.location.pathname || '').match(/\/public\/([^/?#]+)/i);
+          var slug = pathMatch && pathMatch[1] ? decodeURIComponent(pathMatch[1]) : '';
+          var trackUrl = slug ? ('/api/generative-studio/public/' + encodeURIComponent(slug) + '/track-submit') : '';
+
+          var payload = {
+            name: name,
+            business_email: email,
+            asset_url: assetUrl,
+            source_url: window.location.href,
+            contact_id: String(query.get('contact_id') || currentParams.get('contact_id') || '').trim() || null,
+            campaign_id: String(query.get('campaign_id') || currentParams.get('campaign_id') || '').trim() || null,
+            campaign_name: String(query.get('campaign_name') || currentParams.get('campaign_name') || '').trim() || null,
+            utm_source: String(query.get('utm_source') || currentParams.get('utm_source') || '').trim() || null,
+            utm_medium: String(query.get('utm_medium') || currentParams.get('utm_medium') || '').trim() || null,
+            utm_campaign: String(query.get('utm_campaign') || currentParams.get('utm_campaign') || '').trim() || null,
+            utm_term: String(query.get('utm_term') || currentParams.get('utm_term') || '').trim() || null,
+            utm_content: String(query.get('utm_content') || currentParams.get('utm_content') || '').trim() || null,
+          };
+
+          if (trackUrl) {
+            try {
+              var payloadText = JSON.stringify(payload);
+              if (navigator.sendBeacon) {
+                var blob = new Blob([payloadText], { type: 'application/json' });
+                navigator.sendBeacon(trackUrl, blob);
+              } else {
+                fetch(trackUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: payloadText,
+                  keepalive: true,
+                }).catch(function () {});
+              }
+            } catch (e) {
+              // best-effort tracking only
+            }
+          }
 
           var separator = action.indexOf('?') >= 0 ? '&' : '?';
           window.location.href = action + separator + query.toString();
@@ -368,13 +516,16 @@ export async function generateLandingPage(params: LandingPageParams): Promise<Ge
     systemPrompt = 'You are an expert content creation AI assistant.';
   }
 
+  const resolvedThankYouUrl = normalizeThankYouPageUrl(params.thankYouPageUrl);
+  const resolvedAssetUrl = normalizeAssetUrl(params.assetUrl);
+
   const userPrompt = `Generate a complete, responsive landing page based on the following requirements.
 
 Title: ${params.title}
 Requirements: ${params.prompt}
 ${params.ctaGoal ? `CTA Goal: ${params.ctaGoal}` : ''}
-Thank You Page URL: ${params.thankYouPageUrl || '/thank-you'}
-Asset Download/View URL: ${params.assetUrl || 'https://example.com/asset-download'}
+Thank You Page URL: ${resolvedThankYouUrl}
+Asset Download/View URL: ${resolvedAssetUrl || 'https://example.com/asset-download'}
 ${baseContext}
 ${brandContext}
 
@@ -417,7 +568,7 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
   }), 'generative-studio');
 
   const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
-  result.html = enforceLeadCaptureForm(result.html || '', params.thankYouPageUrl, params.assetUrl);
+  result.html = enforceLeadCaptureForm(result.html || '', resolvedThankYouUrl, resolvedAssetUrl);
   const tokensUsed = completion.usage?.total_tokens || 0;
   const duration = Date.now() - startTime;
 
@@ -439,8 +590,8 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
       css: result.css,
       sections: result.sections,
       ctaGoal: params.ctaGoal,
-      thankYouPageUrl: params.thankYouPageUrl || '/thank-you',
-      assetUrl: params.assetUrl || null,
+      thankYouPageUrl: resolvedThankYouUrl,
+      assetUrl: resolvedAssetUrl || null,
       organizationId: params.organizationId,
       clientProjectId: params.clientProjectId,
     },

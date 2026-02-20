@@ -125,6 +125,12 @@ export function generateTrackingUrl(baseUrl: string, params: TrackingParams): st
     if (params.company) {
       url.searchParams.set('company', params.company);
     }
+    if (params.jobTitle) {
+      url.searchParams.set('job_title', params.jobTitle);
+    }
+    if (params.phone) {
+      url.searchParams.set('phone', params.phone);
+    }
     
     // Add campaign tracking
     if (params.campaignId) {

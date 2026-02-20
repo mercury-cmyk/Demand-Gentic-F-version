@@ -15112,6 +15112,11 @@ Provide JSON response with:
   app.use(pipelineRouter);
   app.use(pipelineAccountsRouter);
   app.use(pipelineIntelligenceRouter);
+  app.get('/generative-studio/public/:slug', (req, res) => {
+    const queryIndex = req.originalUrl.indexOf('?');
+    const query = queryIndex >= 0 ? req.originalUrl.slice(queryIndex) : '';
+    return res.redirect(302, `/api/generative-studio/public/${req.params.slug}${query}`);
+  });
   app.use('/api/generative-studio', generativeStudioRouter);
   app.use(contentPromotionRouter);
   app.use('/api/disposition-intelligence', dispositionIntelligenceRouter);

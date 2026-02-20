@@ -11,6 +11,7 @@ import {
   generativeStudioProjects,
   generativeStudioChatMessages,
   generativeStudioPublishedPages,
+  contentPromotionPageViews,
   contentAssets,
   clientProjects,
 } from "@shared/schema";
@@ -645,7 +646,7 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
         .set({ status: 'published', updatedAt: new Date() })
         .where(eq(generativeStudioProjects.id, project.id));
 
-      return res.json({ publishedPage: updated, url: `/api/generative-studio/public/${updated.slug}` });
+      return res.json({ publishedPage: updated, url: `/generative-studio/public/${updated.slug}` });
     }
 
     // Create new published page
@@ -667,7 +668,7 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
       .set({ status: 'published', updatedAt: new Date() })
       .where(eq(generativeStudioProjects.id, project.id));
 
-    res.json({ publishedPage: published, url: `/api/generative-studio/public/${pageSlug}` });
+    res.json({ publishedPage: published, url: `/generative-studio/public/${pageSlug}` });
   } catch (error: any) {
     return sendGenerativeStudioError(res, error, "publish");
   }
@@ -779,6 +780,75 @@ router.post("/save-as-asset/:id", requireDualAuth, async (req: Request, res: Res
 });
 
 /**
+ * GET /published/:slug/submissions
+ * Internal analytics endpoint for latest landing page form submissions
+ */
+router.get("/published/:slug/submissions", requireDualAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const limitRaw = Number.parseInt(String(req.query.limit ?? '10'), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 10;
+
+    const [page] = await db.select().from(generativeStudioPublishedPages)
+      .where(eq(generativeStudioPublishedPages.slug, req.params.slug))
+      .limit(1);
+
+    if (!page) {
+      return res.status(404).json({ error: 'Published page not found' });
+    }
+
+    if (tenantId && page.tenantId !== tenantId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!tenantId && page.ownerId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [totalRow] = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          eq(contentPromotionPageViews.pageId, page.id),
+          eq(contentPromotionPageViews.eventType, 'form_submit')
+        )
+      );
+
+    const recentRows = await db
+      .select({
+        id: contentPromotionPageViews.id,
+        createdAt: contentPromotionPageViews.createdAt,
+        visitorEmail: contentPromotionPageViews.visitorEmail,
+        visitorFirstName: contentPromotionPageViews.visitorFirstName,
+        visitorLastName: contentPromotionPageViews.visitorLastName,
+        visitorCompany: contentPromotionPageViews.visitorCompany,
+        utmSource: contentPromotionPageViews.utmSource,
+        utmMedium: contentPromotionPageViews.utmMedium,
+        utmCampaign: contentPromotionPageViews.utmCampaign,
+        formData: contentPromotionPageViews.formData,
+      })
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          eq(contentPromotionPageViews.pageId, page.id),
+          eq(contentPromotionPageViews.eventType, 'form_submit')
+        )
+      )
+      .orderBy(desc(contentPromotionPageViews.createdAt))
+      .limit(limit);
+
+    return res.json({
+      slug: page.slug,
+      title: page.title,
+      totalSubmissions: totalRow?.count || 0,
+      recentSubmissions: recentRows,
+    });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, 'get published submissions');
+  }
+});
+
+/**
  * GET /public/:slug
  * Serve published page (NO AUTH - public endpoint)
  */
@@ -823,6 +893,76 @@ ${page.htmlContent}
   } catch (error: any) {
     console.error('Error serving public page:', error);
     res.status(500).send('<html><body><h1>Server Error</h1></body></html>');
+  }
+});
+
+/**
+ * POST /public/:slug/track-submit
+ * Track landing page form submissions for published Generative Studio pages
+ * (public endpoint, no auth)
+ */
+router.post("/public/:slug/track-submit", async (req: Request, res: Response) => {
+  try {
+    const [page] = await db.select().from(generativeStudioPublishedPages)
+      .where(
+        and(
+          eq(generativeStudioPublishedPages.slug, req.params.slug),
+          eq(generativeStudioPublishedPages.isPublished, true)
+        )
+      ).limit(1);
+
+    if (!page) {
+      return res.status(404).json({ error: "Page not found" });
+    }
+
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const ipAddress =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
+      req.socket.remoteAddress ||
+      null;
+    const userAgent = req.headers["user-agent"] || null;
+    const referrer = req.headers.referer || null;
+
+    const submitterEmail = String(body.business_email || body.email || '').trim() || null;
+    const submitterName = String(body.name || body.full_name || '').trim() || null;
+    const firstName = String(body.first_name || body.firstname || '').trim() || null;
+    const lastName = String(body.last_name || body.lastname || '').trim() || null;
+    const company = String(body.company || '').trim() || null;
+
+    await db.insert(contentPromotionPageViews).values({
+      pageId: page.id,
+      visitorEmail: submitterEmail,
+      visitorFirstName: firstName,
+      visitorLastName: lastName,
+      visitorCompany: company,
+      ipAddress,
+      userAgent,
+      referrer,
+      utmSource: body.utm_source || null,
+      utmMedium: body.utm_medium || null,
+      utmCampaign: body.utm_campaign || null,
+      utmTerm: body.utm_term || null,
+      utmContent: body.utm_content || null,
+      eventType: "form_submit",
+      formData: {
+        submitterName,
+        submitterEmail,
+        company,
+        jobTitle: body.job_title || null,
+        phone: body.phone || null,
+        contactId: body.contact_id || null,
+        campaignId: body.campaign_id || null,
+        campaignName: body.campaign_name || null,
+        sourceUrl: body.source_url || null,
+        assetUrl: body.asset_url || null,
+      },
+      convertedAt: new Date(),
+    } as any);
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('[GenerativeStudio] form tracking error:', error);
+    return res.status(500).json({ error: 'Failed to track submission' });
   }
 });
 

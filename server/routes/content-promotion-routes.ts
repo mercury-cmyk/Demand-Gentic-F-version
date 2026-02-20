@@ -3,6 +3,8 @@ import { db } from "../db";
 import {
   contentPromotionPages,
   contentPromotionPageViews,
+  generativeStudioProjects,
+  generativeStudioPublishedPages,
   leadForms,
   leadFormSubmissions,
 } from "@shared/schema";
@@ -15,26 +17,281 @@ const router = Router();
 
 // List all promo pages for the tenant
 router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
+  const tenantId = (req as any).user?.tenantId || "default-tenant";
+  const userId =
+    (req as any).user?.id ||
+    (req as any).user?.userId ||
+    (req as any).user?.clientUserId;
+  const { status } = req.query;
+  const requestedStatus = typeof status === "string" ? status : undefined;
+
   try {
-    const tenantId = (req as any).user?.tenantId || "default-tenant";
-    const { status } = req.query;
+    // Fetch content-promotion pages from both scopes (tenant + creator) and merge.
+    const sourceErrors: Array<{ source: string; message: string }> = [];
 
-    let conditions = [eq(contentPromotionPages.tenantId, tenantId)];
-
-    if (status && typeof status === "string") {
-      conditions.push(eq(contentPromotionPages.status, status as any));
+    let tenantScopedPages: any[] = [];
+    if (tenantId && tenantId !== "default-tenant") {
+      const tenantConditions: any[] = [eq(contentPromotionPages.tenantId, tenantId)];
+      if (requestedStatus) {
+        tenantConditions.push(eq(contentPromotionPages.status, requestedStatus as any));
+      }
+      try {
+        tenantScopedPages = await db
+          .select()
+          .from(contentPromotionPages)
+          .where(and(...tenantConditions))
+          .orderBy(desc(contentPromotionPages.createdAt));
+      } catch (err: any) {
+        sourceErrors.push({ source: "contentPromotionPages.tenant", message: err?.message || String(err) });
+      }
     }
 
-    const pages = await db
-      .select()
-      .from(contentPromotionPages)
-      .where(and(...conditions))
-      .orderBy(desc(contentPromotionPages.createdAt));
+    let userScopedPages: any[] = [];
+    if (userId) {
+      const userConditions: any[] = [eq(contentPromotionPages.createdBy, userId)];
+      if (requestedStatus) {
+        userConditions.push(eq(contentPromotionPages.status, requestedStatus as any));
+      }
+      try {
+        userScopedPages = await db
+          .select()
+          .from(contentPromotionPages)
+          .where(and(...userConditions))
+          .orderBy(desc(contentPromotionPages.createdAt));
+      } catch (err: any) {
+        sourceErrors.push({ source: "contentPromotionPages.user", message: err?.message || String(err) });
+      }
+    }
 
-    res.json(pages);
+    const pagesById = new Map<string, any>();
+    for (const page of [...tenantScopedPages, ...userScopedPages]) {
+      if (page?.id) pagesById.set(page.id, page);
+    }
+    const pages = Array.from(pagesById.values());
+
+    // Also surface published Content Studio landing pages so both modules
+    // follow the same listing route in Content Promotion manager.
+    const shouldIncludeStudioPublishedPages =
+      !requestedStatus || requestedStatus === "published";
+    const shouldIncludeStudioDraftProjects =
+      !requestedStatus || requestedStatus === "draft";
+
+    let studioPages: any[] = [];
+    if (shouldIncludeStudioPublishedPages) {
+      const studioPagesById = new Map<string, any>();
+
+      if (tenantId && tenantId !== "default-tenant") {
+        try {
+          const tenantStudioPages = await db
+            .select()
+            .from(generativeStudioPublishedPages)
+            .where(
+              and(
+                eq(generativeStudioPublishedPages.contentType, "landing_page" as any),
+                eq(generativeStudioPublishedPages.isPublished, true),
+                eq(generativeStudioPublishedPages.tenantId, tenantId)
+              )
+            )
+            .orderBy(desc(generativeStudioPublishedPages.createdAt));
+          for (const page of tenantStudioPages) {
+            if (page?.id) studioPagesById.set(page.id, page);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioPublishedPages.tenant", message: err?.message || String(err) });
+        }
+      }
+
+      if (userId) {
+        try {
+          const userStudioPages = await db
+            .select()
+            .from(generativeStudioPublishedPages)
+            .where(
+              and(
+                eq(generativeStudioPublishedPages.contentType, "landing_page" as any),
+                eq(generativeStudioPublishedPages.isPublished, true),
+                eq(generativeStudioPublishedPages.ownerId, userId)
+              )
+            )
+            .orderBy(desc(generativeStudioPublishedPages.createdAt));
+          for (const page of userStudioPages) {
+            if (page?.id) studioPagesById.set(page.id, page);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioPublishedPages.user", message: err?.message || String(err) });
+        }
+      }
+
+      studioPages = Array.from(studioPagesById.values());
+    }
+
+    let studioProjects: any[] = [];
+    if (shouldIncludeStudioDraftProjects) {
+      const studioProjectsById = new Map<string, any>();
+
+      if (tenantId && tenantId !== "default-tenant") {
+        try {
+          const tenantStudioProjects = await db
+            .select()
+            .from(generativeStudioProjects)
+            .where(
+              and(
+                eq(generativeStudioProjects.contentType, "landing_page" as any),
+                eq(generativeStudioProjects.tenantId, tenantId)
+              )
+            )
+            .orderBy(desc(generativeStudioProjects.createdAt));
+          for (const project of tenantStudioProjects) {
+            if (project?.id) studioProjectsById.set(project.id, project);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioProjects.tenant", message: err?.message || String(err) });
+        }
+      }
+
+      if (userId) {
+        try {
+          const userStudioProjects = await db
+            .select()
+            .from(generativeStudioProjects)
+            .where(
+              and(
+                eq(generativeStudioProjects.contentType, "landing_page" as any),
+                eq(generativeStudioProjects.ownerId, userId)
+              )
+            )
+            .orderBy(desc(generativeStudioProjects.createdAt));
+          for (const project of userStudioProjects) {
+            if (project?.id) studioProjectsById.set(project.id, project);
+          }
+        } catch (err: any) {
+          sourceErrors.push({ source: "generativeStudioProjects.user", message: err?.message || String(err) });
+        }
+      }
+
+      studioProjects = Array.from(studioProjectsById.values());
+    }
+
+    const publishedProjectIds = new Set(
+      studioPages
+        .map((p) => p.projectId)
+        .filter((v) => typeof v === "string" && v.length > 0)
+    );
+
+    const mappedStudioPages = studioPages.map((page) => ({
+      id: `studio:${page.id}`,
+      tenantId: page.tenantId || tenantId,
+      title: page.title,
+      slug: page.slug,
+      pageType: "gated_download",
+      status: "published",
+      templateTheme: "modern_gradient",
+      heroConfig: {
+        headline: page.title,
+        subHeadline: "",
+        backgroundStyle: "gradient",
+        backgroundValue: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      },
+      assetConfig: null,
+      brandingConfig: {
+        primaryColor: "#7c3aed",
+        accentColor: "#3b82f6",
+        companyName: "",
+      },
+      formConfig: null,
+      socialProofConfig: null,
+      benefitsConfig: null,
+      urgencyConfig: null,
+      thankYouConfig: null,
+      seoConfig: {
+        metaTitle: page.metaTitle,
+        metaDescription: page.metaDescription,
+        ogImageUrl: page.ogImageUrl,
+      },
+      linkedLeadFormId: null,
+      viewCount: page.viewCount || 0,
+      uniqueViewCount: 0,
+      submissionCount: 0,
+      conversionRate: null,
+      publishedAt: page.publishedAt,
+      expiresAt: null,
+      createdBy: page.ownerId,
+      createdAt: page.createdAt,
+      updatedAt: page.updatedAt,
+      sourceType: "content_studio",
+      sourceProjectId: page.projectId,
+      previewPath: `/generative-studio/public/${page.slug}`,
+    }));
+
+    const mappedStudioProjects = studioProjects
+      .filter((project) => !publishedProjectIds.has(project.id))
+      .filter((project) => project.status !== "failed")
+      .map((project) => ({
+        id: `studio-project:${project.id}`,
+        tenantId: project.tenantId || tenantId,
+        title: project.title,
+        slug: `studio-${typeof project.id === "string" ? project.id.slice(0, 8) : "project"}`,
+        pageType: "gated_download",
+        status: "draft",
+        templateTheme: "modern_gradient",
+        heroConfig: {
+          headline: project.title,
+          subHeadline: "",
+          backgroundStyle: "gradient",
+          backgroundValue: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        },
+        assetConfig: null,
+        brandingConfig: {
+          primaryColor: "#7c3aed",
+          accentColor: "#3b82f6",
+          companyName: "",
+        },
+        formConfig: null,
+        socialProofConfig: null,
+        benefitsConfig: null,
+        urgencyConfig: null,
+        thankYouConfig: null,
+        seoConfig: null,
+        linkedLeadFormId: null,
+        viewCount: 0,
+        uniqueViewCount: 0,
+        submissionCount: 0,
+        conversionRate: null,
+        publishedAt: null,
+        expiresAt: null,
+        createdBy: project.ownerId,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+        sourceType: "content_studio",
+        sourceProjectId: project.id,
+        previewPath: `/generative-studio?projectId=${project.id}`,
+      }));
+
+    const unifiedPages = [...pages, ...mappedStudioPages, ...mappedStudioProjects].sort((a, b) => {
+      const aTime = new Date(a.createdAt as any).getTime();
+      const bTime = new Date(b.createdAt as any).getTime();
+      return bTime - aTime;
+    });
+
+    if (sourceErrors.length > 0) {
+      console.warn("[Content Promotion] Partial source failures while listing pages:", sourceErrors);
+    }
+
+    res.json(unifiedPages);
   } catch (error: any) {
     console.error("[Content Promotion] Error listing pages:", error);
-    res.status(500).json({ error: "Failed to list content promotion pages" });
+    // Last-resort fallback: do not break page load entirely.
+    try {
+      const fallback = await db
+        .select()
+        .from(contentPromotionPages)
+        .where(eq(contentPromotionPages.tenantId, tenantId))
+        .orderBy(desc(contentPromotionPages.createdAt));
+      return res.json(fallback);
+    } catch (fallbackError: any) {
+      console.error("[Content Promotion] Fallback list failed:", fallbackError);
+      return res.json([]);
+    }
   }
 });
 

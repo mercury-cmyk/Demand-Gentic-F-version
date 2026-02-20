@@ -26,11 +26,16 @@ interface ScoreBreakdown {
   titleKeywordScore: number;
   industryKeywordScore: number;
   employeeSizeScore: number;
+  problemSolutionFitScore: number;
+  recentOutcomeScore: number;
   reason_breakdown: {
     exact_title_matches: string[];
     title_keyword_matches: string[];
     industry_matches: string[];
     employee_size_match: string | null;
+    problem_matches: string[];
+    solution_matches: string[];
+    outcome_signal: string | null;
   };
 }
 
@@ -85,6 +90,13 @@ interface UnifiedQueueConfig {
   prioritizedTitleKeywords: UnifiedWeightedRule[];
   prioritizedIndustryKeywords: UnifiedWeightedRule[];
   prioritizedEmployeeSizeRanges: EmployeeSizeRule[];
+  problemKeywords: string[];
+  solutionKeywords: string[];
+  titleWeight: number;
+  industryWeight: number;
+  accountFitWeight: number;
+  problemSolutionWeight: number;
+  recentOutcomeWeight: number;
   routingThreshold: number;
 }
 
@@ -222,6 +234,29 @@ function loadUnifiedQueueConfig(campaign: CampaignContext): UnifiedQueueConfig {
 
   const q = qa?.queueIntelligence || qa?.queue_intelligence || qa || {};
 
+  const derivedProblemKeywords = extractScoringKeywords([
+    campaign.campaignObjective,
+    campaign.targetAudienceDescription,
+    campaign.successCriteria,
+  ]);
+
+  const derivedSolutionKeywords = extractScoringKeywords([
+    campaign.productServiceInfo,
+    campaign.successCriteria,
+    ...(Array.isArray(campaign.talkingPoints) ? campaign.talkingPoints : []),
+  ]);
+
+  const configuredProblemKeywords = normalizeKeywordList(
+    q.problem_keywords ?? q.problemKeywords
+  );
+
+  const configuredSolutionKeywords = normalizeKeywordList(
+    q.solution_keywords ?? q.solutionKeywords
+  );
+
+  const mergedProblemKeywords = dedupeKeywords([...configuredProblemKeywords, ...derivedProblemKeywords]);
+  const mergedSolutionKeywords = dedupeKeywords([...configuredSolutionKeywords, ...derivedSolutionKeywords]);
+
   return {
     prioritizedExactTitles: normalizeWeightedRules(
       q.prioritized_exact_titles ?? q.prioritizedExactTitles,
@@ -249,6 +284,13 @@ function loadUnifiedQueueConfig(campaign: CampaignContext): UnifiedQueueConfig {
     prioritizedEmployeeSizeRanges: normalizeEmployeeSizeRules(
       q.prioritized_employee_size_ranges ?? q.prioritizedEmployeeSizeRanges
     ),
+    problemKeywords: mergedProblemKeywords,
+    solutionKeywords: mergedSolutionKeywords,
+    titleWeight: Number(q.title_weight ?? q.titleWeight ?? 1.0),
+    industryWeight: Number(q.industry_weight ?? q.industryWeight ?? 1.0),
+    accountFitWeight: Number(q.account_fit_weight ?? q.accountFitWeight ?? 1.0),
+    problemSolutionWeight: Number(q.problem_solution_weight ?? q.problemSolutionWeight ?? 1.2),
+    recentOutcomeWeight: Number(q.recent_outcome_weight ?? q.recentOutcomeWeight ?? 1.0),
     routingThreshold: Number(q.routing_threshold ?? q.routingThreshold ?? 800),
   };
 }
@@ -264,11 +306,16 @@ function computeUnifiedPriorityScore(
   let titleKeywordScore = 0;
   let industryKeywordScore = 0;
   let employeeSizeScore = 0;
+  let problemSolutionFitScore = 0;
+  let recentOutcomeScore = 0;
 
   const exactTitleMatches: string[] = [];
   const titleKeywordMatches: string[] = [];
   const industryMatches: string[] = [];
+  const problemMatches: string[] = [];
+  const solutionMatches: string[] = [];
   let employeeSizeMatch: string | null = null;
+  let outcomeSignal: string | null = null;
 
   for (const rule of config.prioritizedExactTitles) {
     if (jobTitle === rule.value.toLowerCase()) {
@@ -299,7 +346,26 @@ function computeUnifiedPriorityScore(
     }
   }
 
-  const priorityScore = titleExactScore + titleKeywordScore + industryKeywordScore + employeeSizeScore;
+  const problemSolutionFit = calculateProblemSolutionFit(contact, config.problemKeywords, config.solutionKeywords);
+  problemSolutionFitScore = problemSolutionFit.score;
+  problemMatches.push(...problemSolutionFit.problemMatches);
+  solutionMatches.push(...problemSolutionFit.solutionMatches);
+
+  const recentOutcome = calculateRecentOutcomeScore(contact.lastCallOutcome);
+  recentOutcomeScore = recentOutcome.score;
+  outcomeSignal = recentOutcome.reason;
+
+  const weightedTitle = Math.round((titleExactScore + titleKeywordScore) * config.titleWeight);
+  const weightedIndustry = Math.round(industryKeywordScore * config.industryWeight);
+  const weightedAccountFit = Math.round(employeeSizeScore * config.accountFitWeight);
+  const weightedProblemSolution = Math.round(problemSolutionFitScore * config.problemSolutionWeight);
+  const weightedOutcome = Math.round(recentOutcomeScore * config.recentOutcomeWeight);
+
+  const priorityScore = clampScore(
+    weightedTitle + weightedIndustry + weightedAccountFit + weightedProblemSolution + weightedOutcome,
+    0,
+    1000
+  );
 
   const breakdown: ScoreBreakdown = {
     // legacy dashboard fields
@@ -307,21 +373,88 @@ function computeUnifiedPriorityScore(
     topic: titleKeywordScore,
     accountFit: employeeSizeScore,
     roleFit: titleExactScore,
-    historical: 0,
+    historical: recentOutcomeScore,
     // unified fields
     titleExactScore,
     titleKeywordScore,
     industryKeywordScore,
     employeeSizeScore,
+    problemSolutionFitScore,
+    recentOutcomeScore,
     reason_breakdown: {
       exact_title_matches: exactTitleMatches,
       title_keyword_matches: titleKeywordMatches,
       industry_matches: industryMatches,
       employee_size_match: employeeSizeMatch,
+      problem_matches: problemMatches,
+      solution_matches: solutionMatches,
+      outcome_signal: outcomeSignal,
     },
   };
 
   return { priorityScore, breakdown };
+}
+
+function calculateProblemSolutionFit(
+  contact: QueueContactRow,
+  problemKeywords: string[],
+  solutionKeywords: string[]
+): { score: number; problemMatches: string[]; solutionMatches: string[] } {
+  if (problemKeywords.length === 0 && solutionKeywords.length === 0) {
+    return { score: 60, problemMatches: [], solutionMatches: [] };
+  }
+
+  const signalTextParts = [
+    contact.jobTitle,
+    contact.seniorityLevel,
+    contact.department,
+    contact.industryStandardized,
+    ...(contact.contactIntentTopics || []),
+    ...(contact.accountIntentTopics || []),
+    ...(contact.techStack || []),
+  ].filter(Boolean);
+
+  const signalText = signalTextParts.join(' ').toLowerCase();
+
+  const matchedProblems = problemKeywords.filter((kw) => signalText.includes(kw));
+  const matchedSolutions = solutionKeywords.filter((kw) => signalText.includes(kw));
+
+  const problemScore = Math.min(140, matchedProblems.length * 28);
+  const solutionScore = Math.min(140, matchedSolutions.length * 28);
+  const coherenceBonus = matchedProblems.length > 0 && matchedSolutions.length > 0 ? 40 : 0;
+
+  const baseline = signalText.length > 0 ? 25 : 10;
+  const total = clampScore(baseline + problemScore + solutionScore + coherenceBonus, 0, 220);
+
+  return {
+    score: total,
+    problemMatches: matchedProblems,
+    solutionMatches: matchedSolutions,
+  };
+}
+
+function calculateRecentOutcomeScore(lastOutcome: string | null | undefined): { score: number; reason: string | null } {
+  const outcome = normalizeOutcome(lastOutcome);
+
+  if (!outcome) {
+    return { score: 20, reason: 'no_outcome_history' };
+  }
+
+  switch (outcome) {
+    case 'callback_requested':
+      return { score: 80, reason: 'recent_callback_interest' };
+    case 'voicemail':
+      return { score: -40, reason: 'recent_voicemail' };
+    case 'no_answer':
+      return { score: -30, reason: 'recent_no_answer' };
+    case 'invalid_number':
+      return { score: -180, reason: 'invalid_number' };
+    default:
+      if (outcome.includes('not_interested') || outcome.includes('donotcall') || outcome.includes('dnc')) {
+        return { score: -130, reason: 'recent_negative_disposition' };
+      }
+      return { score: 10, reason: 'neutral_recent_outcome' };
+  }
 }
 
 function applyCooldownAndRetryRules(contact: QueueContactRow): {
@@ -817,6 +950,9 @@ export async function getContactScores(
         title_keyword_matches: r.ai_score_breakdown?.reason_breakdown?.title_keyword_matches || [],
         industry_matches: r.ai_score_breakdown?.reason_breakdown?.industry_matches || [],
         employee_size_match: r.ai_score_breakdown?.reason_breakdown?.employee_size_match || null,
+        problem_matches: r.ai_score_breakdown?.reason_breakdown?.problem_matches || [],
+        solution_matches: r.ai_score_breakdown?.reason_breakdown?.solution_matches || [],
+        outcome_signal: r.ai_score_breakdown?.reason_breakdown?.outcome_signal || null,
       },
       aiPriorityScore: r.ai_priority_score,
       breakdown: r.ai_score_breakdown || {},
@@ -1601,6 +1737,48 @@ function parseRevenueValue(num: string, suffix?: string): number {
   if (s === "M") return base * 1_000_000;
   if (s === "K") return base * 1_000;
   return base;
+}
+
+function normalizeKeywordList(input: any): string[] {
+  if (!input) return [];
+
+  if (Array.isArray(input)) {
+    return input
+      .map((item) => String(item).toLowerCase().trim())
+      .filter((item) => item.length >= 3 && !STOP_WORDS.has(item));
+  }
+
+  if (typeof input === 'string') {
+    return extractScoringKeywords([input]);
+  }
+
+  return [];
+}
+
+function extractScoringKeywords(parts: Array<any>): string[] {
+  const text = parts
+    .filter(Boolean)
+    .map((p) => (typeof p === 'string' ? p : JSON.stringify(p)))
+    .join(' ')
+    .toLowerCase();
+
+  if (!text) return [];
+
+  return dedupeKeywords(
+    text
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 4 && !STOP_WORDS.has(token))
+  );
+}
+
+function dedupeKeywords(keywords: string[]): string[] {
+  return [...new Set(keywords.map((k) => k.toLowerCase().trim()).filter((k) => k.length >= 3))];
+}
+
+function clampScore(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function getTierRange(tier: string): [number, number] {
