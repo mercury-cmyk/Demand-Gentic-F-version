@@ -4,7 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
   Target, Clock, CheckCircle, Truck,
-  Play, Pause, BarChart3, Plus, Mic, List, Phone, Mail
+  Play, Pause, BarChart3, Plus, Mic, List, Phone, Mail,
+  PhoneCall, PhoneOff, PhoneMissed, Voicemail, UserCheck,
 } from 'lucide-react';
 
 interface Campaign {
@@ -30,12 +31,28 @@ interface Campaign {
   estimatedBudget?: string;
   approvedBudget?: string;
   totalContacts?: number;
+  callReport?: {
+    callsMade: number;
+    connected: number;
+    qualified: number;
+    voicemail: number;
+    noAnswer: number;
+    invalid: number;
+  };
   stats?: {
     attempts: number;
     impressions: number;
     leads: number;
     targetAchieved: number;
     remaining: number;
+    callReport?: {
+      callsMade: number;
+      connected: number;
+      qualified: number;
+      voicemail: number;
+      noAnswer: number;
+      invalid: number;
+    };
     queueStats?: {
       total: number;
       remaining: number;

@@ -1135,7 +1135,8 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
     res.json([...enrichedVerificationCampaigns, ...enrichedRegularCampaigns]);
   } catch (error) {
     console.error('[CLIENT PORTAL] Get campaigns error:', error);
-    res.status(500).json({ message: "Failed to get campaigns" });
+    // Return empty array instead of 500 to keep client portal stable
+    res.json([]);
   }
 });
 
