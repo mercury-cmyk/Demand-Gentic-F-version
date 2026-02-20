@@ -264,8 +264,17 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
         fullName: contacts.fullName,
         email: contacts.email,
         jobTitle: contacts.jobTitle,
+        directPhone: contacts.directPhone,
         accountId: contacts.accountId,
         company: accounts.name,
+        accountDomain: accounts.domain,
+        accountIndustry: accounts.industryStandardized,
+        accountCity: accounts.hqCity,
+        accountState: accounts.hqState,
+        accountCountry: accounts.hqCountry,
+        accountPhone: accounts.mainPhone,
+        accountWebsite: accounts.websiteDomain,
+        accountEmployees: accounts.staffCount,
       })
         .from(contacts)
         .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -287,6 +296,7 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
       email: contact.email!,
       contactId: contact.id,
       customVariables: {
+        // Flat tokens (camelCase + snake_case)
         first_name: contact.firstName || '',
         firstName: contact.firstName || '',
         last_name: contact.lastName || '',
@@ -294,11 +304,35 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
         full_name: contact.fullName || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
         fullName: contact.fullName || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
         name: contact.firstName || contact.fullName || '',
+        email: contact.email || '',
         company: contact.company || '',
         company_name: contact.company || '',
         companyName: contact.company || '',
         job_title: contact.jobTitle || '',
         jobTitle: contact.jobTitle || '',
+        title: contact.jobTitle || '',
+        phone: contact.directPhone || '',
+        // Prefixed contact.X tokens (used by client portal and campaign builder)
+        'contact.firstName': contact.firstName || '',
+        'contact.first_name': contact.firstName || '',
+        'contact.lastName': contact.lastName || '',
+        'contact.last_name': contact.lastName || '',
+        'contact.email': contact.email || '',
+        'contact.phone': contact.directPhone || '',
+        'contact.title': contact.jobTitle || '',
+        'contact.job_title': contact.jobTitle || '',
+        'contact.jobTitle': contact.jobTitle || '',
+        'contact.company': contact.company || '',
+        // Prefixed account.X tokens
+        'account.name': contact.company || '',
+        'account.domain': contact.accountDomain || '',
+        'account.industry': contact.accountIndustry || '',
+        'account.city': contact.accountCity || '',
+        'account.state': contact.accountState || '',
+        'account.country': contact.accountCountry || '',
+        'account.phone': contact.accountPhone || '',
+        'account.website': contact.accountWebsite || '',
+        'account.employees': contact.accountEmployees != null ? String(contact.accountEmployees) : '',
       },
     }));
 

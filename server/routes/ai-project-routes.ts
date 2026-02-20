@@ -87,7 +87,7 @@ function generateStyledEmailBody(content: {
               <!-- Main Content -->
               <div style="padding: 32px;">
                 <p style="margin: 0 0 24px 0; color: ${BRAND_COLORS.text}; font-size: 16px; line-height: 1.6;">
-                  Hi {{first_name}},
+                  Hi {{firstName}},
                 </p>
                 
                 <p style="margin: 0 0 24px 0; color: ${BRAND_COLORS.text}; font-size: 16px; line-height: 1.6;">
@@ -160,7 +160,7 @@ function generateFallbackContent(params: {
     'cold-outreach': {
       heroTitle: 'Quick idea for {{company}}',
       heroSubtitle: 'A practical way to improve outcomes without a heavy lift',
-      intro: `Hi {{first_name}}, I noticed ${companyName || 'your team'} is focused on growth and efficiency. ${context || 'We typically help teams reduce time-to-value and improve conversion quality without adding headcount.'}`,
+      intro: `Hi {{firstName}}, I noticed ${companyName || 'your team'} is focused on growth and efficiency. ${context || 'We typically help teams reduce time-to-value and improve conversion quality without adding headcount.'}`,
       valueBullets: [
         'Reduce manual effort by 20-30% through targeted automation',
         'Improve pipeline quality with clearer qualification signals',
@@ -172,7 +172,7 @@ function generateFallbackContent(params: {
     'follow-up': {
       heroTitle: 'Following up briefly',
       heroSubtitle: 'Sharing a clearer use case for your team',
-      intro: `Hi {{first_name}}, quick follow-up in case my last note got buried. ${context || 'Teams like {{company}} use this to accelerate handoffs and tighten conversion rates.'}`,
+      intro: `Hi {{firstName}}, quick follow-up in case my last note got buried. ${context || 'Teams like {{company}} use this to accelerate handoffs and tighten conversion rates.'}`,
       valueBullets: [
         'Takes 15 minutes to assess fit',
         'No rip-and-replace - integrates with your current stack',
@@ -209,7 +209,7 @@ function generateFallbackContent(params: {
       heroTitle: contextHeadline,
       heroSubtitle: 'Practical insights for B2B demand generation',
       intro: contextTrimmed
-        ? `Hi {{first_name}},\n\n${contextTrimmed}`
+        ? `Hi {{firstName}},\n\n${contextTrimmed}`
         : 'I wanted to share a concise resource that outlines what is working now for B2B teams.',
       valueBullets: [
         'Actionable steps your team can use this week',
@@ -225,7 +225,7 @@ function generateFallbackContent(params: {
 
   if (contextTrimmed) {
     template.heroTitle = template.heroTitle || contextHeadline;
-    template.intro = template.intro || `Hi {{first_name}},\n\n${contextTrimmed}`;
+    template.intro = template.intro || `Hi {{firstName}},\n\n${contextTrimmed}`;
   }
   
   // Adjust for campaign name context
@@ -340,7 +340,7 @@ Requirements:
 - Lead with a specific, credible hook based on the context.
 - Use the provided context as the PRIMARY message. If a clear headline phrase is present, use it as the heroTitle.
 - Address a realistic pain point and connect it to a clear outcome.
-- Use professional personalization tokens like {{first_name}} and {{company}} where it reads naturally.
+- Use personalization tokens like {{firstName}}, {{lastName}}, {{company}}, and {{jobTitle}} where it reads naturally. Do NOT use {{contact.X}} or {{account.X}} format — use ONLY flat tokens like {{firstName}}.
 - Avoid fluffy claims; prefer concrete outcomes, timelines, or proof points.
 - Keep the intro 2-3 sentences, then 3 concise value bullets.
 - Include a CTA label that sounds like a low-friction next step.

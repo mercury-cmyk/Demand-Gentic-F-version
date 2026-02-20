@@ -81,13 +81,14 @@ import { buildBrandedEmailHtml, type BrandPaletteKey, type BrandPaletteOverrides
 // Content Block Types for Visual Editor
 type BlockType = 'text' | 'button' | 'image' | 'divider' | 'spacer' | 'heading' | 'list';
 
-// Prefill merge tags for tracking URLs
+// Prefill merge tags for CTA URLs — must use flat tokens that the
+// bulk-email-service replaces at send time (NOT {{contact.X}} format)
 const PREFILL_QUERY = [
-  'email={{contact.email}}',
-  'firstName={{contact.firstName}}',
-  'lastName={{contact.lastName}}',
-  'company={{account.name}}',
-  'phone={{contact.phone}}'
+  'email={{email}}',
+  'firstName={{firstName}}',
+  'lastName={{lastName}}',
+  'company={{company}}',
+  'phone={{phone}}'
 ].join('&');
 
 interface ContentBlock {
@@ -441,13 +442,13 @@ const blocksToHtml = (blocks: ContentBlock[]): string => {
   }).join('\n');
 };
 
-// Personalization tokens
+// Personalization tokens — must match keys in bulk-email-service customVariables
 const PERSONALIZATION_TOKENS = [
   { token: "{{firstName}}", label: "First Name", icon: User },
   { token: "{{lastName}}", label: "Last Name", icon: User },
   { token: "{{company}}", label: "Company", icon: Building2 },
   { token: "{{email}}", label: "Email", icon: AtSign },
-  { token: "{{title}}", label: "Job Title", icon: User },
+  { token: "{{jobTitle}}", label: "Job Title", icon: User },
 ];
 
 // Outreach types for AI
@@ -557,6 +558,14 @@ export function SimpleTemplateBuilder({
   const [orgName, setOrgName] = useState(organizationName);
   const [orgAddress, setOrgAddress] = useState(organizationAddress);
 
+  // Organization branding colors (loaded from campaign org)
+  const [orgBrandColors, setOrgBrandColors] = useState<{
+    primary: string;
+    secondary: string;
+  } | null>(null);
+  const [orgBrandLoading, setOrgBrandLoading] = useState(false);
+  const [useOrgBrand, setUseOrgBrand] = useState(false);
+
   // Core state - use htmlContent if bodyContent is empty (for edit mode compatibility)
   const initialBodyContent = initialTemplate?.bodyContent || initialTemplate?.htmlContent || "";
   const initialIsBrandedTemplate = Boolean(
@@ -635,10 +644,67 @@ export function SimpleTemplateBuilder({
   }, [editorMode]);
 
   useEffect(() => {
-    if (!useCustomBrandColors) {
+    if (!useCustomBrandColors && !useOrgBrand) {
       setBrandColors(BRAND_COLOR_PRESETS[brandPalette]);
     }
-  }, [brandPalette, useCustomBrandColors]);
+  }, [brandPalette, useCustomBrandColors, useOrgBrand]);
+
+  // Fetch org branding colors when campaignOrganizationId is available
+  useEffect(() => {
+    if (!campaignIntent.campaignOrganizationId) return;
+    let active = true;
+    const fetchOrgBranding = async () => {
+      setOrgBrandLoading(true);
+      try {
+        const res = await apiRequest("GET", `/api/organizations/${campaignIntent.campaignOrganizationId}`);
+        if (!res.ok) throw new Error("Failed to load org");
+        const org = await res.json();
+        if (!active) return;
+        const branding = org.branding || {};
+        if (branding.primaryColor) {
+          const colors = {
+            primary: branding.primaryColor,
+            secondary: branding.secondaryColor || branding.primaryColor,
+          };
+          setOrgBrandColors(colors);
+          // Auto-apply org colors as custom brand
+          const derived = {
+            primary: colors.primary,
+            secondary: colors.secondary,
+            accent: colors.secondary,
+            surface: "#f8fafc",
+            button: colors.primary,
+          };
+          setBrandColors(derived);
+          setUseCustomBrandColors(true);
+          setUseOrgBrand(true);
+        }
+        // Also update org name from intelligence if available
+        if (org.name && org.name !== organizationName) {
+          setOrgName(org.name);
+        }
+        // Update tone from branding if available
+        if (branding.tone) {
+          const toneMap: Record<string, string> = {
+            'Professional': 'professional',
+            'Consultative': 'consultative',
+            'Direct': 'direct',
+            'Friendly': 'friendly',
+          };
+          const mappedTone = toneMap[branding.tone] || branding.tone.toLowerCase();
+          if (TONE_OPTIONS.some(t => t.value === mappedTone)) {
+            setTone(mappedTone);
+          }
+        }
+      } catch (e) {
+        console.warn("[SimpleTemplateBuilder] Failed to load org branding:", e);
+      } finally {
+        if (active) setOrgBrandLoading(false);
+      }
+    };
+    fetchOrgBranding();
+    return () => { active = false; };
+  }, [campaignIntent.campaignOrganizationId]);
 
   useEffect(() => {
     if (editorMode === "html" && useBrandedTemplate) {
@@ -992,8 +1058,8 @@ export function SimpleTemplateBuilder({
         bullets.push(fallbackBullets[bullets.length] || fallbackBullets[0]);
       }
       const fallbackIntro = aiContext
-        ? `Hi {{first_name}},\n\n${aiContext}\n\nWould you be open to a brief conversation next week?`
-        : `Hi {{first_name}},\n\nI wanted to reach out about ${campaignIntent.campaignName}. I believe there is a strong opportunity to help your team achieve its goals.\n\nWould you be open to a brief conversation next week?`;
+        ? `Hi {{firstName}},\n\n${aiContext}\n\nWould you be open to a brief conversation next week?`
+        : `Hi {{firstName}},\n\nI wanted to reach out about ${campaignIntent.campaignName}. I believe there is a strong opportunity to help your team achieve its goals.\n\nWould you be open to a brief conversation next week?`;
 
       return {
         subject: overrides.subject || subject || `Quick question about ${campaignIntent.campaignName}`,
