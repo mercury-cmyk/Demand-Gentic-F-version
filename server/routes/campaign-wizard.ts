@@ -72,7 +72,7 @@ function mapChannelToOrderType(channel: string, campaignType: string): WorkOrder
 /**
  * POST /create - Create a new campaign from the wizard (ADMIN)
  */
-router.post('/create', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.post('/create', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const campaignSchema = z.object({
       // Admin specific - required to associate campaign with a client

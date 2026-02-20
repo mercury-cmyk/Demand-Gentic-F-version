@@ -42,7 +42,7 @@ interface WebhookConfig {
 /**
  * GET /api/telnyx/webhook-config - Get current webhook configuration for all apps
  */
-router.get('/webhook-config', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.get('/webhook-config', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const apiKey = env.TELNYX_API_KEY;
     const texmlAppId = env.TELNYX_TEXML_APP_ID;
@@ -203,7 +203,7 @@ router.get('/webhook-config', requireAuth, requireRole(['admin']), async (req: R
 /**
  * POST /api/telnyx/webhook-config - Update webhook URLs
  */
-router.post('/webhook-config', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.post('/webhook-config', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const apiKey = env.TELNYX_API_KEY;
     const texmlAppId = env.TELNYX_TEXML_APP_ID;
@@ -286,7 +286,7 @@ router.post('/webhook-config', requireAuth, requireRole(['admin']), async (req: 
 /**
  * POST /api/telnyx/webhook-config/switch-to-dev - Switch to ngrok/dev URLs (TeXML + Call Control)
  */
-router.post('/webhook-config/switch-to-dev', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.post('/webhook-config/switch-to-dev', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const apiKey = env.TELNYX_API_KEY;
     const texmlAppId = env.TELNYX_TEXML_APP_ID;
@@ -440,7 +440,7 @@ router.post('/webhook-config/switch-to-dev', requireAuth, requireRole(['admin'])
 /**
  * POST /api/telnyx/webhook-config/switch-to-prod - Switch to production URLs (TeXML + Call Control)
  */
-router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.post('/webhook-config/switch-to-prod', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const apiKey = env.TELNYX_API_KEY;
     const texmlAppId = env.TELNYX_TEXML_APP_ID;
@@ -563,7 +563,7 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
 /**
  * GET /api/telnyx/phone-numbers - List all phone numbers on the account
  */
-router.get('/phone-numbers', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.get('/phone-numbers', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const apiKey = env.TELNYX_API_KEY;
 
@@ -618,7 +618,7 @@ router.get('/phone-numbers', requireAuth, requireRole(['admin']), async (req: Re
 /**
  * GET /api/telnyx/texml-applications - List all TeXML applications
  */
-router.get('/texml-applications', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
+router.get('/texml-applications', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const apiKey = env.TELNYX_API_KEY;
 
