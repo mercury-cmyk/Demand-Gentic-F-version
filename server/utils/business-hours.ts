@@ -19,12 +19,13 @@ export interface ContactTimezoneInfo {
 }
 
 /**
- * Default business hours configuration (Western Mon-Fri)
+ * Default business hours configuration (Western Mon-Sat)
+ * Saturday is now included by default as a business day
  */
 export const DEFAULT_BUSINESS_HOURS: BusinessHoursConfig = {
   enabled: true,
   timezone: 'America/New_York',
-  operatingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  operatingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
   startTime: '09:00',
   endTime: '17:00',
   respectContactTimezone: true,
@@ -32,12 +33,12 @@ export const DEFAULT_BUSINESS_HOURS: BusinessHoursConfig = {
 };
 
 /**
- * Middle East business hours (Sun-Thu work week)
+ * Middle East business hours (Sun-Thu work week + Saturday)
  */
 export const MIDDLE_EAST_BUSINESS_HOURS: BusinessHoursConfig = {
   enabled: true,
   timezone: 'Asia/Dubai', // Will be overridden per country
-  operatingDays: ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
+  operatingDays: ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'saturday'],
   startTime: '09:00',
   endTime: '17:00',
   respectContactTimezone: true,
@@ -407,9 +408,12 @@ export function isWithinBusinessHours(
 
   // Check if it's a working day
   const dayOfWeek = format(zonedTime, 'EEEE').toLowerCase();
+  console.log(`[DEBUG BIZ HOURS] Checking day: ${dayOfWeek}, operatingDays=${JSON.stringify(config.operatingDays)}`);
   if (!config.operatingDays.includes(dayOfWeek)) {
+    console.log(`[DEBUG BIZ HOURS] ${dayOfWeek} NOT in operatingDays - returning false`);
     return false; // Not an operating day
   }
+  console.log(`[DEBUG BIZ HOURS] ${dayOfWeek} IS in operatingDays - checking time`);
 
   // Check if it's a holiday
   const dateString = format(zonedTime, 'yyyy-MM-dd');

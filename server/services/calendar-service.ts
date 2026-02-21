@@ -63,55 +63,66 @@ export class CalendarService {
     if (!type.userId) throw new Error("Booking type has no assigned user");
 
     const hostUserId = type.userId as string;
-    const client = await getAuthenticatedClient(hostUserId);
-    const calendar = google.calendar({ version: 'v3', auth: client });
-
     const startDate = new Date(startTime);
     const endDate = new Date(startDate.getTime() + type.duration * 60000);
 
-    const event = {
-      summary: `${type.name} with ${guest.name}`,
-      description: `Guest: ${guest.name} (${guest.email})\n\nNotes:\n${guest.notes || 'N/A'}`,
-      start: {
-        dateTime: startDate.toISOString(),
-        timeZone: 'UTC', // Always store in UTC
-      },
-      end: {
-        dateTime: endDate.toISOString(),
-        timeZone: 'UTC',
-      },
-      attendees: [
-        { email: guest.email },
-        // Add host email later
-      ],
-      reminders: {
-        useDefault: false,
-        overrides: [
-          { method: 'email', minutes: 24 * 60 },
-          { method: 'popup', minutes: 60 },
+    let googleEventId: string | undefined;
+    let meetingUrl: string | undefined;
+
+    // Try to create Google Calendar event (optional)
+    try {
+      const client = await getAuthenticatedClient(hostUserId);
+      const calendar = google.calendar({ version: 'v3', auth: client });
+
+      const event = {
+        summary: `${type.name} with ${guest.name}`,
+        description: `Guest: ${guest.name} (${guest.email})\n\nNotes:\n${guest.notes || 'N/A'}`,
+        start: {
+          dateTime: startDate.toISOString(),
+          timeZone: 'UTC', // Always store in UTC
+        },
+        end: {
+          dateTime: endDate.toISOString(),
+          timeZone: 'UTC',
+        },
+        attendees: [
+          { email: guest.email },
+          // Add host email later
         ],
-      },
-      conferenceData: {
-        createRequest: {
-          requestId: `dg-meet-${Date.now()}`,
-          conferenceSolutionKey: {
-            type: 'hangoutsMeet'
+        reminders: {
+          useDefault: false,
+          overrides: [
+            { method: 'email', minutes: 24 * 60 },
+            { method: 'popup', minutes: 60 },
+          ],
+        },
+        conferenceData: {
+          createRequest: {
+            requestId: `dg-meet-${Date.now()}`,
+            conferenceSolutionKey: {
+              type: 'hangoutsMeet'
+            }
           }
         }
+      };
+
+      // Get host email
+      const [host] = await db.select({ email: users.email }).from(users).where(eq(users.id, hostUserId));
+      if (host?.email) {
+        event.attendees.push({ email: host.email });
       }
-    };
 
-    // Get host email
-    const [host] = await db.select({ email: users.email }).from(users).where(eq(users.id, hostUserId));
-    if (host?.email) {
-      event.attendees.push({ email: host.email });
+      const createdEvent = await calendar.events.insert({
+        calendarId: 'primary',
+        requestBody: event,
+        conferenceDataVersion: 1,
+      });
+
+      googleEventId = createdEvent.data.id;
+      meetingUrl = createdEvent.data.hangoutLink;
+    } catch (error) {
+      console.log(`[INFO] Could not create Google Calendar event for user ${hostUserId} (not connected or error). Booking will still be created in database.`, error);
     }
-
-    const createdEvent = await calendar.events.insert({
-      calendarId: 'primary',
-      requestBody: event,
-      conferenceDataVersion: 1,
-    });
 
     const [newBooking] = await db.insert(bookings).values({
       bookingTypeId: type.id,
@@ -122,28 +133,22 @@ export class CalendarService {
       startTime: startDate,
       endTime: endDate,
       status: 'confirmed',
-      meetingUrl: createdEvent.data.hangoutLink || undefined,
-      googleEventId: createdEvent.data.id || undefined,
+      meetingUrl: meetingUrl,
+      googleEventId: googleEventId,
     }).returning();
 
     return newBooking;
-  }
   
   /**
    * List available slots for a User and Booking Type
    */
   async getAvailability(userId: string, bookingTypeId: number, startDate: Date, endDate: Date) {
-    const client = await getAuthenticatedClient(userId);
-    const calendar = google.calendar({ version: 'v3', auth: client });
-
     // 1. Get Booking Type Duration
     const [bookingType] = await db.select().from(bookingTypes).where(eq(bookingTypes.id, bookingTypeId));
     if (!bookingType) throw new Error("Booking type not found");
     const durationMin = bookingType.duration;
 
     // 2. Get User's Availability Slots (from DB)
-    // If no slots defined, assume 9-5 Mon-Fri UTC as fallback? Or just return empty?
-    // Let's query slots.
     const userSlots = await db.select().from(availabilitySlots).where(
       and(
         eq(availabilitySlots.userId, userId),
@@ -151,19 +156,23 @@ export class CalendarService {
       )
     );
 
-    // If no specific slots configuration, default to Mon-Fri 09:00-17:00 UTC
-    // Logic: Map slots to the requested date range.
-
-    // 3. Get Google Calendar Busy Times
-    const freeBusy = await calendar.freebusy.query({
-      requestBody: {
-        timeMin: startDate.toISOString(),
-        timeMax: endDate.toISOString(),
-        items: [{ id: 'primary' }],
-      },
-    });
-
-    const busyRanges = freeBusy.data.calendars?.['primary']?.busy || [];
+    // 3. Try to get Google Calendar Busy Times (optional - if user hasn't connected Google Calendar, skip this)
+    let busyRanges: Array<{ start?: string; end?: string }> = [];
+    try {
+      const client = await getAuthenticatedClient(userId);
+      const calendar = google.calendar({ version: 'v3', auth: client });
+      const freeBusy = await calendar.freebusy.query({
+        requestBody: {
+          timeMin: startDate.toISOString(),
+          timeMax: endDate.toISOString(),
+          items: [{ id: 'primary' }],
+        },
+      });
+      busyRanges = freeBusy.data.calendars?.['primary']?.busy || [];
+    } catch (error) {
+      // User hasn't connected Google Calendar - that's okay, we'll use fallback availability
+      console.log(`[INFO] Google Calendar not connected for user ${userId}, using fallback availability.`);
+    }
 
     // 4. Calculate free slots logic
     // This is a simplified implementation. Real-world needs robust time handling.

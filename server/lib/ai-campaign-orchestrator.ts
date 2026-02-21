@@ -268,6 +268,7 @@ function isContactWithinBusinessHours(
       timezone: contactTz,
       respectContactTimezone: false, // We already resolved the timezone
     };
+    console.log(`[DEBUG BIZ HOURS] Using CAMPAIGN config: operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
   } else {
     // Fall back to country-specific business hours (handles Middle East Sun-Thu work week)
     const countryConfig = getBusinessHoursForCountry(contact.country, now);
@@ -276,6 +277,7 @@ function isContactWithinBusinessHours(
       timezone: contactTz,
       respectContactTimezone: false, // We already resolved the timezone
     };
+    console.log(`[DEBUG BIZ HOURS] Using COUNTRY config: country=${contact.country}, operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
   }
 
   // Temporary one-day UK exception: allow Saturday calling on 2026-02-21 only.
@@ -283,6 +285,7 @@ function isContactWithinBusinessHours(
     config.operatingDays = [...config.operatingDays, 'saturday'];
   }
   
+  console.log(`[DEBUG BIZ HOURS] Final config before check: operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
   const canCall = checkBusinessHours(config, undefined, now);
   
   // Get local time for logging
@@ -1058,6 +1061,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     console.log(`[AI Orchestrator] Campaign ${campaignId} not found`);
     return { initiated: 0, skipped: 0 };
   }
+
+  console.log(`[DEBUG] Campaign loaded: businessHoursConfig=${JSON.stringify((campaign as any).businessHoursConfig)}`);
 
   // Check campaign is still active and in ai_agent mode
   if (campaign.status !== 'active' || campaign.dialMode !== 'ai_agent') {

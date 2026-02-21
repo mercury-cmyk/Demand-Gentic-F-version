@@ -49,7 +49,7 @@ async function debugCampaignConfig() {
     const timeResult = await db.execute(sql`
       SELECT NOW() as current_time
     `);
-    const currentTime = new Date(timeResult.rows[0].current_time);
+    const currentTime = new Date(timeResult.rows[0].current_time as string);
     console.log(`\nCurrent Server Time: ${currentTime.toISOString()}`);
     console.log(`Day: ${currentTime.toLocaleString('en-US', { weekday: 'long' })}`);
     console.log(`Time: ${currentTime.toLocaleTimeString('en-US', { hour12: false })}`);
