@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { evaluateIdentityPurposePivot, isVoicemailCueTranscript } from "../voice-dialer";
+import {
+  evaluateIdentityPurposePivot,
+  isAutomatedCallScreenerTranscript,
+  isVoicemailCueTranscript,
+} from "../voice-dialer";
 
 describe("evaluateIdentityPurposePivot", () => {
   it("passes when purpose starts within 700ms", () => {
@@ -30,15 +34,38 @@ describe("isVoicemailCueTranscript", () => {
     expect(isVoicemailCueTranscript("Your call has been forwarded to voice mail.")).toBe(true);
   });
 
-  it("detects automated screening prompts that should not receive a pitch", () => {
+  it("does not treat automated screening prompts as voicemail", () => {
     expect(
       isVoicemailCueTranscript(
+        "If you record your name and reason for calling, I'll see if this person is available."
+      )
+    ).toBe(false);
+  });
+
+  it("does not mark normal live pickup as voicemail", () => {
+    expect(isVoicemailCueTranscript("Hi, this is Marcus speaking.")).toBe(false);
+  });
+});
+
+describe("isAutomatedCallScreenerTranscript", () => {
+  it("detects Google Voice/AI screening prompts", () => {
+    expect(
+      isAutomatedCallScreenerTranscript(
+        "Before I try to connect you, please state your name and reason for calling."
+      )
+    ).toBe(true);
+    expect(
+      isAutomatedCallScreenerTranscript(
         "If you record your name and reason for calling, I'll see if this person is available."
       )
     ).toBe(true);
   });
 
-  it("does not mark normal live pickup as voicemail", () => {
-    expect(isVoicemailCueTranscript("Hi, this is Marcus speaking.")).toBe(false);
+  it("does not mark voicemail greeting as call screener", () => {
+    expect(
+      isAutomatedCallScreenerTranscript(
+        "Hi, you've reached the voicemail of Ann. Please leave a message after the beep."
+      )
+    ).toBe(false);
   });
 });

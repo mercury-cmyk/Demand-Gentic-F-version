@@ -587,16 +587,53 @@ function normalizeTranscriptForComparison(text: string): string {
     .trim();
 }
 
+export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
+  const lower = normalizeTranscriptForComparison(transcript);
+  if (!lower) return false;
+
+  const cues = [
+    "record your name and reason for calling",
+    "if you record your name and reason for calling",
+    "state your name and reason for calling",
+    "tell me your name and reason for calling",
+    "before i try to connect you",
+    "before i connect you",
+    "i ll see if this person is available",
+    "i will see if this person is available",
+    "see if this person is available",
+    "please stay on the line",
+    "stay on the line while i try to connect you",
+    "call screening",
+    "call assist",
+  ];
+
+  if (cues.some((cue) => lower.includes(cue))) return true;
+
+  const regexCues = [
+    /(if )?record (your )?name and reason for calling/i,
+    /state your name and reason for calling/i,
+    /before i try to connect you/i,
+    /i( ll| will) see if this person is available/i,
+    /please stay on the line/i,
+    /call (screening|assist)/i,
+  ];
+
+  return regexCues.some((pattern) => pattern.test(lower));
+}
+
 export function isVoicemailCueTranscript(transcript: string): boolean {
   const lower = normalizeTranscriptForComparison(transcript);
   if (!lower) return false;
+  if (isAutomatedCallScreenerTranscript(lower)) return false;
 
   const cues = [
     "leave a message",
     "leave your message",
     "please leave a message after the tone",
+    "please leave your message",
     "after the beep",
     "after the tone",
+    "the person you are calling is not available",
     "not available to take your call",
     "cannot take your call",
     "cant take your call",
@@ -607,6 +644,8 @@ export function isVoicemailCueTranscript(transcript: string): boolean {
     "voicemail",
     "voice mail",
     "mailbox",
+    "mailbox is full",
+    "cannot accept messages",
     "no one is available",
     "your call has been forwarded",
     "your call has been forwarded to voicemail",
@@ -614,11 +653,8 @@ export function isVoicemailCueTranscript(transcript: string): boolean {
     "automatic voice message system",
     "you have reached the voice mail of",
     "you have reached the voicemail of",
+    "at the tone please record your message",
     "you are trying to reach is not available",
-    "if you record your name and reason for calling",
-    "record your name and reason for calling",
-    "state your name and reason for calling",
-    "see if this person is available",
     "beep",
   ];
 
@@ -629,9 +665,9 @@ export function isVoicemailCueTranscript(transcript: string): boolean {
     /your call has been forwarded to (an )?(automatic )?voice ?mail/i,
     /(i m|im|i am) unavailable to take your call right now/i,
     /please leave (a )?message after the tone/i,
-    /(if )?record (your )?name and reason for calling/i,
-    /state your name and reason for calling/i,
-    /see if this person is available/i,
+    /the person you are calling is not available/i,
+    /at the tone please record your message/i,
+    /(mailbox is full|cannot accept messages)/i,
   ];
 
   return regexCues.some((pattern) => pattern.test(lower));
@@ -4556,6 +4592,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         // This must run before we decide to ignore IVR audio
         if (audioType.type === 'ivr') {
           const lowerTranscript = message.transcript.toLowerCase();
+          const isScreenerPrompt = isAutomatedCallScreenerTranscript(lowerTranscript);
           const voicemailIndicators = [
             // Standard voicemail greetings
             'leave a message',
@@ -4607,7 +4644,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             'away from the phone',
           ];
 
-          const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
+          const isVoicemail = !isScreenerPrompt && voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
           // CRITICAL: Override disposition if AI incorrectly set not_interested/no_answer/qualified_lead for voicemail
           // The transcript evidence should take precedence over AI's disposition
           // FIX: Include 'qualified_lead' to catch cases where AI mistakenly classifies voicemail as qualified
@@ -4615,6 +4652,10 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             session.detectedDisposition === 'not_interested' ||
             session.detectedDisposition === 'no_answer' ||
             session.detectedDisposition === 'qualified_lead';
+
+          if (isScreenerPrompt) {
+            console.log(`${LOG_PREFIX} AI screener prompt detected - engage once and wait for human`);
+          }
 
           if (isVoicemail && shouldOverrideDisposition) {
             if (session.detectedDisposition && session.detectedDisposition !== 'voicemail') {
@@ -5140,6 +5181,12 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
   }
 
   console.log(`${LOG_PREFIX} ${LOG_TAG} Analyzing: "${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '...' : ''}"`);
+
+  // AI call screeners are automated systems, but NOT voicemail.
+  // We should engage once and wait for a human, not hang up as voicemail.
+  if (isAutomatedCallScreenerTranscript(normalizedText)) {
+    return { type: 'ivr', confidence: 0.96 };
+  }
 
   // VOICEMAIL Detection - CHECK FIRST (highest priority)
   // These patterns indicate the call went to voicemail - we must hang up immediately
@@ -6294,14 +6341,19 @@ async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transc
     "after the beep",
     "after the tone",
     "not available",
+    "the person you are calling is not available",
     "cannot take your call",
     "please leave",
     "record your message",
+    "at the tone, please record your message",
+    "mailbox is full",
+    "cannot accept messages",
     "voicemail",
     "answering machine"
   ];
   
-  const isVoicemail = voicemailPhrases.some(phrase => lowerTranscript.includes(phrase));
+  const isScreener = isAutomatedCallScreenerTranscript(lowerTranscript);
+  const isVoicemail = !isScreener && voicemailPhrases.some(phrase => lowerTranscript.includes(phrase));
   
   if (isVoicemail && !session.detectedDisposition) {
     console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId}`);
@@ -7512,19 +7564,8 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               .map((t) => t.text.toLowerCase());
 
             // Check for automated AI screener (Google Voice, Call Screen) FIRST
-            const screenerIndicators = [
-              'record your name',
-              'state your name',
-              'reason for calling',
-              'i\'ll see if this person',
-              'this person is available',
-              'stay on the line',
-              'call screening',
-              'call assist',
-            ];
-
             const isScreenerInteraction = userTexts.some(text =>
-              screenerIndicators.some(indicator => text.includes(indicator))
+              isAutomatedCallScreenerTranscript(text)
             );
 
             if (isScreenerInteraction) {
@@ -7685,6 +7726,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   function isVoicemailTranscript(transcript: string): boolean {
     if (!transcript) return false;
     const lower = transcript.toLowerCase();
+    if (isAutomatedCallScreenerTranscript(lower)) return false;
 
     // Comprehensive voicemail detection phrases
     const voicemailPhrases = [
@@ -7693,14 +7735,18 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       'leave your message',
       'after the beep',
       'after the tone',
+      'the person you are calling is not available',
       'not available',
       'cannot take your call',
       'can\'t take your call',
       'please leave',
       'record your message',
+      'at the tone, please record your message',
       'voicemail',
       'voice mail',
       'mailbox',
+      'mailbox is full',
+      'cannot accept messages',
       'answering machine',
       'reached the voicemail',
       'no one is available',
@@ -8505,6 +8551,7 @@ During this initial silence, LISTEN carefully to what the caller says:
 - If there is silence, hold music, IVR, or robotic audio, do NOT deliver your greeting.
 - Speak only after an actual person starts talking.
 - If you hear voicemail cues in the first moments ("leave a message", "after the beep", "not available"), IMMEDIATELY submit_disposition("voicemail") and then end_call. Do not continue the script.
+- If you hear AI screener prompts ("record/state your name and reason", "before I try to connect you"), follow the screener protocol and DO NOT mark voicemail unless the screener explicitly rejects the call.
 
 ### Phase 1: Identity Verification
 When you hear a standard greeting (e.g., "Hello?", "Hi", "Yeah?"), your first response is ALWAYS:
@@ -9288,6 +9335,7 @@ If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
 - "State your name and reason for calling"
 - "I'll see if this person is available"
 - "Please stay on the line" (after providing your name)
+- "Before I try to connect you"
 
 **Respond EXACTLY ONCE:**
 "This is ${agentName} calling from ${orgName} for ${firstName} regarding a business opportunity."
