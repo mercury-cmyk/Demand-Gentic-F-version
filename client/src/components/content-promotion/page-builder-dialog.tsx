@@ -37,10 +37,6 @@ import {
   Trash2,
   GripVertical,
   FileText,
-  Plus,
-  Trash2,
-  GripVertical,
-  FileText,
   Palette,
   Image,
   FormInput,
@@ -49,7 +45,6 @@ import {
   Settings,
   X,
   Sparkles,
-  Loader2,
 } from "lucide-react";
 import type { ContentPromotionPage } from "@shared/schema";
 

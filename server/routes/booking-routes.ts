@@ -9,16 +9,9 @@ const router = Router();
 
 // ================= PUBLIC ROUTES =================
 
-// 1. Get User Profile and Booking Type info by Username + Slug
-router.get("/public/:username/:slug", async (req, res) => {
-  try {
-    const { username, slug } = req.params;
-
-    // Find User
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    // Find Booking Type
+async function resolvePublicBooking(username: string, slug: string) {
+  const [user] = await db.select().from(users).where(eq(users.username, username));
+  if (user) {
     const [type] = await db.select().from(bookingTypes).where(
       and(
         eq(bookingTypes.userId, user.id),
@@ -26,8 +19,40 @@ router.get("/public/:username/:slug", async (req, res) => {
         eq(bookingTypes.isActive, true)
       )
     );
+    if (type) {
+      return { user, type };
+    }
+  }
 
-    if (!type) return res.status(404).json({ message: "Booking type not found or inactive" });
+  // Fallback: look up any active booking type by slug
+  const [fallback] = await db
+    .select({
+      user: users,
+      type: bookingTypes,
+    })
+    .from(bookingTypes)
+    .leftJoin(users, eq(bookingTypes.userId, users.id))
+    .where(and(eq(bookingTypes.slug, slug), eq(bookingTypes.isActive, true)))
+    .orderBy(desc(bookingTypes.updatedAt));
+
+  if (fallback?.user && fallback?.type) {
+    return { user: fallback.user, type: fallback.type };
+  }
+
+  return null;
+}
+
+// 1. Get User Profile and Booking Type info by Username + Slug
+router.get("/public/:username/:slug", async (req, res) => {
+  try {
+    const { username, slug } = req.params;
+
+    const resolved = await resolvePublicBooking(username, slug);
+    if (!resolved) {
+      return res.status(404).json({ message: "Booking type not found or inactive" });
+    }
+
+    const { user, type } = resolved;
 
     res.json({
       user: {
@@ -52,16 +77,9 @@ router.get("/public/:username/:slug/slots", async (req, res) => {
 
     if (!start || !end) return res.status(400).json({ message: "Start and End dates required" });
 
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    const [type] = await db.select().from(bookingTypes).where(
-      and(
-        eq(bookingTypes.userId, user.id),
-        eq(bookingTypes.slug, slug)
-      )
-    );
-    if (!type) return res.status(404).json({ message: "Booking type not found" });
+    const resolved = await resolvePublicBooking(username, slug);
+    if (!resolved) return res.status(404).json({ message: "Booking type not found" });
+    const { user, type } = resolved;
 
     const startDate = new Date(start as string);
     const endDate = new Date(end as string);
@@ -82,16 +100,9 @@ router.post("/public/:username/:slug/book", async (req, res) => {
     const { username, slug } = req.params;
     const { guestName, guestEmail, guestNotes, startTime } = req.body;
 
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    const [type] = await db.select().from(bookingTypes).where(
-      and(
-        eq(bookingTypes.userId, user.id),
-        eq(bookingTypes.slug, slug)
-      )
-    );
-    if (!type) return res.status(404).json({ message: "Booking type not found" });
+    const resolved = await resolvePublicBooking(username, slug);
+    if (!resolved) return res.status(404).json({ message: "Booking type not found" });
+    const { user, type } = resolved;
 
     const booking = await calendarService.createBooking(type.id, {
       name: guestName,
