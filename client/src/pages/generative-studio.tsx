@@ -231,7 +231,9 @@ export default function GenerativeStudioPage() {
 
   const brandKits = (brandKitsData as any)?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
 
+  // Skip localStorage org restoration when URL has a projectId to resolve
   useEffect(() => {
+    if (projectIdFromUrl) return;
     const storedOrgId = localStorage.getItem("generativeStudioOrgId");
     if (storedOrgId) {
       setSelectedOrgId(storedOrgId);
@@ -256,26 +258,31 @@ export default function GenerativeStudioPage() {
     }
   }, [projectIdFromUrl]);
 
-  // Auto-resolve organization from project when projectId is in URL but no org is selected
+  // Auto-resolve organization from project when projectId is in URL
   const { data: resolvedOrgData } = useQuery<{ organizationId: string | null }>({
     queryKey: [`/api/generative-studio/resolve-project-org?projectId=${projectIdFromUrl || ""}`],
-    enabled: !!projectIdFromUrl && !selectedOrgId && !orgIdFromUrl,
+    enabled: !!projectIdFromUrl && !orgIdFromUrl,
   });
 
   useEffect(() => {
-    if (resolvedOrgData?.organizationId && !selectedOrgId) {
+    if (resolvedOrgData?.organizationId) {
       setSelectedOrgId(resolvedOrgData.organizationId);
     }
-  }, [resolvedOrgData, selectedOrgId]);
+  }, [resolvedOrgData]);
 
   useEffect(() => {
     if (selectedOrgId) {
       localStorage.setItem("generativeStudioOrgId", selectedOrgId);
-      const storedProjectId = localStorage.getItem(`generativeStudioProjectId:${selectedOrgId}`);
-      setSelectedProjectId(storedProjectId || null);
+      // Don't override project from URL
+      if (!projectIdFromUrl) {
+        const storedProjectId = localStorage.getItem(`generativeStudioProjectId:${selectedOrgId}`);
+        setSelectedProjectId(storedProjectId || null);
+      }
     } else {
       localStorage.removeItem("generativeStudioOrgId");
-      setSelectedProjectId(null);
+      if (!projectIdFromUrl) {
+        setSelectedProjectId(null);
+      }
     }
   }, [selectedOrgId]);
 
@@ -302,6 +309,8 @@ export default function GenerativeStudioPage() {
   useEffect(() => {
     if (!selectedOrgId) return;
     if (selectedProjectId && orgProjects.some((p) => p.id === selectedProjectId)) return;
+    // Don't replace URL project while projects are still loading
+    if (projectIdFromUrl && selectedProjectId === projectIdFromUrl && orgProjects.length === 0) return;
     setSelectedProjectId(orgProjects[0]?.id || null);
   }, [selectedOrgId, selectedProjectId, orgProjects]);
 

@@ -59,6 +59,11 @@ describe("isAutomatedCallScreenerTranscript", () => {
         "If you record your name and reason for calling, I'll see if this person is available."
       )
     ).toBe(true);
+    expect(
+      isAutomatedCallScreenerTranscript(
+        "Hi, if you record me your name and the reason for calling, I will see if the person is available."
+      )
+    ).toBe(true);
   });
 
   it("does not mark voicemail greeting as call screener", () => {

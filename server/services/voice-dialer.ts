@@ -272,6 +272,7 @@ interface OpenAIRealtimeSession {
     hasGreetingSent: boolean; // Track if AI has sent its opening greeting
     humanDetected: boolean; // True once we confirm human speech
     humanDetectedAt: Date | null;
+    screenerResponseSent: boolean; // True once we respond to automated screener prompt
     audioPatterns: Array<{ // Track patterns of detected audio
       timestamp: Date;
       transcript: string;
@@ -593,7 +594,11 @@ export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
 
   const cues = [
     "record your name and reason for calling",
+    "record me your name and reason for calling",
+    "record me your name and the reason for calling",
     "if you record your name and reason for calling",
+    "if you record me your name and reason for calling",
+    "if you record me your name and the reason for calling",
     "state your name and reason for calling",
     "tell me your name and reason for calling",
     "before i try to connect you",
@@ -601,6 +606,9 @@ export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
     "i ll see if this person is available",
     "i will see if this person is available",
     "see if this person is available",
+    "i ll see if the person is available",
+    "i will see if the person is available",
+    "see if the person is available",
     "please stay on the line",
     "stay on the line while i try to connect you",
     "call screening",
@@ -611,14 +619,69 @@ export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
 
   const regexCues = [
     /(if )?record (your )?name and reason for calling/i,
+    /(if )?record me your name and (the )?reason for calling/i,
     /state your name and reason for calling/i,
     /before i try to connect you/i,
-    /i( ll| will) see if this person is available/i,
+    /i( ll| will) see if (this|the) person is available/i,
     /please stay on the line/i,
     /call (screening|assist)/i,
   ];
 
   return regexCues.some((pattern) => pattern.test(lower));
+}
+
+async function injectAutomatedScreenerResponse(
+  session: OpenAIRealtimeSession,
+  screenerTranscript: string
+): Promise<void> {
+  if (session.provider !== 'openai' || !session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  if (session.audioDetection.screenerResponseSent) {
+    return;
+  }
+
+  const now = new Date();
+  session.audioDetection.screenerResponseSent = true;
+  session.audioDetection.humanDetected = true;
+  if (!session.audioDetection.humanDetectedAt) {
+    session.audioDetection.humanDetectedAt = now;
+  }
+
+  if (!session.audioDetection.hasGreetingSent) {
+    session.audioDetection.hasGreetingSent = true;
+    session.openingPromptSentAt = now;
+    queueSessionEvent(session, "opening.identity_prompt_sent_at", {
+      eventTs: session.openingPromptSentAt,
+      metadata: { provider: "openai", variant: session.voiceLiftVariant || "control", source: "automated_screener" },
+      once: true,
+    });
+  }
+
+  const compactTranscript = (screenerTranscript || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+
+  session.openaiWs.send(JSON.stringify({
+    type: "response.create",
+    response: {
+      modalities: ["text", "audio"],
+      instructions: `AUTOMATED CALL SCREENER detected.
+Prompt heard: "${compactTranscript}"
+
+Respond immediately in ONE concise sentence that includes:
+1) your name
+2) your company
+3) who you are calling for
+4) brief reason for calling
+
+Then STOP and remain silent. Do NOT ask questions. Do NOT repeat yourself.`,
+    },
+  }));
+
+  console.log(`${LOG_PREFIX} Automated screener response injected for call: ${session.callId}`);
 }
 
 /**
@@ -1729,6 +1792,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 hasGreetingSent: false,
                 humanDetected: false,
                 humanDetectedAt: null,
+                screenerResponseSent: false,
                 audioPatterns: [],
                 lastTranscriptCheckTime: null,
                 ivrMenuRepeatCount: 0,
@@ -1869,6 +1933,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 hasGreetingSent: false,
                 humanDetected: false,
                 humanDetectedAt: null,
+                screenerResponseSent: false,
                 audioPatterns: [],
                 lastTranscriptCheckTime: null,
                 ivrMenuRepeatCount: 0,
@@ -3196,6 +3261,105 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       session.lastUserSpeechTime = new Date();
 
       if (audioType.type !== 'human') {
+        const lowerTranscript = event.text.toLowerCase();
+        const isScreenerPrompt = isAutomatedCallScreenerTranscript(lowerTranscript);
+
+        // VOICEMAIL DETECTION - Check FIRST (highest priority), same as OpenAI path
+        // Must run before we decide to ignore IVR audio
+        if (audioType.type === 'ivr' && !isScreenerPrompt) {
+          const voicemailIndicators = [
+            'leave a message', 'leave your message', 'after the beep', 'after the tone',
+            'not available', 'cannot take your call', "can't take your call", 'unable to answer',
+            'please leave', 'record your message', 'voicemail', 'mailbox',
+            'reached the voicemail', 'no one is available', 'at the tone please record',
+            'press pound when finished', 'beep',
+            "we didn't get your message", 'we did not get your message',
+            'you were not speaking', 'because of a bad connection',
+            'to disconnect press', 'to disconnect, press',
+            'to record your message press', 'to record your message, press',
+            'system cannot process', 'please try again later',
+            'are you still there', 'sorry you were having trouble', 'sorry you are having trouble',
+            'maximum time permitted', 'is not available', 'your call has been forwarded',
+            'automatic voice message system', 'voice messaging system', 'automated voice messaging',
+            'forwarded to an automated',
+            "i'll get back to you", 'i will get back to you', 'call you back',
+            'return your call', 'come to the phone', 'away from my phone', 'away from the phone',
+          ];
+          const shouldOverrideDisposition = !session.detectedDisposition ||
+            session.detectedDisposition === 'not_interested' ||
+            session.detectedDisposition === 'no_answer' ||
+            session.detectedDisposition === 'qualified_lead';
+          const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
+
+          if (isVoicemail && shouldOverrideDisposition) {
+            if (session.detectedDisposition && session.detectedDisposition !== 'voicemail') {
+              console.log(`${LOG_PREFIX} ⚠️ [Gemini] VOICEMAIL CORRECTION: AI had set disposition to '${session.detectedDisposition}' but transcript indicates voicemail`);
+            }
+            console.log(`${LOG_PREFIX} [Gemini] VOICEMAIL DETECTED via transcript: "${event.text.substring(0, 60)}..."`);
+            console.log(`${LOG_PREFIX} [Gemini] Immediately ending call ${session.callId} - NO voicemail will be left`);
+
+            session.transcripts.push({ role: 'user', text: event.text, timestamp: new Date() });
+            scheduleRealtimeQualityAnalysis(session);
+
+            session.detectedDisposition = 'voicemail';
+            session.callOutcome = 'voicemail';
+            recordVoicemailDetectedEvent(session, "gemini_input_transcript");
+
+            if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
+              setImmediate(async () => {
+                try {
+                  await db.update(dialerCallAttempts).set({
+                    voicemailDetected: true,
+                    connected: false,
+                    updatedAt: new Date()
+                  }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+                  console.log(`${LOG_PREFIX} ✅ [Gemini] Updated voicemailDetected=true for call attempt ${session.callAttemptId}`);
+                } catch (err) {
+                  console.error(`${LOG_PREFIX} [Gemini] Failed to update voicemailDetected flag:`, err);
+                }
+              });
+            }
+
+            await endCall(session.callId, 'voicemail');
+            return;
+          }
+        }
+
+        // CALL SCREENER DETECTION - Engage once with name/reason, then wait for human
+        if (isScreenerPrompt) {
+          console.log(`${LOG_PREFIX} [Gemini] AI screener prompt detected - responding once immediately`);
+          session.transcripts.push({ role: 'user', text: event.text, timestamp: new Date() });
+          trimArray(session.transcripts, MAX_TRANSCRIPTS);
+          scheduleRealtimeQualityAnalysis(session);
+          session.timingMetrics.lastProspectSpeechEndAt = new Date();
+          session.lastSpeechStoppedAt = session.timingMetrics.lastProspectSpeechEndAt;
+
+          // Inject screener response via Gemini text message (if not already sent)
+          const geminiProvider = (session as any).geminiProvider;
+          if (geminiProvider && !session.audioDetection.screenerResponseSent) {
+            session.audioDetection.screenerResponseSent = true;
+            session.audioDetection.humanDetected = true;
+            if (!session.audioDetection.humanDetectedAt) {
+              session.audioDetection.humanDetectedAt = new Date();
+            }
+            if (!session.audioDetection.hasGreetingSent) {
+              session.audioDetection.hasGreetingSent = true;
+              session.openingPromptSentAt = new Date();
+            }
+
+            const compactTranscript = (event.text || "").replace(/\s+/g, " ").trim().slice(0, 220);
+            geminiProvider.sendTextMessage(
+              `AUTOMATED CALL SCREENER detected. Prompt heard: "${compactTranscript}"\n\n` +
+              `Respond immediately in ONE concise sentence that includes:\n` +
+              `1) your name\n2) your company\n3) who you are calling for\n4) brief reason for calling\n\n` +
+              `Then STOP and remain silent. Do NOT ask questions. Do NOT repeat yourself.`
+            );
+            console.log(`${LOG_PREFIX} [Gemini] Automated screener response injected for call: ${session.callId}`);
+          }
+          return;
+        }
+
+        // For other non-human audio (generic IVR menus, music, etc.) - ignore
         console.log(`${LOG_PREFIX} [Gemini] Ignoring non-human audio: ${audioType.type} (confidence: ${audioType.confidence.toFixed(2)})`);
         return;
       }
@@ -4711,6 +4875,8 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
         // INTELLIGENT AUDIO DETECTION - Determine if this is human, IVR, or music
         const audioType = detectAudioType(message.transcript, session);
+        const lowerTranscript = message.transcript.toLowerCase();
+        const isScreenerPrompt = isAutomatedCallScreenerTranscript(lowerTranscript);
         session.audioDetection.audioPatterns.push({
           timestamp: new Date(),
           transcript: message.transcript,
@@ -4723,8 +4889,6 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         // INTELLIGENT VOICEMAIL DETECTION - Check FIRST before anything else
         // This must run before we decide to ignore IVR audio
         if (audioType.type === 'ivr') {
-          const lowerTranscript = message.transcript.toLowerCase();
-          const isScreenerPrompt = isAutomatedCallScreenerTranscript(lowerTranscript);
           const voicemailIndicators = [
             // Standard voicemail greetings
             'leave a message',
@@ -4825,6 +4989,21 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             }
 
             await endCall(session.callId, 'voicemail');
+            break;
+          }
+
+          if (isScreenerPrompt) {
+            console.log(`${LOG_PREFIX} AI screener prompt detected - responding once immediately`);
+            session.transcripts.push({
+              role: 'user',
+              text: message.transcript,
+              timestamp: new Date()
+            });
+            trimArray(session.transcripts, MAX_TRANSCRIPTS);
+            scheduleRealtimeQualityAnalysis(session);
+            session.timingMetrics.lastProspectSpeechEndAt = new Date();
+            session.lastSpeechStoppedAt = session.timingMetrics.lastProspectSpeechEndAt;
+            await injectAutomatedScreenerResponse(session, message.transcript);
             break;
           }
 
