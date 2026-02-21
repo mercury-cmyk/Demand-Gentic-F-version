@@ -160,7 +160,7 @@ const MAX_TRANSCRIPTS = 200;
 const MAX_STATE_HISTORY = 50;
 const MAX_AUDIO_PATTERNS = 100;
 const MAX_RESPONSE_LATENCIES = 100;
-const VOICEMAIL_EARLY_WINDOW_MS = 3500;
+const VOICEMAIL_EARLY_WINDOW_MS = 12000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
 
 /** Trim array from the front if it exceeds maxLen. Call after pushing. */
@@ -587,19 +587,21 @@ function normalizeTranscriptForComparison(text: string): string {
     .trim();
 }
 
-function isVoicemailCueTranscript(transcript: string): boolean {
+export function isVoicemailCueTranscript(transcript: string): boolean {
   const lower = normalizeTranscriptForComparison(transcript);
   if (!lower) return false;
 
   const cues = [
     "leave a message",
     "leave your message",
+    "please leave a message after the tone",
     "after the beep",
     "after the tone",
-    "not available",
+    "not available to take your call",
     "cannot take your call",
     "cant take your call",
     "unable to answer",
+    "im unavailable to take your call right now",
     "please leave",
     "record your message",
     "voicemail",
@@ -607,11 +609,32 @@ function isVoicemailCueTranscript(transcript: string): boolean {
     "mailbox",
     "no one is available",
     "your call has been forwarded",
+    "your call has been forwarded to voicemail",
+    "your call has been forwarded to voice mail",
     "automatic voice message system",
+    "you have reached the voice mail of",
+    "you have reached the voicemail of",
+    "you are trying to reach is not available",
+    "if you record your name and reason for calling",
+    "record your name and reason for calling",
+    "state your name and reason for calling",
+    "see if this person is available",
     "beep",
   ];
 
-  return cues.some((cue) => lower.includes(cue));
+  if (cues.some((cue) => lower.includes(cue))) return true;
+
+  const regexCues = [
+    /you have reached (the )?voice ?mail (of|for)/i,
+    /your call has been forwarded to (an )?(automatic )?voice ?mail/i,
+    /(i m|im|i am) unavailable to take your call right now/i,
+    /please leave (a )?message after the tone/i,
+    /(if )?record (your )?name and reason for calling/i,
+    /state your name and reason for calling/i,
+    /see if this person is available/i,
+  ];
+
+  return regexCues.some((pattern) => pattern.test(lower));
 }
 
 function shouldFastAbortForEarlyVoicemail(session: OpenAIRealtimeSession, transcript: string): boolean {
@@ -3358,19 +3381,49 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // 2. AI hears it, THEN introduces itself
     //
     // We wait for Deepgram to detect inbound speech before nudging Gemini.
-    // Fallback: If no speech detected after 4.5s, send greeting anyway (silent pickup / voicemail).
+    // Fallback: if no human speech is detected, send greeting only after a guarded delay.
     //
     // The greeting trigger happens in two places:
-    // - Deepgram onSpeechStarted (inbound) → triggers greeting after 400ms delay
-    // - Fallback timer (4.5s) → triggers greeting if no speech detected
+    // - Deepgram onSpeechStarted (inbound) marks speech and waits for transcript classification
+    // - Fallback timer sends greeting only when automation/voicemail cues are absent
     (session as any).greetingTriggeredByCallerSpeech = false;
+    (session as any).fallbackGreetingDeferrals = 0;
 
     // Fallback: If caller doesn't speak, send greeting.
-    // This handles: silent pickups, voicemail that doesn't announce, etc.
-    // 4.5s balances dead-air risk while allowing early voicemail cues to surface first.
-    const fallbackGreetingTimer = setTimeout(() => {
-      if (session.isActive && !session.audioDetection.hasGreetingSent) {
-        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4.5s - sending greeting (fallback)`);
+    // If we are hearing audio but no human is detected, defer briefly to avoid speaking into voicemail/automation.
+    const scheduleFallbackGreetingCheck = (delayMs: number): void => {
+      const timer = setTimeout(() => {
+        if (!session.isActive || session.audioDetection.hasGreetingSent || session.isEnding) return;
+
+        const hasRecentMachineCue = session.audioDetection.audioPatterns
+          .slice(-4)
+          .some((pattern) => pattern.type === "ivr" || pattern.type === "music");
+        const hasTranscriptVoicemailCue = session.transcripts
+          .slice(-6)
+          .some((turn) => turn.role === "user" && isVoicemailCueTranscript(turn.text));
+
+        if (hasRecentMachineCue || hasTranscriptVoicemailCue) {
+          console.log(`${LOG_PREFIX} [AudioGuard] Fallback greeting suppressed due to automation/voicemail cues`);
+          session.detectedDisposition = "voicemail";
+          session.callOutcome = "voicemail";
+          recordVoicemailDetectedEvent(session, "fallback_greeting_guard");
+          setImmediate(() => {
+            endCall(session.callId, "voicemail").catch((err) => {
+              console.error(`${LOG_PREFIX} Failed to end call after fallback greeting guard:`, err);
+            });
+          });
+          return;
+        }
+
+        const deferrals = Number((session as any).fallbackGreetingDeferrals || 0);
+        if (session.telnyxInboundFrames > 0 && !session.audioDetection.humanDetected && deferrals < 2) {
+          (session as any).fallbackGreetingDeferrals = deferrals + 1;
+          console.log(`${LOG_PREFIX} [AudioGuard] Deferring fallback greeting (${deferrals + 1}/2) while classifying inbound audio`);
+          scheduleFallbackGreetingCheck(2000);
+          return;
+        }
+
+        console.log(`${LOG_PREFIX} No caller speech detected - sending greeting (fallback)`);
         session.audioDetection.hasGreetingSent = true;
         provider.sendOpeningMessage(openingScript);
         session.openingPromptSentAt = new Date();
@@ -3379,9 +3432,12 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           metadata: { provider: "google", variant: session.voiceLiftVariant || "control" },
           once: true,
         });
-      }
-    }, 4500);
-    (session as any).fallbackGreetingTimer = fallbackGreetingTimer; // Store to clear it later
+      }, delayMs);
+
+      (session as any).fallbackGreetingTimer = timer;
+    };
+
+    scheduleFallbackGreetingCheck(6500);
 
     // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 5s,
     // force-retry the opening. This catches edge cases where the greeting was dropped
@@ -6310,32 +6366,8 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
           encoding: deepgramEncoding,
           onSpeechStarted: (channel) => {
             if (channel === 'inbound' && session.isActive && !session.audioDetection.hasGreetingSent && !(session as any).greetingTriggeredByCallerSpeech) {
-              console.log(`${LOG_PREFIX} 🗣️ Caller speech detected by Deepgram - triggering greeting`);
+              console.log(`${LOG_PREFIX} [AudioGuard] Caller speech detected by Deepgram - waiting for transcript classification before greeting`);
               (session as any).greetingTriggeredByCallerSpeech = true;
-
-              // Clear the fallback timer since speech was detected
-              if ((session as any).fallbackGreetingTimer) {
-                clearTimeout((session as any).fallbackGreetingTimer);
-                (session as any).fallbackGreetingTimer = null;
-                console.log(`${LOG_PREFIX}  clearTimeout for fallback greeting timer`);
-              }
-
-              // Send greeting immediately when speech is detected.
-              // Deepgram already introduces latency (startup + detection), so by the
-              // time onSpeechStarted fires, the prospect has already finished "Hello?".
-              // Adding extra delay here makes the agent feel sluggish. Gemini's VAD
-              // handles barge-in if the prospect keeps talking.
-              setImmediate(() => {
-                if (session.isActive && !session.audioDetection.hasGreetingSent) {
-                  session.audioDetection.hasGreetingSent = true;
-                  const provider = (session as any).geminiProvider;
-                  const script = (session as any).geminiOpeningScript;
-                  if (provider && script) {
-                    console.log(`${LOG_PREFIX} 🎙️ Sending greeting immediately after caller speech detected`);
-                    provider.sendOpeningMessage(script);
-                  }
-                }
-              });
             }
           },
           onTranscript: (segment) => {

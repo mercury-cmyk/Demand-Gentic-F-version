@@ -41,10 +41,26 @@ interface CampaignContext {
   targetAudienceDescription: string | null;
 }
 
+interface AggregateStats {
+  totalCalls: number;
+  avgQualityScore: number | null;
+  avgEngagementScore: number | null;
+  avgObjectionHandlingScore: number | null;
+  avgClosingScore: number | null;
+  avgQualificationScore: number | null;
+  avgFlowComplianceScore: number | null;
+  avgDuration: number | null;
+  sentimentDistribution: { positive: number; neutral: number; negative: number };
+  dispositionDistribution: Record<string, number>;
+  dispositionAccuracy: { accurate: number; inaccurate: number; unreviewed: number };
+  issueFrequencies: Record<string, number>;
+}
+
 interface CoachingInput {
   calls: CallDataForAnalysis[];
   campaignContext?: CampaignContext;
   focusAreas?: string[];
+  aggregateStats?: AggregateStats;
 }
 
 export interface CoachingResult {
@@ -92,7 +108,7 @@ export interface CoachingResult {
 export async function generateCoachingRecommendations(
   input: CoachingInput
 ): Promise<CoachingResult> {
-  const { calls, campaignContext, focusAreas } = input;
+  const { calls, campaignContext, focusAreas, aggregateStats } = input;
 
   if (calls.length === 0) {
     return {
@@ -109,20 +125,27 @@ export async function generateCoachingRecommendations(
     };
   }
 
-  // Pre-aggregate issue frequencies
-  const issueFrequencies: Record<string, number> = {};
-  for (const call of calls) {
-    if (Array.isArray(call.issues)) {
-      for (const issue of call.issues) {
-        const key = issue.type || issue.description || 'unknown';
-        issueFrequencies[key] = (issueFrequencies[key] || 0) + 1;
+  const totalAnalyzed = aggregateStats?.totalCalls || calls.length;
+
+  // Use aggregate issue frequencies when available, otherwise compute from sampled calls
+  let issueFrequencies: Record<string, number>;
+  if (aggregateStats?.issueFrequencies && Object.keys(aggregateStats.issueFrequencies).length > 0) {
+    issueFrequencies = aggregateStats.issueFrequencies;
+  } else {
+    issueFrequencies = {};
+    for (const call of calls) {
+      if (Array.isArray(call.issues)) {
+        for (const issue of call.issues) {
+          const key = issue.type || issue.description || 'unknown';
+          issueFrequencies[key] = (issueFrequencies[key] || 0) + 1;
+        }
       }
     }
   }
 
-  // Build call summaries (truncate transcripts to 3000 chars each)
+  // Build call summaries (truncate transcripts to 2000 chars each to fit more calls)
   const callSummaries = calls.map((call, i) => {
-    const transcript = (call.transcript || '').slice(0, 3000);
+    const transcript = (call.transcript || '').slice(0, 2000);
     return `
 --- Call ${i + 1} ---
 Disposition: ${call.disposition || 'unknown'}
@@ -155,13 +178,36 @@ Known Objections: ${JSON.stringify(campaignContext.objections || [])}
     ? `\nFOCUS AREAS (prioritize these in your analysis): ${focusAreas.join(', ')}\n`
     : '';
 
+  // Build aggregate statistics section when analyzing large batches
+  const aggregateSection = aggregateStats ? `
+AGGREGATE STATISTICS FROM ALL ${aggregateStats.totalCalls} CALLS:
+(Note: ${calls.length} representative call transcripts are provided below, but these statistics cover ALL ${aggregateStats.totalCalls} calls. Base your frequency/impact estimates on the full dataset, not just the sampled transcripts.)
+
+Performance Averages:
+- Overall Quality: ${aggregateStats.avgQualityScore ?? 'N/A'}/100
+- Engagement: ${aggregateStats.avgEngagementScore ?? 'N/A'}/100
+- Objection Handling: ${aggregateStats.avgObjectionHandlingScore ?? 'N/A'}/100
+- Closing: ${aggregateStats.avgClosingScore ?? 'N/A'}/100
+- Qualification: ${aggregateStats.avgQualificationScore ?? 'N/A'}/100
+- Flow Compliance: ${aggregateStats.avgFlowComplianceScore ?? 'N/A'}/100
+- Avg Duration: ${aggregateStats.avgDuration ?? 'N/A'}s
+
+Sentiment Distribution: Positive: ${aggregateStats.sentimentDistribution.positive}, Neutral: ${aggregateStats.sentimentDistribution.neutral}, Negative: ${aggregateStats.sentimentDistribution.negative}
+
+Disposition Distribution:
+${Object.entries(aggregateStats.dispositionDistribution).sort((a, b) => b[1] - a[1]).map(([d, c]) => `- ${d}: ${c} calls (${Math.round((c / aggregateStats.totalCalls) * 100)}%)`).join('\n')}
+
+Disposition Accuracy: ${aggregateStats.dispositionAccuracy.accurate} accurate, ${aggregateStats.dispositionAccuracy.inaccurate} inaccurate, ${aggregateStats.dispositionAccuracy.unreviewed} unreviewed
+` : '';
+
   const systemPrompt = `You are an expert B2B sales coach and AI voice agent performance analyst. You analyze batches of call transcripts and quality data to identify systemic patterns, common mistakes, and generate actionable coaching recommendations.
 
 ${campaignSection}
 ${focusSection}
+${aggregateSection}
 
-AGGREGATE ISSUE FREQUENCIES ACROSS ALL CALLS:
-${Object.entries(issueFrequencies).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([issue, count]) => `- ${issue}: ${count} occurrences`).join('\n')}
+AGGREGATE ISSUE FREQUENCIES ACROSS ALL ${totalAnalyzed} CALLS:
+${Object.entries(issueFrequencies).sort((a, b) => b[1] - a[1]).slice(0, 30).map(([issue, count]) => `- ${issue}: ${count} occurrences (${Math.round((count / totalAnalyzed) * 100)}% of calls)`).join('\n')}
 
 CRITICAL RULES — DO NOT VIOLATE:
 1. NEVER suggest improvements to pronunciation, enunciation, or speech clarity. The agent is an AI voice agent — any perceived pronunciation issues are speech-to-text (STT) transcription errors, NOT actual agent mistakes.
@@ -172,6 +218,7 @@ CRITICAL RULES — DO NOT VIOLATE:
 6. All analysis MUST be contextualized against the campaign objectives and success criteria, NOT generic sales best practices.
 7. Focus on actionable, specific improvements — not vague suggestions.
 8. When analyzing voicemail calls, focus on how quickly the agent detected it was a voicemail and hung up. Suggest specific phrases/patterns to detect faster.
+9. When aggregate statistics are provided, use them to scale your frequency and impact estimates to the FULL dataset, not just the sampled transcripts.
 
 Respond with a JSON object matching this structure exactly:
 {
@@ -185,17 +232,17 @@ Respond with a JSON object matching this structure exactly:
   "voicemailOptimization": {"avgDetectionTime": number, "missedVoicemailPhrases": ["string"], "recommendations": ["string"]} or null
 }`;
 
-  const userPrompt = `Analyze these ${calls.length} calls and generate coaching recommendations:
+  const userPrompt = `Analyze coaching data from ${totalAnalyzed} calls (${calls.length} representative transcripts provided below) and generate coaching recommendations:
 
 ${callSummaries}
 
-Generate a comprehensive coaching analysis. Be specific — reference actual phrases from the transcripts. Prioritize issues by frequency and impact on campaign objectives.`;
+Generate a comprehensive coaching analysis based on the full ${totalAnalyzed}-call dataset. Be specific — reference actual phrases from the transcripts. Prioritize issues by frequency and impact on campaign objectives. Scale your affectedCalls estimates to the full ${totalAnalyzed} calls, not just the ${calls.length} sampled transcripts.`;
 
   try {
-    console.log(`${LOG_PREFIX} Generating coaching for ${calls.length} calls using Gemini 3 Deep Think...`);
+    console.log(`${LOG_PREFIX} Generating coaching for ${totalAnalyzed} calls (${calls.length} sampled) using Gemini 3 Deep Think...`);
 
     const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-    const parsed = await deepAnalyzeJSON<any>(fullPrompt, { temperature: 0.3, maxTokens: 4000 });
+    const parsed = await deepAnalyzeJSON<any>(fullPrompt, { temperature: 0.3, maxTokens: 6000 });
     console.log(`${LOG_PREFIX} Coaching generated: ${parsed.topIssues?.length || 0} issues, ${parsed.recommendations?.length || 0} recommendations`);
 
     return {
@@ -205,7 +252,7 @@ Generate a comprehensive coaching analysis. Be specific — reference actual phr
       naturalLanguagePatterns: parsed.naturalLanguagePatterns || { adopt: [], avoid: [] },
       voicemailOptimization: parsed.voicemailOptimization || null,
       metadata: {
-        callsAnalyzed: calls.length,
+        callsAnalyzed: totalAnalyzed,
         dateRange: {
           start: calls[calls.length - 1]?.callSessionId || '',
           end: calls[0]?.callSessionId || '',

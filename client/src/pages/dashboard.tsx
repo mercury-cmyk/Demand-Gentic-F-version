@@ -4,7 +4,7 @@ import { StatCard } from "@/components/shared/stat-card";
 import { 
   Users, Building2, Mail, CheckCircle, Phone, Clock, TrendingUp, 
   Award, FileText, ArrowUp, ArrowDown, Activity, Sparkles, 
-  Zap, MessageSquare, ShieldCheck, Search, Brain, Target, AlertCircle, Plus
+  Zap, MessageSquare, ShieldCheck, Search, Brain, Target, AlertCircle, Plus, Calendar
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
