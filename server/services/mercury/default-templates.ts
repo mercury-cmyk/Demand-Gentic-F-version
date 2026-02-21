@@ -6,8 +6,8 @@
  */
 
 import { db } from '../../db';
-import { eq } from 'drizzle-orm';
-import { mercuryTemplates } from '@shared/schema';
+import { eq, and } from 'drizzle-orm';
+import { mercuryTemplates, mercuryNotificationRules } from '@shared/schema';
 
 export interface DefaultTemplate {
   templateKey: string;
@@ -723,6 +723,184 @@ If you received this email, the Mercury Bridge SMTP configuration is working cor
       { name: 'environment', description: 'Environment name', required: false, defaultValue: 'production', exampleValue: 'production' },
     ],
   },
+  {
+    templateKey: 'campaign_order_submitted',
+    name: 'Campaign Order Submitted',
+    description: 'Internal notification sent to admins when a client submits a new campaign work order.',
+    category: 'notification',
+    subjectTemplate: 'New Campaign Order: {{orderNumber}} — {{clientName}}',
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #d97706 !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+  .cta-btn { background-color: #d97706 !important; color: #ffffff !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #d97706 !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+[data-ogsc] .cta-btn { background-color: #d97706 !important; color: #ffffff !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#d97706; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">New Campaign Order</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">A new campaign work order has been submitted and requires review.</p>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:16px 0;"><tr><td style="background-color:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:16px;">
+      <p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Order #:</strong> {{orderNumber}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Client:</strong> {{clientName}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Title:</strong> {{orderTitle}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Type:</strong> {{orderType}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Priority:</strong> {{priority}}</p>
+      {{#if targetLeadCount}}<p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Target Leads:</strong> {{targetLeadCount}}</p>{{/if}}
+      {{#if budget}}<p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Budget:</strong> {{budget}}</p>{{/if}}
+      <p style="margin:4px 0; font-size:14px; color:#92400e;"><strong>Submitted:</strong> {{submittedAt}}</p>
+    </td></tr></table>
+    {{#if description}}<p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px;"><strong>Description:</strong> {{description}}</p>{{/if}}
+    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin:24px 0;" align="center"><tr><td align="center">
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{adminLink}}" style="height:44px;v-text-anchor:middle;width:240px;" arcsize="14%" stroke="f" fillcolor="#d97706"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;">Review in Admin Portal</center></v:roundrect><![endif]-->
+      <!--[if !mso]><!--><a href="{{adminLink}}" style="background-color:#d97706; color:#ffffff; padding:12px 28px; border-radius:6px; text-decoration:none; font-size:15px; font-weight:600; display:inline-block; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">Review in Admin Portal</a><!--<![endif]-->
+    </td></tr></table>
+    <p style="font-size:13px; color:#6b7280; margin:16px 0 0;">This is an automated notification from the DemandGentic.ai platform.</p>
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
+    textTemplate: `New Campaign Order Submitted
+============================
+
+A new campaign work order has been submitted and requires review.
+
+Order #: {{orderNumber}}
+Client: {{clientName}}
+Title: {{orderTitle}}
+Type: {{orderType}}
+Priority: {{priority}}
+Target Leads: {{targetLeadCount}}
+Budget: {{budget}}
+Submitted: {{submittedAt}}
+
+Description: {{description}}
+
+Review in Admin Portal: {{adminLink}}
+
+--
+Pivotal B2B - DemandGentic.ai Platform`,
+    variables: [
+      { name: 'orderNumber', description: 'Work order reference number', required: true, exampleValue: 'WO-202602-ABC123' },
+      { name: 'clientName', description: 'Client account name', required: true, exampleValue: 'Acme Corp' },
+      { name: 'orderTitle', description: 'Work order title', required: true, exampleValue: 'Q1 Lead Generation Campaign' },
+      { name: 'orderType', description: 'Order type (lead_generation, etc.)', required: true, exampleValue: 'lead_generation' },
+      { name: 'priority', description: 'Order priority', required: true, defaultValue: 'normal', exampleValue: 'normal' },
+      { name: 'targetLeadCount', description: 'Target number of leads', required: false, exampleValue: '500' },
+      { name: 'budget', description: 'Estimated budget', required: false, exampleValue: '$5,000' },
+      { name: 'description', description: 'Order description', required: false, exampleValue: 'Generate qualified leads in the healthcare vertical.' },
+      { name: 'submittedAt', description: 'Submission timestamp', required: true, exampleValue: 'February 21, 2026' },
+      { name: 'adminLink', description: 'Link to review in admin portal', required: false, defaultValue: 'https://demandgentic.ai/admin/project-requests', exampleValue: 'https://demandgentic.ai/admin/project-requests' },
+    ],
+  },
+  {
+    templateKey: 'campaign_order_approved',
+    name: 'Campaign Order Approved',
+    description: 'Confirmation email sent to the client when their campaign order is reviewed and approved.',
+    category: 'notification',
+    subjectTemplate: 'Your campaign order "{{orderTitle}}" has been approved!',
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #059669 !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+  .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #059669 !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+[data-ogsc] .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#059669; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">Order Approved</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">Hi {{recipientName}},</p>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px;">Great news! Your campaign order <strong>"{{orderTitle}}"</strong> has been reviewed and approved.</p>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:16px 0;"><tr><td style="background-color:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:16px;">
+      <p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Order:</strong> {{orderTitle}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Approved on:</strong> {{approvalDate}}</p>
+      {{#if approvedBy}}<p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Approved by:</strong> {{approvedBy}}</p>{{/if}}
+    </td></tr></table>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:16px 0;">You can now log in to your portal to preview the campaign within your campaigns list. Our team will begin setting up your campaign shortly.</p>
+    {{#if portalLink}}
+    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin:24px 0;" align="center"><tr><td align="center">
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{portalLink}}" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="14%" stroke="f" fillcolor="#059669"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;">View Campaign in Portal</center></v:roundrect><![endif]-->
+      <!--[if !mso]><!--><a href="{{portalLink}}" style="background-color:#059669; color:#ffffff; padding:12px 28px; border-radius:6px; text-decoration:none; font-size:15px; font-weight:600; display:inline-block; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">View Campaign in Portal</a><!--<![endif]-->
+    </td></tr></table>
+    {{/if}}
+    <p style="font-size:13px; color:#6b7280; margin:16px 0 0;">We'll notify you again when leads start being generated. Thank you for choosing Pivotal B2B.</p>
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
+    textTemplate: `Hi {{recipientName}},
+
+Great news! Your campaign order "{{orderTitle}}" has been reviewed and approved.
+
+Order: {{orderTitle}}
+Approved on: {{approvalDate}}
+
+You can now log in to your portal to preview the campaign within your campaigns list.
+
+View Campaign in Portal: {{portalLink}}
+
+Our team will begin setting up your campaign shortly. We'll notify you when leads start being generated.
+
+Thank you for choosing Pivotal B2B.
+
+--
+Pivotal B2B - DemandGentic.ai Platform`,
+    variables: [
+      { name: 'recipientName', description: 'Recipient full name', required: true, exampleValue: 'Jane Smith' },
+      { name: 'orderTitle', description: 'Campaign order title or project name', required: true, exampleValue: 'Q1 Lead Generation Campaign' },
+      { name: 'approvalDate', description: 'Date of approval', required: true, exampleValue: 'February 21, 2026' },
+      { name: 'approvedBy', description: 'Admin who approved', required: false, exampleValue: 'Admin User' },
+      { name: 'portalLink', description: 'Link to view campaign in client portal', required: false, exampleValue: 'https://demandgentic.ai/client-portal/campaigns/abc123' },
+    ],
+  },
 ];
 
 /**
@@ -760,5 +938,82 @@ export async function seedDefaultTemplates(): Promise<{ created: number; skipped
   }
 
   console.log(`[Mercury] Templates seeded: created=${created}, skipped=${skipped}`);
+  return { created, skipped };
+}
+
+// ─── Default Notification Rules ───────────────────────────────────────────────
+
+export interface DefaultRule {
+  eventType: string;
+  templateKey: string;
+  channelType: string;
+  recipientResolver: string;
+  customRecipients?: string[];
+  isEnabled: boolean;
+  description: string;
+}
+
+export const DEFAULT_RULES: DefaultRule[] = [
+  {
+    eventType: 'campaign_order_submitted',
+    templateKey: 'campaign_order_submitted',
+    channelType: 'email',
+    recipientResolver: 'custom',
+    customRecipients: [
+      'zahid.m@pivotal-b2b.com',
+      'tabasum.hamdard@pivotal-b2b.com',
+    ],
+    isEnabled: true,
+    description: 'Notify admins (Zahid and Tawassum) when a client submits a new campaign work order.',
+  },
+  {
+    eventType: 'campaign_order_approved',
+    templateKey: 'campaign_order_approved',
+    channelType: 'email',
+    recipientResolver: 'all_tenant_users',
+    isEnabled: true,
+    description: 'Send approval confirmation to all client users when their campaign order is approved.',
+  },
+];
+
+/**
+ * Seed default Mercury notification rules if they don't exist.
+ * Safe to call multiple times — skips existing rules by eventType + templateKey.
+ */
+export async function seedDefaultRules(): Promise<{ created: number; skipped: number }> {
+  let created = 0;
+  let skipped = 0;
+
+  for (const rule of DEFAULT_RULES) {
+    const [existing] = await db
+      .select({ id: mercuryNotificationRules.id })
+      .from(mercuryNotificationRules)
+      .where(
+        and(
+          eq(mercuryNotificationRules.eventType, rule.eventType),
+          eq(mercuryNotificationRules.templateKey, rule.templateKey),
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    await db.insert(mercuryNotificationRules).values({
+      eventType: rule.eventType,
+      templateKey: rule.templateKey,
+      channelType: rule.channelType,
+      recipientResolver: rule.recipientResolver,
+      customRecipients: rule.customRecipients || null,
+      isEnabled: rule.isEnabled,
+      description: rule.description,
+    });
+
+    created++;
+  }
+
+  console.log(`[Mercury] Rules seeded: created=${created}, skipped=${skipped}`);
   return { created, skipped };
 }

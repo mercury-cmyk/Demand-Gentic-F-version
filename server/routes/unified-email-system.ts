@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { smtpProvidersRouter } from "./mercury-bridge";
-import mercuryRouter, { seedDefaultTemplates } from "./mercury-bridge";
+import mercuryRouter, { seedDefaultTemplates, seedDefaultRules } from "./mercury-bridge";
 import transactionalTemplatesRouter from "./transactional-templates";
 import { requireAuth, requireRole, hashPassword } from "../auth";
 import { requireFeatureFlag } from "../feature-flags";
@@ -160,7 +160,8 @@ router.use("/templates", transactionalTemplatesRouter);
 router.post("/onboarding/seed-templates", async (req: Request, res: Response) => {
   try {
     await seedDefaultTemplates();
-    res.json({ success: true, message: "Default templates (including client_invite) seeded." });
+    await seedDefaultRules();
+    res.json({ success: true, message: "Default templates and notification rules seeded." });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

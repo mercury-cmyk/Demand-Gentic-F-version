@@ -20,6 +20,7 @@ import {
 } from '@shared/schema';
 import { z } from 'zod';
 import { notificationService } from '../services/notification-service';
+import { notificationService as mercuryNotificationService } from '../services/mercury';
 
 const router = Router();
 
@@ -455,6 +456,41 @@ router.post('/client', async (req: Request, res: Response) => {
       );
     } catch (notifyError) {
       console.error('[WorkOrders] Failed to send admin email notification:', notifyError);
+    }
+
+    // ── Mercury Bridge: Dispatch campaign_order_submitted event ──────────
+    try {
+      const [mercuryClientAccount] = await db
+        .select({ name: clientAccounts.name })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, clientAccountId))
+        .limit(1);
+
+      mercuryNotificationService.dispatch({
+        eventType: 'campaign_order_submitted',
+        tenantId: clientAccountId,
+        actorUserId: clientUserId || undefined,
+        payload: {
+          orderNumber: workOrder.order_number || orderNumber,
+          clientName: mercuryClientAccount?.name || 'Unknown Client',
+          orderTitle: workOrder.title || parsed.title,
+          orderType: workOrder.order_type || parsed.orderType || 'lead_generation',
+          priority: workOrder.priority || parsed.priority || 'normal',
+          targetLeadCount: String(workOrder.target_lead_count ?? parsed.targetLeadCount ?? ''),
+          budget: (workOrder.estimated_budget ?? parsed.estimatedBudget)
+            ? `$${workOrder.estimated_budget ?? parsed.estimatedBudget}`
+            : '',
+          description: workOrder.description || parsed.description || '',
+          submittedAt: new Date().toLocaleDateString('en-US', {
+            year: 'numeric', month: 'long', day: 'numeric',
+          }),
+          adminLink: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/admin/project-requests`,
+        },
+      }).catch(err => {
+        console.error('[WorkOrders] Mercury notification error:', err.message);
+      });
+    } catch (mercuryErr) {
+      console.error('[WorkOrders] Mercury dispatch error:', mercuryErr);
     }
 
     res.json({

@@ -35,6 +35,8 @@ export type MercuryEventType =
   | 'test_notification'
   | 'welcome_client'
   | 'password_reset_client'
+  | 'campaign_order_submitted'
+  | 'campaign_order_approved'
   | string; // extensible
 
 // ─── Recipient Resolver Types ────────────────────────────────────────────────

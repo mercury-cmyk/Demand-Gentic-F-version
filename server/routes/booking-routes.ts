@@ -10,45 +10,72 @@ const router = Router();
 // ================= PUBLIC ROUTES =================
 
 async function resolvePublicBooking(username: string, slug: string) {
-  const [user] = await db.select().from(users).where(eq(users.username, username));
-  if (user) {
-    const [type] = await db.select().from(bookingTypes).where(
-      and(
-        eq(bookingTypes.userId, user.id),
-        eq(bookingTypes.slug, slug),
-        eq(bookingTypes.isActive, true)
-      )
-    );
-    if (type) {
-      return { user, type };
+  try {
+    console.log(`[DEBUG] resolvePublicBooking: Looking for username="${username}", slug="${slug}"`);
+    
+    const userResults = await db.select().from(users).where(eq(users.username, username));
+    const [user] = userResults;
+    
+    console.log(`[DEBUG] User query result:`, user ? { id: user.id, username: user.username } : "NO USER FOUND");
+    
+    if (user) {
+      const typeResults = await db.select().from(bookingTypes).where(
+        and(
+          eq(bookingTypes.userId, user.id),
+          eq(bookingTypes.slug, slug),
+          eq(bookingTypes.isActive, true)
+        )
+      );
+      const [type] = typeResults;
+      
+      console.log(`[DEBUG] BookingType query result for user:`, type ? { id: type.id, slug: type.slug } : "NO BOOKING TYPE FOR THIS USER");
+      
+      if (type) {
+        return { user, type };
+      }
     }
+
+    // Fallback: look up any active booking type by slug
+    console.log(`[DEBUG] Trying fallback: looking for any active booking with slug="${slug}"`);
+    
+    const fallbackResults = await db
+      .select({
+        user: users,
+        type: bookingTypes,
+      })
+      .from(bookingTypes)
+      .leftJoin(users, eq(bookingTypes.userId, users.id))
+      .where(and(eq(bookingTypes.slug, slug), eq(bookingTypes.isActive, true)))
+      .orderBy(desc(bookingTypes.updatedAt));
+    
+    const [fallback] = fallbackResults;
+    
+    console.log(`[DEBUG] Fallback query result:`, fallback ? { userId: fallback.user?.id, typeId: fallback.type?.id } : "NO FALLBACK FOUND");
+
+    if (fallback?.user && fallback?.type) {
+      console.log(`[DEBUG] Using fallback result`);
+      return { user: fallback.user, type: fallback.type };
+    }
+
+    console.log(`[DEBUG] resolvePublicBooking: No booking found after all attempts`);
+    return null;
+  } catch (error) {
+    console.error(`[ERROR] resolvePublicBooking crashed:`, error);
+    throw error;
   }
-
-  // Fallback: look up any active booking type by slug
-  const [fallback] = await db
-    .select({
-      user: users,
-      type: bookingTypes,
-    })
-    .from(bookingTypes)
-    .leftJoin(users, eq(bookingTypes.userId, users.id))
-    .where(and(eq(bookingTypes.slug, slug), eq(bookingTypes.isActive, true)))
-    .orderBy(desc(bookingTypes.updatedAt));
-
-  if (fallback?.user && fallback?.type) {
-    return { user: fallback.user, type: fallback.type };
-  }
-
-  return null;
 }
 
 // 1. Get User Profile and Booking Type info by Username + Slug
 router.get("/public/:username/:slug", async (req, res) => {
   try {
     const { username, slug } = req.params;
+    console.log(`[DEBUG] Booking API request: username=${username}, slug=${slug}`);
 
     const resolved = await resolvePublicBooking(username, slug);
+    console.log(`[DEBUG] resolvePublicBooking result:`, resolved ? { userId: resolved.user.id, typeId: resolved.type.id } : null);
+    
     if (!resolved) {
+      console.warn(`[DEBUG] No booking found for ${username}/${slug}`);
       return res.status(404).json({ message: "Booking type not found or inactive" });
     }
 
@@ -65,7 +92,7 @@ router.get("/public/:username/:slug", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching public booking info:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error", details: String(error) });
   }
 });
 
