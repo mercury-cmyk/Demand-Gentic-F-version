@@ -534,7 +534,7 @@ app.use((req, res, next) => {
   // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
   const { initializeAiCampaignOrchestrator, getOrchestratorStatus } = await import("./lib/ai-campaign-orchestrator");
   if (hasRedis) {
-    initializeAiCampaignOrchestrator();
+    await initializeAiCampaignOrchestrator();
 
     const configuredHealthcheckMs = Number(process.env.AI_ORCHESTRATOR_HEALTHCHECK_MS || 60000);
     const orchestratorHealthcheckMs = Number.isFinite(configuredHealthcheckMs)
@@ -545,8 +545,11 @@ app.use((req, res, next) => {
       try {
         const status = await getOrchestratorStatus();
         if (!status.available) {
-          console.warn('[AI Orchestrator] Healthcheck detected unavailable orchestrator - attempting re-initialization');
-          initializeAiCampaignOrchestrator();
+          console.warn(
+            `[AI Orchestrator] Healthcheck detected unavailable orchestrator ` +
+            `(workerRunning=${status.workerRunning}, workerPaused=${status.workerPaused}, staleTick=${status.staleTick}, lastTickAgeMs=${status.lastTickAgeMs}) - attempting forced re-initialization`
+          );
+          await initializeAiCampaignOrchestrator({ forceReinitialize: true });
         }
       } catch (err) {
         console.error('[AI Orchestrator] Healthcheck failed:', err);

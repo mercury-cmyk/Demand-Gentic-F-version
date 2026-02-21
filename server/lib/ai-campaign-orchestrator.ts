@@ -710,6 +710,40 @@ let orchestratorWorker: Worker<OrchestratorJobData> | null = null;
 let orchestratorHeartbeatTimer: NodeJS.Timeout | null = null;
 let lastOrchestratorTickAt = 0;
 let lastCampaignStartIndex = 0;
+let orchestratorInitializing = false;
+
+async function teardownAiCampaignOrchestrator(reason: string): Promise<void> {
+  console.warn(`[AI Orchestrator] Tearing down orchestrator: ${reason}`);
+
+  if (orchestratorHeartbeatTimer) {
+    clearInterval(orchestratorHeartbeatTimer);
+    orchestratorHeartbeatTimer = null;
+  }
+
+  const workerToClose = orchestratorWorker;
+  const queueToClose = orchestratorQueue;
+  orchestratorWorker = null;
+  orchestratorQueue = null;
+  lastOrchestratorTickAt = 0;
+
+  if (workerToClose) {
+    try {
+      await workerToClose.close(true);
+      console.log('[AI Orchestrator] Worker closed');
+    } catch (err) {
+      console.error('[AI Orchestrator] Failed to close worker during teardown:', err);
+    }
+  }
+
+  if (queueToClose) {
+    try {
+      await queueToClose.close();
+      console.log('[AI Orchestrator] Queue closed');
+    } catch (err) {
+      console.error('[AI Orchestrator] Failed to close queue during teardown:', err);
+    }
+  }
+}
 
 /**
  * Get the assigned virtual agent for a campaign
@@ -2280,140 +2314,167 @@ async function orchestratorTick(): Promise<OrchestratorJobResult> {
 /**
  * Initialize the AI Campaign Orchestrator
  */
-export function initializeAiCampaignOrchestrator(): void {
-  if (orchestratorQueue && orchestratorWorker) {
+export async function initializeAiCampaignOrchestrator(
+  options: { forceReinitialize?: boolean } = {}
+): Promise<void> {
+  const forceReinitialize = options.forceReinitialize === true;
+
+  if (orchestratorInitializing) {
+    console.warn('[AI Orchestrator] Initialization already in progress - skipping duplicate call');
     return;
   }
 
-  if (orchestratorQueue && !orchestratorWorker) {
-    console.warn('[AI Orchestrator] Detected partial initialization state - resetting and retrying');
-    orchestratorQueue = null;
-  }
-
-  if (!isQueueAvailable()) {
-    console.warn('[AI Orchestrator] Redis not available - orchestrator disabled');
-    return;
-  }
-
-
-  // Create queue
-  orchestratorQueue = createQueue<OrchestratorJobData>('ai-campaign-orchestrator', {
-    attempts: 1,
-    removeOnComplete: 10,
-    removeOnFail: 50,
-  });
-
-  if (!orchestratorQueue) {
-    console.error('[AI Orchestrator] Failed to create queue');
-    return;
-  }
-
-  // Create worker with extended lock duration for high-volume call initiation
-  orchestratorWorker = createWorker<OrchestratorJobData>(
-    'ai-campaign-orchestrator',
-    async (job: Job<OrchestratorJobData>) => {
-      if (job.data.type === 'tick') {
-        const result = await orchestratorTick();
-        lastOrchestratorTickAt = Date.now();
-        return result;
-      } else if (job.data.type === 'campaign-replenish' && job.data.campaignId) {
-        const { globalMax } = await getConcurrencyLimits();
-        const globalSlots = Math.max(0, globalMax - (await getGlobalInProgressCount()));
-        if (globalSlots <= 0) {
-          console.log(`[AI Orchestrator] Replenish skipped for ${job.data.campaignId} - global limit reached`);
-          return { processed: true, callsInitiated: 0, message: 'Global concurrency limit reached' };
-        }
-        const result = await processCampaign(job.data.campaignId, { maxNewCalls: globalSlots });
-        return { processed: true, callsInitiated: result.initiated };
-      }
-      return { processed: false, message: 'Unknown job type' };
-    },
-    { 
-      concurrency: 1, // Process one at a time to avoid race conditions
-      lockDuration: 300000, // 5 minutes - enough time for 50 call initiations
-      stalledInterval: 120000, // Check for stalled jobs every 2 minutes
-    }
+  const workerHealthy = Boolean(
+    orchestratorWorker &&
+    orchestratorWorker.isRunning() &&
+    !orchestratorWorker.isPaused()
   );
 
-  if (!orchestratorWorker) {
-    console.warn('[AI Orchestrator] Worker could not be started');
-    orchestratorQueue = null;
+  if (!forceReinitialize && orchestratorQueue && workerHealthy) {
     return;
   }
 
-  // Add repeatable job for regular ticks
-  orchestratorQueue.add(
-    'orchestrator-tick',
-    { type: 'tick' },
-    {
-      repeat: { every: ORCHESTRATOR_INTERVAL_MS },
-      jobId: 'ai-orchestrator-tick',
-      removeOnComplete: true,
+  orchestratorInitializing = true;
+  try {
+    if (forceReinitialize) {
+      await teardownAiCampaignOrchestrator('forced reinitialize requested');
+    } else if (orchestratorQueue && !workerHealthy) {
+      await teardownAiCampaignOrchestrator('detected unhealthy worker state');
+    } else if (orchestratorQueue && !orchestratorWorker) {
+      await teardownAiCampaignOrchestrator('detected partial initialization state');
     }
-  ).then(() => {
-    console.log(`[AI Orchestrator] Started - checking every ${ORCHESTRATOR_INTERVAL_MS / 1000}s`);
-  }).catch(err => {
-    console.error('[AI Orchestrator] Failed to add repeatable job:', err);
-  });
 
-  // Run an immediate tick on startup so all active campaigns begin processing
-  // without waiting for the next repeat window.
-  orchestratorQueue.add(
-    'orchestrator-tick-startup',
-    { type: 'tick' },
-    {
-      jobId: `ai-orchestrator-startup-${Date.now()}`,
-      removeOnComplete: true,
-      removeOnFail: true,
+    if (!isQueueAvailable()) {
+      console.warn('[AI Orchestrator] Redis not available - orchestrator disabled');
+      return;
     }
-  ).then(() => {
-    console.log('[AI Orchestrator] Startup tick enqueued');
-  }).catch(err => {
-    console.error('[AI Orchestrator] Failed to enqueue startup tick:', err);
-  });
 
-  // Heartbeat watchdog: if tick processing stalls or queue becomes idle,
-  // enqueue a rescue tick to keep call triggering continuous.
-  if (orchestratorHeartbeatTimer) {
-    clearInterval(orchestratorHeartbeatTimer);
-  }
-  lastOrchestratorTickAt = Date.now();
-  orchestratorHeartbeatTimer = setInterval(async () => {
-    if (!orchestratorQueue) return;
 
-    try {
-      const [activeCount, waitingCount] = await Promise.all([
-        orchestratorQueue.getActiveCount(),
-        orchestratorQueue.getWaitingCount(),
-      ]);
+    // Create queue
+    orchestratorQueue = createQueue<OrchestratorJobData>('ai-campaign-orchestrator', {
+      attempts: 1,
+      removeOnComplete: 10,
+      removeOnFail: 50,
+    });
 
-      const now = Date.now();
-      const staleTick = now - lastOrchestratorTickAt > ORCHESTRATOR_HEARTBEAT_MS;
-      const queueIdle = activeCount === 0 && waitingCount === 0;
+    if (!orchestratorQueue) {
+      console.error('[AI Orchestrator] Failed to create queue');
+      return;
+    }
 
-      if (staleTick || queueIdle) {
-        await orchestratorQueue.add(
-          'orchestrator-tick-rescue',
-          { type: 'tick' },
-          {
-            jobId: `ai-orchestrator-rescue-${now}`,
-            removeOnComplete: true,
-            removeOnFail: true,
+    // Create worker with extended lock duration for high-volume call initiation
+    orchestratorWorker = createWorker<OrchestratorJobData>(
+      'ai-campaign-orchestrator',
+      async (job: Job<OrchestratorJobData>) => {
+        if (job.data.type === 'tick') {
+          const result = await orchestratorTick();
+          lastOrchestratorTickAt = Date.now();
+          return result;
+        } else if (job.data.type === 'campaign-replenish' && job.data.campaignId) {
+          const { globalMax } = await getConcurrencyLimits();
+          const globalSlots = Math.max(0, globalMax - (await getGlobalInProgressCount()));
+          if (globalSlots <= 0) {
+            console.log(`[AI Orchestrator] Replenish skipped for ${job.data.campaignId} - global limit reached`);
+            return { processed: true, callsInitiated: 0, message: 'Global concurrency limit reached' };
           }
-        );
-        console.warn(`[AI Orchestrator] Heartbeat enqueued rescue tick (staleTick=${staleTick}, queueIdle=${queueIdle})`);
+          const result = await processCampaign(job.data.campaignId, { maxNewCalls: globalSlots });
+          return { processed: true, callsInitiated: result.initiated };
+        }
+        return { processed: false, message: 'Unknown job type' };
+      },
+      { 
+        concurrency: 1, // Process one at a time to avoid race conditions
+        lockDuration: 300000, // 5 minutes - enough time for 50 call initiations
+        stalledInterval: 120000, // Check for stalled jobs every 2 minutes
       }
-    } catch (err) {
-      console.error('[AI Orchestrator] Heartbeat check failed:', err);
+    );
+
+    if (!orchestratorWorker) {
+      console.warn('[AI Orchestrator] Worker could not be started');
+      orchestratorQueue = null;
+      return;
     }
-  }, ORCHESTRATOR_HEARTBEAT_MS);
 
-  // Run startup resume to clear any stuck items from previous server instance
-  startupResumeStuckCalls().catch(err => {
-    console.error('[AI Orchestrator] Startup resume failed:', err);
-  });
+    orchestratorWorker.on('closed', () => {
+      console.warn('[AI Orchestrator] Worker emitted closed event');
+    });
 
-  console.log('[AI Orchestrator] Initialized successfully');
+    // Add repeatable job for regular ticks
+    orchestratorQueue.add(
+      'orchestrator-tick',
+      { type: 'tick' },
+      {
+        repeat: { every: ORCHESTRATOR_INTERVAL_MS },
+        jobId: 'ai-orchestrator-tick',
+        removeOnComplete: true,
+      }
+    ).then(() => {
+      console.log(`[AI Orchestrator] Started - checking every ${ORCHESTRATOR_INTERVAL_MS / 1000}s`);
+    }).catch(err => {
+      console.error('[AI Orchestrator] Failed to add repeatable job:', err);
+    });
+
+    // Run an immediate tick on startup so all active campaigns begin processing
+    // without waiting for the next repeat window.
+    orchestratorQueue.add(
+      'orchestrator-tick-startup',
+      { type: 'tick' },
+      {
+        jobId: `ai-orchestrator-startup-${Date.now()}`,
+        removeOnComplete: true,
+        removeOnFail: true,
+      }
+    ).then(() => {
+      console.log('[AI Orchestrator] Startup tick enqueued');
+    }).catch(err => {
+      console.error('[AI Orchestrator] Failed to enqueue startup tick:', err);
+    });
+
+    // Heartbeat watchdog: if tick processing stalls or queue becomes idle,
+    // enqueue a rescue tick to keep call triggering continuous.
+    if (orchestratorHeartbeatTimer) {
+      clearInterval(orchestratorHeartbeatTimer);
+    }
+    lastOrchestratorTickAt = Date.now();
+    orchestratorHeartbeatTimer = setInterval(async () => {
+      if (!orchestratorQueue) return;
+
+      try {
+        const [activeCount, waitingCount] = await Promise.all([
+          orchestratorQueue.getActiveCount(),
+          orchestratorQueue.getWaitingCount(),
+        ]);
+
+        const now = Date.now();
+        const staleTick = now - lastOrchestratorTickAt > ORCHESTRATOR_HEARTBEAT_MS;
+        const queueIdle = activeCount === 0 && waitingCount === 0;
+
+        if (staleTick || queueIdle) {
+          await orchestratorQueue.add(
+            'orchestrator-tick-rescue',
+            { type: 'tick' },
+            {
+              jobId: `ai-orchestrator-rescue-${now}`,
+              removeOnComplete: true,
+              removeOnFail: true,
+            }
+          );
+          console.warn(`[AI Orchestrator] Heartbeat enqueued rescue tick (staleTick=${staleTick}, queueIdle=${queueIdle})`);
+        }
+      } catch (err) {
+        console.error('[AI Orchestrator] Heartbeat check failed:', err);
+      }
+    }, ORCHESTRATOR_HEARTBEAT_MS);
+
+    // Run startup resume to clear any stuck items from previous server instance
+    startupResumeStuckCalls().catch(err => {
+      console.error('[AI Orchestrator] Startup resume failed:', err);
+    });
+
+    console.log('[AI Orchestrator] Initialized successfully');
+  } finally {
+    orchestratorInitializing = false;
+  }
 }
 
 /**
@@ -2421,7 +2482,7 @@ export function initializeAiCampaignOrchestrator(): void {
  * Called by webhook handler after a call completes
  */
 export async function triggerCampaignReplenish(campaignId: string): Promise<void> {
-  if (!orchestratorQueue) {
+  if (!orchestratorQueue || !orchestratorWorker || !orchestratorWorker.isRunning()) {
     console.warn('[AI Orchestrator] Queue not available for replenish');
     return;
   }
@@ -2449,18 +2510,46 @@ export async function getOrchestratorStatus(): Promise<{
   available: boolean;
   activeJobs?: number;
   waitingJobs?: number;
+  workerRunning?: boolean;
+  workerPaused?: boolean;
+  staleTick?: boolean;
+  lastTickAgeMs?: number;
 }> {
-  if (!orchestratorQueue) {
+  if (!orchestratorQueue || !orchestratorWorker) {
     return { available: false };
   }
+
+  const workerRunning = orchestratorWorker.isRunning();
+  const workerPaused = orchestratorWorker.isPaused();
+  const lastTickAgeMs = lastOrchestratorTickAt > 0
+    ? Math.max(0, Date.now() - lastOrchestratorTickAt)
+    : undefined;
+  const staleTick = typeof lastTickAgeMs === 'number'
+    ? lastTickAgeMs > ORCHESTRATOR_HEARTBEAT_MS * 2
+    : true;
 
   try {
     const [activeCount, waitingCount] = await Promise.all([
       orchestratorQueue.getActiveCount(),
       orchestratorQueue.getWaitingCount(),
     ]);
-    return { available: true, activeJobs: activeCount, waitingJobs: waitingCount };
+    const available = workerRunning && !workerPaused && !staleTick;
+    return {
+      available,
+      activeJobs: activeCount,
+      waitingJobs: waitingCount,
+      workerRunning,
+      workerPaused,
+      staleTick,
+      lastTickAgeMs,
+    };
   } catch {
-    return { available: false };
+    return {
+      available: false,
+      workerRunning,
+      workerPaused,
+      staleTick,
+      lastTickAgeMs,
+    };
   }
 }
