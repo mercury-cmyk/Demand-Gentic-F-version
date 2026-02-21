@@ -29,8 +29,24 @@ import {
   getContactsByDisposition,
   validateCallsForClientSamples,
   type DeepReanalysisFilter,
+  type DeepReanalysisCallDetail,
 } from "../services/disposition-deep-reanalyzer";
 import { getDispositionCache } from "../services/disposition-analysis-cache";
+import {
+  queueAnalysisJob,
+  getJobStatus,
+  getJobResult,
+  cancelJob,
+  getQueueStats,
+  isQueueOperational,
+} from "../services/disposition-job-queue";
+import {
+  streamResultsAsCSV,
+  streamResultsAsJSON,
+  streamResultsAsJSONL,
+  getRecommendedExportFormat,
+  estimateExportSize,
+} from "../services/disposition-streaming-export";
 import type { CanonicalDisposition } from "@shared/schema";
 
 const router = Router();
@@ -507,6 +523,267 @@ router.post("/deep/push-to-dashboard", requireAuth, async (req: Request, res: Re
   } catch (error: any) {
     console.error("[DispositionReanalysis] Push to dashboard error:", error);
     res.status(500).json({ error: `Push to dashboard failed: ${error.message}` });
+  }
+});
+
+// ============================================================================
+// === BACKGROUND JOB QUEUE ENDPOINTS (Tier 2A) ===
+// ============================================================================
+
+// POST /queue/preview - Queue a preview job (non-blocking)
+// Returns immediately with job ID
+router.post("/queue/preview", requireAuth, async (req: Request, res: Response) => {
+  try {
+    // Check if queue is available
+    if (!isQueueOperational()) {
+      console.warn("[DispositionReanalysis] Queue not operational, using synchronous preview");
+      // Fall back to synchronous if queue unavailable
+      const filters: DeepReanalysisFilter = {
+        campaignId: req.body.campaignId,
+        dispositions: req.body.dispositions,
+        dateFrom: req.body.dateFrom,
+        dateTo: req.body.dateTo,
+        minDurationSec: req.body.minDurationSec,
+        maxDurationSec: req.body.maxDurationSec,
+        hasTranscript: req.body.hasTranscript ?? true,
+        hasRecording: req.body.hasRecording,
+        limit: Math.min(req.body.limit || 100, 500),
+        offset: req.body.offset || 0,
+      };
+      const result = await deepReanalyzeBatch(filters, true /* dryRun */);
+      return res.json({ result });
+    }
+
+    const userId = (req as any).user?.id || "system";
+    const filters: DeepReanalysisFilter = {
+      campaignId: req.body.campaignId,
+      dispositions: req.body.dispositions,
+      dateFrom: req.body.dateFrom,
+      dateTo: req.body.dateTo,
+      minDurationSec: req.body.minDurationSec,
+      maxDurationSec: req.body.maxDurationSec,
+      hasTranscript: req.body.hasTranscript ?? true,
+      hasRecording: req.body.hasRecording,
+      skipDeepForObvious: req.body.skipDeepForObvious ?? true, // Enable lightweight triage
+      limit: Math.min(req.body.limit || 100, 500),
+      offset: req.body.offset || 0,
+    };
+
+    const { jobId, estimatedSeconds } = await queueAnalysisJob(filters, true, userId);
+
+    res.json({
+      status: "queued",
+      jobId,
+      estimatedSeconds,
+      pollUrl: `/api/disposition-reanalysis/queue/job/${jobId}/status`,
+      resultUrl: `/api/disposition-reanalysis/queue/job/${jobId}/result`,
+    });
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Queue preview error:", error);
+    res.status(500).json({ error: `Failed to queue preview: ${error.message}` });
+  }
+});
+
+// POST /queue/apply - Queue an apply job (non-blocking)
+// Returns immediately with job ID
+router.post("/queue/apply", requireAuth, async (req: Request, res: Response) => {
+  try {
+    // Check if queue is available
+    if (!isQueueOperational()) {
+      console.warn("[DispositionReanalysis] Queue not operational, using synchronous apply");
+      // Fall back to synchronous if queue unavailable
+      const filters: DeepReanalysisFilter = {
+        campaignId: req.body.campaignId,
+        dispositions: req.body.dispositions,
+        dateFrom: req.body.dateFrom,
+        dateTo: req.body.dateTo,
+        minDurationSec: req.body.minDurationSec,
+        maxDurationSec: req.body.maxDurationSec,
+        hasTranscript: req.body.hasTranscript ?? true,
+        hasRecording: req.body.hasRecording,
+        limit: Math.min(req.body.limit || 50, 200),
+        offset: req.body.offset || 0,
+      };
+      const result = await deepReanalyzeBatch(filters, false /* apply */);
+      return res.json({ result });
+    }
+
+    const userId = (req as any).user?.id || "system";
+    const filters: DeepReanalysisFilter = {
+      campaignId: req.body.campaignId,
+      dispositions: req.body.dispositions,
+      dateFrom: req.body.dateFrom,
+      dateTo: req.body.dateTo,
+      minDurationSec: req.body.minDurationSec,
+      maxDurationSec: req.body.maxDurationSec,
+      hasTranscript: req.body.hasTranscript ?? true,
+      hasRecording: req.body.hasRecording,
+      skipDeepForObvious: req.body.skipDeepForObvious ?? true,
+      limit: Math.min(req.body.limit || 50, 200),
+      offset: req.body.offset || 0,
+    };
+
+    const { jobId, estimatedSeconds } = await queueAnalysisJob(filters, false, userId);
+
+    res.json({
+      status: "queued",
+      jobId,
+      estimatedSeconds,
+      pollUrl: `/api/disposition-reanalysis/queue/job/${jobId}/status`,
+      resultUrl: `/api/disposition-reanalysis/queue/job/${jobId}/result`,
+    });
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Queue apply error:", error);
+    res.status(500).json({ error: `Failed to queue apply: ${error.message}` });
+  }
+});
+
+// GET /queue/job/:jobId/status - Get job status and progress
+router.get("/queue/job/:jobId/status", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { jobId } = req.params;
+    const status = await getJobStatus(jobId);
+
+    if (!status) {
+      return res.status(404).json({ error: `Job ${jobId} not found` });
+    }
+
+    res.json({
+      jobId,
+      ...status,
+      // Add retry logic hint for client
+      pollIntervalMs: status.status === "processing" ? 1000 : 500,
+    });
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Status error:", error);
+    res.status(500).json({ error: `Failed to get status: ${error.message}` });
+  }
+});
+
+// GET /queue/job/:jobId/result - Get completed job result
+router.get("/queue/job/:jobId/result", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { jobId } = req.params;
+    const result = await getJobResult(jobId);
+
+    if (!result) {
+      return res.status(404).json({ error: `Job ${jobId} not found or still processing` });
+    }
+
+    if (result.status === "failed") {
+      return res.status(400).json(result);
+    }
+
+    res.json(result);
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Result error:", error);
+    res.status(500).json({ error: `Failed to get result: ${error.message}` });
+  }
+});
+
+// DELETE /queue/job/:jobId - Cancel a job
+router.delete("/queue/job/:jobId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { jobId } = req.params;
+    const cancelled = await cancelJob(jobId);
+
+    if (!cancelled) {
+      return res.status(404).json({ error: `Job ${jobId} not found or already completed` });
+    }
+
+    res.json({
+      jobId,
+      success: true,
+      message: "Job cancelled",
+    });
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Cancel error:", error);
+    res.status(500).json({ error: `Failed to cancel job: ${error.message}` });
+  }
+});
+
+// GET /queue/stats - Get queue statistics (admin only)
+router.get("/queue/stats", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const stats = await getQueueStats();
+    res.json({
+      operational: isQueueOperational(),
+      ...stats,
+    });
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Stats error:", error);
+    res.status(500).json({ error: `Failed to get queue stats: ${error.message}` });
+  }
+});
+
+// ============================================================================
+// === STREAMING EXPORT ENDPOINTS (Tier 2B) ===
+// ============================================================================
+
+// GET /queue/job/:jobId/result/export - Stream results in various formats
+router.get("/queue/job/:jobId/result/export", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { jobId } = req.params;
+    const { format = "csv", includeTranscript, includeScores, includeQuality } = req.query;
+
+    const result = await getJobResult(jobId);
+
+    if (!result || result.status !== "completed" || !result.result) {
+      return res.status(404).json({ error: `Job ${jobId} not found or not completed` });
+    }
+
+    const calls = result.result.calls as DeepReanalysisCallDetail[];
+    const exportFormat = (format as string || "csv") as "csv" | "json" | "jsonl";
+    const options = {
+      format: exportFormat,
+      includeTranscript: includeTranscript === "true",
+      includeAgentScores: includeScores === "true",
+      includeCallQuality: includeQuality === "true",
+    };
+
+    // Stream based on format
+    switch (exportFormat) {
+      case "csv":
+        await streamResultsAsCSV(calls, options, res);
+        break;
+      case "json":
+        await streamResultsAsJSON(calls, options, res);
+        break;
+      case "jsonl":
+        await streamResultsAsJSONL(calls, options, res);
+        break;
+      default:
+        res.status(400).json({ error: "Invalid format. Use: csv, json, or jsonl" });
+    }
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Export error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: `Export failed: ${error.message}` });
+    }
+  }
+});
+
+// GET /export-estimate - Estimate export file size
+router.post("/export-estimate", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { resultCount, format = "csv" } = req.body;
+
+    if (!resultCount || typeof resultCount !== "number" || resultCount < 0) {
+      return res.status(400).json({ error: "resultCount must be a positive number" });
+    }
+
+    const recommended = getRecommendedExportFormat(resultCount);
+    const estimates = {
+      recommended,
+      csv: estimateExportSize(resultCount, "csv"),
+      json: estimateExportSize(resultCount, "json"),
+      jsonl: estimateExportSize(resultCount, "jsonl"),
+    };
+
+    res.json(estimates);
+  } catch (error: any) {
+    console.error("[DispositionReanalysis] Export estimate error:", error);
+    res.status(500).json({ error: `Failed to estimate: ${error.message}` });
   }
 });
 
