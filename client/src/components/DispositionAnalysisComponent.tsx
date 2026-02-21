@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   useDispositionAnalysisJob,
   useJobPolling,
-} from './hooks/use-disposition-job-queue';
+} from '../hooks/use-disposition-job-queue';
 
 /**
  * Example component showing how to use the disposition analysis job hooks

@@ -824,6 +824,78 @@ export async function runPostCallAnalysis(
       }
     }
 
+    // 11. AUTO-CORRECT MISMATCHED DISPOSITIONS
+    // When post-call analysis detects the assigned disposition doesn't match what the
+    // transcript evidence suggests, automatically apply the correction. This eliminates
+    // the manual review step shown in Disposition Intelligence ("X calls have mismatched dispositions").
+    // Sources of truth (in priority order):
+    //   1. Campaign outcome evaluation's recommendedDisposition (evaluated against campaign criteria)
+    //   2. Quality analysis's dispositionReview.expectedDisposition (conversation-level assessment)
+    const VALID_AUTO_CORRECT_DISPOSITIONS: CanonicalDisposition[] = [
+      "qualified_lead", "not_interested", "do_not_call", "voicemail",
+      "no_answer", "invalid_data", "needs_review", "callback_requested",
+    ];
+    try {
+      let correctedDisposition: CanonicalDisposition | null = null;
+      let correctionSource = "";
+
+      // Check campaign outcome evaluation first (higher priority — uses campaign criteria)
+      if (result.campaignOutcome && !result.campaignOutcome.dispositionAccurate) {
+        const recommended = result.campaignOutcome.recommendedDisposition as CanonicalDisposition;
+        if (recommended && recommended !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(recommended)) {
+          correctedDisposition = recommended;
+          correctionSource = "campaign_outcome_evaluation";
+        }
+      }
+
+      // Fall back to quality analysis disposition review
+      if (!correctedDisposition && result.qualityAnalysis?.dispositionReview) {
+        const review = result.qualityAnalysis.dispositionReview;
+        if (!review.isAccurate && review.expectedDisposition) {
+          const expected = review.expectedDisposition as CanonicalDisposition;
+          if (expected !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(expected)) {
+            correctedDisposition = expected;
+            correctionSource = "quality_analysis_review";
+          }
+        }
+      }
+
+      if (correctedDisposition) {
+        console.log(`${LOG_PREFIX} 🔄 AUTO-CORRECTING disposition for ${callSessionId}: "${disposition}" → "${correctedDisposition}" (source: ${correctionSource})`);
+
+        const overrideResult = await overrideSingleDisposition(
+          callSessionId,
+          correctedDisposition,
+          "system:post-call-auto-correct",
+          `Auto-corrected by post-call analysis (${correctionSource}). Original: ${disposition}, Evidence-based: ${correctedDisposition}`
+        );
+
+        if (overrideResult.success) {
+          console.log(`${LOG_PREFIX} ✅ Disposition auto-corrected: ${disposition} → ${correctedDisposition} | Action: ${overrideResult.action}`);
+
+          // Update the quality record to mark disposition as now accurate (since we fixed it)
+          if (result.intelligenceRecordId) {
+            await db.update(callQualityRecords)
+              .set({
+                dispositionAccurate: true,
+                assignedDisposition: correctedDisposition,
+                dispositionNotes: [
+                  ...(result.qualityAnalysis?.dispositionReview?.notes || []),
+                  `[Auto-corrected] ${disposition} → ${correctedDisposition} (${correctionSource})`,
+                ],
+                updatedAt: new Date(),
+              })
+              .where(eq(callQualityRecords.id, result.intelligenceRecordId));
+          }
+        } else {
+          console.warn(`${LOG_PREFIX} ⚠️ Disposition auto-correction failed for ${callSessionId}: ${overrideResult.error}`);
+        }
+      }
+    } catch (autoCorrectError: any) {
+      // Auto-correction is best-effort — don't fail the entire post-call analysis
+      console.error(`${LOG_PREFIX} ⚠️ Disposition auto-correction error for ${callSessionId}: ${autoCorrectError.message}`);
+    }
+
     result.success = true;
     const elapsedMs = Date.now() - startTime;
     console.log(`${LOG_PREFIX} ✅ Post-call analysis complete for ${callSessionId} in ${elapsedMs}ms — ${result.metrics.totalTurns} turns, quality=${result.qualityAnalysis?.overallScore ?? "N/A"}, campaign alignment=${result.campaignOutcome?.alignmentScore ?? "N/A"}`);
