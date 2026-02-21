@@ -70,6 +70,17 @@ const STRICT_US_ONLY_CAMPAIGN_IDS = new Set<string>(
     .map((id) => id.trim())
     .filter(Boolean)
 );
+const UK_COUNTRY_KEYS = new Set<string>([
+  'GB',
+  'UK',
+  'UNITED KINGDOM',
+  'UNITED KINGDOM UK',
+  'GREAT BRITAIN',
+  'ENGLAND',
+  'SCOTLAND',
+  'WALES',
+]);
+const UK_SATURDAY_ONE_DAY_OVERRIDE_DATE = '2026-02-21';
 const US_COUNTRY_KEYS = new Set<string>([
   'US',
   'USA',
@@ -95,6 +106,7 @@ const CONCURRENCY_CACHE_TTL_MS = 60000; // 1 minute
 let _cachedHasActivePoolNumbers: boolean | null = null;
 let _activePoolLastFetched = 0;
 const campaignEmptyPoolBackoffUntil = new Map<string, number>();
+let ukSaturdayOverrideLoggedForDate: string | null = null;
 
 async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: number }> {
   const now = Date.now();
@@ -238,15 +250,21 @@ function isContactWithinBusinessHours(contact: { country?: string | null; state?
     };
   }
   
+  const now = new Date();
+
   // Get country-specific business hours (handles Middle East Sun-Thu work week)
-  const countryConfig = getBusinessHoursForCountry(contact.country);
+  const countryConfig = getBusinessHoursForCountry(contact.country, now);
   const config = {
     ...countryConfig,
     timezone: contactTz,
     respectContactTimezone: false, // We already resolved the timezone
   };
+
+  // Temporary one-day UK exception: allow Saturday calling on 2026-02-21 only.
+  if (isUkSaturdayOneDayOverride(contact.country, now) && !config.operatingDays.includes('saturday')) {
+    config.operatingDays = [...config.operatingDays, 'saturday'];
+  }
   
-  const now = new Date();
   const canCall = checkBusinessHours(config, undefined, now);
   
   // Get local time for logging
@@ -260,14 +278,14 @@ function isContactWithinBusinessHours(contact: { country?: string | null; state?
   if (!canCall) {
     // Check if it's a non-working day for this country
     const dayName = dayNames[dayOfWeek].toLowerCase();
-    const isWorkingDay = countryConfig.operatingDays.includes(
+    const isWorkingDay = config.operatingDays.includes(
       ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dayOfWeek]
     );
     
     if (!isWorkingDay) {
       reason = `Non-working day (${localTime} ${contactTz})`;
     } else {
-      reason = `Outside hours (${localTime} ${contactTz}, hours: ${countryConfig.startTime}-${countryConfig.endTime})`;
+      reason = `Outside hours (${localTime} ${contactTz}, hours: ${config.startTime}-${config.endTime})`;
     }
   }
   
@@ -465,6 +483,28 @@ function normalizeCountryName(country: string): string {
   };
 
   return COUNTRY_TYPOS[normalized] || normalized;
+}
+
+function isUkSaturdayOneDayOverride(
+  country: string | null | undefined,
+  referenceTime: Date = new Date()
+): boolean {
+  if (!country) return false;
+
+  const normalizedCountry = String(country).toUpperCase().trim();
+  if (!UK_COUNTRY_KEYS.has(normalizedCountry)) return false;
+
+  const londonNow = toZonedTime(referenceTime, 'Europe/London');
+  const londonDate = format(londonNow, 'yyyy-MM-dd');
+  const londonDay = format(londonNow, 'EEEE').toLowerCase();
+  const enabled = londonDate === UK_SATURDAY_ONE_DAY_OVERRIDE_DATE && londonDay === 'saturday';
+
+  if (enabled && ukSaturdayOverrideLoggedForDate !== londonDate) {
+    ukSaturdayOverrideLoggedForDate = londonDate;
+    console.log(`[AI Orchestrator] UK Saturday one-day override active for ${londonDate} (Europe/London)`);
+  }
+
+  return enabled;
 }
 
 function isUnitedStatesCountry(country: string | null | undefined): boolean {

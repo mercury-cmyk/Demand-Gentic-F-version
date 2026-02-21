@@ -3759,11 +3759,10 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
           .map((t: { role: string; text: string }) => t.text.toLowerCase())
           .join(' ');
 
-        // CRITICAL: For qualified_lead, agent must have meaningful dialogue
-        // If no agent transcripts, we can't verify the booking was completed
+        // For qualified_lead, agent must have meaningful dialogue
         const hasMinimalAgentDialogue = agentTranscripts.length >= 3;
         const agentWordCount = agentTranscriptText.split(/\s+/).filter(Boolean).length;
-        const hasSubstantialAgentDialogue = agentWordCount >= 30; // At least 30 words from agent
+        const hasSubstantialAgentDialogue = agentWordCount >= 30;
 
         // Check for email confirmation - AGENT must have asked about it (or spoken it)
         const agentAskedForEmail = agentTranscriptText.includes('email') ||
@@ -3820,35 +3819,33 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
         // Build list of missing requirements
         const missingSteps: string[] = [];
 
-        // FUNDAMENTAL CHECK: Must have agent dialogue
-        if (!hasMinimalAgentDialogue) {
-          missingSteps.push('have a substantial conversation (minimum 3 agent turns)');
-        }
-        if (!hasSubstantialAgentDialogue) {
-          missingSteps.push('provide meaningful agent dialogue (transcript too short)');
+        // FUNDAMENTAL CHECK: Must have some agent dialogue (but keep thresholds low)
+        // The AI was in the conversation — trust its judgment on qualification
+        if (!hasMinimalAgentDialogue && !hasSubstantialAgentDialogue) {
+          missingSteps.push('have a conversation with the prospect (minimum 2 agent turns)');
         }
 
-        // For appointment campaigns, require full booking flow
+        // For appointment campaigns, email confirmation is important but time proposal is advisory
         if (isAppointmentCampaign) {
-          if (!hasEmailConfirmation) {
-            missingSteps.push('confirm their email address');
+          if (!hasEmailConfirmation && !reasonLower.includes('email') && !reasonLower.includes('meeting') && !reasonLower.includes('booked') && !reasonLower.includes('scheduled')) {
+            missingSteps.push('confirm their email address or mention booking details in the reason');
           }
+          // Time proposal is advisory — log but don't block
           if (!agentProposedTime) {
-            missingSteps.push('propose specific meeting times');
+            console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: Agent didn't propose specific times, but AI says qualified. Allowing.`);
           }
         }
-        // For content/asset campaigns, require email confirmation (no meeting required)
+        // For content/asset campaigns, email confirmation OR mention in reason is enough
         if (isContentCampaign) {
-          if (!hasEmailConfirmation) {
+          if (!hasEmailConfirmation && !reasonLower.includes('email') && !reasonLower.includes('send') && !reasonLower.includes('whitepaper') && !reasonLower.includes('content')) {
             missingSteps.push('confirm their email address for sending the content');
           }
         }
 
-        // Check if qualifying questions have been addressed (if campaign has them)
+        // Qualification questions are advisory — log but don't block
+        // The AI was in the conversation and knows if it asked the right questions
         const qualificationCriteria = session.qualificationCriteria;
         if (qualificationCriteria && qualificationCriteria.trim().length > 0) {
-          // Parse qualifying questions from criteria text
-          // Check if agent asked questions OR if reason mentions qualification
           const combinedTranscript = (agentTranscriptText + ' ' + userTranscriptText).toLowerCase();
           const reasonHasQualification =
             reasonLower.includes('qualif') ||
@@ -3861,7 +3858,6 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
             reasonLower.includes('pain point') ||
             reasonLower.includes('current solution');
 
-          // Agent should have asked at least one qualifying question
           const agentAskedQuestions =
             agentTranscriptText.includes('?') ||
             agentTranscriptText.includes('tell me') ||
@@ -3873,13 +3869,13 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
             agentTranscriptText.includes('would you');
 
           if (!reasonHasQualification && !agentAskedQuestions) {
-            missingSteps.push('ask the qualification questions (see campaign criteria: budget, timeline, decision process, current solutions, pain points)');
+            console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: Qualification questions may not have been addressed, but AI says qualified. Allowing.`);
           }
         }
 
-        // Always require goodbye
+        // Goodbye is nice to have, not a blocking requirement
         if (!hasGoodbye) {
-          missingSteps.push('say a polite goodbye (e.g., "Thank you for your time!")');
+          console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: No goodbye detected, but not blocking disposition.`);
         }
 
         if (missingSteps.length > 0) {
@@ -4131,30 +4127,56 @@ Only AFTER completing these steps can you submit the disposition.`
           session.detectedDisposition = 'voicemail';
           console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: voicemail (from reason)`);
         }
-        // If reason indicates a COMPLETED BOOKING FLOW (meeting confirmed with date/time)
-        // This catches cases where submit_disposition was blocked (e.g., native-audio no text transcripts)
-        // but the AI clearly completed the booking/qualification flow.
-        // STRICT: Must have evidence of actual meeting booking, NOT just "send info" or "follow up".
-        // "Send me info" / "sure, email me" = polite brush-off, NOT qualified_lead.
+        // If reason indicates a COMPLETED BOOKING/QUALIFICATION FLOW
+        // This catches cases where submit_disposition was blocked but the AI completed the flow.
+        // Trust the AI's judgment — it was in the conversation.
         else if (
-          userTranscriptCount >= 3 && callDurationSeconds >= 60 &&
+          userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
           (reason.includes('calendar invite') ||
+           reason.includes('booked') || reason.includes('scheduled') ||
            (reason.includes('meeting') && (reason.includes('confirmed') || reason.includes('booked') || reason.includes('scheduled'))) ||
-           (reason.includes('confirmed email') && reason.includes('confirmed') && (reason.includes('time') || reason.includes('date') || reason.includes('meeting'))))
+           (reason.includes('email') && reason.includes('confirmed')))
         ) {
           session.detectedDisposition = 'qualified_lead';
           console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (from end_call reason with booking evidence: "${reason}")`);
         }
-        // Soft interest (send info, whitepaper, follow-up) → needs_review for human QA, NOT auto-qualified
+        // Content acceptance (send info, whitepaper, follow-up with email confirmed) → qualified_lead
+        // For content syndication campaigns, accepting content delivery IS the campaign objective.
+        // "Send me the whitepaper" + email confirmed = QUALIFIED, not needs_review.
         else if (
           userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
           (reason.includes('whitepaper') || reason.includes('send information') ||
-           reason.includes('follow up') || reason.includes('follow-up') ||
+           reason.includes('send content') || reason.includes('send over') ||
            reason.includes('accepted') || reason.includes('agreed') ||
-           reason.includes('polite goodbye'))
+           reason.includes('email confirmed') || reason.includes('confirmed email'))
         ) {
-          session.detectedDisposition = 'needs_review';
-          console.log(`${LOG_PREFIX} [Gemini] 🔍 Inferred disposition: needs_review (soft interest signals but no confirmed booking: "${reason}")`);
+          // Check campaign type to determine if this is qualified or needs_review
+          const campaignType = session.campaignType || '';
+          const isContentCampaign = campaignType === 'content_syndication' || campaignType === 'high_quality_leads';
+
+          if (isContentCampaign || reason.includes('email confirmed') || reason.includes('confirmed email')) {
+            session.detectedDisposition = 'qualified_lead';
+            console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (content accepted/email confirmed for ${campaignType || 'unknown'} campaign: "${reason}")`);
+          } else {
+            // For non-content campaigns, "send me info" with email confirmed is still qualified
+            // Only route to callback_requested if there's no email/action confirmation
+            if (reason.includes('email') || reason.includes('send')) {
+              session.detectedDisposition = 'qualified_lead';
+              console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (prospect accepted follow-up with action: "${reason}")`);
+            } else {
+              session.detectedDisposition = 'callback_requested';
+              console.log(`${LOG_PREFIX} [Gemini] 📞 Inferred disposition: callback_requested (soft interest, follow-up path agreed: "${reason}")`);
+            }
+          }
+        }
+        // Polite goodbye after a real conversation with engagement → callback_requested (not needs_review)
+        else if (
+          userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
+          (reason.includes('follow up') || reason.includes('follow-up') ||
+           reason.includes('polite goodbye') || reason.includes('call back'))
+        ) {
+          session.detectedDisposition = 'callback_requested';
+          console.log(`${LOG_PREFIX} [Gemini] 📞 Inferred disposition: callback_requested (follow-up agreed: "${reason}")`);
         }
       }
       
@@ -7035,16 +7057,64 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     console.log(`${LOG_PREFIX} 📊 Auto-disposition (user hangup/system end): ${disposition} (analyzed from outcome=${outcome}, transcripts=${session.transcripts.length})`);
   }
 
+  // ==================== HUMAN vs MACHINE TURN DETECTION ====================
+  // Before applying safeguards, distinguish real human turns from machine/IVR/voicemail turns.
+  // Machine turns include: automated greetings, IVR prompts, voicemail messages, hold music transcriptions.
+  // Only real human turns should influence disposition decisions.
+  const machinePatterns = [
+    /leave a message/i, /after the beep/i, /after the tone/i, /voicemail/i,
+    /press \d/i, /press one/i, /press two/i, /main menu/i, /for sales/i,
+    /for support/i, /please hold/i, /your call is being/i, /transferring/i,
+    /all (our )?operators/i, /all agents are busy/i, /extension number/i,
+    /dial by name/i, /not available to take/i, /cannot take your call/i,
+    /mailbox/i, /record your message/i, /automatic voice message/i,
+    /your call has been forwarded/i, /is not available/i, /at the tone/i,
+    /we didn't get your message/i, /maximum time permitted/i,
+    /please stay on the line/i, /putting you through/i,
+  ];
+
+  const userTranscripts = session.transcripts.filter(t => t.role === 'user');
+  const humanUserTurns = userTranscripts.filter(t => {
+    const text = t.text.trim();
+    if (!text || text.length < 3) return false;
+    // If transcript matches machine patterns, it's NOT a human turn
+    return !machinePatterns.some(p => p.test(text));
+  });
+  const humanTurnCount = humanUserTurns.length;
+  const totalUserTurnCount = userTranscripts.length;
+
+  console.log(`${LOG_PREFIX} 🔍 Turn analysis: ${totalUserTurnCount} total user turns, ${humanTurnCount} human turns (${totalUserTurnCount - humanTurnCount} machine turns)`);
+
   // Safeguard: avoid "not_interested" when the transcript indicates engagement/interest,
-  // but the flow was incomplete (common when agent-side transcripts were missing or the call ended abruptly).
-  // Prefer routing to needs_review so it doesn't get treated as an explicit rejection.
-  if (disposition === 'not_interested' && session.transcripts.length > 0) {
+  // but ONLY if the interest signals come from real human turns (not machine audio).
+  if (disposition === 'not_interested' && humanTurnCount > 0) {
     const hasDecline = hasExplicitDecline(session.transcripts);
     const hasInterest = hasInterestSignals(session.transcripts);
     if (hasInterest && !hasDecline) {
-      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: transcript shows interest without explicit decline. Overriding not_interested → needs_review.`);
-      disposition = 'needs_review';
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: ${humanTurnCount} human turns show interest without explicit decline. Overriding not_interested → callback_requested.`);
+      disposition = 'callback_requested';
     }
+  }
+
+  // CRITICAL SAFEGUARD: Fix no_answer for calls with real HUMAN multi-turn transcripts.
+  // Only override if the turns are from real humans, not machine/IVR audio.
+  if (disposition === 'no_answer' && humanTurnCount >= 3) {
+    const hasInterestInTranscript = hasInterestSignals(session.transcripts);
+    const hasDeclineInTranscript = hasExplicitDecline(session.transcripts);
+
+    if (hasInterestInTranscript && !hasDeclineInTranscript) {
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns with interest signals. Overriding → callback_requested.`);
+      disposition = 'callback_requested';
+    } else if (!hasDeclineInTranscript) {
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns (real conversation). Overriding → callback_requested.`);
+      disposition = 'callback_requested';
+    } else {
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns but decline detected. Overriding → not_interested.`);
+      disposition = 'not_interested';
+    }
+  } else if (disposition === 'no_answer' && totalUserTurnCount >= 3 && humanTurnCount < 3) {
+    // Had turns but they were mostly machine — keep as no_answer
+    console.log(`${LOG_PREFIX} ℹ️ no_answer has ${totalUserTurnCount} total turns but only ${humanTurnCount} human turns (mostly machine). Keeping as no_answer.`);
   }
 
   // Check for voicemail in transcript — catches cases where AMD missed the voicemail
@@ -7070,16 +7140,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
   // ==================== SMART DISPOSITION ANALYSIS ====================
   // Apply campaign-specific qualification criteria to improve disposition accuracy
-  // This catches under-classified calls (e.g., no_answer that was actually a conversation)
-  // CRITICAL: Smart analysis can only DOWNGRADE or route to needs_review.
-  // It can NEVER upgrade to qualified_lead — only the AI's submit_disposition can do that.
+  // This catches under-classified calls (e.g., no_answer that was actually a real conversation)
+  // The smart analyzer CAN upgrade to qualified_lead when transcript evidence is strong.
+  // It uses keyword matching + conversation metrics to catch calls the AI under-classified.
   // CRITICAL: Never override a 'voicemail' disposition — transcript-based voicemail detection
-  // (isVoicemailTranscript) is authoritative. The smart analyzer's phrase list is a subset
-  // and would incorrectly reclassify voicemail as needs_review due to transcribed greeting turns.
+  // (isVoicemailTranscript) is authoritative.
   if (session.campaignId && session.transcripts.length > 0 && !session.isTestSession && disposition !== 'voicemail') {
     try {
       const campaignContext = await loadCampaignQualificationContext(session.campaignId);
-      
+
       if (campaignContext) {
         const callDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
         const smartResult = determineSmartDisposition(
@@ -7089,20 +7158,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           callDuration
         );
 
-        // SAFETY: Never let smart analysis UPGRADE to qualified_lead
-        // The AI's submit_disposition tool has strict in-call validation (booking flow,
-        // agent turns >= 3, agent words >= 30, goodbye check, etc.) that keyword matching cannot replicate.
-        if (smartResult.shouldOverride && smartResult.suggestedDisposition !== 'qualified_lead') {
+        // Allow smart analysis to override disposition when confidence is high enough
+        // This includes upgrading to qualified_lead when transcript evidence is strong
+        if (smartResult.shouldOverride) {
           console.log(`${LOG_PREFIX} 🎯 Smart disposition override: ${disposition} → ${smartResult.suggestedDisposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
           console.log(`${LOG_PREFIX}   Reason: ${smartResult.reasoning}`);
           if (smartResult.positiveSignals.length > 0) {
             console.log(`${LOG_PREFIX}   Positive signals: ${smartResult.positiveSignals.join(', ')}`);
           }
           disposition = smartResult.suggestedDisposition;
-        } else if (smartResult.shouldOverride && smartResult.suggestedDisposition === 'qualified_lead') {
-          // Smart analysis wants qualified_lead but we block it — route to needs_review instead
-          console.warn(`${LOG_PREFIX} 🚫 Smart disposition wanted qualified_lead but BLOCKED (only AI submit_disposition can set this). Routing to needs_review instead.`);
-          disposition = 'needs_review';
         } else {
           console.log(`${LOG_PREFIX} Smart disposition agrees with current: ${disposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
         }

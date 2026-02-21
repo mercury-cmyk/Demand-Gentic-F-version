@@ -79,9 +79,10 @@ interface ActivityEvent {
 }
 
 export default function CloudLogsMonitor() {
+  const isDevMode = import.meta.env.DEV;
   const [searchQuery, setSearchQuery] = useState("");
   const [timeWindow, setTimeWindow] = useState<24 | 48 | 168>(24);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(!isDevMode);
   const [selectedSeverity, setSelectedSeverity] = useState<string[]>(['ERROR', 'WARNING', 'INFO', 'DEBUG', 'DEFAULT']);
   const [expandedLog, setExpandedLog] = useState<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -103,6 +104,7 @@ export default function CloudLogsMonitor() {
   const wsRef = useRef<WebSocket | null>(null);
   const connectionStartRef = useRef<Date | null>(null);
   const logCountRef = useRef({ total: 0, lastCheck: Date.now() });
+  const canAutoPoll = autoRefresh;
 
   // Add activity event helper
   const addActivityEvent = useCallback((type: ActivityEvent['type'], message: string, severity?: string) => {
@@ -231,7 +233,8 @@ export default function CloudLogsMonitor() {
       const response = await apiRequest('GET', '/api/cloud-logs/recent?minutes=5&limit=100');
       return await (response as any).json();
     },
-    refetchInterval: !isWebSocketConnected && autoRefresh ? 10000 : false,
+    refetchInterval: !isWebSocketConnected && canAutoPoll ? 30000 : false,
+    enabled: canAutoPoll,
   });
 
   // Merge recent logs with real-time logs
@@ -254,7 +257,8 @@ export default function CloudLogsMonitor() {
       const response = await apiRequest('GET', `/api/cloud-logs/metrics?hours=${timeWindow}`);
       return await (response as any).json();
     },
-    refetchInterval: autoRefresh ? 30000 : false,
+    refetchInterval: canAutoPoll ? 60000 : false,
+    enabled: canAutoPoll,
   });
 
   // Fetch error summary
@@ -264,7 +268,8 @@ export default function CloudLogsMonitor() {
       const response = await apiRequest('GET', `/api/cloud-logs/errors?hours=${timeWindow}`);
       return await (response as any).json();
     },
-    refetchInterval: autoRefresh ? 30000 : false,
+    refetchInterval: canAutoPoll ? 60000 : false,
+    enabled: canAutoPoll,
   });
 
   // Search logs
@@ -274,7 +279,7 @@ export default function CloudLogsMonitor() {
       const response = await apiRequest('GET', `/api/cloud-logs/search?q=${encodeURIComponent(searchQuery)}&hours=${timeWindow}&limit=200`);
       return await (response as any).json();
     },
-    enabled: searchQuery.length > 2,
+    enabled: canAutoPoll && searchQuery.length > 2,
   });
 
   // Auto-scroll (scoped to the log scroll container, not the whole page)

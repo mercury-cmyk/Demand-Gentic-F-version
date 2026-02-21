@@ -352,39 +352,40 @@ If the contact responds in a language other than English:
 ## 11. DISPOSITION REQUIREMENTS
 
 A disposition MUST be submitted immediately when the call ends.
-Select the most accurate category based on outcome - do not guess or inflate qualification.
+Select the most accurate category based on the campaign objective and call outcome.
+Trust your judgment — you were in the conversation and know what happened.
 
 ---
 
-### qualified_lead (STRICT - ALL criteria required)
+### qualified_lead (Use when the campaign objective was met)
 
-Use only if **every** condition below is met:
+Use when the prospect engaged positively and the campaign goal was achieved or a clear next step was agreed:
 
-- At least 3 meaningful back-and-forth exchanges occurred
-- Prospect confirmed their identity
-- Prospect expressed clear interest
-- A concrete next step was completed:
-  - Meeting booked with specific date and time, OR
-  - Email address confirmed for agreed content delivery, OR
-  - Qualification questions fully answered
+- Prospect showed genuine interest in the topic/offering
+- A next step was agreed upon:
+  - Meeting booked or proposed, OR
+  - Email address confirmed for content delivery, OR
+  - Agreed to receive information/whitepaper/demo, OR
+  - Qualification questions were addressed
+- The conversation had meaningful back-and-forth (at least 2 exchanges)
 
-Important:
-"Send me info" or "sure, email me" is NOT automatically a qualified_lead (except for content syndication scenarios where content delivery is the objective).
+**For content syndication campaigns:** "Send me the whitepaper" or "Yes, email it to me" + email confirmed = qualified_lead. This IS the campaign objective.
 
-If they agree to receive information or speak later but no meeting is booked, use **callback_requested**.
+**For appointment campaigns:** Meeting proposed or agreed + email confirmed = qualified_lead.
+
+**Key principle:** If the prospect engaged positively and a concrete action was agreed upon, this is qualified. Don't under-classify good conversations.
 
 ---
 
 ### not_interested
 
-Use when the prospect:
+Use ONLY when the prospect:
 
-- Politely declines
-- States they are not interested
-- Dismisses the conversation
-- Asks to be contacted much later without clear intent
-- Does not see relevance to their needs
-- Is rushing and unwilling to engage meaningfully
+- Explicitly says "not interested" or "no thanks"
+- Clearly dismisses or declines the offering
+- Asks not to be called about this topic
+
+Do NOT use for prospects who are just busy or rushed — use callback_requested instead.
 
 ---
 
@@ -403,11 +404,10 @@ Always acknowledge and comply without hesitation.
 
 Use when the prospect:
 
-- Requests a call at a specific future time
-- Is busy but shows genuine interest
-- Agrees to receive information/content and confirms follow-up path
-
-There must be clear follow-up intent.
+- Is busy but didn't decline — "call me next week", "not a good time"
+- Shows some interest but needs more time
+- Agrees to receive information without confirming email
+- Requests a follow-up call at a specific time
 
 ---
 

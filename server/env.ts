@@ -1,73 +1,138 @@
+import fs from "fs";
+import path from "path";
+import dotenv from "dotenv";
+import { z } from "zod";
 
-import { z } from 'zod';
-import dotenv from 'dotenv';
-import path from 'path';
+const NODE_ENV = (process.env.NODE_ENV || "development").toLowerCase();
 
-// Load environment variables from .env (shared for local and production)
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+function isTruthy(value: string | undefined): boolean {
+  return String(value || "").toLowerCase() === "true";
+}
 
-const envSchema = z.object({
-  // Telnyx - now optional with warnings (allow server to start for Cloud Run healthcheck)
-  TELNYX_API_KEY: z.string().optional(),
-  TELNYX_FROM_NUMBER: z.string().optional(),
-  TELNYX_TEXML_APP_ID: z.string().optional(),
+function loadEnvironmentFiles(): void {
+  const cwd = process.cwd();
+  const candidates = [
+    ".env",
+    `.env.${NODE_ENV}`,
+    ".env.local",
+    `.env.${NODE_ENV}.local`,
+  ].map((file) => path.resolve(cwd, file));
 
-  // Voice Providers
-  OPENAI_API_KEY: z.string().optional(),
-  GOOGLE_AI_API_KEY: z.string().optional(),
-  GEMINI_API_KEY: z.string().optional(),
-  
-  // Google Cloud
-  GOOGLE_CLOUD_PROJECT: z.string().optional(),
-  GCP_PROJECT_ID: z.string().optional(),
-
-  // Webhook and WebSocket
-  PUBLIC_WEBHOOK_HOST: z.string().optional(),
-  PUBLIC_WEBSOCKET_URL: z.string().optional(),
-  
-  // Default Voice Provider
-  VOICE_PROVIDER: z.string().optional(),
-
-  // Replit-specific (optional)
-  REPLIT_DEV_DOMAIN: z.string().optional(),
-
-});
-
-// Track environment validation status for runtime checks
-export let envValidationErrors: string[] = [];
-
-try {
-  const parsedEnv = envSchema.parse(process.env);
-  
-  // Check for critical missing vars (warn but don't exit - allow healthcheck to pass)
-  const criticalVars = ['TELNYX_API_KEY', 'TELNYX_FROM_NUMBER', 'TELNYX_TEXML_APP_ID'];
-  const missingCritical = criticalVars.filter(v => !process.env[v]);
-  
-  if (missingCritical.length > 0) {
-    envValidationErrors = missingCritical;
-    console.error("⚠️  Missing critical environment variables:", missingCritical.join(', '));
-    console.error("   Voice calling features will not work until these are configured.");
-  }
-  
-  // Check for at least one Google AI key
-  if (!process.env.GOOGLE_AI_API_KEY && !process.env.GEMINI_API_KEY) {
-    envValidationErrors.push('GOOGLE_AI_API_KEY or GEMINI_API_KEY');
-    console.error("⚠️  Missing GOOGLE_AI_API_KEY or GEMINI_API_KEY - Google voice provider won't work.");
-  }
-  
-  if (envValidationErrors.length === 0) {
-    console.log("✅ Environment variables validated successfully.");
-  } else {
-    console.log("⚠️  Server starting with missing env vars (see warnings above).");
-  }
-
-} catch (error) {
-  if (error instanceof z.ZodError) {
-    console.error("❌ Environment validation error:", error.format());
-    // DON'T exit - let server start so Cloud Run healthcheck passes and we can see logs
-    envValidationErrors.push('Schema validation failed');
+  for (const envPath of candidates) {
+    if (!fs.existsSync(envPath)) continue;
+    dotenv.config({ path: envPath, override: false });
   }
 }
 
-// Re-export process.env for existing code that uses it directly
+function assertDevelopmentIsolation(): void {
+  if (NODE_ENV !== "development") return;
+  if (process.env.STRICT_ENV_ISOLATION === "false") return;
+
+  const issues: string[] = [];
+
+  if (!process.env.DATABASE_URL_DEV) {
+    issues.push("DATABASE_URL_DEV is required when NODE_ENV is development.");
+  }
+
+  const resolvedDevDbUrl = process.env.DATABASE_URL_DEV || process.env.DATABASE_URL || "";
+  if (
+    resolvedDevDbUrl &&
+    process.env.DATABASE_URL_PROD &&
+    resolvedDevDbUrl === process.env.DATABASE_URL_PROD &&
+    !isTruthy(process.env.ALLOW_DEV_PROD_DB)
+  ) {
+    issues.push("Development database resolves to DATABASE_URL_PROD. Use an isolated DATABASE_URL_DEV.");
+  }
+
+  const allowSharedRedisInDev = isTruthy(process.env.ALLOW_SHARED_REDIS_IN_DEV);
+  const resolvedDevRedisUrl =
+    process.env.REDIS_URL_DEV || (allowSharedRedisInDev ? process.env.REDIS_URL : "");
+  if (
+    resolvedDevRedisUrl &&
+    process.env.REDIS_URL_PROD &&
+    resolvedDevRedisUrl === process.env.REDIS_URL_PROD &&
+    !isTruthy(process.env.ALLOW_DEV_PROD_REDIS)
+  ) {
+    issues.push("Development Redis resolves to REDIS_URL_PROD. Use an isolated REDIS_URL_DEV.");
+  }
+
+  const endpointFields = ["PUBLIC_WEBHOOK_HOST", "PUBLIC_WEBSOCKET_URL", "TELNYX_WEBHOOK_URL"] as const;
+  const blockedMarkers = (process.env.PRODUCTION_HOST_DENYLIST || "demandgentic.ai,.run.app")
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!isTruthy(process.env.ALLOW_DEV_PROD_ENDPOINTS)) {
+    for (const field of endpointFields) {
+      const value = String(process.env[field] || "").toLowerCase();
+      if (!value) continue;
+
+      for (const marker of blockedMarkers) {
+        if (value.includes(marker)) {
+          issues.push(`${field} appears to target a production host (${marker}).`);
+          break;
+        }
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new Error(
+      `[EnvIsolation] Refusing to start in ${NODE_ENV} due to unsafe shared config:\n- ${issues.join("\n- ")}`
+    );
+  }
+}
+
+loadEnvironmentFiles();
+assertDevelopmentIsolation();
+
+const envSchema = z.object({
+  TELNYX_API_KEY: z.string().optional(),
+  TELNYX_FROM_NUMBER: z.string().optional(),
+  TELNYX_TEXML_APP_ID: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  GOOGLE_AI_API_KEY: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  GOOGLE_CLOUD_PROJECT: z.string().optional(),
+  GCP_PROJECT_ID: z.string().optional(),
+  PUBLIC_WEBHOOK_HOST: z.string().optional(),
+  PUBLIC_WEBSOCKET_URL: z.string().optional(),
+  VOICE_PROVIDER: z.string().optional(),
+  REPLIT_DEV_DOMAIN: z.string().optional(),
+});
+
+export let envValidationErrors: string[] = [];
+
+try {
+  envSchema.parse(process.env);
+
+  const criticalVars = ["TELNYX_API_KEY", "TELNYX_FROM_NUMBER", "TELNYX_TEXML_APP_ID"];
+  const missingCritical = criticalVars.filter((key) => !process.env[key]);
+
+  if (missingCritical.length > 0) {
+    envValidationErrors = [...missingCritical];
+    console.error("[Env] Missing critical environment variables:", missingCritical.join(", "));
+    console.error("[Env] Voice calling features will stay disabled until configured.");
+  }
+
+  if (!process.env.GOOGLE_AI_API_KEY && !process.env.GEMINI_API_KEY) {
+    envValidationErrors.push("GOOGLE_AI_API_KEY or GEMINI_API_KEY");
+    console.error("[Env] Missing GOOGLE_AI_API_KEY or GEMINI_API_KEY.");
+  }
+
+  if (envValidationErrors.length === 0) {
+    console.log("[Env] Environment variables validated successfully.");
+  } else {
+    console.log("[Env] Server starting with missing optional env vars.");
+  }
+} catch (error) {
+  if (error instanceof z.ZodError) {
+    console.error("[Env] Schema validation error:", error.format());
+    envValidationErrors.push("Schema validation failed");
+  } else {
+    throw error;
+  }
+}
+
 export const env = process.env;
+

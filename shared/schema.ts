@@ -8116,7 +8116,7 @@ export const workOrders = pgTable("work_orders", {
   leadsDelivered: integer("leads_delivered").default(0),
 
   // QA tracking
-  qaStatus: text("qa_status"), // pending, in_review, approved, rejected
+  qaStatus: text("wo_qa_status"), // pending, in_review, approved, rejected
   qaReviewedBy: varchar("qa_reviewed_by").references(() => users.id, { onDelete: 'set null' }),
   qaReviewedAt: timestamp("qa_reviewed_at"),
   qaNotes: text("qa_notes"),
