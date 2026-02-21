@@ -532,9 +532,26 @@ app.use((req, res, next) => {
   }
   
   // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
-  const { initializeAiCampaignOrchestrator } = await import("./lib/ai-campaign-orchestrator");
+  const { initializeAiCampaignOrchestrator, getOrchestratorStatus } = await import("./lib/ai-campaign-orchestrator");
   if (hasRedis) {
     initializeAiCampaignOrchestrator();
+
+    const configuredHealthcheckMs = Number(process.env.AI_ORCHESTRATOR_HEALTHCHECK_MS || 60000);
+    const orchestratorHealthcheckMs = Number.isFinite(configuredHealthcheckMs)
+      ? Math.max(30000, configuredHealthcheckMs)
+      : 60000;
+
+    setInterval(async () => {
+      try {
+        const status = await getOrchestratorStatus();
+        if (!status.available) {
+          console.warn('[AI Orchestrator] Healthcheck detected unavailable orchestrator - attempting re-initialization');
+          initializeAiCampaignOrchestrator();
+        }
+      } catch (err) {
+        console.error('[AI Orchestrator] Healthcheck failed:', err);
+      }
+    }, orchestratorHealthcheckMs);
   }
 
   // Initialize Vertex AI Agentic CRM Operator

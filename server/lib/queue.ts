@@ -186,7 +186,7 @@ export async function getRedisConnectionAsync(): Promise<IORedis | undefined> {
  * Check if Redis/Queue system is available
  */
 export function isQueueAvailable(): boolean {
-  if (redisConnection && redisConnection.status !== 'end' && redisConnection.status !== 'closed') {
+  if (redisConnection && redisConnection.status !== 'end' && redisConnection.status !== 'close') {
     return true;
   }
 
