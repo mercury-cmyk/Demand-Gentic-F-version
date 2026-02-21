@@ -170,13 +170,13 @@ async function transcribeWithSpeakers(
       structuredTranscript = {
         fullTranscript: plainTranscript,
         conversation: transcriptTurns.map(t => ({
-          speaker: t.role === 'agent' ? 'Agent' : 'Prospect',
+          speaker: t.role === 'agent' ? 'Agent' : 'Contact',
           text: t.text,
           timestamp: t.timeOffset,
         })),
         speakerMapping: {
           'Channel 2': 'Agent',
-          'Channel 1': 'Prospect',
+          'Channel 1': 'Contact',
         },
       };
     } else {
@@ -277,13 +277,13 @@ async function transcribeWithSpeakers(
       structuredTranscript = {
         fullTranscript: plainTranscript,
         conversation: utterances.map(u => ({
-          speaker: u.speaker === agentSpeaker ? 'Agent' : 'Prospect',
+          speaker: u.speaker === agentSpeaker ? 'Agent' : 'Contact',
           text: u.text,
           timestamp: u.start,
         })),
         speakerMapping: {
           [agentSpeaker]: 'Agent',
-          [uniqueSpeakers.find(s => s !== agentSpeaker) || 'Speaker 2']: 'Prospect',
+          [uniqueSpeakers.find(s => s !== agentSpeaker) || 'Speaker 2']: 'Contact',
         },
       };
     }

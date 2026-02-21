@@ -3298,9 +3298,9 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
             console.log(`${LOG_PREFIX} 🚪 [Gemini] GATEKEEPER DETECTED for call: ${session.callId} - Transitioning to GATEKEEPER state`);
 
             // Inject gatekeeper handling reminder so the agent engages properly
-            const contactFirstName = session.contactFirstName || session.contactName?.split(' ')[0] || 'the person';
-            const agentName = session.agentName || 'calling agent';
-            const orgName = session.organizationName || session.campaignOrgName || 'our company';
+            const contactFirstName = contactInfo?.firstName || contactInfo?.fullName?.split(' ')[0] || 'the person';
+            const agentName = resolvedAgentNameGemini || 'calling agent';
+            const orgName = resolvedOrgNameGemini || 'our company';
             const gatekeeperReminder = `[GATEKEEPER DETECTED] You are speaking with a gatekeeper/receptionist, NOT ${contactFirstName}. ` +
               `Do NOT repeat "May I speak with ${contactFirstName}?" again — they already heard you. ` +
               `ENGAGE with the gatekeeper warmly and answer their questions: ` +

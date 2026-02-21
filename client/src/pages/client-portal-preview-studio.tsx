@@ -1316,7 +1316,7 @@ function VoicePreviewSection({
                               "text-[10px] font-semibold uppercase tracking-wider",
                               msg.role === 'user' ? "text-purple-400" : "text-blue-400"
                             )}>
-                              {msg.role === 'user' ? 'You (Prospect)' : 'AI Agent'}
+                              {msg.role === 'user' ? 'You (Contact)' : 'AI Agent'}
                             </span>
                             <span className="text-[9px] text-white/30">
                               {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

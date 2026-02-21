@@ -21,7 +21,7 @@ function normalizeSpeaker(role: string | undefined): 'agent' | 'prospect' | 'sys
 function getSpeakerLabel(speaker: 'agent' | 'prospect' | 'system'): string {
   switch (speaker) {
     case 'agent': return 'Agent';
-    case 'prospect': return 'Prospect';
+    case 'prospect': return 'Contact';
     case 'system': return 'System';
   }
 }
@@ -124,7 +124,7 @@ try {
 
 try {
   assertEqual(getSpeakerLabel('agent'), 'Agent');
-  assertEqual(getSpeakerLabel('prospect'), 'Prospect');
+  assertEqual(getSpeakerLabel('prospect'), 'Contact');
   assertEqual(getSpeakerLabel('system'), 'System');
   results.push({ name: 'getSpeakerLabel: returns correct labels', passed: true });
 } catch (e) {
