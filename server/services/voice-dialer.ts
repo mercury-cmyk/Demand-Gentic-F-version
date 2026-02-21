@@ -160,7 +160,7 @@ const MAX_TRANSCRIPTS = 200;
 const MAX_STATE_HISTORY = 50;
 const MAX_AUDIO_PATTERNS = 100;
 const MAX_RESPONSE_LATENCIES = 100;
-const VOICEMAIL_EARLY_WINDOW_MS = 12000;
+const VOICEMAIL_EARLY_WINDOW_MS = 6000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
 
 /** Trim array from the front if it exceeds maxLen. Call after pushing. */
@@ -697,8 +697,14 @@ export function isVoicemailCueTranscript(transcript: string): boolean {
     "cannot take your call",
     "cant take your call",
     "unable to answer",
+    "unable to take your call",
     "im unavailable to take your call right now",
+    "currently unavailable",
+    "is unavailable",
+    "am unavailable",
     "please leave",
+    "leave your name",
+    "leave a name",
     "record your message",
     "voicemail",
     "voice mail",
@@ -714,6 +720,14 @@ export function isVoicemailCueTranscript(transcript: string): boolean {
     "you have reached the voicemail of",
     "at the tone please record your message",
     "you are trying to reach is not available",
+    "away from my phone",
+    "away from the phone",
+    "i ll get back to you",
+    "i will get back to you",
+    "return your call",
+    "come to the phone",
+    "press pound",
+    "hang up or press",
     "beep",
   ];
 
@@ -6140,7 +6154,10 @@ function formatTranscriptNotes(transcripts: OpenAIRealtimeSession["transcripts"]
     return null;
   }
 
-  const transcriptText = transcripts.map(t => `${t.role}: ${t.text}`).join("\n");
+  const transcriptText = transcripts.map(t => {
+    const label = t.role === 'assistant' ? 'Agent' : t.role === 'user' ? 'Contact' : t.role;
+    return `${label}: ${t.text}`;
+  }).join("\n");
   if (!transcriptText.trim()) {
     return null;
   }
@@ -8075,9 +8092,14 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       'after the tone',
       'the person you are calling is not available',
       'not available',
+      'currently unavailable',
+      'is unavailable',
+      'am unavailable',
       'cannot take your call',
       'can\'t take your call',
       'please leave',
+      'leave your name',
+      'leave a name',
       'record your message',
       'at the tone, please record your message',
       'voicemail',
@@ -10289,9 +10311,10 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       }
     }
 
-    // FAST VOICEMAIL TERMINATION: If voicemail was detected, end after 10s (to capture greeting but not leave message)
-    // This is much faster than waiting for MAX_DURATION_WITHOUT_HUMAN
-    const MAX_VOICEMAIL_DURATION_SECONDS = 10;
+    // FAST VOICEMAIL TERMINATION: If voicemail was detected, end after 5s
+    // Reduced from 10s to 5s based on call analysis showing avg 14.2s detection time
+    // Agent should not linger on voicemail lines - hang up immediately after detection
+    const MAX_VOICEMAIL_DURATION_SECONDS = 5;
     if (session.detectedDisposition === 'voicemail' && elapsedSeconds > MAX_VOICEMAIL_DURATION_SECONDS) {
       console.warn(`${LOG_PREFIX} VOICEMAIL TIMEOUT - Ending call ${session.callId} after ${elapsedSeconds}s (voicemail detected, max ${MAX_VOICEMAIL_DURATION_SECONDS}s)`);
       endCall(session.callId, 'voicemail');
@@ -10299,9 +10322,9 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     }
 
     // ENHANCED VOICEMAIL DETECTION: One-way conversation pattern
-    // If we've been talking for 30+ seconds but got no interactive human responses, it's likely voicemail
-    // A real human would respond back with questions/acknowledgments within this timeframe
-    const MAX_ONE_WAY_CONVERSATION_SECONDS = 30;
+    // If we've been talking for 15+ seconds but got no interactive human responses, it's likely voicemail
+    // Reduced from 30s to 15s - call analysis showed agent lingering 12-21s on voicemail lines
+    const MAX_ONE_WAY_CONVERSATION_SECONDS = 15;
     if (elapsedSeconds > MAX_ONE_WAY_CONVERSATION_SECONDS && !session.detectedDisposition) {
       // Count INTERACTIVE user responses: responses that came AFTER the AI spoke at least once
       // This filters out voicemail greetings that are just the recorded message playing

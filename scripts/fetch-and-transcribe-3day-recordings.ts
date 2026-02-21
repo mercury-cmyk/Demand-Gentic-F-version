@@ -313,12 +313,12 @@ function formatTwoWayTranscript(structured: StructuredTranscript): {
 
   for (const u of structured.utterances) {
     const speakerNum = parseInt(u.speaker.replace("Speaker ", ""), 10) || 1;
-    const label = speakerNum === 1 ? "AGENT" : "PROSPECT";
+    const label = speakerNum === 1 ? "Agent" : "Contact";
     const timestamp = formatTime(u.start);
     const line = `[${timestamp}] ${label}: ${u.text}`;
     lines.push(line);
 
-    if (label === "AGENT") agentLines.push(u.text);
+    if (label === "Agent") agentLines.push(u.text);
     else prospectLines.push(u.text);
   }
 

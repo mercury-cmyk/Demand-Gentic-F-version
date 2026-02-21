@@ -12,10 +12,10 @@ function formatTranscript(segments: any[], fallbackText: string): string {
     
     return segments
       .map((segment) => {
-        const speakerLabel = segment.speaker === "agent" ? "[AI Agent]" : segment.speaker === "prospect" ? "[Prospect]" : "[Unknown]";
+        const speakerLabel = segment.speaker === "agent" ? "Agent:" : segment.speaker === "prospect" ? "Contact:" : "Unknown:";
         return `${speakerLabel} ${segment.text}`;
       })
-      .join("\n\n");
+      .join("\n");
 }
 
 async function retranscribeMissing() {
