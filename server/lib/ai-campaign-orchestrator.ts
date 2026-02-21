@@ -205,12 +205,18 @@ function isTelnyxFatalError(error: any): { code: number; detail: string; isWhite
 }
 
 /**
- * Check if a contact is within their local business hours based on country
+ * Check if a contact is within their local business hours based on country and campaign config
  * Returns { canCall: boolean, timezone: string | null, localTime: string, reason?: string }
  * 
  * If timezone cannot be detected, returns canCall: false to avoid calling at wrong times
+ * 
+ * @param contact - Contact location info
+ * @param campaignBusinessHoursConfig - Optional campaign-specific business hours config (takes precedence over country defaults)
  */
-function isContactWithinBusinessHours(contact: { country?: string | null; state?: string | null; timezone?: string | null }): {
+function isContactWithinBusinessHours(
+  contact: { country?: string | null; state?: string | null; timezone?: string | null },
+  campaignBusinessHoursConfig?: any
+): {
   canCall: boolean;
   timezone: string | null;
   localTime: string;
@@ -252,13 +258,25 @@ function isContactWithinBusinessHours(contact: { country?: string | null; state?
   
   const now = new Date();
 
-  // Get country-specific business hours (handles Middle East Sun-Thu work week)
-  const countryConfig = getBusinessHoursForCountry(contact.country, now);
-  const config = {
-    ...countryConfig,
-    timezone: contactTz,
-    respectContactTimezone: false, // We already resolved the timezone
-  };
+  // Use campaign-specific business hours config if available, otherwise fall back to country defaults
+  let config: any;
+  
+  if (campaignBusinessHoursConfig && campaignBusinessHoursConfig.enabled) {
+    // Use campaign config
+    config = {
+      ...campaignBusinessHoursConfig,
+      timezone: contactTz,
+      respectContactTimezone: false, // We already resolved the timezone
+    };
+  } else {
+    // Fall back to country-specific business hours (handles Middle East Sun-Thu work week)
+    const countryConfig = getBusinessHoursForCountry(contact.country, now);
+    config = {
+      ...countryConfig,
+      timezone: contactTz,
+      respectContactTimezone: false, // We already resolved the timezone
+    };
+  }
 
   // Temporary one-day UK exception: allow Saturday calling on 2026-02-21 only.
   if (isUkSaturdayOneDayOverride(contact.country, now) && !config.operatingDays.includes('saturday')) {
@@ -1345,11 +1363,15 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     
     // Check business hours for this contact's timezone/country FIRST
     // Use stored timezone if available, fall back to country/state detection
-    const bizHoursCheck = isContactWithinBusinessHours({
-      country: effectiveCountry,
-      state,
-      timezone: effectiveTimezone,
-    });
+    // Pass campaign's business hours config to use instead of country defaults
+    const bizHoursCheck = isContactWithinBusinessHours(
+      {
+        country: effectiveCountry,
+        state,
+        timezone: effectiveTimezone,
+      },
+      campaign.businessHoursConfig // Pass campaign config if available
+    );
     const tzKey = bizHoursCheck.timezone || 'unknown';
     
     // Track timezone stats
