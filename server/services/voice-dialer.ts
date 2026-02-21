@@ -6868,11 +6868,13 @@ async function resolveTelnyxCallControlId(session: OpenAIRealtimeSession): Promi
 async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<void> {
   const telnyxApiKey = process.env.TELNYX_API_KEY;
   if (!telnyxApiKey) {
+    console.warn(`${LOG_PREFIX} ⚠️ TELNYX_API_KEY not set - cannot hang up call ${session.callId} via Telnyx API`);
     return;
   }
 
   const callControlId = await resolveTelnyxCallControlId(session);
   if (!callControlId) {
+    console.warn(`${LOG_PREFIX} ⚠️ Cannot resolve callControlId for call ${session.callId} (callAttemptId=${session.callAttemptId}) - Telnyx hangup SKIPPED. Call may become zombie!`);
     return;
   }
 
@@ -6896,6 +6898,70 @@ async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<void> 
   } catch (error) {
     console.warn(`${LOG_PREFIX} Telnyx hangup API request failed for call ${session.callId}:`, error);
   }
+}
+
+/**
+ * Retry version of forceTelnyxHangup - attempts multiple times with delay.
+ * Used as a safety net when the primary endCall might have failed to hang up.
+ * On each retry, re-resolves the callControlId in case it became available later
+ * (e.g., the bridge stored it after the initial endCall attempt).
+ */
+async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRetries: number): Promise<void> {
+  const telnyxApiKey = process.env.TELNYX_API_KEY;
+  if (!telnyxApiKey) return;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const callControlId = await resolveTelnyxCallControlId(session);
+    if (!callControlId) {
+      // Try using callId and callAttemptId directly as fallback IDs
+      const fallbackIds = [session.callId, session.callAttemptId].filter(Boolean);
+      let hung = false;
+      for (const id of fallbackIds) {
+        try {
+          const resp = await fetch(`https://api.telnyx.com/v2/calls/${id}/actions/hangup`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${telnyxApiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          if (resp.ok) {
+            console.log(`${LOG_PREFIX} ✅ Retry hangup succeeded using fallback ID ${id} for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
+            hung = true;
+            break;
+          }
+        } catch (_) { /* try next */ }
+      }
+      if (hung) return;
+
+      if (attempt < maxRetries) {
+        console.warn(`${LOG_PREFIX} ⚠️ Retry hangup attempt ${attempt}/${maxRetries}: no callControlId for ${session.callId}, retrying in ${attempt * 2}s...`);
+        await new Promise(r => setTimeout(r, attempt * 2000));
+        continue;
+      }
+      console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries exhausted for call ${session.callId} - could not resolve callControlId`);
+      return;
+    }
+
+    try {
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${telnyxApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (response.ok) {
+        console.log(`${LOG_PREFIX} ✅ Retry hangup succeeded for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
+        return;
+      }
+      const errText = await response.text().catch(() => '');
+      console.warn(`${LOG_PREFIX} Retry hangup attempt ${attempt}/${maxRetries} returned ${response.status}: ${errText}`);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Retry hangup attempt ${attempt}/${maxRetries} failed:`, error);
+    }
+
+    if (attempt < maxRetries) {
+      await new Promise(r => setTimeout(r, attempt * 2000));
+    }
+  }
+  console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries failed for call ${session.callId}`);
 }
 
 async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voicemail' | 'error'): Promise<void> {
@@ -7021,9 +7087,21 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   await forceTelnyxHangup(session);
 
   // Close Telnyx WebSocket to terminate the call (this triggers Telnyx to hangup)
-  if (session.telnyxWs && session.telnyxWs.readyState === WebSocket.OPEN) {
-    console.log(`${LOG_PREFIX} Closing Telnyx WebSocket to terminate call ${callId}`);
-    session.telnyxWs.close();
+  if (session.telnyxWs) {
+    const wsState = session.telnyxWs.readyState;
+    if (wsState === WebSocket.OPEN || wsState === WebSocket.CONNECTING) {
+      console.log(`${LOG_PREFIX} Closing Telnyx WebSocket to terminate call ${callId} (state: ${wsState})`);
+      session.telnyxWs.close();
+    }
+    // Force-terminate the WebSocket if close() doesn't work fast enough
+    // terminate() destroys the underlying socket immediately (no close handshake)
+    try {
+      if (typeof (session.telnyxWs as any).terminate === 'function') {
+        setTimeout(() => {
+          try { (session.telnyxWs as any).terminate(); } catch (_) {}
+        }, 2000);
+      }
+    } catch (_) {}
   }
 
   // Build transcript — use Gemini in-session transcripts as a lightweight fallback
@@ -10144,6 +10222,10 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       if (elapsedSeconds > absoluteMax) {
         console.warn(`${LOG_PREFIX} ⛔ ABSOLUTE MAX EXCEEDED - Force ending call ${session.callId} after ${elapsedSeconds}s (absolute limit: ${absoluteMax}s)`);
         endCall(session.callId, 'completed');
+        // Defense-in-depth: backup Telnyx hangup in case endCall's hangup failed
+        setTimeout(async () => {
+          try { await forceTelnyxHangupWithRetry(session, 2); } catch (_) {}
+        }, 3000);
         return;
       }
 
@@ -10339,6 +10421,10 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
         session.detectedDisposition === 'voicemail' ? 'voicemail' :
         session.detectedDisposition === 'no_answer' ? 'no_answer' : 'completed';
       endCall(session.callId, outcome);
+      // Defense-in-depth: backup Telnyx hangup in case endCall's hangup failed
+      setTimeout(async () => {
+        try { await forceTelnyxHangupWithRetry(session, 2); } catch (_) {}
+      }, 3000);
       return;
     }
 
@@ -10408,12 +10494,23 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
         }
       }
 
-      // Give 3 seconds for farewell, then force terminate
-      setTimeout(() => {
-        if (session.isActive) {
-          endCall(session.callId, 'completed');
+      // CRITICAL FIX: Call endCall IMMEDIATELY instead of delayed setTimeout.
+      // The old 3-second delay caused a race condition: if another code path set
+      // isActive=false before the timer fired (without successfully hanging up Telnyx),
+      // the setTimeout's endCall would be skipped, leaving a zombie call on Telnyx.
+      // Now we terminate immediately and let the farewell play during the Telnyx hangup grace period.
+      endCall(session.callId, 'completed');
+
+      // DEFENSE-IN-DEPTH: Even if endCall fails to hang up via Telnyx API,
+      // force a direct Telnyx hangup as a belt-and-suspenders measure.
+      // This catches cases where callControlId was null during endCall.
+      setTimeout(async () => {
+        try {
+          await forceTelnyxHangupWithRetry(session, 3);
+        } catch (e) {
+          console.error(`${LOG_PREFIX} ⛔ GLOBAL CEILING: Backup Telnyx hangup also failed for ${session.callId}:`, e);
         }
-      }, 3000);
+      }, 5000);
       return;
     }
 
@@ -10475,6 +10572,67 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     logHealth();
   }, 5000);
 }
+
+// ==================== ZOMBIE SESSION REAPER ====================
+// Defense-in-depth: periodically scan activeSessions for calls that have been
+// alive too long. This catches any call that slipped past all other duration
+// enforcement (e.g., due to race conditions, exceptions, or missing callControlIds).
+const ZOMBIE_REAPER_INTERVAL_MS = 60_000; // Check every 60 seconds
+const ZOMBIE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes absolute max age
+
+setInterval(async () => {
+  const now = Date.now();
+  for (const [callId, session] of activeSessions) {
+    const ageMs = now - session.startTime.getTime();
+
+    // Clean up sessions that are inactive but still in the map (memory leak prevention)
+    if (!session.isActive && ageMs > 5 * 60 * 1000) {
+      console.log(`${LOG_PREFIX} 🧹 Reaper: Removing stale inactive session ${callId} (age: ${Math.round(ageMs / 1000)}s)`);
+      activeSessions.delete(callId);
+      continue;
+    }
+
+    // Force-kill any active session that exceeds the zombie max age
+    if (session.isActive && ageMs > ZOMBIE_MAX_AGE_MS) {
+      console.error(`${LOG_PREFIX} ⛔ ZOMBIE REAPER: Call ${callId} has been active for ${Math.round(ageMs / 1000)}s (max: ${ZOMBIE_MAX_AGE_MS / 1000}s). Force terminating.`);
+
+      // Set disposition if not already set
+      if (!session.detectedDisposition) {
+        session.detectedDisposition = 'needs_review';
+      }
+
+      // Force endCall
+      try {
+        await endCall(callId, 'completed');
+      } catch (e) {
+        console.error(`${LOG_PREFIX} ⛔ Zombie reaper: endCall failed for ${callId}:`, e);
+        // Even if endCall fails, force isActive=false to prevent infinite retries
+        session.isActive = false;
+        session.isEnding = true;
+      }
+
+      // Belt-and-suspenders: try to hang up via Telnyx with retries
+      try {
+        await forceTelnyxHangupWithRetry(session, 3);
+      } catch (e) {
+        console.error(`${LOG_PREFIX} ⛔ Zombie reaper: Telnyx hangup retry also failed for ${callId}:`, e);
+      }
+
+      // Force-close all connections
+      const geminiProvider = (session as any).geminiProvider;
+      if (geminiProvider) {
+        try { geminiProvider.disconnect(); } catch (_) {}
+      }
+      if (session.telnyxWs) {
+        try { session.telnyxWs.close(); } catch (_) {}
+        try { session.telnyxWs.terminate(); } catch (_) {}
+      }
+      if (session.openaiWs) {
+        try { session.openaiWs.close(); } catch (_) {}
+      }
+    }
+  }
+}, ZOMBIE_REAPER_INTERVAL_MS);
 
 export {
   startAudioHealthMonitor,
