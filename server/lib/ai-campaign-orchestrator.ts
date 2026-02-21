@@ -54,6 +54,38 @@ const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_E
 const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
 const ACTIVE_POOL_CACHE_TTL_MS = 30000;
 const ORCHESTRATOR_HEARTBEAT_MS = Math.max(30000, ORCHESTRATOR_INTERVAL_MS * 3);
+const STRICT_US_ONLY_CAMPAIGN_NAME_DEFAULTS = ['RingCentral_AppointmentGen'];
+const STRICT_US_ONLY_CAMPAIGN_NAMES = new Set<string>(
+  [
+    ...STRICT_US_ONLY_CAMPAIGN_NAME_DEFAULTS,
+    ...(process.env.STRICT_US_ONLY_CAMPAIGN_NAMES || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
+  ].map((name) => name.toLowerCase())
+);
+const STRICT_US_ONLY_CAMPAIGN_IDS = new Set<string>(
+  (process.env.STRICT_US_ONLY_CAMPAIGN_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+);
+const US_COUNTRY_KEYS = new Set<string>([
+  'US',
+  'USA',
+  'AMERICA',
+  'UNITED STATES',
+  'UNITED STATES OF AMERICA',
+  'UNITEDSTATES',
+  'UNITEDSTATESOFAMERICA',
+  'U S A',
+  'UNITEDF STATES',
+  'UNITED STATE',
+  'UNTED STATES',
+  'UNITD STATES',
+  'UNTIED STATES',
+  'UITED STATES',
+]);
 
 // Cached concurrency limits from DB (refreshed every 60s)
 let _cachedDefaultMaxConcurrent = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
@@ -435,6 +467,63 @@ function normalizeCountryName(country: string): string {
   return COUNTRY_TYPOS[normalized] || normalized;
 }
 
+function isUnitedStatesCountry(country: string | null | undefined): boolean {
+  if (!country) return false;
+
+  const raw = String(country).toUpperCase().trim();
+  if (!raw) return false;
+
+  const noParens = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const alnumWithSpace = raw.replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const compact = raw.replace(/[^A-Z0-9]/g, '');
+  const candidates = Array.from(new Set([raw, noParens, alnumWithSpace, compact].filter(Boolean)));
+
+  for (const candidate of candidates) {
+    if (US_COUNTRY_KEYS.has(candidate)) return true;
+    const normalized = normalizeCountryName(candidate);
+    if (US_COUNTRY_KEYS.has(normalized)) return true;
+    const normalizedCompact = normalized.replace(/[^A-Z0-9]/g, '');
+    if (US_COUNTRY_KEYS.has(normalizedCompact)) return true;
+  }
+
+  return false;
+}
+
+function shouldEnforceStrictUsOnly(campaign: {
+  id?: string | null;
+  name?: string | null;
+  aiAgentSettings?: unknown;
+}): boolean {
+  const campaignId = (campaign.id || '').trim();
+  if (campaignId && STRICT_US_ONLY_CAMPAIGN_IDS.has(campaignId)) return true;
+
+  const campaignName = (campaign.name || '').trim().toLowerCase();
+  if (campaignName && STRICT_US_ONLY_CAMPAIGN_NAMES.has(campaignName)) return true;
+
+  const aiSettings = campaign.aiAgentSettings && typeof campaign.aiAgentSettings === 'object'
+    ? campaign.aiAgentSettings as Record<string, unknown>
+    : null;
+
+  if (!aiSettings) return false;
+
+  const explicitFlagKeys = ['strictUsOnly', 'strictUSAOnly', 'usaOnly', 'usOnly'];
+  for (const key of explicitFlagKeys) {
+    if (aiSettings[key] === true) return true;
+  }
+
+  const geoAllowRaw = aiSettings.geoAllow;
+  if (Array.isArray(geoAllowRaw) && geoAllowRaw.length > 0) {
+    const geoAllow = geoAllowRaw
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+    if (geoAllow.length > 0 && geoAllow.every((value) => isUnitedStatesCountry(value))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Check if a contact's country is in an enabled calling region
  * Handles various formats: "Indonesia", "indonesia", " Indonesia ", "id", "ID", etc.
@@ -766,9 +855,23 @@ async function resetStuckItems(): Promise<number> {
  * 
  * SIMPLIFIED: Let JavaScript handle ALL business hours logic - don't compute within_hours in SQL
  */
-async function getQueuedItems(campaignId: string, limit: number): Promise<any[]> {
-  const now = new Date();
-  
+async function getQueuedItems(
+  campaignId: string,
+  limit: number,
+  options?: { strictUsOnly?: boolean }
+): Promise<any[]> {
+  const strictUsOnly = options?.strictUsOnly === true;
+  const strictUsOnlySql = strictUsOnly
+    ? sql`
+      -- STRICT USA-ONLY: only dial contacts with explicit US country metadata
+      AND UPPER(TRIM(COALESCE(c.country, ''))) IN (
+        'US', 'USA', 'AMERICA', 'UNITED STATES', 'UNITED STATES OF AMERICA',
+        'U.S', 'U.S.', 'U.S.A', 'U.S.A.',
+        'UNITEDF STATES', 'UNITED STATE', 'UNTED STATES', 'UNITD STATES', 'UNTIED STATES', 'UITED STATES'
+      )
+    `
+    : sql``;
+
   // Fetch queue items with contact data - simplified to just get the DATA, not compute business hours in SQL
   // JavaScript will handle all business hours logic to ensure consistency
   const result = await db.execute(sql`
@@ -822,6 +925,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       AND cq.status = 'queued'
       AND (cq.next_attempt_at IS NULL OR cq.next_attempt_at <= NOW())
       AND (c.direct_phone_e164 IS NOT NULL OR c.mobile_phone_e164 IS NOT NULL)
+      ${strictUsOnlySql}
       -- Exclude contacts already called today (any agent type - prevents duplicate calls)
       -- Match by contact_id first (reliable), then by phone number (catches manual imports)
       AND NOT EXISTS (
@@ -877,7 +981,7 @@ async function setOrchestratorStallReason(campaignId: string, reason: string | n
 /**
  * Process a single campaign - initiate calls to maintain concurrency
  */
-async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
+async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean; hourlyLimitPaused?: boolean }> {
   // Guard: in dev, calls blocked by default — must be enabled in Telephony settings. Production always allows calls.
   if (process.env.NODE_ENV !== 'production' && process.env.CALL_EXECUTION_ENABLED !== 'true') {
     console.log(`[AI Orchestrator] Dev call execution disabled for campaign ${campaignId}; skipping without mutating stall reason`);
@@ -975,6 +1079,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     ? Math.max(0, Math.floor(options.maxNewCalls))
     : campaignSlots;
   const slotsAvailable = Math.min(campaignSlots, requestedSlots);
+  const strictUsOnly = shouldEnforceStrictUsOnly(campaign as any);
+
+  if (strictUsOnly) {
+    console.log(`[AI Orchestrator] Strict USA-only queue filter enabled for campaign ${campaign.name} (${campaignId})`);
+  }
 
   console.log(`[AI Orchestrator] Campaign ${campaignId}: ${inProgressCount}/${maxConcurrent} in progress, ${campaignSlots} campaign slots, ${slotsAvailable} allowed by request`);
 
@@ -983,7 +1092,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   }
 
   // Get queued items
-  const queueItems = await getQueuedItems(campaignId, slotsAvailable);
+  const queueItems = await getQueuedItems(campaignId, slotsAvailable, { strictUsOnly });
   console.log(`[AI Orchestrator] Found ${queueItems.length} queued items for campaign ${campaignId}`);
   
   // DEBUG: Log first few items to see what data we're working with
@@ -1137,11 +1246,25 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
     // Be resilient to bad/missing country metadata:
     // if stored country is missing or not enabled, trust phone-derived country when possible.
+    // For strict USA-only campaigns, do not infer country from phone to avoid CA/+1 bleed-through.
     let effectiveCountry: string | null = (normalizedCountry as string) || null;
-    if (!effectiveCountry && inferredCountry) {
-      effectiveCountry = inferredCountry;
-    } else if (effectiveCountry && !isCountryEnabled(effectiveCountry) && inferredCountry && isCountryEnabled(inferredCountry)) {
-      effectiveCountry = inferredCountry;
+    if (!strictUsOnly) {
+      if (!effectiveCountry && inferredCountry) {
+        effectiveCountry = inferredCountry;
+      } else if (effectiveCountry && !isCountryEnabled(effectiveCountry) && inferredCountry && isCountryEnabled(inferredCountry)) {
+        effectiveCountry = inferredCountry;
+      }
+    }
+
+    if (strictUsOnly && !isUnitedStatesCountry(effectiveCountry)) {
+      countryNotEnabled++;
+      const countryKey = effectiveCountry ? String(effectiveCountry).toUpperCase() : 'NULL/EMPTY';
+      rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
+
+      if (countryNotEnabled <= 3) {
+        console.log(`[AI Orchestrator] ❌ Contact ${item.contact_id} rejected by strict USA-only filter: country='${country}'`);
+      }
+      continue;
     }
 
     // Prefer explicit timezone, then SQL inferred timezone, then derive from best-known geo data.
