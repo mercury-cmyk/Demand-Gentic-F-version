@@ -654,9 +654,9 @@ export default function AboutPage() {
             <div>
               <h4 className="font-semibold mb-4">Get Started</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="/login" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
-                <li><a href="/login" className="hover:text-white transition-colors">Request a Proposal</a></li>
-                <li><a href={`mailto:${BRAND.domains.email.contact}`} className="hover:text-white transition-colors">Contact Us</a></li>
+                <li><a href="/book/admin/demo" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
+                <li><a href="/proposal-request" className="hover:text-white transition-colors">Request a Proposal</a></li>
+                <li><a href="/contact" className="hover:text-white transition-colors">Contact Us</a></li>
               </ul>
             </div>
           </div>

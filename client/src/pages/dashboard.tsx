@@ -298,6 +298,35 @@ export default function Dashboard() {
 
         {/* Right Column: AI Insights & Actions */}
         <div className="space-y-6">
+          <Card className="border-none shadow-sm bg-white">
+            <CardHeader className="pb-4 border-b border-slate-100">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <FileText className="w-5 h-5 text-indigo-500" />
+                Public Pages
+              </CardTitle>
+              <CardDescription>Shareable links for prospect-facing pages.</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-3">
+              <Button variant="outline" className="w-full justify-start gap-2" asChild>
+                <a href="/contact">
+                  <Mail className="h-4 w-4" />
+                  Contact Us
+                </a>
+              </Button>
+              <Button variant="outline" className="w-full justify-start gap-2" asChild>
+                <a href="/book/admin/demo">
+                  <Calendar className="h-4 w-4" />
+                  Book a Demo
+                </a>
+              </Button>
+              <Button variant="outline" className="w-full justify-start gap-2" asChild>
+                <a href="/proposal-request">
+                  <FileText className="h-4 w-4" />
+                  Request a Proposal
+                </a>
+              </Button>
+            </CardContent>
+          </Card>
           <Card className="border-none shadow-sm bg-white h-full">
              <CardHeader className="pb-4 border-b border-slate-100">
                 <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">

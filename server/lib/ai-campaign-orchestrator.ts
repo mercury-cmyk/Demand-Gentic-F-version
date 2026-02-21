@@ -350,6 +350,15 @@ const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
   'PT': true, 'PORTUGAL': true,
   'CZ': true, 'CZECHIA': true, 'CZECH REPUBLIC': true,
   'GR': true, 'GREECE': true,
+  'RO': true, 'ROMANIA': true,
+  'HU': true, 'HUNGARY': true,
+  'BG': true, 'BULGARIA': true,
+  'HR': true, 'CROATIA': true,
+  'SK': true, 'SLOVAKIA': true,
+  'LU': true, 'LUXEMBOURG': true,
+  'LT': true, 'LITHUANIA': true,
+  'LV': true, 'LATVIA': true,
+  'EE': true, 'ESTONIA': true,
 
   // Asia / Pacific
   'SG': true, 'SINGAPORE': true,
