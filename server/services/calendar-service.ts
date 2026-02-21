@@ -4,6 +4,7 @@ import { users, bookings, availabilitySlots, bookingTypes } from '@shared/schema
 import { eq, and, gte, lte } from 'drizzle-orm';
 import CryptoJS from 'crypto-js';
 import { storage } from '../storage';
+import { bookingEmailService } from './booking-email-service';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.GMAIL_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || process.env.GMAIL_CLIENT_SECRET;
@@ -116,6 +117,7 @@ export class CalendarService {
         calendarId: 'primary',
         requestBody: event,
         conferenceDataVersion: 1,
+        sendUpdates: 'all',
       });
 
       googleEventId = createdEvent.data.id;
@@ -137,8 +139,38 @@ export class CalendarService {
       googleEventId: googleEventId,
     }).returning();
 
+    // Get host info for email
+    const [host] = await db.select({ 
+      firstName: users.firstName, 
+      lastName: users.lastName, 
+      email: users.email 
+    }).from(users).where(eq(users.id, hostUserId));
+    
+    const hostName = host ? `${host.firstName || ''} ${host.lastName || ''}`.trim() : 'Your Host';
+
+    // Send confirmation email with iCalendar attachment
+    try {
+      await bookingEmailService.sendConfirmationEmail({
+        guestName: guest.name,
+        guestEmail: guest.email,
+        hostName: hostName,
+        hostEmail: host?.email,
+        bookingTypeName: type.name,
+        bookingDescription: type.description || undefined,
+        startTime: startDate,
+        endTime: endDate,
+        duration: type.duration,
+        timezone: 'UTC',
+        meetingUrl: meetingUrl,
+        notes: guest.notes
+      });
+    } catch (error) {
+      console.error('[Calendar Service] Failed to send booking confirmation email:', error);
+      // Don't fail the booking creation if email fails
+    }
+
     return newBooking;
-  
+  }
   /**
    * List available slots for a User and Booking Type
    */

@@ -60,6 +60,12 @@ export interface MercurySendRequest {
   replyTo?: string;
   fromName?: string;
   fromEmail?: string;
+  attachments?: Array<{
+    filename: string;
+    content: string | Buffer;
+    contentType?: string;
+    cid?: string;
+  }>;
 }
 
 export interface MercurySendResult {
