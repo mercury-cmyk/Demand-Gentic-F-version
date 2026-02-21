@@ -30,6 +30,7 @@ import {
   validateCallsForClientSamples,
   type DeepReanalysisFilter,
 } from "../services/disposition-deep-reanalyzer";
+import { getDispositionCache } from "../services/disposition-analysis-cache";
 import type { CanonicalDisposition } from "@shared/schema";
 
 const router = Router();
@@ -179,6 +180,13 @@ router.post("/override/:callSessionId", requireAuth, async (req: Request, res: R
     if (!result.success) {
       return res.status(400).json({ error: result.error });
     }
+
+    // Invalidate cache for this call (analysis is now stale)
+    const cache = getDispositionCache();
+    await cache.invalidateCall(callSessionId).catch(err => {
+      console.warn("[DispositionReanalysis] Failed to invalidate cache:", err.message);
+      // Still return success - cache invalidation is not critical
+    });
 
     res.json({
       success: true,

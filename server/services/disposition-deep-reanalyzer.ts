@@ -33,6 +33,7 @@ import {
   type CampaignQualificationContext,
 } from "./smart-disposition-analyzer";
 import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
+import { getDispositionCache, type DeepAnalysisOutput as CachedDeepAnalysisOutput } from "./disposition-analysis-cache";
 
 const LOG_PREFIX = "[DeepReanalyzer]";
 const DEEP_ANALYSIS_CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
@@ -584,6 +585,7 @@ async function runDeepAIAnalysis(
     campaignContext,
   });
 
+  // Check Redis and in-memory caches (persistent + fast)
   const now = Date.now();
   const cached = deepAnalysisCache.get(cacheKey);
   if (cached && now - cached.createdAt <= DEEP_ANALYSIS_CACHE_TTL_MS) {
@@ -814,6 +816,14 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 
     deepAnalysisCache.set(cacheKey, { createdAt: now, value: output });
     pruneDeepAnalysisCache(now);
+
+    // Also store in Redis cache for persistence and cross-instance sharing (fire-and-forget)
+    // This allows the result to be reused even after server restart
+    const cache = getDispositionCache();
+    cache.setAnalysis(cacheKey, output as unknown as CachedDeepAnalysisOutput).catch(err => {
+      console.warn(`${LOG_PREFIX} Failed to store analysis in Redis cache:`, err.message);
+      // Graceful degradation - cache still works in-memory
+    });
 
     return { output, cacheHit: false };
   } catch (error: any) {
