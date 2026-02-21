@@ -429,16 +429,30 @@ export default function PageBuilderDialog({
       return res.json();
     },
     onSuccess: (data) => {
-      if (data?.title) {
-        setFormData((prev) => ({
-          ...prev,
-          title: data.title,
-          slug: generateSlug(data.title),
-        }));
+      if (data) {
+        setFormData((prev) => {
+          const defaults = getDefaultFormData();
+          return {
+            ...prev,
+            title: data.title || prev.title,
+            slug: data.title ? generateSlug(data.title) : prev.slug,
+            pageType: data.pageType || prev.pageType,
+            templateTheme: data.templateTheme || prev.templateTheme,
+            heroConfig: data.heroConfig ? { ...defaults.heroConfig, ...data.heroConfig } : prev.heroConfig,
+            assetConfig: data.assetConfig ? { ...defaults.assetConfig, ...data.assetConfig } : prev.assetConfig,
+            brandingConfig: data.brandingConfig ? { ...defaults.brandingConfig, ...data.brandingConfig } : prev.brandingConfig,
+            formConfig: data.formConfig ? { ...defaults.formConfig, ...data.formConfig } : prev.formConfig,
+            socialProofConfig: data.socialProofConfig ? { ...defaults.socialProofConfig, ...data.socialProofConfig } : prev.socialProofConfig,
+            benefitsConfig: data.benefitsConfig ? { ...defaults.benefitsConfig, ...data.benefitsConfig } : prev.benefitsConfig,
+            urgencyConfig: data.urgencyConfig ? { ...defaults.urgencyConfig, ...data.urgencyConfig } : prev.urgencyConfig,
+            thankYouConfig: data.thankYouConfig ? { ...defaults.thankYouConfig, ...data.thankYouConfig } : prev.thankYouConfig,
+            seoConfig: data.seoConfig ? { ...defaults.seoConfig, ...data.seoConfig } : prev.seoConfig,
+          };
+        });
       }
       toast({
         title: "Content generated!",
-        description: "AI has generated initial page content. Customize as needed.",
+        description: "AI has populated all page sections. Review each tab and customize as needed.",
       });
     },
     onError: (error: Error) => {

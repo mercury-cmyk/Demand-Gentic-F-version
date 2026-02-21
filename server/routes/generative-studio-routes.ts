@@ -146,6 +146,25 @@ function normalizeOptionalId(value: unknown): string | undefined {
 // ============================================================================
 
 /**
+ * GET /resolve-project-org
+ * Resolve organization ID from a client project ID
+ */
+router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Response) => {
+  try {
+    const projectId = normalizeOptionalId(req.query.projectId);
+    if (!projectId) {
+      return res.json({ organizationId: null });
+    }
+    const [project] = await db.select({
+      campaignOrganizationId: clientProjects.campaignOrganizationId,
+    }).from(clientProjects).where(eq(clientProjects.id, projectId)).limit(1);
+    res.json({ organizationId: project?.campaignOrganizationId || null });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, "resolve project org");
+  }
+});
+
+/**
  * GET /org-projects
  * List client projects for an organization
  */

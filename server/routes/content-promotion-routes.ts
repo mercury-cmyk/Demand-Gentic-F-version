@@ -7,9 +7,14 @@ import {
   generativeStudioPublishedPages,
   leadForms,
   leadFormSubmissions,
+  campaigns,
+  clientProjects,
+  clientAccounts,
+  contentAssets,
 } from "@shared/schema";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { requireAuth } from "../auth";
+import { generateContentPromotionPage } from "../services/ai-content-promotion";
 
 const router = Router();
 
@@ -315,35 +320,80 @@ router.get("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
   }
 });
 
-// Generate landing page with AI based on context
+// Generate landing page with AI based on campaign/project context
 router.post("/api/content-promotion/pages/generate", requireAuth, async (req, res) => {
   try {
     const { campaignId, projectId, organizationId, clientId } = req.body;
-    
-    // Get campaign or project context
-    let contextData: any = {};
-    
-    // TODO: Fetch campaign details from campaigns table if campaignId provided
-    // TODO: Fetch project details from projects table if projectId provided
-    // TODO: Use org intelligence for tone, industry, etc.
-    
-    // For now, return a basic response that the frontend can use
-    // In a real implementation, this would call Claude or another LLM
-    // to generate landing page content based on the context
-    
-    res.json({
-      title: "Generated Landing Page",
-      contextUsed: {
-        campaignId,
-        projectId,
-        organizationId,
-        clientId,
-      },
-      message: "AI generation endpoint ready. Connect to LLM provider to generate content.",
-    });
+
+    if (!campaignId && !projectId) {
+      return res.status(400).json({ error: "Campaign or Project ID is required for AI generation" });
+    }
+
+    // ---- Gather context from DB ----
+    let campaignData: any = null;
+    let projectData: any = null;
+    let clientData: any = null;
+    let assetData: any[] = [];
+
+    if (campaignId) {
+      const [c] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+      campaignData = c || null;
+      // If campaign has a project, fetch it
+      if (c?.projectId && !projectId) {
+        const [p] = await db.select().from(clientProjects).where(eq(clientProjects.id, c.projectId)).limit(1);
+        projectData = p || null;
+      }
+      // Fetch linked content assets (PDFs, docs)
+      const assets = await db.execute(sql`
+        SELECT id, asset_type, title, description, content, target_audience, cta_goal, tags, file_url
+        FROM content_assets
+        WHERE ${campaignId} = ANY(linked_campaigns)
+        LIMIT 5
+      `);
+      assetData = (assets.rows as any[]) || [];
+    }
+
+    if (projectId && !projectData) {
+      const [p] = await db.select().from(clientProjects).where(eq(clientProjects.id, projectId)).limit(1);
+      projectData = p || null;
+    }
+
+    const clientAccountId = clientId || campaignData?.clientAccountId || projectData?.clientAccountId;
+    if (clientAccountId && !clientData) {
+      const [ca] = await db.select().from(clientAccounts).where(eq(clientAccounts.id, clientAccountId)).limit(1);
+      clientData = ca || null;
+    }
+
+    // Build context object for AI
+    const context = {
+      campaignName: campaignData?.name || null,
+      campaignObjective: campaignData?.campaignObjective || null,
+      productServiceInfo: campaignData?.productServiceInfo || null,
+      targetAudienceDescription: campaignData?.targetAudienceDescription || null,
+      talkingPoints: campaignData?.talkingPoints || null,
+      successCriteria: campaignData?.successCriteria || null,
+      campaignContextBrief: campaignData?.campaignContextBrief || null,
+      callScript: campaignData?.callScript || null,
+      emailSubject: campaignData?.emailSubject || null,
+      projectName: projectData?.name || null,
+      projectDescription: projectData?.description || null,
+      companyName: clientData?.companyName || clientData?.name || null,
+      assets: assetData.map((a: any) => ({
+        title: a.title,
+        description: a.description,
+        type: a.asset_type,
+        targetAudience: a.target_audience,
+        ctaGoal: a.cta_goal,
+        content: a.content ? String(a.content).substring(0, 3000) : null,
+      })),
+    };
+
+    const result = await generateContentPromotionPage(context);
+
+    res.json(result);
   } catch (error: any) {
     console.error("[Content Promotion] Error generating with AI:", error);
-    res.status(500).json({ error: "Failed to generate with AI" });
+    res.status(500).json({ error: error.message || "Failed to generate with AI" });
   }
 });
 
@@ -398,7 +448,15 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
     res.json(page);
   } catch (error: any) {
     console.error("[Content Promotion] Error creating page:", error);
-    res.status(500).json({ error: "Failed to create content promotion page" });
+    const detail = error?.message || error?.detail || "Unknown database error";
+    // Surface actionable info: missing table, enum, constraint violations
+    if (detail.includes("does not exist") || detail.includes("relation")) {
+      res.status(500).json({ error: `Database table or type missing — run migrations. Detail: ${detail}` });
+    } else if (detail.includes("violates") || detail.includes("constraint")) {
+      res.status(400).json({ error: `Validation error: ${detail}` });
+    } else {
+      res.status(500).json({ error: `Failed to create content promotion page: ${detail}` });
+    }
   }
 });
 
