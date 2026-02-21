@@ -2281,6 +2281,15 @@ async function orchestratorTick(): Promise<OrchestratorJobResult> {
  * Initialize the AI Campaign Orchestrator
  */
 export function initializeAiCampaignOrchestrator(): void {
+  if (orchestratorQueue && orchestratorWorker) {
+    return;
+  }
+
+  if (orchestratorQueue && !orchestratorWorker) {
+    console.warn('[AI Orchestrator] Detected partial initialization state - resetting and retrying');
+    orchestratorQueue = null;
+  }
+
   if (!isQueueAvailable()) {
     console.warn('[AI Orchestrator] Redis not available - orchestrator disabled');
     return;
@@ -2328,6 +2337,7 @@ export function initializeAiCampaignOrchestrator(): void {
 
   if (!orchestratorWorker) {
     console.warn('[AI Orchestrator] Worker could not be started');
+    orchestratorQueue = null;
     return;
   }
 
