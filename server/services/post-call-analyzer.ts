@@ -388,6 +388,7 @@ CRITICAL RULES:
 
     // Use Gemini 3 Deep Think for evaluation
     const { deepAnalyzeJSON } = await import("./vertex-ai/vertex-client");
+    const { normalizeDisposition } = await import("./disposition-normalizer");
 
     let raw: any;
     try {
@@ -397,6 +398,10 @@ CRITICAL RULES:
       // Fallback or return partial data? returning null for now to indicate failure to process this step
       return null;
     }
+
+    // Normalize the recommended disposition to canonical format
+    const rawRecommendedDisposition = raw.recommendedDisposition || disposition || "not_interested";
+    const normalizedRecommendedDisposition = normalizeDisposition(rawRecommendedDisposition);
 
     return {
       campaignName: campaign.name || "Unknown",
@@ -416,7 +421,7 @@ CRITICAL RULES:
             evidence: c.evidence ? String(c.evidence) : undefined,
           }))
         : [],
-      recommendedDisposition: raw.recommendedDisposition || disposition || "not_interested",
+      recommendedDisposition: normalizedRecommendedDisposition,
       dispositionAccurate: Boolean(raw.dispositionAccurate),
       notes: Array.isArray(raw.notes) ? raw.notes.map(String) : [],
     };
@@ -831,6 +836,7 @@ export async function runPostCallAnalysis(
     // Sources of truth (in priority order):
     //   1. Campaign outcome evaluation's recommendedDisposition (evaluated against campaign criteria)
     //   2. Quality analysis's dispositionReview.expectedDisposition (conversation-level assessment)
+    const { normalizeDisposition } = await import("./disposition-normalizer");
     const VALID_AUTO_CORRECT_DISPOSITIONS: CanonicalDisposition[] = [
       "qualified_lead", "not_interested", "do_not_call", "voicemail",
       "no_answer", "invalid_data", "needs_review", "callback_requested",
@@ -841,10 +847,11 @@ export async function runPostCallAnalysis(
 
       // Check campaign outcome evaluation first (higher priority — uses campaign criteria)
       if (result.campaignOutcome && !result.campaignOutcome.dispositionAccurate) {
-        const recommended = result.campaignOutcome.recommendedDisposition as CanonicalDisposition;
+        const recommended = normalizeDisposition(result.campaignOutcome.recommendedDisposition);
         if (recommended && recommended !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(recommended)) {
           correctedDisposition = recommended;
           correctionSource = "campaign_outcome_evaluation";
+          console.log(`${LOG_PREFIX} 🔍 Campaign outcome suggests: ${result.campaignOutcome.recommendedDisposition} → normalized to: ${recommended}`);
         }
       }
 
@@ -852,10 +859,11 @@ export async function runPostCallAnalysis(
       if (!correctedDisposition && result.qualityAnalysis?.dispositionReview) {
         const review = result.qualityAnalysis.dispositionReview;
         if (!review.isAccurate && review.expectedDisposition) {
-          const expected = review.expectedDisposition as CanonicalDisposition;
+          const expected = normalizeDisposition(review.expectedDisposition);
           if (expected !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(expected)) {
             correctedDisposition = expected;
             correctionSource = "quality_analysis_review";
+            console.log(`${LOG_PREFIX} 🔍 Quality review suggests: ${review.expectedDisposition} → normalized to: ${expected}`);
           }
         }
       }
