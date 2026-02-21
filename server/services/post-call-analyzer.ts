@@ -12,11 +12,12 @@
  */
 
 import { db } from "../db";
-import { callSessions, dialerCallAttempts, campaigns } from "@shared/schema";
+import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, type CanonicalDisposition } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./deepgram-postcall-transcription";
 import { analyzeConversationQuality, type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
 import { logCallIntelligence } from "./call-intelligence-logger";
+import { overrideSingleDisposition } from "./bulk-disposition-reanalyzer";
 import { recordTranscriptionResult } from "./transcription-monitor";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
 import { getFreshAudioUrl } from "./recording-link-resolver";
