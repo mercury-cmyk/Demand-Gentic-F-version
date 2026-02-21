@@ -621,10 +621,69 @@ export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
   return regexCues.some((pattern) => pattern.test(lower));
 }
 
+/**
+ * Check if a transcript contains gatekeeper indicators that should EXCLUDE voicemail detection.
+ * When a live gatekeeper is speaking, phrases like "not available" mean the person is away,
+ * NOT that we've reached a voicemail system. This prevents false-positive voicemail classification.
+ */
+function isLiveGatekeeperTranscript(text: string): boolean {
+  const lower = typeof text === 'string' ? text.toLowerCase().trim() : '';
+  if (!lower) return false;
+
+  // Gatekeeper phrases that indicate a LIVE PERSON is speaking (not a voicemail system)
+  const liveGatekeeperIndicators = [
+    'what is your call regarding',
+    'what\'s your call regarding',
+    'what is this regarding',
+    'what\'s this regarding',
+    'who is calling',
+    'who\'s calling',
+    'how may i help',
+    'how can i help',
+    'can i help you',
+    'how may i direct',
+    'how can i direct',
+    'you\'ve come through to',
+    'you\'ve reached the office',
+    'this is the front desk',
+    'this is reception',
+    'what do you need',
+    'what can i do for you',
+    'let me check',
+    'let me see if',
+    'i\'ll check if',
+    'i\'ll see if',
+    'hold on',
+    'one moment',
+    'they\'re in a meeting',
+    'he\'s in a meeting',
+    'she\'s in a meeting',
+    'they\'re on another call',
+    'can i take a message',
+    'shall i take a message',
+    'would you like to leave a message',  // gatekeeper offering, not automated VM
+    'not at their desk',
+    'not at his desk',
+    'not at her desk',
+    'not in the office',
+    'try again later',
+    'call back later',
+    'send an email',
+    'what company',
+    'where are you calling from',
+    'is this a sales call',
+  ];
+
+  return liveGatekeeperIndicators.some(phrase => lower.includes(phrase));
+}
+
 export function isVoicemailCueTranscript(transcript: string): boolean {
   const lower = normalizeTranscriptForComparison(transcript);
   if (!lower) return false;
   if (isAutomatedCallScreenerTranscript(lower)) return false;
+  // CRITICAL: Exclude live gatekeeper conversations from voicemail detection
+  // A gatekeeper saying "they're not available" is NOT voicemail
+  if (isLiveGatekeeperTranscript(lower)) return false;
 
   const cues = [
     "leave a message",
@@ -676,6 +735,15 @@ export function isVoicemailCueTranscript(transcript: string): boolean {
 function shouldFastAbortForEarlyVoicemail(session: OpenAIRealtimeSession, transcript: string): boolean {
   if (session.detectedDisposition === "voicemail") return false;
   if (!isVoicemailCueTranscript(transcript)) return false;
+
+  // CRITICAL: If we already detected a gatekeeper state, do NOT fast abort as voicemail
+  // A gatekeeper saying "they're not available" is a live person, not voicemail
+  if (session.conversationState.currentState === 'GATEKEEPER') return false;
+  if (session.conversationState.stateHistory.includes('GATEKEEPER')) return false;
+
+  // If there have been multiple back-and-forth turns, this is a live conversation, not voicemail
+  const userTurns = session.transcripts.filter(t => t.role === 'user').length;
+  if (userTurns >= 2) return false;
 
   const now = Date.now();
   const baseline =
@@ -3205,6 +3273,34 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           if ('softResetRepetitionTracking' in provider) {
             (provider as any).softResetRepetitionTracking();
           }
+        } else if (detectGatekeeper(event.text)) {
+          // GATEKEEPER DETECTED: Transition to GATEKEEPER state and inject guidance
+          // This prevents the agent from endlessly repeating "May I speak with [Name]?"
+          // when a receptionist/office assistant is asking "What is your call regarding?"
+          if (session.conversationState.currentState !== 'GATEKEEPER') {
+            session.conversationState.currentState = 'GATEKEEPER';
+            session.conversationState.stateHistory.push('GATEKEEPER');
+            trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
+            console.log(`${LOG_PREFIX} 🚪 [Gemini] GATEKEEPER DETECTED for call: ${session.callId} - Transitioning to GATEKEEPER state`);
+
+            // Inject gatekeeper handling reminder so the agent engages properly
+            const contactFirstName = session.contactFirstName || session.contactName?.split(' ')[0] || 'the person';
+            const agentName = session.agentName || 'calling agent';
+            const orgName = session.organizationName || session.campaignOrgName || 'our company';
+            const gatekeeperReminder = `[GATEKEEPER DETECTED] You are speaking with a gatekeeper/receptionist, NOT ${contactFirstName}. ` +
+              `Do NOT repeat "May I speak with ${contactFirstName}?" again — they already heard you. ` +
+              `ENGAGE with the gatekeeper warmly and answer their questions: ` +
+              `If asked "What is this regarding?", say: "My name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${contactFirstName} available?" ` +
+              `If asked "Who is calling?", say: "My name is ${agentName}, calling from ${orgName}." ` +
+              `Be kind, polite, and professional. Make no more than 2 polite attempts. If refused, thank them sincerely and end the call.`;
+            provider.sendTextMessage(gatekeeperReminder);
+            console.log(`${LOG_PREFIX} 🚪 [Gemini] Injected gatekeeper handling guidance for call: ${session.callId}`);
+
+            // Reset repetition tracking since gatekeeper is a major state transition
+            if ('softResetRepetitionTracking' in provider) {
+              (provider as any).softResetRepetitionTracking();
+            }
+          }
         }
       }
 
@@ -5167,6 +5263,96 @@ function detectIdentityConfirmation(transcript: string): boolean {
 }
 
 /**
+ * Detect if the user's transcript indicates a gatekeeper (receptionist, office assistant, etc.)
+ * rather than the target contact. This allows the state machine to transition to GATEKEEPER
+ * state so the agent responds appropriately instead of repeating identity checks.
+ */
+function detectGatekeeper(transcript: string): boolean {
+  const normalizedText = transcript.toLowerCase().trim();
+
+  // Phrases that strongly indicate a gatekeeper / receptionist / office assistant
+  const gatekeeperPhrases = [
+    // Direct gatekeeper questions
+    'what is your call regarding',
+    'what\'s your call regarding',
+    'what is this regarding',
+    'what\'s this regarding',
+    'what is this about',
+    'what\'s this about',
+    'who is calling',
+    'who\'s calling',
+    'where are you calling from',
+    'what company are you from',
+    'what company are you with',
+    'how may i direct your call',
+    'how can i direct your call',
+    'how may i help you',
+    'how can i help you',
+    'can i help you',
+    'may i help you',
+    'what do you need',
+    'what can i do for you',
+    'who are you trying to reach',
+    'who are you looking for',
+    'what is the nature of your call',
+    'what\'s the nature of your call',
+    'what is the purpose of your call',
+    'what\'s the purpose of your call',
+    'is this a sales call',
+    'are you selling something',
+
+    // Indicating third-party reference (they are NOT the target)
+    'you\'ve come through to the office',
+    'you\'ve reached the office',
+    'you\'ve called the office',
+    'this is the front desk',
+    'this is reception',
+    'this is the main line',
+    'this is the general line',
+    'you\'ve come through to reception',
+
+    // Offering to help / transfer
+    'let me see if',
+    'let me check if',
+    'i\'ll see if',
+    'i\'ll check if',
+    'i can transfer you',
+    'let me transfer you',
+    'let me put you through',
+    'i\'ll put you through',
+    'let me connect you',
+    'i\'ll connect you',
+    'hold on a moment',
+    'hold on a second',
+    'one moment please',
+    'please hold',
+    'let me get',
+
+    // Gatekeeper blocking
+    'they\'re not available',
+    'he\'s not available',
+    'she\'s not available',
+    'not at their desk',
+    'not at his desk',
+    'not at her desk',
+    'not in the office',
+    'they\'re in a meeting',
+    'he\'s in a meeting',
+    'she\'s in a meeting',
+    'they\'re on another call',
+    'can i take a message',
+    'would you like to leave a message',
+    'shall i take a message',
+    'i can take a message',
+    'send an email',
+    'try again later',
+    'call back later',
+  ];
+
+  return gatekeeperPhrases.some(phrase => normalizedText.includes(phrase));
+}
+
+/**
  * Intelligent Audio Detection - Determines if audio is human speech, IVR, music, or hold
  * Returns the audio type and confidence level
  * VOICEMAIL detection takes highest priority to ensure immediate hangup
@@ -6864,9 +7050,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // Check for voicemail in transcript — catches cases where AMD missed the voicemail
   // Also catches needs_review when the safeguard at line 5768 overrode not_interested
   // but the transcript clearly indicates a voicemail system, not a human conversation
-  if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript)) {
+  // CRITICAL: Do NOT override to voicemail if a gatekeeper was detected or if there was
+  // a multi-turn conversation (gatekeeper saying "not available" != voicemail system)
+  const hadGatekeeperInteraction = session.conversationState.stateHistory.includes('GATEKEEPER');
+  const hadMultipleTurns = session.transcripts.filter(t => t.role === 'user').length >= 2;
+  if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript) && !hadGatekeeperInteraction && !hadMultipleTurns) {
     console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript (was ${disposition}), overriding disposition to voicemail`);
     disposition = 'voicemail';
+  } else if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript) && (hadGatekeeperInteraction || hadMultipleTurns)) {
+    console.log(`${LOG_PREFIX} ⚠️ Voicemail phrases found in transcript but gatekeeper/multi-turn conversation detected — keeping disposition as ${disposition} (not overriding to voicemail)`);
   }
 
   // Check for IVR/auto-attendant system (keep as no_answer but log for analytics)
@@ -7727,6 +7919,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     if (!transcript) return false;
     const lower = transcript.toLowerCase();
     if (isAutomatedCallScreenerTranscript(lower)) return false;
+    // CRITICAL: Exclude live gatekeeper conversations from voicemail detection
+    // A gatekeeper saying "not available" or "leave a message" is a live person offering to help,
+    // NOT an automated voicemail system
+    if (isLiveGatekeeperTranscript(lower)) return false;
 
     // Comprehensive voicemail detection phrases
     const voicemailPhrases = [
@@ -9306,26 +9502,36 @@ If permission is given for other campaign types:
 
 ---
 
-### 3. Gatekeeper Detected (STRICT COMPLIANCE)
+### 3. Gatekeeper Detected (ENGAGE WITH WARMTH - DO NOT LOOP)
 If the response is any of:
-- "Who is calling?"
-- "How may I help you?"
-- "How may I direct your call?"
+- "Who is calling?" / "What is your call regarding?" / "What's this about?"
+- "How may I help you?" / "How can I help you?" / "Can I help you?"
+- "How may I direct your call?" / "You've come through to the office"
 - "Please state your name and purpose"
+- Any indication the person is NOT ${firstName} (receptionist, assistant, office staff)
 
-Classify as gatekeeper and respond with a clear, concise request:
-- "Could you please connect me with ${firstName}?"
+**CRITICAL: You are now talking to a gatekeeper. Do NOT repeat "May I speak with ${firstName}?" — they already heard you. ANSWER THEIR QUESTIONS.**
+
+**When Asked "What is this regarding?" or "What's this about?":**
+- Answer warmly: "Of course — my name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${firstName} available?"
+- Do NOT dodge the question. Do NOT just repeat the name request.
+- If pressed further: "I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?"
 
 **When Asked "Who is calling?" or "Where are you calling from?":**
-- Respond confidently: "My name is ${agentName}, calling on behalf of ${orgName}."
+- Respond confidently: "My name is ${agentName}, calling from ${orgName}."
+- Then ask: "Could you connect me with ${firstName}?"
 
-**When Asked "What is this regarding?":**
-- Keep it VAGUE: "It's regarding some of the services we offer."
-- Do NOT mention specific products, campaigns, or meeting requests.
-- If pressed: "I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?"
+**When Asked "How can I help you?" or "Can I help you?":**
+- Acknowledge warmly: "Thank you! I was hoping to speak with ${firstName} briefly — is ${firstName} available?"
+
+**When Told "${firstName} is not available / in a meeting / at their desk:**
+- Be understanding: "I completely understand. Is there a better time to reach ${firstName}?"
+- If no time offered: "No worries at all. Thank you so much for your help!"
 
 - Make NO MORE than two polite attempts.
-- If refused → Thank them sincerely and END THE CALL immediately.
+- ALWAYS answer gatekeeper questions — never ignore or dodge them.
+- Be kind, warm, and grateful for their time.
+- If refused → Thank them sincerely and END THE CALL gracefully.
 
 ---
 
@@ -10069,6 +10275,81 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
         session.detectedDisposition === 'voicemail' ? 'voicemail' :
         session.detectedDisposition === 'no_answer' ? 'no_answer' : 'completed';
       endCall(session.callId, outcome);
+      return;
+    }
+
+    // ==================== GLOBAL ABSOLUTE CEILING ====================
+    // CRITICAL: No B2B outbound call should EVER exceed 15 minutes regardless of
+    // disposition, campaign config, or conversation state. This is a safety net that
+    // prevents runaway calls (e.g., 209 minute calls) from burning resources and
+    // creating a terrible experience. This applies to ALL calls unconditionally.
+    const GLOBAL_ABSOLUTE_CEILING_SECONDS = 300; // 5 minutes - no exceptions
+    const GLOBAL_WRAP_UP_WARNING_SECONDS = 240; // 4 minutes - send wrap-up warning
+
+    // Send global wrap-up warning at 12 minutes if no other wrap-up was sent
+    if (elapsedSeconds >= GLOBAL_WRAP_UP_WARNING_SECONDS && elapsedSeconds < GLOBAL_ABSOLUTE_CEILING_SECONDS && !session.wrapUpWarningSent) {
+      session.wrapUpWarningSent = true;
+      const remainingSeconds = GLOBAL_ABSOLUTE_CEILING_SECONDS - elapsedSeconds;
+      console.warn(`${LOG_PREFIX} ⏰ GLOBAL WRAP-UP WARNING - Call ${session.callId} at ${elapsedSeconds}s. Sending wrap-up instruction. Remaining: ${remainingSeconds}s`);
+
+      const geminiProvider = (session as any).geminiProvider;
+      if (geminiProvider && geminiProvider.isConnected) {
+        try {
+          geminiProvider.sendTextMessage(`[URGENT] You have approximately ${remainingSeconds} seconds remaining on this call. Begin wrapping up NOW: summarize key points, confirm any next steps, thank them warmly, and say goodbye. Do not mention the time limit.`);
+        } catch (e) {
+          console.error(`${LOG_PREFIX} Error sending global wrap-up warning:`, e);
+        }
+      }
+
+      if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+        try {
+          session.openaiWs.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "system",
+              content: [{
+                type: "input_text",
+                text: `[URGENT TIME LIMIT] You have approximately ${remainingSeconds} seconds remaining. Wrap up NOW: summarize, confirm next steps, thank them, and end the call gracefully. Do not mention the time limit.`
+              }]
+            }
+          }));
+          session.openaiWs.send(JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["text", "audio"],
+              instructions: "Wrap up the conversation immediately. Do not mention the time limit."
+            }
+          }));
+        } catch (e) {
+          console.error(`${LOG_PREFIX} Error sending OpenAI wrap-up:`, e);
+        }
+      }
+    }
+    if (elapsedSeconds > GLOBAL_ABSOLUTE_CEILING_SECONDS) {
+      console.error(`${LOG_PREFIX} ⛔ GLOBAL CEILING BREACHED - Force terminating call ${session.callId} after ${elapsedSeconds}s (GLOBAL CEILING: ${GLOBAL_ABSOLUTE_CEILING_SECONDS}s). This should never happen.`);
+
+      // If call has a real disposition, end gracefully; otherwise mark as needs_review
+      if (!session.detectedDisposition) {
+        session.detectedDisposition = 'needs_review';
+      }
+
+      // Attempt to inject a farewell before terminating
+      const geminiProvider = (session as any).geminiProvider;
+      if (geminiProvider && geminiProvider.isConnected) {
+        try {
+          geminiProvider.sendTextMessage('[URGENT] This call has exceeded the maximum allowed duration. Say a brief, warm farewell immediately: "I really appreciate your time today. I need to wrap up, but it was wonderful speaking with you. Have a great day!" Then end the call.');
+        } catch (e) {
+          // Best effort - proceed with termination regardless
+        }
+      }
+
+      // Give 3 seconds for farewell, then force terminate
+      setTimeout(() => {
+        if (session.isActive) {
+          endCall(session.callId, 'completed');
+        }
+      }, 3000);
       return;
     }
 

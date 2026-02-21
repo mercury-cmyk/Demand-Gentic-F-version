@@ -452,7 +452,7 @@ router.post("/deep/export", requireAuth, async (req: Request, res: Response) => 
 router.get("/contacts-by-disposition/:disposition", requireAuth, async (req: Request, res: Response) => {
   try {
     const { disposition } = req.params;
-    const { campaignId, dateFrom, dateTo, limit, offset, search, minDurationSec, maxDurationSec, minTurns, maxTurns } = req.query;
+    const { campaignId, dateFrom, dateTo, limit, offset, search, transcriptText, minDurationSec, maxDurationSec, minTurns, maxTurns } = req.query;
 
     if (!disposition) {
       return res.status(400).json({ error: "disposition is required" });
@@ -469,6 +469,7 @@ router.get("/contacts-by-disposition/:disposition", requireAuth, async (req: Req
       limit: limit ? parseInt(limit as string) : 50,
       offset: offset ? parseInt(offset as string) : 0,
       search: search as string | undefined,
+      transcriptText: transcriptText as string | undefined,
     });
 
     res.json(result);

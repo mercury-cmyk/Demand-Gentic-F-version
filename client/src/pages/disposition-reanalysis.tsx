@@ -398,6 +398,7 @@ export default function DispositionReanalysisPage() {
   const [contactsDisposition, setContactsDisposition] = useState<string>('');
   const [contactsPage, setContactsPage] = useState(0);
   const [contactsSearch, setContactsSearch] = useState('');
+  const [contactsTranscriptText, setContactsTranscriptText] = useState('');
   const [selectedContactDetail, setSelectedContactDetail] = useState<DispositionContact | null>(null);
   const [contactDetailTab, setContactDetailTab] = useState<'transcript' | 'analysis' | 'history'>('transcript');
   const [pushDashboardNotes, setPushDashboardNotes] = useState('');
@@ -446,7 +447,7 @@ export default function DispositionReanalysisPage() {
 
   // Contacts by disposition query
   const { data: contactsByDisp, isLoading: contactsLoading, refetch: refetchContacts } = useQuery<ContactsByDispositionResponse>({
-    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, contactsDateFrom, contactsDateTo, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsPage, contactsSearch],
+    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, contactsDateFrom, contactsDateTo, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsTranscriptText, contactsPage, contactsSearch],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (campaignId) params.set('campaignId', campaignId);
@@ -456,6 +457,7 @@ export default function DispositionReanalysisPage() {
       if (contactsMaxDuration) params.set('maxDurationSec', contactsMaxDuration);
       if (contactsMinTurns) params.set('minTurns', contactsMinTurns);
       if (contactsMaxTurns) params.set('maxTurns', contactsMaxTurns);
+      if (contactsTranscriptText) params.set('transcriptText', contactsTranscriptText);
       params.set('limit', '50');
       params.set('offset', String(contactsPage * 50));
       if (contactsSearch) params.set('search', contactsSearch);
@@ -883,6 +885,7 @@ export default function DispositionReanalysisPage() {
     setContactsDisposition(disposition);
     setContactsPage(0);
     setContactsSearch('');
+    setContactsTranscriptText('');
     setSelectedContactIds(new Set());
     setContactsMinDuration('');
     setContactsMaxDuration('');
@@ -905,8 +908,9 @@ export default function DispositionReanalysisPage() {
     if (contactsMaxTurns) count++;
     if (contactsDateFrom) count++;
     if (contactsDateTo) count++;
+    if (contactsTranscriptText) count++;
     return count;
-  }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo]);
+  }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo, contactsTranscriptText]);
 
   const clearContactsFilters = useCallback(() => {
     setContactsMinDuration('');
@@ -915,6 +919,7 @@ export default function DispositionReanalysisPage() {
     setContactsMaxTurns('');
     setContactsDateFrom('');
     setContactsDateTo('');
+    setContactsTranscriptText('');
     setContactsPage(0);
   }, []);
 
@@ -1628,7 +1633,16 @@ export default function DispositionReanalysisPage() {
                             className="h-8"
                           />
                         </div>
-                        <div />
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Transcript Text</Label>
+                          <Input
+                            type="text"
+                            placeholder='e.g. "not interested", "call me back"'
+                            value={contactsTranscriptText}
+                            onChange={(e) => { setContactsTranscriptText(e.target.value); setContactsPage(0); }}
+                            className="h-8"
+                          />
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

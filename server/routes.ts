@@ -45,6 +45,7 @@ import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes'
 import dispositionDeepReanalysisRouter from './routes/disposition-deep-reanalysis-routes';
 import queueIntelligenceRouter from './routes/queue-intelligence-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
+import intelligenceRoutes from './routes/intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
 import inboxRouter from './routes/inbox-routes';
 import emailAiRouter from './routes/email-ai-routes';
@@ -14863,6 +14864,10 @@ Provide JSON response with:
   // ==================== ORGANIZATION INTELLIGENCE ====================
 
   app.use("/api/org-intelligence", orgIntelligenceRouter);
+
+  // ==================== UNIFIED INTELLIGENCE HUB ====================
+
+  app.use("/api/intelligence", requireAuth, intelligenceRoutes);
 
   // ==================== PROBLEM INTELLIGENCE & ORGANIZATIONS ====================
 

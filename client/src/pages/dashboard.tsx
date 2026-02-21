@@ -16,6 +16,7 @@ import { TrendChart } from "@/components/patterns/dashboard-components";
 import { AIReasoning } from "@/components/ui/ai-reasoning";
 import { AgentState } from "@/components/ui/agent-state";
 import { ConfidenceIndicator } from "@/components/ui/confidence-indicator";
+import { UnifiedIntelligenceDashboard } from "@/components/intelligence/unified-intelligence-dashboard";
 import { cn } from "@/lib/utils";
 
 interface DashboardStats {
@@ -370,6 +371,11 @@ export default function Dashboard() {
                 </div>
              </CardContent>
           </Card>
+        </div>
+
+        {/* Unified Intelligence Hub */}
+        <div className="mt-12 border-t pt-12">
+          <UnifiedIntelligenceDashboard />
         </div>
       </div>
     </div>

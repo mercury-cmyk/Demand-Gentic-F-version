@@ -1901,6 +1901,7 @@ export async function getContactsByDisposition(
     limit?: number;
     offset?: number;
     search?: string;
+    transcriptText?: string;
   }
 ): Promise<{
   contacts: DispositionContactDetail[];
@@ -2130,6 +2131,21 @@ export async function getContactsByDisposition(
         (contactInfo.email || "").toLowerCase().includes(searchLower) ||
         (s.toNumberE164 || "").includes(searchLower);
     });
+  }
+
+  // Apply transcript text filter if provided
+  if (filters.transcriptText) {
+    const needle = filters.transcriptText.toLowerCase().trim();
+    if (needle) {
+      filteredSessions = filteredSessions.filter(s => {
+        const transcript = attemptMap.get(s.id)?.fullTranscript || s.aiTranscript;
+        const turns = parseTranscriptToTurns(transcript);
+        const normalizedTranscript = turns.length > 0
+          ? turns.map((t) => t.text || "").join(" ").toLowerCase()
+          : String(transcript || "").toLowerCase();
+        return normalizedTranscript.includes(needle);
+      });
+    }
   }
 
   // Apply turns filter if provided (post-query since turns are computed from transcript text)
