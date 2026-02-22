@@ -5,6 +5,13 @@ import { db } from '../db';
 import { requireAuth, requireRole } from '../auth';
 import { campaigns } from '@shared/schema';
 import { BRAND, TAGLINE, PILLARS, BRAND_VOICE, SOCIAL_PROFILES } from '@shared/brand-messaging';
+import {
+  getOrganizationProfile,
+  getOrganizationPromptSettings,
+  getOrganizationLearningSummary,
+  type OrganizationProfile,
+  type OrganizationPromptSettings,
+} from '../lib/org-intelligence-helper';
 
 const router = Router();
 
@@ -85,8 +92,155 @@ function buildProductMessages(
   ]).slice(0, 8);
 }
 
+interface OrgIntelligenceContext {
+  profile: OrganizationProfile | null;
+  settings: OrganizationPromptSettings;
+  learningSummary: string;
+}
+
+async function fetchOrgIntelligenceContext(): Promise<OrgIntelligenceContext> {
+  const [profile, settings, learningSummary] = await Promise.all([
+    getOrganizationProfile(),
+    getOrganizationPromptSettings(),
+    getOrganizationLearningSummary(),
+  ]);
+  return { profile, settings, learningSummary };
+}
+
+function extractOrgIdentityName(profile: OrganizationProfile | null): string | null {
+  if (!profile?.identity) return null;
+  const identity = profile.identity as any;
+  return identity?.legalName?.value || identity?.legalName || null;
+}
+
+function extractOrgDescription(profile: OrganizationProfile | null): string | null {
+  if (!profile?.identity) return null;
+  const identity = profile.identity as any;
+  return identity?.description?.value || identity?.description || null;
+}
+
+function extractOrgIndustry(profile: OrganizationProfile | null): string | null {
+  if (!profile?.identity) return null;
+  const identity = profile.identity as any;
+  return identity?.industry?.value || identity?.industry || null;
+}
+
+function extractIcpIndustries(profile: OrganizationProfile | null): string[] {
+  if (!profile?.icp) return [];
+  const icp = profile.icp as any;
+  const industries = icp?.industries?.value || icp?.industries;
+  if (typeof industries === 'string') return industries.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(industries)) return industries.map((i: any) => typeof i === 'string' ? i : i?.value || String(i));
+  return [];
+}
+
+function extractIcpPersonas(profile: OrganizationProfile | null): Array<{ title: string; painPoints?: string[]; goals?: string[] }> {
+  if (!profile?.icp) return [];
+  const icp = profile.icp as any;
+  const personas = icp?.personas?.value || icp?.personas;
+  if (!Array.isArray(personas)) return [];
+  return personas.map((p: any) => {
+    if (typeof p === 'string') return { title: p };
+    return {
+      title: p.title || p.role || String(p),
+      painPoints: Array.isArray(p.painPoints) ? p.painPoints : [],
+      goals: Array.isArray(p.goals) ? p.goals : [],
+    };
+  });
+}
+
+function extractIcpObjections(profile: OrganizationProfile | null): string[] {
+  if (!profile?.icp) return [];
+  const icp = profile.icp as any;
+  const objections = icp?.objections?.value || icp?.objections;
+  if (typeof objections === 'string') return objections.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(objections)) return objections.map((o: any) => typeof o === 'string' ? o : String(o));
+  return [];
+}
+
+function extractPositioningOneLiner(profile: OrganizationProfile | null): string | null {
+  if (!profile?.positioning) return null;
+  const pos = profile.positioning as any;
+  return pos?.oneLiner?.value || pos?.oneLiner || pos?.valueProposition?.value || pos?.valueProposition || null;
+}
+
+function extractPositioningWhyUs(profile: OrganizationProfile | null): string[] {
+  if (!profile?.positioning) return [];
+  const pos = profile.positioning as any;
+  const whyUs = pos?.whyUs?.value || pos?.whyUs;
+  if (typeof whyUs === 'string') return whyUs.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(whyUs)) return whyUs.map((w: any) => typeof w === 'string' ? w : String(w));
+  return [];
+}
+
+function extractPositioningCompetitors(profile: OrganizationProfile | null): string[] {
+  if (!profile?.positioning) return [];
+  const pos = profile.positioning as any;
+  const competitors = pos?.competitors?.value || pos?.competitors;
+  if (typeof competitors === 'string') return competitors.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(competitors)) return competitors.map((c: any) => typeof c === 'string' ? c : String(c));
+  return [];
+}
+
+function extractOfferingProducts(profile: OrganizationProfile | null): string[] {
+  if (!profile?.offerings) return [];
+  const off = profile.offerings as any;
+  const products = off?.coreProducts?.value || off?.coreProducts;
+  if (typeof products === 'string') return products.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(products)) return products.map((p: any) => typeof p === 'string' ? p : String(p));
+  return [];
+}
+
+function extractOfferingDifferentiators(profile: OrganizationProfile | null): string[] {
+  if (!profile?.offerings) return [];
+  const off = profile.offerings as any;
+  const diff = off?.differentiators?.value || off?.differentiators;
+  if (typeof diff === 'string') return diff.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(diff)) return diff.map((d: any) => typeof d === 'string' ? d : String(d));
+  return [];
+}
+
+function extractOfferingProblemsSolved(profile: OrganizationProfile | null): string[] {
+  if (!profile?.offerings) return [];
+  const off = profile.offerings as any;
+  const problems = off?.problemsSolved?.value || off?.problemsSolved;
+  if (typeof problems === 'string') return problems.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(problems)) return problems.map((p: any) => typeof p === 'string' ? p : String(p));
+  return [];
+}
+
+function extractOutreachEmailAngles(profile: OrganizationProfile | null): string[] {
+  if (!profile?.outreach) return [];
+  const out = profile.outreach as any;
+  const angles = out?.emailAngles?.value || out?.emailAngles;
+  if (typeof angles === 'string') return angles.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(angles)) return angles.map((a: any) => typeof a === 'string' ? a : String(a));
+  return [];
+}
+
+function extractOutreachCallOpeners(profile: OrganizationProfile | null): string[] {
+  if (!profile?.outreach) return [];
+  const out = profile.outreach as any;
+  const openers = out?.callOpeners?.value || out?.callOpeners;
+  if (typeof openers === 'string') return openers.split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (Array.isArray(openers)) return openers.map((o: any) => typeof o === 'string' ? o : String(o));
+  return [];
+}
+
+function extractOutreachObjectionHandlers(profile: OrganizationProfile | null): Array<{ objection: string; response: string }> {
+  if (!profile?.outreach) return [];
+  const out = profile.outreach as any;
+  const handlers = out?.objectionHandlers?.value || out?.objectionHandlers;
+  if (!Array.isArray(handlers)) return [];
+  return handlers.map((h: any) => ({
+    objection: h.objection || String(h),
+    response: h.response || '',
+  }));
+}
+
 function buildPlan(
   input: z.infer<typeof generateQuarterlyPlanSchema>,
+  orgContext: OrgIntelligenceContext,
   campaignContext?: {
     id: string;
     name: string;
@@ -98,27 +252,163 @@ function buildPlan(
   },
 ) {
   const quarterWindow = getQuarterWindow(input.quarter, input.year);
-  const marketFocus = input.targetMarket;
+  const profile = orgContext.profile;
+
+  // --- Org intelligence as primary source, user input as override ---
+  const orgName = extractOrgIdentityName(profile);
+  const orgDescription = extractOrgDescription(profile);
+  const orgIndustry = extractOrgIndustry(profile);
+  const orgOneLiner = extractPositioningOneLiner(profile);
+  const orgWhyUs = extractPositioningWhyUs(profile);
+  const orgCompetitors = extractPositioningCompetitors(profile);
+  const orgProducts = extractOfferingProducts(profile);
+  const orgDifferentiators = extractOfferingDifferentiators(profile);
+  const orgProblemsSolved = extractOfferingProblemsSolved(profile);
+  const orgIcpIndustries = extractIcpIndustries(profile);
+  const orgPersonas = extractIcpPersonas(profile);
+  const orgObjections = extractIcpObjections(profile);
+  const orgEmailAngles = extractOutreachEmailAngles(profile);
+  const orgCallOpeners = extractOutreachCallOpeners(profile);
+  const orgObjectionHandlers = extractOutreachObjectionHandlers(profile);
+
+  // Target market: prefer org ICP industries, then user input
+  const marketFocus = orgIcpIndustries.length > 0
+    ? `${orgIcpIndustries.join(', ')} organizations`
+    : input.targetMarket;
+
   const campaignName = input.campaignName || campaignContext?.name || `Quarterly Campaign - ${quarterWindow.label}`;
+
+  // Primary goal: prefer campaign objective, then user input
   const primaryGoal = campaignContext?.campaignObjective || input.primaryGoal;
+
+  // Value proposition: prefer org positioning, then user input
+  const valueProposition = orgOneLiner || input.valueProposition;
+
+  // Product messages: combine org offerings + campaign info + user input
+  const orgProductMessages = uniqueOrdered([
+    ...orgProducts,
+    ...orgProblemsSolved.slice(0, 3),
+  ]);
   const productMessages = buildProductMessages(
-    input.valueProposition,
+    valueProposition,
     campaignContext?.productServiceInfo,
     campaignContext?.talkingPoints ?? null,
   );
+  const allProductMessages = uniqueOrdered([
+    ...orgProductMessages,
+    ...productMessages,
+  ]).slice(0, 10);
 
+  // Proof points: org differentiators + why us + product messages
   const proofPoints = uniqueOrdered([
-    ...productMessages.slice(0, 4),
+    ...orgDifferentiators.slice(0, 3),
+    ...orgWhyUs.slice(0, 2),
+    ...allProductMessages.slice(0, 3),
     'Reasoning-first engagement model',
     'Multi-channel orchestration across voice, email, and automation',
     'Compliance-first execution with full memory of interactions',
-  ]).slice(0, 7);
+  ]).slice(0, 8);
 
   const successCriteria =
     campaignContext?.successCriteria ||
     `Qualified meetings generated with buying-team alignment by end of ${quarterWindow.label}`;
 
-  const coreNarrative = `${input.valueProposition}. We execute with ${TAGLINE.primary} for ${marketFocus} using product-led messaging tied to measurable commercial outcomes.`;
+  // Core narrative driven by org intelligence
+  const narrativeBase = orgDescription || valueProposition;
+  const coreNarrative = `${narrativeBase}. We execute with ${TAGLINE.primary} for ${marketFocus} using product-led messaging tied to measurable commercial outcomes.`;
+
+  // Build persona angles from org ICP personas, fallback to defaults
+  const personaAngles = orgPersonas.length > 0
+    ? orgPersonas.slice(0, 4).map((persona) => ({
+        persona: persona.title,
+        pain: persona.painPoints?.[0] || 'Operational friction and inconsistent outcomes',
+        message: persona.goals?.[0] || `Targeted strategy for ${persona.title} aligned with quarterly objectives.`,
+      }))
+    : [
+        {
+          persona: 'Demand Generation Leader',
+          pain: 'Channel fragmentation and weak conversion quality',
+          message: 'Unify demand channels with measurable quarterly outcomes and governed execution.',
+        },
+        {
+          persona: 'RevOps / Sales Operations',
+          pain: 'Inconsistent process and poor lifecycle visibility',
+          message: 'Create reliable outbound systems with clear handoff, QA, and attribution.',
+        },
+      ];
+
+  // Objection themes from org intelligence
+  const objectionThemes = orgObjections.length > 0
+    ? orgObjections.slice(0, 5)
+    : orgObjectionHandlers.length > 0
+      ? orgObjectionHandlers.slice(0, 5).map((h) => h.objection)
+      : ['Status quo comfort', 'Timing hesitation', 'Resource constraints'];
+
+  // Key challenges: combine user input with org problems
+  const keyChallenges = input.keyChallenges.length > 0
+    ? input.keyChallenges
+    : orgProblemsSolved.slice(0, 5);
+
+  // Email campaign structures from org outreach angles
+  const emailStructures = orgEmailAngles.length >= 3
+    ? orgEmailAngles.slice(0, 4).map((angle, idx) => ({
+        format: `${angle} sequence`,
+        angle,
+        steps: idx === 0
+          ? ['Insight opener', 'Diagnostic question', 'Outcome framing', 'CTA for discovery']
+          : idx === 1
+            ? ['Proof snapshot', 'Relevance mapping', 'Risk reversal', 'Meeting CTA']
+            : idx === 2
+              ? ['Executive narrative', 'Market framing', 'Strategic recommendation', 'Calendar CTA']
+              : ['Hook', 'Value bridge', 'Social proof', 'CTA'],
+      }))
+    : [
+        {
+          format: 'Problem-led sequence',
+          angle: 'Highlight critical business friction and opportunity cost',
+          steps: ['Insight opener', 'Diagnostic question', 'Outcome framing', 'CTA for discovery'],
+        },
+        {
+          format: 'Proof-led sequence',
+          angle: 'Use credibility and execution confidence',
+          steps: ['Proof snapshot', 'Relevance mapping', 'Risk reversal', 'Meeting CTA'],
+        },
+        {
+          format: 'Executive POV sequence',
+          angle: 'Leadership-level strategic narrative',
+          steps: ['Executive narrative', 'Market framing', 'Strategic recommendation', 'Calendar CTA'],
+        },
+      ];
+
+  // Phone discovery questions from org call openers + context
+  const discoveryQuestions = [
+    ...(orgCallOpeners.length > 0
+      ? orgCallOpeners.slice(0, 3)
+      : [
+          'How are you currently addressing this operational gap?',
+          'What happens if this remains unresolved next quarter?',
+          'Which stakeholders are involved in evaluating alternatives?',
+        ]),
+    ...(allProductMessages[0] ? [`How are you currently solving around "${allProductMessages[0]}" today?`] : []),
+  ];
+
+  // Differentiation focus from org
+  const differentiationFocus = orgDifferentiators.length >= 3
+    ? orgDifferentiators.slice(0, 4)
+    : [
+        'Unified channel orchestration across outbound motions',
+        'Reasoning-first execution over static script-based outreach',
+        'Governed approval flow with campaign-level consistency controls',
+      ];
+
+  // Content assets from org offerings
+  const contentAssets = [
+    ...(orgProducts.length > 0 ? [`Solution brief for ${orgProducts[0]}`] : []),
+    'Thought-leadership article per primary theme',
+    'Persona-specific one-pager per buying role',
+    'Quarterly solution brief aligned to sales talk tracks',
+    ...(orgProducts.length > 1 ? [`Product comparison guide: ${orgProducts.slice(0, 3).join(' vs ')}`] : []),
+  ].slice(0, 5);
 
   return {
     meta: {
@@ -137,13 +427,25 @@ function buildPlan(
         name: campaignName,
         type: campaignContext?.type ?? null,
       },
-      productSignalsCount: productMessages.length,
+      productSignalsCount: allProductMessages.length,
+      sourceOfTruth: 'organization-intelligence',
+    },
+    organizationIntelligenceSummary: {
+      orgName: orgName || BRAND.company.parentBrand,
+      orgDescription: orgDescription || null,
+      orgIndustry: orgIndustry || null,
+      icpIndustries: orgIcpIndustries,
+      icpPersonas: orgPersonas.map((p) => p.title),
+      competitors: orgCompetitors,
+      coreProducts: orgProducts,
+      differentiators: orgDifferentiators,
+      hasOrgIntelligence: Boolean(profile),
     },
     brandPositioningAlignment: {
-      brand: BRAND.company.parentBrand,
+      brand: orgName || BRAND.company.parentBrand,
       product: BRAND.company.productName,
-      promise: TAGLINE.corePromise,
-      strategicIdentity: TAGLINE.identity,
+      promise: orgOneLiner || TAGLINE.corePromise,
+      strategicIdentity: orgDescription || TAGLINE.identity,
       narrativeAnchor: TAGLINE.heroSubHeadline,
       pillarAlignment: PILLARS.map((pillar) => pillar.label),
     },
@@ -152,24 +454,13 @@ function buildPlan(
       messageHouse: {
         heroMessage: primaryGoal,
         proofPoints,
-        challengeFraming: input.keyChallenges,
+        challengeFraming: keyChallenges,
       },
-      personaAngles: [
-        {
-          persona: 'Demand Generation Leader',
-          pain: 'Channel fragmentation and weak conversion quality',
-          message: 'Unify demand channels with measurable quarterly outcomes and governed execution.',
-        },
-        {
-          persona: 'RevOps / Sales Operations',
-          pain: 'Inconsistent process and poor lifecycle visibility',
-          message: 'Create reliable outbound systems with clear handoff, QA, and attribution.',
-        },
-      ],
+      personaAngles,
     },
     keyThemes: [
       `Problem-first demand for ${marketFocus}`,
-      ...(productMessages.length > 0 ? [`Product-led value narrative: ${productMessages[0]}`] : []),
+      ...(allProductMessages.length > 0 ? [`Product-led value narrative: ${allProductMessages[0]}`] : []),
       'Reasoning-led outbound with compliance by design',
       'Pipeline quality over activity vanity metrics',
       'Cross-channel consistency from first touch to booked meeting',
@@ -177,53 +468,27 @@ function buildPlan(
     productPositioning: {
       summary:
         campaignContext?.productServiceInfo ||
+        orgDescription ||
         `Position ${BRAND.company.productName} as the operational system for consistent demand generation outcomes.`,
-      keyProductMessages: productMessages,
-      differentiationFocus: [
-        'Unified channel orchestration across outbound motions',
-        'Reasoning-first execution over static script-based outreach',
-        'Governed approval flow with campaign-level consistency controls',
-      ],
+      keyProductMessages: allProductMessages,
+      differentiationFocus,
     },
-    emailCampaignStructures: [
-      {
-        format: 'Problem-led sequence',
-        angle: 'Highlight critical business friction and opportunity cost',
-        steps: ['Insight opener', 'Diagnostic question', 'Outcome framing', 'CTA for discovery'],
-      },
-      {
-        format: 'Proof-led sequence',
-        angle: 'Use credibility and execution confidence',
-        steps: ['Proof snapshot', 'Relevance mapping', 'Risk reversal', 'Meeting CTA'],
-      },
-      {
-        format: 'Executive POV sequence',
-        angle: 'Leadership-level strategic narrative',
-        steps: ['Executive narrative', 'Market framing', 'Strategic recommendation', 'Calendar CTA'],
-      },
-    ],
+    emailCampaignStructures: emailStructures,
     contentStrategy: {
       monthlyFocus: [
         'Month 1: Positioning + market challenge framing',
         'Month 2: Solution proof + implementation confidence',
         'Month 3: Decision enablement + conversion assets',
       ],
-      assets: [
-        'Thought-leadership article per primary theme',
-        'Persona-specific one-pager per buying role',
-        'Quarterly solution brief aligned to sales talk tracks',
-      ],
+      assets: contentAssets,
       distribution: ['Email nurtures', 'Sales enablement handoff', 'Client-facing landing pages'],
     },
     phoneOutreachStrategy: {
-      openingFramework: 'Problem intelligence → role relevance → value hypothesis',
-      discoveryQuestions: [
-        'How are you currently addressing this operational gap?',
-        'What happens if this remains unresolved next quarter?',
-        'Which stakeholders are involved in evaluating alternatives?',
-        ...(productMessages[0] ? [`How are you currently solving around "${productMessages[0]}" today?`] : []),
-      ],
-      objectionPlaybookThemes: ['Status quo comfort', 'Timing hesitation', 'Resource constraints'],
+      openingFramework: orgCallOpeners.length > 0
+        ? orgCallOpeners[0]
+        : 'Problem intelligence → role relevance → value hypothesis',
+      discoveryQuestions,
+      objectionPlaybookThemes: objectionThemes,
       callbackAndFollowUp: 'Every call disposition maps to next best action and sequence branch.',
     },
     automationSequenceDesign: {
@@ -246,26 +511,32 @@ function buildPlan(
     socialMessagingPack: {
       companyProfile: {
         headline: SOCIAL_PROFILES.linkedin.headline,
-        narrative: `${coreNarrative} ${TAGLINE.corePromise}`,
-        quarterlyTheme: `Quarterly focus: ${quarterWindow.label} — ${input.primaryGoal}`,
+        narrative: `${coreNarrative} ${orgOneLiner || TAGLINE.corePromise}`,
+        quarterlyTheme: `Quarterly focus: ${quarterWindow.label} — ${primaryGoal}`,
       },
-      individualProfiles: [
-        {
-          role: 'Executive / Founder',
-          positioning: 'Strategic POV on market problems and transformation outcomes',
-          style: 'Authoritative, evidence-backed, future-facing',
-        },
-        {
-          role: 'Sales / Inside Team',
-          positioning: 'Customer problem fluency + practical execution insights',
-          style: 'Consultative, clear, and value-led',
-        },
-        {
-          role: 'Marketing / Content',
-          positioning: 'Theme amplification and buyer education',
-          style: BRAND_VOICE.traits?.join(', ') ?? 'Insightful and audience-first',
-        },
-      ],
+      individualProfiles: orgPersonas.length > 0
+        ? orgPersonas.slice(0, 3).map((persona) => ({
+            role: persona.title,
+            positioning: `${persona.title} perspective on market problems and transformation outcomes`,
+            style: 'Consultative, evidence-backed, value-led',
+          }))
+        : [
+            {
+              role: 'Executive / Founder',
+              positioning: 'Strategic POV on market problems and transformation outcomes',
+              style: 'Authoritative, evidence-backed, future-facing',
+            },
+            {
+              role: 'Sales / Inside Team',
+              positioning: 'Customer problem fluency + practical execution insights',
+              style: 'Consultative, clear, and value-led',
+            },
+            {
+              role: 'Marketing / Content',
+              positioning: 'Theme amplification and buyer education',
+              style: BRAND_VOICE.traits?.join(', ') ?? 'Insightful and audience-first',
+            },
+          ],
       consistencyRules: [
         'All social copy must map to quarterly core narrative and approved themes.',
         'Do not introduce claims not represented in campaign proof points.',
@@ -275,7 +546,9 @@ function buildPlan(
     governance: {
       lifecycle: ['draft', 'internal_review', 'approved', 'launch_ready', 'active', 'optimizing'],
       approvalRequired: true,
+      complianceContext: orgContext.settings.compliancePolicy ? 'Organization compliance policy applied' : 'Default compliance policy applied',
     },
+    performanceLearnings: orgContext.learningSummary || null,
     outcomeModel: {
       primarySuccessCriteria: successCriteria,
       secondarySignals: [
@@ -295,9 +568,51 @@ function buildPlan(
 
 router.use(requireAuth);
 
+/**
+ * GET /org-context
+ * Returns org intelligence data for the campaign manager frontend to use as form defaults.
+ * Organization intelligence is the primary source of truth for quarterly planning.
+ */
+router.get('/org-context', async (_req: Request, res: Response) => {
+  try {
+    const orgContext = await fetchOrgIntelligenceContext();
+    const profile = orgContext.profile;
+
+    res.json({
+      success: true,
+      hasOrgIntelligence: Boolean(profile),
+      orgContext: {
+        orgName: extractOrgIdentityName(profile),
+        orgDescription: extractOrgDescription(profile),
+        orgIndustry: extractOrgIndustry(profile),
+        domain: profile?.domain || null,
+        targetMarket: extractIcpIndustries(profile).length > 0
+          ? `${extractIcpIndustries(profile).join(', ')} organizations`
+          : null,
+        valueProposition: extractPositioningOneLiner(profile),
+        keyChallenges: extractOfferingProblemsSolved(profile),
+        icpPersonas: extractIcpPersonas(profile).map((p) => p.title),
+        coreProducts: extractOfferingProducts(profile),
+        differentiators: extractOfferingDifferentiators(profile),
+        competitors: extractPositioningCompetitors(profile),
+        whyUs: extractPositioningWhyUs(profile),
+        emailAngles: extractOutreachEmailAngles(profile),
+        callOpeners: extractOutreachCallOpeners(profile),
+        learningSummary: orgContext.learningSummary || null,
+      },
+    });
+  } catch (error) {
+    console.error('[CampaignManager] Failed to fetch org context:', error);
+    res.status(500).json({ message: 'Failed to fetch organization intelligence context' });
+  }
+});
+
 router.post('/plans/generate', async (req: Request, res: Response) => {
   try {
     const input = generateQuarterlyPlanSchema.parse(req.body);
+
+    // Fetch org intelligence as the primary source of truth
+    const orgContext = await fetchOrgIntelligenceContext();
 
     let campaignContext:
       | {
@@ -331,7 +646,7 @@ router.post('/plans/generate', async (req: Request, res: Response) => {
       campaignContext = campaign;
     }
 
-    const plan = buildPlan(input, campaignContext);
+    const plan = buildPlan(input, orgContext, campaignContext);
 
     res.json({
       success: true,
