@@ -79,7 +79,7 @@ import texmlRouter from './routes/texml';
 import aiOperatorRouter from './routes/ai-operator';
 import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
-import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
+
 import problemIntelligenceRouter from './routes/problem-intelligence-routes';
 import productIntelligenceRouter from './routes/product-intelligence-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
@@ -110,6 +110,10 @@ import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import adminAgenticCampaignsRouter from './routes/admin-agentic-campaigns';
 import contentPromotionRouter from './routes/content-promotion-routes';
+import superOrgRouter from './routes/super-organization-routes';
+import organizationManagerRouter from './routes/organization-manager-routes';
+import opsManagementRouter from './routes/ops-management';
+import unifiedAgentArchitectureRouter from './routes/unified-agent-architecture';
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
 import {
@@ -12083,24 +12087,59 @@ export function registerRoutes(app: Express) {
 
   // ==================== DASHBOARD STATS ====================
 
-  let dashboardStatsCache: { data: any; timestamp: number } | null = null;
-  const CACHE_TTL_MS = 5 * 60 * 1000;
+  // Per-user cache keyed by clientAccountId (or 'global' for internal users)
+  const dashboardStatsCacheMap: Map<string, { data: any; timestamp: number }> = new Map();
+  const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes for fresher data
 
   function invalidateDashboardCache() {
-    dashboardStatsCache = null;
+    dashboardStatsCacheMap.clear();
   }
 
   app.get("/api/dashboard/stats", requireAuth, async (req, res) => {
     try {
       const now = Date.now();
 
-      if (dashboardStatsCache && (now - dashboardStatsCache.timestamp) < CACHE_TTL_MS) {
-        return res.json(dashboardStatsCache.data);
+      // Determine if the user is a client (scoped to their clientAccountId)
+      const isClient = ['client', 'client_user'].includes((req.user as any)?.role);
+      const clientAccountId = isClient ? ((req.user as any).clientAccountId || (req.user as any).tenantId) : null;
+      const cacheKey = clientAccountId || 'global';
+
+      const cached = dashboardStatsCacheMap.get(cacheKey);
+      if (cached && (now - cached.timestamp) < CACHE_TTL_MS) {
+        return res.json(cached.data);
       }
 
       const thisMonth = new Date();
       thisMonth.setDate(1);
       thisMonth.setHours(0, 0, 0, 0);
+
+      // Build campaign query with optional client scoping
+      let campaignQuery = db.select({ id: campaigns.id, type: campaigns.type, status: campaigns.status, clientAccountId: campaigns.clientAccountId }).from(campaigns);
+      if (clientAccountId) {
+        campaignQuery = campaignQuery.where(eq(campaigns.clientAccountId, clientAccountId)) as any;
+      }
+
+      // Build leads query: exclude soft-deleted, scope to client campaigns if applicable
+      let leadsQuery;
+      if (clientAccountId) {
+        // Client users: count leads from their campaigns only, exclude soft-deleted
+        leadsQuery = db.select({ count: sql<number>`count(*)::int` })
+          .from(leads)
+          .innerJoin(campaigns, eq(leads.campaignId, campaigns.id))
+          .where(and(
+            sql`${leads.createdAt} >= ${thisMonth}`,
+            sql`${leads.deletedAt} IS NULL`,
+            eq(campaigns.clientAccountId, clientAccountId)
+          ));
+      } else {
+        // Internal users: count all non-deleted leads
+        leadsQuery = db.select({ count: sql<number>`count(*)::int` })
+          .from(leads)
+          .where(and(
+            sql`${leads.createdAt} >= ${thisMonth}`,
+            sql`${leads.deletedAt} IS NULL`
+          ));
+      }
 
       const [
         totalAccounts,
@@ -12110,10 +12149,8 @@ export function registerRoutes(app: Express) {
       ] = await Promise.all([
         storage.getAccountsCount(),
         storage.getContactsCount(),
-        db.select({ id: campaigns.id, type: campaigns.type, status: campaigns.status }).from(campaigns),
-        db.select({ count: sql<number>`count(*)::int` })
-          .from(leads)
-          .where(sql`${leads.createdAt} >= ${thisMonth}`)
+        campaignQuery,
+        leadsQuery
       ]);
 
       const activeCampaigns = allCampaigns.filter(c => c.status === 'active');
@@ -12131,7 +12168,7 @@ export function registerRoutes(app: Express) {
         leadsThisMonth: leadsThisMonthResult[0]?.count || 0
       };
 
-      dashboardStatsCache = { data: statsData, timestamp: now };
+      dashboardStatsCacheMap.set(cacheKey, { data: statsData, timestamp: now });
 
       res.json(statsData);
     } catch (error) {
@@ -12208,11 +12245,14 @@ export function registerRoutes(app: Express) {
         d.systemAction === 'converted_qualified'
       ).length;
 
-      // Get leads created by this agent
+      // Get leads created by this agent (exclude soft-deleted)
       const agentLeads = await db
         .select()
         .from(leads)
-        .where(eq(leads.agentId, agentId));
+        .where(and(
+          eq(leads.agentId, agentId),
+          sql`${leads.deletedAt} IS NULL`
+        ));
 
       const approvedLeads = agentLeads.filter(l => l.qaStatus === 'approved').length;
       const pendingLeads = agentLeads.filter(l =>
@@ -14874,10 +14914,6 @@ Provide JSON response with:
   app.use("/api", problemIntelligenceRouter);
   app.use("/api", productIntelligenceRouter);
 
-  // ==================== ORGANIZATION INTELLIGENCE INJECTION MODEL ====================
-  // Voice Agent OI Modes: use_existing | fresh_research | none
-  app.use("/api/org-intelligence-injection", orgIntelligenceInjectionRouter);
-
   // ==================== DIALER RUNS (Manual/PowerDialer) ====================
 
   app.use("/api/dialer-runs", dialerRunsRouter);
@@ -14894,6 +14930,16 @@ Provide JSON response with:
 
   app.use("/api/iam", iamRouter);
   app.use("/api/secrets", secretsRouter);
+
+  // ==================== ORGANIZATION MANAGEMENT ====================
+
+  app.use("/api/super-org", superOrgRouter);
+  app.use("/api/organizations", organizationManagerRouter);
+
+  // ==================== OPERATIONS HUB (GCP Infrastructure Management) ====================
+  // Real-time dashboard for deployments, secrets, logs, costs, domains, builds
+
+  app.use("/api/ops", opsManagementRouter);
 
   // ==================== AGENTIC OPERATOR ====================
 
@@ -18025,6 +18071,10 @@ Return ONLY valid JSON, no other text.`;
       res.status(500).json({ message: "Migration failed", error: error.message });
     }
   });
+
+  // ==================== UNIFIED AGENT ARCHITECTURE (Consolidated AI Intelligence) ====================
+  // One Agent Per Type. Fully Self-Contained. Learning-Integrated.
+  app.use("/api/unified-agents", requireAuth, unifiedAgentArchitectureRouter);
 
   // =============================================================================
   // OTHER ROUTES

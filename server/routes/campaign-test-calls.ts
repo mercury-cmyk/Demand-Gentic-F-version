@@ -307,14 +307,10 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         await storeCallSession(ctx);
 
         // Generate client state params
+        // NOTE: system_prompt and agent_settings are stored in Redis (via storeCallSession above)
+        // and retrieved by voice-dialer from call-session-store. Keeping them OUT of the URL
+        // prevents the TeXML URL from exceeding length limits that break Telnyx fetching.
         const customParams = contextToClientStateParams(ctx);
-        
-        // HACK: Explicitly include system_prompt in customParams because existing voice-dialer.ts 
-        // logic (lines 1172+) looks for it there. Ideally, voice-dialer should read from Redis.
-        // We include it here to ensure test calls work with current voice-dialer implementation.
-        if (ctx.systemPrompt) {
-            customParams.system_prompt = ctx.systemPrompt;
-        }
 
         const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
         const providerForClientState = (ctx.provider === 'google') ? 'gemini_live' : 'openai_realtime';
@@ -395,6 +391,8 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         // Prefer explicit webhook URL secret if provided; fallback to resolved host
         // Prefer explicit webhook URL override if available, else fallback to TeXML host
         StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
+        // Include ClientState so webhooks can identify this as a test call
+        ClientState: clientStateB64,
       }),
     });
 

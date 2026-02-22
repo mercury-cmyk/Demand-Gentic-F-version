@@ -4,7 +4,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, desc } from 'drizzle-orm';
 import {
   campaigns,
   clientCampaignAccess,
@@ -15,6 +15,7 @@ import {
   contacts,
   previewStudioSessions,
   previewSimulationTranscripts,
+  callSessions,
 } from '@shared/schema';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
@@ -282,12 +283,13 @@ router.post('/start', async (req: Request, res: Response) => {
     };
 
     // First try to get agent info from campaign's aiAgentSettings
-    if (campaign.aiAgentSettings?.persona) {
-      const persona = campaign.aiAgentSettings.persona;
+    const aiSettings = campaign.aiAgentSettings as any;
+    if (aiSettings?.persona) {
+      const persona = aiSettings.persona;
       agentInfo.name = persona.name || agentInfo.name;
       agentInfo.companyName = persona.companyName || agentInfo.companyName;
       agentInfo.role = persona.role || agentInfo.role;
-      agentInfo.voice = persona.voice || campaign.aiAgentSettings.voice || agentInfo.voice;
+      agentInfo.voice = persona.voice || aiSettings.voice || agentInfo.voice;
     }
 
     // Try to get virtual agent if assigned (overrides campaign settings)
@@ -434,12 +436,13 @@ router.post('/chat', async (req: Request, res: Response) => {
         voice: 'Fenrir',
       };
 
-      if (campaign.aiAgentSettings?.persona) {
-        const persona = campaign.aiAgentSettings.persona;
+      const aiSettings2 = campaign.aiAgentSettings as any;
+      if (aiSettings2?.persona) {
+        const persona = aiSettings2.persona;
         agentInfo.name = persona.name || agentInfo.name;
         agentInfo.companyName = persona.companyName || agentInfo.companyName;
         agentInfo.role = persona.role || agentInfo.role;
-        agentInfo.voice = persona.voice || campaign.aiAgentSettings.voice || agentInfo.voice;
+        agentInfo.voice = persona.voice || aiSettings2.voice || agentInfo.voice;
       }
 
       const newSessionId = uuidv4();
@@ -1270,9 +1273,6 @@ router.post('/generate-email', async (req: Request, res: Response) => {
     const organizationContext = {
       name: companyName,
       website: businessProfile?.website,
-      industry: businessProfile?.industry,
-      description: businessProfile?.description,
-      proposition: businessProfile?.valueProposition
     };
 
     const companyAddress = (() => {
@@ -1415,7 +1415,16 @@ function inferDispositionFromTranscript(transcriptText: string, metadata: Record
   if (lower.includes('do not call') || lower.includes("don't call")) return 'do_not_call';
   if (lower.includes('not interested') || lower.includes('no thanks')) return 'not_interested';
   if (lower.includes('call me back') || lower.includes('callback')) return 'callback_requested';
-  if (lower.includes('yes') && lower.includes('meeting')) return 'qualified';
+
+  // Qualified lead patterns: meeting/demo booking
+  if (lower.includes('yes') && lower.includes('meeting')) return 'qualified_lead';
+  // Content syndication qualified: prospect agreed to receive content (whitepaper, ebook, etc.)
+  if (lower.includes('send') && (lower.includes('email') || lower.includes('@'))) return 'qualified_lead';
+  if ((lower.includes('of course') || lower.includes('absolutely') || lower.includes('yes please') || lower.includes('sure')) &&
+      (lower.includes('copy') || lower.includes('white paper') || lower.includes('whitepaper') || lower.includes('ebook') || lower.includes('report') || lower.includes('send'))) return 'qualified_lead';
+  // Prospect confirmed email address — strong qualified signal
+  if (/\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/.test(transcriptText)) return 'qualified_lead';
+
   if (endReason.includes('no_call_control')) return 'no_answer';
   if (!lower.trim()) return 'no_answer';
   return 'needs_review';
@@ -1449,7 +1458,32 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<ClientPostC
     };
   }
 
-  const finalDisposition = inferDispositionFromTranscript(transcriptText, metadata);
+  // First check if the voice-dialer's full post-call analysis pipeline has already
+  // determined a disposition via callSessions (includes AI-powered campaign outcome evaluation).
+  // This is more accurate than simple keyword inference.
+  let voiceDialerDisposition: string | null = null;
+  let voiceDialerAnalysis: Record<string, unknown> | null = null;
+  const callControlId = metadata.callControlId as string | undefined;
+  if (callControlId) {
+    try {
+      const [csRecord] = await db
+        .select()
+        .from(callSessions)
+        .where(eq(callSessions.telnyxCallId, callControlId))
+        .orderBy(desc(callSessions.startedAt))
+        .limit(1);
+
+      if (csRecord?.aiDisposition) {
+        voiceDialerDisposition = csRecord.aiDisposition;
+        voiceDialerAnalysis = (csRecord as any).aiAnalysis?.postCallAnalysis || null;
+        console.log(`[Client Phone Test] Using voice-dialer disposition: ${voiceDialerDisposition} (from callSession ${csRecord.id})`);
+      }
+    } catch (lookupErr) {
+      console.warn('[Client Phone Test] callSessions lookup failed:', lookupErr);
+    }
+  }
+
+  const finalDisposition = voiceDialerDisposition || inferDispositionFromTranscript(transcriptText, metadata);
 
   let conversationQuality: Record<string, unknown> | null = null;
   if (transcriptText.trim().length > 0) {
@@ -1476,6 +1510,8 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<ClientPostC
         ? `Post-call analysis ready (${turnCount} turns captured).`
         : 'Call ended. No transcript captured yet; showing provisional outcome.',
     conversationQuality,
+    ...(voiceDialerAnalysis ? { voiceDialerAnalysis } : {}),
+    dispositionSource: voiceDialerDisposition ? 'voice_dialer_pipeline' : 'transcript_inference',
   };
 
   await db.update(previewStudioSessions)
@@ -1559,6 +1595,9 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       }
     }
 
+    // Resolve virtual agent for this campaign
+    const resolvedAgentId = await resolveClientVirtualAgentId(campaignId);
+
     // Get caller ID
     let fromNumber = '';
     let callerNumberId: string | null = null;
@@ -1567,7 +1606,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       const callerIdResult = await getCallerIdForCall({
         campaignId,
         prospectNumber: normalizedPhone,
-        virtualAgentId: virtualAgentId || undefined,
+        virtualAgentId: resolvedAgentId || undefined,
         callType: 'preview_phone_test',
       });
       fromNumber = callerIdResult.callerId;
@@ -1657,18 +1696,14 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       },
     }).returning();
 
-    // HACK: Explicitly include system_prompt in customParams (same as admin campaign-test-calls.ts)
-    // voice-dialer reads system_prompt from client_state params; without this, the AI has no prompt
-    // and test calls have no audio.
+    // system_prompt is stored in Redis (callSessionStore below) and retrieved by voice-dialer.
+    // Keeping it OUT of the URL prevents TeXML URL length limits from breaking Telnyx fetching.
     const customParams: Record<string, any> = {
       ...contextToClientStateParams(unifiedContext),
       is_preview_test: true,
       preview_session_id: session.id,
       provider: providerForClientState,
     };
-    if (unifiedContext.systemPrompt) {
-      customParams.system_prompt = unifiedContext.systemPrompt;
-    }
 
     // Store session in Redis
     const { callSessionStore } = await import('../services/call-session-store');
@@ -1681,8 +1716,8 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       contact_id: unifiedContext.contactId,
       called_number: unifiedContext.calledNumber,
       from_number: unifiedContext.fromNumber,
-      caller_number_id: unifiedContext.callerNumberId,
-      caller_number_decision_id: unifiedContext.callerNumberDecisionId,
+      caller_number_id: unifiedContext.callerNumberId ?? undefined,
+      caller_number_decision_id: unifiedContext.callerNumberDecisionId ?? undefined,
       virtual_agent_id: unifiedContext.virtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
@@ -1694,6 +1729,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       organization_name: unifiedContext.organizationName,
       provider: unifiedContext.provider,
       system_prompt: unifiedContext.systemPrompt || undefined,
+      agent_settings: unifiedContext.agentSettings || undefined,
       test_contact: {
         name: unifiedContext.contactName,
         company: unifiedContext.accountName,
@@ -1744,6 +1780,8 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
         From: fromNumber,
         Url: texmlUrl,
         StatusCallback: (process.env.TELNYX_WEBHOOK_URL || '').trim() || `https://${webhookHost}/api/webhooks/telnyx`,
+        // Include ClientState so webhooks can identify this as a test call
+        ClientState: clientStateB64,
       }),
     });
 

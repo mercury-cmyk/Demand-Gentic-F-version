@@ -1522,6 +1522,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                       if (!customParams.organization_name && storedParams.organization_name) {
                         customParams.organization_name = storedParams.organization_name;
                       }
+                      if (!customParams.agent_settings && storedParams.agent_settings) {
+                        customParams.agent_settings = storedParams.agent_settings;
+                        console.log(`${LOG_PREFIX} Retrieved agent_settings from session store for ${mergeCallId}`);
+                      }
                       console.log(`${LOG_PREFIX} ✅ Merged session store params for pending-call-state`);
                     }
                   } catch (storeErr) {
@@ -1629,6 +1633,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                     }
                     if (!customParams.account_name && storedParams.account_name) {
                       customParams.account_name = storedParams.account_name;
+                    }
+                    if (!customParams.agent_settings && storedParams.agent_settings) {
+                      customParams.agent_settings = storedParams.agent_settings;
+                      console.log(`${LOG_PREFIX} Retrieved agent_settings from session store for ${callId}`);
                     }
                     console.log(`${LOG_PREFIX} ✅ Merged session store params for unified call context`);
                   }
@@ -2940,27 +2948,33 @@ openaiWs.on("open", async () => {
         });
         sendOpeningMessage(openaiWs, openingScript);
 
-        // SAFETY NET: If greeting was sent but no agent audio within 5s, retry once
+        // SAFETY NET: If greeting was sent but no agent audio within 10s, retry ONCE.
+        // Increased from 5s to 10s to avoid racing with AI audio generation latency.
+        // Limited to one retry to prevent the agent from repeating its intro multiple times.
         if ((session as any).greetingRetryTimer) {
           clearTimeout((session as any).greetingRetryTimer);
         }
         const greetingRetryTimer = setTimeout(() => {
           if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
-            console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 5s — retrying opening message`);
+            if (session.openingRestartCount >= 1) {
+              console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): No agent audio after 10s but already retried ${session.openingRestartCount} time(s) — skipping to avoid repeated intro`);
+              queueSessionEvent(session, "realtime.loop_detected", {
+                valueText: "opening_retry_suppressed",
+                metadata: { provider: "openai", count: session.openingRestartCount },
+              });
+              return;
+            }
+            console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 10s — retrying opening message (once)`);
             session.openingRestartCount += 1;
+            // Force the next agent transcript to start a new entry so the retry is visible
+            (session as any)._forceNewAgentTranscript = true;
             queueSessionEvent(session, "opening.restart_count", {
               valueNum: session.openingRestartCount,
               metadata: { provider: "openai" },
             });
-            if (session.openingRestartCount > 1) {
-              queueSessionEvent(session, "realtime.loop_detected", {
-                valueText: "opening_restart_limit_exceeded",
-                metadata: { provider: "openai", count: session.openingRestartCount },
-              });
-            }
             sendOpeningMessage(openaiWs, openingScript);
           }
-        }, 5000);
+        }, 10000);
         (session as any).greetingRetryTimer = greetingRetryTimer;
       };
 
@@ -3640,10 +3654,16 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] AI: "${event.text}"`);
 
-        // FIXED: Accumulate consecutive assistant transcripts instead of creating new entries
-        // Gemini sends word-by-word transcriptions, so we need to merge them
+        // Accumulate consecutive assistant transcripts instead of creating new entries
+        // Gemini sends word-by-word transcriptions, so we need to merge them.
+        // EXCEPTION: If the opening was retried (openingRestartCount > 0 and forceNewTranscriptEntry),
+        // start a new entry so repeated intros are visible separately in the transcript.
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
-        if (lastTranscript?.role === 'assistant') {
+        const forceNew = (session as any)._forceNewAgentTranscript === true;
+        if (forceNew) {
+          (session as any)._forceNewAgentTranscript = false;
+        }
+        if (lastTranscript?.role === 'assistant' && !forceNew) {
           // Append to existing assistant transcript with a space
           lastTranscript.text += ' ' + event.text;
           maybeRecordPurposeStart(session, lastTranscript.text);
@@ -3867,26 +3887,33 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     scheduleFallbackGreetingCheck(6500);
 
-    // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 5s,
-    // force-retry the opening. This catches edge cases where the greeting was dropped
-    // (WebSocket reset, setup race condition, Gemini ignoring the trigger).
+    // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 10s,
+    // retry the opening ONCE. Increased from 5s to 10s to avoid racing with Gemini's
+    // audio generation latency which can take 3-7s on cold starts.
+    // The retry timer is cleared as soon as the first agent audio chunk arrives (line ~3320).
     const greetingRetryTimer = setTimeout(() => {
       if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
-        console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 5s — retrying opening message`);
+        // Only retry ONCE — never send the opening more than twice total.
+        // Multiple retries cause the agent to repeat its intro, confusing the prospect.
+        if (session.openingRestartCount >= 1) {
+          console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: No agent audio after 10s but already retried ${session.openingRestartCount} time(s) — skipping to avoid repeated intro`);
+          queueSessionEvent(session, "realtime.loop_detected", {
+            valueText: "opening_retry_suppressed",
+            metadata: { provider: "google", count: session.openingRestartCount },
+          });
+          return;
+        }
+        console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 10s — retrying opening message (once)`);
         session.openingRestartCount += 1;
+        // Force the next agent transcript to start a new entry so the retry is visible
+        (session as any)._forceNewAgentTranscript = true;
         queueSessionEvent(session, "opening.restart_count", {
           valueNum: session.openingRestartCount,
           metadata: { provider: "google" },
         });
-        if (session.openingRestartCount > 1) {
-          queueSessionEvent(session, "realtime.loop_detected", {
-            valueText: "opening_restart_limit_exceeded",
-            metadata: { provider: "google", count: session.openingRestartCount },
-          });
-        }
         provider.sendOpeningMessage(openingScript);
       }
-    }, 5000);
+    }, 10000);
     (session as any).greetingRetryTimer = greetingRetryTimer;
 
     console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);

@@ -69,7 +69,7 @@ export const emailSuppressionReasonEnum = pgEnum('email_suppression_reason', [
 ]);
 
 // Organization and membership enums
-export const organizationTypeEnum = pgEnum('organization_type', ['super', 'client']);
+export const organizationTypeEnum = pgEnum('organization_type', ['super', 'client', 'campaign']);
 export const organizationMemberRoleEnum = pgEnum('organization_member_role', ['owner', 'admin', 'member']);
 
 // Campaign enums
@@ -10554,6 +10554,9 @@ export const campaignOrganizations = pgTable('campaign_organizations', {
   // Compiled prompt-ready context
   compiledOrgContext: text('compiled_org_context'),
 
+  // Multi-type flags (an org can be both client AND campaign)
+  isCampaignOrg: boolean('is_campaign_org').notNull().default(false),
+
   // Status
   isDefault: boolean('is_default').notNull().default(false), // Default org for new campaigns
   isActive: boolean('is_active').notNull().default(true),
@@ -14072,3 +14075,629 @@ export type ContentPromotionPage = typeof contentPromotionPages.$inferSelect;
 export type InsertContentPromotionPage = z.infer<typeof insertContentPromotionPageSchema>;
 export type ContentPromotionPageView = typeof contentPromotionPageViews.$inferSelect;
 export type InsertContentPromotionPageView = z.infer<typeof insertContentPromotionPageViewSchema>;
+
+// ==================== UNIFIED AGENT ARCHITECTURE ====================
+// One Agent Per Type. Fully Self-Contained. Learning-Integrated.
+// These tables persist the unified agent intelligence framework state.
+
+/**
+ * Unified agent type enum for PostgreSQL
+ */
+export const unifiedAgentTypeEnum = pgEnum('unified_agent_type', [
+  'voice', 'email', 'strategy', 'compliance', 'data', 'research', 'content', 'pipeline'
+]);
+
+/**
+ * Master record for each canonical agent type (ONE per type, enforced by UNIQUE constraint)
+ */
+export const unifiedAgents = pgTable("unified_agents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentType: unifiedAgentTypeEnum("agent_type").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  channel: varchar("channel").notNull(),
+  status: varchar("status").notNull().default('active'),
+  currentVersion: varchar("current_version").notNull().default('1.0.0'),
+  currentHash: varchar("current_hash"),
+  configuration: jsonb("configuration").notNull().default(sql`'{}'::jsonb`),
+  performanceSnapshot: jsonb("performance_snapshot").notNull().default(sql`'{}'::jsonb`),
+  deployedAt: timestamp("deployed_at").notNull().defaultNow(),
+  deployedBy: varchar("deployed_by").notNull().default('system'),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/**
+ * Versioned prompt sections — the foundational knowledge layer
+ */
+export const unifiedAgentPromptSections = pgTable("unified_agent_prompt_sections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => unifiedAgents.id, { onDelete: 'cascade' }),
+  sectionId: varchar("section_id").notNull(),
+  name: text("name").notNull(),
+  sectionNumber: integer("section_number").notNull(),
+  category: varchar("category").notNull(),
+  content: text("content").notNull(),
+  isRequired: boolean("is_required").notNull().default(true),
+  isActive: boolean("is_active").notNull().default(true),
+  versionHash: varchar("version_hash"),
+  lastUpdated: timestamp("last_updated").notNull().defaultNow(),
+  lastUpdatedBy: varchar("last_updated_by").notNull().default('system'),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Full change history for prompt sections
+ */
+export const unifiedAgentPromptChanges = pgTable("unified_agent_prompt_changes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sectionPk: varchar("section_pk").notNull().references(() => unifiedAgentPromptSections.id, { onDelete: 'cascade' }),
+  versionHash: varchar("version_hash").notNull(),
+  previousContent: text("previous_content"),
+  newContent: text("new_content").notNull(),
+  changedBy: varchar("changed_by").notNull(),
+  changeReason: text("change_reason"),
+  source: varchar("source").notNull().default('manual'),
+  recommendationId: varchar("recommendation_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Agent capabilities with performance tracking
+ */
+export const unifiedAgentCapabilities = pgTable("unified_agent_capabilities", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => unifiedAgents.id, { onDelete: 'cascade' }),
+  capabilityId: varchar("capability_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: varchar("category").notNull(),
+  performanceScore: real("performance_score").notNull().default(0),
+  trend: varchar("trend").notNull().default('stable'),
+  learningInputSources: jsonb("learning_input_sources").notNull().default(sql`'[]'::jsonb`),
+  lastOptimized: timestamp("last_optimized"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/**
+ * Capability-to-prompt-section mapping (the architectural requirement)
+ */
+export const unifiedAgentCapabilityMappings = pgTable("unified_agent_capability_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => unifiedAgents.id, { onDelete: 'cascade' }),
+  capabilityId: varchar("capability_id").notNull(),
+  promptSectionId: varchar("prompt_section_id").notNull(),
+  confidence: real("confidence").notNull().default(1.0),
+  requiresApproval: boolean("requires_approval").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Learning pipeline recommendations
+ */
+export const unifiedAgentRecommendations = pgTable("unified_agent_recommendations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => unifiedAgents.id, { onDelete: 'cascade' }),
+  title: text("title").notNull(),
+  description: text("description"),
+  category: varchar("category").notNull(),
+  priorityScore: integer("priority_score").notNull().default(50),
+  status: varchar("status").notNull().default('pending'),
+  capabilityId: varchar("capability_id"),
+  targetPromptSectionId: varchar("target_prompt_section_id"),
+  evidence: jsonb("evidence").notNull().default(sql`'[]'::jsonb`),
+  proposedChange: jsonb("proposed_change").notNull().default(sql`'{}'::jsonb`),
+  impact: jsonb("impact").notNull().default(sql`'{}'::jsonb`),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: varchar("reviewed_by"),
+  reviewNotes: text("review_notes"),
+  appliedVersion: varchar("applied_version"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Version snapshots for rollback support
+ */
+export const unifiedAgentVersions = pgTable("unified_agent_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => unifiedAgents.id, { onDelete: 'cascade' }),
+  version: varchar("version").notNull(),
+  hash: varchar("hash").notNull(),
+  promptSectionsSnapshot: jsonb("prompt_sections_snapshot").notNull().default(sql`'{}'::jsonb`),
+  configurationSnapshot: jsonb("configuration_snapshot").notNull().default(sql`'{}'::jsonb`),
+  changelog: text("changelog"),
+  deployedBy: varchar("deployed_by").notNull().default('system'),
+  rollbackAvailable: boolean("rollback_available").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Raw learning pipeline data points
+ */
+export const unifiedAgentLearningData = pgTable("unified_agent_learning_data", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => unifiedAgents.id, { onDelete: 'cascade' }),
+  sourceType: varchar("source_type").notNull(),
+  metrics: jsonb("metrics").notNull().default(sql`'{}'::jsonb`),
+  insights: jsonb("insights").notNull().default(sql`'[]'::jsonb`),
+  sampleSize: integer("sample_size").notNull().default(0),
+  timeRangeStart: timestamp("time_range_start"),
+  timeRangeEnd: timestamp("time_range_end"),
+  analysisId: varchar("analysis_id"),
+  findings: jsonb("findings").notNull().default(sql`'[]'::jsonb`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ==================== QA AGENT QUALITY TRACKING ====================
+
+/**
+ * Lead Quality Assessment Scores
+ * Tracks ICP fit, engagement potential, and qualification for each lead
+ */
+export const qaLeadQualityScores = pgTable("qa_lead_quality_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
+  icpScore: integer("icp_score").notNull(), // 0-100
+  engagementPotentialScore: integer("engagement_potential_score").notNull(), // 0-100
+  campaignAlignmentScore: integer("campaign_alignment_score").notNull(), // 0-100
+  overallQualityScore: integer("overall_quality_score").notNull(), // 0-100
+  qualification: text("qualification").notNull(), // QUALIFIED, MARGINAL, UNQUALIFIED
+  confidence: integer("confidence").notNull(), // 0-100
+  recommendedAction: text("recommended_action"), // Immediate Action, Nurture Sequence, Remove
+  nextBestChannel: text("next_best_channel"), // voice, email, content
+  qualitySummary: text("quality_summary"),
+  improvementOpportunities: jsonb("improvement_opportunities").default(sql`'[]'::jsonb`),
+  assessedAt: timestamp("assessed_at").notNull().defaultNow(),
+  assessedBy: varchar("assessed_by").notNull().default('qa_agent'),
+});
+
+/**
+ * Conversation Quality Analysis
+ * Evaluates quality of calls, emails, and conversations
+ */
+export const qaConversationAnalysis = pgTable("qa_conversation_analysis", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull(),
+  leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  conversationType: text("conversation_type").notNull(), // 'call', 'email', 'meeting'
+  discoveryQuality: integer("discovery_quality").notNull(), // 0-10
+  engagementQuality: integer("engagement_quality").notNull(), // 0-10
+  valueDeliveryScore: integer("value_delivery_score").notNull(), // 0-10
+  objectionHandlingScore: integer("objection_handling_score").notNull(), // 0-10
+  complianceScore: integer("compliance_score").notNull(), // 0-10
+  authenticityScore: integer("authenticity_score").notNull(), // 0-10
+  overallConversationScore: integer("overall_conversation_score").notNull(), // 0-10
+  prospectEnergyMaintained: boolean("prospect_energy_maintained"),
+  prospectSentiment: text("prospect_sentiment"), // positive, neutral, negative
+  keyInsights: jsonb("key_insights").default(sql`'[]'::jsonb`),
+  coachingRecommendations: text("coaching_recommendations"),
+  analysisNotes: text("analysis_notes"),
+  analyzedAt: timestamp("analyzed_at").notNull().defaultNow(),
+  analyzedBy: varchar("analyzed_by").notNull().default('qa_agent'),
+});
+
+/**
+ * Interaction Quality Metrics
+ * Tracks quality of individual interactions (calls, emails, touchpoints)
+ */
+export const qaInteractionQuality = pgTable("qa_interaction_quality", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  interactionId: varchar("interaction_id").notNull(),
+  leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  interactionType: text("interaction_type").notNull(), // 'call', 'email', 'meeting', 'network', 'content'
+  timinessScore: integer("timeliness_score").notNull(), // 0-10
+  relevanceScore: integer("relevance_score").notNull(), // 0-10
+  appropriatenessScore: integer("appropriateness_score").notNull(), // 0-10
+  engagementEffectivenessScore: integer("engagement_effectiveness_score").notNull(), // 0-10
+  overallInteractionScore: integer("overall_interaction_score").notNull(), // 0-10
+  appropriateChannel: boolean("appropriate_channel"),
+  prospectResponsive: text("prospect_responsive"), // yes, no, voicemail, brush_off, rejection
+  messageRelevance: boolean("message_relevance"),
+  nextActionTriggered: text("next_action_triggered"), // callback_booked, reply_sent, asset_opened
+  improprietiesFound: jsonb("improprieties_found").default(sql`'[]'::jsonb`),
+  feedbackForAgent: text("feedback_for_agent"),
+  assessedAt: timestamp("assessed_at").notNull().defaultNow(),
+  assessedBy: varchar("assessed_by").notNull().default('qa_agent'),
+});
+
+/**
+ * Touchpoint Sequence Quality
+ * Analyzes quality and optimization of multi-touch sequences
+ */
+export const qaTouchpointSequenceQuality = pgTable("qa_touchpoint_sequence_quality", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  totalTouches: integer("total_touches").notNull(),
+  touchpointSequence: jsonb("touchpoint_sequence").notNull(), // Array of { type, channel, timestamp, engagement }
+  voiceTouchCount: integer("voice_touch_count").notNull(),
+  emailTouchCount: integer("email_touch_count").notNull(),
+  contentTouchCount: integer("content_touch_count").notNull(),
+  otherTouchCount: integer("other_touch_count").notNull(),
+  frequencyPerWeek: decimal("frequency_per_week", { precision: 4, scale: 2 }),
+  coherenceScore: integer("coherence_score").notNull(), // 0-10
+  timingOptimizationScore: integer("timing_optimization_score").notNull(), // 0-10
+  channelMixScore: integer("channel_mix_score").notNull(), // 0-10
+  adaptiveQualityScore: integer("adaptive_quality_score").notNull(), // 0-10
+  overallSequenceScore: integer("overall_sequence_score").notNull(), // 0-10
+  redFlags: jsonb("red_flags").default(sql`'[]'::jsonb`),
+  optimizationOpportunities: jsonb("optimization_opportunities").default(sql`'[]'::jsonb`),
+  recommendedSequenceAdjustments: text("recommended_sequence_adjustments"),
+  assessedAt: timestamp("assessed_at").notNull().defaultNow(),
+  assessedBy: varchar("assessed_by").notNull().default('qa_agent'),
+});
+
+/**
+ * Compliance Quality Review
+ * Tracks compliance verification for conversations and interactions
+ */
+export const qaComplianceReview = pgTable("qa_compliance_review", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id"),
+  interactionId: varchar("interaction_id"),
+  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  callerIdVerified: boolean("caller_id_verified"),
+  purposeStatedClearlyly: boolean("purpose_stated_clearly"),
+  consentObtained: boolean("consent_obtained"),
+  dncStatusChecked: boolean("dnc_status_checked"),
+  piiMinimized: boolean("pii_minimized"),
+  recordingConsentObtained: boolean("recording_consent_obtained"),
+  noFalseRepresentations: boolean("no_false_representations"),
+  noDiscriminatoryLanguage: boolean("no_discriminatory_language"),
+  professionalToneMaintained: boolean("professional_tone_maintained"),
+  regulatoryZones: jsonb("regulatory_zones").default(sql`'{}'::jsonb`), // { gdpr, tcpa, pipeda, etc }
+  gdprCompliant: boolean("gdpr_compliant"),
+  tcpaCompliant: boolean("tcpa_compliant"),
+  pipedalCompliant: boolean("pipedal_compliant"),
+  overallComplianceScore: integer("overall_compliance_score").notNull(), // 0-100
+  flaggedIssues: jsonb("flagged_issues").default(sql`'[]'::jsonb`),
+  escalatedToCompliance: boolean("escalated_to_compliance"),
+  complianceTeamReview: text("compliance_team_review"),
+  remediationRequired: boolean("remediation_required"),
+  remediationNotes: text("remediation_notes"),
+  reviewedAt: timestamp("reviewed_at").notNull().defaultNow(),
+  reviewedBy: varchar("reviewed_by").notNull().default('qa_agent'),
+});
+
+/**
+ * QA Performance Summary
+ * Aggregate quality metrics and coaching recommendations
+ */
+export const qaPerformanceSummary = pgTable("qa_performance_summary", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").references(() => virtualAgents.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  leadsAssessed: integer("leads_assessed").notNull().default(0),
+  leadsQualified: integer("leads_qualified").notNull().default(0),
+  qualificationRate: decimal("qualification_rate", { precision: 5, scale: 2 }),
+  avgLeadQualityScore: decimal("avg_lead_quality_score", { precision: 5, scale: 2 }),
+  conversationsAnalyzed: integer("conversations_analyzed").notNull().default(0),
+  avgConversationScore: decimal("avg_conversation_score", { precision: 5, scale: 2 }),
+  interactionsReviewed: integer("interactions_reviewed").notNull().default(0),
+  avgInteractionScore: decimal("avg_interaction_score", { precision: 5, scale: 2 }),
+  sequencesOptimized: integer("sequences_optimized").notNull().default(0),
+  avgSequenceScore: decimal("avg_sequence_score", { precision: 5, scale: 2 }),
+  complianceViolations: integer("compliance_violations").notNull().default(0),
+  complianceScore: integer("compliance_score").notNull().default(100),
+  winRate: decimal("win_rate", { precision: 5, scale: 2 }),
+  lossRate: decimal("loss_rate", { precision: 5, scale: 2 }),
+  topCoachingAreas: jsonb("top_coaching_areas").default(sql`'[]'::jsonb`),
+  performanceTrend: text("performance_trend"), // improving, stable, declining
+  keyFindingsNarrative: text("key_findings_narrative"),
+  recommendationsForImprovement: jsonb("recommendations_for_improvement").default(sql`'[]'::jsonb`),
+  generatedAt: timestamp("generated_at").notNull().defaultNow(),
+  generatedBy: varchar("generated_by").notNull().default('qa_agent'),
+});
+
+// Type exports
+export type UnifiedAgent = typeof unifiedAgents.$inferSelect;
+export type UnifiedAgentPromptSection = typeof unifiedAgentPromptSections.$inferSelect;
+export type UnifiedAgentPromptChange = typeof unifiedAgentPromptChanges.$inferSelect;
+export type UnifiedAgentCapability = typeof unifiedAgentCapabilities.$inferSelect;
+export type UnifiedAgentCapabilityMapping = typeof unifiedAgentCapabilityMappings.$inferSelect;
+export type UnifiedAgentRecommendation = typeof unifiedAgentRecommendations.$inferSelect;
+export type UnifiedAgentVersion = typeof unifiedAgentVersions.$inferSelect;
+export type UnifiedAgentLearningDataRow = typeof unifiedAgentLearningData.$inferSelect;
+export type QALeadQualityScore = typeof qaLeadQualityScores.$inferSelect;
+export type QAConversationAnalysis = typeof qaConversationAnalysis.$inferSelect;
+export type QAInteractionQuality = typeof qaInteractionQuality.$inferSelect;
+export type QATouchpointSequenceQuality = typeof qaTouchpointSequenceQuality.$inferSelect;
+export type QAComplianceReview = typeof qaComplianceReview.$inferSelect;
+export type QAPerformanceSummary = typeof qaPerformanceSummary.$inferSelect;
+
+// ==================== DATA MANAGEMENT DASHBOARD ====================
+
+// Data Request Status Enum
+export const dataRequestStatusEnum = pgEnum('data_request_status', [
+  'requested',
+  'in_progress',
+  'delivered',
+  'validated',
+  'rejected',
+  'cancelled'
+]);
+
+// Data Source Type Enum
+export const dataSourceTypeEnum = pgEnum('data_source_type', [
+  'vendor',
+  'internal_enrichment',
+  'scraping',
+  'partner',
+  'client_provided',
+  'manual_entry',
+  'api_integration',
+  'public_data'
+]);
+
+// Data Upload Status Enum
+export const dataUploadStatusEnum = pgEnum('data_upload_status', [
+  'pending',
+  'validating',
+  'processing',
+  'intelligence_running',
+  'completed',
+  'failed',
+  'partial'
+]);
+
+// Data Quality Issue Severity Enum
+export const dataQualitySeverityEnum = pgEnum('data_quality_severity', [
+  'critical',
+  'high',
+  'medium',
+  'low',
+  'info'
+]);
+
+// Data Template Type Enum
+export const dataTemplateTypeEnum = pgEnum('data_template_type', [
+  'contacts',
+  'accounts',
+  'leads',
+  'mixed',
+  'event_registrations',
+  'suppression_list'
+]);
+
+// Data Requests / Procurement Orders
+export const dataRequests = pgTable("data_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description"),
+  requestType: text("request_type").notNull(), // project, campaign, client_intake, internal
+  status: dataRequestStatusEnum("status").notNull().default('requested'),
+  priority: text("priority").default('medium'), // low, medium, high, urgent
+  sourceType: dataSourceTypeEnum("source_type"),
+  sourceDetails: text("source_details"),
+  
+  // Linkage
+  projectId: varchar("project_id"),
+  campaignId: varchar("campaign_id"),
+  clientName: text("client_name"),
+  
+  // Assignment
+  assignedTo: varchar("assigned_to"),
+  requestedBy: varchar("requested_by").notNull(),
+  
+  // Requirements
+  targetRecordCount: integer("target_record_count"),
+  deliveredRecordCount: integer("delivered_record_count"),
+  dataSpecifications: jsonb("data_specifications"), // {industries, titles, geos, company sizes, etc.}
+  qualityCriteria: jsonb("quality_criteria"),
+  
+  // Tracking
+  requestedAt: timestamp("requested_at").notNull().defaultNow(),
+  startedAt: timestamp("started_at"),
+  deliveredAt: timestamp("delivered_at"),
+  validatedAt: timestamp("validated_at"),
+  dueDate: timestamp("due_date"),
+  
+  // Audit
+  notes: text("notes"),
+  rejectionReason: text("rejection_reason"),
+  metadata: jsonb("metadata"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("data_requests_status_idx").on(table.status),
+  assignedToIdx: index("data_requests_assigned_idx").on(table.assignedTo),
+  projectIdx: index("data_requests_project_idx").on(table.projectId),
+  campaignIdx: index("data_requests_campaign_idx").on(table.campaignId),
+}));
+
+export const insertDataRequestSchema = createInsertSchema(dataRequests);
+export type DataRequest = typeof dataRequests.$inferSelect;
+export type InsertDataRequest = typeof dataRequests.$inferInsert;
+
+// Data Uploads - tracks all file uploads and their processing
+export const dataUploads = pgTable("data_uploads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  mimeType: text("mime_type"),
+  storageKey: text("storage_key"), // S3/GCS key
+  
+  status: dataUploadStatusEnum("status").notNull().default('pending'),
+  uploadedBy: varchar("uploaded_by").notNull(),
+  
+  // Linkage
+  dataRequestId: varchar("data_request_id"),
+  projectId: varchar("project_id"),
+  campaignId: varchar("campaign_id"),
+  templateId: varchar("template_id"),
+  
+  // Processing results
+  totalRows: integer("total_rows"),
+  validRows: integer("valid_rows"),
+  invalidRows: integer("invalid_rows"),
+  duplicateRows: integer("duplicate_rows"),
+  
+  // Records created
+  contactsCreated: integer("contacts_created").default(0),
+  accountsCreated: integer("accounts_created").default(0),
+  contactsUpdated: integer("contacts_updated").default(0),
+  accountsUpdated: integer("accounts_updated").default(0),
+  
+  // Validation & Quality
+  validationResults: jsonb("validation_results"),
+  qualityScore: integer("quality_score"), // 0-100
+  completenessScore: integer("completeness_score"), // 0-100
+  complianceScore: integer("compliance_score"), // 0-100
+  
+  // Intelligence results
+  intelligenceResults: jsonb("intelligence_results"),
+  icpAlignmentScore: integer("icp_alignment_score"), // 0-100
+  
+  // Column mapping
+  columnMapping: jsonb("column_mapping"),
+  detectedSchema: jsonb("detected_schema"),
+  
+  // Errors
+  errors: jsonb("errors"),
+  warnings: jsonb("warnings"),
+  
+  processingStartedAt: timestamp("processing_started_at"),
+  processingCompletedAt: timestamp("processing_completed_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("data_uploads_status_idx").on(table.status),
+  uploaderIdx: index("data_uploads_uploader_idx").on(table.uploadedBy),
+  requestIdx: index("data_uploads_request_idx").on(table.dataRequestId),
+}));
+
+export const insertDataUploadSchema = createInsertSchema(dataUploads);
+export type DataUpload = typeof dataUploads.$inferSelect;
+export type InsertDataUpload = typeof dataUploads.$inferInsert;
+
+// Data Quality Issues - detected problems in data
+export const dataQualityIssues = pgTable("data_quality_issues", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Source reference
+  uploadId: varchar("upload_id"),
+  recordType: text("record_type").notNull(), // contact, account
+  recordId: varchar("record_id"),
+  fieldName: text("field_name"),
+  
+  // Issue details
+  issueType: text("issue_type").notNull(), // missing_industry, missing_title, duplicate, format_error, etc.
+  severity: dataQualitySeverityEnum("severity").notNull().default('medium'),
+  description: text("description").notNull(),
+  currentValue: text("current_value"),
+  
+  // AI Recommendation
+  aiRecommendation: text("ai_recommendation"),
+  aiConfidence: real("ai_confidence"), // 0.0-1.0
+  suggestedValue: text("suggested_value"),
+  
+  // Resolution
+  isResolved: boolean("is_resolved").notNull().default(false),
+  resolvedBy: varchar("resolved_by"),
+  resolvedAt: timestamp("resolved_at"),
+  resolution: text("resolution"), // accepted_ai, manual_fix, ignored, suppressed
+  appliedValue: text("applied_value"),
+  
+  // Batch tracking
+  scanBatchId: varchar("scan_batch_id"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  uploadIdx: index("dq_issues_upload_idx").on(table.uploadId),
+  typeIdx: index("dq_issues_type_idx").on(table.issueType),
+  severityIdx: index("dq_issues_severity_idx").on(table.severity),
+  resolvedIdx: index("dq_issues_resolved_idx").on(table.isResolved),
+  recordIdx: index("dq_issues_record_idx").on(table.recordType, table.recordId),
+}));
+
+export const insertDataQualityIssueSchema = createInsertSchema(dataQualityIssues);
+export type DataQualityIssue = typeof dataQualityIssues.$inferSelect;
+export type InsertDataQualityIssue = typeof dataQualityIssues.$inferInsert;
+
+// Data Templates - standardized data schemas
+export const dataTemplates = pgTable("data_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  templateType: dataTemplateTypeEnum("template_type").notNull(),
+  version: integer("version").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false),
+  
+  // Schema definition
+  mandatoryFields: jsonb("mandatory_fields").notNull(), // [{name, type, description, validation}]
+  optionalFields: jsonb("optional_fields"), // [{name, type, description, validation}]
+  fieldValidations: jsonb("field_validations"), // {fieldName: {regex, enum, range, etc.}}
+  
+  // Naming conventions
+  namingConventions: jsonb("naming_conventions"), // {industry_taxonomy, title_hierarchy, etc.}
+  
+  // Industry taxonomy
+  industryTaxonomy: jsonb("industry_taxonomy"), // standardized industry names/codes
+  titleHierarchy: jsonb("title_hierarchy"), // seniority => title mapping
+  
+  createdBy: varchar("created_by"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertDataTemplateSchema = createInsertSchema(dataTemplates);
+export type DataTemplate = typeof dataTemplates.$inferSelect;
+export type InsertDataTemplate = typeof dataTemplates.$inferInsert;
+
+// Data Quality Scans - batch quality analysis results
+export const dataQualityScans = pgTable("data_quality_scans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  scanType: text("scan_type").notNull(), // full, incremental, upload, manual
+  status: text("status").notNull().default('running'), // running, completed, failed
+  
+  // Scope
+  uploadId: varchar("upload_id"),
+  projectId: varchar("project_id"),
+  campaignId: varchar("campaign_id"),
+  
+  // Results summary
+  totalRecordsScanned: integer("total_records_scanned").default(0),
+  issuesFound: integer("issues_found").default(0),
+  criticalIssues: integer("critical_issues").default(0),
+  highIssues: integer("high_issues").default(0),
+  mediumIssues: integer("medium_issues").default(0),
+  lowIssues: integer("low_issues").default(0),
+  
+  // Scores
+  overallHealthScore: integer("overall_health_score"), // 0-100
+  completenessScore: integer("completeness_score"), // 0-100
+  accuracyScore: integer("accuracy_score"), // 0-100
+  consistencyScore: integer("consistency_score"), // 0-100
+  complianceScore: integer("compliance_score"), // 0-100
+  
+  // Breakdown
+  issueBreakdown: jsonb("issue_breakdown"), // {type: count}
+  fieldCoverage: jsonb("field_coverage"), // {fieldName: percentage}
+  
+  // AI recommendations summary
+  aiRecommendations: jsonb("ai_recommendations"),
+  
+  triggeredBy: varchar("triggered_by"),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("dq_scans_status_idx").on(table.status),
+  uploadIdx: index("dq_scans_upload_idx").on(table.uploadId),
+}));
+
+export const insertDataQualityScanSchema = createInsertSchema(dataQualityScans);
+export type DataQualityScan = typeof dataQualityScans.$inferSelect;
+export type InsertDataQualityScan = typeof dataQualityScans.$inferInsert;

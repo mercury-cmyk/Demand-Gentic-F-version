@@ -59,6 +59,7 @@ import {
 } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { apiRequest } from '@/lib/queryClient';
 
 // Types
 interface AgentPrompt {
@@ -118,15 +119,11 @@ export default function AgentPromptsPage() {
   const { data: prompts = [], isLoading, refetch } = useQuery<AgentPrompt[]>({
     queryKey: ['agent-prompts', roleFilter, typeFilter],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const params = new URLSearchParams();
       if (roleFilter !== 'all') params.append('role', roleFilter);
       if (typeFilter !== 'all') params.append('type', typeFilter);
 
-      const response = await fetch(`/api/agent-prompts?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Failed to fetch prompts');
+      const response = await apiRequest('GET', `/api/agent-prompts?${params.toString()}`);
       return response.json();
     },
   });
@@ -135,11 +132,7 @@ export default function AgentPromptsPage() {
   const { data: tools = [] } = useQuery<Tool[]>({
     queryKey: ['agent-tools'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/agent-prompts/tools/available', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Failed to fetch tools');
+      const response = await apiRequest('GET', '/api/agent-prompts/tools/available');
       return response.json();
     },
   });
@@ -147,16 +140,7 @@ export default function AgentPromptsPage() {
   // Create prompt mutation
   const createMutation = useMutation({
     mutationFn: async (data: Partial<AgentPrompt>) => {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/agent-prompts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) throw new Error('Failed to create prompt');
+      const response = await apiRequest('POST', '/api/agent-prompts', data);
       return response.json();
     },
     onSuccess: () => {
@@ -172,16 +156,7 @@ export default function AgentPromptsPage() {
   // Update prompt mutation
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<AgentPrompt> }) => {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/agent-prompts/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) throw new Error('Failed to update prompt');
+      const response = await apiRequest('PUT', `/api/agent-prompts/${id}`, data);
       return response.json();
     },
     onSuccess: () => {
@@ -197,12 +172,7 @@ export default function AgentPromptsPage() {
   // Delete prompt mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/agent-prompts/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Failed to delete prompt');
+      const response = await apiRequest('DELETE', `/api/agent-prompts/${id}`);
       return response.json();
     },
     onSuccess: () => {
@@ -217,15 +187,7 @@ export default function AgentPromptsPage() {
   // Seed defaults mutation
   const seedDefaultsMutation = useMutation({
     mutationFn: async () => {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/agent-prompts/seed-defaults', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to seed defaults');
-      }
+      const response = await apiRequest('POST', '/api/agent-prompts/seed-defaults');
       return response.json();
     },
     onSuccess: (data) => {

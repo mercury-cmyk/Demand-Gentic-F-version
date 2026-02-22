@@ -115,7 +115,7 @@ export function OrganizationIntelligenceSetup({
 
   // Fetch available OI sources
   const { data: sources, isLoading: sourcesLoading } = useQuery<AvailableSource>({
-    queryKey: ['/api/org-intelligence-injection/available-sources'],
+    queryKey: ['/api/unified-agents/org-intelligence/available-sources'],
   });
 
   // Research mutation
@@ -129,7 +129,7 @@ export function OrganizationIntelligenceSetup({
     }) => {
       const response = await apiRequest(
         'POST',
-        '/api/org-intelligence-injection/research',
+        '/api/unified-agents/org-intelligence/research',
         input
       );
       return response.json();
@@ -147,7 +147,7 @@ export function OrganizationIntelligenceSetup({
       if (onResearchComplete) {
         onResearchComplete(data.snapshot.id);
       }
-      queryClient.invalidateQueries({ queryKey: ['/api/org-intelligence-injection/available-sources'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/unified-agents/org-intelligence/available-sources'] });
       toast({
         title: 'Research Complete',
         description: data.researchSummary,

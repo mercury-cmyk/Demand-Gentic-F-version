@@ -503,6 +503,22 @@ export interface CallCustomParams {
     email?: string;
   };
   provider?: string;
+  agent_settings?: Record<string, any>;
+  organization_name?: string;
+  from_number?: string;
+  caller_number_id?: string;
+  caller_number_decision_id?: string;
+  // Campaign context
+  campaign_objective?: string;
+  success_criteria?: string;
+  target_audience_description?: string;
+  product_service_info?: string;
+  talking_points?: string[];
+  // Contact context
+  contact_name?: string;
+  contact_first_name?: string;
+  contact_job_title?: string;
+  account_name?: string;
   // OpenAI Realtime configuration (from Preview Studio)
   openai_config?: {
     turn_detection?: 'server_vad' | 'semantic' | 'disabled';

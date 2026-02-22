@@ -45,6 +45,7 @@ import {
   Settings,
   X,
   Sparkles,
+  AlertCircle,
 } from "lucide-react";
 import type { ContentPromotionPage } from "@shared/schema";
 
@@ -455,10 +456,13 @@ export default function PageBuilderDialog({
         description: "AI has populated all page sections. Review each tab and customize as needed.",
       });
     },
-    onError: (error: Error) => {
+    onError: (error: any) => {
+      const isOIError = error?.message?.includes('Organizational Intelligence') || error?.message?.includes('Organization is required');
       toast({
-        title: "Generation failed",
-        description: error.message || "Failed to generate with AI. Please try again.",
+        title: isOIError ? "Organization Intelligence Required" : "Generation failed",
+        description: isOIError
+          ? "Please complete the Organization Intelligence profile before generating content. All landing pages must be derived from Organizational Intelligence."
+          : (error.message || "Failed to generate with AI. Please try again."),
         variant: "destructive",
       });
     },
@@ -1631,15 +1635,27 @@ export default function PageBuilderDialog({
             </TabsContent>
           </div>
 
+          {/* OI requirement banner */}
+          {!organizationId && (campaignId || projectId) && !isEditing && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-700 mx-6 mb-2">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <div>
+                <p className="font-medium">Organization Intelligence Required for AI Generation</p>
+                <p className="mt-0.5">Select an organization to enable AI-powered page generation. Manual page building is still available.</p>
+              </div>
+            </div>
+          )}
+
           {/* Footer */}
           <div className="border-t px-6 py-4 flex items-center justify-between gap-3 shrink-0">
             <div>
               {(campaignId || projectId) && !isEditing && (
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => generateWithAIMutation.mutate()}
-                  disabled={generateWithAIMutation.isPending || saveMutation.isPending}
+                  disabled={generateWithAIMutation.isPending || saveMutation.isPending || !organizationId}
                   className="gap-1.5"
+                  title={!organizationId ? "Organization Intelligence required for AI generation" : undefined}
                 >
                   {generateWithAIMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                   {!generateWithAIMutation.isPending && <Sparkles className="h-4 w-4" />}

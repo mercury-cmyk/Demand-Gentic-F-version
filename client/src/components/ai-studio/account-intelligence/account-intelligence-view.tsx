@@ -62,6 +62,45 @@ interface AccountProfile {
   };
 }
 
+const defaultField = (overrides?: Partial<IntelligenceField>): IntelligenceField => ({
+  value: overrides?.value ?? "",
+  source: overrides?.source,
+  confidence: overrides?.confidence ?? 0,
+  status: overrides?.status ?? "suggested",
+  locked: overrides?.locked ?? false,
+});
+
+const normalizeProfile = (raw: Partial<AccountProfile> | null | undefined): AccountProfile => ({
+  identity: {
+    legalName: defaultField(raw?.identity?.legalName),
+    domain: defaultField(raw?.identity?.domain),
+    description: defaultField(raw?.identity?.description),
+    industry: defaultField(raw?.identity?.industry),
+    employees: defaultField(raw?.identity?.employees),
+    regions: defaultField(raw?.identity?.regions),
+  },
+  offerings: {
+    coreProducts: defaultField(raw?.offerings?.coreProducts),
+    useCases: defaultField(raw?.offerings?.useCases),
+    problemsSolved: defaultField(raw?.offerings?.problemsSolved),
+    differentiators: defaultField(raw?.offerings?.differentiators),
+  },
+  icp: {
+    industries: defaultField(raw?.icp?.industries),
+    personas: defaultField(raw?.icp?.personas),
+    objections: defaultField(raw?.icp?.objections),
+  },
+  positioning: {
+    oneLiner: defaultField(raw?.positioning?.oneLiner),
+    competitors: defaultField(raw?.positioning?.competitors),
+    whyUs: defaultField(raw?.positioning?.whyUs),
+  },
+  outreach: {
+    emailAngles: defaultField(raw?.outreach?.emailAngles),
+    callOpeners: defaultField(raw?.outreach?.callOpeners),
+  },
+});
+
 // --- Mock Data Generator (REMOVED - now using real API) ---
 
 // --- Components ---
@@ -228,7 +267,7 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
       
       // Small delay to show completion
       setTimeout(() => {
-        setProfile(data.profile);
+        setProfile(normalizeProfile(data.profile));
         setAnalysisMetadata({
           models: data.models,
           reasoning: data.reasoning,
@@ -298,6 +337,7 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
 
       // Invalidate organizations query so the selector refreshes
       queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/organizations/dropdown"] });
 
       toast({
         title: "Profile Saved",
@@ -316,17 +356,22 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
 
   // Load existing profile when organizationId changes
   useEffect(() => {
+    // Skip loading if no organizationId provided
+    if (!organizationId) {
+      setProfile(null);
+      setDomain("");
+      setState("idle");
+      return;
+    }
+
     const loadExistingProfile = async () => {
       try {
-        const url = organizationId
-          ? `/api/org-intelligence/profile?organizationId=${organizationId}`
-          : "/api/org-intelligence/profile";
-        const response = await apiRequest("GET", url);
+        const response = await apiRequest("GET", `/api/org-intelligence/profile?organizationId=${organizationId}`);
         const data = await response.json();
 
         if (data.profile) {
           setDomain(data.profile.domain || "");
-          setProfile(data.profile);
+          setProfile(normalizeProfile(data.profile));
           setState("review");
         } else {
           // Reset to idle if no profile for this org

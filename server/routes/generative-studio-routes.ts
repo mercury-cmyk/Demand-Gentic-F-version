@@ -360,9 +360,27 @@ router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Respon
 // ============================================================================
 
 /**
+ * Validates that organizationId is present in the request body.
+ * Organizational Intelligence is mandatory context for all generation.
+ */
+function requireOrganizationId(req: Request, res: Response): boolean {
+  const orgId = req.body?.organizationId;
+  if (!orgId || typeof orgId !== 'string' || !orgId.trim()) {
+    res.status(400).json({
+      error: 'Organization is required for content generation.',
+      code: 'ORG_REQUIRED',
+      message: 'All Creative Studio outputs must be derived from Organizational Intelligence. Please select an organization before generating content.',
+    });
+    return false;
+  }
+  return true;
+}
+
+/**
  * POST /generate/landing-page
  */
 router.post("/generate/landing-page", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -381,6 +399,7 @@ router.post("/generate/landing-page", requireDualAuth, async (req: Request, res:
  * POST /generate/email-template
  */
 router.post("/generate/email-template", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -399,6 +418,7 @@ router.post("/generate/email-template", requireDualAuth, async (req: Request, re
  * POST /generate/blog-post
  */
 router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -417,6 +437,7 @@ router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Re
  * POST /generate/ebook
  */
 router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -435,6 +456,7 @@ router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Respon
  * POST /generate/solution-brief
  */
 router.post("/generate/solution-brief", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 

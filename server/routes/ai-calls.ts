@@ -1301,25 +1301,57 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     const callId = `gemini-test-${Date.now()}`;
     
     // Include contact context for proper placeholder substitution
+    // Build opening message from settings or default
+    const firstMessage = settingsOverride?.scripts?.opening
+      || `Hello, may I speak with ${contactFirstName || contactName || 'there'} please?`;
+
+    // Keep customParams lean — system_prompt and agent_settings are stored in Redis
+    // to prevent TeXML URL length from exceeding limits that break Telnyx fetching.
     const customParams = {
       call_id: callId,
       campaign_id: campaignId || 'test-campaign',
-      called_number: normalizedPhone, // Required for database tracking
+      called_number: normalizedPhone,
       from_number: fromNumber,
       caller_number_id: callerNumberId,
       caller_number_decision_id: callerNumberDecisionId,
       virtual_agent_id: virtualAgentId || 'test-agent',
-      system_prompt: systemPrompt,
-      voice, // Dynamic voice selection for automatic synchronization
-      agent_settings: settingsOverride,
+      voice,
       provider: 'gemini_live',
-      // Contact context for DemandGentic.ai By Pivotal B2B identity
       contact_name: contactName,
       contact_first_name: contactFirstName,
       contact_job_title: contactJobTitle,
       account_name: accountName,
       organization_name: campaignOrgName,
+      is_test_call: true,
+      test_call_id: callId,
+      first_message: firstMessage,
     };
+
+    // Store large fields (system_prompt, agent_settings) in Redis for voice-dialer retrieval
+    try {
+      const { callSessionStore } = await import('../services/call-session-store');
+      await callSessionStore.setSession(callId, {
+        call_id: callId,
+        campaign_id: campaignId || 'test-campaign',
+        virtual_agent_id: virtualAgentId || 'test-agent',
+        is_test_call: true,
+        test_call_id: callId,
+        first_message: firstMessage,
+        voice,
+        agent_name: settingsOverride?.persona?.agentName || settingsOverride?.persona?.name || '',
+        organization_name: campaignOrgName,
+        system_prompt: systemPrompt,
+        agent_settings: settingsOverride,
+        provider: 'google',
+        contact_name: contactName,
+        contact_first_name: contactFirstName,
+        contact_job_title: contactJobTitle,
+        account_name: accountName,
+      });
+      console.log(`[AI Calls] Stored session ${callId} in Redis`);
+    } catch (storeErr) {
+      console.warn(`[AI Calls] Failed to store session in Redis:`, storeErr);
+    }
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
     // Resolve webhook host robustly to avoid localhost in production
@@ -1334,7 +1366,8 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
 
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
-    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
+    // Pass client_state in URL so TeXML endpoint can extract call context and store in pending-call-state
+    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
 
     // Prefer path-based TeXML endpoint to avoid app defaults; include StatusCallback explicitly
     const response = await fetch(`https://api.telnyx.com/v2/texml/calls/${connectionId}`, {

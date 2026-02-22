@@ -30,7 +30,7 @@ import {
   Pencil,
   Copy,
   Globe,
-  Archive,
+  Trash2,
   ExternalLink,
   BarChart3,
   Users,
@@ -190,7 +190,7 @@ export default function ContentPromotionManager() {
     },
   });
 
-  // Archive mutation
+  // Delete mutation
   const archiveMutation = useMutation({
     mutationFn: async (pageId: string) => {
       return await apiRequest("DELETE", `/api/content-promotion/pages/${pageId}`);
@@ -198,8 +198,8 @@ export default function ContentPromotionManager() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/content-promotion/pages"] });
       toast({
-        title: "Page archived",
-        description: "The page has been archived successfully.",
+        title: "Content deleted",
+        description: "The content has been deleted successfully.",
       });
       setArchiveDialogOpen(false);
       setPageToArchive(null);
@@ -207,7 +207,7 @@ export default function ContentPromotionManager() {
     onError: () => {
       toast({
         title: "Error",
-        description: "Failed to archive the page.",
+        description: "Failed to delete the content.",
         variant: "destructive",
       });
     },
@@ -302,7 +302,10 @@ export default function ContentPromotionManager() {
         title: "Managed in Content Studio",
         description: "This landing page was created in Content Studio. Open Content Studio to edit it.",
       });
-      window.open("/generative-studio", "_blank");
+      const studioPath = page.sourceProjectId
+        ? `/generative-studio?projectId=${encodeURIComponent(page.sourceProjectId)}`
+        : "/generative-studio";
+      window.open(studioPath, "_blank");
       return;
     }
     setEditingPage(page);
@@ -310,6 +313,13 @@ export default function ContentPromotionManager() {
   };
 
   const handlePreview = (page: ContentPromotionPage) => {
+    if (page.sourceType === "content_studio" && page.status !== "published") {
+      toast({
+        title: "Preview unavailable",
+        description: "This Content Studio page is not published yet. Open Content Studio to manage it.",
+      });
+      return;
+    }
     const path = page.previewPath || `/promo/${page.slug}`;
     window.open(path, "_blank");
   };
@@ -474,6 +484,8 @@ export default function ContentPromotionManager() {
             const themeName = THEME_LABELS[page.templateTheme] || page.templateTheme;
             const conversionRate = parseFloat(page.conversionRate || "0");
             const isStudioPage = page.sourceType === "content_studio";
+            const canPreview = !isStudioPage || page.status === "published";
+            const previewLabel = page.previewPath || (isStudioPage ? "Not published yet" : `/promo/${page.slug}`);
 
             return (
               <Card key={page.id} className="flex flex-col">
@@ -507,7 +519,7 @@ export default function ContentPromotionManager() {
                   {/* Slug */}
                   <div className="flex items-center gap-1 text-sm text-muted-foreground">
                     <ExternalLink className="h-3 w-3 flex-shrink-0" />
-                    <span className="font-mono text-xs truncate">{page.previewPath || `/promo/${page.slug}`}</span>
+                    <span className="font-mono text-xs truncate">{previewLabel}</span>
                   </div>
 
                   {/* Stats Row */}
@@ -537,19 +549,36 @@ export default function ContentPromotionManager() {
                       variant="outline"
                       size="sm"
                       onClick={() => handlePreview(page)}
+                      disabled={!canPreview}
                     >
                       <Eye className="h-3.5 w-3.5 mr-1" />
                       Preview
                     </Button>
                     {isStudioPage ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => window.open('/generative-studio', '_blank')}
-                      >
-                        <Pencil className="h-3.5 w-3.5 mr-1" />
-                        Manage in Studio
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const studioPath = page.sourceProjectId
+                              ? `/generative-studio?projectId=${encodeURIComponent(page.sourceProjectId)}`
+                              : "/generative-studio";
+                            window.open(studioPath, '_blank');
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5 mr-1" />
+                          Manage in Studio
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleArchive(page)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />
+                          Delete
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Button
@@ -584,8 +613,8 @@ export default function ContentPromotionManager() {
                           onClick={() => handleArchive(page)}
                           className="text-destructive hover:text-destructive"
                         >
-                          <Archive className="h-3.5 w-3.5 mr-1" />
-                          Archive
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />
+                          Delete
                         </Button>
                       </>
                     )}
@@ -609,14 +638,14 @@ export default function ContentPromotionManager() {
         clientId={clientId}
       />
 
-      {/* Archive Confirmation Dialog */}
+      {/* Delete Confirmation Dialog */}
       <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Archive this page?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this content?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will archive "{pageToArchive?.title}" and make it inaccessible to visitors.
-              You can restore it later if needed.
+              This will permanently delete "{pageToArchive?.title}".
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -625,7 +654,7 @@ export default function ContentPromotionManager() {
               onClick={() => pageToArchive && archiveMutation.mutate(pageToArchive.id)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Archive
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

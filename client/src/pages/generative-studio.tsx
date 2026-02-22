@@ -80,6 +80,10 @@ export interface OrgIntelligenceProfile {
   branding?: {
     tone?: { value?: string };
     keywords?: { value?: string };
+    forbiddenTerms?: { value?: string };
+    communicationStyle?: { value?: string };
+    primaryColor?: { value?: string };
+    secondaryColor?: { value?: string };
   };
   events?: {
     upcoming?: string | { value?: string };
@@ -347,6 +351,8 @@ export default function GenerativeStudioPage() {
   );
 
   const hasScope = !!selectedOrgId;
+  // OI is mandatory — generation is blocked without it
+  const oiMissing = !hasOrgIntel && !!selectedOrgId && !orgIntelLoading;
 
   const currentModule = MODULES.find((m) => m.id === activeModule) || MODULES[0];
 
@@ -476,11 +482,17 @@ export default function GenerativeStudioPage() {
         </div>
       </div>
 
-      {/* No Org Warning */}
+      {/* Mandatory OI Gate */}
       {!hasScope && (
-        <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 px-4 py-1.5">
+        <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border-b border-red-200 px-4 py-2">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          Select an organization above to unlock Creative Studio content creation.
+          <span className="font-medium">Organization required.</span> Select an organization above to unlock Creative Studio. All outputs must be derived from Organizational Intelligence.
+        </div>
+      )}
+      {oiMissing && (
+        <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 px-4 py-2">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-medium">Organizational Intelligence profile incomplete.</span> Go to AI Studio &gt; Organization Intelligence to analyze and complete the profile before generating content.
         </div>
       )}
 

@@ -68,11 +68,30 @@ export async function getOrganizations(userId?: string): Promise<CampaignOrganiz
  * Get organization by ID
  */
 export async function getOrganizationById(id: string): Promise<CampaignOrganization | null> {
-  const [org] = await db
+  // Try to find by UUID first
+  let [org] = await db
     .select()
     .from(campaignOrganizations)
     .where(eq(campaignOrganizations.id, id))
     .limit(1);
+
+  // If not found by ID, try by domain
+  if (!org) {
+    [org] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.domain, id))
+      .limit(1);
+  }
+
+  // If still not found, try by name
+  if (!org) {
+    [org] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.name, id))
+      .limit(1);
+  }
 
   return org || null;
 }

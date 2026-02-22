@@ -80,7 +80,7 @@ export function CampaignOrgIntelligenceBinding({
     binding: CampaignOIBinding | null;
     snapshotInfo: SnapshotInfo | null;
   }>({
-    queryKey: [`/api/org-intelligence-injection/campaigns/${campaignId}/binding`],
+    queryKey: [`/api/unified-agents/org-intelligence/campaigns/${campaignId}/binding`],
     enabled: !!campaignId,
   });
 
@@ -106,7 +106,7 @@ export function CampaignOrgIntelligenceBinding({
       description: string;
     }>;
   }>({
-    queryKey: ['/api/org-intelligence-injection/available-sources'],
+    queryKey: ['/api/unified-agents/org-intelligence/available-sources'],
   });
 
   // Bind mutation
@@ -119,14 +119,14 @@ export function CampaignOrgIntelligenceBinding({
     }) => {
       const response = await apiRequest(
         'POST',
-        `/api/org-intelligence-injection/campaigns/${campaignId}/bind`,
+        `/api/unified-agents/org-intelligence/campaigns/${campaignId}/bind`,
         params
       );
       return response.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ 
-        queryKey: [`/api/org-intelligence-injection/campaigns/${campaignId}/binding`] 
+        queryKey: [`/api/unified-agents/org-intelligence/campaigns/${campaignId}/binding`] 
       });
       if (onBindingChange) {
         onBindingChange(data.binding);

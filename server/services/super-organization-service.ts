@@ -28,7 +28,7 @@ import {
   type OrganizationMemberRole,
   type CredentialCategory,
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql, ilike, or, count, gte } from "drizzle-orm";
 import { BRAND, TAGLINE, STATS } from "@shared/brand-messaging";
 
 // ==================== SUPER ORGANIZATION INITIALIZATION ====================
@@ -163,6 +163,7 @@ export async function updateClientOrganization(
     industry?: string;
     logoUrl?: string;
     isActive?: boolean;
+    isCampaignOrg?: boolean;
     identity?: any;
     offerings?: any;
     icp?: any;
@@ -593,6 +594,7 @@ export async function createClientOrganization(
     description?: string;
     industry?: string;
     logoUrl?: string;
+    isCampaignOrg?: boolean;
   },
   createdBy?: string
 ): Promise<CampaignOrganization> {
@@ -601,14 +603,16 @@ export async function createClientOrganization(
     throw new Error('Super organization not initialized');
   }
 
+  const { isCampaignOrg, ...rest } = data;
   const [org] = await db
     .insert(campaignOrganizations)
     .values({
-      ...data,
+      ...rest,
       organizationType: 'client',
       parentOrganizationId: superOrg.id,
       createdBy,
       isDefault: false,
+      isCampaignOrg: isCampaignOrg ?? false,
     })
     .returning();
 
@@ -629,6 +633,131 @@ export async function getClientOrganizations(): Promise<CampaignOrganization[]> 
       )
     )
     .orderBy(campaignOrganizations.name);
+}
+
+// ==================== ALL ORGANIZATIONS ====================
+
+/**
+ * Get all organizations with optional filtering
+ */
+export async function getAllOrganizations(filters?: {
+  type?: 'super' | 'client' | 'campaign';
+  isActive?: boolean;
+  search?: string;
+}): Promise<CampaignOrganization[]> {
+  const conditions = [];
+
+  if (filters?.type) {
+    conditions.push(eq(campaignOrganizations.organizationType, filters.type));
+  }
+
+  if (filters?.isActive !== undefined) {
+    conditions.push(eq(campaignOrganizations.isActive, filters.isActive));
+  }
+
+  if (filters?.search) {
+    conditions.push(
+      or(
+        ilike(campaignOrganizations.name, `%${filters.search}%`),
+        ilike(campaignOrganizations.domain, `%${filters.search}%`)
+      )
+    );
+  }
+
+  const query = db
+    .select()
+    .from(campaignOrganizations);
+
+  if (conditions.length > 0) {
+    return query
+      .where(and(...conditions))
+      .orderBy(
+        sql`CASE WHEN ${campaignOrganizations.organizationType} = 'super' THEN 0 WHEN ${campaignOrganizations.organizationType} = 'client' THEN 1 ELSE 2 END`,
+        campaignOrganizations.name
+      );
+  }
+
+  return query.orderBy(
+    sql`CASE WHEN ${campaignOrganizations.organizationType} = 'super' THEN 0 WHEN ${campaignOrganizations.organizationType} = 'client' THEN 1 ELSE 2 END`,
+    campaignOrganizations.name
+  );
+}
+
+/**
+ * Get organization statistics
+ */
+export async function getOrganizationStats(): Promise<{
+  total: number;
+  active: number;
+  inactive: number;
+  byType: { super: number; client: number; campaign: number };
+  recentlyCreated: number;
+}> {
+  const allOrgs = await db
+    .select()
+    .from(campaignOrganizations);
+
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const stats = {
+    total: allOrgs.length,
+    active: allOrgs.filter(o => o.isActive).length,
+    inactive: allOrgs.filter(o => !o.isActive).length,
+    byType: {
+      super: allOrgs.filter(o => o.organizationType === 'super').length,
+      client: allOrgs.filter(o => o.organizationType === 'client').length,
+      campaign: allOrgs.filter(o => o.organizationType === 'campaign').length,
+    },
+    recentlyCreated: allOrgs.filter(o => o.createdAt && new Date(o.createdAt) >= thirtyDaysAgo).length,
+  };
+
+  return stats;
+}
+
+/**
+ * Create a campaign organization under the super organization
+ */
+export async function createCampaignOrganization(
+  data: {
+    name: string;
+    domain?: string;
+    description?: string;
+    industry?: string;
+    logoUrl?: string;
+  },
+  createdBy?: string
+): Promise<CampaignOrganization> {
+  const superOrg = await getSuperOrganization();
+  if (!superOrg) {
+    throw new Error('Super organization not initialized');
+  }
+
+  const [org] = await db
+    .insert(campaignOrganizations)
+    .values({
+      ...data,
+      organizationType: 'campaign',
+      parentOrganizationId: superOrg.id,
+      createdBy,
+      isDefault: false,
+      isCampaignOrg: true,
+    })
+    .returning();
+
+  return org;
+}
+
+/**
+ * Get member count for an organization
+ */
+export async function getOrganizationMemberCount(organizationId: string): Promise<number> {
+  const [result] = await db
+    .select({ count: count() })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.organizationId, organizationId));
+
+  return result?.count ?? 0;
 }
 
 // ==================== INITIALIZATION HELPER ====================

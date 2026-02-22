@@ -126,13 +126,13 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
                   Infrastructure
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
-                  <DropdownMenuItem onClick={() => setLocation('/email-infrastructure/sender-profiles')} data-testid="menu-sender-profiles">
+                  <DropdownMenuItem onClick={() => setLocation('/settings/smtp-providers')} data-testid="menu-sender-profiles">
                     <Mail className="mr-2 h-4 w-4" />
-                    Email Infrastructure
+                    SMTP Providers
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setLocation('/telephony/sip-trunks')} data-testid="menu-sip-trunks">
+                  <DropdownMenuItem onClick={() => setLocation('/settings/telephony')} data-testid="menu-sip-trunks">
                     <Phone className="mr-2 h-4 w-4" />
-                    Telephony
+                    Telephony Settings
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setLocation('/settings/integrations')} data-testid="menu-integrations">
                     <Zap className="mr-2 h-4 w-4" />

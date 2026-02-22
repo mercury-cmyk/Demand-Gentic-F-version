@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, Loader2 } from "lucide-react";
+import { getAuthHeaders } from "@/lib/queryClient";
 
 type FieldStatus = "suggested" | "edited" | "verified";
 
@@ -84,14 +85,19 @@ export function MessagingProofTab({ organizationId }: MessagingProofTabProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Skip loading if no organizationId provided
+    if (!organizationId) {
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+
     const fetchProfile = async () => {
       try {
         setLoading(true);
         setError(null);
-        const url = organizationId
-          ? `/api/org-intelligence/profile?organizationId=${organizationId}`
-          : "/api/org-intelligence/profile";
-        const response = await fetch(url);
+        const url = `/api/org-intelligence/profile?organizationId=${organizationId}`;
+        const response = await fetch(url, { headers: getAuthHeaders(url) });
         if (!response.ok) throw new Error("Failed to load organization profile");
         const result = await response.json();
         setProfile(result.profile ?? null);

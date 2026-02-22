@@ -27,3 +27,15 @@ export function formatRevenue(revenue: string | number | null | undefined): stri
   if (num > 0) return "Under 1K";
   return "$0";
 }
+
+export function formatDate(value?: string | number | Date | null): string {
+  if (!value) return "—";
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}

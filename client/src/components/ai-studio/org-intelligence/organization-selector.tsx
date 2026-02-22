@@ -29,11 +29,12 @@ interface Organization {
   id: string;
   name: string;
   domain: string | null;
-  description: string | null;
+  description?: string | null;
   industry: string | null;
-  logoUrl: string | null;
+  logoUrl?: string | null;
+  organizationType?: string;
   isDefault: boolean;
-  isActive: boolean;
+  isActive?: boolean;
 }
 
 interface OrganizationSelectorProps {
@@ -56,16 +57,20 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
   });
 
   const { data: orgsData, isLoading } = useQuery<{ organizations: Organization[] }>({
-    queryKey: ["/api/organizations"],
+    queryKey: ["/api/organizations/dropdown"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/organizations/dropdown");
+      return response.json();
+    },
   });
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const response = await apiRequest("POST", "/api/organizations", data);
+      const response = await apiRequest("POST", "/api/organizations/campaign", data);
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/organizations/dropdown"] });
       setIsDialogOpen(false);
       resetForm();
     },
@@ -77,7 +82,7 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/organizations/dropdown"] });
       setIsDialogOpen(false);
       resetForm();
     },
@@ -114,14 +119,19 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
     }
   };
 
-  // Auto-select default org on load
+  // Auto-select: prioritize super org, then isDefault, then first org
   useEffect(() => {
     if (orgsData?.organizations && !selectedOrgId) {
-      const defaultOrg = orgsData.organizations.find((o) => o.isDefault);
-      if (defaultOrg) {
-        onOrgChange(defaultOrg.id);
-      } else if (orgsData.organizations.length > 0) {
-        onOrgChange(orgsData.organizations[0].id);
+      const superOrg = orgsData.organizations.find((o) => o.organizationType === 'super');
+      if (superOrg) {
+        onOrgChange(superOrg.id);
+      } else {
+        const defaultOrg = orgsData.organizations.find((o) => o.isDefault);
+        if (defaultOrg) {
+          onOrgChange(defaultOrg.id);
+        } else if (orgsData.organizations.length > 0) {
+          onOrgChange(orgsData.organizations[0].id);
+        }
       }
     }
   }, [orgsData?.organizations, selectedOrgId, onOrgChange]);
@@ -142,9 +152,14 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
             {selectedOrg && (
               <div className="flex items-center gap-2">
                 <span>{selectedOrg.name}</span>
-                {selectedOrg.isDefault && (
-                  <Badge variant="secondary" className="text-[10px] h-4">
-                    Default
+                {selectedOrg.organizationType === 'super' && (
+                  <Badge variant="default" className="text-[10px] h-4 bg-emerald-600">
+                    Platform
+                  </Badge>
+                )}
+                {selectedOrg.organizationType === 'client' && (
+                  <Badge variant="outline" className="text-[10px] h-4">
+                    Client
                   </Badge>
                 )}
               </div>
@@ -157,9 +172,14 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
               <SelectItem value={org.id} className="flex-1">
                 <div className="flex items-center gap-2">
                   <span>{org.name}</span>
-                  {org.isDefault && (
-                    <Badge variant="secondary" className="text-[10px] h-4">
-                      Default
+                  {org.organizationType === 'super' && (
+                    <Badge variant="default" className="text-[10px] h-4 bg-emerald-600">
+                      Platform
+                    </Badge>
+                  )}
+                  {org.organizationType === 'client' && (
+                    <Badge variant="outline" className="text-[10px] h-4">
+                      Client
                     </Badge>
                   )}
                 </div>

@@ -7,8 +7,8 @@
  */
 
 import { db } from "../db";
-import { accountIntelligence, callAttempts, emailEvents, leads } from "@shared/schema";
-import { desc, gte, sql } from "drizzle-orm";
+import { accountIntelligence, campaignOrganizations, callAttempts, emailEvents, leads } from "@shared/schema";
+import { desc, eq, gte, sql } from "drizzle-orm";
 import { buildUnifiedKnowledgePrompt } from "../services/unified-knowledge-hub";
 import { AGENT_DEFAULTS } from "@shared/brand-messaging";
 
@@ -362,27 +362,33 @@ export async function getOrganizationLearningSummary(): Promise<string> {
 
 /**
  * Gets the organization's prompt optimization settings for AI agents
- * Reads from database first, falls back to sensible defaults if not configured
+ * Prioritizes super org compiledOrgContext, then accountIntelligence, then defaults
  */
 export async function getOrganizationPromptSettings(): Promise<OrganizationPromptSettings> {
   try {
-    // Get the most recent organization intelligence profile
+    // First: check super org for compiled context
+    const [superOrg] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.organizationType, 'super'))
+      .limit(1);
+
+    // If super org has a compiled context, use it as orgIntelligence
+    const superOrgContext = superOrg?.compiledOrgContext?.trim();
+
+    // Also check accountIntelligence for prompt settings (compliance, platform, voice)
     const [profile] = await db.select()
       .from(accountIntelligence)
       .orderBy(desc(accountIntelligence.createdAt))
       .limit(1);
 
-    // Use database values if set, otherwise use defaults
-    // This ensures agents always have baseline guidance even without configuration
     return {
-      orgIntelligence: profile?.orgIntelligence?.trim() || DEFAULT_ORG_INTELLIGENCE,
+      orgIntelligence: superOrgContext || profile?.orgIntelligence?.trim() || DEFAULT_ORG_INTELLIGENCE,
       compliancePolicy: profile?.compliancePolicy?.trim() || DEFAULT_COMPLIANCE_POLICY,
       platformPolicies: profile?.platformPolicies?.trim() || DEFAULT_PLATFORM_POLICIES,
       agentVoiceDefaults: profile?.agentVoiceDefaults?.trim() || DEFAULT_VOICE_DEFAULTS,
     };
   } catch (error) {
     console.error('[OrgIntelligence] Failed to fetch prompt settings from database:', error);
-    // Return defaults on error - agents should still have baseline guidance
     return {
       orgIntelligence: DEFAULT_ORG_INTELLIGENCE,
       compliancePolicy: DEFAULT_COMPLIANCE_POLICY,
@@ -394,9 +400,30 @@ export async function getOrganizationPromptSettings(): Promise<OrganizationPromp
 
 /**
  * Gets the full organization profile including identity, offerings, ICP, etc.
+ * Prioritizes the super organization (Pivotal B2B) from campaignOrganizations,
+ * which is the platform's source of truth. Falls back to accountIntelligence
+ * only if the super org has no intelligence data.
  */
 export async function getOrganizationProfile(): Promise<OrganizationProfile | null> {
   try {
+    // First: try the super organization from campaignOrganizations (source of truth)
+    const [superOrg] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.organizationType, 'super'))
+      .limit(1);
+
+    if (superOrg && superOrg.identity && Object.keys(superOrg.identity as any).length > 0) {
+      return {
+        domain: superOrg.domain || 'pivotalb2b.com',
+        identity: superOrg.identity,
+        offerings: superOrg.offerings,
+        icp: superOrg.icp,
+        positioning: superOrg.positioning,
+        outreach: superOrg.outreach || {},
+      };
+    }
+
+    // Fallback: legacy accountIntelligence table (org_intelligence_profiles)
     const [profile] = await db.select()
       .from(accountIntelligence)
       .orderBy(desc(accountIntelligence.createdAt))

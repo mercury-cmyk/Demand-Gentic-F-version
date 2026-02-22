@@ -244,6 +244,14 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Agent infrastructure initialization failed (non-blocking):', err);
   }
 
+  // Initialize Unified Agent Architecture (One Agent Per Type, Self-Contained, Learning-Integrated)
+  try {
+    const { initializeUnifiedAgentArchitecture } = await import("./services/agents/unified");
+    initializeUnifiedAgentArchitecture();
+  } catch (err) {
+    console.error('[STARTUP] Unified agent architecture initialization failed (non-blocking):', err);
+  }
+
   // Initialize Number Pool Scheduler (hourly/daily counter resets, cooldown processing, reputation recalc)
   try {
     const { initializeAlignedScheduler } = await import("./services/number-pool-scheduler");
@@ -308,6 +316,16 @@ app.use((req, res, next) => {
     logStreamingService.initialize().catch((err) => {
       console.warn('[LogStreaming] Pub/Sub init failed (console fallback active):', err.message);
     });
+  }
+
+  // Initialize Operations Hub WebSocket Server for real-time infrastructure updates
+  let opsSocketIO: any = null;
+  try {
+    const { setupOpsWebSocket } = await import("./middleware/ops-websocket");
+    opsSocketIO = setupOpsWebSocket(server);
+    console.log('[STARTUP] ✓ Operations Hub WebSocket server initialized on /ops namespace');
+  } catch (err) {
+    console.error('[STARTUP] Operations Hub WebSocket initialization failed (non-blocking):', err);
   }
   
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
