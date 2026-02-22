@@ -184,7 +184,9 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
       setError('Recording URL is not available.');
       return;
     }
-    window.open(resolvedUrl, '_blank');
+    const separator = resolvedUrl.includes('?') ? '&' : '?';
+    const downloadUrl = `${resolvedUrl}${separator}download=1`;
+    window.open(downloadUrl, '_blank');
   };
 
   return (
