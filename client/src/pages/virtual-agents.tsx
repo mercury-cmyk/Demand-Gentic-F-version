@@ -4719,7 +4719,7 @@ export default function VirtualAgentsPage() {
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                                  {message.role === 'user' ? 'You (Prospect)' : 'Agent'}
+                                  {message.role === 'user' ? 'You (Contact)' : 'Agent'}
                                 </span>
                                 {message.timestamp && (
                                   <span className="text-xs text-muted-foreground/50">

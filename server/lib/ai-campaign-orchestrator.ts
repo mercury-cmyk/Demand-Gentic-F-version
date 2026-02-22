@@ -54,6 +54,49 @@ const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_E
 const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
 const ACTIVE_POOL_CACHE_TTL_MS = 30000;
 const ORCHESTRATOR_HEARTBEAT_MS = Math.max(30000, ORCHESTRATOR_INTERVAL_MS * 3);
+const STRICT_US_ONLY_CAMPAIGN_NAME_DEFAULTS = ['RingCentral_AppointmentGen'];
+const STRICT_US_ONLY_CAMPAIGN_NAMES = new Set<string>(
+  [
+    ...STRICT_US_ONLY_CAMPAIGN_NAME_DEFAULTS,
+    ...(process.env.STRICT_US_ONLY_CAMPAIGN_NAMES || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
+  ].map((name) => name.toLowerCase())
+);
+const STRICT_US_ONLY_CAMPAIGN_IDS = new Set<string>(
+  (process.env.STRICT_US_ONLY_CAMPAIGN_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+);
+const UK_COUNTRY_KEYS = new Set<string>([
+  'GB',
+  'UK',
+  'UNITED KINGDOM',
+  'UNITED KINGDOM UK',
+  'GREAT BRITAIN',
+  'ENGLAND',
+  'SCOTLAND',
+  'WALES',
+]);
+const UK_SATURDAY_ONE_DAY_OVERRIDE_DATE = '2026-02-21';
+const US_COUNTRY_KEYS = new Set<string>([
+  'US',
+  'USA',
+  'AMERICA',
+  'UNITED STATES',
+  'UNITED STATES OF AMERICA',
+  'UNITEDSTATES',
+  'UNITEDSTATESOFAMERICA',
+  'U S A',
+  'UNITEDF STATES',
+  'UNITED STATE',
+  'UNTED STATES',
+  'UNITD STATES',
+  'UNTIED STATES',
+  'UITED STATES',
+]);
 
 // Cached concurrency limits from DB (refreshed every 60s)
 let _cachedDefaultMaxConcurrent = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
@@ -63,6 +106,7 @@ const CONCURRENCY_CACHE_TTL_MS = 60000; // 1 minute
 let _cachedHasActivePoolNumbers: boolean | null = null;
 let _activePoolLastFetched = 0;
 const campaignEmptyPoolBackoffUntil = new Map<string, number>();
+let ukSaturdayOverrideLoggedForDate: string | null = null;
 
 async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: number }> {
   const now = Date.now();
@@ -161,12 +205,18 @@ function isTelnyxFatalError(error: any): { code: number; detail: string; isWhite
 }
 
 /**
- * Check if a contact is within their local business hours based on country
+ * Check if a contact is within their local business hours based on country and campaign config
  * Returns { canCall: boolean, timezone: string | null, localTime: string, reason?: string }
  * 
  * If timezone cannot be detected, returns canCall: false to avoid calling at wrong times
+ * 
+ * @param contact - Contact location info
+ * @param campaignBusinessHoursConfig - Optional campaign-specific business hours config (takes precedence over country defaults)
  */
-function isContactWithinBusinessHours(contact: { country?: string | null; state?: string | null; timezone?: string | null }): {
+function isContactWithinBusinessHours(
+  contact: { country?: string | null; state?: string | null; timezone?: string | null },
+  campaignBusinessHoursConfig?: any
+): {
   canCall: boolean;
   timezone: string | null;
   localTime: string;
@@ -206,15 +256,36 @@ function isContactWithinBusinessHours(contact: { country?: string | null; state?
     };
   }
   
-  // Get country-specific business hours (handles Middle East Sun-Thu work week)
-  const countryConfig = getBusinessHoursForCountry(contact.country);
-  const config = {
-    ...countryConfig,
-    timezone: contactTz,
-    respectContactTimezone: false, // We already resolved the timezone
-  };
-  
   const now = new Date();
+
+  // Use campaign-specific business hours config if available, otherwise fall back to country defaults
+  let config: any;
+  
+  if (campaignBusinessHoursConfig && campaignBusinessHoursConfig.enabled) {
+    // Use campaign config
+    config = {
+      ...campaignBusinessHoursConfig,
+      timezone: contactTz,
+      respectContactTimezone: false, // We already resolved the timezone
+    };
+    console.log(`[DEBUG BIZ HOURS] Using CAMPAIGN config: operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
+  } else {
+    // Fall back to country-specific business hours (handles Middle East Sun-Thu work week)
+    const countryConfig = getBusinessHoursForCountry(contact.country, now);
+    config = {
+      ...countryConfig,
+      timezone: contactTz,
+      respectContactTimezone: false, // We already resolved the timezone
+    };
+    console.log(`[DEBUG BIZ HOURS] Using COUNTRY config: country=${contact.country}, operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
+  }
+
+  // Temporary one-day UK exception: allow Saturday calling on 2026-02-21 only.
+  if (isUkSaturdayOneDayOverride(contact.country, now) && !config.operatingDays.includes('saturday')) {
+    config.operatingDays = [...config.operatingDays, 'saturday'];
+  }
+  
+  console.log(`[DEBUG BIZ HOURS] Final config before check: operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
   const canCall = checkBusinessHours(config, undefined, now);
   
   // Get local time for logging
@@ -228,14 +299,14 @@ function isContactWithinBusinessHours(contact: { country?: string | null; state?
   if (!canCall) {
     // Check if it's a non-working day for this country
     const dayName = dayNames[dayOfWeek].toLowerCase();
-    const isWorkingDay = countryConfig.operatingDays.includes(
+    const isWorkingDay = config.operatingDays.includes(
       ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dayOfWeek]
     );
     
     if (!isWorkingDay) {
       reason = `Non-working day (${localTime} ${contactTz})`;
     } else {
-      reason = `Outside hours (${localTime} ${contactTz}, hours: ${countryConfig.startTime}-${countryConfig.endTime})`;
+      reason = `Outside hours (${localTime} ${contactTz}, hours: ${config.startTime}-${config.endTime})`;
     }
   }
   
@@ -350,6 +421,15 @@ const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
   'PT': true, 'PORTUGAL': true,
   'CZ': true, 'CZECHIA': true, 'CZECH REPUBLIC': true,
   'GR': true, 'GREECE': true,
+  'RO': true, 'ROMANIA': true,
+  'HU': true, 'HUNGARY': true,
+  'BG': true, 'BULGARIA': true,
+  'HR': true, 'CROATIA': true,
+  'SK': true, 'SLOVAKIA': true,
+  'LU': true, 'LUXEMBOURG': true,
+  'LT': true, 'LITHUANIA': true,
+  'LV': true, 'LATVIA': true,
+  'EE': true, 'ESTONIA': true,
 
   // Asia / Pacific
   'SG': true, 'SINGAPORE': true,
@@ -426,6 +506,85 @@ function normalizeCountryName(country: string): string {
   return COUNTRY_TYPOS[normalized] || normalized;
 }
 
+function isUkSaturdayOneDayOverride(
+  country: string | null | undefined,
+  referenceTime: Date = new Date()
+): boolean {
+  if (!country) return false;
+
+  const normalizedCountry = String(country).toUpperCase().trim();
+  if (!UK_COUNTRY_KEYS.has(normalizedCountry)) return false;
+
+  const londonNow = toZonedTime(referenceTime, 'Europe/London');
+  const londonDate = format(londonNow, 'yyyy-MM-dd');
+  const londonDay = format(londonNow, 'EEEE').toLowerCase();
+  const enabled = londonDate === UK_SATURDAY_ONE_DAY_OVERRIDE_DATE && londonDay === 'saturday';
+
+  if (enabled && ukSaturdayOverrideLoggedForDate !== londonDate) {
+    ukSaturdayOverrideLoggedForDate = londonDate;
+    console.log(`[AI Orchestrator] UK Saturday one-day override active for ${londonDate} (Europe/London)`);
+  }
+
+  return enabled;
+}
+
+function isUnitedStatesCountry(country: string | null | undefined): boolean {
+  if (!country) return false;
+
+  const raw = String(country).toUpperCase().trim();
+  if (!raw) return false;
+
+  const noParens = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const alnumWithSpace = raw.replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const compact = raw.replace(/[^A-Z0-9]/g, '');
+  const candidates = Array.from(new Set([raw, noParens, alnumWithSpace, compact].filter(Boolean)));
+
+  for (const candidate of candidates) {
+    if (US_COUNTRY_KEYS.has(candidate)) return true;
+    const normalized = normalizeCountryName(candidate);
+    if (US_COUNTRY_KEYS.has(normalized)) return true;
+    const normalizedCompact = normalized.replace(/[^A-Z0-9]/g, '');
+    if (US_COUNTRY_KEYS.has(normalizedCompact)) return true;
+  }
+
+  return false;
+}
+
+function shouldEnforceStrictUsOnly(campaign: {
+  id?: string | null;
+  name?: string | null;
+  aiAgentSettings?: unknown;
+}): boolean {
+  const campaignId = (campaign.id || '').trim();
+  if (campaignId && STRICT_US_ONLY_CAMPAIGN_IDS.has(campaignId)) return true;
+
+  const campaignName = (campaign.name || '').trim().toLowerCase();
+  if (campaignName && STRICT_US_ONLY_CAMPAIGN_NAMES.has(campaignName)) return true;
+
+  const aiSettings = campaign.aiAgentSettings && typeof campaign.aiAgentSettings === 'object'
+    ? campaign.aiAgentSettings as Record<string, unknown>
+    : null;
+
+  if (!aiSettings) return false;
+
+  const explicitFlagKeys = ['strictUsOnly', 'strictUSAOnly', 'usaOnly', 'usOnly'];
+  for (const key of explicitFlagKeys) {
+    if (aiSettings[key] === true) return true;
+  }
+
+  const geoAllowRaw = aiSettings.geoAllow;
+  if (Array.isArray(geoAllowRaw) && geoAllowRaw.length > 0) {
+    const geoAllow = geoAllowRaw
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+    if (geoAllow.length > 0 && geoAllow.every((value) => isUnitedStatesCountry(value))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Check if a contact's country is in an enabled calling region
  * Handles various formats: "Indonesia", "indonesia", " Indonesia ", "id", "ID", etc.
@@ -498,6 +657,9 @@ function inferCountryFromPhone(phone: string | null | undefined): string | null 
     if (e164.startsWith('971')) e164 = `+${e164}`;
     else if (e164.startsWith('44')) e164 = `+${e164}`;
     else if (e164.startsWith('1')) e164 = `+${e164}`;
+    // 10-digit NANP (US/Canada): area code starts 2-9, no country code prefix.
+    // Very common in US CRM data where contacts are stored without the +1.
+    else if (/^[2-9]\d{9}$/.test(e164)) return 'US';
   }
   if (!e164.startsWith('+')) return null;
 
@@ -754,9 +916,23 @@ async function resetStuckItems(): Promise<number> {
  * 
  * SIMPLIFIED: Let JavaScript handle ALL business hours logic - don't compute within_hours in SQL
  */
-async function getQueuedItems(campaignId: string, limit: number): Promise<any[]> {
-  const now = new Date();
-  
+async function getQueuedItems(
+  campaignId: string,
+  limit: number,
+  options?: { strictUsOnly?: boolean }
+): Promise<any[]> {
+  const strictUsOnly = options?.strictUsOnly === true;
+  const strictUsOnlySql = strictUsOnly
+    ? sql`
+      -- STRICT USA-ONLY: only dial contacts with explicit US country metadata
+      AND UPPER(TRIM(COALESCE(c.country, ''))) IN (
+        'US', 'USA', 'AMERICA', 'UNITED STATES', 'UNITED STATES OF AMERICA',
+        'U.S', 'U.S.', 'U.S.A', 'U.S.A.',
+        'UNITEDF STATES', 'UNITED STATE', 'UNTED STATES', 'UNITD STATES', 'UNTIED STATES', 'UITED STATES'
+      )
+    `
+    : sql``;
+
   // Fetch queue items with contact data - simplified to just get the DATA, not compute business hours in SQL
   // JavaScript will handle all business hours logic to ensure consistency
   const result = await db.execute(sql`
@@ -772,14 +948,19 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       c.job_title as contact_job_title,
       a.name as account_name,
       -- Infer timezone from: explicit timezone > country > phone prefix
+      -- 10-digit phones (NANP/US format stored without +1) are treated as US
       COALESCE(
         c.timezone,
-        CASE 
+        CASE
           WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'UNITED KINGDOM UK', 'ENGLAND', 'SCOTLAND', 'WALES') THEN 'Europe/London'
-          WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA') THEN 'America/New_York'
+          WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA', 'UNITED STATES OF AMERICA') THEN 'America/New_York'
           WHEN UPPER(c.country) IN ('CA', 'CANADA') THEN 'America/Toronto'
           WHEN c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%' THEN 'Europe/London'
           WHEN c.mobile_phone_e164 LIKE '+1%' OR c.direct_phone_e164 LIKE '+1%' THEN 'America/New_York'
+          -- 10-digit NANP (US contacts stored without +1 country code)
+          WHEN c.mobile_phone_e164 ~ '^[2-9][0-9]{9}$' OR c.direct_phone_e164 ~ '^[2-9][0-9]{9}$' THEN 'America/New_York'
+          -- 11-digit US (1XXXXXXXXXX stored without +)
+          WHEN c.mobile_phone_e164 ~ '^1[2-9][0-9]{9}$' OR c.direct_phone_e164 ~ '^1[2-9][0-9]{9}$' THEN 'America/New_York'
           ELSE NULL
         END
       ) as inferred_timezone,
@@ -805,6 +986,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       AND cq.status = 'queued'
       AND (cq.next_attempt_at IS NULL OR cq.next_attempt_at <= NOW())
       AND (c.direct_phone_e164 IS NOT NULL OR c.mobile_phone_e164 IS NOT NULL)
+      ${strictUsOnlySql}
       -- Exclude contacts already called today (any agent type - prevents duplicate calls)
       -- Match by contact_id first (reliable), then by phone number (catches manual imports)
       AND NOT EXISTS (
@@ -860,7 +1042,7 @@ async function setOrchestratorStallReason(campaignId: string, reason: string | n
 /**
  * Process a single campaign - initiate calls to maintain concurrency
  */
-async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
+async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean; hourlyLimitPaused?: boolean }> {
   // Guard: in dev, calls blocked by default — must be enabled in Telephony settings. Production always allows calls.
   if (process.env.NODE_ENV !== 'production' && process.env.CALL_EXECUTION_ENABLED !== 'true') {
     console.log(`[AI Orchestrator] Dev call execution disabled for campaign ${campaignId}; skipping without mutating stall reason`);
@@ -879,6 +1061,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     console.log(`[AI Orchestrator] Campaign ${campaignId} not found`);
     return { initiated: 0, skipped: 0 };
   }
+
+  console.log(`[DEBUG] Campaign loaded: businessHoursConfig=${JSON.stringify((campaign as any).businessHoursConfig)}`);
 
   // Check campaign is still active and in ai_agent mode
   if (campaign.status !== 'active' || campaign.dialMode !== 'ai_agent') {
@@ -958,6 +1142,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     ? Math.max(0, Math.floor(options.maxNewCalls))
     : campaignSlots;
   const slotsAvailable = Math.min(campaignSlots, requestedSlots);
+  const strictUsOnly = shouldEnforceStrictUsOnly(campaign as any);
+
+  if (strictUsOnly) {
+    console.log(`[AI Orchestrator] Strict USA-only queue filter enabled for campaign ${campaign.name} (${campaignId})`);
+  }
 
   console.log(`[AI Orchestrator] Campaign ${campaignId}: ${inProgressCount}/${maxConcurrent} in progress, ${campaignSlots} campaign slots, ${slotsAvailable} allowed by request`);
 
@@ -966,7 +1155,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   }
 
   // Get queued items
-  const queueItems = await getQueuedItems(campaignId, slotsAvailable);
+  const queueItems = await getQueuedItems(campaignId, slotsAvailable, { strictUsOnly });
   console.log(`[AI Orchestrator] Found ${queueItems.length} queued items for campaign ${campaignId}`);
   
   // DEBUG: Log first few items to see what data we're working with
@@ -1120,11 +1309,25 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
     // Be resilient to bad/missing country metadata:
     // if stored country is missing or not enabled, trust phone-derived country when possible.
+    // For strict USA-only campaigns, do not infer country from phone to avoid CA/+1 bleed-through.
     let effectiveCountry: string | null = (normalizedCountry as string) || null;
-    if (!effectiveCountry && inferredCountry) {
-      effectiveCountry = inferredCountry;
-    } else if (effectiveCountry && !isCountryEnabled(effectiveCountry) && inferredCountry && isCountryEnabled(inferredCountry)) {
-      effectiveCountry = inferredCountry;
+    if (!strictUsOnly) {
+      if (!effectiveCountry && inferredCountry) {
+        effectiveCountry = inferredCountry;
+      } else if (effectiveCountry && !isCountryEnabled(effectiveCountry) && inferredCountry && isCountryEnabled(inferredCountry)) {
+        effectiveCountry = inferredCountry;
+      }
+    }
+
+    if (strictUsOnly && !isUnitedStatesCountry(effectiveCountry)) {
+      countryNotEnabled++;
+      const countryKey = effectiveCountry ? String(effectiveCountry).toUpperCase() : 'NULL/EMPTY';
+      rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
+
+      if (countryNotEnabled <= 3) {
+        console.log(`[AI Orchestrator] ❌ Contact ${item.contact_id} rejected by strict USA-only filter: country='${country}'`);
+      }
+      continue;
     }
 
     // Prefer explicit timezone, then SQL inferred timezone, then derive from best-known geo data.
@@ -1137,7 +1340,18 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         state: state || undefined,
       });
     }
-    
+
+    // If country resolves to US but the timezone is clearly non-US (e.g. Asia/*, Europe/*, Australia/*),
+    // override with a safe US default. This corrects contacts imported with wrong timezone metadata.
+    if (effectiveCountry) {
+      const normalizedEffectiveCountry = effectiveCountry.toUpperCase().trim();
+      const isUsCountry = ['US', 'USA', 'UNITED STATES', 'UNITED STATES OF AMERICA', 'AMERICA'].includes(normalizedEffectiveCountry);
+      if (isUsCountry && effectiveTimezone && !effectiveTimezone.startsWith('America/') && !effectiveTimezone.startsWith('US/')) {
+        console.log(`[AI Orchestrator] ⚠️ Contact ${item.contact_id} has US country but non-US timezone '${effectiveTimezone}' — overriding to America/New_York`);
+        effectiveTimezone = 'America/New_York';
+      }
+    }
+
     // Check if country is in enabled calling regions
     if (!isCountryEnabled(effectiveCountry)) {
       countryNotEnabled++;
@@ -1154,11 +1368,15 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     
     // Check business hours for this contact's timezone/country FIRST
     // Use stored timezone if available, fall back to country/state detection
-    const bizHoursCheck = isContactWithinBusinessHours({
-      country: effectiveCountry,
-      state,
-      timezone: effectiveTimezone,
-    });
+    // Pass campaign's business hours config to use instead of country defaults
+    const bizHoursCheck = isContactWithinBusinessHours(
+      {
+        country: effectiveCountry,
+        state,
+        timezone: effectiveTimezone,
+      },
+      campaign.businessHoursConfig // Pass campaign config if available
+    );
     const tzKey = bizHoursCheck.timezone || 'unknown';
     
     // Track timezone stats
@@ -2063,6 +2281,15 @@ async function orchestratorTick(): Promise<OrchestratorJobResult> {
  * Initialize the AI Campaign Orchestrator
  */
 export function initializeAiCampaignOrchestrator(): void {
+  if (orchestratorQueue && orchestratorWorker) {
+    return;
+  }
+
+  if (orchestratorQueue && !orchestratorWorker) {
+    console.warn('[AI Orchestrator] Detected partial initialization state - resetting and retrying');
+    orchestratorQueue = null;
+  }
+
   if (!isQueueAvailable()) {
     console.warn('[AI Orchestrator] Redis not available - orchestrator disabled');
     return;
@@ -2110,6 +2337,7 @@ export function initializeAiCampaignOrchestrator(): void {
 
   if (!orchestratorWorker) {
     console.warn('[AI Orchestrator] Worker could not be started');
+    orchestratorQueue = null;
     return;
   }
 

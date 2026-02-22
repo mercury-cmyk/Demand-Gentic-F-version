@@ -186,7 +186,20 @@ export async function getRedisConnectionAsync(): Promise<IORedis | undefined> {
  * Check if Redis/Queue system is available
  */
 export function isQueueAvailable(): boolean {
-  return !!redisConnection;
+  if (redisConnection && redisConnection.status !== 'end' && redisConnection.status !== 'close') {
+    return true;
+  }
+
+  // If Redis is configured but not connected yet, trigger async initialization
+  // and report as available so queue initializers don't skip permanently on startup.
+  if (isRedisConfigured()) {
+    ensureRedisInitialized().catch((err) => {
+      console.error('[Queue] Deferred Redis initialization failed:', err);
+    });
+    return true;
+  }
+
+  return false;
 }
 
 /**

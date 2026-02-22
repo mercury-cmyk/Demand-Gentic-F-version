@@ -19,7 +19,7 @@ import { Buffer } from 'buffer';
 import { GoogleAuth } from 'google-auth-library';
 import { db } from "../db";
 import { contacts, campaigns, campaignQueue, dialerCallAttempts, callSessions, type CanonicalDisposition } from "@shared/schema";
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { createCallSessionSafely } from '../lib/call-session-factory';
 import { audioQualityMonitor } from "./audio-quality-monitor";
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format, createTranscoderState } from "./voice-providers/audio-transcoder";
@@ -196,7 +196,16 @@ const EARLY_VOICEMAIL_PATTERNS: RegExp[] = [
   /cannot (take|accept) your call/i,
   /you('?ve| have) reached/i,
   /please leave/i,
+];
+
+const EARLY_AI_SCREENER_PATTERNS: RegExp[] = [
+  /record your name and reason for calling/i,
+  /state your name and reason for calling/i,
+  /before i try to connect you/i,
+  /i('?ll| will) see if this person is available/i,
+  /please stay on the line/i,
   /call screening/i,
+  /call assist/i,
 ];
 
 // EARLY AUDIO QUALITY GATE - DISABLED
@@ -448,7 +457,7 @@ ${context.contactName ? `
 5. Do NOT pitch to the gatekeeper - they are not the decision maker
 
 ### AUTOMATED CALL SCREENER (Google Voice / Call Screen):
-If you hear phrases like "record your name and reason for calling", "state your name and reason for calling", or "I'll see if this person is available":
+If you hear phrases like "record your name and reason for calling", "state your name and reason for calling", "I'll see if this person is available", "please stay on the line", or "before I try to connect you":
 - This is NOT a human gatekeeper — it's an automated screening system
 - Respond ONCE: "I'm calling on behalf of ${orgRef} for ${context.contactFirstName || context.contactName || 'the contact'} regarding a business opportunity."
 - Then WAIT SILENTLY — do not speak again until a human voice speaks
@@ -786,7 +795,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   function isScreenerContext(): boolean {
     return transcriptTurns
       .filter(t => t.role === 'contact')
-      .some(t => /record your name|reason for calling|stay on the line|this person is available|call screening|call assist/i.test(t.text));
+      .some(t => /record your name|state your name|reason for calling|stay on the line|this person is available|before i try to connect you|call screening|call assist/i.test(t.text));
   }
 
   function detectAgentRepetitionLoop(): { isLooping: boolean; phrase: string } {
@@ -1056,6 +1065,9 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
 
   function isEarlyVoicemailCue(text: string): boolean {
     if (!text) return false;
+    if (EARLY_AI_SCREENER_PATTERNS.some((pattern) => pattern.test(text))) {
+      return false;
+    }
     return EARLY_VOICEMAIL_PATTERNS.some((pattern) => pattern.test(text));
   }
 

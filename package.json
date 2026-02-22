@@ -12,6 +12,7 @@
     "start": "cross-env NODE_ENV=production node dist/server/index.js",
     "check": "tsc",
     "db:push": "drizzle-kit push",
+    "db:clone:prod-to-dev": "tsx scripts/clone-prod-to-dev.ts --yes",
     "fix-audio": "tsx fix-audio-one-command.ts",
     "diagnose-audio": "tsx diagnose-audio.ts",
     "test-audio": "tsx test-audio-transmission.ts",

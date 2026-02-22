@@ -2604,180 +2604,133 @@ export default function ClientPortalDashboard() {
 
         {/* ==================== CAMPAIGNS TAB ==================== */}
         {activeTab === 'campaigns' && (
-          <div className="space-y-6 md:space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-6">
+
+            {/* Page header + filters inline */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Campaign Operations</h2>
-                <p className="text-sm text-muted-foreground w-full md:w-auto">Monitor campaign delivery, performance, and execution from one workspace.</p>
-              </div>
-            </div>
-
-            <Card className="rounded-2xl border border-violet-200/80 dark:border-violet-800/80 bg-gradient-to-r from-violet-50/80 to-indigo-50/80 dark:from-violet-950/20 dark:to-indigo-950/20 shadow-sm">
-              <CardContent className="p-5 md:p-6">
-                <div className="space-y-1.5">
-                  <div className="space-y-1.5">
-                    <h3 className="font-semibold text-violet-900 dark:text-violet-300 flex items-center gap-2">
-                      <Sparkles className="h-4 w-4" />
-                      Campaign testing now lives in Preview Studio
-                    </h3>
-                    <p className="text-sm text-violet-800/80 dark:text-violet-300/80">
-                      Test Calls and Test Emails are run from Preview Studio only so your team uses one consistent workflow per campaign.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-
-            {/* Call Campaign Reports */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
-                <CardContent className="p-5">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Calls Made</p>
-                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.callsMade.toLocaleString()}</p>
-                </CardContent>
-              </Card>
-              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
-                <CardContent className="p-5">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Connected</p>
-                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.connected.toLocaleString()}</p>
-                </CardContent>
-              </Card>
-              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
-                <CardContent className="p-5">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Qualified</p>
-                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.qualified.toLocaleString()}</p>
-                </CardContent>
-              </Card>
-              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
-                <CardContent className="p-5">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Voice Mail</p>
-                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.voicemail.toLocaleString()}</p>
-                </CardContent>
-              </Card>
-              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
-                <CardContent className="p-5">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">No Answer</p>
-                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.noAnswer.toLocaleString()}</p>
-                </CardContent>
-              </Card>
-              <Card className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm">
-                <CardContent className="p-5">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Invalid</p>
-                  <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">{callCampaignReportTotals.invalid.toLocaleString()}</p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Campaign Filters */}
-            <Card className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/70 shadow-sm">
-              <CardContent className="p-4">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Filters</p>
-                  {(campaignSearchQuery || campaignStatusFilter !== 'all' || campaignTypeFilter !== 'all') && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        setCampaignSearchQuery('');
-                        setCampaignStatusFilter('all');
-                        setCampaignTypeFilter('all');
-                      }}
-                    >
-                      Reset
-                    </Button>
+                <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Target className="h-5 w-5 text-violet-600" />
+                  Campaign Portfolio
+                  {filteredCampaigns.length > 0 && (
+                    <Badge variant="secondary" className="ml-1 text-xs">{filteredCampaigns.length}</Badge>
                   )}
-                </div>
-                <div className="flex flex-col md:flex-row gap-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input 
-                      placeholder="Search by campaign name..." 
-                      className="pl-9 bg-white dark:bg-gray-950 border-slate-300/80 dark:border-slate-700"
-                      value={campaignSearchQuery}
-                      onChange={(e) => setCampaignSearchQuery(e.target.value)}
-                    />
-                  </div>
-                  <Select value={campaignStatusFilter} onValueChange={(val) => setCampaignStatusFilter(val)}>
-                    <SelectTrigger className="w-full md:w-[210px] bg-white dark:bg-gray-950 border-slate-300/80 dark:border-slate-700">
-                      <div className="flex items-center gap-2">
-                        <Filter className="h-4 w-4" />
-                        <SelectValue placeholder="Status" />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="draft">Draft</SelectItem>
-                      <SelectItem value="in_review">Pending Approval</SelectItem>
-                      <SelectItem value="approved_pending_setup">Approved (Pending setup)</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="paused">Paused</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={campaignTypeFilter} onValueChange={(val) => setCampaignTypeFilter(val)}>
-                    <SelectTrigger className="w-full md:w-[210px] bg-white dark:bg-gray-950 border-slate-300/80 dark:border-slate-700">
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Types</SelectItem>
-                      <SelectItem value="voice">Voice Campaigns</SelectItem>
-                      <SelectItem value="email">Email Campaigns</SelectItem>
-                      <SelectItem value="combined">Combined</SelectItem>
-                      <SelectItem value="data">Data Enrichment</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Your Campaigns */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
-                <Target className="h-5 w-5 text-violet-600" />
-                Campaign Portfolio
-                {filteredCampaigns.length > 0 && (
-                  <Badge variant="secondary" className="ml-2">{filteredCampaigns.length}</Badge>
-                )}
-              </h3>
-              {campaignsLoading ? (
-                 <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
-              ) : filteredCampaigns.length === 0 ? (
-                 <Card className="rounded-2xl bg-slate-50 dark:bg-slate-900 border-dashed border-slate-300/80 dark:border-slate-700">
-                    <CardContent className="flex flex-col items-center justify-center py-12">
-                      <div className="h-16 w-16 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mb-4">
-                        <Target className="h-8 w-8 text-purple-600" />
-                      </div>
-                      <h4 className="font-semibold text-lg mb-2">No campaigns yet</h4>
-                       <p className="text-muted-foreground text-center mb-4 max-w-md">
-                         {campaigns.length === 0 ? 'Submit a campaign request and our team will configure and launch your AI-powered outreach.' : 'No campaigns match your current filters.'}
-                       </p>
-                    </CardContent>
-                 </Card>
-              ) : (
-                  <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-                {filteredCampaigns.map((campaign) => {
-                  return (
-                    <CampaignCard
-                      key={campaign.id}
-                      campaign={campaign}
-                      onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
-                      onOpenPreviewStudio={(campaignId, mode) => openCampaignPreviewStudio(campaignId, mode || 'voice')}
-                      onSelectVoice={(campaignId) => {
-                        setClientVoiceCampaignId(campaignId);
-                        setShowClientVoiceSelect(true);
-                      }}
-                      onViewQueue={(campaignId) => {
-                        setQueueCampaignId(campaignId);
-                        setShowQueueDialog(true);
-                      }}
-                    />
-                  );
-                })}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Live dialer stats match your admin view — sourced from the same data.</p>
               </div>
-              )}
+              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                <div className="relative flex-1 sm:w-56">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search campaigns..."
+                    className="pl-8 h-8 text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-700"
+                    value={campaignSearchQuery}
+                    onChange={(e) => setCampaignSearchQuery(e.target.value)}
+                  />
+                </div>
+                <Select value={campaignStatusFilter} onValueChange={(val) => setCampaignStatusFilter(val)}>
+                  <SelectTrigger className="h-8 text-sm w-full sm:w-[160px] bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center gap-1.5">
+                      <Filter className="h-3.5 w-3.5" />
+                      <SelectValue placeholder="Status" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="paused">Paused</SelectItem>
+                    <SelectItem value="approved_pending_setup">Pending Setup</SelectItem>
+                    <SelectItem value="in_review">Pending Approval</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={campaignTypeFilter} onValueChange={(val) => setCampaignTypeFilter(val)}>
+                  <SelectTrigger className="h-8 text-sm w-full sm:w-[140px] bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-700">
+                    <SelectValue placeholder="Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    <SelectItem value="voice">Voice</SelectItem>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="combined">Combined</SelectItem>
+                    <SelectItem value="data">Data</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(campaignSearchQuery || campaignStatusFilter !== 'all' || campaignTypeFilter !== 'all') && (
+                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => { setCampaignSearchQuery(''); setCampaignStatusFilter('all'); setCampaignTypeFilter('all'); }}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             </div>
+
+            {/* Aggregate call stats bar */}
+            {callCampaignReportTotals.callsMade > 0 && (
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {[
+                  { label: 'Calls Made', value: callCampaignReportTotals.callsMade, color: 'text-slate-700 dark:text-slate-200' },
+                  { label: 'Connected', value: callCampaignReportTotals.connected, color: 'text-blue-600 dark:text-blue-400' },
+                  { label: 'Qualified', value: callCampaignReportTotals.qualified, color: 'text-emerald-600 dark:text-emerald-400' },
+                  { label: 'Voicemail', value: callCampaignReportTotals.voicemail, color: 'text-amber-600 dark:text-amber-400' },
+                  { label: 'No Answer', value: callCampaignReportTotals.noAnswer, color: 'text-slate-500 dark:text-slate-400' },
+                  { label: 'Invalid', value: callCampaignReportTotals.invalid, color: 'text-red-500 dark:text-red-400' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded-xl border border-slate-100 bg-white/90 dark:border-slate-800 dark:bg-slate-900/70 px-3 py-2.5 text-center shadow-sm">
+                    <p className={`text-xl font-bold ${color}`}>{value.toLocaleString()}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-0.5">{label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Preview Studio notice */}
+            <div className="flex items-start gap-3 rounded-xl border border-violet-200/70 bg-violet-50/60 dark:border-violet-800/50 dark:bg-violet-950/20 px-4 py-3">
+              <Sparkles className="h-4 w-4 text-violet-600 dark:text-violet-400 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-violet-900 dark:text-violet-300">Campaign testing lives in Preview Studio</p>
+                <p className="text-xs text-violet-700/80 dark:text-violet-400/80 mt-0.5">
+                  Use <strong>Test Call</strong> and <strong>Test Email</strong> buttons on each campaign card — all in one consistent workflow.
+                </p>
+              </div>
+            </div>
+
+            {/* Campaign cards */}
+            {campaignsLoading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
+            ) : filteredCampaigns.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40 py-16">
+                <div className="h-14 w-14 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center mb-4">
+                  <Target className="h-7 w-7 text-violet-600" />
+                </div>
+                <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-1">
+                  {campaigns.length === 0 ? 'No campaigns yet' : 'No matching campaigns'}
+                </h4>
+                <p className="text-sm text-muted-foreground text-center max-w-sm">
+                  {campaigns.length === 0
+                    ? 'Submit a campaign request and our team will configure and launch your AI-powered outreach.'
+                    : 'Try adjusting your search or filters to see more results.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {filteredCampaigns.map((campaign) => (
+                  <CampaignCard
+                    key={campaign.id}
+                    campaign={campaign}
+                    onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
+                    onOpenPreviewStudio={(campaignId, mode) => openCampaignPreviewStudio(campaignId, mode || 'voice')}
+                    onSelectVoice={(campaignId) => {
+                      setClientVoiceCampaignId(campaignId);
+                      setShowClientVoiceSelect(true);
+                    }}
+                    onViewQueue={(campaignId) => {
+                      setQueueCampaignId(campaignId);
+                      setShowQueueDialog(true);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
 
           </div>
         )}

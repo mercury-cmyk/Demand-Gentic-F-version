@@ -311,6 +311,11 @@ export async function analyzeLeadQualityDepartment(
       "mark_dnc", "schedule_callback", "no_action",
     ];
 
+    // Normalize AI-suggested disposition to canonical format
+    const { normalizeDisposition } = await import("./disposition-normalizer");
+    const rawSuggestedDisposition = ensureString(outcome.suggestedDisposition, "needs_review");
+    const normalizedSuggestedDisposition = normalizeDisposition(rawSuggestedDisposition);
+
     const result: LeadQualityDepartmentResult = {
       success: true,
       leadQualificationScore: clampScore(raw.leadQualificationScore, 0),
@@ -336,7 +341,7 @@ export async function analyzeLeadQualityDepartment(
       outcomeCategorization: {
         outcomeCategory: validOutcomes.includes(outcome.outcomeCategory) ? outcome.outcomeCategory : "not_interested",
         dispositionAccurate: ensureBoolean(outcome.dispositionAccurate, false),
-        suggestedDisposition: ensureString(outcome.suggestedDisposition, "needs_review"),
+        suggestedDisposition: normalizedSuggestedDisposition,
         dispositionConfidence: clampFloat(outcome.dispositionConfidence, 0),
       },
       leadRouting: {

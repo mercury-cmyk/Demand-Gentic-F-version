@@ -156,6 +156,25 @@ export default function ClientPortalCampaignCreate() {
   const [titleInput, setTitleInput] = useState('');
   const [regionInput, setRegionInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
+  const [orgInteligenceLoading, setOrgIntelligenceLoading] = useState(false);
+  const [showOrgIntelligenceOptions, setShowOrgIntelligenceOptions] = useState(false);
+
+  // Fetch organization intelligence data
+  const { data: organizationIntelligence } = useQuery<any>({
+    queryKey: ['client-portal-organization-intelligence'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/client-portal/settings/organization-intelligence', {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        if (!res.ok) return null;
+        return res.json();
+      } catch (error) {
+        console.error('Failed to fetch organization intelligence:', error);
+        return null;
+      }
+    },
+  });
 
   // Fetch campaign pricing data
   const { data: pricingData } = useQuery<{
@@ -345,6 +364,110 @@ export default function ClientPortalCampaignCreate() {
     }
 
     event.target.value = '';
+  };
+
+  // ── Organization Intelligence helpers ────
+
+  const populateFromOrganizationIntelligence = async () => {
+    if (!organizationIntelligence?.organization) {
+      toast({
+        title: 'No Organization Intelligence',
+        description: 'Please set up your organization profile first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setOrgIntelligenceLoading(true);
+    try {
+      const org = organizationIntelligence.organization;
+      const updates: Partial<FormData> = {};
+
+      // Populate target industries from org intelligence
+      if (org.icp?.industries) {
+        const industries = Array.isArray(org.icp.industries)
+          ? org.icp.industries
+          : typeof org.icp.industries === 'string'
+          ? org.icp.industries.split(',').map((i: string) => i.trim()).filter((i: string) => i)
+          : [];
+        if (industries.length > 0) {
+          updates.targetIndustries = [...new Set([...form.targetIndustries, ...industries])];
+        }
+      } else if (org.identity?.industry) {
+        if (!form.targetIndustries.includes(org.identity.industry)) {
+          updates.targetIndustries = [...form.targetIndustries, org.identity.industry];
+        }
+      }
+
+      // Populate target job titles from org ICP personas
+      if (org.icp?.personas) {
+        const personas = Array.isArray(org.icp.personas)
+          ? org.icp.personas.map((p: any) => typeof p === 'string' ? p : p.title || '')
+          : typeof org.icp.personas === 'string'
+          ? org.icp.personas.split(',').map((p: string) => p.trim()).filter((p: string) => p)
+          : [];
+        const titles = personas.filter((t: string) => t && !form.targetTitles.includes(t));
+        if (titles.length > 0) {
+          updates.targetTitles = [...form.targetTitles, ...titles];
+        }
+      }
+
+      // Populate target regions
+      if (org.identity?.regions) {
+        const regions = Array.isArray(org.identity.regions)
+          ? org.identity.regions
+          : typeof org.identity.regions === 'string'
+          ? org.identity.regions.split(',').map((r: string) => r.trim()).filter((r: string) => r)
+          : [];
+        const newRegions = regions.filter((r: string) => r && !form.targetRegions.includes(r));
+        if (newRegions.length > 0) {
+          updates.targetRegions = [...form.targetRegions, ...newRegions];
+        }
+      }
+
+      // Populate target audience from org description or ICP
+      if (!form.targetAudience) {
+        let audience = '';
+        if (org.icp?.companySize) {
+          audience = `${org.icp.companySize} companies`;
+        }
+        if (org.identity?.description) {
+          audience += (audience ? ' - ' : '') + org.identity.description;
+        }
+        if (audience) {
+          updates.targetAudience = audience.slice(0, 500); // Limit to textarea capacity
+        }
+      }
+
+      // Populate success criteria if not set
+      if (!form.successCriteria && org.offerings?.useCases) {
+        const useCases = Array.isArray(org.offerings.useCases)
+          ? org.offerings.useCases.slice(0, 2).join(', ')
+          : typeof org.offerings.useCases === 'string'
+          ? org.offerings.useCases.split(',').slice(0, 2).join(', ')
+          : '';
+        if (useCases) {
+          updates.successCriteria = `Successfully execute ${useCases} use cases`;
+        }
+      }
+
+      // Apply updates
+      setForm(prev => ({ ...prev, ...updates }));
+      setShowOrgIntelligenceOptions(false);
+      toast({
+        title: 'Organization Intelligence Applied',
+        description: 'Campaign details populated from your organization profile.',
+      });
+    } catch (error) {
+      console.error('Error populating from organization intelligence:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to populate campaign details.',
+        variant: 'destructive',
+      });
+    } finally {
+      setOrgIntelligenceLoading(false);
+    }
   };
 
   const removeAttachment = (id: string) => {
@@ -638,6 +761,42 @@ export default function ClientPortalCampaignCreate() {
           All fields below are <strong>optional</strong>. Fill in what you can — our team will help configure the rest.
         </p>
       </div>
+
+      {/* Organization Intelligence CTA */}
+      {organizationIntelligence?.organization && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <Database className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+              <div>
+                <h3 className="font-semibold text-blue-900 dark:text-blue-100 text-sm">Organization Intelligence</h3>
+                <p className="text-blue-700 dark:text-blue-300 text-xs mt-1">
+                  Automatically populate campaign details from your organization profile.
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={populateFromOrganizationIntelligence}
+              disabled={orgInteligenceLoading}
+              className="flex-shrink-0 border-blue-200 hover:bg-blue-100 dark:border-blue-800 dark:hover:bg-blue-900"
+            >
+              {orgInteligenceLoading ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  Populate
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left column */}

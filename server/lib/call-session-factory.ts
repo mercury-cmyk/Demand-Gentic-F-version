@@ -11,8 +11,9 @@ import {
   campaigns,
   contacts,
   dialerCallAttempts,
-  type InsertCallSession,
 } from '@shared/schema';
+
+type InsertCallSession = typeof callSessions.$inferInsert;
 import { eq } from 'drizzle-orm';
 
 const LOG_PREFIX = '[CallSessionFactory]';
@@ -67,9 +68,10 @@ export async function createCallSessionSafely(
 
     // queueItemId is intentionally not validated since it's typically internal
 
-    // Insert with safe defaults
+    // Insert with safe defaults (strip validate* flags - not DB columns)
+    const { validateCampaignId: _vc, validateContactId: _vco, validateQueueItemId: _vq, ...rest } = input;
     const sanitizedInput = {
-      ...input,
+      ...rest,
       // Ensure null values for optional FKs
       campaignId: input.campaignId || null,
       contactId: input.contactId || null,

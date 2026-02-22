@@ -184,7 +184,7 @@ function TranscriptMessage({ turn, onTimestampClick }: TranscriptMessageProps) {
           )}
         >
           <Badge variant={isAgent ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
-            {isAgent ? 'AI Agent' : 'Prospect'}
+            {isAgent ? 'Agent' : 'Contact'}
           </Badge>
           {turn.timestamp && (
             <button

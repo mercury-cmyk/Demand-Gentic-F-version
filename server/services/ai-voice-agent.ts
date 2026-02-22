@@ -169,6 +169,8 @@ export interface CallContext {
   targetAudienceDescription?: string; // e.g., "CISOs at mid-market companies"
   productServiceInfo?: string; // Product/service details
   talkingPoints?: string[]; // Key points to mention
+  // Call flow configuration - state machine for AI agent execution
+  callFlow?: any;
   // Max call duration in seconds - auto-hangup after this time
   maxCallDurationSeconds?: number;
   // Number pool tracking for metrics and rotation

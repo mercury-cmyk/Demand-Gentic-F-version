@@ -778,9 +778,9 @@ router.get("/campaign-analysis", requireAuth, async (req: Request, res: Response
 
 router.post("/generate-coaching", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { campaignId, startDate, endDate, focusAreas, maxCalls = 20 } = req.body;
+    const { campaignId, startDate, endDate, focusAreas, maxCalls = 250 } = req.body;
 
-    // Fetch call quality records with transcripts
+    // Phase 1: Fetch metadata only (no transcripts) for all calls — lightweight query
     const conditions: any[] = [];
     if (campaignId) conditions.push(eq(callQualityRecords.campaignId, campaignId));
     if (startDate) conditions.push(gte(callQualityRecords.createdAt, new Date(startDate)));
@@ -790,11 +790,11 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
     const records = await db
       .select({
         callSessionId: callQualityRecords.callSessionId,
-        transcript: callQualityRecords.fullTranscript,
         qualityScore: callQualityRecords.overallQualityScore,
         engagementScore: callQualityRecords.engagementScore,
         objectionHandlingScore: callQualityRecords.objectionHandlingScore,
         closingScore: callQualityRecords.closingScore,
+        qualificationScore: callQualityRecords.qualificationScore,
         flowComplianceScore: callQualityRecords.flowComplianceScore,
         sentiment: callQualityRecords.sentiment,
         issues: callQualityRecords.issues,
@@ -803,11 +803,12 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
         expectedDisposition: callQualityRecords.expectedDisposition,
         dispositionAccurate: callQualityRecords.dispositionAccurate,
         campaignId: callQualityRecords.campaignId,
+        createdAt: callQualityRecords.createdAt,
       })
       .from(callQualityRecords)
       .where(and(...conditions))
       .orderBy(desc(callQualityRecords.createdAt))
-      .limit(Math.min(maxCalls, 30));
+      .limit(Math.min(maxCalls, 250));
 
     if (records.length === 0) {
       return res.json({
@@ -824,57 +825,158 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
       });
     }
 
-    // Get duration from call sessions
-    const sessionIds = records.map(r => r.callSessionId);
-    const sessions = await db
-      .select({ id: callSessions.id, duration: callSessions.durationSec, disposition: callSessions.aiDisposition })
-      .from(callSessions)
-      .where(sql`${callSessions.id} IN (${sql.join(sessionIds.map(id => sql`${id}`), sql`, `)})`);
-    const sessionMap: Record<string, any> = {};
-    for (const s of sessions) sessionMap[s.id] = s;
+    // Pre-aggregate statistics from ALL records before sampling (no transcripts needed)
+    const avgScore = (arr: (number | null)[]) => {
+      const valid = arr.filter((v): v is number => v != null);
+      return valid.length > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
+    };
 
-    // Load campaign context if provided
-    let campaignContext: any = undefined;
-    if (campaignId) {
-      const [camp] = await db
-        .select({
-          name: campaigns.name,
-          objective: campaigns.campaignObjective,
-          successCriteria: campaigns.successCriteria,
-          talkingPoints: campaigns.talkingPoints,
-          objections: campaigns.campaignObjections,
-          targetAudienceDescription: campaigns.targetAudienceDescription,
+    const issueFrequencies: Record<string, number> = {};
+    for (const r of records) {
+      if (Array.isArray(r.issues)) {
+        for (const issue of r.issues as any[]) {
+          const key = issue.type || issue.description || 'unknown';
+          issueFrequencies[key] = (issueFrequencies[key] || 0) + 1;
+        }
+      }
+    }
+
+    const aggregateStats = {
+      totalCalls: records.length,
+      avgQualityScore: avgScore(records.map(r => r.qualityScore)),
+      avgEngagementScore: avgScore(records.map(r => r.engagementScore)),
+      avgObjectionHandlingScore: avgScore(records.map(r => r.objectionHandlingScore)),
+      avgClosingScore: avgScore(records.map(r => r.closingScore)),
+      avgQualificationScore: avgScore(records.map(r => r.qualificationScore)),
+      avgFlowComplianceScore: avgScore(records.map(r => r.flowComplianceScore)),
+      avgDuration: null as number | null, // filled after session lookup on sampled calls
+      sentimentDistribution: {
+        positive: records.filter(r => r.sentiment === 'positive').length,
+        neutral: records.filter(r => r.sentiment === 'neutral').length,
+        negative: records.filter(r => r.sentiment === 'negative').length,
+      },
+      dispositionDistribution: records.reduce((acc, r) => {
+        const d = r.assignedDisposition || 'unknown';
+        acc[d] = (acc[d] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+      dispositionAccuracy: {
+        accurate: records.filter(r => r.dispositionAccurate === true).length,
+        inaccurate: records.filter(r => r.dispositionAccurate === false).length,
+        unreviewed: records.filter(r => r.dispositionAccurate == null).length,
+      },
+      issueFrequencies,
+    };
+
+    // Smart sampling: select up to 25 representative calls for transcript fetch
+    const SAMPLE_SIZE = 25;
+    let sampledIds: Set<string>;
+    if (records.length <= SAMPLE_SIZE) {
+      sampledIds = new Set(records.map(r => r.callSessionId));
+    } else {
+      sampledIds = new Set<string>();
+      const scored = records.filter(r => r.qualityScore != null).sort((a, b) => (a.qualityScore || 0) - (b.qualityScore || 0));
+      const unscored = records.filter(r => r.qualityScore == null);
+
+      // Worst 8
+      for (const r of scored.slice(0, 8)) sampledIds.add(r.callSessionId);
+      // Best 5
+      for (const r of scored.slice(-5)) sampledIds.add(r.callSessionId);
+
+      // Fill remaining from random pool (prefer calls with issues)
+      const remaining = [...scored, ...unscored].filter(r => !sampledIds.has(r.callSessionId));
+      const withIssues = remaining.filter(r => Array.isArray(r.issues) && (r.issues as any[]).length > 0);
+      const noIssues = remaining.filter(r => !Array.isArray(r.issues) || (r.issues as any[]).length === 0);
+      const pool = [...withIssues, ...noIssues];
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      for (const r of pool) {
+        if (sampledIds.size >= SAMPLE_SIZE) break;
+        sampledIds.add(r.callSessionId);
+      }
+    }
+
+    // Phase 2: Fetch transcripts ONLY for sampled calls + session durations + campaign context in PARALLEL
+    const sampledIdArray = Array.from(sampledIds);
+    const [transcriptRows, sessionRows, campaignContext, fallbackCampaign] = await Promise.all([
+      // Transcripts for sampled calls only
+      db.select({
+          callSessionId: callQualityRecords.callSessionId,
+          transcript: callQualityRecords.fullTranscript,
         })
-        .from(campaigns)
-        .where(eq(campaigns.id, campaignId))
-        .limit(1);
-      campaignContext = camp || undefined;
+        .from(callQualityRecords)
+        .where(sql`${callQualityRecords.callSessionId} IN (${sql.join(sampledIdArray.map(id => sql`${id}`), sql`, `)})`)
+        .limit(SAMPLE_SIZE),
+
+      // Session durations for sampled calls only
+      db.select({ id: callSessions.id, duration: callSessions.durationSec, disposition: callSessions.aiDisposition })
+        .from(callSessions)
+        .where(sql`${callSessions.id} IN (${sql.join(sampledIdArray.map(id => sql`${id}`), sql`, `)})`),
+
+      // Campaign context
+      campaignId
+        ? db.select({
+            name: campaigns.name,
+            objective: campaigns.campaignObjective,
+            successCriteria: campaigns.successCriteria,
+            talkingPoints: campaigns.talkingPoints,
+            objections: campaigns.campaignObjections,
+            targetAudienceDescription: campaigns.targetAudienceDescription,
+          })
+          .from(campaigns)
+          .where(eq(campaigns.id, campaignId))
+          .limit(1)
+          .then(rows => rows[0] || undefined)
+        : Promise.resolve(undefined),
+
+      // Fallback campaign name
+      !campaignId && records[0]?.campaignId
+        ? db.select({ name: campaigns.name })
+          .from(campaigns)
+          .where(eq(campaigns.id, records[0].campaignId))
+          .limit(1)
+          .then(rows => rows[0]?.name || null)
+        : Promise.resolve(null),
+    ]);
+
+    // Build lookup maps
+    const transcriptMap: Record<string, string> = {};
+    for (const t of transcriptRows) transcriptMap[t.callSessionId] = t.transcript || '';
+
+    const sessionMap: Record<string, { duration: number | null; disposition: string | null }> = {};
+    for (const s of sessionRows) sessionMap[s.id] = { duration: s.duration, disposition: s.disposition };
+
+    // Compute avg duration from sampled sessions
+    const durations = sessionRows.map(s => s.duration).filter((d): d is number => d != null);
+    aggregateStats.avgDuration = durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
+
+    // Update disposition distribution with session-level dispositions for sampled calls
+    for (const s of sessionRows) {
+      if (s.disposition && aggregateStats.dispositionDistribution[s.disposition] === undefined) {
+        aggregateStats.dispositionDistribution[s.disposition] = 0;
+      }
     }
 
-    // Get campaign name from first record's campaign if no explicit campaign context
-    let fallbackCampaignName: string | null = null;
-    if (!campaignContext && records[0]?.campaignId) {
-      const [camp] = await db
-        .select({ name: campaigns.name })
-        .from(campaigns)
-        .where(eq(campaigns.id, records[0].campaignId))
-        .limit(1);
-      fallbackCampaignName = camp?.name || null;
-    }
+    const campName = (campaignContext as any)?.name || fallbackCampaign || null;
 
-    const callsForAnalysis = records.map(r => ({
+    // Build sampled calls with transcripts for AI analysis
+    const sampledRecords = records.filter(r => sampledIds.has(r.callSessionId));
+    const sampledCalls = sampledRecords.map(r => ({
       callSessionId: r.callSessionId,
-      transcript: r.transcript || '',
+      transcript: transcriptMap[r.callSessionId] || '',
       disposition: sessionMap[r.callSessionId]?.disposition || r.assignedDisposition || null,
       qualityScore: r.qualityScore,
       engagementScore: r.engagementScore,
       objectionHandlingScore: r.objectionHandlingScore,
       closingScore: r.closingScore,
+      qualificationScore: r.qualificationScore,
       flowComplianceScore: r.flowComplianceScore,
       durationSeconds: sessionMap[r.callSessionId]?.duration || null,
       issues: (r.issues || []) as any[],
       recommendations: (r.recommendations || []) as any[],
-      campaignName: campaignContext?.name || fallbackCampaignName,
+      campaignName: campName,
       sentiment: r.sentiment,
       assignedDisposition: r.assignedDisposition,
       expectedDisposition: r.expectedDisposition,
@@ -882,15 +984,17 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
     }));
 
     const result = await generateCoachingRecommendations({
-      calls: callsForAnalysis,
-      campaignContext,
+      calls: sampledCalls,
+      campaignContext: campaignContext as any,
       focusAreas,
+      aggregateStats,
     });
 
-    // Override metadata with actual dates
+    // Override metadata with actual info
+    result.metadata.callsAnalyzed = records.length;
     result.metadata.dateRange = {
-      start: startDate || records[records.length - 1]?.callSessionId || '',
-      end: endDate || records[0]?.callSessionId || '',
+      start: startDate || (records[records.length - 1]?.createdAt?.toISOString() || ''),
+      end: endDate || (records[0]?.createdAt?.toISOString() || ''),
     };
 
     res.json(result);

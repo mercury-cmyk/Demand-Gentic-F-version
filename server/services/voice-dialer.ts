@@ -160,7 +160,7 @@ const MAX_TRANSCRIPTS = 200;
 const MAX_STATE_HISTORY = 50;
 const MAX_AUDIO_PATTERNS = 100;
 const MAX_RESPONSE_LATENCIES = 100;
-const VOICEMAIL_EARLY_WINDOW_MS = 3500;
+const VOICEMAIL_EARLY_WINDOW_MS = 6000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
 
 /** Trim array from the front if it exceeds maxLen. Call after pushing. */
@@ -587,36 +587,177 @@ function normalizeTranscriptForComparison(text: string): string {
     .trim();
 }
 
-function isVoicemailCueTranscript(transcript: string): boolean {
+export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
   const lower = normalizeTranscriptForComparison(transcript);
   if (!lower) return false;
 
   const cues = [
+    "record your name and reason for calling",
+    "if you record your name and reason for calling",
+    "state your name and reason for calling",
+    "tell me your name and reason for calling",
+    "before i try to connect you",
+    "before i connect you",
+    "i ll see if this person is available",
+    "i will see if this person is available",
+    "see if this person is available",
+    "please stay on the line",
+    "stay on the line while i try to connect you",
+    "call screening",
+    "call assist",
+  ];
+
+  if (cues.some((cue) => lower.includes(cue))) return true;
+
+  const regexCues = [
+    /(if )?record (your )?name and reason for calling/i,
+    /state your name and reason for calling/i,
+    /before i try to connect you/i,
+    /i( ll| will) see if this person is available/i,
+    /please stay on the line/i,
+    /call (screening|assist)/i,
+  ];
+
+  return regexCues.some((pattern) => pattern.test(lower));
+}
+
+/**
+ * Check if a transcript contains gatekeeper indicators that should EXCLUDE voicemail detection.
+ * When a live gatekeeper is speaking, phrases like "not available" mean the person is away,
+ * NOT that we've reached a voicemail system. This prevents false-positive voicemail classification.
+ */
+function isLiveGatekeeperTranscript(text: string): boolean {
+  const lower = typeof text === 'string' ? text.toLowerCase().trim() : '';
+  if (!lower) return false;
+
+  // Gatekeeper phrases that indicate a LIVE PERSON is speaking (not a voicemail system)
+  const liveGatekeeperIndicators = [
+    'what is your call regarding',
+    'what\'s your call regarding',
+    'what is this regarding',
+    'what\'s this regarding',
+    'who is calling',
+    'who\'s calling',
+    'how may i help',
+    'how can i help',
+    'can i help you',
+    'how may i direct',
+    'how can i direct',
+    'you\'ve come through to',
+    'you\'ve reached the office',
+    'this is the front desk',
+    'this is reception',
+    'what do you need',
+    'what can i do for you',
+    'let me check',
+    'let me see if',
+    'i\'ll check if',
+    'i\'ll see if',
+    'hold on',
+    'one moment',
+    'they\'re in a meeting',
+    'he\'s in a meeting',
+    'she\'s in a meeting',
+    'they\'re on another call',
+    'can i take a message',
+    'shall i take a message',
+    'would you like to leave a message',  // gatekeeper offering, not automated VM
+    'not at their desk',
+    'not at his desk',
+    'not at her desk',
+    'not in the office',
+    'try again later',
+    'call back later',
+    'send an email',
+    'what company',
+    'where are you calling from',
+    'is this a sales call',
+  ];
+
+  return liveGatekeeperIndicators.some(phrase => lower.includes(phrase));
+}
+
+export function isVoicemailCueTranscript(transcript: string): boolean {
+  const lower = normalizeTranscriptForComparison(transcript);
+  if (!lower) return false;
+  if (isAutomatedCallScreenerTranscript(lower)) return false;
+  // CRITICAL: Exclude live gatekeeper conversations from voicemail detection
+  // A gatekeeper saying "they're not available" is NOT voicemail
+  if (isLiveGatekeeperTranscript(lower)) return false;
+
+  const cues = [
     "leave a message",
     "leave your message",
+    "please leave a message after the tone",
+    "please leave your message",
     "after the beep",
     "after the tone",
-    "not available",
+    "the person you are calling is not available",
+    "not available to take your call",
     "cannot take your call",
     "cant take your call",
     "unable to answer",
+    "unable to take your call",
+    "im unavailable to take your call right now",
+    "currently unavailable",
+    "is unavailable",
+    "am unavailable",
     "please leave",
+    "leave your name",
+    "leave a name",
     "record your message",
     "voicemail",
     "voice mail",
     "mailbox",
+    "mailbox is full",
+    "cannot accept messages",
     "no one is available",
     "your call has been forwarded",
+    "your call has been forwarded to voicemail",
+    "your call has been forwarded to voice mail",
     "automatic voice message system",
+    "you have reached the voice mail of",
+    "you have reached the voicemail of",
+    "at the tone please record your message",
+    "you are trying to reach is not available",
+    "away from my phone",
+    "away from the phone",
+    "i ll get back to you",
+    "i will get back to you",
+    "return your call",
+    "come to the phone",
+    "press pound",
+    "hang up or press",
     "beep",
   ];
 
-  return cues.some((cue) => lower.includes(cue));
+  if (cues.some((cue) => lower.includes(cue))) return true;
+
+  const regexCues = [
+    /you have reached (the )?voice ?mail (of|for)/i,
+    /your call has been forwarded to (an )?(automatic )?voice ?mail/i,
+    /(i m|im|i am) unavailable to take your call right now/i,
+    /please leave (a )?message after the tone/i,
+    /the person you are calling is not available/i,
+    /at the tone please record your message/i,
+    /(mailbox is full|cannot accept messages)/i,
+  ];
+
+  return regexCues.some((pattern) => pattern.test(lower));
 }
 
 function shouldFastAbortForEarlyVoicemail(session: OpenAIRealtimeSession, transcript: string): boolean {
   if (session.detectedDisposition === "voicemail") return false;
   if (!isVoicemailCueTranscript(transcript)) return false;
+
+  // CRITICAL: If we already detected a gatekeeper state, do NOT fast abort as voicemail
+  // A gatekeeper saying "they're not available" is a live person, not voicemail
+  if (session.conversationState.currentState === 'GATEKEEPER') return false;
+  if (session.conversationState.stateHistory.includes('GATEKEEPER')) return false;
+
+  // If there have been multiple back-and-forth turns, this is a live conversation, not voicemail
+  const userTurns = session.transcripts.filter(t => t.role === 'user').length;
+  if (userTurns >= 2) return false;
 
   const now = Date.now();
   const baseline =
@@ -3146,6 +3287,34 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           if ('softResetRepetitionTracking' in provider) {
             (provider as any).softResetRepetitionTracking();
           }
+        } else if (detectGatekeeper(event.text)) {
+          // GATEKEEPER DETECTED: Transition to GATEKEEPER state and inject guidance
+          // This prevents the agent from endlessly repeating "May I speak with [Name]?"
+          // when a receptionist/office assistant is asking "What is your call regarding?"
+          if (session.conversationState.currentState !== 'GATEKEEPER') {
+            session.conversationState.currentState = 'GATEKEEPER';
+            session.conversationState.stateHistory.push('GATEKEEPER');
+            trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
+            console.log(`${LOG_PREFIX} 🚪 [Gemini] GATEKEEPER DETECTED for call: ${session.callId} - Transitioning to GATEKEEPER state`);
+
+            // Inject gatekeeper handling reminder so the agent engages properly
+            const contactFirstName = contactInfo?.firstName || contactInfo?.fullName?.split(' ')[0] || 'the person';
+            const agentName = resolvedAgentNameGemini || 'calling agent';
+            const orgName = resolvedOrgNameGemini || 'our company';
+            const gatekeeperReminder = `[GATEKEEPER DETECTED] You are speaking with a gatekeeper/receptionist, NOT ${contactFirstName}. ` +
+              `Do NOT repeat "May I speak with ${contactFirstName}?" again — they already heard you. ` +
+              `ENGAGE with the gatekeeper warmly and answer their questions: ` +
+              `If asked "What is this regarding?", say: "My name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${contactFirstName} available?" ` +
+              `If asked "Who is calling?", say: "My name is ${agentName}, calling from ${orgName}." ` +
+              `Be kind, polite, and professional. Make no more than 2 polite attempts. If refused, thank them sincerely and end the call.`;
+            provider.sendTextMessage(gatekeeperReminder);
+            console.log(`${LOG_PREFIX} 🚪 [Gemini] Injected gatekeeper handling guidance for call: ${session.callId}`);
+
+            // Reset repetition tracking since gatekeeper is a major state transition
+            if ('softResetRepetitionTracking' in provider) {
+              (provider as any).softResetRepetitionTracking();
+            }
+          }
         }
       }
 
@@ -3358,19 +3527,49 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // 2. AI hears it, THEN introduces itself
     //
     // We wait for Deepgram to detect inbound speech before nudging Gemini.
-    // Fallback: If no speech detected after 4.5s, send greeting anyway (silent pickup / voicemail).
+    // Fallback: if no human speech is detected, send greeting only after a guarded delay.
     //
     // The greeting trigger happens in two places:
-    // - Deepgram onSpeechStarted (inbound) → triggers greeting after 400ms delay
-    // - Fallback timer (4.5s) → triggers greeting if no speech detected
+    // - Deepgram onSpeechStarted (inbound) marks speech and waits for transcript classification
+    // - Fallback timer sends greeting only when automation/voicemail cues are absent
     (session as any).greetingTriggeredByCallerSpeech = false;
+    (session as any).fallbackGreetingDeferrals = 0;
 
     // Fallback: If caller doesn't speak, send greeting.
-    // This handles: silent pickups, voicemail that doesn't announce, etc.
-    // 4.5s balances dead-air risk while allowing early voicemail cues to surface first.
-    const fallbackGreetingTimer = setTimeout(() => {
-      if (session.isActive && !session.audioDetection.hasGreetingSent) {
-        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4.5s - sending greeting (fallback)`);
+    // If we are hearing audio but no human is detected, defer briefly to avoid speaking into voicemail/automation.
+    const scheduleFallbackGreetingCheck = (delayMs: number): void => {
+      const timer = setTimeout(() => {
+        if (!session.isActive || session.audioDetection.hasGreetingSent || session.isEnding) return;
+
+        const hasRecentMachineCue = session.audioDetection.audioPatterns
+          .slice(-4)
+          .some((pattern) => pattern.type === "ivr" || pattern.type === "music");
+        const hasTranscriptVoicemailCue = session.transcripts
+          .slice(-6)
+          .some((turn) => turn.role === "user" && isVoicemailCueTranscript(turn.text));
+
+        if (hasRecentMachineCue || hasTranscriptVoicemailCue) {
+          console.log(`${LOG_PREFIX} [AudioGuard] Fallback greeting suppressed due to automation/voicemail cues`);
+          session.detectedDisposition = "voicemail";
+          session.callOutcome = "voicemail";
+          recordVoicemailDetectedEvent(session, "fallback_greeting_guard");
+          setImmediate(() => {
+            endCall(session.callId, "voicemail").catch((err) => {
+              console.error(`${LOG_PREFIX} Failed to end call after fallback greeting guard:`, err);
+            });
+          });
+          return;
+        }
+
+        const deferrals = Number((session as any).fallbackGreetingDeferrals || 0);
+        if (session.telnyxInboundFrames > 0 && !session.audioDetection.humanDetected && deferrals < 2) {
+          (session as any).fallbackGreetingDeferrals = deferrals + 1;
+          console.log(`${LOG_PREFIX} [AudioGuard] Deferring fallback greeting (${deferrals + 1}/2) while classifying inbound audio`);
+          scheduleFallbackGreetingCheck(2000);
+          return;
+        }
+
+        console.log(`${LOG_PREFIX} No caller speech detected - sending greeting (fallback)`);
         session.audioDetection.hasGreetingSent = true;
         provider.sendOpeningMessage(openingScript);
         session.openingPromptSentAt = new Date();
@@ -3379,9 +3578,12 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           metadata: { provider: "google", variant: session.voiceLiftVariant || "control" },
           once: true,
         });
-      }
-    }, 4500);
-    (session as any).fallbackGreetingTimer = fallbackGreetingTimer; // Store to clear it later
+      }, delayMs);
+
+      (session as any).fallbackGreetingTimer = timer;
+    };
+
+    scheduleFallbackGreetingCheck(6500);
 
     // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 5s,
     // force-retry the opening. This catches edge cases where the greeting was dropped
@@ -3571,11 +3773,10 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
           .map((t: { role: string; text: string }) => t.text.toLowerCase())
           .join(' ');
 
-        // CRITICAL: For qualified_lead, agent must have meaningful dialogue
-        // If no agent transcripts, we can't verify the booking was completed
+        // For qualified_lead, agent must have meaningful dialogue
         const hasMinimalAgentDialogue = agentTranscripts.length >= 3;
         const agentWordCount = agentTranscriptText.split(/\s+/).filter(Boolean).length;
-        const hasSubstantialAgentDialogue = agentWordCount >= 30; // At least 30 words from agent
+        const hasSubstantialAgentDialogue = agentWordCount >= 30;
 
         // Check for email confirmation - AGENT must have asked about it (or spoken it)
         const agentAskedForEmail = agentTranscriptText.includes('email') ||
@@ -3632,35 +3833,33 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
         // Build list of missing requirements
         const missingSteps: string[] = [];
 
-        // FUNDAMENTAL CHECK: Must have agent dialogue
-        if (!hasMinimalAgentDialogue) {
-          missingSteps.push('have a substantial conversation (minimum 3 agent turns)');
-        }
-        if (!hasSubstantialAgentDialogue) {
-          missingSteps.push('provide meaningful agent dialogue (transcript too short)');
+        // FUNDAMENTAL CHECK: Must have some agent dialogue (but keep thresholds low)
+        // The AI was in the conversation — trust its judgment on qualification
+        if (!hasMinimalAgentDialogue && !hasSubstantialAgentDialogue) {
+          missingSteps.push('have a conversation with the prospect (minimum 2 agent turns)');
         }
 
-        // For appointment campaigns, require full booking flow
+        // For appointment campaigns, email confirmation is important but time proposal is advisory
         if (isAppointmentCampaign) {
-          if (!hasEmailConfirmation) {
-            missingSteps.push('confirm their email address');
+          if (!hasEmailConfirmation && !reasonLower.includes('email') && !reasonLower.includes('meeting') && !reasonLower.includes('booked') && !reasonLower.includes('scheduled')) {
+            missingSteps.push('confirm their email address or mention booking details in the reason');
           }
+          // Time proposal is advisory — log but don't block
           if (!agentProposedTime) {
-            missingSteps.push('propose specific meeting times');
+            console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: Agent didn't propose specific times, but AI says qualified. Allowing.`);
           }
         }
-        // For content/asset campaigns, require email confirmation (no meeting required)
+        // For content/asset campaigns, email confirmation OR mention in reason is enough
         if (isContentCampaign) {
-          if (!hasEmailConfirmation) {
+          if (!hasEmailConfirmation && !reasonLower.includes('email') && !reasonLower.includes('send') && !reasonLower.includes('whitepaper') && !reasonLower.includes('content')) {
             missingSteps.push('confirm their email address for sending the content');
           }
         }
 
-        // Check if qualifying questions have been addressed (if campaign has them)
+        // Qualification questions are advisory — log but don't block
+        // The AI was in the conversation and knows if it asked the right questions
         const qualificationCriteria = session.qualificationCriteria;
         if (qualificationCriteria && qualificationCriteria.trim().length > 0) {
-          // Parse qualifying questions from criteria text
-          // Check if agent asked questions OR if reason mentions qualification
           const combinedTranscript = (agentTranscriptText + ' ' + userTranscriptText).toLowerCase();
           const reasonHasQualification =
             reasonLower.includes('qualif') ||
@@ -3673,7 +3872,6 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
             reasonLower.includes('pain point') ||
             reasonLower.includes('current solution');
 
-          // Agent should have asked at least one qualifying question
           const agentAskedQuestions =
             agentTranscriptText.includes('?') ||
             agentTranscriptText.includes('tell me') ||
@@ -3685,13 +3883,13 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
             agentTranscriptText.includes('would you');
 
           if (!reasonHasQualification && !agentAskedQuestions) {
-            missingSteps.push('ask the qualification questions (see campaign criteria: budget, timeline, decision process, current solutions, pain points)');
+            console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: Qualification questions may not have been addressed, but AI says qualified. Allowing.`);
           }
         }
 
-        // Always require goodbye
+        // Goodbye is nice to have, not a blocking requirement
         if (!hasGoodbye) {
-          missingSteps.push('say a polite goodbye (e.g., "Thank you for your time!")');
+          console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: No goodbye detected, but not blocking disposition.`);
         }
 
         if (missingSteps.length > 0) {
@@ -3943,30 +4141,56 @@ Only AFTER completing these steps can you submit the disposition.`
           session.detectedDisposition = 'voicemail';
           console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: voicemail (from reason)`);
         }
-        // If reason indicates a COMPLETED BOOKING FLOW (meeting confirmed with date/time)
-        // This catches cases where submit_disposition was blocked (e.g., native-audio no text transcripts)
-        // but the AI clearly completed the booking/qualification flow.
-        // STRICT: Must have evidence of actual meeting booking, NOT just "send info" or "follow up".
-        // "Send me info" / "sure, email me" = polite brush-off, NOT qualified_lead.
+        // If reason indicates a COMPLETED BOOKING/QUALIFICATION FLOW
+        // This catches cases where submit_disposition was blocked but the AI completed the flow.
+        // Trust the AI's judgment — it was in the conversation.
         else if (
-          userTranscriptCount >= 3 && callDurationSeconds >= 60 &&
+          userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
           (reason.includes('calendar invite') ||
+           reason.includes('booked') || reason.includes('scheduled') ||
            (reason.includes('meeting') && (reason.includes('confirmed') || reason.includes('booked') || reason.includes('scheduled'))) ||
-           (reason.includes('confirmed email') && reason.includes('confirmed') && (reason.includes('time') || reason.includes('date') || reason.includes('meeting'))))
+           (reason.includes('email') && reason.includes('confirmed')))
         ) {
           session.detectedDisposition = 'qualified_lead';
           console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (from end_call reason with booking evidence: "${reason}")`);
         }
-        // Soft interest (send info, whitepaper, follow-up) → needs_review for human QA, NOT auto-qualified
+        // Content acceptance (send info, whitepaper, follow-up with email confirmed) → qualified_lead
+        // For content syndication campaigns, accepting content delivery IS the campaign objective.
+        // "Send me the whitepaper" + email confirmed = QUALIFIED, not needs_review.
         else if (
           userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
           (reason.includes('whitepaper') || reason.includes('send information') ||
-           reason.includes('follow up') || reason.includes('follow-up') ||
+           reason.includes('send content') || reason.includes('send over') ||
            reason.includes('accepted') || reason.includes('agreed') ||
-           reason.includes('polite goodbye'))
+           reason.includes('email confirmed') || reason.includes('confirmed email'))
         ) {
-          session.detectedDisposition = 'needs_review';
-          console.log(`${LOG_PREFIX} [Gemini] 🔍 Inferred disposition: needs_review (soft interest signals but no confirmed booking: "${reason}")`);
+          // Check campaign type to determine if this is qualified or needs_review
+          const campaignType = session.campaignType || '';
+          const isContentCampaign = campaignType === 'content_syndication' || campaignType === 'high_quality_leads';
+
+          if (isContentCampaign || reason.includes('email confirmed') || reason.includes('confirmed email')) {
+            session.detectedDisposition = 'qualified_lead';
+            console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (content accepted/email confirmed for ${campaignType || 'unknown'} campaign: "${reason}")`);
+          } else {
+            // For non-content campaigns, "send me info" with email confirmed is still qualified
+            // Only route to callback_requested if there's no email/action confirmation
+            if (reason.includes('email') || reason.includes('send')) {
+              session.detectedDisposition = 'qualified_lead';
+              console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (prospect accepted follow-up with action: "${reason}")`);
+            } else {
+              session.detectedDisposition = 'callback_requested';
+              console.log(`${LOG_PREFIX} [Gemini] 📞 Inferred disposition: callback_requested (soft interest, follow-up path agreed: "${reason}")`);
+            }
+          }
+        }
+        // Polite goodbye after a real conversation with engagement → callback_requested (not needs_review)
+        else if (
+          userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
+          (reason.includes('follow up') || reason.includes('follow-up') ||
+           reason.includes('polite goodbye') || reason.includes('call back'))
+        ) {
+          session.detectedDisposition = 'callback_requested';
+          console.log(`${LOG_PREFIX} [Gemini] 📞 Inferred disposition: callback_requested (follow-up agreed: "${reason}")`);
         }
       }
       
@@ -4500,6 +4724,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         // This must run before we decide to ignore IVR audio
         if (audioType.type === 'ivr') {
           const lowerTranscript = message.transcript.toLowerCase();
+          const isScreenerPrompt = isAutomatedCallScreenerTranscript(lowerTranscript);
           const voicemailIndicators = [
             // Standard voicemail greetings
             'leave a message',
@@ -4551,7 +4776,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             'away from the phone',
           ];
 
-          const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
+          const isVoicemail = !isScreenerPrompt && voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
           // CRITICAL: Override disposition if AI incorrectly set not_interested/no_answer/qualified_lead for voicemail
           // The transcript evidence should take precedence over AI's disposition
           // FIX: Include 'qualified_lead' to catch cases where AI mistakenly classifies voicemail as qualified
@@ -4559,6 +4784,10 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             session.detectedDisposition === 'not_interested' ||
             session.detectedDisposition === 'no_answer' ||
             session.detectedDisposition === 'qualified_lead';
+
+          if (isScreenerPrompt) {
+            console.log(`${LOG_PREFIX} AI screener prompt detected - engage once and wait for human`);
+          }
 
           if (isVoicemail && shouldOverrideDisposition) {
             if (session.detectedDisposition && session.detectedDisposition !== 'voicemail') {
@@ -5070,6 +5299,96 @@ function detectIdentityConfirmation(transcript: string): boolean {
 }
 
 /**
+ * Detect if the user's transcript indicates a gatekeeper (receptionist, office assistant, etc.)
+ * rather than the target contact. This allows the state machine to transition to GATEKEEPER
+ * state so the agent responds appropriately instead of repeating identity checks.
+ */
+function detectGatekeeper(transcript: string): boolean {
+  const normalizedText = transcript.toLowerCase().trim();
+
+  // Phrases that strongly indicate a gatekeeper / receptionist / office assistant
+  const gatekeeperPhrases = [
+    // Direct gatekeeper questions
+    'what is your call regarding',
+    'what\'s your call regarding',
+    'what is this regarding',
+    'what\'s this regarding',
+    'what is this about',
+    'what\'s this about',
+    'who is calling',
+    'who\'s calling',
+    'where are you calling from',
+    'what company are you from',
+    'what company are you with',
+    'how may i direct your call',
+    'how can i direct your call',
+    'how may i help you',
+    'how can i help you',
+    'can i help you',
+    'may i help you',
+    'what do you need',
+    'what can i do for you',
+    'who are you trying to reach',
+    'who are you looking for',
+    'what is the nature of your call',
+    'what\'s the nature of your call',
+    'what is the purpose of your call',
+    'what\'s the purpose of your call',
+    'is this a sales call',
+    'are you selling something',
+
+    // Indicating third-party reference (they are NOT the target)
+    'you\'ve come through to the office',
+    'you\'ve reached the office',
+    'you\'ve called the office',
+    'this is the front desk',
+    'this is reception',
+    'this is the main line',
+    'this is the general line',
+    'you\'ve come through to reception',
+
+    // Offering to help / transfer
+    'let me see if',
+    'let me check if',
+    'i\'ll see if',
+    'i\'ll check if',
+    'i can transfer you',
+    'let me transfer you',
+    'let me put you through',
+    'i\'ll put you through',
+    'let me connect you',
+    'i\'ll connect you',
+    'hold on a moment',
+    'hold on a second',
+    'one moment please',
+    'please hold',
+    'let me get',
+
+    // Gatekeeper blocking
+    'they\'re not available',
+    'he\'s not available',
+    'she\'s not available',
+    'not at their desk',
+    'not at his desk',
+    'not at her desk',
+    'not in the office',
+    'they\'re in a meeting',
+    'he\'s in a meeting',
+    'she\'s in a meeting',
+    'they\'re on another call',
+    'can i take a message',
+    'would you like to leave a message',
+    'shall i take a message',
+    'i can take a message',
+    'send an email',
+    'try again later',
+    'call back later',
+  ];
+
+  return gatekeeperPhrases.some(phrase => normalizedText.includes(phrase));
+}
+
+/**
  * Intelligent Audio Detection - Determines if audio is human speech, IVR, music, or hold
  * Returns the audio type and confidence level
  * VOICEMAIL detection takes highest priority to ensure immediate hangup
@@ -5084,6 +5403,12 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
   }
 
   console.log(`${LOG_PREFIX} ${LOG_TAG} Analyzing: "${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '...' : ''}"`);
+
+  // AI call screeners are automated systems, but NOT voicemail.
+  // We should engage once and wait for a human, not hang up as voicemail.
+  if (isAutomatedCallScreenerTranscript(normalizedText)) {
+    return { type: 'ivr', confidence: 0.96 };
+  }
 
   // VOICEMAIL Detection - CHECK FIRST (highest priority)
   // These patterns indicate the call went to voicemail - we must hang up immediately
@@ -5829,7 +6154,10 @@ function formatTranscriptNotes(transcripts: OpenAIRealtimeSession["transcripts"]
     return null;
   }
 
-  const transcriptText = transcripts.map(t => `${t.role}: ${t.text}`).join("\n");
+  const transcriptText = transcripts.map(t => {
+    const label = t.role === 'assistant' ? 'Agent' : t.role === 'user' ? 'Contact' : t.role;
+    return `${label}: ${t.text}`;
+  }).join("\n");
   if (!transcriptText.trim()) {
     return null;
   }
@@ -6238,14 +6566,19 @@ async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transc
     "after the beep",
     "after the tone",
     "not available",
+    "the person you are calling is not available",
     "cannot take your call",
     "please leave",
     "record your message",
+    "at the tone, please record your message",
+    "mailbox is full",
+    "cannot accept messages",
     "voicemail",
     "answering machine"
   ];
   
-  const isVoicemail = voicemailPhrases.some(phrase => lowerTranscript.includes(phrase));
+  const isScreener = isAutomatedCallScreenerTranscript(lowerTranscript);
+  const isVoicemail = !isScreener && voicemailPhrases.some(phrase => lowerTranscript.includes(phrase));
   
   if (isVoicemail && !session.detectedDisposition) {
     console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId}`);
@@ -6310,32 +6643,8 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
           encoding: deepgramEncoding,
           onSpeechStarted: (channel) => {
             if (channel === 'inbound' && session.isActive && !session.audioDetection.hasGreetingSent && !(session as any).greetingTriggeredByCallerSpeech) {
-              console.log(`${LOG_PREFIX} 🗣️ Caller speech detected by Deepgram - triggering greeting`);
+              console.log(`${LOG_PREFIX} [AudioGuard] Caller speech detected by Deepgram - waiting for transcript classification before greeting`);
               (session as any).greetingTriggeredByCallerSpeech = true;
-
-              // Clear the fallback timer since speech was detected
-              if ((session as any).fallbackGreetingTimer) {
-                clearTimeout((session as any).fallbackGreetingTimer);
-                (session as any).fallbackGreetingTimer = null;
-                console.log(`${LOG_PREFIX}  clearTimeout for fallback greeting timer`);
-              }
-
-              // Send greeting immediately when speech is detected.
-              // Deepgram already introduces latency (startup + detection), so by the
-              // time onSpeechStarted fires, the prospect has already finished "Hello?".
-              // Adding extra delay here makes the agent feel sluggish. Gemini's VAD
-              // handles barge-in if the prospect keeps talking.
-              setImmediate(() => {
-                if (session.isActive && !session.audioDetection.hasGreetingSent) {
-                  session.audioDetection.hasGreetingSent = true;
-                  const provider = (session as any).geminiProvider;
-                  const script = (session as any).geminiOpeningScript;
-                  if (provider && script) {
-                    console.log(`${LOG_PREFIX} 🎙️ Sending greeting immediately after caller speech detected`);
-                    provider.sendOpeningMessage(script);
-                  }
-                }
-              });
             }
           },
           onTranscript: (segment) => {
@@ -6576,11 +6885,13 @@ async function resolveTelnyxCallControlId(session: OpenAIRealtimeSession): Promi
 async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<void> {
   const telnyxApiKey = process.env.TELNYX_API_KEY;
   if (!telnyxApiKey) {
+    console.warn(`${LOG_PREFIX} ⚠️ TELNYX_API_KEY not set - cannot hang up call ${session.callId} via Telnyx API`);
     return;
   }
 
   const callControlId = await resolveTelnyxCallControlId(session);
   if (!callControlId) {
+    console.warn(`${LOG_PREFIX} ⚠️ Cannot resolve callControlId for call ${session.callId} (callAttemptId=${session.callAttemptId}) - Telnyx hangup SKIPPED. Call may become zombie!`);
     return;
   }
 
@@ -6604,6 +6915,70 @@ async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<void> 
   } catch (error) {
     console.warn(`${LOG_PREFIX} Telnyx hangup API request failed for call ${session.callId}:`, error);
   }
+}
+
+/**
+ * Retry version of forceTelnyxHangup - attempts multiple times with delay.
+ * Used as a safety net when the primary endCall might have failed to hang up.
+ * On each retry, re-resolves the callControlId in case it became available later
+ * (e.g., the bridge stored it after the initial endCall attempt).
+ */
+async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRetries: number): Promise<void> {
+  const telnyxApiKey = process.env.TELNYX_API_KEY;
+  if (!telnyxApiKey) return;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const callControlId = await resolveTelnyxCallControlId(session);
+    if (!callControlId) {
+      // Try using callId and callAttemptId directly as fallback IDs
+      const fallbackIds = [session.callId, session.callAttemptId].filter(Boolean);
+      let hung = false;
+      for (const id of fallbackIds) {
+        try {
+          const resp = await fetch(`https://api.telnyx.com/v2/calls/${id}/actions/hangup`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${telnyxApiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          if (resp.ok) {
+            console.log(`${LOG_PREFIX} ✅ Retry hangup succeeded using fallback ID ${id} for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
+            hung = true;
+            break;
+          }
+        } catch (_) { /* try next */ }
+      }
+      if (hung) return;
+
+      if (attempt < maxRetries) {
+        console.warn(`${LOG_PREFIX} ⚠️ Retry hangup attempt ${attempt}/${maxRetries}: no callControlId for ${session.callId}, retrying in ${attempt * 2}s...`);
+        await new Promise(r => setTimeout(r, attempt * 2000));
+        continue;
+      }
+      console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries exhausted for call ${session.callId} - could not resolve callControlId`);
+      return;
+    }
+
+    try {
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${telnyxApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (response.ok) {
+        console.log(`${LOG_PREFIX} ✅ Retry hangup succeeded for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
+        return;
+      }
+      const errText = await response.text().catch(() => '');
+      console.warn(`${LOG_PREFIX} Retry hangup attempt ${attempt}/${maxRetries} returned ${response.status}: ${errText}`);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Retry hangup attempt ${attempt}/${maxRetries} failed:`, error);
+    }
+
+    if (attempt < maxRetries) {
+      await new Promise(r => setTimeout(r, attempt * 2000));
+    }
+  }
+  console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries failed for call ${session.callId}`);
 }
 
 async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voicemail' | 'error'): Promise<void> {
@@ -6729,9 +7104,21 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   await forceTelnyxHangup(session);
 
   // Close Telnyx WebSocket to terminate the call (this triggers Telnyx to hangup)
-  if (session.telnyxWs && session.telnyxWs.readyState === WebSocket.OPEN) {
-    console.log(`${LOG_PREFIX} Closing Telnyx WebSocket to terminate call ${callId}`);
-    session.telnyxWs.close();
+  if (session.telnyxWs) {
+    const wsState = session.telnyxWs.readyState;
+    if (wsState === WebSocket.OPEN || wsState === WebSocket.CONNECTING) {
+      console.log(`${LOG_PREFIX} Closing Telnyx WebSocket to terminate call ${callId} (state: ${wsState})`);
+      session.telnyxWs.close();
+    }
+    // Force-terminate the WebSocket if close() doesn't work fast enough
+    // terminate() destroys the underlying socket immediately (no close handshake)
+    try {
+      if (typeof (session.telnyxWs as any).terminate === 'function') {
+        setTimeout(() => {
+          try { (session.telnyxWs as any).terminate(); } catch (_) {}
+        }, 2000);
+      }
+    } catch (_) {}
   }
 
   // Build transcript — use Gemini in-session transcripts as a lightweight fallback
@@ -6765,24 +7152,78 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     console.log(`${LOG_PREFIX} 📊 Auto-disposition (user hangup/system end): ${disposition} (analyzed from outcome=${outcome}, transcripts=${session.transcripts.length})`);
   }
 
+  // ==================== HUMAN vs MACHINE TURN DETECTION ====================
+  // Before applying safeguards, distinguish real human turns from machine/IVR/voicemail turns.
+  // Machine turns include: automated greetings, IVR prompts, voicemail messages, hold music transcriptions.
+  // Only real human turns should influence disposition decisions.
+  const machinePatterns = [
+    /leave a message/i, /after the beep/i, /after the tone/i, /voicemail/i,
+    /press \d/i, /press one/i, /press two/i, /main menu/i, /for sales/i,
+    /for support/i, /please hold/i, /your call is being/i, /transferring/i,
+    /all (our )?operators/i, /all agents are busy/i, /extension number/i,
+    /dial by name/i, /not available to take/i, /cannot take your call/i,
+    /mailbox/i, /record your message/i, /automatic voice message/i,
+    /your call has been forwarded/i, /is not available/i, /at the tone/i,
+    /we didn't get your message/i, /maximum time permitted/i,
+    /please stay on the line/i, /putting you through/i,
+  ];
+
+  const userTranscripts = session.transcripts.filter(t => t.role === 'user');
+  const humanUserTurns = userTranscripts.filter(t => {
+    const text = t.text.trim();
+    if (!text || text.length < 3) return false;
+    // If transcript matches machine patterns, it's NOT a human turn
+    return !machinePatterns.some(p => p.test(text));
+  });
+  const humanTurnCount = humanUserTurns.length;
+  const totalUserTurnCount = userTranscripts.length;
+
+  console.log(`${LOG_PREFIX} 🔍 Turn analysis: ${totalUserTurnCount} total user turns, ${humanTurnCount} human turns (${totalUserTurnCount - humanTurnCount} machine turns)`);
+
   // Safeguard: avoid "not_interested" when the transcript indicates engagement/interest,
-  // but the flow was incomplete (common when agent-side transcripts were missing or the call ended abruptly).
-  // Prefer routing to needs_review so it doesn't get treated as an explicit rejection.
-  if (disposition === 'not_interested' && session.transcripts.length > 0) {
+  // but ONLY if the interest signals come from real human turns (not machine audio).
+  if (disposition === 'not_interested' && humanTurnCount > 0) {
     const hasDecline = hasExplicitDecline(session.transcripts);
     const hasInterest = hasInterestSignals(session.transcripts);
     if (hasInterest && !hasDecline) {
-      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: transcript shows interest without explicit decline. Overriding not_interested → needs_review.`);
-      disposition = 'needs_review';
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: ${humanTurnCount} human turns show interest without explicit decline. Overriding not_interested → callback_requested.`);
+      disposition = 'callback_requested';
     }
+  }
+
+  // CRITICAL SAFEGUARD: Fix no_answer for calls with real HUMAN multi-turn transcripts.
+  // Only override if the turns are from real humans, not machine/IVR audio.
+  if (disposition === 'no_answer' && humanTurnCount >= 3) {
+    const hasInterestInTranscript = hasInterestSignals(session.transcripts);
+    const hasDeclineInTranscript = hasExplicitDecline(session.transcripts);
+
+    if (hasInterestInTranscript && !hasDeclineInTranscript) {
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns with interest signals. Overriding → callback_requested.`);
+      disposition = 'callback_requested';
+    } else if (!hasDeclineInTranscript) {
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns (real conversation). Overriding → callback_requested.`);
+      disposition = 'callback_requested';
+    } else {
+      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns but decline detected. Overriding → not_interested.`);
+      disposition = 'not_interested';
+    }
+  } else if (disposition === 'no_answer' && totalUserTurnCount >= 3 && humanTurnCount < 3) {
+    // Had turns but they were mostly machine — keep as no_answer
+    console.log(`${LOG_PREFIX} ℹ️ no_answer has ${totalUserTurnCount} total turns but only ${humanTurnCount} human turns (mostly machine). Keeping as no_answer.`);
   }
 
   // Check for voicemail in transcript — catches cases where AMD missed the voicemail
   // Also catches needs_review when the safeguard at line 5768 overrode not_interested
   // but the transcript clearly indicates a voicemail system, not a human conversation
-  if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript)) {
+  // CRITICAL: Do NOT override to voicemail if a gatekeeper was detected or if there was
+  // a multi-turn conversation (gatekeeper saying "not available" != voicemail system)
+  const hadGatekeeperInteraction = session.conversationState.stateHistory.includes('GATEKEEPER');
+  const hadMultipleTurns = session.transcripts.filter(t => t.role === 'user').length >= 2;
+  if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript) && !hadGatekeeperInteraction && !hadMultipleTurns) {
     console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript (was ${disposition}), overriding disposition to voicemail`);
     disposition = 'voicemail';
+  } else if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript) && (hadGatekeeperInteraction || hadMultipleTurns)) {
+    console.log(`${LOG_PREFIX} ⚠️ Voicemail phrases found in transcript but gatekeeper/multi-turn conversation detected — keeping disposition as ${disposition} (not overriding to voicemail)`);
   }
 
   // Check for IVR/auto-attendant system (keep as no_answer but log for analytics)
@@ -6794,16 +7235,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
   // ==================== SMART DISPOSITION ANALYSIS ====================
   // Apply campaign-specific qualification criteria to improve disposition accuracy
-  // This catches under-classified calls (e.g., no_answer that was actually a conversation)
-  // CRITICAL: Smart analysis can only DOWNGRADE or route to needs_review.
-  // It can NEVER upgrade to qualified_lead — only the AI's submit_disposition can do that.
+  // This catches under-classified calls (e.g., no_answer that was actually a real conversation)
+  // The smart analyzer CAN upgrade to qualified_lead when transcript evidence is strong.
+  // It uses keyword matching + conversation metrics to catch calls the AI under-classified.
   // CRITICAL: Never override a 'voicemail' disposition — transcript-based voicemail detection
-  // (isVoicemailTranscript) is authoritative. The smart analyzer's phrase list is a subset
-  // and would incorrectly reclassify voicemail as needs_review due to transcribed greeting turns.
+  // (isVoicemailTranscript) is authoritative.
   if (session.campaignId && session.transcripts.length > 0 && !session.isTestSession && disposition !== 'voicemail') {
     try {
       const campaignContext = await loadCampaignQualificationContext(session.campaignId);
-      
+
       if (campaignContext) {
         const callDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
         const smartResult = determineSmartDisposition(
@@ -6813,20 +7253,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           callDuration
         );
 
-        // SAFETY: Never let smart analysis UPGRADE to qualified_lead
-        // The AI's submit_disposition tool has strict in-call validation (booking flow,
-        // agent turns >= 3, agent words >= 30, goodbye check, etc.) that keyword matching cannot replicate.
-        if (smartResult.shouldOverride && smartResult.suggestedDisposition !== 'qualified_lead') {
+        // Allow smart analysis to override disposition when confidence is high enough
+        // This includes upgrading to qualified_lead when transcript evidence is strong
+        if (smartResult.shouldOverride) {
           console.log(`${LOG_PREFIX} 🎯 Smart disposition override: ${disposition} → ${smartResult.suggestedDisposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
           console.log(`${LOG_PREFIX}   Reason: ${smartResult.reasoning}`);
           if (smartResult.positiveSignals.length > 0) {
             console.log(`${LOG_PREFIX}   Positive signals: ${smartResult.positiveSignals.join(', ')}`);
           }
           disposition = smartResult.suggestedDisposition;
-        } else if (smartResult.shouldOverride && smartResult.suggestedDisposition === 'qualified_lead') {
-          // Smart analysis wants qualified_lead but we block it — route to needs_review instead
-          console.warn(`${LOG_PREFIX} 🚫 Smart disposition wanted qualified_lead but BLOCKED (only AI submit_disposition can set this). Routing to needs_review instead.`);
-          disposition = 'needs_review';
         } else {
           console.log(`${LOG_PREFIX} Smart disposition agrees with current: ${disposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
         }
@@ -7480,19 +7915,8 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               .map((t) => t.text.toLowerCase());
 
             // Check for automated AI screener (Google Voice, Call Screen) FIRST
-            const screenerIndicators = [
-              'record your name',
-              'state your name',
-              'reason for calling',
-              'i\'ll see if this person',
-              'this person is available',
-              'stay on the line',
-              'call screening',
-              'call assist',
-            ];
-
             const isScreenerInteraction = userTexts.some(text =>
-              screenerIndicators.some(indicator => text.includes(indicator))
+              isAutomatedCallScreenerTranscript(text)
             );
 
             if (isScreenerInteraction) {
@@ -7653,6 +8077,11 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   function isVoicemailTranscript(transcript: string): boolean {
     if (!transcript) return false;
     const lower = transcript.toLowerCase();
+    if (isAutomatedCallScreenerTranscript(lower)) return false;
+    // CRITICAL: Exclude live gatekeeper conversations from voicemail detection
+    // A gatekeeper saying "not available" or "leave a message" is a live person offering to help,
+    // NOT an automated voicemail system
+    if (isLiveGatekeeperTranscript(lower)) return false;
 
     // Comprehensive voicemail detection phrases
     const voicemailPhrases = [
@@ -7661,14 +8090,23 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       'leave your message',
       'after the beep',
       'after the tone',
+      'the person you are calling is not available',
       'not available',
+      'currently unavailable',
+      'is unavailable',
+      'am unavailable',
       'cannot take your call',
       'can\'t take your call',
       'please leave',
+      'leave your name',
+      'leave a name',
       'record your message',
+      'at the tone, please record your message',
       'voicemail',
       'voice mail',
       'mailbox',
+      'mailbox is full',
+      'cannot accept messages',
       'answering machine',
       'reached the voicemail',
       'no one is available',
@@ -8473,6 +8911,7 @@ During this initial silence, LISTEN carefully to what the caller says:
 - If there is silence, hold music, IVR, or robotic audio, do NOT deliver your greeting.
 - Speak only after an actual person starts talking.
 - If you hear voicemail cues in the first moments ("leave a message", "after the beep", "not available"), IMMEDIATELY submit_disposition("voicemail") and then end_call. Do not continue the script.
+- If you hear AI screener prompts ("record/state your name and reason", "before I try to connect you"), follow the screener protocol and DO NOT mark voicemail unless the screener explicitly rejects the call.
 
 ### Phase 1: Identity Verification
 When you hear a standard greeting (e.g., "Hello?", "Hi", "Yeah?"), your first response is ALWAYS:
@@ -9227,26 +9666,36 @@ If permission is given for other campaign types:
 
 ---
 
-### 3. Gatekeeper Detected (STRICT COMPLIANCE)
+### 3. Gatekeeper Detected (ENGAGE WITH WARMTH - DO NOT LOOP)
 If the response is any of:
-- "Who is calling?"
-- "How may I help you?"
-- "How may I direct your call?"
+- "Who is calling?" / "What is your call regarding?" / "What's this about?"
+- "How may I help you?" / "How can I help you?" / "Can I help you?"
+- "How may I direct your call?" / "You've come through to the office"
 - "Please state your name and purpose"
+- Any indication the person is NOT ${firstName} (receptionist, assistant, office staff)
 
-Classify as gatekeeper and respond with a clear, concise request:
-- "Could you please connect me with ${firstName}?"
+**CRITICAL: You are now talking to a gatekeeper. Do NOT repeat "May I speak with ${firstName}?" — they already heard you. ANSWER THEIR QUESTIONS.**
+
+**When Asked "What is this regarding?" or "What's this about?":**
+- Answer warmly: "Of course — my name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${firstName} available?"
+- Do NOT dodge the question. Do NOT just repeat the name request.
+- If pressed further: "I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?"
 
 **When Asked "Who is calling?" or "Where are you calling from?":**
-- Respond confidently: "My name is ${agentName}, calling on behalf of ${orgName}."
+- Respond confidently: "My name is ${agentName}, calling from ${orgName}."
+- Then ask: "Could you connect me with ${firstName}?"
 
-**When Asked "What is this regarding?":**
-- Keep it VAGUE: "It's regarding some of the services we offer."
-- Do NOT mention specific products, campaigns, or meeting requests.
-- If pressed: "I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?"
+**When Asked "How can I help you?" or "Can I help you?":**
+- Acknowledge warmly: "Thank you! I was hoping to speak with ${firstName} briefly — is ${firstName} available?"
+
+**When Told "${firstName} is not available / in a meeting / at their desk:**
+- Be understanding: "I completely understand. Is there a better time to reach ${firstName}?"
+- If no time offered: "No worries at all. Thank you so much for your help!"
 
 - Make NO MORE than two polite attempts.
-- If refused → Thank them sincerely and END THE CALL immediately.
+- ALWAYS answer gatekeeper questions — never ignore or dodge them.
+- Be kind, warm, and grateful for their time.
+- If refused → Thank them sincerely and END THE CALL gracefully.
 
 ---
 
@@ -9256,6 +9705,7 @@ If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
 - "State your name and reason for calling"
 - "I'll see if this person is available"
 - "Please stay on the line" (after providing your name)
+- "Before I try to connect you"
 
 **Respond EXACTLY ONCE:**
 "This is ${agentName} calling from ${orgName} for ${firstName} regarding a business opportunity."
@@ -9794,6 +10244,10 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       if (elapsedSeconds > absoluteMax) {
         console.warn(`${LOG_PREFIX} ⛔ ABSOLUTE MAX EXCEEDED - Force ending call ${session.callId} after ${elapsedSeconds}s (absolute limit: ${absoluteMax}s)`);
         endCall(session.callId, 'completed');
+        // Defense-in-depth: backup Telnyx hangup in case endCall's hangup failed
+        setTimeout(async () => {
+          try { await forceTelnyxHangupWithRetry(session, 2); } catch (_) {}
+        }, 3000);
         return;
       }
 
@@ -9857,9 +10311,10 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       }
     }
 
-    // FAST VOICEMAIL TERMINATION: If voicemail was detected, end after 10s (to capture greeting but not leave message)
-    // This is much faster than waiting for MAX_DURATION_WITHOUT_HUMAN
-    const MAX_VOICEMAIL_DURATION_SECONDS = 10;
+    // FAST VOICEMAIL TERMINATION: If voicemail was detected, end after 5s
+    // Reduced from 10s to 5s based on call analysis showing avg 14.2s detection time
+    // Agent should not linger on voicemail lines - hang up immediately after detection
+    const MAX_VOICEMAIL_DURATION_SECONDS = 5;
     if (session.detectedDisposition === 'voicemail' && elapsedSeconds > MAX_VOICEMAIL_DURATION_SECONDS) {
       console.warn(`${LOG_PREFIX} VOICEMAIL TIMEOUT - Ending call ${session.callId} after ${elapsedSeconds}s (voicemail detected, max ${MAX_VOICEMAIL_DURATION_SECONDS}s)`);
       endCall(session.callId, 'voicemail');
@@ -9867,9 +10322,9 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     }
 
     // ENHANCED VOICEMAIL DETECTION: One-way conversation pattern
-    // If we've been talking for 30+ seconds but got no interactive human responses, it's likely voicemail
-    // A real human would respond back with questions/acknowledgments within this timeframe
-    const MAX_ONE_WAY_CONVERSATION_SECONDS = 30;
+    // If we've been talking for 15+ seconds but got no interactive human responses, it's likely voicemail
+    // Reduced from 30s to 15s - call analysis showed agent lingering 12-21s on voicemail lines
+    const MAX_ONE_WAY_CONVERSATION_SECONDS = 15;
     if (elapsedSeconds > MAX_ONE_WAY_CONVERSATION_SECONDS && !session.detectedDisposition) {
       // Count INTERACTIVE user responses: responses that came AFTER the AI spoke at least once
       // This filters out voicemail greetings that are just the recorded message playing
@@ -9989,6 +10444,96 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
         session.detectedDisposition === 'voicemail' ? 'voicemail' :
         session.detectedDisposition === 'no_answer' ? 'no_answer' : 'completed';
       endCall(session.callId, outcome);
+      // Defense-in-depth: backup Telnyx hangup in case endCall's hangup failed
+      setTimeout(async () => {
+        try { await forceTelnyxHangupWithRetry(session, 2); } catch (_) {}
+      }, 3000);
+      return;
+    }
+
+    // ==================== GLOBAL ABSOLUTE CEILING ====================
+    // CRITICAL: No B2B outbound call should EVER exceed 15 minutes regardless of
+    // disposition, campaign config, or conversation state. This is a safety net that
+    // prevents runaway calls (e.g., 209 minute calls) from burning resources and
+    // creating a terrible experience. This applies to ALL calls unconditionally.
+    const GLOBAL_ABSOLUTE_CEILING_SECONDS = 300; // 5 minutes - no exceptions
+    const GLOBAL_WRAP_UP_WARNING_SECONDS = 240; // 4 minutes - send wrap-up warning
+
+    // Send global wrap-up warning at 12 minutes if no other wrap-up was sent
+    if (elapsedSeconds >= GLOBAL_WRAP_UP_WARNING_SECONDS && elapsedSeconds < GLOBAL_ABSOLUTE_CEILING_SECONDS && !session.wrapUpWarningSent) {
+      session.wrapUpWarningSent = true;
+      const remainingSeconds = GLOBAL_ABSOLUTE_CEILING_SECONDS - elapsedSeconds;
+      console.warn(`${LOG_PREFIX} ⏰ GLOBAL WRAP-UP WARNING - Call ${session.callId} at ${elapsedSeconds}s. Sending wrap-up instruction. Remaining: ${remainingSeconds}s`);
+
+      const geminiProvider = (session as any).geminiProvider;
+      if (geminiProvider && geminiProvider.isConnected) {
+        try {
+          geminiProvider.sendTextMessage(`[URGENT] You have approximately ${remainingSeconds} seconds remaining on this call. Begin wrapping up NOW: summarize key points, confirm any next steps, thank them warmly, and say goodbye. Do not mention the time limit.`);
+        } catch (e) {
+          console.error(`${LOG_PREFIX} Error sending global wrap-up warning:`, e);
+        }
+      }
+
+      if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+        try {
+          session.openaiWs.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "system",
+              content: [{
+                type: "input_text",
+                text: `[URGENT TIME LIMIT] You have approximately ${remainingSeconds} seconds remaining. Wrap up NOW: summarize, confirm next steps, thank them, and end the call gracefully. Do not mention the time limit.`
+              }]
+            }
+          }));
+          session.openaiWs.send(JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["text", "audio"],
+              instructions: "Wrap up the conversation immediately. Do not mention the time limit."
+            }
+          }));
+        } catch (e) {
+          console.error(`${LOG_PREFIX} Error sending OpenAI wrap-up:`, e);
+        }
+      }
+    }
+    if (elapsedSeconds > GLOBAL_ABSOLUTE_CEILING_SECONDS) {
+      console.error(`${LOG_PREFIX} ⛔ GLOBAL CEILING BREACHED - Force terminating call ${session.callId} after ${elapsedSeconds}s (GLOBAL CEILING: ${GLOBAL_ABSOLUTE_CEILING_SECONDS}s). This should never happen.`);
+
+      // If call has a real disposition, end gracefully; otherwise mark as needs_review
+      if (!session.detectedDisposition) {
+        session.detectedDisposition = 'needs_review';
+      }
+
+      // Attempt to inject a farewell before terminating
+      const geminiProvider = (session as any).geminiProvider;
+      if (geminiProvider && geminiProvider.isConnected) {
+        try {
+          geminiProvider.sendTextMessage('[URGENT] This call has exceeded the maximum allowed duration. Say a brief, warm farewell immediately: "I really appreciate your time today. I need to wrap up, but it was wonderful speaking with you. Have a great day!" Then end the call.');
+        } catch (e) {
+          // Best effort - proceed with termination regardless
+        }
+      }
+
+      // CRITICAL FIX: Call endCall IMMEDIATELY instead of delayed setTimeout.
+      // The old 3-second delay caused a race condition: if another code path set
+      // isActive=false before the timer fired (without successfully hanging up Telnyx),
+      // the setTimeout's endCall would be skipped, leaving a zombie call on Telnyx.
+      // Now we terminate immediately and let the farewell play during the Telnyx hangup grace period.
+      endCall(session.callId, 'completed');
+
+      // DEFENSE-IN-DEPTH: Even if endCall fails to hang up via Telnyx API,
+      // force a direct Telnyx hangup as a belt-and-suspenders measure.
+      // This catches cases where callControlId was null during endCall.
+      setTimeout(async () => {
+        try {
+          await forceTelnyxHangupWithRetry(session, 3);
+        } catch (e) {
+          console.error(`${LOG_PREFIX} ⛔ GLOBAL CEILING: Backup Telnyx hangup also failed for ${session.callId}:`, e);
+        }
+      }, 5000);
       return;
     }
 
@@ -10050,6 +10595,67 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     logHealth();
   }, 5000);
 }
+
+// ==================== ZOMBIE SESSION REAPER ====================
+// Defense-in-depth: periodically scan activeSessions for calls that have been
+// alive too long. This catches any call that slipped past all other duration
+// enforcement (e.g., due to race conditions, exceptions, or missing callControlIds).
+const ZOMBIE_REAPER_INTERVAL_MS = 60_000; // Check every 60 seconds
+const ZOMBIE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes absolute max age
+
+setInterval(async () => {
+  const now = Date.now();
+  for (const [callId, session] of activeSessions) {
+    const ageMs = now - session.startTime.getTime();
+
+    // Clean up sessions that are inactive but still in the map (memory leak prevention)
+    if (!session.isActive && ageMs > 5 * 60 * 1000) {
+      console.log(`${LOG_PREFIX} 🧹 Reaper: Removing stale inactive session ${callId} (age: ${Math.round(ageMs / 1000)}s)`);
+      activeSessions.delete(callId);
+      continue;
+    }
+
+    // Force-kill any active session that exceeds the zombie max age
+    if (session.isActive && ageMs > ZOMBIE_MAX_AGE_MS) {
+      console.error(`${LOG_PREFIX} ⛔ ZOMBIE REAPER: Call ${callId} has been active for ${Math.round(ageMs / 1000)}s (max: ${ZOMBIE_MAX_AGE_MS / 1000}s). Force terminating.`);
+
+      // Set disposition if not already set
+      if (!session.detectedDisposition) {
+        session.detectedDisposition = 'needs_review';
+      }
+
+      // Force endCall
+      try {
+        await endCall(callId, 'completed');
+      } catch (e) {
+        console.error(`${LOG_PREFIX} ⛔ Zombie reaper: endCall failed for ${callId}:`, e);
+        // Even if endCall fails, force isActive=false to prevent infinite retries
+        session.isActive = false;
+        session.isEnding = true;
+      }
+
+      // Belt-and-suspenders: try to hang up via Telnyx with retries
+      try {
+        await forceTelnyxHangupWithRetry(session, 3);
+      } catch (e) {
+        console.error(`${LOG_PREFIX} ⛔ Zombie reaper: Telnyx hangup retry also failed for ${callId}:`, e);
+      }
+
+      // Force-close all connections
+      const geminiProvider = (session as any).geminiProvider;
+      if (geminiProvider) {
+        try { geminiProvider.disconnect(); } catch (_) {}
+      }
+      if (session.telnyxWs) {
+        try { session.telnyxWs.close(); } catch (_) {}
+        try { session.telnyxWs.terminate(); } catch (_) {}
+      }
+      if (session.openaiWs) {
+        try { session.openaiWs.close(); } catch (_) {}
+      }
+    }
+  }
+}, ZOMBIE_REAPER_INTERVAL_MS);
 
 export {
   startAudioHealthMonitor,

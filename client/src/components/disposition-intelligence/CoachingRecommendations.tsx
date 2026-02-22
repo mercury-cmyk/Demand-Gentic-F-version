@@ -56,7 +56,7 @@ export function CoachingRecommendations({ filters, campaigns }: CoachingRecommen
 
   const coachingMutation = useMutation({
     mutationFn: async () => {
-      const body: any = { maxCalls: 20 };
+      const body: any = { maxCalls: 250 };
       if (filters.campaignId !== 'all') body.campaignId = filters.campaignId;
       if (filters.startDate) body.startDate = filters.startDate;
       if (filters.endDate) body.endDate = filters.endDate;
@@ -120,7 +120,7 @@ export function CoachingRecommendations({ filters, campaigns }: CoachingRecommen
               {coachingMutation.isPending ? 'Analyzing Calls...' : 'Generate Coaching'}
             </Button>
             <p className="text-xs text-muted-foreground">
-              Analyzes up to 20 recent calls with transcripts
+              Analyzes up to 250 recent calls with transcripts
             </p>
           </div>
         </CardContent>

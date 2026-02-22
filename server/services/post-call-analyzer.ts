@@ -12,11 +12,12 @@
  */
 
 import { db } from "../db";
-import { callSessions, dialerCallAttempts, campaigns } from "@shared/schema";
+import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, type CanonicalDisposition } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./deepgram-postcall-transcription";
 import { analyzeConversationQuality, type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
 import { logCallIntelligence } from "./call-intelligence-logger";
+import { overrideSingleDisposition } from "./bulk-disposition-reanalyzer";
 import { recordTranscriptionResult } from "./transcription-monitor";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
 import { getFreshAudioUrl } from "./recording-link-resolver";
@@ -151,12 +152,23 @@ function extractStorageKeyFromUrl(url: string | null | undefined): string | null
 
 /**
  * Identify which speaker is the "agent" from structured utterances.
- * Do not assume first utterance is agent (prospect often answers first with "Hello").
+ * 
+ * Now that Deepgram transcription uses channel-based attribution:
+ * - Utterances are labeled as "agent" or "contact" based on stereo channels
+ * - Return "agent" directly if properly attributed
+ * - Fall back to heuristic-based identification for older data
  */
 function identifyAgentSpeaker(utterances: StructuredTranscript["utterances"]): string {
-  if (utterances.length === 0) return "Speaker 1";
+  if (utterances.length === 0) return "agent";
 
   const uniqueSpeakers = Array.from(new Set(utterances.map(u => u.speaker)));
+  
+  // QUICK WIN: If "agent" speaker is present, return it (channel-based attribution)
+  if (uniqueSpeakers.includes("agent")) {
+    return "agent";
+  }
+  
+  // FALLBACK: Old data may have "Speaker 1", "Speaker 2" labels
   if (uniqueSpeakers.length === 1) return uniqueSpeakers[0];
 
   const scores = new Map<string, number>();
@@ -376,6 +388,7 @@ CRITICAL RULES:
 
     // Use Gemini 3 Deep Think for evaluation
     const { deepAnalyzeJSON } = await import("./vertex-ai/vertex-client");
+    const { normalizeDisposition } = await import("./disposition-normalizer");
 
     let raw: any;
     try {
@@ -385,6 +398,10 @@ CRITICAL RULES:
       // Fallback or return partial data? returning null for now to indicate failure to process this step
       return null;
     }
+
+    // Normalize the recommended disposition to canonical format
+    const rawRecommendedDisposition = raw.recommendedDisposition || disposition || "not_interested";
+    const normalizedRecommendedDisposition = normalizeDisposition(rawRecommendedDisposition);
 
     return {
       campaignName: campaign.name || "Unknown",
@@ -404,7 +421,7 @@ CRITICAL RULES:
             evidence: c.evidence ? String(c.evidence) : undefined,
           }))
         : [],
-      recommendedDisposition: raw.recommendedDisposition || disposition || "not_interested",
+      recommendedDisposition: normalizedRecommendedDisposition,
       dispositionAccurate: Boolean(raw.dispositionAccurate),
       notes: Array.isArray(raw.notes) ? raw.notes.map(String) : [],
     };
@@ -489,7 +506,35 @@ export async function runPostCallAnalysis(
     const disposition = options?.disposition || session.aiDisposition || null;
     const callDurationSec = options?.callDurationSec || session.durationSec || 0;
 
-    // 2. Get audio URL for transcription
+    // 🔥 CRITICAL: For live Gemini calls, use native transcript — skip Deepgram entirely
+    // Gemini Live provides built-in speaker attribution, no post-call processing needed
+    let structuredTranscript: StructuredTranscript | null = null;
+    if (options?.geminiTranscript && options.geminiTranscript.trim().length > 50) {
+      console.log(`${LOG_PREFIX} ✅ Using native Gemini Live transcript (${options.geminiTranscript.length} chars) — skipping Deepgram post-call processing`);
+      // Parse Gemini transcript format: "Agent: text\nContact: text\n..."
+      const lines = options.geminiTranscript.split('\n').filter(l => l.trim().length > 0);
+      const utterances = lines.map((line, idx) => {
+        const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+        if (match) {
+          return {
+            speaker: match[1].toLowerCase() === 'agent' ? 'agent' : 'contact',
+            text: match[2].trim(),
+            start: 0,
+            end: 0,
+          };
+        }
+        return null;
+      }).filter(Boolean) as Array<{speaker: string; text: string; start: number; end: number; channelTag?: number}>;
+      
+      if (utterances.length > 0) {
+        structuredTranscript = {
+          text: options.geminiTranscript,
+          utterances,
+        };
+      }
+    }
+
+    // 2. Get audio URL for transcription (only if Gemini transcript not available)
     let audioUrl: string | null = options?.gcsUri || null;
 
     // Prefer S3/GCS recording (our own recording is stereo — inbound + outbound)
@@ -528,17 +573,16 @@ export async function runPostCallAnalysis(
       }
     }
 
-    // 3. Transcribe with structured diarization
-    let structuredTranscript: StructuredTranscript | null = null;
-
-    if (audioUrl) {
+    // 3. Transcribe with structured diarization (skip if native Gemini transcript available)
+    if (!structuredTranscript && audioUrl) {
       try {
-        structuredTranscript = await submitStructuredTranscription(audioUrl, {
+        const deepgramResult = await submitStructuredTranscription(audioUrl, {
           telnyxCallId: session.telnyxCallId || undefined,
           recordingS3Key: session.recordingS3Key || undefined,
         });
 
-        if (structuredTranscript) {
+        if (deepgramResult) {
+          structuredTranscript = deepgramResult;
           console.log(`${LOG_PREFIX} ✅ Structured transcription completed: ${structuredTranscript.utterances.length} utterances, ${structuredTranscript.text.length} chars`);
         }
       } catch (transcriptionError: any) {
@@ -783,6 +827,81 @@ export async function runPostCallAnalysis(
       } catch (intError: any) {
         console.error(`${LOG_PREFIX} Intelligence logging failed: ${intError.message}`);
       }
+    }
+
+    // 11. AUTO-CORRECT MISMATCHED DISPOSITIONS
+    // When post-call analysis detects the assigned disposition doesn't match what the
+    // transcript evidence suggests, automatically apply the correction. This eliminates
+    // the manual review step shown in Disposition Intelligence ("X calls have mismatched dispositions").
+    // Sources of truth (in priority order):
+    //   1. Campaign outcome evaluation's recommendedDisposition (evaluated against campaign criteria)
+    //   2. Quality analysis's dispositionReview.expectedDisposition (conversation-level assessment)
+    const { normalizeDisposition } = await import("./disposition-normalizer");
+    const VALID_AUTO_CORRECT_DISPOSITIONS: CanonicalDisposition[] = [
+      "qualified_lead", "not_interested", "do_not_call", "voicemail",
+      "no_answer", "invalid_data", "needs_review", "callback_requested",
+    ];
+    try {
+      let correctedDisposition: CanonicalDisposition | null = null;
+      let correctionSource = "";
+
+      // Check campaign outcome evaluation first (higher priority — uses campaign criteria)
+      if (result.campaignOutcome && !result.campaignOutcome.dispositionAccurate) {
+        const recommended = normalizeDisposition(result.campaignOutcome.recommendedDisposition);
+        if (recommended && recommended !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(recommended)) {
+          correctedDisposition = recommended;
+          correctionSource = "campaign_outcome_evaluation";
+          console.log(`${LOG_PREFIX} 🔍 Campaign outcome suggests: ${result.campaignOutcome.recommendedDisposition} → normalized to: ${recommended}`);
+        }
+      }
+
+      // Fall back to quality analysis disposition review
+      if (!correctedDisposition && result.qualityAnalysis?.dispositionReview) {
+        const review = result.qualityAnalysis.dispositionReview;
+        if (!review.isAccurate && review.expectedDisposition) {
+          const expected = normalizeDisposition(review.expectedDisposition);
+          if (expected !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(expected)) {
+            correctedDisposition = expected;
+            correctionSource = "quality_analysis_review";
+            console.log(`${LOG_PREFIX} 🔍 Quality review suggests: ${review.expectedDisposition} → normalized to: ${expected}`);
+          }
+        }
+      }
+
+      if (correctedDisposition) {
+        console.log(`${LOG_PREFIX} 🔄 AUTO-CORRECTING disposition for ${callSessionId}: "${disposition}" → "${correctedDisposition}" (source: ${correctionSource})`);
+
+        const overrideResult = await overrideSingleDisposition(
+          callSessionId,
+          correctedDisposition,
+          "system:post-call-auto-correct",
+          `Auto-corrected by post-call analysis (${correctionSource}). Original: ${disposition}, Evidence-based: ${correctedDisposition}`
+        );
+
+        if (overrideResult.success) {
+          console.log(`${LOG_PREFIX} ✅ Disposition auto-corrected: ${disposition} → ${correctedDisposition} | Action: ${overrideResult.action}`);
+
+          // Update the quality record to mark disposition as now accurate (since we fixed it)
+          if (result.intelligenceRecordId) {
+            await db.update(callQualityRecords)
+              .set({
+                dispositionAccurate: true,
+                assignedDisposition: correctedDisposition,
+                dispositionNotes: [
+                  ...(result.qualityAnalysis?.dispositionReview?.notes || []),
+                  `[Auto-corrected] ${disposition} → ${correctedDisposition} (${correctionSource})`,
+                ],
+                updatedAt: new Date(),
+              })
+              .where(eq(callQualityRecords.id, result.intelligenceRecordId));
+          }
+        } else {
+          console.warn(`${LOG_PREFIX} ⚠️ Disposition auto-correction failed for ${callSessionId}: ${overrideResult.error}`);
+        }
+      }
+    } catch (autoCorrectError: any) {
+      // Auto-correction is best-effort — don't fail the entire post-call analysis
+      console.error(`${LOG_PREFIX} ⚠️ Disposition auto-correction error for ${callSessionId}: ${autoCorrectError.message}`);
     }
 
     result.success = true;

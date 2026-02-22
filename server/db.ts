@@ -1,7 +1,5 @@
 // Database connection setup - referenced from blueprint:javascript_database
-import { config } from "dotenv";
-// Load environment variables from .env (shared for local and production)
-config({ path: ".env" });
+import "./env";
 
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
@@ -10,17 +8,55 @@ import * as schema from "../shared/schema.ts";
 
 neonConfig.webSocketConstructor = ws;
 
-// Get DATABASE_URL - don't throw immediately, allow server to start for healthcheck
-let databaseUrl = process.env.DATABASE_URL || '';
+const nodeEnv = (process.env.NODE_ENV || "development").toLowerCase();
+const strictIsolation = nodeEnv === "development" && process.env.STRICT_ENV_ISOLATION !== "false";
+
+function resolveDatabaseUrl(): { url: string; source: string } {
+  if (process.env.REPLIT_DEPLOYMENT === "1") {
+    return {
+      url: process.env.REPLIT_PRODUCTION_DATABASE_URL || "",
+      source: "REPLIT_PRODUCTION_DATABASE_URL",
+    };
+  }
+
+  if (nodeEnv === "production") {
+    return {
+      url: process.env.DATABASE_URL_PROD || process.env.DATABASE_URL || "",
+      source: process.env.DATABASE_URL_PROD ? "DATABASE_URL_PROD" : "DATABASE_URL",
+    };
+  }
+
+  return {
+    url: process.env.DATABASE_URL_DEV || process.env.DATABASE_URL || "",
+    source: process.env.DATABASE_URL_DEV ? "DATABASE_URL_DEV" : "DATABASE_URL",
+  };
+}
+
+const resolvedDb = resolveDatabaseUrl();
+let databaseUrl = resolvedDb.url;
 let dbConfigError: string | null = null;
 
-if (!databaseUrl) {
-  dbConfigError = "DATABASE_URL must be set. Did you forget to provision a database?";
-  console.error(`❌ ${dbConfigError}`);
-  console.error("   Server will start but database operations will fail.");
-  // Use a placeholder to prevent null errors during module init
-  // Actual DB operations will fail with clear error messages
-  databaseUrl = 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
+if (strictIsolation && nodeEnv !== "production") {
+  if (!process.env.DATABASE_URL_DEV) {
+    dbConfigError = "DATABASE_URL_DEV is required in development mode when STRICT_ENV_ISOLATION is enabled.";
+  } else if (
+    process.env.DATABASE_URL_PROD &&
+    databaseUrl &&
+    databaseUrl === process.env.DATABASE_URL_PROD &&
+    process.env.ALLOW_DEV_PROD_DB !== "true"
+  ) {
+    dbConfigError = "Development database URL matches DATABASE_URL_PROD. Refusing to connect.";
+  }
+}
+
+if (!dbConfigError && !databaseUrl) {
+  dbConfigError = `${resolvedDb.source} must be set. Did you forget to provision a database?`;
+}
+
+if (dbConfigError) {
+  console.error(`[DB] ${dbConfigError}`);
+  console.error("[DB] Server will start but database operations will fail.");
+  databaseUrl = "postgresql://placeholder:placeholder@localhost:5432/placeholder";
 }
 
 // PRODUCTION DATABASE OVERRIDE
@@ -31,8 +67,8 @@ if (!dbConfigError && process.env.REPLIT_DEPLOYMENT === '1') {
   const productionDbUrl = process.env.REPLIT_PRODUCTION_DATABASE_URL;
 
   if (!productionDbUrl) {
-    dbConfigError = 'REPLIT_PRODUCTION_DATABASE_URL must be set when REPLIT_DEPLOYMENT=1';
-    console.error(`❌ ${dbConfigError}`);
+    dbConfigError = 'REPLIT_PRODUCTION_DATABASE_URL must be set when REPLIT_DEPLOYMENT=1.';
+    console.error(`[DB] ${dbConfigError}`);
   } else {
     console.log('[DB] Production deployment detected - using override database URL');
     const endpoint = productionDbUrl.match(/ep-[^.]+/)?.[0] ?? 'unknown';
@@ -40,10 +76,9 @@ if (!dbConfigError && process.env.REPLIT_DEPLOYMENT === '1') {
     databaseUrl = productionDbUrl;
   }
 } else if (!dbConfigError) {
-  console.log('[DB] Development mode - using DATABASE_URL from environment');
+  console.log(`[DB] ${nodeEnv} mode - using ${resolvedDb.source}`);
   console.log('[DB] Database endpoint:', databaseUrl.match(/ep-[^.]+/)?.[0] || 'unknown');
 }
-
 // Export config error for health checks
 export { dbConfigError };
 
@@ -253,3 +288,4 @@ workerPool.on('connect', () => {
 });
 
 export const workerDb = drizzle({ client: workerPool, schema });
+

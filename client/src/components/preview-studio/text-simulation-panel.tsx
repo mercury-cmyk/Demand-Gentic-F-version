@@ -303,7 +303,7 @@ export function TextSimulationPanel({
 
     try {
       const transcript = messages.map(m => 
-        `${m.role === 'assistant' ? 'Agent' : 'Prospect'}: ${m.content}`
+        `${m.role === 'assistant' ? 'Agent' : 'Contact'}: ${m.content}`
       ).join('\n');
 
       const response = await apiRequest('POST', '/api/preview-studio/save-as-lead', {

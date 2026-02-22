@@ -22,13 +22,23 @@ function parseEnv(filePath: string) {
     return env;
 }
 
-// Load envs to sync with server
-const envLocal = parseEnv(path.join(process.cwd(), '.env.local'));
+// Load envs with explicit development precedence:
+// .env -> .env.development -> .env.local -> .env.development.local
 const envDefault = parseEnv(path.join(process.cwd(), '.env'));
-const mergedEnv = { ...envDefault, ...envLocal };
+const envDevelopment = parseEnv(path.join(process.cwd(), '.env.development'));
+const envLocal = parseEnv(path.join(process.cwd(), '.env.local'));
+const envDevLocal = parseEnv(path.join(process.cwd(), '.env.development.local'));
+const mergedEnv = { ...envDefault, ...envDevelopment, ...envLocal, ...envDevLocal };
 
 function resolveEnv(key: string): string | undefined {
-    return process.env[key] || envLocal[key] || envDefault[key];
+    return process.env[key] || envDevLocal[key] || envLocal[key] || envDevelopment[key] || envDefault[key];
+}
+
+const devDatabaseUrl = resolveEnv('DATABASE_URL_DEV');
+if (!devDatabaseUrl) {
+  console.error('❌ DATABASE_URL_DEV is required for isolated development mode.');
+  console.error('   Create .env.development with DATABASE_URL_DEV=... and retry.');
+  process.exit(1);
 }
 
 // Determine PORT: process.env > .env.local > .env > 5000
@@ -220,10 +230,14 @@ function startDevServer() {
   const env = {
       ...process.env,
       ...mergedEnv,
+      DATABASE_URL: devDatabaseUrl,
+      REDIS_URL: resolveEnv('REDIS_URL_DEV') || '',
       PUBLIC_WEBSOCKET_URL: publicWsUrl,
       PUBLIC_WEBHOOK_HOST: publicWebhookHost,
       TELNYX_WEBHOOK_URL: telnyxWebhookUrl,
       NODE_ENV: 'development',
+      STRICT_ENV_ISOLATION: 'true',
+      ALLOW_SHARED_REDIS_IN_DEV: resolveEnv('ALLOW_SHARED_REDIS_IN_DEV') || 'false',
       PORT: PORT.toString(),
       NODE_OPTIONS: `--require "${escapedPreloadPath}" ${existingNodeOptions}`.trim()
   };

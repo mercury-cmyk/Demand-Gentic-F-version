@@ -35,6 +35,8 @@ export type MercuryEventType =
   | 'test_notification'
   | 'welcome_client'
   | 'password_reset_client'
+  | 'campaign_order_submitted'
+  | 'campaign_order_approved'
   | string; // extensible
 
 // ─── Recipient Resolver Types ────────────────────────────────────────────────
@@ -58,6 +60,12 @@ export interface MercurySendRequest {
   replyTo?: string;
   fromName?: string;
   fromEmail?: string;
+  attachments?: Array<{
+    filename: string;
+    content: string | Buffer;
+    contentType?: string;
+    cid?: string;
+  }>;
 }
 
 export interface MercurySendResult {

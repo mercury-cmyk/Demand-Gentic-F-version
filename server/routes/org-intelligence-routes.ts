@@ -2059,15 +2059,34 @@ router.get("/prompt-optimization", requireDualAuth, async (req: Request, res: Re
 router.put("/prompt-optimization", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
   try {
     const { orgIntelligence, compliancePolicy, platformPolicies, agentVoiceDefaults } = req.body;
+    const organizationId = (req.body?.organizationId || req.query.organizationId) as string | undefined;
 
     // Validate that at least one field is provided
     if (!orgIntelligence && !compliancePolicy && !platformPolicies && !agentVoiceDefaults) {
       return res.status(400).json({ error: "At least one field must be provided" });
     }
 
-    // Get the most recent organization intelligence profile
+    if (!organizationId) {
+      return res.status(400).json({ error: "organizationId is required" });
+    }
+
+    const [org] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.id, organizationId))
+      .limit(1);
+
+    if (!org) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+
+    if (!org.domain) {
+      return res.status(400).json({ error: "Organization does not have a domain configured" });
+    }
+
+    // Get latest profile for this organization domain
     const [existingProfile] = await db.select()
       .from(accountIntelligence)
+      .where(eq(accountIntelligence.domain, org.domain))
       .orderBy(desc(accountIntelligence.createdAt))
       .limit(1);
 
@@ -2087,7 +2106,7 @@ router.put("/prompt-optimization", requireAuth, requireRole("admin"), async (req
     } else {
       // Create new profile with just prompt optimization settings
       await db.insert(accountIntelligence).values({
-        domain: 'organization-settings',
+        domain: org.domain,
         identity: {},
         offerings: {},
         icp: {},

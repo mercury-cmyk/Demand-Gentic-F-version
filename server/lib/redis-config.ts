@@ -20,6 +20,8 @@ const REDIS_WARNING_INTERVAL = 60000; // Only warn once per minute
  */
 export function getRedisUrl(): string | null {
   const nodeEnv = process.env.NODE_ENV || 'development';
+  const strictIsolation = nodeEnv === 'development' && process.env.STRICT_ENV_ISOLATION !== 'false';
+  const allowSharedRedisInDev = process.env.ALLOW_SHARED_REDIS_IN_DEV === 'true';
 
   // Check if Redis is explicitly disabled
   if (process.env.DISABLE_REDIS === 'true') {
@@ -28,9 +30,9 @@ export function getRedisUrl(): string | null {
 
   if (nodeEnv === 'production') {
     // Production: Use Google Cloud Memorystore Redis
-    // Primary: REDIS_URL (set via Secret Manager)
-    // Fallback: REDIS_URL_PROD environment variable
-    const prodUrl = process.env.REDIS_URL || process.env.REDIS_URL_PROD;
+    // Primary: REDIS_URL_PROD
+    // Fallback: REDIS_URL (legacy)
+    const prodUrl = process.env.REDIS_URL_PROD || process.env.REDIS_URL;
 
     // Only use default Memorystore IP if explicitly enabled
     // This prevents connection timeouts when VPC connector isn't configured
@@ -42,9 +44,24 @@ export function getRedisUrl(): string | null {
   }
 
   // Development: Use local Redis or development-specific Redis
-  // Primary: REDIS_URL_DEV (for explicit dev Redis Cloud instance)
-  // Fallback: REDIS_URL (for backward compatibility)
-  const devUrl = process.env.REDIS_URL_DEV || process.env.REDIS_URL;
+  // Primary: REDIS_URL_DEV
+  // Optional fallback: REDIS_URL only when ALLOW_SHARED_REDIS_IN_DEV=true
+  const devUrl = process.env.REDIS_URL_DEV || (allowSharedRedisInDev ? process.env.REDIS_URL : undefined);
+
+  if (!devUrl && strictIsolation && process.env.REDIS_URL && !allowSharedRedisInDev) {
+    logRedisWarning('REDIS_URL_DEV is missing; refusing REDIS_URL fallback in development (STRICT_ENV_ISOLATION=true).');
+  }
+
+  if (
+    strictIsolation &&
+    devUrl &&
+    process.env.REDIS_URL_PROD &&
+    devUrl === process.env.REDIS_URL_PROD &&
+    process.env.ALLOW_DEV_PROD_REDIS !== 'true'
+  ) {
+    logRedisWarning('Dev Redis resolved to REDIS_URL_PROD; Redis disabled until REDIS_URL_DEV is configured.');
+    return null;
+  }
 
   // Only fall back to localhost if Redis is explicitly required
   if (!devUrl && process.env.REQUIRE_REDIS === 'true') {
@@ -150,3 +167,4 @@ export function getRedisConnectionOptions() {
     keepAlive: isProduction ? 30000 : 10000,
   };
 }
+

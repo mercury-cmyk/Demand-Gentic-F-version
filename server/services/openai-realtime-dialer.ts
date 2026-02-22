@@ -2042,7 +2042,10 @@ function formatTranscriptNotes(transcripts: OpenAIRealtimeSession["transcripts"]
     return null;
   }
 
-  const transcriptText = transcripts.map(t => `${t.role}: ${t.text}`).join("\n");
+  const transcriptText = transcripts.map(t => {
+    const label = t.role === 'assistant' ? 'Agent' : t.role === 'user' ? 'Contact' : t.role;
+    return `${label}: ${t.text}`;
+  }).join("\n");
   if (!transcriptText.trim()) {
     return null;
   }

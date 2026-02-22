@@ -555,7 +555,7 @@ async function generateAgentMessage(
   // Build conversation history
   const conversationHistory = transcript
     .filter(m => m.role !== 'system')
-    .map(m => `${m.role === 'agent' ? 'Agent' : 'Prospect'}: ${m.content}`)
+    .map(m => `${m.role === 'agent' ? 'Agent' : 'Contact'}: ${m.content}`)
     .join('\n');
 
   // Build step context

@@ -73,7 +73,7 @@ export function UnifiedTranscriptDisplay({
         {!speakerAnalysis.hasProspect && speakerAnalysis.hasAgent && (
           <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-300">
             <AlertTriangle className="h-3 w-3 mr-1" />
-            Prospect channel unavailable
+            Contact channel unavailable
           </Badge>
         )}
         {!speakerAnalysis.hasAgent && speakerAnalysis.hasProspect && (
@@ -170,7 +170,7 @@ function TranscriptMessage({ turn, onTimestampClick }: TranscriptMessageProps) {
             variant={isAgent ? 'default' : 'secondary'}
             className="text-xs px-1.5 py-0"
           >
-            {isAgent ? 'AI Agent' : 'Prospect'}
+            {isAgent ? 'AI Agent' : 'Contact'}
           </Badge>
           {formattedTimestamp && (
             <button

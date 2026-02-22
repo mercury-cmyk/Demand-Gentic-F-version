@@ -219,7 +219,7 @@ spamRiskLevel determination:
 
 ## 4. CALL QUALITY ANALYSIS
 
-You will receive: call duration (seconds), assigned disposition, campaign context (name, objective, talking points as JSON), and transcript (up to 8000 chars with speaker labels like "Agent:" and "Prospect:").
+You will receive: call duration (seconds), assigned disposition, campaign context (name, objective, talking points as JSON), and transcript (up to 8000 chars with speaker labels like "Agent:" and "Contact:").
 
 Return this EXACT JSON structure:
 {
@@ -742,14 +742,14 @@ When ICP criteria are NOT provided:
     isRequired: true,
     content: `
 ### Transcript Format
-Transcripts use speaker labels: "Agent:" for the AI voice agent, "Prospect:" for the person called.
+Transcripts use speaker labels: "Agent:" for the AI voice agent, "Contact:" for the person called.
 Analyze turn-by-turn for quality signals.
 
 ### Talk Ratio Analysis
 Calculate approximate speaking distribution:
-- Ideal for discovery calls: Agent 30-40%, Prospect 60-70%
+- Ideal for discovery calls: Agent 30-40%, Contact 60-70%
 - Agent talking >60%: finding — agent is not listening enough
-- Prospect talking >80%: finding — agent may not be guiding conversation
+- Contact talking >80%: finding — agent may not be guiding conversation
 
 ### Sentiment Shift Detection
 Track sentiment changes throughout the call:

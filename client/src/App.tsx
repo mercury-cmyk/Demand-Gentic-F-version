@@ -28,6 +28,8 @@ import AboutPage from "@/pages/about";
 import PrivacyPolicyPage from "@/pages/privacy-policy";
 import TermsOfServicePage from "@/pages/terms-of-service";
 import GDPRPolicyPage from "@/pages/gdpr-policy";
+import ContactUsPage from "@/pages/contact-us";
+import ProposalRequestPage from "@/pages/proposal-request";
 import Dashboard from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import AccountDetailPage from "@/pages/account-detail";
@@ -626,6 +628,12 @@ function Router() {
       </Route>
       <Route path="/gdpr">
         <GDPRPolicyPage />
+      </Route>
+      <Route path="/contact">
+        <ContactUsPage />
+      </Route>
+      <Route path="/proposal-request">
+        <ProposalRequestPage />
       </Route>
 
       {/* Public Resources Centre - Announcements, Insights, eBooks, Solution Briefs, Webinars */}

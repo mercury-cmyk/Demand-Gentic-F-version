@@ -53,9 +53,11 @@ export function normalizeDisposition(rawDisposition: string | null | undefined):
   }
 
   // Qualified outcomes - creates a lead
+  // Includes AI-specific dispositions: success, mql, sql, follow_up
   if ([
     'qualified', 'lead', 'meeting_booked',
-    'positive_intent', 'expressed_interest', 'demo_scheduled', 'appointment_set'
+    'positive_intent', 'expressed_interest', 'demo_scheduled', 'appointment_set',
+    'success', 'mql', 'sql', 'follow_up', 'qualified_lead'
   ].includes(d)) {
     return 'qualified_lead';
   }
@@ -69,9 +71,10 @@ export function normalizeDisposition(rawDisposition: string | null | undefined):
   }
   
   // Not interested - explicit rejection after conversation
+  // Includes AI-specific dispositions: not_a_fit, not_qualified
   if ([
     'not_interested', 'rejected', 'declined', 'no_thanks', 'hung_up_after_pitch',
-    'gatekeeper_block', 'no_budget', 'not_a_fit'
+    'gatekeeper_block', 'no_budget', 'not_a_fit', 'not_qualified'
   ].includes(d)) {
     return 'not_interested';
   }

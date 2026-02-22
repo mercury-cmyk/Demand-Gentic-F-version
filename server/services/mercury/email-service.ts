@@ -79,6 +79,7 @@ export class MercuryEmailService {
         html: request.html,
         text: request.text,
         replyTo: request.replyTo || MERCURY_DEFAULTS.replyTo,
+        attachments: request.attachments,
       };
 
       const info = await transporter.sendMail(mailOptions);

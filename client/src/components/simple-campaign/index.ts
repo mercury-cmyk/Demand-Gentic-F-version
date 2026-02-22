@@ -13,4 +13,4 @@ export { SimpleTemplateBuilder } from "./SimpleTemplateBuilder";
 export { AudienceSendPage } from "./AudienceSendPage";
 
 // Re-export types
-export type { default as SimpleCampaignBuilderType } from "./SimpleCampaignBuilder";
+export type { CampaignIntent } from "./CampaignIntentForm";

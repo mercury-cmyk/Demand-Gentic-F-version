@@ -44,6 +44,7 @@ import {
   Star,
   Settings,
   X,
+  Sparkles,
 } from "lucide-react";
 import type { ContentPromotionPage } from "@shared/schema";
 
@@ -156,6 +157,11 @@ interface PageBuilderDialogProps {
   onOpenChange: (open: boolean) => void;
   editingPage: ContentPromotionPage | null;
   onSuccess: () => void;
+  // Context for AI generation
+  campaignId?: string;
+  projectId?: string;
+  organizationId?: string;
+  clientId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +345,10 @@ export default function PageBuilderDialog({
   onOpenChange,
   editingPage,
   onSuccess,
+  campaignId,
+  projectId,
+  organizationId,
+  clientId,
 }: PageBuilderDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -400,6 +410,55 @@ export default function PageBuilderDialog({
       toast({
         title: "Error",
         description: error.message || "Failed to save page. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const generateWithAIMutation = useMutation({
+    mutationFn: async () => {
+      if (!campaignId && !projectId) {
+        throw new Error("Campaign or Project context is required for AI generation");
+      }
+      const res = await apiRequest("POST", "/api/content-promotion/pages/generate", {
+        campaignId,
+        projectId,
+        organizationId,
+        clientId,
+      }, { timeout: 180000 });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data) {
+        setFormData((prev) => {
+          const defaults = getDefaultFormData();
+          return {
+            ...prev,
+            title: data.title || prev.title,
+            slug: data.title ? generateSlug(data.title) : prev.slug,
+            pageType: data.pageType || prev.pageType,
+            templateTheme: data.templateTheme || prev.templateTheme,
+            heroConfig: data.heroConfig ? { ...defaults.heroConfig, ...data.heroConfig } : prev.heroConfig,
+            assetConfig: data.assetConfig ? { ...defaults.assetConfig, ...data.assetConfig } : prev.assetConfig,
+            brandingConfig: data.brandingConfig ? { ...defaults.brandingConfig, ...data.brandingConfig } : prev.brandingConfig,
+            formConfig: data.formConfig ? { ...defaults.formConfig, ...data.formConfig } : prev.formConfig,
+            socialProofConfig: data.socialProofConfig ? { ...defaults.socialProofConfig, ...data.socialProofConfig } : prev.socialProofConfig,
+            benefitsConfig: data.benefitsConfig ? { ...defaults.benefitsConfig, ...data.benefitsConfig } : prev.benefitsConfig,
+            urgencyConfig: data.urgencyConfig ? { ...defaults.urgencyConfig, ...data.urgencyConfig } : prev.urgencyConfig,
+            thankYouConfig: data.thankYouConfig ? { ...defaults.thankYouConfig, ...data.thankYouConfig } : prev.thankYouConfig,
+            seoConfig: data.seoConfig ? { ...defaults.seoConfig, ...data.seoConfig } : prev.seoConfig,
+          };
+        });
+      }
+      toast({
+        title: "Content generated!",
+        description: "AI has populated all page sections. Review each tab and customize as needed.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Generation failed",
+        description: error.message || "Failed to generate with AI. Please try again.",
         variant: "destructive",
       });
     },
@@ -561,12 +620,25 @@ export default function PageBuilderDialog({
       <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0 gap-0">
         {/* Header */}
         <DialogHeader className="px-6 pt-6 pb-0 shrink-0">
-          <DialogTitle className="text-xl">
-            {isEditing ? "Edit Content Promotion Page" : "Create Content Promotion Page"}
-          </DialogTitle>
-          <DialogDescription>
-            Configure every aspect of your landing page across the tabs below.
-          </DialogDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle className="text-xl">
+                {isEditing ? "Edit Content Promotion Page" : "Create Content Promotion Page"}
+              </DialogTitle>
+              <DialogDescription>
+                {campaignId || projectId ? 
+                  "Configure your landing page with AI assistance based on your campaign/project context." :
+                  "Configure every aspect of your landing page across the tabs below."
+                }
+              </DialogDescription>
+            </div>
+            {(campaignId || projectId) && (
+              <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                {campaignId && <span className="text-blue-600">📋 Campaign Context</span>}
+                {projectId && <span className="text-purple-600">📁 Project Context</span>}
+              </div>
+            )}
+          </div>
         </DialogHeader>
 
         {/* Tabs */}
@@ -1560,14 +1632,30 @@ export default function PageBuilderDialog({
           </div>
 
           {/* Footer */}
-          <div className="border-t px-6 py-4 flex items-center justify-end gap-3 shrink-0">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saveMutation.isPending}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saveMutation.isPending}>
-              {saveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {isEditing ? "Save Changes" : "Create Page"}
-            </Button>
+          <div className="border-t px-6 py-4 flex items-center justify-between gap-3 shrink-0">
+            <div>
+              {(campaignId || projectId) && !isEditing && (
+                <Button 
+                  variant="outline" 
+                  onClick={() => generateWithAIMutation.mutate()}
+                  disabled={generateWithAIMutation.isPending || saveMutation.isPending}
+                  className="gap-1.5"
+                >
+                  {generateWithAIMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {!generateWithAIMutation.isPending && <Sparkles className="h-4 w-4" />}
+                  Generate with AI
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saveMutation.isPending || generateWithAIMutation.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={handleSave} disabled={saveMutation.isPending || generateWithAIMutation.isPending}>
+                {saveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isEditing ? "Save Changes" : "Create Page"}
+              </Button>
+            </div>
           </div>
         </Tabs>
       </DialogContent>

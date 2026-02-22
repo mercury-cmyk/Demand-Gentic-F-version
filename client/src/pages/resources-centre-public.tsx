@@ -257,7 +257,7 @@ export default function ResourcesCentrePublic() {
             <Button variant="ghost" onClick={() => setLocation("/login")}>
               Sign In
             </Button>
-            <Button onClick={() => setLocation("/login")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
+            <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
               Schedule Demo
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>

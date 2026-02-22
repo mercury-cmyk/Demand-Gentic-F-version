@@ -81,13 +81,14 @@ import { buildBrandedEmailHtml, type BrandPaletteKey, type BrandPaletteOverrides
 // Content Block Types for Visual Editor
 type BlockType = 'text' | 'button' | 'image' | 'divider' | 'spacer' | 'heading' | 'list';
 
-// Prefill merge tags for tracking URLs
+// Prefill merge tags for CTA URLs — must use flat tokens that the
+// bulk-email-service replaces at send time (NOT {{contact.X}} format)
 const PREFILL_QUERY = [
-  'email={{contact.email}}',
-  'firstName={{contact.firstName}}',
-  'lastName={{contact.lastName}}',
-  'company={{account.name}}',
-  'phone={{contact.phone}}'
+  'email={{email}}',
+  'firstName={{firstName}}',
+  'lastName={{lastName}}',
+  'company={{company}}',
+  'phone={{phone}}'
 ].join('&');
 
 interface ContentBlock {
@@ -106,7 +107,7 @@ interface ContentBlock {
   };
 }
 
-// Types
+// Types - extends to include project/org context from Step 1
 interface CampaignIntent {
   campaignName: string;
   senderProfileId: string;
@@ -114,6 +115,13 @@ interface CampaignIntent {
   fromEmail: string;
   replyToEmail: string;
   subject: string;
+  // Project & org context (from Step 1 selection)
+  clientAccountId?: string;
+  clientName?: string;
+  projectId?: string;
+  projectName?: string;
+  projectDescription?: string;
+  campaignOrganizationId?: string;
 }
 
 interface TemplateData {
@@ -434,13 +442,13 @@ const blocksToHtml = (blocks: ContentBlock[]): string => {
   }).join('\n');
 };
 
-// Personalization tokens
+// Personalization tokens — must match keys in bulk-email-service customVariables
 const PERSONALIZATION_TOKENS = [
   { token: "{{firstName}}", label: "First Name", icon: User },
   { token: "{{lastName}}", label: "Last Name", icon: User },
   { token: "{{company}}", label: "Company", icon: Building2 },
   { token: "{{email}}", label: "Email", icon: AtSign },
-  { token: "{{title}}", label: "Job Title", icon: User },
+  { token: "{{jobTitle}}", label: "Job Title", icon: User },
 ];
 
 // Outreach types for AI
@@ -550,6 +558,14 @@ export function SimpleTemplateBuilder({
   const [orgName, setOrgName] = useState(organizationName);
   const [orgAddress, setOrgAddress] = useState(organizationAddress);
 
+  // Organization branding colors (loaded from campaign org)
+  const [orgBrandColors, setOrgBrandColors] = useState<{
+    primary: string;
+    secondary: string;
+  } | null>(null);
+  const [orgBrandLoading, setOrgBrandLoading] = useState(false);
+  const [useOrgBrand, setUseOrgBrand] = useState(false);
+
   // Core state - use htmlContent if bodyContent is empty (for edit mode compatibility)
   const initialBodyContent = initialTemplate?.bodyContent || initialTemplate?.htmlContent || "";
   const initialIsBrandedTemplate = Boolean(
@@ -584,7 +600,14 @@ export function SimpleTemplateBuilder({
   // AgentX state
   const [outreachType, setOutreachType] = useState("cold-outreach");
   const [tone, setTone] = useState("professional");
-  const [aiContext, setAiContext] = useState("");
+  // Pre-populate context with project details when available
+  const [aiContext, setAiContext] = useState(() => {
+    const parts: string[] = [];
+    if (campaignIntent.projectName) parts.push(`Project: ${campaignIntent.projectName}`);
+    if (campaignIntent.projectDescription) parts.push(campaignIntent.projectDescription);
+    if (campaignIntent.clientName) parts.push(`Client: ${campaignIntent.clientName}`);
+    return parts.join("\n\n");
+  });
   const [aiGenerating, setAiGenerating] = useState(false);
   const [ctaUrl, setCtaUrl] = useState("https://example.com");
   const [brandPalette, setBrandPalette] = useState<BrandPaletteKey>("indigo");
@@ -621,10 +644,67 @@ export function SimpleTemplateBuilder({
   }, [editorMode]);
 
   useEffect(() => {
-    if (!useCustomBrandColors) {
+    if (!useCustomBrandColors && !useOrgBrand) {
       setBrandColors(BRAND_COLOR_PRESETS[brandPalette]);
     }
-  }, [brandPalette, useCustomBrandColors]);
+  }, [brandPalette, useCustomBrandColors, useOrgBrand]);
+
+  // Fetch org branding colors when campaignOrganizationId is available
+  useEffect(() => {
+    if (!campaignIntent.campaignOrganizationId) return;
+    let active = true;
+    const fetchOrgBranding = async () => {
+      setOrgBrandLoading(true);
+      try {
+        const res = await apiRequest("GET", `/api/organizations/${campaignIntent.campaignOrganizationId}`);
+        if (!res.ok) throw new Error("Failed to load org");
+        const org = await res.json();
+        if (!active) return;
+        const branding = org.branding || {};
+        if (branding.primaryColor) {
+          const colors = {
+            primary: branding.primaryColor,
+            secondary: branding.secondaryColor || branding.primaryColor,
+          };
+          setOrgBrandColors(colors);
+          // Auto-apply org colors as custom brand
+          const derived = {
+            primary: colors.primary,
+            secondary: colors.secondary,
+            accent: colors.secondary,
+            surface: "#f8fafc",
+            button: colors.primary,
+          };
+          setBrandColors(derived);
+          setUseCustomBrandColors(true);
+          setUseOrgBrand(true);
+        }
+        // Also update org name from intelligence if available
+        if (org.name && org.name !== organizationName) {
+          setOrgName(org.name);
+        }
+        // Update tone from branding if available
+        if (branding.tone) {
+          const toneMap: Record<string, string> = {
+            'Professional': 'professional',
+            'Consultative': 'consultative',
+            'Direct': 'direct',
+            'Friendly': 'friendly',
+          };
+          const mappedTone = toneMap[branding.tone] || branding.tone.toLowerCase();
+          if (TONE_OPTIONS.some(t => t.value === mappedTone)) {
+            setTone(mappedTone);
+          }
+        }
+      } catch (e) {
+        console.warn("[SimpleTemplateBuilder] Failed to load org branding:", e);
+      } finally {
+        if (active) setOrgBrandLoading(false);
+      }
+    };
+    fetchOrgBranding();
+    return () => { active = false; };
+  }, [campaignIntent.campaignOrganizationId]);
 
   useEffect(() => {
     if (editorMode === "html" && useBrandedTemplate) {
@@ -978,8 +1058,8 @@ export function SimpleTemplateBuilder({
         bullets.push(fallbackBullets[bullets.length] || fallbackBullets[0]);
       }
       const fallbackIntro = aiContext
-        ? `Hi {{first_name}},\n\n${aiContext}\n\nWould you be open to a brief conversation next week?`
-        : `Hi {{first_name}},\n\nI wanted to reach out about ${campaignIntent.campaignName}. I believe there is a strong opportunity to help your team achieve its goals.\n\nWould you be open to a brief conversation next week?`;
+        ? `Hi {{firstName}},\n\n${aiContext}\n\nWould you be open to a brief conversation next week?`
+        : `Hi {{firstName}},\n\nI wanted to reach out about ${campaignIntent.campaignName}. I believe there is a strong opportunity to help your team achieve its goals.\n\nWould you be open to a brief conversation next week?`;
 
       return {
         subject: overrides.subject || subject || `Quick question about ${campaignIntent.campaignName}`,
@@ -1032,7 +1112,12 @@ export function SimpleTemplateBuilder({
         senderName: campaignIntent.senderName,
         companyName: orgName,
         ctaUrl: ctaUrl?.trim() ? ctaUrl.trim() : undefined,
-        brandPalette
+        brandPalette,
+        // Project & org context for intelligent email generation
+        organizationId: campaignIntent.campaignOrganizationId,
+        projectName: campaignIntent.projectName,
+        projectDescription: campaignIntent.projectDescription,
+        clientName: campaignIntent.clientName,
       });
       const data = await res.json();
       const copy = buildCopy(data?.rawContent || data?.content || {});
@@ -1174,6 +1259,25 @@ export function SimpleTemplateBuilder({
                   </div>
                 </SheetHeader>
                 <div className="mt-6 space-y-6">
+                  {/* Project Context Banner */}
+                  {(campaignIntent.projectName || campaignIntent.clientName) && (
+                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-1">
+                      <p className="text-xs font-semibold text-blue-800">Campaign context</p>
+                      {campaignIntent.clientName && (
+                        <p className="text-xs text-blue-600">Client: {campaignIntent.clientName}</p>
+                      )}
+                      {campaignIntent.projectName && (
+                        <p className="text-xs text-blue-600">Project: {campaignIntent.projectName}</p>
+                      )}
+                      {campaignIntent.campaignOrganizationId && (
+                        <p className="text-xs text-blue-500 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" />
+                          Org intelligence will be used for generation
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* AI Form */}
                   <div className="space-y-4">
                     <div className="space-y-2">
@@ -1207,27 +1311,78 @@ export function SimpleTemplateBuilder({
                     {/* Brand Palette */}
                     <div className="space-y-2">
                       <Label className="text-xs text-slate-500 block">Brand Palette</Label>
-                      <Select value={brandPalette} onValueChange={(value) => setBrandPalette(value as BrandPaletteKey)}>
+
+                      {/* Organization brand colors (auto-loaded) */}
+                      {orgBrandColors && (
+                        <Button
+                          type="button"
+                          variant={useOrgBrand ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => {
+                            const derived = {
+                              primary: orgBrandColors.primary,
+                              secondary: orgBrandColors.secondary,
+                              accent: orgBrandColors.secondary,
+                              surface: "#f8fafc",
+                              button: orgBrandColors.primary,
+                            };
+                            setBrandColors(derived);
+                            setUseCustomBrandColors(true);
+                            setUseOrgBrand(true);
+                          }}
+                          className={`w-full text-xs ${useOrgBrand ? "bg-blue-600 hover:bg-blue-700" : ""}`}
+                        >
+                          <div className="flex items-center gap-2 w-full">
+                            <div className="flex gap-1">
+                              <span className="w-4 h-4 rounded-full border border-white/30" style={{ backgroundColor: orgBrandColors.primary }} />
+                              <span className="w-4 h-4 rounded-full border border-white/30" style={{ backgroundColor: orgBrandColors.secondary }} />
+                            </div>
+                            <span>{useOrgBrand ? "Using Organization Colors" : "Apply Organization Colors"}</span>
+                          </div>
+                        </Button>
+                      )}
+                      {orgBrandLoading && (
+                        <div className="flex items-center gap-2 text-xs text-slate-400 py-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Loading org brand...
+                        </div>
+                      )}
+
+                      {/* Preset palette selector */}
+                      <Select value={brandPalette} onValueChange={(value) => {
+                        setBrandPalette(value as BrandPaletteKey);
+                        setUseOrgBrand(false);
+                        setUseCustomBrandColors(false);
+                      }}>
                         <SelectTrigger className="h-9 text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           {BRAND_PALETTE_OPTIONS.map((option) => (
                             <SelectItem key={option} value={option} className="text-xs">
-                              {option.charAt(0).toUpperCase() + option.slice(1)}
+                              <div className="flex items-center gap-2">
+                                <div className="flex gap-0.5">
+                                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: BRAND_COLOR_PRESETS[option].primary }} />
+                                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: BRAND_COLOR_PRESETS[option].secondary }} />
+                                </div>
+                                {option.charAt(0).toUpperCase() + option.slice(1)}
+                              </div>
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       <Button
                         type="button"
-                        variant={useCustomBrandColors ? "secondary" : "outline"}
+                        variant={useCustomBrandColors && !useOrgBrand ? "secondary" : "outline"}
                         size="sm"
-                        onClick={() => setUseCustomBrandColors(prev => !prev)}
+                        onClick={() => {
+                          setUseCustomBrandColors(prev => !prev);
+                          setUseOrgBrand(false);
+                        }}
                         className="w-full text-xs"
                       >
                         <Palette className="w-3.5 h-3.5 mr-2" />
-                        {useCustomBrandColors ? "Using custom colors" : "Customize brand colors"}
+                        {useCustomBrandColors && !useOrgBrand ? "Using custom colors" : "Customize brand colors"}
                       </Button>
                       {useCustomBrandColors && (
                         <div className="grid grid-cols-2 gap-2">
@@ -1244,12 +1399,18 @@ export function SimpleTemplateBuilder({
                                 <Input
                                   type="color"
                                   value={brandColors[key]}
-                                  onChange={(e) => updateBrandColor(key, e.target.value)}
+                                  onChange={(e) => {
+                                    updateBrandColor(key, e.target.value);
+                                    setUseOrgBrand(false);
+                                  }}
                                   className="h-8 w-10 p-1"
                                 />
                                 <Input
                                   value={brandColors[key]}
-                                  onChange={(e) => updateBrandColor(key, e.target.value)}
+                                  onChange={(e) => {
+                                    updateBrandColor(key, e.target.value);
+                                    setUseOrgBrand(false);
+                                  }}
                                   className="text-[10px] h-8"
                                 />
                               </div>
@@ -1257,6 +1418,28 @@ export function SimpleTemplateBuilder({
                           ))}
                         </div>
                       )}
+
+                      {/* Active color swatch preview */}
+                      <div className="pt-2 border-t border-slate-100">
+                        <Label className="text-[10px] text-slate-400 block mb-1.5">Active Colors</Label>
+                        <div className="flex items-center gap-1.5">
+                          {([
+                            { key: "primary" as const, label: "Primary" },
+                            { key: "secondary" as const, label: "Secondary" },
+                            { key: "accent" as const, label: "Accent" },
+                            { key: "button" as const, label: "Button" },
+                          ]).map(({ key, label }) => (
+                            <div key={key} className="flex flex-col items-center gap-0.5">
+                              <span
+                                className="w-6 h-6 rounded border border-slate-200"
+                                style={{ backgroundColor: brandColors[key] }}
+                                title={`${label}: ${brandColors[key]}`}
+                              />
+                              <span className="text-[8px] text-slate-400">{label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
                     <Button onClick={handleAiGenerate} disabled={aiGenerating} className="w-full bg-purple-600 text-white">
@@ -1802,7 +1985,44 @@ export function SimpleTemplateBuilder({
                 Preview your email template across different email clients.
               </DialogDescription>
             </DialogHeader>
-            
+
+            {/* Active Brand Colors Strip */}
+            <div className="flex items-center gap-3 px-1 py-2 border-b">
+              <span className="text-xs font-medium text-slate-500">Brand Colors:</span>
+              <div className="flex items-center gap-2">
+                {[
+                  { label: "Primary", color: brandColors.primary },
+                  { label: "Secondary", color: brandColors.secondary },
+                  { label: "Accent", color: brandColors.accent },
+                  { label: "Button", color: brandColors.button },
+                  { label: "Surface", color: brandColors.surface },
+                ].map(({ label, color }) => (
+                  <div key={label} className="flex items-center gap-1.5" title={`${label}: ${color}`}>
+                    <span
+                      className="w-5 h-5 rounded-md border border-slate-200 shadow-sm"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="text-[10px] text-slate-400">{label}</span>
+                  </div>
+                ))}
+              </div>
+              {useOrgBrand && orgBrandColors && (
+                <span className="ml-auto text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
+                  Organization Colors
+                </span>
+              )}
+              {useCustomBrandColors && !useOrgBrand && (
+                <span className="ml-auto text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-medium">
+                  Custom Colors
+                </span>
+              )}
+              {!useCustomBrandColors && !useOrgBrand && (
+                <span className="ml-auto text-[10px] bg-slate-50 text-slate-500 px-2 py-0.5 rounded-full font-medium capitalize">
+                  {brandPalette} Palette
+                </span>
+              )}
+            </div>
+
             {/* Email Header Preview */}
             <div className="border-b pb-4 space-y-2">
               <div className="flex items-center gap-2 text-sm text-slate-500">

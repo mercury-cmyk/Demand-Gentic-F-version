@@ -256,6 +256,18 @@ export default function GenerativeStudioPage() {
     }
   }, [projectIdFromUrl]);
 
+  // Auto-resolve organization from project when projectId is in URL but no org is selected
+  const { data: resolvedOrgData } = useQuery<{ organizationId: string | null }>({
+    queryKey: [`/api/generative-studio/resolve-project-org?projectId=${projectIdFromUrl || ""}`],
+    enabled: !!projectIdFromUrl && !selectedOrgId && !orgIdFromUrl,
+  });
+
+  useEffect(() => {
+    if (resolvedOrgData?.organizationId && !selectedOrgId) {
+      setSelectedOrgId(resolvedOrgData.organizationId);
+    }
+  }, [resolvedOrgData, selectedOrgId]);
+
   useEffect(() => {
     if (selectedOrgId) {
       localStorage.setItem("generativeStudioOrgId", selectedOrgId);

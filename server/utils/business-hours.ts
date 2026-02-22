@@ -19,12 +19,13 @@ export interface ContactTimezoneInfo {
 }
 
 /**
- * Default business hours configuration (Western Mon-Fri)
+ * Default business hours configuration (Western Mon-Sat)
+ * Saturday is now included by default as a business day
  */
 export const DEFAULT_BUSINESS_HOURS: BusinessHoursConfig = {
   enabled: true,
   timezone: 'America/New_York',
-  operatingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  operatingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
   startTime: '09:00',
   endTime: '17:00',
   respectContactTimezone: true,
@@ -32,12 +33,12 @@ export const DEFAULT_BUSINESS_HOURS: BusinessHoursConfig = {
 };
 
 /**
- * Middle East business hours (Sun-Thu work week)
+ * Middle East business hours (Sun-Thu work week + Saturday)
  */
 export const MIDDLE_EAST_BUSINESS_HOURS: BusinessHoursConfig = {
   enabled: true,
   timezone: 'Asia/Dubai', // Will be overridden per country
-  operatingDays: ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
+  operatingDays: ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'saturday'],
   startTime: '09:00',
   endTime: '17:00',
   respectContactTimezone: true,
@@ -53,15 +54,58 @@ const MIDDLE_EAST_COUNTRIES = new Set([
 ]);
 
 /**
+ * UK country keys used across contact imports.
+ */
+const UK_COUNTRIES = new Set([
+  'GB',
+  'UK',
+  'UNITED KINGDOM',
+  'UNITED KINGDOM UK',
+  'GREAT BRITAIN',
+  'ENGLAND',
+  'SCOTLAND',
+  'WALES',
+]);
+
+/**
+ * Temporary one-day exception to allow UK Saturday calling.
+ * This is intentionally date-bound to avoid enabling all future Saturdays.
+ */
+const UK_SATURDAY_OVERRIDE_DATE = '2026-02-21';
+
+function isUkSaturdayOverrideActive(referenceTime: Date = new Date()): boolean {
+  const londonNow = toZonedTime(referenceTime, 'Europe/London');
+  const londonDate = format(londonNow, 'yyyy-MM-dd');
+  const londonDay = format(londonNow, 'EEEE').toLowerCase();
+  return londonDate === UK_SATURDAY_OVERRIDE_DATE && londonDay === 'saturday';
+}
+
+/**
  * Get country-specific business hours config
  */
-export function getBusinessHoursForCountry(countryCode: string | null | undefined): BusinessHoursConfig {
+export function getBusinessHoursForCountry(
+  countryCode: string | null | undefined,
+  referenceTime: Date = new Date()
+): BusinessHoursConfig {
   if (!countryCode) return DEFAULT_BUSINESS_HOURS;
   
   const normalized = countryCode.toUpperCase().trim();
   
   if (MIDDLE_EAST_COUNTRIES.has(normalized)) {
     return { ...MIDDLE_EAST_BUSINESS_HOURS };
+  }
+
+  if (UK_COUNTRIES.has(normalized)) {
+    const ukConfig: BusinessHoursConfig = {
+      ...DEFAULT_BUSINESS_HOURS,
+      timezone: 'Europe/London',
+    };
+
+    if (isUkSaturdayOverrideActive(referenceTime) && !ukConfig.operatingDays.includes('saturday')) {
+      ukConfig.operatingDays = [...ukConfig.operatingDays, 'saturday'];
+    }
+
+    return ukConfig;
   }
   
   return { ...DEFAULT_BUSINESS_HOURS };
@@ -364,9 +408,12 @@ export function isWithinBusinessHours(
 
   // Check if it's a working day
   const dayOfWeek = format(zonedTime, 'EEEE').toLowerCase();
+  console.log(`[DEBUG BIZ HOURS] Checking day: ${dayOfWeek}, operatingDays=${JSON.stringify(config.operatingDays)}`);
   if (!config.operatingDays.includes(dayOfWeek)) {
+    console.log(`[DEBUG BIZ HOURS] ${dayOfWeek} NOT in operatingDays - returning false`);
     return false; // Not an operating day
   }
+  console.log(`[DEBUG BIZ HOURS] ${dayOfWeek} IS in operatingDays - checking time`);
 
   // Check if it's a holiday
   const dateString = format(zonedTime, 'yyyy-MM-dd');

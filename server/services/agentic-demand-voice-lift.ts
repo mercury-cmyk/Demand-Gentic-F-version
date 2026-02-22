@@ -69,10 +69,19 @@ This contract is mandatory for this call.
 }
 
 export function looksLikePurposeStatement(agentText: string): boolean {
-  const text = agentText.toLowerCase();
-  return (
+  const text = agentText.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!text) return false;
+
+  const campaignSpecificSignal =
     text.includes("quick reason for my call") ||
     (text.includes("problem intelligence") && text.includes("solution mapping")) ||
-    (text.includes("demand gen") && text.includes("spray-and-pray"))
-  );
+    (text.includes("demand gen") && text.includes("spray-and-pray"));
+
+  const introSignal = /\b(this is|my name is|calling on behalf of|i am|i'm)\b/.test(text);
+  const purposeSignal =
+    /\b(quick reason|reason i am calling|reason i'm calling|im calling|i am calling|calling to|reach(?:ing|ed) out|wanted to)\b/.test(text);
+  const valueSignal =
+    /\b(help|improve|reduce|increase|streamline|eliminate|solve|platform|service|cost|productivity|security|customer experience|book|schedule|meeting|discuss)\b/.test(text);
+
+  return campaignSpecificSignal || ((introSignal || purposeSignal) && valueSignal);
 }

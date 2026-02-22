@@ -372,17 +372,15 @@ export function determineSmartDisposition(
   console.log(`${LOG_PREFIX} Flags - Voicemail: ${analysis.isVoicemail}, IVR: ${analysis.isIVR}, Gatekeeper: ${analysis.isGatekeeper}, Real Conversation: ${analysis.hasRealConversation}`);
 
 
-  // HARD GATE: Very short calls (<60s) with minimal user turns (<3) can NEVER be qualified
-  // This prevents IVR greetings, gatekeepers saying "please hold", etc. from being misclassified
-  const isMinimalCall = callDurationSeconds < 60 && analysis.userTurns < 3;
+  // HARD GATE: Very short calls (<30s) with no user turns can NEVER be qualified
+  const isMinimalCall = callDurationSeconds < 30 && analysis.userTurns < 1;
 
   // 1. Voicemail detection takes priority
-  if (analysis.isVoicemail) {
+  if (analysis.isVoicemail && !analysis.hasRealConversation) {
     result.suggestedDisposition = 'voicemail';
     result.confidence = 0.9;
     result.reasoning = 'Voicemail or answering machine detected in transcript';
-    
-    // Only override if current is wrong
+
     if (currentDisposition !== 'voicemail') {
       result.shouldOverride = true;
     }
@@ -390,54 +388,73 @@ export function determineSmartDisposition(
     return result;
   }
 
-  // CRITICAL RULE: If the AI already set a disposition via submit_disposition,
-  // the smart analyzer should NOT upgrade it to qualified_lead.
-  // The AI's in-call safeguards (booking flow check, agent turns, etc.) are more reliable
-  // than keyword matching. Only DOWNGRADE is allowed (e.g., voicemail override above).
-  // We CAN suggest needs_review for human verification.
-  //
-  // EXCEPTION: If the AI set not_interested but transcript shows positive engagement,
-  // we SHOULD override to needs_review so a human can catch misclassified leads.
+  // 2. STRONG positive signals with real conversation → qualified_lead
+  // When multiple positive signals exist AND there's a real multi-turn conversation,
+  // the call is likely qualified. Trust the evidence in the transcript.
+  const strongPositiveCount = analysis.positiveSignals.length;
+  const hasStrongEvidence = strongPositiveCount >= 2 && analysis.hasRealConversation && analysis.userTurns >= 3 && callDurationSeconds >= 45;
 
-  // 2. Check for MIXED signals (both positive and negative)
-  if (analysis.positiveSignals.length > 0 && analysis.negativeSignals.length > 0) {
-    result.suggestedDisposition = 'needs_review';
-    result.confidence = 0.6;
-    result.reasoning = `Mixed signals detected: Positive(${analysis.positiveSignals.length}) vs Negative(${analysis.negativeSignals.length}) - needs human review`;
-    // Override not_interested too — mixed signals means the AI may have been wrong
-    result.shouldOverride = currentDisposition !== 'needs_review' && currentDisposition !== 'qualified_lead';
+  if (hasStrongEvidence && analysis.negativeSignals.length === 0) {
+    result.suggestedDisposition = 'qualified_lead';
+    result.confidence = 0.80 + (strongPositiveCount * 0.03);
+    result.reasoning = `Strong qualification evidence: ${analysis.positiveSignals.join(', ')} with ${analysis.userTurns} user turns in ${callDurationSeconds}s call`;
+    result.metSuccessIndicators = analysis.positiveSignals;
+    // Upgrade from any under-classified disposition
+    result.shouldOverride = currentDisposition !== 'qualified_lead' && currentDisposition !== 'do_not_call';
     console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
-  // 3. Positive signals detected
-  // Never auto-upgrade to qualified_lead. Route to needs_review instead.
-  // Only the AI agent's submit_disposition tool (with its booking flow validation)
-  // should produce a qualified_lead disposition.
-  if (analysis.positiveSignals.length > 0 && analysis.hasUserResponse) {
-    // If the call is too short/minimal, avoid hard "no_answer" so campaign goals
-    // can still be recovered via human/QA verification when positive cues exist.
+  // 3. Check for MIXED signals (both positive and negative)
+  if (analysis.positiveSignals.length > 0 && analysis.negativeSignals.length > 0) {
+    // If positive signals strongly outweigh negative, lean toward qualified
+    if (analysis.positiveSignals.length >= analysis.negativeSignals.length * 2 && analysis.hasRealConversation) {
+      result.suggestedDisposition = 'qualified_lead';
+      result.confidence = 0.65;
+      result.reasoning = `Positive signals (${analysis.positiveSignals.length}) strongly outweigh negative (${analysis.negativeSignals.length}) with real conversation`;
+      result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'needs_review' || currentDisposition === null;
+    } else {
+      result.suggestedDisposition = 'callback_requested';
+      result.confidence = 0.6;
+      result.reasoning = `Mixed signals: Positive(${analysis.positiveSignals.length}) vs Negative(${analysis.negativeSignals.length}) - treat as callback opportunity`;
+      result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === null;
+    }
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
+    return result;
+  }
+
+  // 4. Positive signals with real conversation → qualified_lead (single signal)
+  if (analysis.positiveSignals.length > 0 && analysis.hasUserResponse && analysis.hasRealConversation && callDurationSeconds >= 30) {
     if (isMinimalCall) {
-      result.suggestedDisposition = 'needs_review';
+      result.suggestedDisposition = 'callback_requested';
       result.confidence = 0.62;
-      result.reasoning = `Positive keywords detected in a short call (${callDurationSeconds}s, ${analysis.userTurns} turns) - route to review instead of hard no_answer`;
-      result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === null;
+      result.reasoning = `Positive keywords in short call (${callDurationSeconds}s, ${analysis.userTurns} turns) - treat as callback`;
+      result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === null;
       console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
       return result;
     }
 
-    result.suggestedDisposition = 'needs_review';
-    result.confidence = 0.75 + (analysis.positiveSignals.length * 0.05);
-    result.reasoning = `Positive signals detected: ${analysis.positiveSignals.join(', ')} - routed to QA for human verification`;
+    result.suggestedDisposition = 'qualified_lead';
+    result.confidence = 0.72 + (analysis.positiveSignals.length * 0.05);
+    result.reasoning = `Positive signals with real conversation: ${analysis.positiveSignals.join(', ')} (${analysis.userTurns} turns, ${callDurationSeconds}s)`;
     result.metSuccessIndicators = analysis.positiveSignals;
-    // Override not_interested when positive signals exist — the AI likely misclassified
-    // Still never override qualified_lead (already the best outcome)
-    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === 'not_interested' || currentDisposition === null;
+    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'not_interested' || currentDisposition === 'needs_review' || currentDisposition === null;
     console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
-  // 4. Check for explicit negative signals
+  // 5. Positive signals but minimal conversation → callback_requested
+  if (analysis.positiveSignals.length > 0 && analysis.hasUserResponse) {
+    result.suggestedDisposition = 'callback_requested';
+    result.confidence = 0.65;
+    result.reasoning = `Positive signals detected but limited conversation: ${analysis.positiveSignals.join(', ')}`;
+    result.metSuccessIndicators = analysis.positiveSignals;
+    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === null;
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
+    return result;
+  }
+
+  // 6. Check for explicit negative signals
   if (analysis.negativeSignals.length > 0) {
     result.suggestedDisposition = 'not_interested';
     result.confidence = 0.85;
@@ -447,38 +464,37 @@ export function determineSmartDisposition(
     return result;
   }
 
-  // 4. Real conversation with engagement but no explicit signals - needs review
-  // A real back-and-forth conversation that was marked not_interested deserves human review
+  // 7. Real conversation with engagement but no explicit signals → callback_requested
+  // If someone had a real back-and-forth, they're at least a callback opportunity
   if (analysis.hasRealConversation && analysis.userTurns >= 2) {
-    result.suggestedDisposition = 'needs_review';
-    result.confidence = 0.7;
-    result.reasoning = `Real conversation with ${analysis.userTurns} user turns - needs human review`;
-    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'not_interested';
+    result.suggestedDisposition = 'callback_requested';
+    result.confidence = 0.65;
+    result.reasoning = `Real conversation with ${analysis.userTurns} user turns but no explicit interest/disinterest signals - treat as callback`;
+    result.shouldOverride = currentDisposition === 'no_answer';
     console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
-  // 5. Has some user response but minimal engagement
+  // 8. Has some user response but minimal engagement
   if (analysis.hasUserResponse && analysis.userTurns >= 1 && !analysis.isIVR) {
-    // If current disposition is no_answer but there was a response, it's wrong
     if (currentDisposition === 'no_answer') {
-      result.suggestedDisposition = 'needs_review';
-      result.confidence = 0.6;
-      result.reasoning = 'User responded but engagement was minimal - needs review';
+      result.suggestedDisposition = 'callback_requested';
+      result.confidence = 0.55;
+      result.reasoning = 'User responded (not no_answer) - treat as callback opportunity';
       result.shouldOverride = true;
     } else {
       result.suggestedDisposition = currentDisposition as any || 'no_answer';
-      result.reasoning = 'Minimal user engagement';
+      result.reasoning = 'Minimal user engagement - keeping current disposition';
     }
     console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
-  // 6. No user response or IVR only
+  // 9. No user response or IVR only
   result.suggestedDisposition = 'no_answer';
   result.confidence = 0.8;
   result.reasoning = analysis.isIVR ? 'Only IVR interaction detected' : 'No meaningful user response detected';
-  
+
   console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
   return result;
 }

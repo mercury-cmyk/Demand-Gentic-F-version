@@ -420,8 +420,8 @@ function formatTwoWayTranscript(structured: StructuredTranscript): {
   const lines: string[] = [];
 
   for (const utterance of structured.utterances) {
-    const role = utterance.speaker === "Speaker 1" ? "AGENT" : "PROSPECT";
-    if (role === "AGENT") agentLines.push(utterance.text);
+    const role = utterance.speaker === "Speaker 1" ? "Agent" : "Contact";
+    if (role === "Agent") agentLines.push(utterance.text);
     else prospectLines.push(utterance.text);
 
     lines.push(`[${toClock(utterance.start)}] ${role}: ${utterance.text}`);

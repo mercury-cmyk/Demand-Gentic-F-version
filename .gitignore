@@ -57,3 +57,4 @@ fix-production-db.sql
 !.devcontainer/
 .env.sip
 .env.sip.example
+!.env.development.example

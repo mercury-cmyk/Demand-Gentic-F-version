@@ -45,6 +45,7 @@ import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes'
 import dispositionDeepReanalysisRouter from './routes/disposition-deep-reanalysis-routes';
 import queueIntelligenceRouter from './routes/queue-intelligence-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
+import intelligenceRoutes from './routes/intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
 import inboxRouter from './routes/inbox-routes';
 import emailAiRouter from './routes/email-ai-routes';
@@ -4332,6 +4333,44 @@ export function registerRoutes(app: Express) {
     } catch (error) {
       console.error('Get list members error:', error);
       res.status(500).json({ message: "Failed to get list members" });
+    }
+  });
+
+  // Added endpoint to get list member count (contacts resolved for account lists)
+  app.get("/api/lists/:id/count", requireAuth, async (req, res) => {
+    try {
+      const list = await storage.getList(req.params.id);
+      if (!list) {
+        return res.status(404).json({ message: "List not found" });
+      }
+
+      const recordIds = Array.isArray(list.recordIds) ? list.recordIds : [];
+      if (recordIds.length === 0) {
+        return res.json({ count: 0, entityType: list.entityType });
+      }
+
+      if (list.entityType === 'account') {
+        const uniqueAccountIds = Array.from(new Set(recordIds));
+        const BATCH_SIZE = 500;
+        let total = 0;
+
+        for (let i = 0; i < uniqueAccountIds.length; i += BATCH_SIZE) {
+          const batch = uniqueAccountIds.slice(i, i + BATCH_SIZE);
+          const [row] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(contacts)
+            .where(inArray(contacts.accountId, batch));
+          total += Number(row?.count ?? 0);
+        }
+
+        return res.json({ count: total, entityType: list.entityType });
+      }
+
+      const uniqueContactIds = new Set(recordIds);
+      return res.json({ count: uniqueContactIds.size, entityType: list.entityType });
+    } catch (error) {
+      console.error('Get list count error:', error);
+      res.status(500).json({ message: "Failed to get list count" });
     }
   });
 
@@ -14825,6 +14864,10 @@ Provide JSON response with:
   // ==================== ORGANIZATION INTELLIGENCE ====================
 
   app.use("/api/org-intelligence", orgIntelligenceRouter);
+
+  // ==================== UNIFIED INTELLIGENCE HUB ====================
+
+  app.use("/api/intelligence", requireAuth, intelligenceRoutes);
 
   // ==================== PROBLEM INTELLIGENCE & ORGANIZATIONS ====================
 

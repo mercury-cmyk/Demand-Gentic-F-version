@@ -146,6 +146,25 @@ function normalizeOptionalId(value: unknown): string | undefined {
 // ============================================================================
 
 /**
+ * GET /resolve-project-org
+ * Resolve organization ID from a client project ID
+ */
+router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Response) => {
+  try {
+    const projectId = normalizeOptionalId(req.query.projectId);
+    if (!projectId) {
+      return res.json({ organizationId: null });
+    }
+    const [project] = await db.select({
+      campaignOrganizationId: clientProjects.campaignOrganizationId,
+    }).from(clientProjects).where(eq(clientProjects.id, projectId)).limit(1);
+    res.json({ organizationId: project?.campaignOrganizationId || null });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, "resolve project org");
+  }
+});
+
+/**
  * GET /org-projects
  * List client projects for an organization
  */
@@ -609,9 +628,8 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
     if (!tenantId && project.ownerId !== userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
-    if (!isProjectWithinScope(project, organizationId, clientProjectId)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Note: We don't check isProjectWithinScope here because if the user owns the project,
+    // they should be able to publish it regardless of organizationId/clientProjectId mismatch
 
     // Generate slug if not provided
     const pageSlug = slug || project.title

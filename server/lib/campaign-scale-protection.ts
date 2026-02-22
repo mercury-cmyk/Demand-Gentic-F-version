@@ -1,4 +1,4 @@
-import { db } from './db';
+import { db } from '../db';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -23,18 +23,19 @@ export async function monitorCampaignStatusChanges() {
       LIMIT 50
     `);
 
-    const paused = (recentUpdates as any[]).filter(c => c.status === 'paused');
-    
+    const rows = (recentUpdates as unknown as { rows: any[] }).rows ?? (recentUpdates as unknown as any[]);
+    const paused = rows.filter((c: any) => c.status === 'paused');
+
     if (paused.length > 0) {
       console.warn(`[Campaign Monitor] ⚠️ ${paused.length} AI agent campaigns recently paused:`);
       paused.forEach((c: any) => {
         const secondsSince = Math.round(c.seconds_since_update);
         console.warn(`  - ${c.name} (${c.id}): paused ${secondsSince}s ago`);
       });
-      return { paused, total: (recentUpdates as any[]).length };
+      return { paused, total: rows.length };
     }
 
-    return { paused: [], total: (recentUpdates as any[]).length };
+    return { paused: [], total: rows.length };
   } catch (error) {
     console.error('[Campaign Monitor] Error checking campaign status:', error);
     return { paused: [], total: 0, error };

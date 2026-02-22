@@ -37,6 +37,7 @@ import {
   notificationService,
   bulkInvitationService,
   seedDefaultTemplates,
+  seedDefaultRules,
 } from '../services/mercury';
 import { generateJSON } from '../services/vertex-ai';
 import { smtpOAuthService } from '../services/smtp-oauth-service';
@@ -753,12 +754,13 @@ mercuryRouter.post('/verify-connection', async (req: Request, res: Response) => 
 mercuryRouter.post('/templates/seed', async (req: Request, res: Response) => {
   try {
     const result = await seedDefaultTemplates();
+    const rulesResult = await seedDefaultRules();
     // Return all templates after seed so UI can refresh immediately
     const templates = await db
       .select()
       .from(mercuryTemplates)
       .orderBy(mercuryTemplates.category, mercuryTemplates.name);
-    res.json({ success: true, ...result, templates });
+    res.json({ success: true, ...result, rules: rulesResult, templates });
   } catch (error: any) {
     console.error('[Mercury/Routes] Seed error:', error.message);
     res.status(500).json({ error: error.message });
@@ -1376,5 +1378,5 @@ mercuryRouter.post('/outbox/process',
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export { smtpProvidersRouter, smtpOAuthCallbackRouter, seedDefaultTemplates };
+export { smtpProvidersRouter, smtpOAuthCallbackRouter, seedDefaultTemplates, seedDefaultRules };
 export default mercuryRouter;
