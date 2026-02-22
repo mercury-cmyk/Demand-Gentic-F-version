@@ -165,6 +165,15 @@ describe('Stream Endpoint — Never Returns JSON', () => {
     const shouldReResolve = firstSource === 'cached';
     expect(shouldReResolve).toBe(true);
   });
+
+  it('supports server-side GCS streaming path (gcs-internal source)', () => {
+    const resolved = {
+      source: 'gcs',
+      url: 'gcs-internal://demandgentic-storage/recordings/lead-123.mp3',
+    };
+    expect(resolved.source).toBe('gcs');
+    expect(resolved.url.startsWith('gcs-internal://')).toBe(true);
+  });
 });
 
 // ─── Schema Columns Tests ──────────────────────────────────────────────

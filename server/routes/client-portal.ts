@@ -352,27 +352,126 @@ function generateClientToken(clientUser: typeof clientUsers.$inferSelect, isOwne
 interface ClientRecordingStreamTokenPayload {
   type: 'client_portal_lead_recording_stream';
   leadId: string;
-  clientUserId: string;
-  clientAccountId: string;
+  authMode: 'client' | 'admin';
+  clientUserId?: string;
+  clientAccountId?: string;
+  adminUserId?: string;
 }
 
-function createClientRecordingStreamToken(payload: ClientRecordingStreamTokenPayload): string {
+export function createClientRecordingStreamToken(payload: ClientRecordingStreamTokenPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS });
 }
 
-function verifyClientRecordingStreamToken(token: string): ClientRecordingStreamTokenPayload | null {
+export function verifyClientRecordingStreamToken(token: string): ClientRecordingStreamTokenPayload | null {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as ClientRecordingStreamTokenPayload;
     if (!decoded || decoded.type !== 'client_portal_lead_recording_stream') {
       return null;
     }
-    if (!decoded.leadId || !decoded.clientAccountId || !decoded.clientUserId) {
+    if (!decoded.leadId || (decoded.authMode !== 'client' && decoded.authMode !== 'admin')) {
+      return null;
+    }
+    if (decoded.authMode === 'client' && (!decoded.clientAccountId || !decoded.clientUserId)) {
+      return null;
+    }
+    if (decoded.authMode === 'admin' && !decoded.adminUserId) {
       return null;
     }
     return decoded;
   } catch {
     return null;
   }
+}
+
+type RecordingAuthContext =
+  | {
+      mode: 'client';
+      clientUser: ClientJWTPayload;
+      authPath: 'query-token' | 'bearer';
+    }
+  | {
+      mode: 'admin';
+      adminUserId: string;
+      authPath: 'query-token' | 'cookie' | 'bearer';
+    };
+
+function decodeClientPortalBearerToken(authHeader: string | undefined): ClientJWTPayload | null {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7);
+  if (!token || token === 'null' || token === 'undefined') return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as ClientJWTPayload;
+    if (!payload?.isClient) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveRecordingRequestAuth(req: Request, leadId: string): {
+  context: RecordingAuthContext | null;
+  tokenVerified: boolean;
+  reason?: string;
+} {
+  let invalidQueryTokenReason: string | undefined;
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : '';
+  if (queryToken) {
+    const decoded = verifyClientRecordingStreamToken(queryToken);
+    if (!decoded) {
+      invalidQueryTokenReason = 'invalid_or_expired_query_token';
+    } else if (decoded.leadId !== leadId) {
+      invalidQueryTokenReason = 'query_token_lead_mismatch';
+    } else if (decoded.authMode === 'client') {
+      return {
+        context: {
+          mode: 'client',
+          clientUser: {
+            clientUserId: decoded.clientUserId!,
+            clientAccountId: decoded.clientAccountId!,
+            email: '',
+            firstName: null,
+            lastName: null,
+            isClient: true,
+          },
+          authPath: 'query-token',
+        },
+        tokenVerified: true,
+      };
+    } else {
+      return {
+        context: {
+          mode: 'admin',
+          adminUserId: decoded.adminUserId!,
+          authPath: 'query-token',
+        },
+        tokenVerified: true,
+      };
+    }
+  }
+
+  const bearerClient = decodeClientPortalBearerToken(req.headers.authorization);
+  if (bearerClient) {
+    return {
+      context: { mode: 'client', clientUser: bearerClient, authPath: 'bearer' },
+      tokenVerified: true,
+    };
+  }
+
+  const reqAny = req as any;
+  const sessionAuthenticated =
+    typeof reqAny.isAuthenticated === 'function' && reqAny.isAuthenticated() && reqAny.user?.id;
+  if (sessionAuthenticated) {
+    return {
+      context: {
+        mode: 'admin',
+        adminUserId: String(reqAny.user.id),
+        authPath: 'cookie',
+      },
+      tokenVerified: true,
+    };
+  }
+
+  return { context: null, tokenVerified: false, reason: invalidQueryTokenReason || 'no_supported_auth_found' };
 }
 
 function requireClientAuth(req: Request, res: Response, next: NextFunction) {
@@ -1964,26 +2063,69 @@ async function getLeadRecordingSourceHint(lead: {
 
 // Resolve a fresh recording URL for a specific lead.
 // Returns a platform stream URL (never raw storage links) for both Play and Download.
-router.get('/qualified-leads/:id/recording-link', requireClientAuth, async (req, res) => {
+router.get('/qualified-leads/:id/recording-link', async (req, res) => {
   try {
     const { id } = req.params;
-
-    const context = await getLeadRecordingContextForClientPortal(id, req.clientUser!.clientAccountId);
-    if (!context.ok) {
-      return res.status(context.status).json({
+    const auth = resolveRecordingRequestAuth(req, id);
+    console.log(
+      `[CLIENT PORTAL] recording-link auth path used: ${auth.context?.authPath || 'none'} ` +
+      `token verified: ${auth.tokenVerified} reason: ${auth.reason || 'ok'}`,
+    );
+    if (!auth.context) {
+      return res.status(401).json({
         success: false,
-        message: context.message,
+        message: 'Authentication required',
       });
     }
 
-    const sourceHint = await getLeadRecordingSourceHint(context.lead).catch(() => null);
+    let leadContext:
+      | Awaited<ReturnType<typeof getLeadRecordingContextForClientPortal>>
+      | { ok: true; lead: { id: string; recordingUrl: string | null; recordingS3Key: string | null; callSessionId: string | null } };
 
-    const streamToken = createClientRecordingStreamToken({
-      type: 'client_portal_lead_recording_stream',
-      leadId: id,
-      clientUserId: req.clientUser!.clientUserId,
-      clientAccountId: req.clientUser!.clientAccountId,
-    });
+    if (auth.context.mode === 'client') {
+      leadContext = await getLeadRecordingContextForClientPortal(id, auth.context.clientUser.clientAccountId);
+      if (!leadContext.ok) {
+        return res.status(leadContext.status).json({
+          success: false,
+          message: leadContext.message,
+        });
+      }
+    } else {
+      const [lead] = await db
+        .select({
+          id: leads.id,
+          recordingUrl: leads.recordingUrl,
+          recordingS3Key: leads.recordingS3Key,
+          callSessionId: dialerCallAttempts.callSessionId,
+        })
+        .from(leads)
+        .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
+        .where(eq(leads.id, id))
+        .limit(1);
+      if (!lead) {
+        return res.status(404).json({ success: false, message: 'Lead not found' });
+      }
+      leadContext = { ok: true, lead };
+    }
+
+    const sourceHint = await getLeadRecordingSourceHint(leadContext.lead).catch(() => null);
+
+    const streamToken = createClientRecordingStreamToken(
+      auth.context.mode === 'client'
+        ? {
+            type: 'client_portal_lead_recording_stream',
+            leadId: id,
+            authMode: 'client',
+            clientUserId: auth.context.clientUser.clientUserId,
+            clientAccountId: auth.context.clientUser.clientAccountId,
+          }
+        : {
+            type: 'client_portal_lead_recording_stream',
+            leadId: id,
+            authMode: 'admin',
+            adminUserId: auth.context.adminUserId,
+          },
+    );
 
     const streamUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording-stream?token=${encodeURIComponent(streamToken)}`;
     if (streamUrl.includes('s3.amazonaws.com') || streamUrl.includes('telephony-recorder-prod')) {
@@ -2017,26 +2159,29 @@ router.get('/qualified-leads/:id/recording-link', requireClientAuth, async (req,
 router.get('/qualified-leads/:id/recording-stream', async (req, res) => {
   try {
     const { id } = req.params;
-    const token = String(req.query.token || '');
-    if (!token) {
-      return res.status(401).type('text/plain').send('Missing recording stream token');
+    const auth = resolveRecordingRequestAuth(req, id);
+    console.log(
+      `[CLIENT PORTAL] recording-stream auth path used: ${auth.context?.authPath || 'none'} ` +
+      `token verified: ${auth.tokenVerified} reason: ${auth.reason || 'ok'}`,
+    );
+    if (!auth.context) {
+      return res.status(401).type('text/plain').send('Authentication required');
     }
 
-    const payload = verifyClientRecordingStreamToken(token);
-    if (!payload) {
-      return res.status(401).type('text/plain').send('Invalid or expired recording stream token');
+    if (auth.context.mode === 'client') {
+      const context = await getLeadRecordingContextForClientPortal(id, auth.context.clientUser.clientAccountId);
+      if (!context.ok) {
+        return res.status(context.status).type('text/plain').send(context.message);
+      }
+      console.log(
+        `[CLIENT PORTAL] Lead recording stream request | lead=${id} user=${auth.context.clientUser.clientUserId} account=${auth.context.clientUser.clientAccountId}`,
+      );
+    } else {
+      console.log(
+        `[CLIENT PORTAL] Lead recording stream request | lead=${id} adminUser=${auth.context.adminUserId}`,
+      );
     }
 
-    if (payload.leadId !== id) {
-      return res.status(403).type('text/plain').send('Recording stream token does not match lead');
-    }
-
-    const context = await getLeadRecordingContextForClientPortal(id, payload.clientAccountId);
-    if (!context.ok) {
-      return res.status(context.status).type('text/plain').send(context.message);
-    }
-
-    console.log(`[CLIENT PORTAL] Lead recording stream request | lead=${id} user=${payload.clientUserId} account=${payload.clientAccountId}`);
     const { streamRecording } = await import('./recordings');
     return streamRecording(req as Request, res as Response);
   } catch (error: any) {

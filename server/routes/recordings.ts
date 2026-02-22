@@ -1137,6 +1137,7 @@ router.get('/:id/url', async (req: Request, res: Response) => {
 export async function streamRecording(req: Request, res: Response) {
   try {
     const { id } = req.params;
+    const downloadRequested = String(req.query.download || '') === '1';
     const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
 
     // ── Resolve a playable URL ───────────────────────────────────────
@@ -1225,6 +1226,10 @@ export async function streamRecording(req: Request, res: Response) {
     const contentLength = audioResponse.headers.get('content-length');
 
     res.setHeader('Content-Type', contentType);
+    if (downloadRequested) {
+      const extension = contentType.includes('wav') ? 'wav' : 'mp3';
+      res.setHeader('Content-Disposition', `attachment; filename=\"recording-${id}.${extension}\"`);
+    }
     if (contentLength) {
       res.setHeader('Content-Length', contentLength);
     }
