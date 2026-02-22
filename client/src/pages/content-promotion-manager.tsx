@@ -313,14 +313,31 @@ export default function ContentPromotionManager() {
   };
 
   const handlePreview = (page: ContentPromotionPage) => {
-    if (page.sourceType === "content_studio" && page.status !== "published") {
-      toast({
-        title: "Preview unavailable",
-        description: "This Content Studio page is not published yet. Open Content Studio to manage it.",
-      });
-      return;
+    // Allow preview for all pages, including drafts
+    let path: string;
+    
+    if (page.sourceType === "content_studio") {
+      if (page.status === "published" && page.previewPath) {
+        // Published Content Studio pages use their public URL
+        path = page.previewPath;
+      } else if (page.sourceProjectId) {
+        // Draft Content Studio pages: open in studio for preview
+        path = `/generative-studio?projectId=${encodeURIComponent(page.sourceProjectId)}`;
+        window.open(path, "_blank");
+        return;
+      } else {
+        toast({
+          title: "Preview unavailable",
+          description: "Unable to locate project for preview.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else {
+      // Content Promotion pages always use /promo/:slug route
+      path = `/promo/${page.slug}`;
     }
-    const path = page.previewPath || `/promo/${page.slug}`;
+    
     window.open(path, "_blank");
   };
 
@@ -484,8 +501,15 @@ export default function ContentPromotionManager() {
             const themeName = THEME_LABELS[page.templateTheme] || page.templateTheme;
             const conversionRate = parseFloat(page.conversionRate || "0");
             const isStudioPage = page.sourceType === "content_studio";
-            const canPreview = !isStudioPage || page.status === "published";
-            const previewLabel = page.previewPath || (isStudioPage ? "Not published yet" : `/promo/${page.slug}`);
+            const canPreview = true; // Always allow preview
+            let previewLabel: string;
+            if (isStudioPage) {
+              previewLabel = page.status === "published" 
+                ? (page.previewPath || "Published") 
+                : "Draft (opens in Studio)";
+            } else {
+              previewLabel = `/promo/${page.slug}`;
+            }
 
             return (
               <Card key={page.id} className="flex flex-col">

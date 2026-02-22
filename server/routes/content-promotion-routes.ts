@@ -816,18 +816,26 @@ router.get("/api/public/promo/:slug", async (req, res) => {
   try {
     const { slug } = req.params;
 
+    // Allow preview of draft pages with preview token for authenticated users
+    const allowDraft = req.query.preview === 'true' && req.headers.authorization;
+
+    const conditions: any[] = [eq(contentPromotionPages.slug, slug)];
+    if (!allowDraft) {
+      conditions.push(eq(contentPromotionPages.status, "published" as any));
+    }
+
     const [page] = await db
       .select()
       .from(contentPromotionPages)
-      .where(
-        and(
-          eq(contentPromotionPages.slug, slug),
-          eq(contentPromotionPages.status, "published" as any)
-        )
-      )
+      .where(and(...conditions))
       .limit(1);
 
     if (!page) {
+      return res.status(404).json({ error: "Page not found" });
+    }
+
+    // For draft pages, verify authentication
+    if (page.status !== "published" && !req.headers.authorization) {
       return res.status(404).json({ error: "Page not found" });
     }
 

@@ -267,7 +267,9 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
       
       // Small delay to show completion
       setTimeout(() => {
-        setProfile(normalizeProfile(data.profile));
+        const normalized = normalizeProfile(data.profile);
+        setProfile(normalized);
+        setDomain(normalized.identity.domain.value || domain);
         setAnalysisMetadata({
           models: data.models,
           reasoning: data.reasoning,
@@ -308,15 +310,20 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
   };
 
   const updateField = (section: keyof AccountProfile, field: string, updates: Partial<IntelligenceField>) => {
-    if (!profile) return;
-    setProfile({
-      ...profile,
-      [section]: {
-        ...profile[section],
-        models: analysisMetadata?.models,
-        reasoning: analysisMetadata?.reasoning,
-        [field]: { ...(profile[section] as any)[field], ...updates }
-      }
+    setProfile((prev) => {
+      if (!prev) return prev;
+      const normalized = normalizeProfile(prev);
+      const sectionData = (normalized as any)[section] ?? {};
+      const existingField = sectionData[field] ?? defaultField();
+      return normalizeProfile({
+        ...normalized,
+        [section]: {
+          ...sectionData,
+          models: analysisMetadata?.models,
+          reasoning: analysisMetadata?.reasoning,
+          [field]: { ...existingField, ...updates }
+        }
+      } as AccountProfile);
     });
   };
 
@@ -370,8 +377,9 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
         const data = await response.json();
 
         if (data.profile) {
-          setDomain(data.profile.domain || "");
-          setProfile(normalizeProfile(data.profile));
+          const normalized = normalizeProfile(data.profile);
+          setDomain(normalized.identity.domain.value || "");
+          setProfile(normalized);
           setState("review");
         } else {
           // Reset to idle if no profile for this org
@@ -535,7 +543,9 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
     );
   }
 
-  if (state === "review" && profile) {
+  const safeProfile = profile ? normalizeProfile(profile) : null;
+
+  if (state === "review" && safeProfile) {
     return (
       <div className="space-y-8 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
         <div className="flex justify-between items-center">
@@ -544,13 +554,13 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
                     <Building2 className="h-6 w-6 text-primary" />
                  </div>
                  <div>
-                    <h2 className="text-2xl font-semibold tracking-tight">{profile.identity.legalName.value}</h2>
+                    <h2 className="text-2xl font-semibold tracking-tight">{safeProfile.identity.legalName.value}</h2>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <a href={`https://${profile.identity.domain.value}`} target="_blank" rel="noreferrer" className="hover:text-primary transition-colors hover:underline">
-                            {profile.identity.domain.value}
+                        <a href={`https://${safeProfile.identity.domain.value}`} target="_blank" rel="noreferrer" className="hover:text-primary transition-colors hover:underline">
+                            {safeProfile.identity.domain.value}
                         </a>
                         <span>•</span>
-                         <span>{profile.identity.employees.value} employees</span>
+                         <span>{safeProfile.identity.employees.value} employees</span>
                     </div>
                  </div>
              </div>
@@ -593,29 +603,29 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
                   <div className="grid sm:grid-cols-2 gap-6">
                     <SmartField 
                       label="Legal Name" 
-                      field={profile.identity.legalName} 
+                      field={safeProfile.identity.legalName} 
                       onUpdate={(u) => updateField('identity', 'legalName', u)} 
                     />
                     <SmartField 
                       label="Industry" 
-                      field={profile.identity.industry} 
+                      field={safeProfile.identity.industry} 
                       onUpdate={(u) => updateField('identity', 'industry', u)} 
                     />
                     <SmartField 
                       label="Headquarters / Regions" 
-                      field={profile.identity.regions} 
+                      field={safeProfile.identity.regions} 
                       onUpdate={(u) => updateField('identity', 'regions', u)} 
                     />
                     <SmartField 
                       label="Company Size" 
-                      field={profile.identity.employees} 
+                      field={safeProfile.identity.employees} 
                       onUpdate={(u) => updateField('identity', 'employees', u)} 
                     />
                   </div>
                   <Separator />
                   <SmartField 
                     label="Company Description" 
-                    field={profile.identity.description} 
+                    field={safeProfile.identity.description} 
                     onUpdate={(u) => updateField('identity', 'description', u)} 
                     multiline 
                   />
@@ -665,27 +675,27 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
               <CardContent className="space-y-6">
                 <SmartField 
                   label="Core Products/Services" 
-                  field={profile.offerings.coreProducts} 
+                  field={safeProfile.offerings.coreProducts} 
                   onUpdate={(u) => updateField('offerings', 'coreProducts', u)} 
                   multiline
                 />
                 <div className="grid lg:grid-cols-2 gap-6">
                   <SmartField 
                     label="Primary Use Cases" 
-                    field={profile.offerings.useCases} 
+                    field={safeProfile.offerings.useCases} 
                     onUpdate={(u) => updateField('offerings', 'useCases', u)} 
                     multiline
                   />
                   <SmartField 
                     label="Problems Solved" 
-                    field={profile.offerings.problemsSolved} 
+                    field={safeProfile.offerings.problemsSolved} 
                     onUpdate={(u) => updateField('offerings', 'problemsSolved', u)} 
                     multiline
                   />
                 </div>
                 <SmartField 
                   label="Key Differentiators" 
-                  field={profile.offerings.differentiators} 
+                  field={safeProfile.offerings.differentiators} 
                   onUpdate={(u) => updateField('offerings', 'differentiators', u)} 
                   multiline
                 />
@@ -708,18 +718,18 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
                 <div className="grid lg:grid-cols-2 gap-6">
                   <SmartField 
                     label="Best-fit Industries" 
-                    field={profile.icp.industries} 
+                    field={safeProfile.icp.industries} 
                     onUpdate={(u) => updateField('icp', 'industries', u)} 
                   />
                   <SmartField 
                     label="Key Personas" 
-                    field={profile.icp.personas} 
+                    field={safeProfile.icp.personas} 
                     onUpdate={(u) => updateField('icp', 'personas', u)} 
                   />
                 </div>
                 <SmartField 
                   label="Typical Objections" 
-                  field={profile.icp.objections} 
+                  field={safeProfile.icp.objections} 
                   onUpdate={(u) => updateField('icp', 'objections', u)} 
                   multiline
                 />
@@ -739,18 +749,18 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
                 <CardContent className="space-y-4">
                   <SmartField 
                     label="One-Liner" 
-                    field={profile.positioning.oneLiner} 
+                    field={safeProfile.positioning.oneLiner} 
                     onUpdate={(u) => updateField('positioning', 'oneLiner', u)} 
                     multiline
                   />
                   <SmartField 
                     label="Top Competitors" 
-                    field={profile.positioning.competitors} 
+                    field={safeProfile.positioning.competitors} 
                     onUpdate={(u) => updateField('positioning', 'competitors', u)} 
                   />
                   <SmartField 
                     label="Why Us? (Win themes)" 
-                    field={profile.positioning.whyUs} 
+                    field={safeProfile.positioning.whyUs} 
                     onUpdate={(u) => updateField('positioning', 'whyUs', u)} 
                     multiline
                   />
@@ -767,13 +777,13 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
                 <CardContent className="space-y-4">
                   <SmartField 
                     label="Recommended Email Angles" 
-                    field={profile.outreach.emailAngles} 
+                    field={safeProfile.outreach.emailAngles} 
                     onUpdate={(u) => updateField('outreach', 'emailAngles', u)} 
                     multiline
                   />
                   <SmartField 
                     label="Call Opener Variations" 
-                    field={profile.outreach.callOpeners} 
+                    field={safeProfile.outreach.callOpeners} 
                     onUpdate={(u) => updateField('outreach', 'callOpeners', u)} 
                     multiline
                   />

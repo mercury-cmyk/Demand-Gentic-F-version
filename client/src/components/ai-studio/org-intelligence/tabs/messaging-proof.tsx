@@ -48,7 +48,8 @@ function formatConfidence(value?: number) {
 }
 
 function FieldRow({ label, field }: { label: string; field?: IntelligenceField }) {
-  const value = field?.value?.trim();
+  const rawValue = field?.value;
+  const value = typeof rawValue === "string" ? rawValue.trim() : rawValue != null ? String(rawValue).trim() : "";
   const confidence = formatConfidence(field?.confidence);
 
   return (

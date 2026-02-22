@@ -46,6 +46,7 @@ import {
   PRINCIPLES,
   FOUNDER_QUOTES,
   FOOTER,
+  PUBLIC_PAGES_MESSAGING,
 } from "@shared/brand-messaging";
 
 export default function LandingPage() {
@@ -98,27 +99,25 @@ export default function LandingPage() {
           <div className="text-center max-w-4xl mx-auto">
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
-              Agentic ABM for B2B Vendors
+              {PUBLIC_PAGES_MESSAGING.category}
             </Badge>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               <span className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 bg-clip-text text-transparent">
-                Agentic Account-Based Marketing
+                {PUBLIC_PAGES_MESSAGING.headline}
               </span>
               <br />
               <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 bg-clip-text text-transparent">
-                for B2B Vendors
+                {PUBLIC_PAGES_MESSAGING.subHeadline}
               </span>
             </h1>
 
             <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed max-w-3xl mx-auto font-medium">
-              Human-led ABM strategy. Reasoning-first AI execution. Brand-controlled demand.
+              {PUBLIC_PAGES_MESSAGING.tagline}
             </p>
 
             <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed max-w-3xl mx-auto">
-              DemandGentic turns your ABM strategy into coordinated outreach across email, voice,
-              and workflows—so you generate higher-quality pipeline from target accounts without
-              sacrificing compliance, accuracy, or brand integrity.
+              {PUBLIC_PAGES_MESSAGING.valueProposition}
             </p>
 
             {/* Trust Line */}

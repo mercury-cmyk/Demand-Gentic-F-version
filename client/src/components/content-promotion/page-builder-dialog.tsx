@@ -394,16 +394,35 @@ export default function PageBuilderDialog({
         : "/api/content-promotion/pages";
       const method = isEditing ? "PUT" : "POST";
       const res = await apiRequest(method, url, data);
-      return res.json();
+      const result = await res.json();
+      
+      // If campaignId is provided, update campaign with landing page URL
+      if (campaignId && result.id && result.slug) {
+        try {
+          const landingPageUrl = `${window.location.origin}/promo/${result.slug}`;
+          await apiRequest("PATCH", `/api/campaigns/${campaignId}`, {
+            landingPageUrl,
+          });
+        } catch (err) {
+          console.warn("Failed to update campaign landing page URL:", err);
+          // Don't fail the main operation
+        }
+      }
+      
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      const previewUrl = data.slug ? `/promo/${data.slug}` : null;
       toast({
         title: isEditing ? "Page updated" : "Page created",
         description: isEditing
           ? "Your content promotion page has been updated."
-          : "Your content promotion page has been created.",
+          : "Your content promotion page has been created." + (previewUrl ? ` Preview: ${previewUrl}` : ""),
       });
       queryClient.invalidateQueries({ queryKey: ["/api/content-promotion/pages"] });
+      if (campaignId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaignId}`] });
+      }
       onSuccess();
       onOpenChange(false);
     },
