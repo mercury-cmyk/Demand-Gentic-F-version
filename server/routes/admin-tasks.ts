@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { requireAuth, requireRole } from "../auth";
 import { db } from "../db";
-import { adminTodoTasks } from "@shared/schema";
+import { adminTodoBoardNotes, adminTodoTasks } from "@shared/schema";
 
 const router = Router();
 
@@ -13,17 +13,23 @@ const taskStatusSchema = z.enum(["todo", "in_progress", "done"]);
 const createTaskSchema = z.object({
   title: z.string().min(1, "Title is required").max(500),
   assigneeName: z.string().max(120).optional().nullable(),
+  details: z.string().max(10000).optional().nullable(),
 });
 
 const updateTaskSchema = z
   .object({
     title: z.string().min(1).max(500).optional(),
     assigneeName: z.string().max(120).nullable().optional(),
+    details: z.string().max(10000).nullable().optional(),
     status: taskStatusSchema.optional(),
   })
-  .refine((value) => value.title !== undefined || value.assigneeName !== undefined || value.status !== undefined, {
+  .refine((value) => value.title !== undefined || value.assigneeName !== undefined || value.details !== undefined || value.status !== undefined, {
     message: "No fields provided to update",
   });
+
+const updateBoardNoteSchema = z.object({
+  content: z.string().max(20000),
+});
 
 const idParamSchema = z.object({
   id: z.string().uuid(),
@@ -51,9 +57,15 @@ async function ensureAdminTodoSchema() {
           title text NOT NULL,
           status admin_todo_task_status NOT NULL DEFAULT 'todo',
           assignee_name varchar(120),
+          details text,
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now()
         );
+      `);
+
+      await db.execute(sql`
+        ALTER TABLE admin_todo_tasks
+        ADD COLUMN IF NOT EXISTS details text;
       `);
 
       await db.execute(sql`
@@ -61,6 +73,15 @@ async function ensureAdminTodoSchema() {
       `);
       await db.execute(sql`
         CREATE INDEX IF NOT EXISTS admin_todo_tasks_created_at_idx ON admin_todo_tasks(created_at);
+      `);
+
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS admin_todo_board_notes (
+          id varchar PRIMARY KEY DEFAULT 'shared',
+          content text NOT NULL DEFAULT '',
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          updated_by varchar(255)
+        );
       `);
     })().catch((error) => {
       ensureSchemaPromise = null;
@@ -80,6 +101,7 @@ export async function listAdminTasks(_req: Request, res: Response) {
         title: adminTodoTasks.title,
         status: adminTodoTasks.status,
         assigneeName: adminTodoTasks.assigneeName,
+        details: adminTodoTasks.details,
         createdAt: adminTodoTasks.createdAt,
         updatedAt: adminTodoTasks.updatedAt,
       })
@@ -99,6 +121,7 @@ export async function createAdminTask(req: Request, res: Response) {
     const parsed = createTaskSchema.parse(req.body);
     const title = parsed.title.trim();
     const assigneeName = parsed.assigneeName?.trim() || null;
+    const details = parsed.details?.trim() || null;
 
     const [task] = await db
       .insert(adminTodoTasks)
@@ -106,6 +129,7 @@ export async function createAdminTask(req: Request, res: Response) {
         title,
         status: "todo",
         assigneeName,
+        details,
       })
       .returning();
 
@@ -137,6 +161,9 @@ export async function updateAdminTask(req: Request, res: Response) {
     }
     if (parsed.assigneeName !== undefined) {
       updates.assigneeName = parsed.assigneeName?.trim() || null;
+    }
+    if (parsed.details !== undefined) {
+      updates.details = parsed.details?.trim() || null;
     }
     if (parsed.status !== undefined) {
       updates.status = parsed.status;
@@ -185,8 +212,79 @@ export async function deleteAdminTask(req: Request, res: Response) {
   }
 }
 
+export async function getAdminTodoBoardNote(_req: Request, res: Response) {
+  try {
+    await ensureAdminTodoSchema();
+    let [note] = await db
+      .select({
+        id: adminTodoBoardNotes.id,
+        content: adminTodoBoardNotes.content,
+        updatedAt: adminTodoBoardNotes.updatedAt,
+        updatedBy: adminTodoBoardNotes.updatedBy,
+      })
+      .from(adminTodoBoardNotes)
+      .where(eq(adminTodoBoardNotes.id, "shared"))
+      .limit(1);
+
+    if (!note) {
+      [note] = await db
+        .insert(adminTodoBoardNotes)
+        .values({
+          id: "shared",
+          content: "",
+          updatedBy: null,
+        })
+        .returning();
+    }
+
+    res.json(note);
+  } catch (error: any) {
+    console.error("[Admin To-Do Tasks] Failed to load board note:", error);
+    res.status(500).json({ message: "Failed to load board note" });
+  }
+}
+
+export async function updateAdminTodoBoardNote(req: Request, res: Response) {
+  try {
+    await ensureAdminTodoSchema();
+    const parsed = updateBoardNoteSchema.parse(req.body);
+    const actor = (req.user as any)?.username || (req.user as any)?.email || (req.user as any)?.userId || "admin";
+
+    const [note] = await db
+      .insert(adminTodoBoardNotes)
+      .values({
+        id: "shared",
+        content: parsed.content,
+        updatedAt: new Date(),
+        updatedBy: actor,
+      })
+      .onConflictDoUpdate({
+        target: adminTodoBoardNotes.id,
+        set: {
+          content: parsed.content,
+          updatedAt: new Date(),
+          updatedBy: actor,
+        },
+      })
+      .returning();
+
+    res.json(note);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        message: "Invalid board note payload",
+        errors: error.flatten(),
+      });
+    }
+    console.error("[Admin To-Do Tasks] Failed to save board note:", error);
+    res.status(500).json({ message: "Failed to save board note" });
+  }
+}
+
 router.get("/", listAdminTasks);
 router.post("/", createAdminTask);
+router.get("/notes", getAdminTodoBoardNote);
+router.put("/notes", updateAdminTodoBoardNote);
 router.patch("/:id", updateAdminTask);
 router.delete("/:id", deleteAdminTask);
 

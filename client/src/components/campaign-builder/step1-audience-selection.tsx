@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { apiRequest } from "@/lib/queryClient";
 import { InlineOrgCreator } from "@/components/campaigns/inline-org-creator";
 import { CampaignAudienceSelector, type AudienceSelection } from "@/components/campaigns/CampaignAudienceSelector";
 
@@ -22,6 +23,7 @@ interface Organization {
   domain: string | null;
   industry: string | null;
   isDefault: boolean;
+  organizationType?: "super" | "client" | "campaign";
 }
 
 interface Step1Props {
@@ -42,19 +44,29 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
   // Fetch organizations for dropdown
   const { data: orgsData } = useQuery<{ organizations: Organization[] }>({
     queryKey: ["/api/organizations/dropdown"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/organizations/dropdown");
+      return res.json();
+    },
   });
+  const organizations = orgsData?.organizations || [];
+  const selectedOrgExists = !!selectedOrgId && organizations.some((org) => org.id === selectedOrgId);
+  const effectiveSelectedOrgValue = selectedOrgExists ? selectedOrgId! : "none";
 
   // Auto-select default org on first load
   useEffect(() => {
-    if (orgsData?.organizations && !selectedOrgId && !data.organizationId) {
-      const defaultOrg = orgsData.organizations.find((o) => o.isDefault);
-      if (defaultOrg) {
-        setSelectedOrgId(defaultOrg.id);
-      } else if (orgsData.organizations.length > 0) {
-        setSelectedOrgId(orgsData.organizations[0].id);
-      }
+    if (selectedOrgId && organizations.length > 0 && !organizations.some((o) => o.id === selectedOrgId)) {
+      setSelectedOrgId(null);
+      return;
     }
-  }, [orgsData?.organizations, selectedOrgId, data.organizationId]);
+
+    if (!selectedOrgId && !data.organizationId && organizations.length > 0) {
+      const superOrg = organizations.find((o) => o.organizationType === "super");
+      const defaultOrg = organizations.find((o) => o.isDefault);
+      const fallbackOrg = superOrg || defaultOrg || organizations[0];
+      setSelectedOrgId(fallbackOrg.id);
+    }
+  }, [organizations, selectedOrgId, data.organizationId]);
 
   const [audienceData, setAudienceData] = useState<AudienceSelection>({
     source: data.audience?.source || "filters",
@@ -116,14 +128,15 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
               </Label>
               <div className="flex gap-2">
                 <Select
-                  value={selectedOrgId || ""}
-                  onValueChange={(value) => setSelectedOrgId(value)}
+                  value={effectiveSelectedOrgValue}
+                  onValueChange={(value) => setSelectedOrgId(value === "none" ? null : value)}
                 >
                   <SelectTrigger id="organization-select" data-testid="select-organization" className="flex-1">
                     <SelectValue placeholder="Select organization..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {orgsData?.organizations?.map((org) => (
+                    <SelectItem value="none">No organization</SelectItem>
+                    {organizations.map((org) => (
                       <SelectItem key={org.id} value={org.id}>
                         <div className="flex items-center gap-2">
                           <span>{org.name}</span>

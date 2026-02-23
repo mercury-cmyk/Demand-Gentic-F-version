@@ -15221,6 +15221,7 @@ Provide JSON response with:
 
   // ==================== ADMIN TO-DO TASK BOARD ====================
   app.use('/api/admin/tasks', adminTasksRouter);
+  app.use('/api/admin/todo-board', adminTasksRouter);
 
   // ==================== DATA MANAGEMENT ====================
   app.use('/api/data-management', dataManagementRouter);

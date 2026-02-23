@@ -116,7 +116,14 @@ export default function PhoneCampaignEditPage() {
   // Fetch organizations for organization selection
   const { data: organizationsData } = useQuery<{ organizations: { id: string; name: string }[] }>({
     queryKey: ['/api/organizations/dropdown'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/organizations/dropdown');
+      return res.json();
+    },
   });
+  const organizations = organizationsData?.organizations || [];
+  const selectedOrgExists = !!problemIntelligenceOrgId && organizations.some((org) => org.id === problemIntelligenceOrgId);
+  const effectiveProblemOrgId = selectedOrgExists ? problemIntelligenceOrgId : null;
 
   // Initialize form with campaign data
   useEffect(() => {
@@ -296,7 +303,7 @@ export default function PhoneCampaignEditPage() {
         name: aiPersonaName,
         role: aiRole,
         voice: selectedVoice,
-        companyName: organizationsData?.organizations?.find(o => o.id === problemIntelligenceOrgId)?.name || campaign?.aiAgentSettings?.persona?.companyName || '',
+        companyName: organizations.find((o) => o.id === effectiveProblemOrgId)?.name || campaign?.aiAgentSettings?.persona?.companyName || '',
       },
     };
 
@@ -450,7 +457,7 @@ export default function PhoneCampaignEditPage() {
                 <Label htmlFor="organization">Organization</Label>
                 <div className="flex gap-2">
                   <Select
-                    value={problemIntelligenceOrgId || "none"}
+                    value={effectiveProblemOrgId || "none"}
                     onValueChange={(value) => setProblemIntelligenceOrgId(value === "none" ? null : value)}
                   >
                     <SelectTrigger data-testid="select-organization" className="flex-1">
@@ -458,7 +465,7 @@ export default function PhoneCampaignEditPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">No organization</SelectItem>
-                      {organizationsData?.organizations?.map((org) => (
+                      {organizations.map((org) => (
                         <SelectItem key={org.id} value={org.id}>
                           {org.name}
                         </SelectItem>
@@ -606,7 +613,7 @@ export default function PhoneCampaignEditPage() {
                   <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50">
                     <Building className="w-4 h-4 text-muted-foreground" />
                     <span className={problemIntelligenceOrgId ? "text-foreground" : "text-muted-foreground"}>
-                      {organizationsData?.organizations?.find(o => o.id === problemIntelligenceOrgId)?.name || "Select organization in Basic Info tab"}
+                      {organizations.find(o => o.id === effectiveProblemOrgId)?.name || "Select organization in Basic Info tab"}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">From selected organization</p>

@@ -58,6 +58,14 @@ export function getAssigneeColorTheme(assigneeName?: string | null): AssigneeCol
     return DEFAULT_THEME;
   }
 
+  if (normalized.toLowerCase() === "zahid") {
+    return {
+      cardClass: "border-l-green-500 bg-green-50/50",
+      badgeClass: "bg-green-100 text-green-800 border-green-300",
+      accentClass: "text-green-700",
+    };
+  }
+
   const paletteIndex = hashAssigneeName(normalized.toLowerCase()) % ASSIGNEE_THEMES.length;
   return ASSIGNEE_THEMES[paletteIndex];
 }

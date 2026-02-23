@@ -14096,6 +14096,7 @@ export const adminTodoTasks = pgTable(
     title: text("title").notNull(),
     status: adminTodoTaskStatusEnum("status").notNull().default("todo"),
     assigneeName: varchar("assignee_name", { length: 120 }),
+    details: text("details"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -14111,8 +14112,21 @@ export const insertAdminTodoTaskSchema = createInsertSchema(adminTodoTasks).omit
   updatedAt: true,
 });
 
+export const adminTodoBoardNotes = pgTable("admin_todo_board_notes", {
+  id: varchar("id").primaryKey().default("shared"),
+  content: text("content").notNull().default(""),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: varchar("updated_by", { length: 255 }),
+});
+
+export const insertAdminTodoBoardNoteSchema = createInsertSchema(adminTodoBoardNotes).omit({
+  updatedAt: true,
+});
+
 export type AdminTodoTask = typeof adminTodoTasks.$inferSelect;
 export type InsertAdminTodoTask = z.infer<typeof insertAdminTodoTaskSchema>;
+export type AdminTodoBoardNote = typeof adminTodoBoardNotes.$inferSelect;
+export type InsertAdminTodoBoardNote = z.infer<typeof insertAdminTodoBoardNoteSchema>;
 // ==================== UNIFIED AGENT ARCHITECTURE ====================
 // One Agent Per Type. Fully Self-Contained. Learning-Integrated.
 // These tables persist the unified agent intelligence framework state.

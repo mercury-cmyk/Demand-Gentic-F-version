@@ -601,6 +601,32 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  private campaignTimezonePriorityColumnReady = false;
+  private ensureCampaignTimezonePriorityColumnPromise: Promise<void> | null = null;
+
+  private isMissingTimezonePriorityConfigColumnError(error: unknown): boolean {
+    const dbError = error as { code?: string; message?: string } | undefined;
+    return dbError?.code === "42703" && String(dbError?.message || "").includes("timezone_priority_config");
+  }
+
+  private async ensureCampaignTimezonePriorityColumn(): Promise<void> {
+    if (this.campaignTimezonePriorityColumnReady) {
+      return;
+    }
+
+    if (!this.ensureCampaignTimezonePriorityColumnPromise) {
+      this.ensureCampaignTimezonePriorityColumnPromise = (async () => {
+        await db.execute(sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS timezone_priority_config jsonb`);
+        this.campaignTimezonePriorityColumnReady = true;
+        console.warn("[DB] Added missing campaigns.timezone_priority_config column on demand.");
+      })().finally(() => {
+        this.ensureCampaignTimezonePriorityColumnPromise = null;
+      });
+    }
+
+    await this.ensureCampaignTimezonePriorityColumnPromise;
+  }
+
   // Users
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
@@ -1358,18 +1384,44 @@ export class DatabaseStorage implements IStorage {
       conditions.push(eq(campaigns.type, filters.type));
     }
 
-    const query = db.select().from(campaigns);
+    const runQuery = async (): Promise<Campaign[]> => {
+      const query = db.select().from(campaigns);
 
-    if (conditions.length > 0) {
-      return await query.where(and(...conditions)).orderBy(desc(campaigns.createdAt));
+      if (conditions.length > 0) {
+        return await query.where(and(...conditions)).orderBy(desc(campaigns.createdAt));
+      }
+
+      return await query.orderBy(desc(campaigns.createdAt));
+    };
+
+    try {
+      return await runQuery();
+    } catch (error) {
+      if (!this.isMissingTimezonePriorityConfigColumnError(error)) {
+        throw error;
+      }
+
+      await this.ensureCampaignTimezonePriorityColumn();
+      return await runQuery();
     }
-
-    return await query.orderBy(desc(campaigns.createdAt));
   }
 
   async getCampaign(id: string): Promise<Campaign | undefined> {
-    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, id));
-    return campaign || undefined;
+    const runQuery = async () => {
+      const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, id));
+      return campaign || undefined;
+    };
+
+    try {
+      return await runQuery();
+    } catch (error) {
+      if (!this.isMissingTimezonePriorityConfigColumnError(error)) {
+        throw error;
+      }
+
+      await this.ensureCampaignTimezonePriorityColumn();
+      return await runQuery();
+    }
   }
 
   async createCampaign(insertCampaign: InsertCampaign): Promise<Campaign> {
