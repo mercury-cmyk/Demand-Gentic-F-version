@@ -961,6 +961,19 @@ async function createLeadForReanalysis(
 ): Promise<string | null> {
   if (!session.campaignId || !session.contactId) return null;
 
+  // DURATION GUARD: Prevent reanalysis from promoting ghost/short calls to qualified_lead
+  const [sessionDuration] = await db
+    .select({ durationSec: callSessions.durationSec })
+    .from(callSessions)
+    .where(eq(callSessions.id, session.id))
+    .limit(1);
+  const durationSec = sessionDuration?.durationSec || 0;
+  const MIN_REANALYSIS_LEAD_DURATION = 45;
+  if (durationSec < MIN_REANALYSIS_LEAD_DURATION) {
+    console.warn(`${LOG_PREFIX} 🚫 BLOCKED lead creation from reanalysis: Call ${session.id} duration ${durationSec}s < ${MIN_REANALYSIS_LEAD_DURATION}s minimum`);
+    return null;
+  }
+
   // Get contact info
   const [contactInfo] = await db
     .select({

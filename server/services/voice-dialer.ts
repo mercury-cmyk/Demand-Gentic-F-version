@@ -4369,7 +4369,7 @@ Only AFTER completing these steps can you submit the disposition.`
         console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - intro/purpose not fully delivered before termination.`);
         return {
           success: false,
-          error: 'STOP — your opening was incomplete. Before ending, say this clearly: "Sorry, quick audio check — can you hear me clearly now?" Then restart with: "Hi [First Name], this is [Agent Name] calling on behalf of [Organization]. I am calling because [single-sentence purpose]." Wait for their response before continuing.',
+          error: 'STOP — your opening was incomplete. You confirmed the prospect\'s identity but never delivered your intro and purpose. Say this now: "Hi [First Name], this is [Agent Name] calling on behalf of [Organization] — [single-sentence purpose]. Would that be worth a quick conversation?" Wait for their response before continuing.',
         };
       }
 
@@ -9383,8 +9383,7 @@ Once identity is confirmed ("Yes" / "Speaking" / "That's me"), you have a 3-SECO
 **WRONG:** "Great, thanks for taking the call! So, I'm calling from Harver, and... the reason for my call is..."
 **RIGHT:** "Hi John, this is Sarah calling on behalf of Harver — we're helping companies like yours reduce time-to-hire by 40%. Would that be worth a quick conversation?"
 
-If audio seems unclear or they interrupt with "hello?" repeatedly, use this recovery line first:
-"Sorry, quick audio check — can you hear me clearly now?"
+If the prospect says "hello?" THREE or more times in a row with no acknowledgment of your words, they likely cannot hear you. Only then say: "I apologize for the connection — can you hear me now?" Do NOT use an audio check after a single "hello?" — that is normal call behavior, not an audio issue.
 
 Keep the organization name confidential until identity is confirmed.
 

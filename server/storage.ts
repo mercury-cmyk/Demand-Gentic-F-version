@@ -2800,15 +2800,24 @@ export class DatabaseStorage implements IStorage {
       const isQualifyingDisposition = QUALIFYING_DISPOSITIONS.includes(call.disposition || '');
       const isNonQualifying = NON_QUALIFYING_DISPOSITIONS.includes(call.disposition || '');
       
+      // DURATION GUARD: Block AI-generated leads from ghost/short calls
+      const callDurationSec = call.duration || 0;
+      const MIN_AI_LEAD_DURATION = 45;
+      const isGhostCall = callDurationSec < MIN_AI_LEAD_DURATION;
+      
       console.log('[LEAD CREATION] Checking disposition for lead creation:', {
         disposition: call.disposition,
         contactId: call.contactId,
         isQualifyingDisposition,
         isNonQualifying,
-        shouldCreateLead: isQualifyingDisposition && !isNonQualifying && !!call.contactId,
+        duration: callDurationSec,
+        isGhostCall,
+        shouldCreateLead: isQualifyingDisposition && !isNonQualifying && !!call.contactId && !isGhostCall,
       });
 
-      if (isQualifyingDisposition && !isNonQualifying && call.contactId) {
+      if (isQualifyingDisposition && !isNonQualifying && call.contactId && isGhostCall) {
+        console.warn(`[LEAD CREATION] 🚫 BLOCKED: Qualified disposition but call duration ${callDurationSec}s < ${MIN_AI_LEAD_DURATION}s minimum. Not creating lead for ghost/short call.`);
+      } else if (isQualifyingDisposition && !isNonQualifying && call.contactId) {
         console.log('[LEAD CREATION] ✅ Qualified disposition detected - creating lead for contact:', call.contactId);
 
         // Get contact info
@@ -3894,6 +3903,18 @@ export class DatabaseStorage implements IStorage {
     // Only create leads for qualified dispositions
     if (attempt.disposition !== 'qualified' && attempt.disposition !== 'qualified_lead') {
       console.log('[LEAD CREATION] ⏭️ Skipping - disposition is not qualified:', attempt.disposition);
+      return undefined;
+    }
+
+    // DURATION GUARD: Block leads from ghost/short AI calls
+    const attemptDuration = attempt.callDurationSeconds || 0;
+    const MIN_QUALIFIED_DURATION = 45;
+    if (attemptDuration < MIN_QUALIFIED_DURATION) {
+      console.warn(`[LEAD CREATION] 🚫 BLOCKED: Call duration ${attemptDuration}s < ${MIN_QUALIFIED_DURATION}s minimum for qualified_lead. Skipping lead creation to prevent false positive.`, {
+        callAttemptId,
+        disposition: attempt.disposition,
+        duration: attemptDuration,
+      });
       return undefined;
     }
 
