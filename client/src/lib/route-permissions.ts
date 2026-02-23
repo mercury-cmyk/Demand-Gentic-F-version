@@ -142,6 +142,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // ============================================
   { pattern: '/client-portal-admin', roles: [USER_ROLES.ADMIN], description: 'Client Portal Admin' },
   { pattern: '/client-hierarchy-manager', roles: [USER_ROLES.ADMIN], description: 'Client Hierarchy Manager' },
+  { pattern: '/admin/todo-board', roles: [USER_ROLES.ADMIN], description: 'Admin To-Do Board' },
 
   // ============================================
   // IAM - Admin only

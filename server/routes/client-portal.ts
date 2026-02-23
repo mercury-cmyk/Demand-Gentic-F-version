@@ -3062,11 +3062,86 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .where(eq(clientProjects.clientAccountId, client.id))
       .orderBy(desc(clientProjects.createdAt));
 
-    const clientWorkOrders = await db
-      .select()
+    const approvedWorkOrderStatuses = ['approved', 'in_progress', 'qa_review', 'completed'] as const;
+    const approvedClientWorkOrders = await db
+      .select({
+        id: workOrders.id,
+        orderNumber: workOrders.orderNumber,
+        title: workOrders.title,
+        status: workOrders.status,
+        projectId: workOrders.projectId,
+        createdAt: workOrders.createdAt,
+      })
       .from(workOrders)
-      .where(eq(workOrders.clientAccountId, client.id))
+      .where(
+        and(
+          eq(workOrders.clientAccountId, client.id),
+          inArray(workOrders.status, approvedWorkOrderStatuses as any)
+        )
+      )
       .orderBy(desc(workOrders.createdAt));
+
+    // Fallback: if no approved work orders exist yet, include submitted/under_review
+    // orders so admins can still link and continue editing.
+    const fallbackWorkOrderStatuses = ['submitted', 'under_review'] as const;
+    const fallbackClientWorkOrders = approvedClientWorkOrders.length > 0
+      ? []
+      : await db
+          .select({
+            id: workOrders.id,
+            orderNumber: workOrders.orderNumber,
+            title: workOrders.title,
+            status: workOrders.status,
+            projectId: workOrders.projectId,
+            createdAt: workOrders.createdAt,
+          })
+          .from(workOrders)
+          .where(
+            and(
+              eq(workOrders.clientAccountId, client.id),
+              inArray(workOrders.status, fallbackWorkOrderStatuses as any)
+            )
+          )
+          .orderBy(desc(workOrders.createdAt));
+
+    const clientWorkOrders = approvedClientWorkOrders.length > 0
+      ? approvedClientWorkOrders
+      : fallbackClientWorkOrders;
+
+    // Intake requests can point to projectId before all legacy bridges exist.
+    const intakeWithProjects = await db
+      .select({
+        id: campaignIntakeRequests.id,
+        projectId: campaignIntakeRequests.projectId,
+      })
+      .from(campaignIntakeRequests)
+      .where(
+        and(
+          eq(campaignIntakeRequests.clientAccountId, client.id),
+          inArray(campaignIntakeRequests.status, ['approved', 'qso_approved', 'in_progress', 'completed'] as any),
+          isNotNull(campaignIntakeRequests.projectId)
+        )
+      );
+
+    const projectIdsFromIntake = intakeWithProjects
+      .map((row) => row.projectId)
+      .filter((id): id is string => Boolean(id));
+
+    const intakeLinkedProjects = projectIdsFromIntake.length > 0
+      ? await db
+          .select()
+          .from(clientProjects)
+          .where(inArray(clientProjects.id, projectIdsFromIntake))
+      : [];
+
+    const normalizedProjects = [...projects];
+    const seenProjectIds = new Set(projects.map((p) => p.id));
+    for (const p of intakeLinkedProjects) {
+      if (!seenProjectIds.has(p.id)) {
+        normalizedProjects.push(p);
+        seenProjectIds.add(p.id);
+      }
+    }
 
     // Get lead counts for each regular campaign (all approved + published leads for admin view)
     const regularCampaignIds = mappedRegularAccess.map(a => a.campaign.id);
@@ -3104,8 +3179,20 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
     res.json({
       ...client,
       users,
-      projects,
-      workOrders: clientWorkOrders,
+      projects: normalizedProjects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        createdAt: p.createdAt,
+      })),
+      workOrders: clientWorkOrders.map((wo) => ({
+        id: wo.id,
+        orderNumber: wo.orderNumber,
+        title: wo.title,
+        status: wo.status,
+        projectId: wo.projectId,
+        createdAt: wo.createdAt,
+      })),
       campaigns: verificationAccess.map(a => ({
         ...a.access,
         campaign: a.campaign,

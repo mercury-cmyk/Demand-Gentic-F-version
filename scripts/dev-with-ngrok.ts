@@ -180,19 +180,13 @@ const pollInterval = setInterval(async () => {
 }, 500);
 
 function startDevServer() {
-  const envPublicWsUrl = resolveEnv('PUBLIC_WEBSOCKET_URL');
+  const localWsUrl = `ws://localhost:${PORT}/voice-dialer`;
 
-  // ALWAYS use ngrok URL when tunnel is available - ignore placeholder env values
-  // This ensures Telnyx can reach our WebSocket endpoint
-  const isPlaceholderUrl = envPublicWsUrl && (
-    envPublicWsUrl.includes('<your-ngrok-host>') ||
-    envPublicWsUrl.includes('placeholder') ||
-    envPublicWsUrl.includes('localhost')
-  );
-
+  // In local-only mode (no tunnel), force localhost-safe endpoints so strict env isolation
+  // does not inherit production hosts from env files.
   const publicWsUrl = tunnelUrl
     ? `${tunnelUrl}/voice-dialer`  // Always use ngrok URL when available
-    : (isPlaceholderUrl ? `http://localhost:${PORT}` : (envPublicWsUrl || `http://localhost:${PORT}`));
+    : localWsUrl;
 
   // Extract the hostname from the ngrok tunnel URL for webhooks
   // tunnelUrl is in format: wss://xxxx.ngrok.io -> need https://xxxx.ngrok.io for webhooks
@@ -209,10 +203,8 @@ function startDevServer() {
   }
   if (tunnelUrl) {
       console.log(`✅ Using ngrok tunnel for PUBLIC_WEBSOCKET_URL (ignoring env placeholder)`);
-  } else if (envPublicWsUrl && !isPlaceholderUrl) {
-      console.log(`ℹ️  Using PUBLIC_WEBSOCKET_URL from .env.local/.env`);
   } else {
-      console.log(`⚠️  No ngrok tunnel - using localhost`);
+      console.log(`⚠️  No ngrok tunnel - forcing localhost-safe websocket/webhook URLs`);
   }
   console.log(`🔗 PUBLIC_WEBSOCKET_URL=${publicWsUrl}`);
   console.log('---------------------------------------------------');

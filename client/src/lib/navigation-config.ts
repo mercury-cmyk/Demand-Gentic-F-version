@@ -424,6 +424,22 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         badge: { text: 'New', variant: 'new' },
       },
       {
+        id: 'todo-board',
+        title: 'To-Do Board',
+        url: '/admin/todo-board',
+        icon: 'KanbanSquare',
+        roles: [USER_ROLES.ADMIN],
+        description: 'Admin task board with assignment and status tracking',
+      },
+      {
+        id: 'pm-review',
+        title: 'PM Review',
+        url: '/leads?tab=pm-review',
+        icon: 'Briefcase',
+        roles: MANAGEMENT_ROLES,
+        description: 'Review QA-approved leads before client delivery',
+      },
+      {
         id: 'organization-manager',
         title: 'Organizations',
         url: '/organization-manager',
