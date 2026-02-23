@@ -23,6 +23,7 @@ interface QualifiedLead {
   contactName: string | null;
   contactEmail: string | null;
   accountName: string | null;
+  companyName?: string | null;
   accountIndustry: string | null;
   campaignId: string | null;
   campaignName: string | null;
@@ -343,7 +344,7 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5">
                             <Building2 className="h-3.5 w-3.5 text-blue-600" />
-                            <p className="font-medium text-gray-900">{lead.accountName || '-'}</p>
+                            <p className="font-medium text-gray-900">{lead.companyName || lead.accountName || '-'}</p>
                           </div>
                           <p className="text-xs text-muted-foreground">{lead.accountIndustry || '-'}</p>
                         </div>

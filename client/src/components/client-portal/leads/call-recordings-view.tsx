@@ -33,6 +33,8 @@ interface CallRecordingItem {
   hasWav: boolean;
   primaryFormat: 'mp3' | 'wav' | null;
   recordingUrl?: string | null;
+  streamUrl?: string | null;
+  downloadUrl?: string | null;
 }
 
 interface CallRecordingsResponse {
@@ -146,7 +148,9 @@ export function CallRecordingsView() {
             primaryFormat: row.recordingUrl
               ? (String(row.recordingUrl).includes('.wav') ? 'wav' : 'mp3')
               : null,
-            recordingUrl: row.recordingUrl || null,
+            recordingUrl: null,
+            streamUrl: row.streamUrl || null,
+            downloadUrl: row.downloadUrl || null,
           }));
 
           return {
@@ -174,18 +178,27 @@ export function CallRecordingsView() {
   const handleOpenInNewTab = async (recording: CallRecordingItem) => {
     const recordingId = recording.id;
 
-    if (!recording.recordingUrl) {
-      toast({
-        title: 'No Recording',
-        description: 'Recording URL not available for this call.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     setLoadingRecordingId(recordingId);
     try {
-      window.open(recording.recordingUrl, '_blank', 'noopener,noreferrer');
+      let playableUrl = recording.streamUrl || null;
+      if (!playableUrl) {
+        const token = getToken();
+        const tokenRes = await fetch(
+          `/api/client-portal/qualified-leads/recordings/${encodeURIComponent(recordingId)}/stream-token`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (!tokenRes.ok) {
+          throw new Error('Recording is not available for this call.');
+        }
+        const tokenBody = await tokenRes.json();
+        playableUrl = tokenBody?.streamUrl || null;
+      }
+
+      if (!playableUrl) {
+        throw new Error('Recording is not available for this call.');
+      }
+
+      window.open(playableUrl, '_blank', 'noopener,noreferrer');
     } catch (err: any) {
       toast({
         title: 'Failed to open recording',

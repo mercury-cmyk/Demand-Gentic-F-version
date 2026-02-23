@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
 import {
   createClientRecordingStreamToken,
+  resolveQualifiedLeadRecordingUrl,
   resolveRecordingRequestAuth,
 } from '../client-portal';
 
@@ -75,5 +76,11 @@ describe('client portal recording download auth', () => {
     expect(auth.context).toBeTruthy();
     expect(auth.context?.mode).toBe('client');
     expect((auth.context as any)?.authPath).toBe('bearer');
+  });
+
+  it('does not expose direct storage URLs from qualified lead payload mapper', () => {
+    expect(resolveQualifiedLeadRecordingUrl('https://storage.googleapis.com/bucket/audio.mp3', null)).toBeNull();
+    expect(resolveQualifiedLeadRecordingUrl('gcs-internal://bucket/private.wav', 'recordings/private.wav')).toBeNull();
+    expect(resolveQualifiedLeadRecordingUrl('/api/client-portal/qualified-leads/abc/recording/stream', null)).toBeNull();
   });
 });

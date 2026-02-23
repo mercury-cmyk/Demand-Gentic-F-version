@@ -11129,7 +11129,7 @@ export function registerRoutes(app: Express) {
           id: leads.id,
           contactName: leads.contactName,
           contactEmail: leads.contactEmail,
-          accountName: leads.accountName,
+          accountName: sql<string>`COALESCE(${accounts.name}, ${contacts.companyNorm}, ${leads.accountName}, 'Unknown Company')`.as('account_name_resolved'),
           accountIndustry: leads.accountIndustry,
           campaignId: leads.campaignId,
           campaignName: campaigns.name,
@@ -11143,6 +11143,8 @@ export function registerRoutes(app: Express) {
           createdAt: leads.createdAt,
         })
         .from(leads)
+        .leftJoin(contacts, eq(leads.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
         .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
         .where(and(...whereConditions))
         .orderBy(desc(leads.createdAt))

@@ -347,14 +347,12 @@ function formatPhoneForTelnyx(value: string | null | undefined): string | undefi
   return `+${digits}`;
 }
 
-function resolveQualifiedLeadRecordingUrl(
-  recordingUrl: string | null | undefined,
-  recordingS3Key: string | null | undefined,
+export function resolveQualifiedLeadRecordingUrl(
+  _recordingUrl: string | null | undefined,
+  _recordingS3Key: string | null | undefined,
 ): string | null {
-  return resolvePlayableRecordingUrl({
-    recordingUrl,
-    recordingS3Key,
-  });
+  // Client portal must not expose raw storage URLs to browsers.
+  return null;
 }
 
 declare global {
@@ -1703,7 +1701,9 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         or(
           like(leads.contactName, searchTerm),
           like(leads.contactEmail, searchTerm),
-          like(leads.accountName, searchTerm)
+          like(leads.accountName, searchTerm),
+          like(accounts.name, searchTerm),
+          like(contacts.companyNorm, searchTerm)
         )!
       );
     }
@@ -1713,17 +1713,20 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       .select({ count: sql<number>`count(*)::int` })
       .from(leads)
       .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
+      .leftJoin(contacts, eq(leads.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .where(and(...whereConditions));
 
     const total = countResult?.count || 0;
 
     // Get leads with campaign info
+    const companyNameExpr = sql<string>`COALESCE(${accounts.name}, ${contacts.companyNorm}, ${leads.accountName}, 'Unknown Company')`;
     const sortColumn = sortBy === 'approvedAt' ? leads.approvedAt :
                       sortBy === 'createdAt' ? effectiveLeadTimestamp :
                       sortBy === 'callStartedAt' ? effectiveLeadTimestamp :
                       sortBy === 'aiScore' ? leads.aiScore :
                       sortBy === 'callDuration' ? leads.callDuration :
-                      sortBy === 'accountName' ? leads.accountName :
+                      sortBy === 'accountName' ? companyNameExpr :
                       effectiveLeadTimestamp;
 
     const orderDirection = sortOrder === 'asc' ? asc : desc;
@@ -1733,7 +1736,8 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         id: leads.id,
         contactName: leads.contactName,
         contactEmail: leads.contactEmail,
-        accountName: leads.accountName,
+        accountName: companyNameExpr.as('account_name_resolved'),
+        companyName: companyNameExpr.as('company_name'),
         accountIndustry: leads.accountIndustry,
         campaignId: leads.campaignId,
         campaignName: campaigns.name,
@@ -1752,6 +1756,8 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       .from(leads)
       .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
       .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
+      .leftJoin(contacts, eq(leads.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .where(and(...whereConditions))
       .orderBy(orderDirection(sortColumn))
       .limit(pageSizeNum)
@@ -2147,6 +2153,16 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
 
         if (!recordingUrl) return null;
 
+        const streamToken = createClientRecordingStreamToken({
+          type: 'client_portal_lead_recording_stream',
+          leadId: session.id,
+          authMode: 'client',
+          clientUserId: req.clientUser!.clientUserId,
+          clientAccountId: req.clientUser!.clientAccountId,
+        });
+        const streamUrl = `/api/client-portal/qualified-leads/recordings/${encodeURIComponent(session.id)}/stream?token=${encodeURIComponent(streamToken)}`;
+        const downloadUrl = `/api/client-portal/qualified-leads/recordings/${encodeURIComponent(session.id)}/download?token=${encodeURIComponent(streamToken)}`;
+
         return {
           id: session.id,
           callControlId: session.telnyxCallId || null,
@@ -2164,7 +2180,9 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
           hasMp3: recordingUrl.includes('.mp3'),
           hasWav: recordingUrl.includes('.wav'),
           primaryFormat: recordingUrl.includes('.wav') ? 'wav' : 'mp3',
-          recordingUrl,
+          recordingUrl: null,
+          streamUrl,
+          downloadUrl,
         };
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -2189,23 +2207,111 @@ router.get(['/qualified-leads/recordings', '/telnyx-recordings'], requireClientA
   }
 });
 
-// Streaming disabled: client portal serves direct GCS URLs only.
+async function getCallSessionRecordingContextForClientPortal(recordingId: string, clientAccountId: string) {
+  const [session] = await db
+    .select({
+      id: callSessions.id,
+      campaignId: callSessions.campaignId,
+      recordingUrl: callSessions.recordingUrl,
+      recordingS3Key: callSessions.recordingS3Key,
+    })
+    .from(callSessions)
+    .where(eq(callSessions.id, recordingId))
+    .limit(1);
+
+  if (!session) {
+    return { ok: false as const, status: 404, message: 'Recording not found' };
+  }
+  if (!session.campaignId) {
+    return { ok: false as const, status: 404, message: 'Recording campaign mapping not found' };
+  }
+
+  const hasAccess = await hasClientAccessToCampaign(clientAccountId, session.campaignId);
+  if (!hasAccess) {
+    return { ok: false as const, status: 403, message: "You don't have access to this recording" };
+  }
+  if (!session.recordingS3Key && !session.recordingUrl) {
+    return { ok: false as const, status: 404, message: 'Recording audio not available' };
+  }
+
+  return { ok: true as const, session };
+}
+
+// Stream/download token endpoints for call recordings list.
 router.get(
   ['/qualified-leads/recordings/:recordingId/stream-token', '/telnyx-recordings/:recordingId/stream-token'],
   requireClientAuth,
-  async (_req, res) => {
-    return res.status(410).json({
-      message: 'Recording streaming is disabled. Use GCS recordingUrl from lead/recordings APIs.',
-      gcsOnly: true,
+  async (req, res) => {
+    const { recordingId } = req.params;
+    const context = await getCallSessionRecordingContextForClientPortal(recordingId, req.clientUser!.clientAccountId);
+    if (!context.ok) {
+      return res.status(context.status).json({ message: context.message });
+    }
+
+    const token = createClientRecordingStreamToken({
+      type: 'client_portal_lead_recording_stream',
+      leadId: recordingId,
+      authMode: 'client',
+      clientUserId: req.clientUser!.clientUserId,
+      clientAccountId: req.clientUser!.clientAccountId,
+    });
+
+    return res.json({
+      token,
+      streamUrl: `/api/client-portal/qualified-leads/recordings/${encodeURIComponent(recordingId)}/stream?token=${encodeURIComponent(token)}`,
+      downloadUrl: `/api/client-portal/qualified-leads/recordings/${encodeURIComponent(recordingId)}/download?token=${encodeURIComponent(token)}`,
+      expiresInSeconds: CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS,
     });
   }
 );
 
-router.get(['/qualified-leads/recordings/:recordingId/stream', '/telnyx-recordings/:recordingId/stream'], requireClientAuth, async (_req, res) => {
-  return res.status(410).json({
-    message: 'Recording streaming is disabled. Use GCS recordingUrl from lead/recordings APIs.',
-    gcsOnly: true,
-  });
+router.get(['/qualified-leads/recordings/:recordingId/stream', '/telnyx-recordings/:recordingId/stream'], async (req, res) => {
+  try {
+    const { recordingId } = req.params;
+    const auth = resolveRecordingRequestAuth(req, recordingId);
+    if (!auth.context) {
+      return res.status(401).type('text/plain').send('Authentication required');
+    }
+
+    if (auth.context.mode === 'client') {
+      const context = await getCallSessionRecordingContextForClientPortal(recordingId, auth.context.clientUser.clientAccountId);
+      if (!context.ok) {
+        return res.status(context.status).type('text/plain').send(context.message);
+      }
+    }
+
+    (req as any).params = { ...(req.params || {}), id: recordingId };
+    const { streamRecording } = await import('./recordings');
+    return streamRecording(req as Request, res as Response);
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Call recording stream error:', error);
+    return res.status(500).type('text/plain').send('Failed to stream recording audio');
+  }
+});
+
+router.get(['/qualified-leads/recordings/:recordingId/download', '/telnyx-recordings/:recordingId/download'], async (req, res) => {
+  try {
+    const { recordingId } = req.params;
+    const auth = resolveRecordingRequestAuth(req, recordingId);
+    if (!auth.context) {
+      return res.status(401).type('text/plain').send('Authentication required');
+    }
+
+    if (auth.context.mode === 'client') {
+      const context = await getCallSessionRecordingContextForClientPortal(recordingId, auth.context.clientUser.clientAccountId);
+      if (!context.ok) {
+        return res.status(context.status).type('text/plain').send(context.message);
+      }
+    }
+
+    (req as any).params = { ...(req.params || {}), id: recordingId };
+    (req as any).query = { ...(req.query || {}), download: '1' };
+    const { streamRecording } = await import('./recordings');
+    return streamRecording(req as Request, res as Response);
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Call recording download error:', error);
+    return res.status(500).type('text/plain').send('Failed to download recording audio');
+  }
 });
 
 async function getLeadRecordingContextForClientPortal(leadId: string, clientAccountId: string) {
@@ -2370,8 +2476,8 @@ router.get('/qualified-leads/:id/recording-link', async (req, res) => {
           },
     );
 
-    const streamUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording-stream?token=${encodeURIComponent(streamToken)}`;
-    const downloadUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording-download?token=${encodeURIComponent(streamToken)}`;
+    const streamUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording/stream?token=${encodeURIComponent(streamToken)}`;
+    const downloadUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording/download?token=${encodeURIComponent(streamToken)}`;
     if (streamUrl.includes('s3.amazonaws.com') || streamUrl.includes('telephony-recorder-prod')) {
       return res.status(500).json({
         success: false,
@@ -2401,7 +2507,7 @@ router.get('/qualified-leads/:id/recording-link', async (req, res) => {
 });
 
 // Stream lead recording audio through platform endpoint using a short-lived token.
-router.get('/qualified-leads/:id/recording-stream', async (req, res) => {
+router.get(['/qualified-leads/:id/recording-stream', '/qualified-leads/:id/recording/stream'], async (req, res) => {
   try {
     const { id } = req.params;
     const auth = resolveRecordingRequestAuth(req, id);
@@ -2436,7 +2542,7 @@ router.get('/qualified-leads/:id/recording-stream', async (req, res) => {
 });
 
 // Download lead recording audio through a platform endpoint (never raw storage links).
-router.get('/qualified-leads/:id/recording-download', async (req, res) => {
+router.get(['/qualified-leads/:id/recording-download', '/qualified-leads/:id/recording/download'], async (req, res) => {
   try {
     const { id } = req.params;
     const auth = resolveRecordingRequestAuth(req, id);
@@ -2503,6 +2609,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
         contactId: leads.contactId,
         // Account info
         accountName: leads.accountName,
+        companyName: sql<string>`COALESCE(${accounts.name}, ${contacts.companyNorm}, ${leads.accountName}, 'Unknown Company')`.as('company_name'),
         accountIndustry: leads.accountIndustry,
         // Campaign info
         campaignId: leads.campaignId,
@@ -2530,6 +2637,8 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
       .from(leads)
       .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
       .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
+      .leftJoin(contacts, eq(leads.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .where(eq(leads.id, id))
       .limit(1);
 
@@ -2579,7 +2688,8 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
       contactTitle: contactInfo?.title,
       linkedinUrl: contactInfo?.linkedinUrl,
       // Account info
-      accountName: lead.accountName,
+      accountName: lead.companyName || lead.accountName || 'Unknown Company',
+      companyName: lead.companyName || lead.accountName || 'Unknown Company',
       accountIndustry: lead.accountIndustry,
       // Campaign info
       campaignId: lead.campaignId,
