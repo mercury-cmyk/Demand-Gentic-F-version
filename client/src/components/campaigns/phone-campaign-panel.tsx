@@ -42,6 +42,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { InvalidRecordsModal } from './invalid-records-modal';
 
 export interface QueueStats {
   total: number;
@@ -49,6 +50,7 @@ export interface QueueStats {
   inProgress: number;
   completed: number;
   removed: number;
+  invalid: number;
   removedBreakdown: Record<string, number>;
   agents: number;
   suppression?: {
@@ -90,6 +92,7 @@ export function PhoneCampaignPanel({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [scaleDialogOpen, setScaleDialogOpen] = useState(false);
+  const [invalidModalOpen, setInvalidModalOpen] = useState(false);
   const [workerCount, setWorkerCount] = useState(campaign.maxConcurrentWorkers || 1);
 
   // Scale Workers Mutation
@@ -340,7 +343,7 @@ export function PhoneCampaignPanel({
   return (
     <div className={className}>
       {/* Queue Statistics Grid */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-5 gap-3 mb-4">
         <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-900">
           <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">In Queue</p>
           <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
@@ -363,6 +366,22 @@ export function PhoneCampaignPanel({
           <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">Filtered Out</p>
           <p className="text-2xl font-bold text-orange-700 dark:text-orange-300">
             {queueStats?.removed || 0}
+          </p>
+        </div>
+        <div
+          className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+            (queueStats?.invalid || 0) > 0
+              ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 hover:bg-red-100 dark:hover:bg-red-950/40'
+              : 'bg-gray-50 dark:bg-gray-950/20 border-gray-200 dark:border-gray-800'
+          }`}
+          onClick={() => (queueStats?.invalid || 0) > 0 && setInvalidModalOpen(true)}
+          title={(queueStats?.invalid || 0) > 0 ? 'Click to view invalid records' : 'No invalid records'}
+        >
+          <p className={`text-xs font-medium ${(queueStats?.invalid || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+            Invalid
+          </p>
+          <p className={`text-2xl font-bold ${(queueStats?.invalid || 0) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-400 dark:text-gray-500'}`}>
+            {queueStats?.invalid || 0}
           </p>
         </div>
       </div>
@@ -691,6 +710,13 @@ export function PhoneCampaignPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Invalid Records Modal */}
+      <InvalidRecordsModal
+        campaignId={campaign.id.toString()}
+        open={invalidModalOpen}
+        onOpenChange={setInvalidModalOpen}
+      />
     </div>
   );
 }

@@ -6901,6 +6901,47 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // ==================== INVALID QUEUE RECORDS ====================
+
+  // Get list of invalid queue items (queued contacts with no valid phone)
+  app.get("/api/campaigns/:id/queue/invalid", requireAuth, async (req, res) => {
+    try {
+      const items = await storage.getInvalidQueueItems(req.params.id);
+      res.json({ items, count: items.length });
+    } catch (error) {
+      console.error('[QUEUE INVALID] Error fetching invalid items:', error);
+      res.status(500).json({ message: "Failed to fetch invalid queue items" });
+    }
+  });
+
+  // Bulk remove all invalid queue items from campaign
+  app.post("/api/campaigns/:id/queue/invalid/remove-all", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+    try {
+      const result = await storage.bulkRemoveInvalidItems(req.params.id, 'invalid_data');
+      console.log(`[QUEUE INVALID] Bulk removed ${result.removed} invalid items from campaign ${req.params.id}`);
+      res.json({ removed: result.removed, message: `Removed ${result.removed} invalid record(s) from queue` });
+    } catch (error) {
+      console.error('[QUEUE INVALID] Error bulk removing:', error);
+      res.status(500).json({ message: "Failed to remove invalid items" });
+    }
+  });
+
+  // Send invalid queue items to data cleaning pipeline (marks as removed with special reason for re-processing)
+  app.post("/api/campaigns/:id/queue/invalid/clean", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+    try {
+      const result = await storage.bulkRemoveInvalidItems(req.params.id, 'sent_to_cleaning');
+      console.log(`[QUEUE INVALID] Sent ${result.removed} items to cleaning pipeline from campaign ${req.params.id}`);
+      res.json({
+        sent: result.removed,
+        message: `Sent ${result.removed} record(s) to data cleaning pipeline`,
+        pipeline: 'data_cleaning',
+      });
+    } catch (error) {
+      console.error('[QUEUE INVALID] Error sending to cleaning:', error);
+      res.status(500).json({ message: "Failed to send items to cleaning pipeline" });
+    }
+  });
+
   // ==================== DUAL-DIALER (MANUAL & HYBRID) ====================
 
   // Set campaign dial mode

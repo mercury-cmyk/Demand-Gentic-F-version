@@ -171,6 +171,8 @@ export interface IStorage {
 
   // Campaign Queue (Account Lead Cap)
   getCampaignQueue(campaignId: string, status?: string): Promise<any[]>;
+  getInvalidQueueItems(campaignId: string): Promise<any[]>;
+  bulkRemoveInvalidItems(campaignId: string, reason?: string): Promise<{ removed: number }>;
   enqueueContact(campaignId: string, contactId: string, accountId: string, priority?: number): Promise<any>;
   bulkEnqueueContacts(campaignId: string, contacts: Array<{ contactId: string; accountId: string; priority?: number }>): Promise<{ enqueued: number }>;
   updateQueueStatus(id: string, status: string, removedReason?: string, isPositiveDisposition?: boolean): Promise<any>;
@@ -1810,6 +1812,7 @@ export class DatabaseStorage implements IStorage {
     inProgress: number;
     completed: number;
     removed: number;
+    invalid: number;
     removedBreakdown: Record<string, number>;
     agents: number;
   }> {
@@ -1856,7 +1859,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      return { total, queued, inProgress, completed, removed: 0, removedBreakdown: {}, agents: agentCount };
+      return { total, queued, inProgress, completed, removed: 0, invalid: 0, removedBreakdown: {}, agents: agentCount };
     } else {
       // POWER MODE: Query campaign_queue table with GROUP BY for efficiency
       const stats = await db
@@ -1887,6 +1890,28 @@ export class DatabaseStorage implements IStorage {
         removedBreakdown[key] = row.count;
       }
 
+      // Count invalid records: queued items whose contacts have NO valid phone number
+      const [invalidResult] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(campaignQueue)
+        .leftJoin(contacts, eq(campaignQueue.contactId, contacts.id))
+        .where(and(
+          eq(campaignQueue.campaignId, campaignId),
+          eq(campaignQueue.status, 'queued'),
+          sql`(
+            ${contacts.id} IS NULL
+            OR (
+              COALESCE(${contacts.dialingPhoneE164}, '') = ''
+              AND COALESCE(${contacts.directPhoneE164}, '') = ''
+              AND COALESCE(${contacts.mobilePhoneE164}, '') = ''
+              AND COALESCE(${contacts.directPhone}, '') = ''
+              AND COALESCE(${contacts.mobilePhone}, '') = ''
+            )
+          )`
+        ));
+
+      const invalid = invalidResult?.count ?? 0;
+
       // Aggregate counts
       let total = 0;
       let queued = 0;
@@ -1909,7 +1934,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      return { total, queued, inProgress, completed, removed, removedBreakdown, agents: agentCount };
+      return { total, queued, inProgress, completed, removed, invalid, removedBreakdown, agents: agentCount };
     }
   }
 
@@ -2018,6 +2043,117 @@ export class DatabaseStorage implements IStorage {
         account: r.accountName ? { name: r.accountName } : null,
       }));
     }
+  }
+
+  /**
+   * Get invalid queue items — queued contacts with no valid phone number or missing contact record.
+   * Returns enriched records with invalidity reason for UI display.
+   */
+  async getInvalidQueueItems(campaignId: string): Promise<any[]> {
+    const rows = await db
+      .select({
+        id: campaignQueue.id,
+        campaignId: campaignQueue.campaignId,
+        contactId: campaignQueue.contactId,
+        accountId: campaignQueue.accountId,
+        priority: campaignQueue.priority,
+        status: campaignQueue.status,
+        queuedAt: campaignQueue.createdAt,
+        contactFirstName: contacts.firstName,
+        contactLastName: contacts.lastName,
+        contactEmail: contacts.email,
+        contactDirectPhone: contacts.directPhone,
+        contactDirectPhoneE164: contacts.directPhoneE164,
+        contactMobilePhone: contacts.mobilePhone,
+        contactMobilePhoneE164: contacts.mobilePhoneE164,
+        contactDialingPhone: contacts.dialingPhoneE164,
+        contactId2: contacts.id,
+        accountName: accounts.name,
+      })
+      .from(campaignQueue)
+      .leftJoin(contacts, eq(campaignQueue.contactId, contacts.id))
+      .leftJoin(accounts, eq(campaignQueue.accountId, accounts.id))
+      .where(and(
+        eq(campaignQueue.campaignId, campaignId),
+        eq(campaignQueue.status, 'queued'),
+        sql`(
+          ${contacts.id} IS NULL
+          OR (
+            COALESCE(${contacts.dialingPhoneE164}, '') = ''
+            AND COALESCE(${contacts.directPhoneE164}, '') = ''
+            AND COALESCE(${contacts.mobilePhoneE164}, '') = ''
+            AND COALESCE(${contacts.directPhone}, '') = ''
+            AND COALESCE(${contacts.mobilePhone}, '') = ''
+          )
+        )`
+      ))
+      .orderBy(campaignQueue.createdAt);
+
+    return rows.map(r => {
+      let invalidReason = 'no_phone_number';
+      if (!r.contactId2) {
+        invalidReason = 'contact_not_found';
+      } else if (!r.contactDirectPhone && !r.contactDirectPhoneE164 && !r.contactMobilePhone && !r.contactMobilePhoneE164 && !r.contactDialingPhone) {
+        invalidReason = 'no_phone_number';
+      }
+
+      return {
+        id: r.id,
+        campaignId: r.campaignId,
+        contactId: r.contactId,
+        accountId: r.accountId,
+        priority: r.priority,
+        status: r.status,
+        queuedAt: r.queuedAt,
+        invalidReason,
+        contact: r.contactFirstName ? {
+          firstName: r.contactFirstName,
+          lastName: r.contactLastName,
+          email: r.contactEmail,
+          directPhone: r.contactDirectPhone,
+          directPhoneE164: r.contactDirectPhoneE164,
+          mobilePhone: r.contactMobilePhone,
+          mobilePhoneE164: r.contactMobilePhoneE164,
+          dialingPhone: r.contactDialingPhone,
+        } : null,
+        account: r.accountName ? { name: r.accountName } : null,
+      };
+    });
+  }
+
+  /**
+   * Bulk remove all invalid queue items (no valid phone) from a campaign.
+   * Sets status='removed', removed_reason='invalid_data'.
+   * Returns count of removed items.
+   */
+  async bulkRemoveInvalidItems(campaignId: string, reason: string = 'invalid_data'): Promise<{ removed: number }> {
+    const result = await db.execute(sql`
+      UPDATE campaign_queue cq
+      SET status = 'removed',
+          removed_reason = ${reason},
+          updated_at = NOW()
+      FROM (
+        SELECT cq2.id
+        FROM campaign_queue cq2
+        LEFT JOIN contacts c ON cq2.contact_id = c.id
+        WHERE cq2.campaign_id = ${campaignId}
+          AND cq2.status = 'queued'
+          AND (
+            c.id IS NULL
+            OR (
+              COALESCE(c.dialing_phone_e164, '') = ''
+              AND COALESCE(c.direct_phone_e164, '') = ''
+              AND COALESCE(c.mobile_phone_e164, '') = ''
+              AND COALESCE(c.direct_phone, '') = ''
+              AND COALESCE(c.mobile_phone, '') = ''
+            )
+          )
+      ) invalid_items
+      WHERE cq.id = invalid_items.id
+    `);
+
+    const removed = (result as any)?.rowCount ?? 0;
+    return { removed };
   }
 
   async enqueueContact(campaignId: string, contactId: string, accountId: string, priority: number = 0): Promise<any> {

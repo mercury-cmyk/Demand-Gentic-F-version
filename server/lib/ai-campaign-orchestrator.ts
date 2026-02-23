@@ -834,6 +834,17 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     return { initiated: 0, skipped: 0 };
   }
 
+  // Proactive invalid record scan: remove queued items with no valid phone BEFORE pulling candidates
+  // This prevents invalid records from occupying queue slots or causing call-time failures
+  try {
+    const invalidScanResult = await storage.bulkRemoveInvalidItems(campaignId, 'invalid_phone_proactive');
+    if (invalidScanResult.removed > 0) {
+      console.log(`[AI Orchestrator] Proactive scan: removed ${invalidScanResult.removed} invalid (no-phone) records from campaign ${campaignId}`);
+    }
+  } catch (err) {
+    console.warn(`[AI Orchestrator] Proactive invalid scan failed (non-blocking):`, err);
+  }
+
   // Get queued items
   const queueItems = await getQueuedItems(campaignId, slotsAvailable, { strictUsOnly });
   console.log(`[AI Orchestrator] Found ${queueItems.length} queued items for campaign ${campaignId}`);

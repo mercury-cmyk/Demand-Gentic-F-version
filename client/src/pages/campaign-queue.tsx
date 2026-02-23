@@ -16,7 +16,8 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
-  Brain
+  Brain,
+  AlertTriangle
 } from "lucide-react";
 import {
   Table,
@@ -30,6 +31,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { QueueIntelligenceView } from "@/components/queue-intelligence";
+import { InvalidRecordsModal } from "@/components/campaigns/invalid-records-modal";
 
 type Campaign = typeof campaigns.$inferSelect;
 type QueueStatus = "queued" | "in_progress" | "done" | "skipped" | "removed";
@@ -78,6 +80,7 @@ export default function CampaignQueuePage() {
   const urlParams = new URLSearchParams(window.location.search);
   const initialTab = urlParams.get('tab') === 'intelligence' ? 'intelligence' : 'queue';
   const [pageTab, setPageTab] = useState<"queue" | "intelligence">(initialTab);
+  const [invalidModalOpen, setInvalidModalOpen] = useState(false);
   const rawRoles = (user as any)?.roles ?? user?.role;
   const roleList = Array.isArray(rawRoles) ? rawRoles : rawRoles ? [rawRoles] : [];
   const normalizedRoles = roleList
@@ -188,6 +191,19 @@ export default function CampaignQueuePage() {
     removed: queueItems.filter(i => i.status === "removed").length,
   };
 
+  // Fetch server-side stats which include the invalid count
+  const { data: serverStats } = useQuery<{ invalid: number }>({
+    queryKey: [`/api/campaigns/${campaignId}/queue/stats`],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/campaigns/${campaignId}/queue/stats`);
+      return res.json();
+    },
+    enabled: !!campaignId,
+    refetchInterval: 15000,
+  });
+
+  const invalidCount = serverStats?.invalid ?? 0;
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -287,7 +303,7 @@ export default function CampaignQueuePage() {
       )}
 
       {/* Queue Statistics */}
-      <div className="grid grid-cols-6 gap-4">
+      <div className="grid grid-cols-7 gap-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
@@ -334,6 +350,21 @@ export default function CampaignQueuePage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{queueStats.removed}</div>
+          </CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-colors ${invalidCount > 0 ? 'border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950/20' : ''}`}
+          onClick={() => invalidCount > 0 && setInvalidModalOpen(true)}
+          title={invalidCount > 0 ? 'Click to view and manage invalid records' : 'No invalid records'}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-red-600 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              Invalid
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{invalidCount}</div>
           </CardContent>
         </Card>
       </div>
@@ -462,6 +493,15 @@ export default function CampaignQueuePage() {
       )}
 
       </>}
+
+      {/* Invalid Records Modal */}
+      {campaignId && (
+        <InvalidRecordsModal
+          campaignId={campaignId}
+          open={invalidModalOpen}
+          onOpenChange={setInvalidModalOpen}
+        />
+      )}
     </div>
   );
 }
