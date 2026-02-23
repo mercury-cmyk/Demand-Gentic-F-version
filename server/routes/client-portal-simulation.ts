@@ -1741,7 +1741,11 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       target_audience_description: unifiedContext.targetAudienceDescription,
       product_service_info: unifiedContext.productServiceInfo,
       talking_points: unifiedContext.talkingPoints,
-      max_call_duration_seconds: unifiedContext.maxCallDurationSeconds,
+      max_call_duration_seconds: (() => {
+        const raw = Number(unifiedContext.maxCallDurationSeconds);
+        if (!Number.isFinite(raw) || raw <= 0) return undefined;
+        return Math.min(raw, 300);
+      })(),
     });
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');

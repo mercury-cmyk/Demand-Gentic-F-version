@@ -935,7 +935,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   function parseMaxCallDurationSeconds(value: unknown): number | null {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
-    return Math.floor(parsed);
+    return Math.min(Math.floor(parsed), 300);
   }
 
   function getEffectiveMaxCallDurationSeconds(): number | null {
@@ -1364,7 +1364,11 @@ Instructions:
                 productServiceInfo: config.product_service_info || config.productServiceInfo,
                 talkingPoints: config.talking_points || config.talkingPoints,
                 // Max call duration in seconds - auto-hangup after this time
-                maxCallDurationSeconds: config.max_call_duration_seconds || config.maxCallDurationSeconds,
+                maxCallDurationSeconds: (() => {
+                  const raw = Number(config.max_call_duration_seconds || config.maxCallDurationSeconds);
+                  if (!Number.isFinite(raw) || raw <= 0) return undefined;
+                  return Math.min(raw, 300);
+                })(),
                 // IDs for disposition processing and call tracking
                 queueItemId: config.queue_item_id || config.queueItemId,
                 callAttemptId: config.call_attempt_id || config.callAttemptId,

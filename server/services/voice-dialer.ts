@@ -162,6 +162,7 @@ const MAX_AUDIO_PATTERNS = 100;
 const MAX_RESPONSE_LATENCIES = 100;
 const VOICEMAIL_EARLY_WINDOW_MS = 6000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
+const HARD_MAX_CALL_DURATION_SECONDS = 300;
 
 /** Trim array from the front if it exceeds maxLen. Call after pushing. */
 function trimArray<T>(arr: T[], maxLen: number): void {
@@ -2439,8 +2440,14 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
     // Set campaign-level max call duration for strict enforcement
     if (campaignConfig?.maxCallDurationSeconds) {
-      session.campaignMaxCallDurationSeconds = campaignConfig.maxCallDurationSeconds;
-      console.log(`${LOG_PREFIX} ⏱️ Campaign max call duration set to ${campaignConfig.maxCallDurationSeconds}s`);
+      const clampedCampaignMax = Math.min(
+        Number(campaignConfig.maxCallDurationSeconds),
+        HARD_MAX_CALL_DURATION_SECONDS
+      );
+      session.campaignMaxCallDurationSeconds = clampedCampaignMax;
+      console.log(
+        `${LOG_PREFIX} ⏱️ Campaign max call duration set to ${clampedCampaignMax}s (requested: ${campaignConfig.maxCallDurationSeconds}s, hard cap: ${HARD_MAX_CALL_DURATION_SECONDS}s)`
+      );
     }
 
     // Set campaign type on session for disposition validation
@@ -3112,8 +3119,11 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     const campaignMaxDurationRaw = Number(campaignConfig?.maxCallDurationSeconds);
     if (Number.isFinite(campaignMaxDurationRaw) && campaignMaxDurationRaw > 0) {
-      session.campaignMaxCallDurationSeconds = campaignMaxDurationRaw;
-      console.log(`${LOG_PREFIX} [Gemini] ⏱️ Campaign max call duration set to ${campaignMaxDurationRaw}s`);
+      const clampedCampaignMax = Math.min(campaignMaxDurationRaw, HARD_MAX_CALL_DURATION_SECONDS);
+      session.campaignMaxCallDurationSeconds = clampedCampaignMax;
+      console.log(
+        `${LOG_PREFIX} [Gemini] ⏱️ Campaign max call duration set to ${clampedCampaignMax}s (requested: ${campaignMaxDurationRaw}s, hard cap: ${HARD_MAX_CALL_DURATION_SECONDS}s)`
+      );
     } else {
       console.log(`${LOG_PREFIX} [Gemini] ⏱️ Campaign max call duration not set or disabled (value: ${campaignConfig?.maxCallDurationSeconds ?? 'null'})`);
     }
@@ -7281,17 +7291,17 @@ async function resolveTelnyxCallControlId(session: OpenAIRealtimeSession): Promi
   }
 }
 
-async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<void> {
+async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<boolean> {
   const telnyxApiKey = process.env.TELNYX_API_KEY;
   if (!telnyxApiKey) {
     console.warn(`${LOG_PREFIX} ⚠️ TELNYX_API_KEY not set - cannot hang up call ${session.callId} via Telnyx API`);
-    return;
+    return false;
   }
 
   const callControlId = await resolveTelnyxCallControlId(session);
   if (!callControlId) {
     console.warn(`${LOG_PREFIX} ⚠️ Cannot resolve callControlId for call ${session.callId} (callAttemptId=${session.callAttemptId}) - Telnyx hangup SKIPPED. Call may become zombie!`);
-    return;
+    return false;
   }
 
   try {
@@ -7307,12 +7317,14 @@ async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<void> 
     if (!response.ok) {
       const errText = await response.text();
       console.warn(`${LOG_PREFIX} Telnyx hangup API returned ${response.status} for ${callControlId}: ${errText}`);
-      return;
+      return false;
     }
 
     console.log(`${LOG_PREFIX} ✅ Telnyx hangup API succeeded for call ${session.callId} (control_id=${callControlId})`);
+    return true;
   } catch (error) {
     console.warn(`${LOG_PREFIX} Telnyx hangup API request failed for call ${session.callId}:`, error);
+    return false;
   }
 }
 
@@ -7394,15 +7406,6 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   session.callOutcome = outcome;
   if (outcome === "voicemail") {
     recordVoicemailDetectedEvent(session, "end_call_outcome");
-  }
-
-  // Notify bridge that WebSocket is definitely closed/ending
-  try {
-    const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
-    const bridge = getTelnyxAiBridge();
-    await bridge.notifyCallEndedByCallId(callId);
-  } catch (err) {
-    console.warn(`${LOG_PREFIX} Failed to notify bridge of call end:`, err);
   }
 
   // Clean up ALL active timers to prevent leaks
@@ -7500,7 +7503,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
   // HARD TERMINATION: Explicit Telnyx hangup for deterministic enforcement.
   // Do this before closing websocket so duration-based endings reliably terminate carrier-side calls.
-  await forceTelnyxHangup(session);
+  const hangupSent = await forceTelnyxHangup(session);
 
   // Close Telnyx WebSocket to terminate the call (this triggers Telnyx to hangup)
   if (session.telnyxWs) {
@@ -7518,6 +7521,20 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         }, 2000);
       }
     } catch (_) {}
+  }
+
+  // Notify bridge only after a carrier-side hangup command was sent.
+  // If hangup command could not be sent, keep bridge state so its watchdogs can still force terminate.
+  if (hangupSent) {
+    try {
+      const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
+      const bridge = getTelnyxAiBridge();
+      await bridge.notifyCallEndedByCallId(callId);
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} Failed to notify bridge of call end:`, err);
+    }
+  } else {
+    console.warn(`${LOG_PREFIX} Skipping bridge end notification for ${callId} because Telnyx hangup command was not confirmed.`);
   }
 
   // Build transcript — use Gemini in-session transcripts as a lightweight fallback
@@ -10657,6 +10674,9 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
     } else if (agentMaxDurationSeconds > 0) {
       effectiveMaxDuration = agentMaxDurationSeconds;
     }
+    if (effectiveMaxDuration > 0) {
+      effectiveMaxDuration = Math.min(effectiveMaxDuration, HARD_MAX_CALL_DURATION_SECONDS);
+    }
 
     // Enhanced logging for max duration debugging (only if limit is actually set)
     if (effectiveMaxDuration > 0) {
@@ -10903,10 +10923,10 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     // disposition, campaign config, or conversation state. This is a safety net that
     // prevents runaway calls (e.g., 209 minute calls) from burning resources and
     // creating a terrible experience. This applies to ALL calls unconditionally.
-    const GLOBAL_ABSOLUTE_CEILING_SECONDS = 300; // 5 minutes - no exceptions
-    const GLOBAL_WRAP_UP_WARNING_SECONDS = 240; // 4 minutes - send wrap-up warning
+    const GLOBAL_ABSOLUTE_CEILING_SECONDS = HARD_MAX_CALL_DURATION_SECONDS; // 5 minutes - no exceptions
+    const GLOBAL_WRAP_UP_WARNING_SECONDS = Math.max(1, GLOBAL_ABSOLUTE_CEILING_SECONDS - 60); // warn 1 min before hard stop
 
-    // Send global wrap-up warning at 12 minutes if no other wrap-up was sent
+    // Send global wrap-up warning 60s before hard stop if no other wrap-up was sent
     if (elapsedSeconds >= GLOBAL_WRAP_UP_WARNING_SECONDS && elapsedSeconds < GLOBAL_ABSOLUTE_CEILING_SECONDS && !session.wrapUpWarningSent) {
       session.wrapUpWarningSent = true;
       const remainingSeconds = GLOBAL_ABSOLUTE_CEILING_SECONDS - elapsedSeconds;
@@ -10946,7 +10966,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
         }
       }
     }
-    if (elapsedSeconds > GLOBAL_ABSOLUTE_CEILING_SECONDS) {
+    if (elapsedSeconds >= GLOBAL_ABSOLUTE_CEILING_SECONDS) {
       console.error(`${LOG_PREFIX} ⛔ GLOBAL CEILING BREACHED - Force terminating call ${session.callId} after ${elapsedSeconds}s (GLOBAL CEILING: ${GLOBAL_ABSOLUTE_CEILING_SECONDS}s). This should never happen.`);
 
       // If call has a real disposition, end gracefully; otherwise mark as needs_review
