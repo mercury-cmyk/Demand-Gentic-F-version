@@ -5,10 +5,13 @@
  * - Organization association (Problem Intelligence Org)
  * - Campaign objective
  * - Talking points / key messages
+ * - Product/service info, target audience, objections
+ *
+ * Supports AI-powered context generation from Organization Intelligence.
  */
 
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -25,13 +28,28 @@ import {
   X,
   Lightbulb,
   Sparkles,
+  Wand2,
+  CheckCircle2,
+  Users,
+  Package,
+  ShieldAlert,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface CampaignOrganization {
   id: string;
   name: string;
   industry?: string;
+}
+
+interface GeneratedContext {
+  campaignObjective: string;
+  talkingPoints: string[];
+  successCriteria: string;
+  productServiceInfo: string;
+  targetAudienceDescription: string;
+  campaignObjections: Array<{ objection: string; response: string }>;
 }
 
 interface StepCampaignContextProps {
@@ -41,19 +59,27 @@ interface StepCampaignContextProps {
 }
 
 export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContextProps) {
+  const { toast } = useToast();
+
   // Organization selection
   const [selectedOrgId, setSelectedOrgId] = useState<string>(data?.organizationId || "");
 
-  // Campaign objective
+  // Core fields
   const [campaignObjective, setCampaignObjective] = useState<string>(data?.campaignObjective || "");
-
-  // Talking points
   const [talkingPoints, setTalkingPoints] = useState<string[]>(
     data?.talkingPoints?.length > 0 ? data.talkingPoints : [""]
   );
-
-  // Success criteria
   const [successCriteria, setSuccessCriteria] = useState<string>(data?.successCriteria || "");
+
+  // Extended fields (populated by AI or manual)
+  const [productServiceInfo, setProductServiceInfo] = useState<string>(data?.productServiceInfo || "");
+  const [targetAudienceDescription, setTargetAudienceDescription] = useState<string>(data?.targetAudienceDescription || "");
+  const [campaignObjections, setCampaignObjections] = useState<Array<{ objection: string; response: string }>>(
+    data?.campaignObjections?.length > 0 ? data.campaignObjections : []
+  );
+
+  // AI generation state
+  const [aiGenerated, setAiGenerated] = useState(false);
 
   // Fetch available organizations
   const { data: organizations = [], isLoading: orgsLoading } = useQuery<CampaignOrganization[]>({
@@ -67,6 +93,49 @@ export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContex
       } catch {
         return [];
       }
+    },
+  });
+
+  // AI context generation mutation
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/campaign-manager/generate-context", {
+        organizationId: selectedOrgId,
+        campaignType: data?.type || "call",
+        campaignName: data?.name,
+        existingObjective: campaignObjective.trim() || undefined,
+        existingTalkingPoints: talkingPoints.filter(tp => tp.trim().length > 0),
+      }, { timeout: 45000 });
+      return res.json();
+    },
+    onSuccess: (result: { success: boolean; generated: GeneratedContext; organizationName: string }) => {
+      if (!result.success || !result.generated) {
+        toast({ title: "Generation failed", description: "AI returned an unexpected response.", variant: "destructive" });
+        return;
+      }
+
+      const g = result.generated;
+
+      // Apply generated fields
+      if (g.campaignObjective) setCampaignObjective(g.campaignObjective);
+      if (g.talkingPoints?.length > 0) setTalkingPoints(g.talkingPoints);
+      if (g.successCriteria) setSuccessCriteria(g.successCriteria);
+      if (g.productServiceInfo) setProductServiceInfo(g.productServiceInfo);
+      if (g.targetAudienceDescription) setTargetAudienceDescription(g.targetAudienceDescription);
+      if (g.campaignObjections?.length > 0) setCampaignObjections(g.campaignObjections);
+
+      setAiGenerated(true);
+      toast({
+        title: "Context Generated",
+        description: `AI generated campaign context from ${result.organizationName}'s intelligence. Review and edit as needed.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Generation Failed",
+        description: error.message || "Could not generate campaign context. Please try again.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -108,39 +177,45 @@ export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContex
     return templates[type] || templates.call;
   };
 
-  // Add a new talking point
-  const addTalkingPoint = () => {
-    setTalkingPoints([...talkingPoints, ""]);
-  };
-
-  // Remove a talking point
+  // Talking point helpers
+  const addTalkingPoint = () => setTalkingPoints([...talkingPoints, ""]);
   const removeTalkingPoint = (index: number) => {
-    if (talkingPoints.length > 1) {
-      setTalkingPoints(talkingPoints.filter((_, i) => i !== index));
-    }
+    if (talkingPoints.length > 1) setTalkingPoints(talkingPoints.filter((_, i) => i !== index));
   };
-
-  // Update a talking point
   const updateTalkingPoint = (index: number, value: string) => {
     const updated = [...talkingPoints];
     updated[index] = value;
     setTalkingPoints(updated);
   };
 
+  // Objection helpers
+  const addObjection = () => setCampaignObjections([...campaignObjections, { objection: "", response: "" }]);
+  const removeObjection = (index: number) => setCampaignObjections(campaignObjections.filter((_, i) => i !== index));
+  const updateObjection = (index: number, field: "objection" | "response", value: string) => {
+    const updated = [...campaignObjections];
+    updated[index] = { ...updated[index], [field]: value };
+    setCampaignObjections(updated);
+  };
+
   // Validation
   const isValid = campaignObjective.trim().length > 0;
 
   const handleNext = () => {
-    // Filter out empty talking points
-    const validTalkingPoints = talkingPoints.filter((tp) => typeof tp === 'string' && tp.trim().length > 0);
+    const validTalkingPoints = talkingPoints.filter((tp) => typeof tp === "string" && tp.trim().length > 0);
+    const validObjections = campaignObjections.filter((o) => o.objection.trim().length > 0);
 
     onNext({
       organizationId: selectedOrgId || null,
       campaignObjective: campaignObjective.trim(),
       talkingPoints: validTalkingPoints.length > 0 ? validTalkingPoints : null,
       successCriteria: successCriteria.trim() || null,
+      productServiceInfo: productServiceInfo.trim() || null,
+      targetAudienceDescription: targetAudienceDescription.trim() || null,
+      campaignObjections: validObjections.length > 0 ? validObjections : null,
     });
   };
+
+  const selectedOrg = organizations.find((o) => o.id === selectedOrgId);
 
   return (
     <div className="space-y-6">
@@ -148,26 +223,30 @@ export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContex
       <div className="space-y-2">
         <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
           <Target className="h-6 w-6 text-primary" />
-          Campaign Context
+          Content & Context
         </h2>
         <p className="text-muted-foreground">
-          Define what your AI agent should accomplish and the key messages to convey.
+          Define your campaign objective and provide context for AI-powered conversations.
         </p>
       </div>
 
-      {/* Organization Selection (Optional) */}
+      {/* Organization Selection */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Building className="h-5 w-5" />
-            Problem Intelligence Organization
-            <Badge variant="secondary" className="text-xs">Optional</Badge>
-          </CardTitle>
-          <CardDescription>
-            Link to an organization for context-aware intelligence during calls.
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Building className="h-5 w-5" />
+                Campaign Organization
+                <Badge variant="outline" className="text-xs text-blue-600 border-blue-200 bg-blue-50">Recommended</Badge>
+              </CardTitle>
+              <CardDescription>
+                Select the organization this campaign is for. This provides context-aware intelligence during calls.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           {orgsLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -192,6 +271,48 @@ export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContex
                 ))}
               </SelectContent>
             </Select>
+          )}
+
+          {/* AI Generate Button — visible when org is selected */}
+          {selectedOrgId && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <Wand2 className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-blue-900">
+                    AI Context Generation
+                  </p>
+                  <p className="text-xs text-blue-700 mt-0.5">
+                    Auto-generate campaign objective, talking points, target audience, product info, and objection handling — all grounded in{" "}
+                    <span className="font-semibold">{selectedOrg?.name || "the organization"}</span>'s intelligence data.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => generateMutation.mutate()}
+                  disabled={generateMutation.isPending}
+                  className="shrink-0 bg-blue-600 hover:bg-blue-700"
+                >
+                  {generateMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="h-4 w-4 mr-1.5" />
+                      Generate with AI
+                    </>
+                  )}
+                </Button>
+              </div>
+              {aiGenerated && (
+                <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded px-2.5 py-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Context generated from organization intelligence. All fields below have been populated — review and edit as needed.
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -236,6 +357,50 @@ export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContex
               ))}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Product / Service Info */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Package className="h-5 w-5" />
+            Product / Service Info
+            <Badge variant="secondary" className="text-xs">Optional</Badge>
+          </CardTitle>
+          <CardDescription>
+            Describe the product or service being promoted. The AI agent uses this during conversations.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            placeholder="e.g., Our AI-powered demand generation platform helps B2B companies book more qualified meetings through intelligent outbound calling, email automation, and real-time conversation intelligence."
+            value={productServiceInfo}
+            onChange={(e) => setProductServiceInfo(e.target.value)}
+            className="min-h-[80px]"
+          />
+        </CardContent>
+      </Card>
+
+      {/* Target Audience */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Users className="h-5 w-5" />
+            Target Audience
+            <Badge variant="secondary" className="text-xs">Optional</Badge>
+          </CardTitle>
+          <CardDescription>
+            Who is the ideal prospect for this campaign? Include titles, industries, and company size.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            placeholder="e.g., VP of Sales, CROs, and Demand Gen Directors at mid-market B2B SaaS companies (200-5000 employees) struggling with pipeline generation and outbound conversion rates."
+            value={targetAudienceDescription}
+            onChange={(e) => setTargetAudienceDescription(e.target.value)}
+            className="min-h-[80px]"
+          />
         </CardContent>
       </Card>
 
@@ -325,6 +490,80 @@ export function StepCampaignContext({ data, onNext, onBack }: StepCampaignContex
           </div>
         </CardContent>
       </Card>
+
+      {/* Objection Handling */}
+      {campaignObjections.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <ShieldAlert className="h-5 w-5" />
+              Objection Handling
+              <Badge variant="secondary" className="text-xs">AI Generated</Badge>
+            </CardTitle>
+            <CardDescription>
+              Common objections and recommended responses for the AI agent.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {campaignObjections.map((obj, index) => (
+              <div key={index} className="rounded-lg border p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-sm font-medium text-muted-foreground mt-2 w-6">{index + 1}.</span>
+                  <div className="flex-1 space-y-2">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Objection</Label>
+                      <Input
+                        value={obj.objection}
+                        onChange={(e) => updateObjection(index, "objection", e.target.value)}
+                        placeholder="e.g., We already have a solution for this"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Recommended Response</Label>
+                      <Textarea
+                        value={obj.response}
+                        onChange={(e) => updateObjection(index, "response", e.target.value)}
+                        placeholder="e.g., I understand — many of our clients felt the same way initially..."
+                        className="min-h-[60px]"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive mt-2"
+                    onClick={() => removeObjection(index)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={addObjection}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Objection
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add objection button when no objections exist yet */}
+      {campaignObjections.length === 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addObjection}
+          className="w-full"
+        >
+          <ShieldAlert className="h-4 w-4 mr-2" />
+          Add Objection Handling (Optional)
+        </Button>
+      )}
 
       {/* Navigation */}
       <div className="flex justify-between pt-4">

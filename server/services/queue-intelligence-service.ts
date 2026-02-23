@@ -680,7 +680,7 @@ export async function getQueueIntelligenceOverview(
       c.job_title,
       c.seniority_level,
       a.name AS account_name,
-      a.industry_standardized AS industry
+      COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry
     FROM campaign_queue cq
     INNER JOIN contacts c ON c.id = cq.contact_id
     INNER JOIN accounts a ON a.id = cq.account_id
@@ -779,7 +779,7 @@ export async function getSegmentAnalysis(
       c.job_title,
       c.seniority_level,
       a.name AS account_name,
-      a.industry_standardized AS industry
+      COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry
     FROM campaign_queue cq
     INNER JOIN contacts c ON c.id = cq.contact_id
     INNER JOIN accounts a ON a.id = cq.account_id
@@ -917,7 +917,7 @@ export async function getContactScores(
       c.job_title,
       c.seniority_level,
       a.name AS account_name,
-      a.industry_standardized AS industry
+      COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry
     FROM campaign_queue cq
     INNER JOIN contacts c ON c.id = cq.contact_id
     INNER JOIN accounts a ON a.id = cq.account_id
@@ -1014,7 +1014,7 @@ async function loadQueuedContacts(campaignId: string): Promise<QueueContactRow[]
       c.department,
       c.intent_topics AS contact_intent_topics,
       a.name AS account_name,
-      a.industry_standardized,
+      COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry_standardized,
       a.industry_secondary,
       a.staff_count,
       a.annual_revenue,
@@ -1079,7 +1079,7 @@ async function loadAgentQueueContacts(campaignId: string): Promise<QueueContactR
       c.department,
       c.intent_topics AS contact_intent_topics,
       a.name AS account_name,
-      a.industry_standardized,
+      COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry_standardized,
       a.industry_secondary,
       a.staff_count,
       a.annual_revenue,
@@ -1133,7 +1133,7 @@ async function loadHistoricalData(
   const industryResult = await pool.query(
     `
     SELECT
-      a.industry_standardized AS industry,
+      COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry,
       COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE dca.disposition IN ('qualified_lead', 'callback_requested'))::int AS converted
     FROM dialer_call_attempts dca
@@ -1142,8 +1142,8 @@ async function loadHistoricalData(
     INNER JOIN campaigns camp ON camp.id = dca.campaign_id
     WHERE camp.owner_id = $1
       AND dca.disposition IS NOT NULL
-      AND a.industry_standardized IS NOT NULL
-    GROUP BY a.industry_standardized
+      AND COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) IS NOT NULL
+    GROUP BY COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested)
     `,
     [tenantId]
   );

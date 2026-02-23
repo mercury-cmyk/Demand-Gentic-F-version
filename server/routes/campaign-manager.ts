@@ -3,8 +3,9 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db';
 import { requireAuth, requireRole } from '../auth';
-import { campaigns } from '@shared/schema';
+import { campaigns, campaignOrganizations } from '@shared/schema';
 import { BRAND, TAGLINE, PILLARS, BRAND_VOICE, SOCIAL_PROFILES } from '@shared/brand-messaging';
+import { generateJSON } from '../services/vertex-ai/vertex-client';
 import {
   getOrganizationProfile,
   getOrganizationPromptSettings,
@@ -604,6 +605,182 @@ router.get('/org-context', async (_req: Request, res: Response) => {
   } catch (error) {
     console.error('[CampaignManager] Failed to fetch org context:', error);
     res.status(500).json({ message: 'Failed to fetch organization intelligence context' });
+  }
+});
+
+/**
+ * POST /generate-context
+ * AI-generates campaign context fields (objective, talking points, success criteria,
+ * product/service info, target audience, objections) from Organization Intelligence.
+ * Requires an organizationId so the AI can ground its output in real OI data.
+ */
+const generateContextSchema = z.object({
+  organizationId: z.string().min(1),
+  campaignType: z.string().optional().default('call'),
+  campaignName: z.string().optional(),
+  // Allow partial pre-existing values to refine generation
+  existingObjective: z.string().optional(),
+  existingTalkingPoints: z.array(z.string()).optional(),
+});
+
+router.post('/generate-context', async (req: Request, res: Response) => {
+  try {
+    const input = generateContextSchema.parse(req.body);
+
+    // 1. Fetch the selected organization's intelligence
+    const [org] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.id, input.organizationId))
+      .limit(1);
+
+    if (!org) {
+      return res.status(404).json({ message: 'Organization not found' });
+    }
+
+    // Extract OI sections
+    const identity = (org.identity as any) || {};
+    const offerings = (org.offerings as any) || {};
+    const icp = (org.icp as any) || {};
+    const positioning = (org.positioning as any) || {};
+    const outreach = (org.outreach as any) || {};
+
+    const orgName = identity?.legalName?.value || identity?.legalName || org.name;
+    const orgDescription = identity?.description?.value || identity?.description || '';
+    const orgIndustry = identity?.industry?.value || identity?.industry || org.industry || '';
+
+    // Products / offerings
+    const coreProducts = Array.isArray(offerings?.coreProducts?.value)
+      ? offerings.coreProducts.value
+      : Array.isArray(offerings?.coreProducts)
+        ? offerings.coreProducts
+        : [];
+    const problemsSolved = Array.isArray(offerings?.problemsSolved?.value)
+      ? offerings.problemsSolved.value
+      : Array.isArray(offerings?.problemsSolved)
+        ? offerings.problemsSolved
+        : [];
+    const differentiators = Array.isArray(offerings?.differentiators?.value)
+      ? offerings.differentiators.value
+      : Array.isArray(offerings?.differentiators)
+        ? offerings.differentiators
+        : [];
+
+    // ICP
+    const icpIndustries = Array.isArray(icp?.industries?.value)
+      ? icp.industries.value
+      : Array.isArray(icp?.industries)
+        ? icp.industries
+        : [];
+    const personas = Array.isArray(icp?.personas?.value)
+      ? icp.personas.value
+      : Array.isArray(icp?.personas)
+        ? icp.personas
+        : [];
+    const objections = Array.isArray(icp?.objections?.value)
+      ? icp.objections.value
+      : Array.isArray(icp?.objections)
+        ? icp.objections
+        : [];
+
+    // Positioning
+    const oneLiner = positioning?.oneLiner?.value || positioning?.oneLiner || '';
+    const whyUs = Array.isArray(positioning?.whyUs?.value)
+      ? positioning.whyUs.value
+      : Array.isArray(positioning?.whyUs)
+        ? positioning.whyUs
+        : [];
+    const competitors = Array.isArray(positioning?.competitors?.value)
+      ? positioning.competitors.value
+      : Array.isArray(positioning?.competitors)
+        ? positioning.competitors
+        : [];
+
+    // Outreach
+    const callOpeners = Array.isArray(outreach?.callOpeners?.value)
+      ? outreach.callOpeners.value
+      : Array.isArray(outreach?.callOpeners)
+        ? outreach.callOpeners
+        : [];
+    const emailAngles = Array.isArray(outreach?.emailAngles?.value)
+      ? outreach.emailAngles.value
+      : Array.isArray(outreach?.emailAngles)
+        ? outreach.emailAngles
+        : [];
+
+    // Build OI context block for the AI
+    const oiContext = [
+      `Organization: ${orgName}`,
+      orgDescription && `Description: ${orgDescription}`,
+      orgIndustry && `Industry: ${orgIndustry}`,
+      oneLiner && `Value Proposition: ${oneLiner}`,
+      coreProducts.length > 0 && `Core Products/Services: ${coreProducts.join(', ')}`,
+      problemsSolved.length > 0 && `Problems Solved: ${problemsSolved.join(', ')}`,
+      differentiators.length > 0 && `Differentiators: ${differentiators.join(', ')}`,
+      icpIndustries.length > 0 && `Target Industries: ${icpIndustries.join(', ')}`,
+      personas.length > 0 && `Target Personas: ${personas.map((p: any) => typeof p === 'string' ? p : p.title || p.role || JSON.stringify(p)).join(', ')}`,
+      whyUs.length > 0 && `Why Choose Us: ${whyUs.join('; ')}`,
+      competitors.length > 0 && `Competitors: ${competitors.join(', ')}`,
+      callOpeners.length > 0 && `Call Openers: ${callOpeners.join(' | ')}`,
+      emailAngles.length > 0 && `Email Angles: ${emailAngles.join(' | ')}`,
+      objections.length > 0 && `Common Objections: ${objections.map((o: any) => typeof o === 'string' ? o : o.objection || JSON.stringify(o)).join('; ')}`,
+    ].filter(Boolean).join('\n');
+
+    // Campaign type label
+    const typeLabels: Record<string, string> = {
+      appointment_generation: 'Appointment Generation / Meeting Booking',
+      high_quality_leads: 'High Quality Lead Generation',
+      live_webinar: 'Webinar Registration',
+      content_syndication: 'Content Syndication Follow-up',
+      executive_dinner: 'Executive Dinner/Event RSVP',
+      call: 'Outbound Calling',
+    };
+    const typeLabel = typeLabels[input.campaignType] || input.campaignType;
+
+    const prompt = `You are a B2B demand generation strategist. Based on the Organization Intelligence below, generate campaign context fields for a "${typeLabel}" campaign${input.campaignName ? ` named "${input.campaignName}"` : ''}.
+
+=== ORGANIZATION INTELLIGENCE ===
+${oiContext}
+
+=== INSTRUCTIONS ===
+Generate a complete, ready-to-use campaign context. Every field must be grounded in the Organization Intelligence above — use real product names, real value props, real target personas. Do NOT use generic placeholders.
+
+${input.existingObjective ? `The user has already written this objective (refine it): "${input.existingObjective}"` : ''}
+${input.existingTalkingPoints?.length ? `The user has these talking points (expand on them): ${input.existingTalkingPoints.join('; ')}` : ''}
+
+Return ONLY a valid JSON object with these fields:
+{
+  "campaignObjective": "A clear, specific 1-2 sentence campaign objective grounded in the org's offerings and target audience",
+  "talkingPoints": ["5-7 specific talking points using real product names, metrics, and differentiators"],
+  "successCriteria": "One clear success criteria statement for what counts as a successful call",
+  "productServiceInfo": "2-3 sentence summary of the product/service being promoted, with specific features and benefits",
+  "targetAudienceDescription": "Specific description of the target audience including titles, industries, company size, and pain points",
+  "campaignObjections": [
+    {"objection": "Common objection text", "response": "Recommended response using org intelligence"}
+  ]
+}
+
+Be specific, actionable, and grounded in the organization's real data. No generic filler.`;
+
+    const result = await generateJSON<{
+      campaignObjective: string;
+      talkingPoints: string[];
+      successCriteria: string;
+      productServiceInfo: string;
+      targetAudienceDescription: string;
+      campaignObjections: Array<{ objection: string; response: string }>;
+    }>(prompt, { temperature: 0.4, maxTokens: 2000 });
+
+    res.json({
+      success: true,
+      generated: result,
+      organizationName: orgName,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation failed', errors: error.errors });
+    }
+    console.error('[CampaignManager] Generate context failed:', error);
+    res.status(500).json({ message: 'Failed to generate campaign context' });
   }
 });
 

@@ -194,7 +194,7 @@ router.get("/api/queue-intelligence/:campaignId/live-stats", requireAuth, async 
             NULLIF(TRIM(c.direct_phone), '')
           ) AS best_phone,
           a.name AS account_name,
-          a.industry
+          COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry
         FROM campaign_queue cq
         INNER JOIN contacts c ON c.id = cq.contact_id
         LEFT JOIN accounts a ON a.id = cq.account_id

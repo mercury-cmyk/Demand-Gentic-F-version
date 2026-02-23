@@ -56,7 +56,7 @@ export function QueueIntelligenceView({ campaignId }: Props) {
   });
 
   // Live stats data
-  const { data: liveStats, isLoading: liveStatsLoading } = useQuery<LiveStatsData>({
+  const { data: liveStats, isLoading: liveStatsLoading, error: liveStatsError } = useQuery<LiveStatsData>({
     queryKey: ["/api/queue-intelligence", campaignId, "live-stats"],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/queue-intelligence/${campaignId}/live-stats`);
@@ -64,6 +64,7 @@ export function QueueIntelligenceView({ campaignId }: Props) {
     },
     enabled: !!campaignId && activeTab === "live-stats",
     refetchInterval: activeTab === "live-stats" ? 30000 : false, // Auto-refresh every 30s when tab is active
+    retry: 1,
   });
 
   // Score mutation
@@ -214,9 +215,25 @@ export function QueueIntelligenceView({ campaignId }: Props) {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
+          ) : liveStatsError ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Activity className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm font-medium mb-1">Could not load live stats</p>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                {(liveStatsError as any)?.message || "The queue may not have any contacts yet, or the endpoint is unavailable. Try syncing or setting the queue first."}
+              </p>
+            </div>
           ) : liveStats ? (
             <LiveStatsPanel data={liveStats} />
-          ) : null}
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Activity className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm font-medium mb-1">No Queue Data</p>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Queue contacts into this campaign first, then live stats will appear here showing country distribution, phone status, priority breakdown, and next-in-line contacts.
+              </p>
+            </div>
+          )}
         </TabsContent>
 
         {hasScores && (

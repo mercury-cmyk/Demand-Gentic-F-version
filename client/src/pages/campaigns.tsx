@@ -574,11 +574,11 @@ export default function CampaignsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <div className="space-y-1.5">
             {isLoading ? (
-              <div className="grid gap-3">
+              <div className="grid gap-2">
                 {[1, 2, 3].map((item) => (
-                  <div key={item} className="h-28 animate-pulse rounded-xl border border-border/60 bg-muted/30" />
+                  <div key={item} className="h-14 animate-pulse rounded-lg border border-border/60 bg-muted/30" />
                 ))}
               </div>
             ) : filteredCampaigns.length === 0 ? (
@@ -617,190 +617,181 @@ export default function CampaignsPage() {
                     open={isExpanded}
                     onOpenChange={() => toggleCampaignExpanded(campaign.id)}
                   >
-                    <div className="group rounded-2xl border border-border/70 bg-card transition-all duration-200 hover:border-primary/30 hover:shadow-md">
-                      <div className="p-4 md:p-5">
-                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                          {/* Left: Info */}
-                          <div className="flex items-start gap-4 min-w-[250px]">
-                            <div className={`p-2.5 rounded-lg ring-1 ${isEmail ? 'bg-cyan-50 text-cyan-700 ring-cyan-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
-                              {isEmail ? <Mail className="h-5 w-5" /> : <Phone className="h-5 w-5" />}
-                            </div>
-                            <div>
-                              <h3 className="font-semibold text-base text-foreground">{campaign.name}</h3>
-                              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                                {campaign.startDate && (
-                                  <>
-                                    <span>Started {new Date(campaign.startDate).toLocaleDateString()}</span>
-                                    <span>|</span>
-                                  </>
-                                )}
-                                <span className="capitalize">{isPhone ? 'Phone' : campaign.type}</span>
-                                {isPhone && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'hybrid') && (
-                                  <>
-                                    <span>|</span>
-                                    <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-cyan-300 text-cyan-700">
-                                      <Bot className="h-3 w-3 mr-1" />
-                                      {campaign.dialMode === 'hybrid' ? 'Hybrid' : 'AI Agent'}
-                                    </Badge>
-                                  </>
-                                )}
-                                {isPhone && campaignQueueStats && (
-                                  <>
-                                    <span>|</span>
-                                    <Badge variant="secondary" className="text-[10px] py-0 px-1.5 bg-muted/60">
-                                      <Users className="h-3 w-3 mr-1" />
-                                      {campaignQueueStats.queued} in queue
-                                    </Badge>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
+                    <div className="group rounded-lg border border-border/70 bg-card transition-colors hover:bg-accent/5">
+                      {/* Compact row header */}
+                      <div className="flex items-center gap-3 px-4 py-2.5">
+                        {/* Type icon */}
+                        <div className={`p-1.5 rounded-md ring-1 shrink-0 ${isEmail ? 'bg-cyan-50 text-cyan-600 ring-cyan-200 dark:bg-cyan-950/30 dark:text-cyan-400 dark:ring-cyan-800' : 'bg-emerald-50 text-emerald-600 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:ring-emerald-800'}`}>
+                          {isEmail ? <Mail className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
+                        </div>
 
-                          {/* Middle: Metrics & Status */}
-                          <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full md:w-auto items-center">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className={`${getStatusColor(campaign.status)} capitalize`}>
-                                {campaign.status}
+                        {/* Name + meta */}
+                        <div className="min-w-0 flex-[2]">
+                          <h3 className="text-sm font-semibold text-foreground truncate leading-tight">{campaign.name}</h3>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            <Badge variant="outline" className={`${getStatusColor(campaign.status)} capitalize text-[10px] h-5 px-1.5`}>
+                              {campaign.status}
+                            </Badge>
+                            <span className="text-[10px] text-muted-foreground capitalize">{isPhone ? 'Phone' : campaign.type}</span>
+                            {isPhone && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'hybrid') && (
+                              <Badge variant="outline" className="text-[10px] py-0 px-1 h-4 border-cyan-300 text-cyan-700 dark:border-cyan-700 dark:text-cyan-400 gap-0.5">
+                                <Bot className="h-2.5 w-2.5" />
+                                {campaign.dialMode === 'hybrid' ? 'Hybrid' : 'AI'}
                               </Badge>
-                            </div>
-
-                            <div className="col-span-2 space-y-1.5">
-                              <div className="flex justify-between text-xs">
-                                <span className="text-muted-foreground">
-                                  {isEmail ? 'Engagement Rate' : 'Connect Rate'}
-                                </span>
-                                <span className="font-medium">
-                                  {isEmail ? `${engagementRate}%` : `${connectRate}%`}
-                                </span>
-                              </div>
-                              <Progress
-                                value={isEmail ? engagementRate : connectRate}
-                                className="h-2"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Right: AI Insight & Actions */}
-                          <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
-                            {insight && (
-                              <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border text-xs">
-                                {insight.type === 'success' ? (
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-                                ) : (
-                                  <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                                )}
-                                <span className="font-medium">{insight.message}</span>
-                                <div className="w-px h-3 bg-border mx-1" />
-                                <ConfidenceIndicator score={insight.score} showBar={false} className="!gap-0" />
-                              </div>
                             )}
-
-                            {/* Quick Status Toggle */}
-                            {canManageCampaigns && (campaign.status === 'active' || campaign.status === 'paused') && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleStatusMutation.mutate({ id: campaign.id.toString(), status: campaign.status });
-                                }}
-                                disabled={toggleStatusMutation.isPending}
-                              >
-                                {campaign.status === 'active' ? (
-                                  <>
-                                    <Pause className="h-4 w-4 mr-1" />
-                                    Pause
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="h-4 w-4 mr-1" />
-                                    Resume
-                                  </>
-                                )}
-                              </Button>
+                            {isPhone && campaignQueueStats && (
+                              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                <Users className="h-2.5 w-2.5" />
+                                {campaignQueueStats.queued} queued
+                              </span>
                             )}
-
-                            <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-8 px-2">
-                                {isExpanded ? (
-                                  <ChevronUp className="h-4 w-4" />
-                                ) : (
-                                  <ChevronDown className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </CollapsibleTrigger>
-
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                {canManageCampaigns && (
-                                  <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
-                                    <Edit className="mr-2 h-4 w-4" />
-                                    Edit
-                                  </DropdownMenuItem>
-                                )}
-                                <DropdownMenuItem onClick={() => handleCreateLandingPageClick(campaign)}>
-                                  <Globe className="mr-2 h-4 w-4" />
-                                  Create Landing Page
-                                </DropdownMenuItem>
-                                {isPhone && (
-                                  <>
-                                    {/* Start AI Calls - only for active AI agent campaigns */}
-                                    {canManageCampaigns && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql') && campaign.status === 'active' && (
-                                      <DropdownMenuItem
-                                        onClick={() => handleStartAiCallsClick(campaign)}
-                                        disabled={startAiCallsMutation.isPending}
-                                        className="text-green-600"
-                                      >
-                                        <Phone className="mr-2 h-4 w-4" />
-                                        {startAiCallsMutation.isPending ? 'Starting...' : 'Start AI Calls'}
-                                      </DropdownMenuItem>
-                                    )}
-                                    {canSelectVoice && (
-                                      <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
-                                        <Mic className="mr-2 h-4 w-4" />
-                                        Select AI Voice
-                                      </DropdownMenuItem>
-                                    )}
-                                    {canManageCampaigns && (
-                                      <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
-                                        <Users className="mr-2 h-4 w-4" />
-                                        Assign Agents
-                                      </DropdownMenuItem>
-                                    )}
-                                  </>
-                                )}
-                                {canManageCampaigns && (
-                                  <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(campaign)}>
-                                      <Trash2 className="mr-2 h-4 w-4" />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
                           </div>
                         </div>
 
-                        {/* Performance Snapshot - Always visible */}
-                        <div className="mt-4">
-                          <CampaignPerformanceSnapshot
-                            data={campaignSnapshots[String(campaign.id)]}
-                            isLoading={snapshotsLoading}
-                          />
+                        {/* Inline KPI metrics */}
+                        <div className="hidden md:grid grid-cols-4 gap-x-5 flex-[2.5] shrink-0">
+                          {isPhone ? (
+                            <>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-foreground">{callAttempts.toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Calls</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{callConnected.toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Connected</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{connectRate}%</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Rate</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{(callSnapshot?.leadsQualified ?? 0).toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Qualified</p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-foreground">{emailRecipients.toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Sent</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{emailOpens.toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Opens</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{engagementRate}%</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Engage</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{(emailSnapshot?.clicks ?? 0).toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Clicks</p>
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        {/* AI Insight pill (desktop) */}
+                        {insight && (
+                          <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted/50 border text-[11px] shrink-0">
+                            {insight.type === 'success' ? (
+                              <CheckCircle2 className="w-3 h-3 text-green-500" />
+                            ) : (
+                              <AlertCircle className="w-3 h-3 text-amber-500" />
+                            )}
+                            <span className="font-medium truncate max-w-[140px]">{insight.message}</span>
+                          </div>
+                        )}
+
+                        {/* Actions cluster */}
+                        <div className="flex items-center gap-1 shrink-0">
+                          {canManageCampaigns && (campaign.status === 'active' || campaign.status === 'paused') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs px-2"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleStatusMutation.mutate({ id: campaign.id.toString(), status: campaign.status });
+                              }}
+                              disabled={toggleStatusMutation.isPending}
+                            >
+                              {campaign.status === 'active' ? (
+                                <><Pause className="h-3 w-3 mr-1" />Pause</>
+                              ) : (
+                                <><Play className="h-3 w-3 mr-1" />Resume</>
+                              )}
+                            </Button>
+                          )}
+
+                          <CollapsibleTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                              {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                            </Button>
+                          </CollapsibleTrigger>
+
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7">
+                                <MoreVertical className="h-3.5 w-3.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {canManageCampaigns && (
+                                <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
+                                  <Edit className="mr-2 h-3.5 w-3.5" />Edit
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem onClick={() => handleCreateLandingPageClick(campaign)}>
+                                <Globe className="mr-2 h-3.5 w-3.5" />Create Landing Page
+                              </DropdownMenuItem>
+                              {isPhone && (
+                                <>
+                                  {canManageCampaigns && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql') && campaign.status === 'active' && (
+                                    <DropdownMenuItem
+                                      onClick={() => handleStartAiCallsClick(campaign)}
+                                      disabled={startAiCallsMutation.isPending}
+                                      className="text-green-600"
+                                    >
+                                      <Phone className="mr-2 h-3.5 w-3.5" />
+                                      {startAiCallsMutation.isPending ? 'Starting...' : 'Start AI Calls'}
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canSelectVoice && (
+                                    <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
+                                      <Mic className="mr-2 h-3.5 w-3.5" />Select AI Voice
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canManageCampaigns && (
+                                    <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
+                                      <Users className="mr-2 h-3.5 w-3.5" />Assign Agents
+                                    </DropdownMenuItem>
+                                  )}
+                                </>
+                              )}
+                              {canManageCampaigns && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(campaign)}>
+                                    <Trash2 className="mr-2 h-3.5 w-3.5" />Delete
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
 
-                      {/* Expandable Type-Specific Panel */}
+                      {/* Expandable Detail Panel */}
                       <CollapsibleContent>
                         <div className="border-t px-4 py-4 bg-muted/30">
+                          {/* Performance Snapshot — now inside expandable */}
+                          <div className="mb-4">
+                            <CampaignPerformanceSnapshot
+                              data={campaignSnapshots[String(campaign.id)]}
+                              isLoading={snapshotsLoading}
+                            />
+                          </div>
                           {isPhone && (campaign as any).lastStallReason && campaign.status === 'active' && (
                             <Alert variant="warning" className="mb-3">
                               <AlertCircle className="h-4 w-4" />
