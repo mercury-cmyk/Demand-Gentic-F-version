@@ -817,7 +817,7 @@ export class CoreVoiceAgent extends BaseAgent {
 
     try {
       // Build the complete system prompt
-      const systemPrompt = this.buildCompletePrompt(input);
+      const systemPrompt = await this.buildCompletePrompt(input);
 
       // Track which layers were applied
       for (const section of this.getKnowledgeSections()) {

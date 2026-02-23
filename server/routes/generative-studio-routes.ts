@@ -148,20 +148,72 @@ function normalizeOptionalId(value: unknown): string | undefined {
 
 /**
  * GET /resolve-project-org
- * Resolve organization ID from a client project ID
+ * Resolve organization ID from a project ID.
+ * Checks generativeStudioProjects first (metadata.organizationId),
+ * then falls back to clientProjects (campaignOrganizationId).
  */
 router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const projectId = normalizeOptionalId(req.query.projectId);
     if (!projectId) {
-      return res.json({ organizationId: null });
+      return res.json({ organizationId: null, source: null });
     }
-    const [project] = await db.select({
+
+    // 1. Check generative studio projects first (most likely when projectId is in URL)
+    const [gsProject] = await db.select({
+      id: generativeStudioProjects.id,
+      metadata: generativeStudioProjects.metadata,
+      type: generativeStudioProjects.type,
+    }).from(generativeStudioProjects).where(eq(generativeStudioProjects.id, projectId)).limit(1);
+
+    if (gsProject) {
+      const meta = (gsProject.metadata as any) || {};
+      return res.json({
+        organizationId: meta.organizationId || null,
+        clientProjectId: meta.clientProjectId || null,
+        studioProjectId: gsProject.id,
+        studioProjectType: gsProject.type,
+        source: "generative_studio",
+      });
+    }
+
+    // 2. Fallback: check client projects
+    const [clientProject] = await db.select({
       campaignOrganizationId: clientProjects.campaignOrganizationId,
     }).from(clientProjects).where(eq(clientProjects.id, projectId)).limit(1);
-    res.json({ organizationId: project?.campaignOrganizationId || null });
+
+    if (clientProject) {
+      return res.json({
+        organizationId: clientProject.campaignOrganizationId || null,
+        clientProjectId: projectId,
+        source: "client_project",
+      });
+    }
+
+    res.json({ organizationId: null, source: null });
   } catch (error: any) {
     return sendGenerativeStudioError(res, error, "resolve project org");
+  }
+});
+
+/**
+ * GET /projects/:id
+ * Fetch a single generative studio project by ID (for direct URL access)
+ */
+router.get("/projects/:id", requireDualAuth, async (req: Request, res: Response) => {
+  try {
+    const [project] = await db.select()
+      .from(generativeStudioProjects)
+      .where(eq(generativeStudioProjects.id, req.params.id))
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    res.json({ project });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, "get project by id");
   }
 });
 

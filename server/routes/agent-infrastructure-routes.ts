@@ -8,14 +8,14 @@ import { Router, Request, Response } from 'express';
 import { 
   agentRegistry, 
   agentGovernance, 
-  coreEmailAgent, 
-  coreVoiceAgent,
-  coreComplianceAgent,
-  coreDataManagementAgent,
   getAgentInfrastructureStatus,
   GOVERNANCE_POLICIES,
   FOUNDATIONAL_PROMPTS,
 } from '../services/agents';
+import { unifiedVoiceAgent } from '../services/agents/unified/unified-voice-agent';
+import { unifiedEmailAgent } from '../services/agents/unified/unified-email-agent';
+import { unifiedQAAgent } from '../services/agents/unified/unified-qa-agent';
+import { unifiedMemoryAgent } from '../services/agents/unified/unified-memory-agent';
 import type { AgentCampaignContext, AgentContactContext } from '../services/agents/types';
 
 const router = Router();
@@ -123,8 +123,8 @@ router.post('/email/generate', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'campaignContext is required' });
     }
 
-    const result = await coreEmailAgent.execute({
-      agentId: coreEmailAgent.id,
+    const result = await unifiedEmailAgent.execute({
+      agentId: unifiedEmailAgent.id,
       campaignContext,
       contactContext,
       organizationIntelligence,
@@ -160,7 +160,7 @@ router.post('/email/generate-followup', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await coreEmailAgent.generateFollowUpEmail(
+    const result = await unifiedEmailAgent.generateFollowUpEmail(
       campaignContext,
       previousEmailContext,
       followUpNumber
@@ -196,7 +196,7 @@ router.post('/email/generate-transactional', async (req: Request, res: Response)
       });
     }
 
-    const result = await coreEmailAgent.generateTransactionalEmail(type, context);
+    const result = await unifiedEmailAgent.generateTransactionalEmail(type, context);
     res.json(result);
   } catch (error: any) {
     console.error('[AgentRoutes] Error generating transactional email:', error);
@@ -226,8 +226,8 @@ router.post('/voice/build-prompt', async (req: Request, res: Response) => {
       additionalInstructions?: string;
     };
 
-    const result = await coreVoiceAgent.execute({
-      agentId: coreVoiceAgent.id,
+    const result = await unifiedVoiceAgent.execute({
+      agentId: unifiedVoiceAgent.id,
       campaignContext,
       contactContext,
       organizationIntelligence,
@@ -252,8 +252,8 @@ router.post('/voice/first-message', async (req: Request, res: Response) => {
       contactContext?: AgentContactContext;
     };
 
-    const firstMessage = coreVoiceAgent.buildFirstMessage(contactContext);
-    const validation = coreVoiceAgent.validateOpeningVariables(contactContext);
+    const firstMessage = unifiedVoiceAgent.buildFirstMessage(contactContext);
+    const validation = unifiedVoiceAgent.validateOpeningVariables(contactContext);
 
     res.json({
       firstMessage,
@@ -287,8 +287,8 @@ router.post('/compliance/build-prompt', async (req: Request, res: Response) => {
       additionalInstructions?: string;
     };
 
-    const result = await coreComplianceAgent.execute({
-      agentId: coreComplianceAgent.id,
+    const result = await unifiedQAAgent.execute({
+      agentId: unifiedQAAgent.id,
       campaignContext,
       contactContext,
       organizationIntelligence,
@@ -325,8 +325,8 @@ router.post('/data-management/build-prompt', async (req: Request, res: Response)
       additionalInstructions?: string;
     };
 
-    const result = await coreDataManagementAgent.execute({
-      agentId: coreDataManagementAgent.id,
+    const result = await unifiedMemoryAgent.execute({
+      agentId: unifiedMemoryAgent.id,
       campaignContext,
       contactContext,
       organizationIntelligence,

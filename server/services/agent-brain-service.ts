@@ -17,8 +17,8 @@
  */
 
 import { db } from "../db";
-import { accountIntelligence } from "@shared/schema";
-import { desc } from "drizzle-orm";
+import { accountIntelligence, campaignOrganizations } from "@shared/schema";
+import { desc, eq } from "drizzle-orm";
 import { buildUnifiedKnowledgePrompt } from "./unified-knowledge-hub";
 
 // NOTE: DEMAND_*_KNOWLEDGE constants are deprecated - use unified knowledge hub
@@ -659,10 +659,64 @@ export interface OrganizationBrain {
 }
 
 /**
- * Fetch Organization Intelligence to inject into agent brain
+ * Fetch Organization Intelligence to inject into agent brain.
+ * Prioritizes the super org from campaignOrganizations (source of truth),
+ * falls back to legacy accountIntelligence table.
  */
 export async function getOrganizationBrain(): Promise<OrganizationBrain | null> {
   try {
+    // Priority 1: Super org from campaignOrganizations (canonical source)
+    const [superOrg] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.organizationType, 'super'))
+      .limit(1);
+
+    if (superOrg && superOrg.identity && Object.keys(superOrg.identity as any).length > 0) {
+      const identity = superOrg.identity as any || {};
+      const offerings = superOrg.offerings as any || {};
+      const icp = superOrg.icp as any || {};
+      const positioning = superOrg.positioning as any || {};
+      const outreach = superOrg.outreach as any || {};
+
+      // Also fetch compliance/voice from accountIntelligence (not stored in campaignOrganizations)
+      const [aiProfile] = await db.select()
+        .from(accountIntelligence)
+        .orderBy(desc(accountIntelligence.createdAt))
+        .limit(1);
+
+      return {
+        identity: {
+          companyName: identity.legalName?.value || superOrg.name || "Our Company",
+          description: identity.description?.value || "",
+          industry: identity.industry?.value || superOrg.industry || "",
+          valueProposition: positioning.oneLiner?.value || "",
+        },
+        offerings: {
+          products: offerings.coreProducts?.value || "",
+          useCases: offerings.useCases?.value || "",
+          differentiators: offerings.differentiators?.value || "",
+          problemsSolved: offerings.problemsSolved?.value || "",
+        },
+        icp: {
+          targetIndustries: icp.industries?.value || "",
+          targetPersonas: icp.personas?.value || "",
+          commonObjections: icp.objections?.value || "",
+        },
+        positioning: {
+          oneLiner: positioning.oneLiner?.value || "",
+          competitors: positioning.competitors?.value || "",
+          whyUs: positioning.whyUs?.value || "",
+        },
+        outreach: {
+          emailAngles: outreach.emailAngles?.value || "",
+          callOpeners: outreach.callOpeners?.value || "",
+        },
+        compliance: aiProfile?.compliancePolicy || "",
+        voiceDefaults: aiProfile?.agentVoiceDefaults || "",
+      };
+    }
+
+    // Fallback: Legacy accountIntelligence table
     const [profile] = await db.select()
       .from(accountIntelligence)
       .orderBy(desc(accountIntelligence.createdAt))

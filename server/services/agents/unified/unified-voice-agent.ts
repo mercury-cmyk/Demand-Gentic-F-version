@@ -34,10 +34,26 @@ import type {
   UnifiedAgentConfiguration,
   LearningInputSource,
 } from './types';
+import { VOICE_AGENT_FOUNDATIONAL_PROMPT } from '../core-voice-agent';
 
 // ==================== VOICE AGENT PROMPT SECTIONS ====================
 
 const VOICE_PROMPT_SECTIONS: PromptSection[] = [
+  // Section 0: Core Foundational Knowledge — imported from core-voice-agent.ts
+  // Contains the Human-First Philosophy, Three Truths, Role Constraints,
+  // Critical Output Format, Right-Party Verification, Call State Machine,
+  // Turn-Taking Discipline, Gatekeeper Protocol, Voicemail Handling,
+  // DNC/Compliance, Being Human on the Phone, Disposition Requirements,
+  // Function Call Error Recovery, and Anti-Repetition Protocol.
+  UnifiedBaseAgent['createPromptSection'](
+    'voice_foundational_knowledge',
+    'Core Foundational Knowledge',
+    0,
+    VOICE_AGENT_FOUNDATIONAL_PROMPT,
+    'identity',
+    true
+  ),
+
   UnifiedBaseAgent['createPromptSection'](
     'voice_identity',
     'Identity & Persona',
@@ -407,6 +423,20 @@ ADAPTIVE BEHAVIOR:
 
 const VOICE_CAPABILITIES: AgentCapability[] = [
   {
+    id: 'voice_cap_foundational',
+    name: 'Core Foundational Knowledge',
+    description: 'Human-First Philosophy, Three Truths, output format rules, right-party verification, call state machine, turn-taking, voicemail/gatekeeper protocols, compliance, disposition requirements, and anti-repetition — the bedrock knowledge for all voice interactions',
+    promptSectionIds: ['voice_foundational_knowledge'],
+    learningInputSources: [{
+      id: 'lis_foundational', name: 'Foundational Compliance Audit', type: 'compliance_audit',
+      description: 'Monitors adherence to foundational voice interaction rules and human-first philosophy', isActive: true,
+    }],
+    performanceScore: 95,
+    trend: 'stable',
+    isActive: true,
+    optimizationWeight: 10,
+  },
+  {
     id: 'voice_cap_identity',
     name: 'Identity & Persona',
     description: 'Core identity, role definition, and personality traits',
@@ -676,7 +706,7 @@ export class UnifiedVoiceAgent extends UnifiedBaseAgent {
   };
 
   async execute(input: AgentExecutionInput): Promise<AgentExecutionOutput> {
-    const prompt = this.buildCompletePrompt(input);
+    const prompt = await this.buildCompletePrompt(input);
     return {
       success: true,
       content: prompt,
@@ -688,6 +718,61 @@ export class UnifiedVoiceAgent extends UnifiedBaseAgent {
         tokenUsage: { promptTokens: prompt.length, completionTokens: 0, totalTokens: prompt.length },
         layersApplied: ['foundational', 'organization', 'campaign', 'contact'],
       },
+    };
+  }
+
+  // =============================================================================
+  // VOICE-SPECIFIC UTILITY METHODS
+  // =============================================================================
+
+  /**
+   * Build the first message for a call based on contact context
+   */
+  buildFirstMessage(contactContext?: AgentExecutionInput['contactContext']): string {
+    if (!contactContext) {
+      return "Hello, may I speak with the person I'm trying to reach?";
+    }
+
+    const name = [contactContext.firstName, contactContext.lastName]
+      .filter(Boolean)
+      .join(' ');
+    const title = contactContext.title;
+    const company = contactContext.company;
+
+    if (name && title && company) {
+      return `Hello, may I please speak with ${name}, the ${title} at ${company}?`;
+    } else if (name && company) {
+      return `Hello, may I please speak with ${name} at ${company}?`;
+    } else if (name) {
+      return `Hello, may I please speak with ${name}?`;
+    }
+
+    return "Hello, may I speak with the person I'm trying to reach?";
+  }
+
+  /**
+   * Validate required variables for opening message
+   */
+  validateOpeningVariables(
+    contactContext?: AgentExecutionInput['contactContext']
+  ): { valid: boolean; missing: string[] } {
+    const missing: string[] = [];
+
+    if (!contactContext) {
+      return { valid: false, missing: ['contactContext'] };
+    }
+
+    if (!contactContext.firstName && !contactContext.lastName) {
+      missing.push('contact_name');
+    }
+
+    if (!contactContext.company) {
+      missing.push('company');
+    }
+
+    return {
+      valid: missing.length === 0,
+      missing,
     };
   }
 }

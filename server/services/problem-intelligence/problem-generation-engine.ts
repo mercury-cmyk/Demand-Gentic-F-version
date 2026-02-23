@@ -16,6 +16,7 @@ import {
   type InsertCampaignAccountProblem,
 } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
+import { wrapPromptWithOI } from "../../lib/org-intelligence-helper";
 import type {
   CampaignAccountProblemIntelligence,
   AccountSignals,
@@ -248,7 +249,8 @@ async function synthesizeProblemIntelligence(params: {
     return buildFallbackSynthesis(detectedProblems, gapAnalysis, serviceCatalog);
   }
 
-  const systemPrompt = buildSynthesisSystemPrompt();
+  const baseSystemPrompt = buildSynthesisSystemPrompt();
+  const systemPrompt = await wrapPromptWithOI(baseSystemPrompt);
   const userPrompt = buildSynthesisUserPrompt(
     accountSignals,
     detectedProblems,

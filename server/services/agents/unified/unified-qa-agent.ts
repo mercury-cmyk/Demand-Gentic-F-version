@@ -30,10 +30,23 @@ import type {
   CapabilityPromptMapping,
   UnifiedAgentConfiguration,
 } from './types';
+import { COMPLIANCE_AGENT_FOUNDATIONAL_PROMPT } from '../core-compliance-agent';
 
 // ==================== QA AGENT PROMPT SECTIONS ====================
 
 const QA_PROMPT_SECTIONS: PromptSection[] = [
+  // Section 0: Core Compliance Foundational Knowledge — imported from core-compliance-agent.ts
+  // Contains scope of oversight (call, email, digital, data privacy), core responsibilities,
+  // required inputs, output format, decision matrix, and compliance governance rules.
+  UnifiedBaseAgent['createPromptSection'](
+    'qa_compliance_foundational',
+    'Core Compliance Foundational Knowledge',
+    0,
+    COMPLIANCE_AGENT_FOUNDATIONAL_PROMPT,
+    'compliance',
+    true
+  ),
+
   UnifiedBaseAgent['createPromptSection'](
     'qa_identity',
     'Identity & Mission',
@@ -412,6 +425,21 @@ FEEDBACK QUALITY ASSESSMENT:
 // ==================== QA AGENT CAPABILITIES ====================
 
 const QA_CAPABILITIES: AgentCapability[] = [
+  {
+    id: 'qa_cap_compliance_foundational',
+    name: 'Core Compliance Foundational Knowledge',
+    description: 'Complete compliance governance framework: TCPA, CAN-SPAM, GDPR, CCPA oversight, consent validation, DNC handling, data privacy, and decision matrix — the bedrock compliance layer for all QA operations',
+    promptSectionIds: ['qa_compliance_foundational'],
+    learningInputSources: [{
+      id: 'lis_qa_compliance', name: 'Compliance Governance Audit', type: 'compliance_audit',
+      description: 'Monitors adherence to foundational compliance standards across all channels', isActive: true,
+    }],
+    performanceScore: 95,
+    trend: 'stable',
+    isActive: true,
+    optimizationWeight: 10,
+  },
+
   {
     id: 'qa_cap_lead_quality',
     name: 'Lead Quality Scoring',

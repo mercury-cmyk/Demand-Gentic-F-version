@@ -166,7 +166,7 @@ export class CoreResearchAnalysisAgent extends BaseAgent {
     const layersApplied: string[] = ['foundational_prompt'];
 
     try {
-      const systemPrompt = this.buildCompletePrompt(input);
+      const systemPrompt = await this.buildCompletePrompt(input);
 
       for (const section of this.getKnowledgeSections()) {
         layersApplied.push(section.id);

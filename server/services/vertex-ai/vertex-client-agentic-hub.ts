@@ -40,6 +40,7 @@ import {
 } from "@shared/schema";
 import { eq, and, or, desc, sql, gte, lte, count, sum } from "drizzle-orm";
 import { notificationService } from "../notification-service";
+import { wrapPromptWithOI } from "../../lib/org-intelligence-helper";
 
 // ==================== TYPES ====================
 
@@ -351,6 +352,7 @@ Return JSON:
   "optimizedCriteria": { ... any suggested improvements }
 }`;
 
+      const enrichedAnalysisPrompt = await wrapPromptWithOI(analysisPrompt);
       let analysis = await generateJSON<{
         isValid: boolean;
         validationNotes: string;
@@ -359,7 +361,7 @@ Return JSON:
         estimatedDeliveryDays: number;
         recommendations: string[];
         optimizedCriteria?: any;
-      }>(analysisPrompt, { temperature: 0.2 });
+      }>(enrichedAnalysisPrompt, { temperature: 0.2 });
 
       console.log('[VertexClientAgenticHub] Order analysis result:', JSON.stringify(analysis, null, 2));
 
@@ -605,13 +607,14 @@ Return JSON:
   "coachingPoints": ["point 1", "point 2"]
 }`;
 
+      const enrichedScenarioPrompt = await wrapPromptWithOI(scenarioPrompt);
       let simulation = await generateJSON<{
         scenario: { prospectName: string; company: string; title: string };
         dialogue: { speaker: string; text: string; tone: string }[];
         objections: { objection: string; category: string; difficulty: number }[];
         expectedOutcome: string;
         coachingPoints: string[];
-      }>(scenarioPrompt, { temperature: 0.7 });
+      }>(enrichedScenarioPrompt, { temperature: 0.7 });
 
       // Handle potential array output from LLM
       if (Array.isArray(simulation)) {
@@ -649,6 +652,7 @@ Return JSON:
   "detailedFeedback": "paragraph of coaching feedback"
 }`;
 
+      const enrichedSimAnalysisPrompt = await wrapPromptWithOI(analysisPrompt);
       let analysis = await generateJSON<{
         objectionCount: number;
         successfulResponses: number;
@@ -657,7 +661,7 @@ Return JSON:
         improvementAreas: string[];
         overallScore: number;
         detailedFeedback: string;
-      }>(analysisPrompt, { temperature: 0.3 });
+      }>(enrichedSimAnalysisPrompt, { temperature: 0.3 });
 
       // Handle potential array output from LLM
       if (Array.isArray(analysis)) {
@@ -755,6 +759,7 @@ Return JSON:
   }
 }`;
 
+      const enrichedPersonaPrompt = await wrapPromptWithOI(personaPrompt);
       let persona = await generateJSON<{
         systemPrompt: string;
         voiceStyle: string;
@@ -767,7 +772,7 @@ Return JSON:
           keyObjections: string[];
           buyingSignals: string[];
         };
-      }>(personaPrompt, { temperature: 0.6 });
+      }>(enrichedPersonaPrompt, { temperature: 0.6 });
 
       // Handle potential array output from LLM
       if (Array.isArray(persona)) {
@@ -902,11 +907,12 @@ Return JSON:
 }`;
 
       console.log("[ClientAgenticHub] Generating email with Vertex AI...");
-      
+
+      const enrichedEmailPrompt = await wrapPromptWithOI(emailPrompt);
       const rawResult = await generateJSON<{
         emails: GeneratedEmail[];
         copywritingNotes: string;
-      }>(emailPrompt, { temperature: 0.7 });
+      }>(enrichedEmailPrompt, { temperature: 0.7 });
 
       const result = Array.isArray(rawResult) ? rawResult[0] : rawResult;
 
@@ -1023,10 +1029,11 @@ Return JSON:
   ]
 }`;
 
+      const enrichedSequencePrompt = await wrapPromptWithOI(sequencePrompt);
       const rawResult = await generateJSON<{
         sequenceStrategy: string;
         emails: (GeneratedEmail & { order: number; sendDelay: number; subjectVariant?: string; emailPurpose: string })[];
-      }>(sequencePrompt, { temperature: 0.6 });
+      }>(enrichedSequencePrompt, { temperature: 0.6 });
 
       const result = Array.isArray(rawResult) ? rawResult[0] : rawResult;
 
@@ -1087,11 +1094,12 @@ Return JSON:
   "technicalSpecs": "technical details for the image"
 }`;
 
+      const enrichedImagePrompt = await wrapPromptWithOI(promptRefinementPrompt);
       const rawResult = await generateJSON<{
         refinedPrompt: string;
         styleKeywords: string[];
         technicalSpecs: string;
-      }>(promptRefinementPrompt, { temperature: 0.4 });
+      }>(enrichedImagePrompt, { temperature: 0.4 });
 
       const promptResult = Array.isArray(rawResult) ? rawResult[0] : rawResult;
 
@@ -1287,6 +1295,7 @@ Return JSON:
   }
 }`;
 
+      const enrichedReportPrompt = await wrapPromptWithOI(analysisPrompt);
       let analysis = await generateJSON<{
         title: string;
         summary: string;
@@ -1295,7 +1304,7 @@ Return JSON:
         insights: ReportInsight[];
         recommendations: string[];
         trends: { volumeTrend: string; qualityTrend: string };
-      }>(analysisPrompt, { temperature: 0.3 });
+      }>(enrichedReportPrompt, { temperature: 0.3 });
 
       // Handle potential array response from LLM
       if (Array.isArray(analysis)) {
@@ -1352,7 +1361,8 @@ Return JSON:
 
     try {
       // Use reasoning model for complex planning
-      const { thinking, answer } = await reason(`You are a B2B demand generation strategist. Create a complete campaign plan from this goal.
+      const campaignPlanPrompt = await wrapPromptWithOI(`You are a B2B demand generation strategist. Create a complete campaign plan from this goal.`);
+      const { thinking, answer } = await reason(campaignPlanPrompt + `
 
 CLIENT GOAL: "${goal}"
 BUDGET: ${budget ? `$${budget}` : "Flexible"}
@@ -1591,7 +1601,7 @@ Return JSON:
       },
     ];
 
-    const systemPrompt = `You are AgentX, the Agentic Operator for DemandGentic.ai By Pivotal.
+    const baseAgentXPrompt = `You are AgentX, the Agentic Operator for DemandGentic.ai By Pivotal.
 
 You are equipped with:
 1. Agentic CRM Actions (create/manage campaigns, orders)
@@ -1611,6 +1621,8 @@ Be helpful, professional, and proactive. When users describe what they need, use
 
 Client: ${this.context.clientName || "Valued Client"}
 Account ID: ${this.context.clientAccountId}`;
+
+    const systemPrompt = await wrapPromptWithOI(baseAgentXPrompt);
 
     const { text, functionCalls } = await generateWithFunctions(systemPrompt, message, functions, {
       temperature: 0.5,

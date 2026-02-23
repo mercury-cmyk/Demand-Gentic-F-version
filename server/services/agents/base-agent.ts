@@ -5,16 +5,17 @@
  * Provides common functionality and enforces the agent contract.
  */
 
-import type { 
-  IAgent, 
-  AgentChannel, 
-  AgentStatus, 
+import type {
+  IAgent,
+  AgentChannel,
+  AgentStatus,
   AgentKnowledgeSection,
   AgentExecutionInput,
   AgentExecutionOutput,
   AgentExecutionMetadata
 } from './types';
 import { createHash } from 'crypto';
+import { getSuperOrgOIContext } from '../../lib/org-intelligence-helper';
 
 export abstract class BaseAgent implements IAgent {
   abstract readonly id: string;
@@ -53,7 +54,7 @@ export abstract class BaseAgent implements IAgent {
   /**
    * Build the complete prompt including all layers
    */
-  protected buildCompletePrompt(input: AgentExecutionInput): string {
+  protected async buildCompletePrompt(input: AgentExecutionInput): Promise<string> {
     const parts: string[] = [];
     const knowledgeSections = this.getKnowledgeSections()
       .sort((a, b) => a.priority - b.priority);
@@ -66,9 +67,10 @@ export abstract class BaseAgent implements IAgent {
       parts.push(`\n# ${section.name}\n${section.content}`);
     }
 
-    // Layer 3: Organization Intelligence
-    if (input.organizationIntelligence) {
-      parts.push(`\n# Organization Intelligence\n${input.organizationIntelligence}`);
+    // Layer 3: Organization Intelligence (always injected — auto-fetches if not provided)
+    const oiContext = input.organizationIntelligence || await getSuperOrgOIContext();
+    if (oiContext) {
+      parts.push(`\n# Organization Intelligence\n${oiContext}`);
     }
 
     // Layer 4: Problem Intelligence

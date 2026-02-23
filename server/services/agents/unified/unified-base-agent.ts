@@ -12,6 +12,7 @@
 
 import { createHash } from 'crypto';
 import type { AgentChannel, AgentKnowledgeSection, AgentExecutionInput, AgentExecutionOutput } from '../types';
+import { getSuperOrgOIContext } from '../../../lib/org-intelligence-helper';
 import type {
   IUnifiedAgent,
   UnifiedAgentType,
@@ -322,15 +323,16 @@ export abstract class UnifiedBaseAgent implements IUnifiedAgent {
   /**
    * Build complete prompt with all layers (backward-compatible with BaseAgent)
    */
-  protected buildCompletePrompt(input: AgentExecutionInput): string {
+  protected async buildCompletePrompt(input: AgentExecutionInput): Promise<string> {
     const parts: string[] = [];
 
     // Layer 1: Assembled foundational prompt (from modular sections)
     parts.push(this.assembleFoundationalPrompt());
 
-    // Layer 2: Organization Intelligence
-    if (input.organizationIntelligence) {
-      parts.push(`\n# Organization Intelligence\n${input.organizationIntelligence}`);
+    // Layer 2: Organization Intelligence (always injected — auto-fetches if not provided)
+    const oiContext = input.organizationIntelligence || await getSuperOrgOIContext();
+    if (oiContext) {
+      parts.push(`\n# Organization Intelligence\n${oiContext}`);
     }
 
     // Layer 3: Problem Intelligence

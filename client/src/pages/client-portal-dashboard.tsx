@@ -690,6 +690,40 @@ export default function ClientPortalDashboard() {
     enabled: !!user,
   });
 
+  // Batch-stats for call/email metrics on campaign cards
+  const PHONE_TYPES = ['call', 'telemarketing', 'sql', 'content_syndication', 'appointment_generation',
+    'high_quality_leads', 'live_webinar', 'on_demand_webinar', 'executive_dinner',
+    'leadership_forum', 'conference'];
+
+  const { data: campaignSnapshots = {} } = useQuery<Record<string, { call: any; email: any }>>({
+    queryKey: ['client-portal-batch-stats', campaigns.map((c) => c.id).join(',')],
+    queryFn: async () => {
+      const types: Record<string, { isCall: boolean; isEmail: boolean }> = {};
+      const campaignIds: string[] = [];
+      for (const c of campaigns) {
+        campaignIds.push(c.id);
+        const ct = (c.campaignType || c.type || '').toLowerCase();
+        types[c.id] = {
+          isEmail: ct === 'email' || ct === 'combo',
+          isCall: PHONE_TYPES.includes(ct) || c.dialMode === 'ai_agent',
+        };
+      }
+      const res = await fetch('/api/client-portal/campaigns/batch-stats', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders.headers,
+        },
+        body: JSON.stringify({ campaignIds, types }),
+      });
+      if (!res.ok) return {};
+      return res.json();
+    },
+    enabled: campaigns.length > 0 && !!user,
+    refetchInterval: 15000,
+    staleTime: 10000,
+  });
+
   const { data: orders = [], isLoading: ordersLoading, refetch: refetchOrders } = useQuery<Order[]>({
     queryKey: ['client-portal-orders', user?.clientAccountId],
     queryFn: async () => {
@@ -1588,25 +1622,39 @@ export default function ClientPortalDashboard() {
     return matchesStatus && matchesSearch && matchesType;
   });
 
+  // Aggregate call stats from batch-stats snapshots
   const callCampaignReportTotals = filteredCampaigns.reduce((acc, campaign) => {
-    const report = campaign.callReport || campaign.stats?.callReport;
-    if (!report) return acc;
-
-    acc.callsMade += Number(report.callsMade || 0);
-    acc.connected += Number(report.connected || 0);
-    acc.qualified += Number(report.qualified || 0);
-    acc.voicemail += Number(report.voicemail || 0);
-    acc.noAnswer += Number(report.noAnswer || 0);
-    acc.invalid += Number(report.invalid || 0);
+    const snap = campaignSnapshots[campaign.id]?.call;
+    if (snap) {
+      acc.recipients += Number(snap.contactsInQueue || 0);
+      acc.callsMade += Number(snap.callsMade || 0);
+      acc.connected += Number(snap.callsConnected || 0);
+      acc.qualified += Number(snap.leadsQualified || 0);
+      acc.dnc += Number(snap.dncRequests || 0);
+    } else {
+      // Fallback to campaign-level callReport
+      const report = campaign.callReport || campaign.stats?.callReport;
+      if (report) {
+        acc.callsMade += Number(report.callsMade || 0);
+        acc.connected += Number(report.connected || 0);
+        acc.qualified += Number(report.qualified || 0);
+      }
+    }
     return acc;
-  }, {
-    callsMade: 0,
-    connected: 0,
-    qualified: 0,
-    voicemail: 0,
-    noAnswer: 0,
-    invalid: 0,
-  });
+  }, { recipients: 0, callsMade: 0, connected: 0, qualified: 0, dnc: 0 });
+
+  // Aggregate email stats from batch-stats snapshots
+  const emailCampaignReportTotals = filteredCampaigns.reduce((acc, campaign) => {
+    const snap = campaignSnapshots[campaign.id]?.email;
+    if (snap) {
+      acc.recipients += Number(snap.totalRecipients || 0);
+      acc.delivered += Number(snap.delivered || 0);
+      acc.opens += Number(snap.opens || 0);
+      acc.clicks += Number(snap.clicks || 0);
+      acc.unsubs += Number(snap.unsubscribes || 0);
+    }
+    return acc;
+  }, { recipients: 0, delivered: 0, opens: 0, clicks: 0, unsubs: 0 });
   
   // Filter projects (campaign requests)
   const filteredProjects = projects.filter(project => {
@@ -2666,20 +2714,49 @@ export default function ClientPortalDashboard() {
 
             {/* Aggregate call stats bar */}
             {callCampaignReportTotals.callsMade > 0 && (
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                {[
-                  { label: 'Calls Made', value: callCampaignReportTotals.callsMade, color: 'text-slate-700 dark:text-slate-200' },
-                  { label: 'Connected', value: callCampaignReportTotals.connected, color: 'text-blue-600 dark:text-blue-400' },
-                  { label: 'Qualified', value: callCampaignReportTotals.qualified, color: 'text-emerald-600 dark:text-emerald-400' },
-                  { label: 'Voicemail', value: callCampaignReportTotals.voicemail, color: 'text-amber-600 dark:text-amber-400' },
-                  { label: 'No Answer', value: callCampaignReportTotals.noAnswer, color: 'text-slate-500 dark:text-slate-400' },
-                  { label: 'Invalid', value: callCampaignReportTotals.invalid, color: 'text-red-500 dark:text-red-400' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="rounded-xl border border-slate-100 bg-white/90 dark:border-slate-800 dark:bg-slate-900/70 px-3 py-2.5 text-center shadow-sm">
-                    <p className={`text-xl font-bold ${color}`}>{value.toLocaleString()}</p>
-                    <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-0.5">{label}</p>
-                  </div>
-                ))}
+              <div>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Phone className="h-3.5 w-3.5 text-emerald-600" />
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Call Campaigns</span>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {[
+                    { label: 'Recipients', value: callCampaignReportTotals.recipients, color: 'text-slate-700 dark:text-slate-200' },
+                    { label: 'Attempts', value: callCampaignReportTotals.callsMade, color: 'text-blue-600 dark:text-blue-400' },
+                    { label: 'RPC', value: callCampaignReportTotals.connected, color: 'text-emerald-600 dark:text-emerald-400' },
+                    { label: 'Qualified', value: callCampaignReportTotals.qualified, color: 'text-violet-600 dark:text-violet-400' },
+                    { label: 'DNC', value: callCampaignReportTotals.dnc, color: 'text-red-500 dark:text-red-400' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="rounded-xl border border-slate-100 bg-white/90 dark:border-slate-800 dark:bg-slate-900/70 px-3 py-2.5 text-center shadow-sm">
+                      <p className={`text-xl font-bold ${color}`}>{value.toLocaleString()}</p>
+                      <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Aggregate email stats bar */}
+            {emailCampaignReportTotals.recipients > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Mail className="h-3.5 w-3.5 text-cyan-600" />
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Email Campaigns</span>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {[
+                    { label: 'Recipients', value: emailCampaignReportTotals.recipients, color: 'text-slate-700 dark:text-slate-200' },
+                    { label: 'Delivered', value: emailCampaignReportTotals.delivered, color: 'text-blue-600 dark:text-blue-400' },
+                    { label: 'Opened', value: emailCampaignReportTotals.opens, color: 'text-emerald-600 dark:text-emerald-400' },
+                    { label: 'Clicked', value: emailCampaignReportTotals.clicks, color: 'text-violet-600 dark:text-violet-400' },
+                    { label: 'Unsub', value: emailCampaignReportTotals.unsubs, color: 'text-red-500 dark:text-red-400' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="rounded-xl border border-slate-100 bg-white/90 dark:border-slate-800 dark:bg-slate-900/70 px-3 py-2.5 text-center shadow-sm">
+                      <p className={`text-xl font-bold ${color}`}>{value.toLocaleString()}</p>
+                      <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -2713,22 +2790,29 @@ export default function ClientPortalDashboard() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {filteredCampaigns.map((campaign) => (
-                  <CampaignCard
-                    key={campaign.id}
-                    campaign={campaign}
-                    onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
-                    onOpenPreviewStudio={(campaignId, mode) => openCampaignPreviewStudio(campaignId, mode || 'voice')}
-                    onSelectVoice={(campaignId) => {
-                      setClientVoiceCampaignId(campaignId);
-                      setShowClientVoiceSelect(true);
-                    }}
-                    onViewQueue={(campaignId) => {
-                      setQueueCampaignId(campaignId);
-                      setShowQueueDialog(true);
-                    }}
-                  />
-                ))}
+                {filteredCampaigns.map((campaign) => {
+                  const snap = campaignSnapshots[campaign.id];
+                  return (
+                    <CampaignCard
+                      key={campaign.id}
+                      campaign={{
+                        ...campaign,
+                        callSnapshot: snap?.call || undefined,
+                        emailSnapshot: snap?.email || undefined,
+                      }}
+                      onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
+                      onOpenPreviewStudio={(campaignId, mode) => openCampaignPreviewStudio(campaignId, mode || 'voice')}
+                      onSelectVoice={(campaignId) => {
+                        setClientVoiceCampaignId(campaignId);
+                        setShowClientVoiceSelect(true);
+                      }}
+                      onViewQueue={(campaignId) => {
+                        setQueueCampaignId(campaignId);
+                        setShowQueueDialog(true);
+                      }}
+                    />
+                  );
+                })}
               </div>
             )}
 

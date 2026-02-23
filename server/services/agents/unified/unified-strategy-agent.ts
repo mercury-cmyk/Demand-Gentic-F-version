@@ -15,8 +15,22 @@ import type {
   CapabilityPromptMapping,
   UnifiedAgentConfiguration,
 } from './types';
+import { RESEARCH_ANALYSIS_FOUNDATIONAL_PROMPT } from '../prompts/research-analysis-prompt';
 
 const STRATEGY_PROMPT_SECTIONS: PromptSection[] = [
+  // Section 0: Core Research & Analysis Foundational Knowledge — imported from prompts/research-analysis-prompt.ts
+  // Contains scoring standards, lead quality analysis, email quality control,
+  // call quality control, engagement analysis, account health scoring,
+  // and next-best-action recommendation frameworks.
+  UnifiedBaseAgent['createPromptSection'](
+    'strategy_research_foundational',
+    'Core Research & Analysis Foundational Knowledge',
+    0,
+    RESEARCH_ANALYSIS_FOUNDATIONAL_PROMPT,
+    'knowledge',
+    true
+  ),
+
   UnifiedBaseAgent['createPromptSection'](
     'strategy_identity', 'Identity & Mission', 1,
     `You are the Strategy Agent — the central intelligence system for demand generation orchestration.
@@ -83,6 +97,14 @@ You are NOT a report generator — you are a Decision Engine.`,
 ];
 
 const STRATEGY_CAPABILITIES: AgentCapability[] = [
+  {
+    id: 'strategy_cap_research_foundational', name: 'Core Research & Analysis Foundational Knowledge',
+    description: 'Scoring standards, lead/email/call quality analysis, engagement analysis, account health scoring, and next-best-action frameworks — the bedrock analytical layer for all strategy operations',
+    promptSectionIds: ['strategy_research_foundational'], learningInputSources: [
+      { id: 'lis_strategy_research', name: 'Research Quality Audit', type: 'research_quality_audit', description: 'Monitors research and analysis standard adherence', isActive: true },
+    ],
+    performanceScore: 90, trend: 'stable', isActive: true, optimizationWeight: 10,
+  },
   {
     id: 'strategy_cap_pipeline', name: 'Pipeline Analysis', description: 'Full pipeline health monitoring and velocity analysis',
     promptSectionIds: ['strategy_pipeline'], learningInputSources: [
@@ -170,7 +192,7 @@ export class UnifiedStrategyAgent extends UnifiedBaseAgent {
   };
 
   async execute(input: AgentExecutionInput): Promise<AgentExecutionOutput> {
-    const prompt = this.buildCompletePrompt(input);
+    const prompt = await this.buildCompletePrompt(input);
     return {
       success: true, content: prompt,
       metadata: { agentId: this.id, channel: this.channel, promptVersion: this.promptVersion, executionTimestamp: new Date(), tokenUsage: { promptTokens: prompt.length, completionTokens: 0, totalTokens: prompt.length }, layersApplied: ['foundational', 'organization', 'campaign'] },
