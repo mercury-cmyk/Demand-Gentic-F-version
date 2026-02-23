@@ -1,5 +1,49 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+const FRIENDLY_RATE_LIMIT_MESSAGE =
+  "429: The AI service is temporarily rate-limited. Please wait a moment and try again.";
+
+function extractErrorMessage(rawText: string): string {
+  const text = (rawText || "").trim();
+  if (!text) return "";
+
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed === "string") {
+        return parsed;
+      }
+      if (parsed && typeof parsed === "object") {
+        const candidate =
+          parsed.message ??
+          parsed.error ??
+          parsed.detail ??
+          parsed.details ??
+          parsed.reason;
+        if (typeof candidate === "string" && candidate.trim()) {
+          return candidate.trim();
+        }
+      }
+    } catch {
+      // fall through to raw text
+    }
+  }
+
+  return text;
+}
+
+function isRateLimitError(status: number, message: string): boolean {
+  const lower = (message || "").toLowerCase();
+  return (
+    status === 429 ||
+    lower.includes("rate exceeded") ||
+    lower.includes("rate limit") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("too many requests")
+  );
+}
+
 async function throwIfResNotOk(res: Response, url?: string) {
   if (!res.ok) {
     // Handle 401 Unauthorized - do NOT logout for /api/recordings/:id/stream
@@ -24,8 +68,14 @@ async function throwIfResNotOk(res: Response, url?: string) {
       // Always throw for 401 so caller can handle local error
       throw new Error('Session expired. Please login again.');
     }
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    const rawText = (await res.text()) || res.statusText;
+    const message = extractErrorMessage(rawText) || res.statusText;
+
+    if (isRateLimitError(res.status, message)) {
+      throw new Error(FRIENDLY_RATE_LIMIT_MESSAGE);
+    }
+
+    throw new Error(`${res.status}: ${message}`);
   }
 }
 

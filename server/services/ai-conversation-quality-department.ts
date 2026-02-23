@@ -9,7 +9,7 @@
  * Scoring logic is completely independent from the Lead Quality Department.
  */
 
-import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
+import { deepAnalyze } from "./ai-analysis-router";
 import { db } from "../db";
 import { campaigns, conversationQualityAssessments, callSessions, dialerCallAttempts } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -209,7 +209,7 @@ export async function analyzeConversationQualityDepartment(
   const prompt = buildConversationQualityPrompt(transcriptText, contextLines);
 
   try {
-    const raw: any = await deepAnalyzeJSON(prompt, { temperature: 0.2, maxTokens: 8192 });
+    const raw: any = await deepAnalyze(prompt, { temperature: 0.2, maxTokens: 8192, label: "conv-quality-dept" });
 
     const communicationBehavior = raw.communicationBehavior || {};
     const scriptCompliance = raw.scriptCompliance || {};

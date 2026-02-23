@@ -387,14 +387,14 @@ CRITICAL RULES:
 4. Focus on: objective achievement, talking point coverage, qualification, and disposition accuracy.`;
 
     // Use Gemini 3 Deep Think for evaluation
-    const { deepAnalyzeJSON } = await import("./vertex-ai/vertex-client");
+    const { deepAnalyze } = await import("./ai-analysis-router");
     const { normalizeDisposition } = await import("./disposition-normalizer");
 
     let raw: any;
     try {
-      raw = await deepAnalyzeJSON(prompt, { temperature: 0.2, maxTokens: 4096 });
-    } catch (vertexError: any) {
-      console.warn(`${LOG_PREFIX} Vertex AI evaluation failed: ${vertexError.message}`);
+      raw = await deepAnalyze(prompt, { temperature: 0.2, maxTokens: 4096, label: "post-call" });
+    } catch (routerError: any) {
+      console.warn(`${LOG_PREFIX} AI evaluation failed (all providers): ${routerError.message}`);
       // Fallback or return partial data? returning null for now to indicate failure to process this step
       return null;
     }
