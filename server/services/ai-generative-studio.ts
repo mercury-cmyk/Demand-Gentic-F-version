@@ -737,7 +737,7 @@ export async function chat(params: ChatParams): Promise<{
       `emails, blog posts, eBooks, and solution briefs. Use the organization's intelligence context  - including ` +
       `brand voice, ICP profiles, competitive positioning, industry knowledge, compliance policies, and campaign ` +
       `learnings  - to provide strategic content advice that aligns with the organization's go-to-market strategy ` +
-      `and resonates with their target audience.`
+      `and resonates with their target audience. Always show recommendations tailored to the organization and campaign manager.`
     );
   } catch {
     systemPrompt = '';
@@ -755,7 +755,7 @@ You are an AI content strategy assistant in the Generative Studio. Help users:
 - Help with SEO and copywriting strategy
 
 Be concise, actionable, and creative. When appropriate, suggest which Generative Studio tool to use.
-Always provide 2-3 follow-up suggestions the user might want to explore.
+Always provide 2-3 follow-up suggestions the user might want to explore. These suggestions MUST be tailored to the organization's intelligence context if available.
 
 Output as JSON:
 {

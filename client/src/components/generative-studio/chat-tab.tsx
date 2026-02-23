@@ -252,7 +252,20 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2 justify-center mt-2">
-                    {[
+                    {orgIntelligence?.identity?.legalName?.value ? [
+                      `Plan a blog series for ${orgIntelligence.identity.legalName.value}`,
+                      `What makes a high-converting landing page for ${orgIntelligence.icp?.personas?.value || 'our target audience'}?`,
+                      `Email subject lines for our ${orgIntelligence.offerings?.coreProducts?.value || 'product'} launch`,
+                    ].map((suggestion) => (
+                      <Badge
+                        key={suggestion}
+                        variant="outline"
+                        className="cursor-pointer hover:bg-accent py-1.5 px-3 text-xs font-normal"
+                        onClick={() => setInput(suggestion)}
+                      >
+                        {suggestion}
+                      </Badge>
+                    )) : [
                       "Plan a blog series about AI in healthcare",
                       "What makes a high-converting landing page?",
                       "Email subject lines for a product launch",

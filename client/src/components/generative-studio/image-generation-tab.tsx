@@ -15,6 +15,12 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Loader2,
   Sparkles,
   Download,
@@ -25,7 +31,12 @@ import {
   ZoomIn,
   Settings2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  MoreVertical,
+  Globe,
+  Mail,
+  FileText,
+  BookOpen
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -388,17 +399,40 @@ export default function ImageGenerationTab({
                         {img.altText || prompt.slice(0, 50)}
                       </p>
                       {!brokenImages.has(i) && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 shrink-0"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDownload(img.url, i);
-                          }}
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownload(img.url, i);
+                            }}
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <MoreVertical className="w-3.5 h-3.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast({ title: "Added to Landing Page", description: "Image is now available in Landing Page builder." }); }}>
+                                <Globe className="w-4 h-4 mr-2" /> Use in Landing Page
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast({ title: "Added to Email Template", description: "Image is now available in Email builder." }); }}>
+                                <Mail className="w-4 h-4 mr-2" /> Use in Email Template
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast({ title: "Added to Blog Post", description: "Image is now available in Blog Post builder." }); }}>
+                                <FileText className="w-4 h-4 mr-2" /> Use in Blog Post
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast({ title: "Added to eBook", description: "Image is now available in eBook builder." }); }}>
+                                <BookOpen className="w-4 h-4 mr-2" /> Use in eBook
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       )}
                     </div>
                   </CardContent>

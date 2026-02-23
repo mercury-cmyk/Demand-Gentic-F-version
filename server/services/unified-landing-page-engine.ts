@@ -483,10 +483,10 @@ These are BINDING constraints, not suggestions. Your output must be verifiably a
 ## CONVERSION ARCHITECTURE
 
 1. **Hero Section** (Above the Fold)
-   - Headline: Address the ICP's #1 pain point directly. Max 10 words. Bold, clear
-   - Subheadline: Deliver the value proposition in one sentence. What they get + why it matters
-   - Badge: Create urgency or exclusivity ("Free Download", "Limited Report", "2025 Benchmark")
-   - Primary CTA button immediately visible
+   - MUST use a 2-column layout on desktop (e.g., CSS Grid or Flexbox).
+   - **Left Column (or Right)**: Headline (addressing ICP's #1 pain point, max 10 words), Subheadline (value proposition), Badge (urgency/exclusivity), and 3-4 bullet points summarizing the key benefits or overview of the offer.
+   - **Right Column (or Left)**: The Lead Capture Form MUST be placed here, directly in the hero section above the fold.
+   - Primary CTA button immediately visible within the form.
 
 2. **Social Proof Strip**
    - Stats, customer counts, or trust indicators immediately below hero
@@ -781,10 +781,10 @@ ${brandContext}
 ${campaignBlock}
 
 Generate a complete, production-ready landing page following the conversion architecture in your instructions. The page MUST include:
-- A hero section with a compelling headline addressing the ICP's primary pain point and a subheadline delivering the value proposition
+- A hero section with a 2-column layout on desktop. One side MUST contain a compelling headline addressing the ICP's primary pain point, a subheadline delivering the value proposition, and a few bullet points summarizing the offer. The other side MUST contain the lead capture form aligned at the top.
 - A social proof strip with 2-4 credibility indicators
 - A benefits section with 3-5 outcome-driven benefits using the organization's differentiators
-- A lead capture form with ONLY these fields: Name (text) and Business Email (email)
+- A lead capture form located in the hero section with ONLY these fields: Name (text) and Business Email (email)
 - On submit, the form MUST redirect to the provided thank-you page URL passing name, business_email, and asset_url as query params
 - A CTA button with action-oriented text that communicates value (e.g., "Download Your Free Copy")
 - Micro-copy beneath the CTA to reduce friction
