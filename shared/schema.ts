@@ -14072,3 +14072,38 @@ export type ContentPromotionPage = typeof contentPromotionPages.$inferSelect;
 export type InsertContentPromotionPage = z.infer<typeof insertContentPromotionPageSchema>;
 export type ContentPromotionPageView = typeof contentPromotionPageViews.$inferSelect;
 export type InsertContentPromotionPageView = z.infer<typeof insertContentPromotionPageViewSchema>;
+
+// ============================================================
+// ADMIN TO-DO BOARD
+// ============================================================
+
+export const adminTodoTaskStatusEnum = pgEnum("admin_todo_task_status", [
+  "todo",
+  "in_progress",
+  "done",
+]);
+
+export const adminTodoTasks = pgTable(
+  "admin_todo_tasks",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    title: text("title").notNull(),
+    status: adminTodoTaskStatusEnum("status").notNull().default("todo"),
+    assigneeName: varchar("assignee_name", { length: 120 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("admin_todo_tasks_status_idx").on(table.status),
+    createdAtIdx: index("admin_todo_tasks_created_at_idx").on(table.createdAt),
+  }),
+);
+
+export const insertAdminTodoTaskSchema = createInsertSchema(adminTodoTasks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type AdminTodoTask = typeof adminTodoTasks.$inferSelect;
+export type InsertAdminTodoTask = z.infer<typeof insertAdminTodoTaskSchema>;

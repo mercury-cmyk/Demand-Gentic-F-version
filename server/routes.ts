@@ -99,6 +99,7 @@ import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
 import adminProjectRequestsRouter from './routes/admin-project-requests';
+import adminTasksRouter from './routes/admin-tasks';
 import telephonyProvidersRouter from './routes/telephony-providers';
 import telnyxWebhookRouter from './routes/telnyx-webhook-management';
 import transcriptionManagementRouter from './routes/transcription-management';
@@ -15170,6 +15171,9 @@ Provide JSON response with:
 
   // ==================== ADMIN PROJECT REQUESTS ====================
   app.use('/api/admin/project-requests', requireAuth, adminProjectRequestsRouter);
+
+  // ==================== ADMIN TO-DO TASK BOARD ====================
+  app.use('/api/admin/tasks', adminTasksRouter);
 
   // ==================== CLOUD LOGGING ====================
   app.use('/api/cloud-logs', cloudLogsRouter);

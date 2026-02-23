@@ -24,6 +24,7 @@ interface WorkOrder {
   title: string;
   status: string;
   projectId?: string;
+  createdAt?: string;
 }
 
 interface StepClientProjectProps {
@@ -31,6 +32,16 @@ interface StepClientProjectProps {
   onNext: (data: any) => void;
   initialClientId?: string;
   initialProjectId?: string;
+}
+
+export function canProceedFromClientProjectStep(
+  selectedClientId: string,
+  selectedProjectId: string,
+  hasProjects: boolean,
+): boolean {
+  if (!selectedClientId) return false;
+  if (hasProjects && !selectedProjectId) return false;
+  return true;
 }
 
 export function StepClientProject({ data, onNext, initialClientId, initialProjectId }: StepClientProjectProps) {
@@ -59,6 +70,21 @@ export function StepClientProject({ data, onNext, initialClientId, initialProjec
 
   const projects = clientDetail?.projects || [];
   const workOrders = clientDetail?.workOrders || [];
+  const hasProjects = projects.length > 0;
+  const hasWorkOrders = workOrders.length > 0;
+
+  // Sync late-loaded edit data into local state when arriving from campaign edit.
+  useEffect(() => {
+    if (data?.clientAccountId && !selectedClientId) {
+      setSelectedClientId(data.clientAccountId);
+    }
+    if (data?.projectId && !selectedProjectId) {
+      setSelectedProjectId(data.projectId);
+    }
+    if (data?.workOrderId && !selectedWorkOrderId) {
+      setSelectedWorkOrderId(data.workOrderId);
+    }
+  }, [data?.clientAccountId, data?.projectId, data?.workOrderId, selectedClientId, selectedProjectId, selectedWorkOrderId]);
 
   // When a work order is selected, try to auto-select its project if available
   useEffect(() => {
@@ -93,11 +119,11 @@ export function StepClientProject({ data, onNext, initialClientId, initialProjec
   }, [selectedClientId, selectedProjectId, projects, selectedWorkOrderId]);
 
   const handleNext = () => {
-    if (!selectedClientId || !selectedProjectId) return;
+    if (!canProceedFromClientProjectStep(selectedClientId, selectedProjectId, hasProjects)) return;
     onNext({
       ...data,
       clientAccountId: selectedClientId,
-      projectId: selectedProjectId,
+      projectId: selectedProjectId || null,
       workOrderId: selectedWorkOrderId || null, // Optional
     });
   };
@@ -162,8 +188,8 @@ export function StepClientProject({ data, onNext, initialClientId, initialProjec
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Loading orders...
               </div>
-            ) : workOrders.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No work orders found.</p>
+            ) : !hasWorkOrders ? (
+              <p className="text-sm text-muted-foreground">No approved work orders found for this client.</p>
             ) : (
               <div className="space-y-2">
                 <Label>Work Order</Label>
@@ -200,8 +226,8 @@ export function StepClientProject({ data, onNext, initialClientId, initialProjec
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Loading projects...
               </div>
-            ) : projects.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No projects found for this client.</p>
+            ) : !hasProjects ? (
+              <p className="text-sm text-muted-foreground">No client projects found for this client.</p>
             ) : (
               <div className="space-y-2">
                 <Label>Project</Label>
@@ -224,11 +250,13 @@ export function StepClientProject({ data, onNext, initialClientId, initialProjec
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={handleNext} disabled={!selectedClientId || !selectedProjectId}>
+        <Button
+          onClick={handleNext}
+          disabled={!canProceedFromClientProjectStep(selectedClientId, selectedProjectId, hasProjects)}
+        >
           Next Step
         </Button>
       </div>
     </div>
   );
 }
-
