@@ -15014,42 +15014,21 @@ Provide JSON response with:
   // ==================== CALL CAMPAIGN REPORTING ROUTES ====================
   app.use('/api/reports/calls', reportingRoutes);
 
-  // ==================== CALL RECORDINGS (TOKEN-AUTHENTICATED STREAM ROUTE) ====================
-  // Audio stream uses short-lived signed token in query string (audio elements can't send auth headers)
-  // Token is verified server-side before streaming; tokens expire in 15 minutes
-  app.get('/api/recordings/:id/stream', async (req, res) => {
-    const queryToken = req.query.token as string | undefined;
-    const authHeader = req.headers.authorization;
-    const headerToken = authHeader?.startsWith('Bearer ')
-      ? authHeader.substring(7)
-      : undefined;
-
-    const token = queryToken || headerToken;
-
-    if (!token) {
-      return res.status(401).send('Authentication required');
-    }
-    // Verify the short-lived stream token
-    const payload = verifyToken(token);
-    if (!payload) {
-      return res.status(401).send('Invalid or expired stream token');
-    }
-    const recordingsModule = await import('./routes/recordings');
-    return recordingsModule.streamRecording(req, res);
+  // ==================== CALL RECORDINGS (TOKEN-AUTHENTICATED STREAM ROUTE - DEPRECATED) ====================
+  // DEPRECATED: All recording playback now uses GCS pre-signed URLs via /api/recordings/:id/gcs-url
+  // These stream endpoints are kept as 410 Gone stubs for backward compatibility
+  app.get('/api/recordings/:id/stream', (_req, res) => {
+    res.status(410).json({
+      message: 'Recording streaming has been deprecated. Use GET /api/recordings/:id/gcs-url instead.',
+      migration: 'Fetch a GCS pre-signed URL and open it directly in a new tab.',
+    });
   });
 
-  // Generate a short-lived stream token for audio playback
-  app.get('/api/recordings/:id/stream-token', requireAuth, async (req, res) => {
-    try {
-      const streamToken = generateToken(
-        { id: req.user!.userId, username: req.user!.username, email: req.user!.email, role: req.user!.role } as any,
-        req.user!.roles || [req.user!.role],
-        '15m'
-      );
-      res.json({ token: streamToken, expiresIn: 900 });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to generate stream token" });
-    }
+  // DEPRECATED: Stream tokens are no longer needed
+  app.get('/api/recordings/:id/stream-token', (_req, res) => {
+    res.status(410).json({
+      message: 'Stream tokens have been deprecated. Use GET /api/recordings/:id/gcs-url instead.',
+    });
   });
 
   // ==================== CALL RECORDINGS (AUTHENTICATED) ====================

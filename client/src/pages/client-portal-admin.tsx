@@ -1086,6 +1086,10 @@ export default function ClientPortalAdmin() {
   const [passwordTargetUser, setPasswordTargetUser] = useState<any | null>(null);
   const [newClientUserPassword, setNewClientUserPassword] = useState('');
   const [confirmClientUserPassword, setConfirmClientUserPassword] = useState('');
+  const [showAssignProjectDialog, setShowAssignProjectDialog] = useState(false);
+  const [showUnassignProjectDialog, setShowUnassignProjectDialog] = useState(false);
+  const [projectToUnassign, setProjectToUnassign] = useState<any | null>(null);
+  const [selectedAssignProjectId, setSelectedAssignProjectId] = useState<string>('');
 
   // Queries
   const { data: clients, isLoading: clientsLoading } = useQuery<ClientAccount[]>({
@@ -1115,6 +1119,20 @@ export default function ClientPortalAdmin() {
 
   const { data: invoices, isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery<Invoice[]>({
     queryKey: ['/api/client-portal/admin/invoices'],
+  });
+
+  // Available projects for assignment (excludes current client's projects)
+  const { data: availableProjectsData } = useQuery<{ success: boolean; projects: any[] }>({
+    queryKey: ['/api/client-portal/admin/available-projects', selectedClient?.id],
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/client-portal/admin/available-projects${selectedClient ? `?excludeClientId=${selectedClient.id}` : ''}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` } }
+      );
+      if (!response.ok) throw new Error('Failed to fetch projects');
+      return response.json();
+    },
+    enabled: showAssignProjectDialog && !!selectedClient,
   });
 
   // Mutations
@@ -1344,6 +1362,52 @@ export default function ClientPortalAdmin() {
     },
     onError: () => {
       toast({ title: 'Failed to regenerate link', variant: 'destructive' });
+    },
+  });
+
+  const assignProjectMutation = useMutation({
+    mutationFn: async ({ clientId, projectId }: { clientId: string; projectId: string }) => {
+      const res = await apiRequest('POST', `/api/client-portal/admin/clients/${clientId}/projects/${projectId}/assign`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to assign project');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (selectedClient) {
+        fetchClientDetail(selectedClient.id);
+      }
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/available-projects'] });
+      setShowAssignProjectDialog(false);
+      setSelectedAssignProjectId('');
+      toast({ title: 'Project assigned', description: data.message || 'Project has been assigned to this client.' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Assignment failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const unassignProjectMutation = useMutation({
+    mutationFn: async ({ clientId, projectId }: { clientId: string; projectId: string }) => {
+      const res = await apiRequest('DELETE', `/api/client-portal/admin/clients/${clientId}/projects/${projectId}/unassign`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to remove project');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (selectedClient) {
+        fetchClientDetail(selectedClient.id);
+      }
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/available-projects'] });
+      setShowUnassignProjectDialog(false);
+      setProjectToUnassign(null);
+      toast({ title: 'Project removed', description: data.message || 'Project has been removed from this client.' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Removal failed', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1684,6 +1748,7 @@ export default function ClientPortalAdmin() {
                       <TabsTrigger value="pricing" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Pricing</TabsTrigger>
                       <TabsTrigger value="settings" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Settings</TabsTrigger>
                       <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Users & Access</TabsTrigger>
+                      <TabsTrigger value="projects" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Projects</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="profile">
@@ -2010,6 +2075,73 @@ export default function ClientPortalAdmin() {
                       )}
                     </div>
                   </div>
+                  </TabsContent>
+
+                  {/* ==================== PROJECTS TAB ==================== */}
+                  <TabsContent value="projects">
+                    <div className="pt-4 space-y-6">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-semibold flex items-center gap-2">
+                            <FileText className="h-4 w-4" />
+                            Assigned Projects
+                          </h3>
+                          <Button size="sm" variant="outline" onClick={() => {
+                            setSelectedAssignProjectId('');
+                            setShowAssignProjectDialog(true);
+                          }}>
+                            <Plus className="h-4 w-4 mr-1" />
+                            Assign Project
+                          </Button>
+                        </div>
+
+                        {clientDetail.projects && clientDetail.projects.length > 0 ? (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Project Name</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Created</TableHead>
+                                <TableHead className="text-right">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {clientDetail.projects.map((project: any) => (
+                                <TableRow key={project.id}>
+                                  <TableCell className="font-medium">{project.name}</TableCell>
+                                  <TableCell>
+                                    <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
+                                      {project.status}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {new Date(project.createdAt).toLocaleDateString()}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      onClick={() => {
+                                        setProjectToUnassign(project);
+                                        setShowUnassignProjectDialog(true);
+                                      }}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                      Remove
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        ) : (
+                          <p className="text-muted-foreground text-sm py-4 text-center border rounded-lg">
+                            No projects assigned to this client. Use "Assign Project" to connect a project.
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </TabsContent>
                   </Tabs>
                 ) : (
@@ -2880,6 +3012,118 @@ export default function ClientPortalAdmin() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Assign Project Dialog */}
+      <Dialog open={showAssignProjectDialog} onOpenChange={(open) => {
+        setShowAssignProjectDialog(open);
+        if (!open) setSelectedAssignProjectId('');
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Assign Project to {selectedClient?.name}</DialogTitle>
+            <DialogDescription>
+              Select an existing project to reassign to this client. The project will be moved from its current client.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Select Project</Label>
+              <Select value={selectedAssignProjectId} onValueChange={setSelectedAssignProjectId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a project to assign..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  {availableProjectsData?.projects && availableProjectsData.projects.length > 0 ? (
+                    availableProjectsData.projects.map((project: any) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-violet-600" />
+                          <span className="truncate max-w-[250px]">{project.name}</span>
+                          <Badge variant="secondary" className="ml-auto text-xs py-0 h-5">
+                            {project.status}
+                          </Badge>
+                          {project.clientName && (
+                            <span className="text-xs text-muted-foreground ml-1">
+                              ({project.clientName})
+                            </span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-4 text-sm text-muted-foreground text-center">
+                      No projects available for assignment
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
+              {selectedAssignProjectId && availableProjectsData?.projects && (
+                <p className="text-xs text-amber-600 mt-1">
+                  This will reassign the project from its current client to {selectedClient?.name}.
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAssignProjectDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedClient && selectedAssignProjectId) {
+                  assignProjectMutation.mutate({
+                    clientId: selectedClient.id,
+                    projectId: selectedAssignProjectId,
+                  });
+                }
+              }}
+              disabled={!selectedAssignProjectId || assignProjectMutation.isPending}
+            >
+              {assignProjectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Assign Project
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unassign/Remove Project Confirmation Dialog */}
+      <AlertDialog open={showUnassignProjectDialog} onOpenChange={(open) => {
+        setShowUnassignProjectDialog(open);
+        if (!open) setProjectToUnassign(null);
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Project from Client</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove the project "{projectToUnassign?.name}" from {selectedClient?.name}?
+              This will permanently delete the project and disconnect all linked campaigns. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowUnassignProjectDialog(false);
+              setProjectToUnassign(null);
+            }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={unassignProjectMutation.isPending}
+              onClick={() => {
+                if (selectedClient && projectToUnassign) {
+                  unassignProjectMutation.mutate({
+                    clientId: selectedClient.id,
+                    projectId: projectToUnassign.id,
+                  });
+                }
+              }}
+            >
+              {unassignProjectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Remove Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

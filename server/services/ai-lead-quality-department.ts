@@ -10,7 +10,7 @@
  * the Conversation Quality Department.
  */
 
-import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
+import { deepAnalyze } from "./ai-analysis-router";
 import { db } from "../db";
 import { campaigns, leadQualityAssessments, contacts, accounts } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -294,7 +294,7 @@ export async function analyzeLeadQualityDepartment(
   const prompt = buildLeadQualityPrompt(transcriptText, contextLines);
 
   try {
-    const raw: any = await deepAnalyzeJSON(prompt, { temperature: 0.2, maxTokens: 8192 });
+    const raw: any = await deepAnalyze(prompt, { temperature: 0.2, maxTokens: 8192, label: "lead-quality-dept" });
 
     const interest = raw.interestIdentification || {};
     const qualification = raw.qualificationAnalysis || {};

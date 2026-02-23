@@ -1976,7 +1976,24 @@ export default function DispositionReanalysisPage() {
               {(activeCallDetail.recordingUrl || activeCallDetail.callSessionId) && (
                 <div>
                   <Label className="text-xs text-muted-foreground">Recording</Label>
-                  <audio controls className="w-full mt-1" src={`/api/recordings/${activeCallDetail.callSessionId}/stream`} />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-1 gap-2"
+                    onClick={async () => {
+                      try {
+                        const res = await apiRequest('GET', `/api/recordings/${activeCallDetail.callSessionId}/gcs-url`);
+                        const data = await res.json();
+                        if (data.url) {
+                          window.open(data.url, '_blank', 'noopener,noreferrer');
+                        }
+                      } catch (err) {
+                        console.error('Failed to get recording URL:', err);
+                      }
+                    }}
+                  >
+                    <ExternalLink className="h-4 w-4" /> Play in New Tab
+                  </Button>
                 </div>
               )}
 
@@ -2196,7 +2213,24 @@ export default function DispositionReanalysisPage() {
                 <TabsContent value="transcript">
                   {(selectedContactDetail.recordingUrl || selectedContactDetail.callSessionId) && (
                     <div className="mb-3">
-                      <audio controls className="w-full" src={`/api/recordings/${selectedContactDetail.callSessionId}/stream`} />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={async () => {
+                          try {
+                            const res = await apiRequest('GET', `/api/recordings/${selectedContactDetail.callSessionId}/gcs-url`);
+                            const data = await res.json();
+                            if (data.url) {
+                              window.open(data.url, '_blank', 'noopener,noreferrer');
+                            }
+                          } catch (err) {
+                            console.error('Failed to get recording URL:', err);
+                          }
+                        }}
+                      >
+                        <ExternalLink className="h-4 w-4" /> Play in New Tab
+                      </Button>
                     </div>
                   )}
                   <ScrollArea className="h-[300px] border rounded-md p-3 bg-muted/30">

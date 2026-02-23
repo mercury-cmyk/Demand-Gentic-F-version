@@ -1,4 +1,4 @@
-import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
+import { deepAnalyze } from "./ai-analysis-router";
 import { db } from "../db";
 import { campaigns } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -864,11 +864,11 @@ Return JSON with this exact shape and no extra keys:
     // Use Gemini 3 Deep Think for quality analysis
     let raw: any;
     try {
-      raw = await deepAnalyzeJSON(prompt, { temperature: 0.3, maxTokens: 8192 });
-    } catch (vertexError: any) {
-      console.warn(`[ConversationQuality] Vertex AI analysis failed: ${vertexError.message}`);
+      raw = await deepAnalyze(prompt, { temperature: 0.3, maxTokens: 8192, label: "conv-quality" });
+    } catch (routerError: any) {
+      console.warn(`[ConversationQuality] AI analysis failed (all providers): ${routerError.message}`);
       // Fallback analysis will be returned
-      return buildFallbackAnalysis(input, "analysis_failed", `Vertex AI failed: ${vertexError.message}`);
+      return buildFallbackAnalysis(input, "analysis_failed", `AI analysis failed: ${routerError.message}`);
     }
     const qualityDimensions = raw.qualityDimensions || {};
     const campaignAlignment = raw.campaignAlignment || {};

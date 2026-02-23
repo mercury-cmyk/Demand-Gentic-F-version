@@ -252,7 +252,7 @@ router.get('/', async (req: Request, res: Response) => {
         recordingFormat: rec.recordingFormat || (rec.recordingS3Key?.endsWith('.wav') ? 'wav' : 'mp3'),
         fileSizeBytes: rec.recordingFileSizeBytes,
         recordingUrl,
-        streamUrl: `/api/recordings/${rec.id}/stream`,
+        gcsUrlEndpoint: `/api/recordings/${rec.id}/gcs-url`,
         hasRecording: !!(recordingUrl || rec.recordingS3Key),
         agentType: rec.agentType as 'ai' | 'human',
         disposition: rec.aiDisposition || rec.disposition,
@@ -399,7 +399,7 @@ router.get('/qa', async (req: Request, res: Response) => {
         callTimestamp: rec.createdAt?.toISOString(),
         callDuration: rec.callDuration,
         recordingUrl,
-        streamUrl: `/api/recordings/${rec.id}/stream`,
+        gcsUrlEndpoint: `/api/recordings/${rec.id}/gcs-url`,
         hasRecording: !!(recordingUrl || rec.recordingS3Key),
         recordingStatus: rec.recordingS3Key ? 'stored' : (recordingUrl ? 'pending' : 'none'),
         hasTranscript: !!rec.transcript,
@@ -625,7 +625,7 @@ router.get('/all', async (req: Request, res: Response) => {
           recordingStatus: rec.recordingStatus || (rec.recordingS3Key ? 'stored' : 'pending'),
           recordingFormat: rec.recordingFormat,
           recordingUrl,
-          streamUrl: `/api/recordings/${rec.id}/stream`,
+          gcsUrlEndpoint: `/api/recordings/${rec.id}/gcs-url`,
           recordingS3Key: rec.recordingS3Key, // Include to determine if stored in GCS
           agentType: rec.agentType,
           disposition: rec.aiDisposition,
@@ -690,7 +690,7 @@ router.get('/all', async (req: Request, res: Response) => {
           allRecordings.push({
             ...rec,
             recordingUrl,
-            streamUrl: `/api/recordings/${rec.id}/stream`,
+            gcsUrlEndpoint: `/api/recordings/${rec.id}/gcs-url`,
             hasRecording: !!(recordingUrl || (rec as any).recordingS3Key),
             contactName: null,
             contactPhone: rec.toNumber,
@@ -1546,11 +1546,8 @@ router.get('/:id/gcs-url', async (req: Request, res: Response) => {
  * POST /api/recordings/:id/recording-link
  * Validate & warm a fresh recording URL on the server side.
  *
- * IMPORTANT: Does NOT return the raw download URL to the browser.
- * The browser should ALWAYS play audio via GET /api/recordings/:id/stream
- * which proxies the audio bytes and avoids CORS / URL-expiry issues.
- *
- * Returns { success, source, expiresInSeconds, mimeType, streamUrl }
+ * Returns { success, source, expiresInSeconds, mimeType, gcsUrlEndpoint }
+ * Frontend should use /api/recordings/:id/gcs-url to get a presigned GCS URL.
  */
 router.post('/:id/recording-link', async (req: Request, res: Response) => {
   try {
@@ -1571,8 +1568,7 @@ router.post('/:id/recording-link', async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      // Never expose the raw Telnyx URL to the browser — always use the stream proxy
-      streamUrl: `/api/recordings/${id}/stream`,
+      gcsUrlEndpoint: `/api/recordings/${id}/gcs-url`,
       source: result.source,
       expiresInSeconds: result.expiresInSeconds,
       mimeType: result.mimeType,

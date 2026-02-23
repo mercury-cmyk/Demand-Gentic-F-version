@@ -8,6 +8,7 @@ import {
 import { poolMetrics } from "../db";
 import { getAiConcurrencyStats } from "../lib/ai-concurrency";
 import { getVertexThrottleStats } from "../services/vertex-ai/vertex-client";
+import { getRouterStats } from "../services/ai-analysis-router";
 
 const router = Router();
 
@@ -20,6 +21,7 @@ router.get("/health", async (req, res) => {
     const dbStats = poolMetrics.getStats();
     const aiStats = getAiConcurrencyStats();
     const vertexStats = getVertexThrottleStats();
+    const routerStats = getRouterStats();
 
     // Basic health check - service is running
     const health = {
@@ -35,6 +37,7 @@ router.get("/health", async (req, res) => {
       dbPool: dbStats,
       aiConcurrency: aiStats,
       vertexThrottle: vertexStats,
+      aiRouter: routerStats,
       memory: {
         rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
         heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),

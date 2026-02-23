@@ -20,8 +20,22 @@ import {
 import { eq, and, desc, asc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { generateCoachingRecommendations } from "../services/ai-disposition-intelligence";
+import { overrideSingleDisposition } from "../services/bulk-disposition-reanalyzer";
+import { getDispositionCache } from "../services/disposition-analysis-cache";
+import type { CanonicalDisposition } from "@shared/schema";
 
 const router = Router();
+
+const VALID_DISPOSITIONS: CanonicalDisposition[] = [
+  "qualified_lead",
+  "not_interested",
+  "do_not_call",
+  "voicemail",
+  "no_answer",
+  "invalid_data",
+  "needs_review",
+  "callback_requested",
+];
 
 // ============================================================================
 // HELPERS
@@ -1001,6 +1015,128 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
   } catch (error: any) {
     console.error('[DispositionIntelligence] Coaching generation error:', error);
     res.status(500).json({ error: `Failed to generate coaching: ${error.message}` });
+  }
+});
+
+// ============================================================================
+// POST /override/:callSessionId - Override disposition from Deep Dive
+// ============================================================================
+
+router.post("/override/:callSessionId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { callSessionId } = req.params;
+    const { newDisposition, reason } = req.body;
+
+    if (!callSessionId) {
+      return res.status(400).json({ error: "callSessionId is required" });
+    }
+
+    if (!newDisposition || !VALID_DISPOSITIONS.includes(newDisposition as CanonicalDisposition)) {
+      return res.status(400).json({
+        error: `Invalid disposition. Must be one of: ${VALID_DISPOSITIONS.join(", ")}`,
+      });
+    }
+
+    const userId = (req as any).user?.id || "system";
+
+    const result = await overrideSingleDisposition(
+      callSessionId,
+      newDisposition as CanonicalDisposition,
+      userId,
+      reason || "Override from Disposition Intelligence Deep Dive"
+    );
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    // Invalidate cache for this call
+    try {
+      const cache = getDispositionCache();
+      await cache.invalidateCall(callSessionId);
+    } catch (cacheErr: any) {
+      console.warn("[DispositionIntelligence] Cache invalidation warning:", cacheErr.message);
+    }
+
+    res.json({
+      success: true,
+      callSessionId,
+      newDisposition,
+      action: result.action,
+    });
+  } catch (error: any) {
+    console.error("[DispositionIntelligence] Override error:", error);
+    res.status(500).json({ error: `Override failed: ${error.message}` });
+  }
+});
+
+// ============================================================================
+// POST /bulk-override - Override multiple dispositions from Deep Dive
+// ============================================================================
+
+router.post("/bulk-override", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { overrides } = req.body;
+
+    if (!Array.isArray(overrides) || overrides.length === 0) {
+      return res.status(400).json({
+        error: "overrides array is required. Format: [{ callSessionId, newDisposition, reason? }]",
+      });
+    }
+
+    if (overrides.length > 50) {
+      return res.status(400).json({ error: "Maximum 50 overrides per request" });
+    }
+
+    const userId = (req as any).user?.id || "system";
+    const results: Array<{ callSessionId: string; success: boolean; action?: string; error?: string }> = [];
+
+    for (const override of overrides) {
+      if (!override.callSessionId || !VALID_DISPOSITIONS.includes(override.newDisposition as CanonicalDisposition)) {
+        results.push({
+          callSessionId: override.callSessionId || "unknown",
+          success: false,
+          error: "Invalid callSessionId or disposition",
+        });
+        continue;
+      }
+
+      const result = await overrideSingleDisposition(
+        override.callSessionId,
+        override.newDisposition as CanonicalDisposition,
+        userId,
+        override.reason || "Bulk override from Disposition Intelligence Deep Dive"
+      );
+
+      results.push({
+        callSessionId: override.callSessionId,
+        success: result.success,
+        action: result.action,
+        error: result.error,
+      });
+
+      // Invalidate cache
+      if (result.success) {
+        try {
+          const cache = getDispositionCache();
+          await cache.invalidateCall(override.callSessionId);
+        } catch {}
+      }
+    }
+
+    const succeeded = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+
+    res.json({
+      success: failed === 0,
+      total: results.length,
+      succeeded,
+      failed,
+      results,
+    });
+  } catch (error: any) {
+    console.error("[DispositionIntelligence] Bulk override error:", error);
+    res.status(500).json({ error: `Bulk override failed: ${error.message}` });
   }
 });
 

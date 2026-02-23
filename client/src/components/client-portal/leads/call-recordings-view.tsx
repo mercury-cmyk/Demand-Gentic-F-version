@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Pause, Phone, Play, RefreshCw, Search } from 'lucide-react';
+import { Download, ExternalLink, Loader2, Phone, Play, RefreshCw, Search } from 'lucide-react';
 
 interface CallRecordingItem {
   id: string;
@@ -53,13 +53,11 @@ function formatDuration(totalSeconds: number): string {
 
 export function CallRecordingsView() {
   const { toast } = useToast();
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const page = 1;
   const pageSize = 10;
   const [phoneSearch, setPhoneSearch] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [activeRecordingId, setActiveRecordingId] = useState<string | null>(null);
   const [loadingRecordingId, setLoadingRecordingId] = useState<string | null>(null);
 
   const queryParams = useMemo(() => {
@@ -173,58 +171,27 @@ export function CallRecordingsView() {
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
 
-  const stopPlayback = () => {
-    if (!audioRef.current) return;
-    audioRef.current.pause();
-    audioRef.current.src = '';
-    setActiveRecordingId(null);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-      }
-    };
-  }, []);
-
-  const handlePlay = async (recording: CallRecordingItem) => {
+  const handleOpenInNewTab = async (recording: CallRecordingItem) => {
     const recordingId = recording.id;
-    if (activeRecordingId === recordingId) {
-      stopPlayback();
+
+    if (!recording.recordingUrl) {
+      toast({
+        title: 'No Recording',
+        description: 'Recording URL not available for this call.',
+        variant: 'destructive',
+      });
       return;
     }
 
+    setLoadingRecordingId(recordingId);
     try {
-      setLoadingRecordingId(recordingId);
-      stopPlayback();
-
-      if (!recording.recordingUrl) {
-        throw new Error('Recording URL not available');
-      }
-
-      const audio = new Audio(recording.recordingUrl);
-      audio.onended = () => setActiveRecordingId(null);
-      audio.onerror = () => {
-        setActiveRecordingId(null);
-        toast({
-          title: 'Playback failed',
-          description: 'Could not play this GCS recording URL.',
-          variant: 'destructive',
-        });
-      };
-
-      audioRef.current = audio;
-      await audio.play();
-      setActiveRecordingId(recordingId);
-    } catch (playbackError: any) {
+      window.open(recording.recordingUrl, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
       toast({
-        title: 'Playback failed',
-        description: playbackError?.message || 'Unable to play this recording.',
+        title: 'Failed to open recording',
+        description: err?.message || 'Unable to open this recording.',
         variant: 'destructive',
       });
-      setActiveRecordingId(null);
     } finally {
       setLoadingRecordingId(null);
     }
@@ -324,16 +291,15 @@ export function CallRecordingsView() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handlePlay(item)}
+                          onClick={() => handleOpenInNewTab(item)}
                           disabled={loadingRecordingId === item.id}
                         >
                           {loadingRecordingId === item.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : activeRecordingId === item.id ? (
-                            <Pause className="h-4 w-4" />
                           ) : (
-                            <Play className="h-4 w-4" />
+                            <ExternalLink className="h-4 w-4" />
                           )}
+                          <span className="ml-1">Play</span>
                         </Button>
                       </TableCell>
                     </TableRow>

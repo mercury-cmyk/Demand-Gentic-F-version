@@ -182,19 +182,31 @@ export function getVertexThrottleStats() {
 // Deep Think circuit breaker (prevents repeated 429 storms)
 const DEEP_THINK_COOLDOWN_MS = Math.max(10000, Number(process.env.VERTEX_DEEP_THINK_COOLDOWN_MS || 120000));
 let deepThinkCooldownUntil = 0;
+const VERTEX_RATE_LIMIT_USER_MESSAGE = "Vertex AI is temporarily rate-limited. Please retry in about a minute.";
 
 function isRateLimitError(error: any): boolean {
-  const msg = error?.message || error?.toString?.() || "";
-  const code = error?.code;
+  const msg = (error?.message || error?.toString?.() || "").toLowerCase();
+  const code = Number(error?.code ?? error?.status ?? error?.statusCode);
   return (
     code === 8 ||
     code === 429 ||
-    msg.includes("RESOURCE_EXHAUSTED") ||
-    msg.includes("Rate exceeded") ||
-    msg.includes("Quota exceeded") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("rate exceeded") ||
+    msg.includes("rate limit") ||
+    msg.includes("quota exceeded") ||
     msg.includes("429") ||
-    msg.includes("Too Many Requests")
+    msg.includes("too many requests")
   );
+}
+
+function toVertexRateLimitError(error: any): Error {
+  const wrapped: any = new Error(VERTEX_RATE_LIMIT_USER_MESSAGE);
+  wrapped.code = 429;
+  wrapped.status = 429;
+  wrapped.statusCode = 429;
+  wrapped.retryAfterSeconds = Math.max(5, Math.ceil(Math.max(0, _globalCooldownUntil - Date.now()) / 1000) || 60);
+  wrapped.cause = error;
+  return wrapped;
 }
 
 function getDeepThinkCooldownRemainingMs(): number {
@@ -360,15 +372,19 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
     } catch (error: any) {
       const isRetryable = isRateLimitError(error);
 
-      if (!isRetryable || attempt === maxRetries) {
+      if (!isRetryable) {
         throw error;
+      }
+
+      if (attempt === maxRetries) {
+        throw toVertexRateLimitError(error);
       }
 
       // If global cooldown is already active, don't retry — another call already triggered it
       const cooldownRemaining = _globalCooldownUntil - Date.now();
       if (cooldownRemaining > 2000 && attempt > 0) {
         console.warn(`[VertexAI] Skipping retry — global cooldown active (${Math.ceil(cooldownRemaining / 1000)}s remaining)`);
-        throw error;
+        throw toVertexRateLimitError(error);
       }
 
       const backoffMs = Math.min(3000 * Math.pow(2, attempt) + Math.random() * 1000, 60000);

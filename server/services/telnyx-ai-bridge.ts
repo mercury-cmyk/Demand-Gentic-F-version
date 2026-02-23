@@ -65,7 +65,12 @@ export interface ActiveAiCall {
   amdResult?: string;
   amdConfidence?: number;
   hasActiveWebSocket?: boolean; // Track if voice-dialer has an active WebSocket connection
+  hardStopTimer?: ReturnType<typeof setTimeout> | null;
+  enforcedMaxDurationSeconds?: number;
 }
+
+const GLOBAL_MAX_CALL_DURATION_SECONDS = 300;
+const PRE_ANSWER_MAX_SECONDS = 60;
 
 export interface QueuedCall {
   phoneNumber: string;
@@ -429,6 +434,53 @@ export class TelnyxAiBridge extends EventEmitter {
     }
   }
 
+  private clearHardStopTimer(call: ActiveAiCall | undefined): void {
+    if (!call?.hardStopTimer) return;
+    clearTimeout(call.hardStopTimer);
+    call.hardStopTimer = null;
+  }
+
+  private scheduleHardStop(callId: string, callControlId: string, maxDurationSeconds: number): void {
+    const delayMs = Math.max(1, maxDurationSeconds) * 1000;
+    const timer = setTimeout(async () => {
+      const call = this.activeCalls.get(callId);
+      if (!call || call.hasEnded) return;
+
+      console.error(
+        `[TelnyxAiBridge] HARD STOP: Forcing hangup for ${callId} at ${maxDurationSeconds}s (control_id=${callControlId})`
+      );
+
+      try {
+        await this.hangupCall(callControlId);
+      } catch (err) {
+        console.error(`[TelnyxAiBridge] HARD STOP hangup API failed for ${callId}:`, err);
+      }
+
+      try {
+        if (!call.disposition) {
+          call.disposition = call.isAnswered ? "completed" : "no-answer";
+        }
+        await this.handleCallHangup(callId, call);
+      } catch (err) {
+        console.error(`[TelnyxAiBridge] HARD STOP post-hangup cleanup failed for ${callId}:`, err);
+      } finally {
+        this.releaseSlot(callId, call, 'hard_stop');
+        this.activeCalls.delete(callId);
+      }
+    }, delayMs);
+
+    timer.unref?.();
+
+    const call = this.activeCalls.get(callId);
+    if (call) {
+      this.clearHardStopTimer(call);
+      call.hardStopTimer = timer;
+      call.enforcedMaxDurationSeconds = maxDurationSeconds;
+    } else {
+      clearTimeout(timer);
+    }
+  }
+
   // Process queued calls when a slot opens up
   private async processQueue(): Promise<void> {
     if (this.callQueue.length === 0) return;
@@ -671,7 +723,11 @@ export class TelnyxAiBridge extends EventEmitter {
         // - campaign_objective, success_criteria, target_audience_description
         // - product_service_info, talking_points, call_flow
         // Max call duration in seconds - auto-hangup after this time
-        max_call_duration_seconds: context.maxCallDurationSeconds || undefined,
+        max_call_duration_seconds: (() => {
+          const raw = Number(context.maxCallDurationSeconds);
+          if (!Number.isFinite(raw) || raw <= 0) return undefined;
+          return Math.min(raw, GLOBAL_MAX_CALL_DURATION_SECONDS);
+        })(),
         // Also include canonical dot-notation fields for other consumers
         'contact.full_name': contactFullName || `${context.contactFirstName || ''} ${context.contactLastName || ''}`.trim(),
         'contact.first_name': context.contactFirstName || '',
@@ -809,6 +865,12 @@ export class TelnyxAiBridge extends EventEmitter {
         }
       }
       
+      const requestedMaxDuration = Number(context.maxCallDurationSeconds);
+      const enforcedMaxDurationSeconds =
+        Number.isFinite(requestedMaxDuration) && requestedMaxDuration > 0
+          ? Math.min(requestedMaxDuration, GLOBAL_MAX_CALL_DURATION_SECONDS)
+          : GLOBAL_MAX_CALL_DURATION_SECONDS;
+
       this.activeCalls.set(callId, {
         callControlId,
         callSessionId,
@@ -823,7 +885,11 @@ export class TelnyxAiBridge extends EventEmitter {
         callerNumberDecisionId: (context as any).callerNumberDecisionId || null,
         startTime: new Date(),
         isAnswered: false,
+        hardStopTimer: null,
+        enforcedMaxDurationSeconds,
       });
+
+      this.scheduleHardStop(callId, callControlId, enforcedMaxDurationSeconds);
 
       console.log(`[TelnyxAiBridge] AI call initiated: ${callId} -> ${phoneNumber}`);
       this.emit("call:initiated", { callId, callControlId, phoneNumber });
@@ -973,8 +1039,8 @@ export class TelnyxAiBridge extends EventEmitter {
 
   private async pollCallStatus(callId: string, callControlId: string, agent: AiVoiceAgent): Promise<void> {
     let attempts = 0;
-    const preAnswerMaxAttempts = 60; // Wait up to 60s for call to be answered (ringing can take 30-45s)
-    const postAnswerMaxAttempts = 600; // Track answered calls for up to 10 minutes
+    const preAnswerMaxAttempts = PRE_ANSWER_MAX_SECONDS; // 1 attempt/sec before answer
+    const postAnswerMaxAttempts = GLOBAL_MAX_CALL_DURATION_SECONDS; // attempt-based fallback only
     const basePollInterval = 1000; // 1 second
     const mediaPollInterval = 5000; // Reduce polling when media is connected
     const maxPollInterval = 10000;
@@ -1002,17 +1068,49 @@ export class TelnyxAiBridge extends EventEmitter {
       // Use different timeout based on whether call has been answered
       const activeCall = this.activeCalls.get(callId);
       const isCallAnswered = activeCall?.isAnswered === true;
+      const startedAtMs = activeCall?.startTime?.getTime() || Date.now();
+      const elapsedMs = Date.now() - startedAtMs;
+      const maxDurationSeconds = Math.min(
+        activeCall?.enforcedMaxDurationSeconds || GLOBAL_MAX_CALL_DURATION_SECONDS,
+        GLOBAL_MAX_CALL_DURATION_SECONDS
+      );
       const effectiveMaxAttempts = isCallAnswered ? postAnswerMaxAttempts : preAnswerMaxAttempts;
+
+      if (isCallAnswered && elapsedMs >= maxDurationSeconds * 1000) {
+        console.error(
+          `[TelnyxAiBridge] POLL HARD STOP: Call ${callId} exceeded ${maxDurationSeconds}s (elapsed=${Math.round(elapsedMs / 1000)}s). Forcing hangup.`
+        );
+        if (activeCall) {
+          try {
+            await this.hangupCall(callControlId);
+          } catch (err) {
+            console.error(`[TelnyxAiBridge] POLL HARD STOP hangup failed for ${callId}:`, err);
+          }
+          if (!activeCall.disposition) {
+            activeCall.disposition = "completed";
+          }
+          await this.handleCallHangup(callId, activeCall);
+        }
+        this.releaseSlot(callId, activeCall, 'poll_hard_stop');
+        this.activeCalls.delete(callId);
+        return;
+      }
 
       if (attempts > effectiveMaxAttempts) {
         console.log(`[TelnyxAiBridge] Call ${callId} polling timeout (${isCallAnswered ? 'post-answer' : 'pre-answer'}) - cleaning up`);
-        // Only set no_answer disposition if call was never answered
+        // Enforce Telnyx-side hangup before cleanup to prevent zombie calls.
         const timedOutCall = this.activeCalls.get(callId);
-        if (timedOutCall && !timedOutCall.isAnswered) {
-          timedOutCall.disposition = "no-answer";
+        if (timedOutCall) {
+          try {
+            await this.hangupCall(callControlId);
+          } catch (err) {
+            console.error(`[TelnyxAiBridge] Poll-timeout hangup failed for ${callId}:`, err);
+          }
+          if (!timedOutCall.disposition) {
+            timedOutCall.disposition = timedOutCall.isAnswered ? "completed" : "no-answer";
+          }
           await this.handleCallHangup(callId, timedOutCall);
         }
-        // CRITICAL: Release semaphore slot when call ends
         this.releaseSlot(callId, timedOutCall, 'timeout');
         this.activeCalls.delete(callId);
         return;
@@ -1373,6 +1471,7 @@ export class TelnyxAiBridge extends EventEmitter {
       return;
     }
     call.hasEnded = true;
+    this.clearHardStopTimer(call);
     console.log(`[TelnyxAiBridge] Call hangup: ${callId}`);
 
     const { summary, transcript } = await call.agent.endConversation(call.disposition || "completed");
@@ -1876,17 +1975,13 @@ export class TelnyxAiBridge extends EventEmitter {
   async notifyCallEndedByCallId(callId: string): Promise<void> {
     const call = this.activeCalls.get(callId);
     if (call) {
-      console.log(`[TelnyxAiBridge] WebSocket closed for call ${callId} - initiating cleanup`);
+      console.log(`[TelnyxAiBridge] WebSocket closed for call ${callId} - retaining bridge state until carrier hangup is confirmed`);
       call.hasActiveWebSocket = false;
       
       // Ensure disposition is set if missing
       if (!call.disposition) {
         call.disposition = call.isAnswered ? "completed" : "no-answer";
       }
-
-      await this.handleCallHangup(callId, call);
-      this.releaseSlot(callId, call, 'websocket_close');
-      this.activeCalls.delete(callId);
     }
   }
 

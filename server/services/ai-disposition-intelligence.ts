@@ -5,7 +5,7 @@
  * detect patterns, and produce actionable improvements for AI voice agents.
  */
 
-import { deepAnalyzeJSON } from "./vertex-ai/vertex-client";
+import { deepAnalyze } from "./ai-analysis-router";
 
 const LOG_PREFIX = '[DispositionIntelligence]';
 
@@ -242,7 +242,7 @@ Generate a comprehensive coaching analysis based on the full ${totalAnalyzed}-ca
     console.log(`${LOG_PREFIX} Generating coaching for ${totalAnalyzed} calls (${calls.length} sampled) using Gemini 3 Deep Think...`);
 
     const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-    const parsed = await deepAnalyzeJSON<any>(fullPrompt, { temperature: 0.3, maxTokens: 6000 });
+    const parsed = await deepAnalyze<any>(fullPrompt, { temperature: 0.3, maxTokens: 6000, label: "disposition-intel" });
     console.log(`${LOG_PREFIX} Coaching generated: ${parsed.topIssues?.length || 0} issues, ${parsed.recommendations?.length || 0} recommendations`);
 
     return {

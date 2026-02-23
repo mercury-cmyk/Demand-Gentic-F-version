@@ -1495,7 +1495,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           // Call flow configuration - state machine for AI agent execution
           callFlow: (campaign as any).callFlow || undefined,
           // Max call duration in seconds - auto-hangup after this time
-          maxCallDurationSeconds: (campaign as any).maxCallDurationSeconds || undefined,
+          maxCallDurationSeconds: (() => {
+            const raw = Number((campaign as any).maxCallDurationSeconds);
+            if (!Number.isFinite(raw) || raw <= 0) return undefined;
+            return Math.min(raw, 300);
+          })(),
         };
 
         // PRE-LOCK: Mark as in_progress BEFORE initiation to prevent race conditions
@@ -1688,7 +1692,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             campaignObjective: (campaign as any).campaignObjective || undefined,
             productServiceInfo: (campaign as any).productServiceInfo || undefined,
             talkingPoints: (campaign as any).talkingPoints || undefined,
-            maxCallDurationSeconds: (campaign as any).maxCallDurationSeconds || undefined,
+            maxCallDurationSeconds: (() => {
+              const raw = Number((campaign as any).maxCallDurationSeconds);
+              if (!Number.isFinite(raw) || raw <= 0) return undefined;
+              return Math.min(raw, 300);
+            })(),
             // Number pool tracking
             callerNumberId: callerIdResult.numberId,
             callerNumberDecisionId: callerIdResult.decisionId,

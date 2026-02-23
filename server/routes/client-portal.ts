@@ -1237,7 +1237,13 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
       .where(eq(clientCampaigns.clientAccountId, clientAccountId));
 
     // Merge all regular campaigns, deduplicating by ID
-    const allRegularCampaigns = [...regularAccessList, ...mappedCampaignAccessList.filter(c => !regularAccessList.some(r => r.id === c.id))];
+    const allRegularCampaigns: Array<{
+      id: string;
+      name: string;
+      status: string;
+      type: string | null;
+      projectId: string | null;
+    }> = [...regularAccessList, ...mappedCampaignAccessList.filter(c => !regularAccessList.some(r => r.id === c.id))];
     for (const c of [...workOrderCampaigns, ...intakeCampaigns, ...directCampaigns]) {
       if (!seenIds.has(c.id)) {
         seenIds.add(c.id);
@@ -3906,6 +3912,187 @@ router.delete('/admin/clients/:clientId/campaigns/:accessId', requireAuth, requi
   } catch (error) {
     console.error('[CLIENT PORTAL] Revoke access error:', error);
     res.status(500).json({ message: "Failed to revoke access" });
+  }
+});
+
+// ==================== PROJECT ASSIGNMENT FOR CLIENTS ====================
+
+/**
+ * GET /admin/available-projects
+ * Get all projects optionally filtered, for assigning to clients.
+ * Query params: ?excludeClientId= to exclude projects already belonging to a client
+ */
+router.get('/admin/available-projects', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const { excludeClientId } = req.query;
+
+    // Get all projects not belonging to the specified client
+    let allProjects;
+    if (excludeClientId && typeof excludeClientId === 'string') {
+      allProjects = await db
+        .select({
+          id: clientProjects.id,
+          name: clientProjects.name,
+          status: clientProjects.status,
+          projectType: clientProjects.projectType,
+          clientAccountId: clientProjects.clientAccountId,
+          clientName: clientAccounts.name,
+          createdAt: clientProjects.createdAt,
+        })
+        .from(clientProjects)
+        .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+        .where(
+          sql`${clientProjects.clientAccountId} != ${excludeClientId}`
+        )
+        .orderBy(desc(clientProjects.createdAt));
+    } else {
+      allProjects = await db
+        .select({
+          id: clientProjects.id,
+          name: clientProjects.name,
+          status: clientProjects.status,
+          projectType: clientProjects.projectType,
+          clientAccountId: clientProjects.clientAccountId,
+          clientName: clientAccounts.name,
+          createdAt: clientProjects.createdAt,
+        })
+        .from(clientProjects)
+        .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+        .orderBy(desc(clientProjects.createdAt));
+    }
+
+    res.json({ success: true, projects: allProjects });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get available projects error:', error);
+    res.status(500).json({ message: "Failed to fetch available projects" });
+  }
+});
+
+/**
+ * POST /admin/clients/:clientId/projects/:projectId/assign
+ * Reassign an existing project to this client
+ */
+router.post('/admin/clients/:clientId/projects/:projectId/assign', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const { clientId, projectId } = req.params;
+
+    // Verify client exists
+    const [client] = await db
+      .select()
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientId))
+      .limit(1);
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Verify project exists
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, projectId))
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    if (project.clientAccountId === clientId) {
+      return res.status(409).json({ message: "Project is already assigned to this client" });
+    }
+
+    // Reassign the project to this client
+    const [updated] = await db
+      .update(clientProjects)
+      .set({
+        clientAccountId: clientId,
+        updatedAt: new Date(),
+      })
+      .where(eq(clientProjects.id, projectId))
+      .returning();
+
+    await logClientPortalActivity({
+      clientAccountId: clientId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'project_assigned',
+      details: {
+        projectName: project.name,
+        performedBy: (req as any).user?.userId || null,
+      },
+    });
+
+    res.json({
+      success: true,
+      project: updated,
+      message: `Project "${project.name}" assigned to client successfully`,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Assign project error:', error);
+    res.status(500).json({ message: "Failed to assign project to client" });
+  }
+});
+
+/**
+ * DELETE /admin/clients/:clientId/projects/:projectId/unassign
+ * Remove/disconnect a project from a client.
+ * Since clientAccountId is NOT NULL, this deletes the project and its linked campaigns.
+ */
+router.delete('/admin/clients/:clientId/projects/:projectId/unassign', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const { clientId, projectId } = req.params;
+
+    // Verify the project belongs to this client
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: "Project not found for this client" });
+    }
+
+    // Remove campaign links first (clientProjectCampaigns cascades, but let's be explicit)
+    await db
+      .delete(clientProjectCampaigns)
+      .where(eq(clientProjectCampaigns.projectId, projectId));
+
+    // Unlink any campaigns referencing this project
+    await db
+      .update(campaigns)
+      .set({ projectId: null, updatedAt: new Date() })
+      .where(eq(campaigns.projectId, projectId));
+
+    // Delete the project itself
+    await db
+      .delete(clientProjects)
+      .where(eq(clientProjects.id, projectId));
+
+    await logClientPortalActivity({
+      clientAccountId: clientId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'project_removed',
+      details: {
+        projectName: project.name,
+        performedBy: (req as any).user?.userId || null,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `Project "${project.name}" has been removed from this client`,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Unassign project error:', error);
+    res.status(500).json({ message: "Failed to remove project from client" });
   }
 });
 

@@ -3,7 +3,8 @@ import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schem
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { deepAnalyzeJSON, chat } from "./vertex-ai/vertex-client";
+import { deepAnalyze } from "./ai-analysis-router";
+import { chat } from "./vertex-ai/vertex-client";
 
 interface QAParameters {
   required_info: string[];
@@ -223,9 +224,10 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
     try {
       console.log(`[AI-QA] Using Gemini 3 Deep Think for lead qualification (lead: ${leadId})`);
       const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
-      rawAnalysis = await deepAnalyzeJSON<any>(fullPrompt, {
+      rawAnalysis = await deepAnalyze<any>(fullPrompt, {
         temperature: 0.3,
         maxTokens: 2000,
+        label: "qa-analyzer",
       });
     } catch (analysisError: any) {
       console.error('[AI-QA] Deep Think analysis failed:', analysisError.message);
