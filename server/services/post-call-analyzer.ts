@@ -254,6 +254,53 @@ function buildPrecisionTurns(
 }
 
 /**
+ * Normalize transcript utterances: merge consecutive same-speaker turns and
+ * deduplicate near-identical adjacent utterances (Jaccard similarity ≥ 0.8).
+ * This cleans up fragmented streaming transcripts before precision processing.
+ */
+function normalizeTranscriptUtterances(
+  utterances: Array<{speaker: string; text: string; start: number; end: number; channelTag?: number}>
+): Array<{speaker: string; text: string; start: number; end: number; channelTag?: number}> {
+  if (utterances.length <= 1) return utterances;
+
+  const normalized: typeof utterances = [];
+
+  for (const u of utterances) {
+    const last = normalized[normalized.length - 1];
+    if (!last) {
+      normalized.push({ ...u });
+      continue;
+    }
+
+    // Same speaker? Try to merge or dedup
+    if (last.speaker === u.speaker) {
+      // Jaccard similarity for dedup
+      const setA = new Set(last.text.toLowerCase().split(/\s+/));
+      const setB = new Set(u.text.toLowerCase().split(/\s+/));
+      const intersection = new Set([...setA].filter(w => setB.has(w)));
+      const union = new Set([...setA, ...setB]);
+      const similarity = union.size === 0 ? 1 : intersection.size / union.size;
+
+      if (similarity >= 0.8) {
+        // Near-duplicate — keep the longer version
+        if (u.text.length > last.text.length) {
+          last.text = u.text;
+        }
+        last.end = Math.max(last.end, u.end);
+      } else {
+        // Different content from same speaker — merge
+        last.text = last.text + ' ' + u.text;
+        last.end = Math.max(last.end, u.end);
+      }
+    } else {
+      normalized.push({ ...u });
+    }
+  }
+
+  return normalized;
+}
+
+/**
  * Compute turn-level metrics from precision turns.
  */
 function computeTurnMetrics(turns: PrecisionTurn[]): TurnMetrics {
@@ -527,9 +574,12 @@ export async function runPostCallAnalysis(
       }).filter(Boolean) as Array<{speaker: string; text: string; start: number; end: number; channelTag?: number}>;
       
       if (utterances.length > 0) {
+        // NORMALIZE: Merge consecutive same-speaker chunks and deduplicate near-identical entries
+        const normalizedUtterances = normalizeTranscriptUtterances(utterances);
+        console.log(`${LOG_PREFIX} 📊 Transcript normalization: ${utterances.length} raw → ${normalizedUtterances.length} normalized utterances`);
         structuredTranscript = {
           text: options.geminiTranscript,
-          utterances,
+          utterances: normalizedUtterances,
         };
       }
     }
@@ -683,21 +733,23 @@ export async function runPostCallAnalysis(
 
     console.log(`${LOG_PREFIX} 📊 Turn metrics: ${result.metrics.totalTurns} turns (Agent: ${result.metrics.agentTurns}, Contact: ${result.metrics.contactTurns}), Agent words: ${result.metrics.agentWords}, Contact words: ${result.metrics.contactWords}`);
 
-    // 6. Save transcript to DB
-    if (options?.callAttemptId) {
-      await db.update(dialerCallAttempts)
-        .set({
-          fullTranscript: transcriptWithSummary,
-          updatedAt: new Date(),
-        })
-        .where(eq(dialerCallAttempts.id, options.callAttemptId));
-    }
+    // 6. Save transcript to DB (atomic transaction)
+    await db.transaction(async (tx) => {
+      if (options?.callAttemptId) {
+        await tx.update(dialerCallAttempts)
+          .set({
+            fullTranscript: transcriptWithSummary,
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, options.callAttemptId));
+      }
 
-    await db.update(callSessions)
-      .set({
-        aiTranscript: transcriptWithSummary,
-      })
-      .where(eq(callSessions.id, callSessionId));
+      await tx.update(callSessions)
+        .set({
+          aiTranscript: transcriptWithSummary,
+        })
+        .where(eq(callSessions.id, callSessionId));
+    });
 
     recordTranscriptionResult(callSessionId, "fallback", options?.callAttemptId || callSessionId);
 

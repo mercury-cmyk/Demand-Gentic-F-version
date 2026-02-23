@@ -782,9 +782,21 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     role: 'agent' | 'contact';
     text: string;
     timestamp: number;
+    sequence: number; // Monotonic counter for stable sort ordering
   }
   const transcriptTurns: TranscriptTurn[] = [];
   const MAX_TRANSCRIPT_TURNS = 200; // Rolling window to prevent unbounded memory growth
+  let turnSequence = 0; // Monotonic sequence counter for stable transcript ordering
+  const MERGE_GAP_MS = 3000; // Max gap between chunks to consider them same turn
+
+  // Similarity helper for deduplication (Jaccard on word sets)
+  function textSimilarity(a: string, b: string): number {
+    const setA = new Set(a.toLowerCase().split(/\s+/));
+    const setB = new Set(b.toLowerCase().split(/\s+/));
+    const intersection = new Set([...setA].filter(w => setB.has(w)));
+    const union = new Set([...setA, ...setB]);
+    return union.size === 0 ? 1 : intersection.size / union.size;
+  }
 
   // REPETITION DETECTION: Catch AI stuck in a loop saying the same thing
   // (e.g., "let me check" over and over when gatekeeper puts on hold)
@@ -886,6 +898,12 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   // when actual human speech (inputTranscription) is detected.
   let greetingCooldownUntil: number = 0;
   let greetingTurnCompleted: boolean = false;
+
+  // MIN-PLAYBACK GUARD: Track when agent audio started playing to prevent
+  // premature interruption from VAD misfires on noise/echo
+  const MIN_PLAYBACK_BEFORE_INTERRUPT_MS = 1500;
+  let agentAudioStartedAt: number | null = null;
+  let cooldownFramesDropped: number = 0; // Track frames dropped during cooldown
 
   // AMD (Answering Machine Detection) tracking
   // CRITICAL: Wait for AMD result before speaking to avoid talking to voicemail/IVR
@@ -1775,7 +1793,7 @@ Instructions:
           let geminiTranscript = '';
           if (transcriptTurns.length > 0) {
             geminiTranscript = transcriptTurns
-              .sort((a, b) => a.timestamp - b.timestamp)
+              .sort((a, b) => a.sequence - b.sequence) // Stable sort via monotonic sequence counter
               .map(t => `${t.role === 'agent' ? 'Agent' : 'Contact'}: ${t.text}`)
               .join('\n');
             console.log(`[Gemini Live] 📝 Gemini in-session transcript available as fallback: ${transcriptTurns.length} turns, ${geminiTranscript.length} chars`);
@@ -2153,7 +2171,7 @@ Instructions:
               disabled: false,
               startOfSpeechSensitivity: 'LOW',
               endOfSpeechSensitivity: 'LOW',
-              silenceDuration: 1.5,
+              silenceDuration: 2.0,
             },
           },
         }
@@ -2351,11 +2369,20 @@ Instructions:
         if (outputTranscription?.text) {
           const agentText = outputTranscription.text.trim();
           if (agentText) {
-            transcriptTurns.push({
-              role: 'agent',
-              text: agentText,
-              timestamp: Date.now()
-            });
+            // CHUNK MERGING: Consecutive agent chunks within MERGE_GAP_MS are part of the same turn
+            const lastTurn = transcriptTurns[transcriptTurns.length - 1];
+            const now = Date.now();
+            if (lastTurn && lastTurn.role === 'agent' && (now - lastTurn.timestamp) < MERGE_GAP_MS) {
+              lastTurn.text += ' ' + agentText;
+              lastTurn.timestamp = now; // Update timestamp for gap calculation
+            } else {
+              transcriptTurns.push({
+                role: 'agent',
+                text: agentText,
+                timestamp: now,
+                sequence: ++turnSequence
+              });
+            }
             // Cap transcript array to prevent unbounded memory growth
             while (transcriptTurns.length > MAX_TRANSCRIPT_TURNS) transcriptTurns.shift();
             lastTranscriptionReceivedAt = Date.now();
@@ -2406,7 +2433,8 @@ Instructions:
                 transcriptTurns.push({
                   role: 'agent',
                   text: fallbackText,
-                  timestamp: Date.now()
+                  timestamp: Date.now(),
+                  sequence: ++turnSequence
                 });
                 while (transcriptTurns.length > MAX_TRANSCRIPT_TURNS) transcriptTurns.shift();
                 console.log(`[Gemini Live] 📝 Agent transcript (fallback from text part): "${fallbackText.substring(0, 100)}${fallbackText.length > 100 ? '...' : ''}"`);
@@ -2437,11 +2465,31 @@ Instructions:
               firstContactSpeechAt = Date.now();
             }
 
-            transcriptTurns.push({
-              role: 'contact',
-              text: contactText,
-              timestamp: Date.now()
-            });
+            // CHUNK MERGING + DEDUPLICATION: Merge consecutive contact chunks,
+            // and deduplicate near-identical transcriptions (Gemini sends interim + final)
+            const lastTurn = transcriptTurns[transcriptTurns.length - 1];
+            const now = Date.now();
+            if (lastTurn && lastTurn.role === 'contact' && (now - lastTurn.timestamp) < MERGE_GAP_MS) {
+              // Check for duplicate (≥80% similarity = Gemini re-sent the same utterance)
+              if (textSimilarity(lastTurn.text, contactText) >= 0.8) {
+                // Take the longer version (final transcription is usually more complete)
+                if (contactText.length > lastTurn.text.length) {
+                  lastTurn.text = contactText;
+                }
+                lastTurn.timestamp = now;
+              } else {
+                // Different text from same speaker within gap — append
+                lastTurn.text += ' ' + contactText;
+                lastTurn.timestamp = now;
+              }
+            } else {
+              transcriptTurns.push({
+                role: 'contact',
+                text: contactText,
+                timestamp: now,
+                sequence: ++turnSequence
+              });
+            }
             while (transcriptTurns.length > MAX_TRANSCRIPT_TURNS) transcriptTurns.shift();
             lastTranscriptionReceivedAt = Date.now();
             lastContactSpeechAt = Date.now(); // Reset hold timer — contact is speaking
@@ -2526,8 +2574,19 @@ Instructions:
               // for 2 seconds unless actual human speech was detected. This prevents the agent
               // from self-responding to ambient noise or its own echo.
               if (greetingCooldownUntil > 0 && Date.now() < greetingCooldownUntil) {
-                console.log(`[Gemini Live] ❄️ Dropping audio during post-greeting cooldown (${Math.round(greetingCooldownUntil - Date.now())}ms left)`);
+                cooldownFramesDropped++;
+                // Log only first frame and every 20th to reduce spam
+                if (cooldownFramesDropped === 1 || cooldownFramesDropped % 20 === 0) {
+                  console.log(`[Gemini Live] ❄️ Dropping audio during post-greeting cooldown (${Math.round(greetingCooldownUntil - Date.now())}ms left, ${cooldownFramesDropped} frames dropped)`);
+                }
+                // On first frame dropped, send clear to flush any buffered audio in Telnyx
+                if (cooldownFramesDropped === 1 && streamSid && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ event: 'clear', stream_id: streamSid }));
+                }
                 continue;
+              } else if (cooldownFramesDropped > 0) {
+                console.log(`[Gemini Live] ❄️ Post-greeting cooldown ended, dropped ${cooldownFramesDropped} frames total`);
+                cooldownFramesDropped = 0;
               }
 
               // Calculate bytes received
@@ -2612,6 +2671,11 @@ Instructions:
                     payload: g711Base64
                   }
                 }));
+
+                // Track when agent audio playback started (for min-playback guard)
+                if (agentAudioStartedAt === null) {
+                  agentAudioStartedAt = Date.now();
+                }
               }
             }
           }
@@ -3269,19 +3333,31 @@ Instructions:
             greetingCooldownUntil = Date.now() + 2000; // 2-second cooldown
             console.log('[Gemini Live] ❄️ Post-greeting cooldown: suppressing AI speech for 2s unless human speaks');
           }
+
+          // Reset audio playback tracking for next turn
+          agentAudioStartedAt = null;
         }
 
         // Handle Interruptions (user started talking while AI was speaking)
         if (response.serverContent?.interrupted) {
-          console.log('[Gemini Live] ✋ Model interrupted by user');
-          aiTranscript = ""; // Clear any accumulated transcript
-          // SPEED OPTIMIZATION: Send clear event to Telnyx immediately
-          // This stops any buffered AI audio, making interruption feel instant
-          if (streamSid && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              event: 'clear',
-              stream_id: streamSid
-            }));
+          // MIN-PLAYBACK GUARD: Only honor interruption if agent has been playing
+          // audio for at least MIN_PLAYBACK_BEFORE_INTERRUPT_MS. This prevents
+          // VAD misfires on ambient noise/echo from cutting off the agent prematurely.
+          const playbackDuration = agentAudioStartedAt ? Date.now() - agentAudioStartedAt : Infinity;
+          if (playbackDuration < MIN_PLAYBACK_BEFORE_INTERRUPT_MS) {
+            console.log(`[Gemini Live] ✋ Ignoring interruption — agent only played ${playbackDuration}ms (min: ${MIN_PLAYBACK_BEFORE_INTERRUPT_MS}ms)`);
+          } else {
+            console.log(`[Gemini Live] ✋ Model interrupted by user (after ${playbackDuration === Infinity ? 'unknown' : playbackDuration + 'ms'} playback)`);
+            aiTranscript = ""; // Clear any accumulated transcript
+            agentAudioStartedAt = null; // Reset audio tracking
+            // SPEED OPTIMIZATION: Send clear event to Telnyx immediately
+            // This stops any buffered AI audio, making interruption feel instant
+            if (streamSid && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                event: 'clear',
+                stream_id: streamSid
+              }));
+            }
           }
         }
 
@@ -3312,6 +3388,16 @@ Instructions:
         bytesReceived: (metrics.totalBytesReceived / 1024).toFixed(2) + 'KB',
         backpressureEvents: metrics.bufferBackpressureEvents,
         connectionDrops: metrics.connectionDrops,
+      });
+
+      // Audio session state summary for debugging transcript/voice issues
+      console.log('[Gemini Live] 📊 Session state summary:', {
+        transcriptTurns: transcriptTurns.length,
+        turnSequence,
+        cooldownFramesDropped,
+        greetingTurnCompleted,
+        humanHasSpoken,
+        firstContactSpeechAt: firstContactSpeechAt ? new Date(firstContactSpeechAt).toISOString() : null,
       });
 
       // If the voice was rejected by the model, move to the next available voice and retry from scratch

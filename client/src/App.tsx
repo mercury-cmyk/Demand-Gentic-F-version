@@ -69,7 +69,6 @@ const AIContentGeneratorPage = lazy(() => import("@/pages/ai-content-generator")
 const SocialMediaPublisherPage = lazy(() => import("@/pages/social-media-publisher"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
 const CallReportsPage = lazy(() => import("@/pages/call-reports"));
-const CallRecordingsPage = lazy(() => import("@/pages/call-recordings"));
 const UnifiedIntelligencePage = lazy(() => import("@/pages/unified-intelligence"));
 const PotentialLeadsPage = lazy(() => import("@/pages/potential-leads"));
 const DispositionReanalysisPage = lazy(() => import("@/pages/disposition-reanalysis"));
@@ -428,7 +427,6 @@ function AuthenticatedApp() {
               <Route path="/reports" component={ReportsPage} />
               <Route path="/call-reports" component={CallReportsPage} />
               <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
-              <Route path="/call-recordings" component={CallRecordingsPage} />
               {/* /call-intelligence route removed - page deprecated */}
               <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
               <Route path="/unified-intelligence/potential-leads" component={PotentialLeadsPage} />

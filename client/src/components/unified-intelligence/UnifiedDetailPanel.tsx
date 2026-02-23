@@ -3,7 +3,7 @@
  *
  * Complete detail view for a selected conversation including:
  * - Header / Metadata
- * - Recording Playback
+ * - Recording status (playback deactivated)
  * - Two-Sided Transcript
  * - Call Analysis Summary (matching Test AI Agent workflow)
  * - Quality Analysis Panel
@@ -35,7 +35,6 @@ import {
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { UnifiedConversationDetail, CallHistoryEntry } from './types';
-import { UnifiedRecordingPlayer } from './UnifiedRecordingPlayer';
 import { UnifiedTranscriptDisplay } from './UnifiedTranscriptDisplay';
 import { CallAnalysisSummary } from './CallAnalysisSummary';
 import { QualityAnalysisPanel } from './QualityAnalysisPanel';
@@ -100,7 +99,7 @@ export function UnifiedDetailPanel({
   const hasTranscriptContent = conversation.transcript.available;
   const hasRecordingAvailable = conversation.recording.available;
   const canAnalyze = hasTranscriptContent && !hasCallAnalysis && conversation.source === 'call_session';
-  const canTranscribe = hasRecordingAvailable && !hasTranscriptContent && conversation.source === 'call_session';
+  const canTranscribe = Boolean(onTranscribe) && hasRecordingAvailable && !hasTranscriptContent && conversation.source === 'call_session';
   const canPushToShowcase = conversation.source === 'call_session';
   const hasCallHistory = (conversation.callCount || 1) > 1 && conversation.callHistory;
 
@@ -246,16 +245,15 @@ export function UnifiedDetailPanel({
                 </div>
               )}
 
-              {/* Recording Player */}
+              {/* Recording access deactivated */}
               <div className="rounded-lg border bg-background/70 p-3">
                 <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
                   <Phone className="h-4 w-4" />
                   Recording
                 </h3>
-                <UnifiedRecordingPlayer
-                  recordingId={conversation.id}
-                  recording={conversation.recording}
-                />
+                <p className="text-sm text-muted-foreground">
+                  Call recording playback is deactivated and removed from dashboard access.
+                </p>
               </div>
 
               {/* Quick Summary */}

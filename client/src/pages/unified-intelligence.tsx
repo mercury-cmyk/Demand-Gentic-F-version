@@ -3,9 +3,8 @@
  *
  * Single unified page combining capabilities from:
  * - Conversation Quality page (filters, list, quality analysis)
- * - Call Intelligence Dashboard (recordings, transcripts)
+ * - Call Intelligence Dashboard (analysis, transcripts)
  * - Test AI Agent call analysis (call analysis summary)
- * - Call Recordings page (audio playback)
  *
  * This page is ADDITIVE - it does not modify or replace existing pages.
  * Existing pages continue to work unchanged.
@@ -20,7 +19,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, Brain, MessageSquare, BarChart3, Target, Headphones, FileText, Trophy } from 'lucide-react';
+import { RefreshCw, Brain, MessageSquare, BarChart3, Target, FileText, Trophy } from 'lucide-react';
 import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram';
 import {
   ResizablePanelGroup,
@@ -40,7 +39,6 @@ import {
 } from '@/components/unified-intelligence';
 import { DispositionIntelligenceView } from '@/components/disposition-intelligence';
 
-const CallRecordingsPage = lazy(() => import('@/pages/call-recordings'));
 const ReportsPage = lazy(() => import('@/pages/reports'));
 const ShowcaseCallsPage = lazy(() => import('@/pages/showcase-calls'));
 const DispositionReanalysisPage = lazy(() => import('@/pages/disposition-reanalysis'));
@@ -197,7 +195,7 @@ function normalizeSpeaker(role: string): 'agent' | 'prospect' | 'system' {
 export default function UnifiedIntelligencePage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [pageTab, setPageTab] = useState<'conversations' | 'disposition-intelligence' | 'call-recordings' | 'reports' | 'showcase-calls' | 'disposition-reanalysis'>('conversations');
+  const [pageTab, setPageTab] = useState<'conversations' | 'disposition-intelligence' | 'reports' | 'showcase-calls' | 'disposition-reanalysis'>('conversations');
   const [filters, setFilters] = useState<UnifiedIntelligenceFilters>(defaultUnifiedFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
@@ -320,28 +318,9 @@ export default function UnifiedIntelligencePage() {
     },
   });
 
-  // ===== TRANSCRIBE MUTATION =====
-  const transcribeMutation = useMutation({
-    mutationFn: async (sessionId: string) => {
-      const response = await apiRequest('POST', `/api/recordings/${sessionId}/transcribe`, { source: 'call_sessions' });
-      return response.json();
-    },
-    onSuccess: () => {
-      toast({ title: 'Transcription Complete', description: 'Transcript generated from recording' });
-      refetchConversations();
-    },
-    onError: (error: any) => {
-      toast({ title: 'Transcription Failed', description: error.message || 'Could not transcribe recording', variant: 'destructive' });
-    },
-  });
-
   const handleAnalyze = useCallback((sessionId: string) => {
     analyzeMutation.mutate(sessionId);
   }, [analyzeMutation]);
-
-  const handleTranscribe = useCallback((sessionId: string) => {
-    transcribeMutation.mutate(sessionId);
-  }, [transcribeMutation]);
 
   const handleSelectHistoryCall = useCallback((sessionId: string) => {
     setSelectedId(sessionId);
@@ -385,7 +364,7 @@ export default function UnifiedIntelligencePage() {
               Unified Intelligence
             </h1>
             <p className="text-sm text-muted-foreground">
-              Complete conversation analysis, recordings, reports, and quality insights
+              Complete conversation analysis, reports, and quality insights
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -424,10 +403,6 @@ export default function UnifiedIntelligencePage() {
                 <BarChart3 className="h-4 w-4" />
                 Disposition Intelligence
               </TabsTrigger>
-              <TabsTrigger value="call-recordings" className="gap-1.5 flex-1">
-                <Headphones className="h-4 w-4" />
-                Call Recordings
-              </TabsTrigger>
               <TabsTrigger value="reports" className="gap-1.5 flex-1">
                 <FileText className="h-4 w-4" />
                 Reports
@@ -449,12 +424,6 @@ export default function UnifiedIntelligencePage() {
       {pageTab === 'disposition-intelligence' ? (
         <div className="flex-1 overflow-hidden">
           <DispositionIntelligenceView campaigns={campaigns} />
-        </div>
-      ) : pageTab === 'call-recordings' ? (
-        <div className="flex-1 overflow-auto">
-          <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
-            <CallRecordingsPage />
-          </Suspense>
         </div>
       ) : pageTab === 'reports' ? (
         <div className="flex-1 overflow-auto p-6">
@@ -518,10 +487,8 @@ export default function UnifiedIntelligencePage() {
                 conversation={selectedConversation}
                 isLoading={conversationsLoading && !!selectedId}
                 onAnalyze={handleAnalyze}
-                onTranscribe={handleTranscribe}
                 onSelectHistoryCall={handleSelectHistoryCall}
                 isAnalyzing={analyzeMutation.isPending}
-                isTranscribing={transcribeMutation.isPending}
               />
             </div>
           </ResizablePanel>

@@ -92,9 +92,26 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private sttLastRestartTime: number = 0;
   private sttErrorLoggedAt: number = 0; // Rate-limit error logging
 
+  // Transcript dedup: prevent duplicate/overlapping transcription events from Gemini
+  private lastEmittedUserText: string = '';
+  private lastEmittedUserTimestamp: number = 0;
+  private lastEmittedAgentText: string = '';
+  private lastEmittedAgentTimestamp: number = 0;
+
   // Queued opening message: if sendOpeningMessage is called before setup completes,
   // queue it and auto-send when setupComplete fires. Prevents silent agent on race conditions.
   private pendingOpeningMessage: string | null = null;
+
+  // Override setResponding to log audio state transitions for debugging voice delivery issues
+  protected setResponding(responding: boolean, responseId?: string): void {
+    const wasResponding = this._isResponding;
+    super.setResponding(responding, responseId);
+    if (responding && !wasResponding) {
+      console.log(`${LOG_PREFIX} [AudioState] ▶ STARTED responding (id=${responseId})`);
+    } else if (!responding && wasResponding) {
+      console.log(`${LOG_PREFIX} [AudioState] ⏹ STOPPED responding (id=${responseId})`);
+    }
+  }
 
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
@@ -293,6 +310,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     this.setupComplete = false;
     this.pendingOpeningMessage = null;
+    // Reset transcript dedup tracking
+    this.lastEmittedUserText = '';
+    this.lastEmittedUserTimestamp = 0;
+    this.lastEmittedAgentText = '';
+    this.lastEmittedAgentTimestamp = 0;
     this.setConnected(false);
   }
 
@@ -1105,14 +1127,28 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     if (content.input_transcription || content.inputTranscription) {
       const inputTranscription = content.input_transcription || content.inputTranscription;
       const text = inputTranscription.text || inputTranscription.transcript || '';
-      if (text.trim()) {
-        if (DEBUG) console.log(`${LOG_PREFIX} 👂 INPUT TRANSCRIPTION (caller): "${text}"`);
-        // Emit as user transcript so voice-dialer can detect human speech
-        this.emit('transcript:user', {
-          text: text.trim(),
-          isFinal: true,
-          timestamp: new Date(),
-        });
+      const trimmedUserText = text.trim();
+      if (trimmedUserText) {
+        // Dedup: skip if same text emitted within 2s, or shorter substring of recent within 3s
+        const now = Date.now();
+        const timeSinceLast = now - this.lastEmittedUserTimestamp;
+        if (trimmedUserText === this.lastEmittedUserText && timeSinceLast < 2000) {
+          if (DEBUG) console.log(`${LOG_PREFIX} [Dedup] Skipping duplicate user transcription: "${trimmedUserText.substring(0, 50)}"`);
+        } else if (this.lastEmittedUserText.includes(trimmedUserText) && timeSinceLast < 3000) {
+          // New text is shorter substring of what we already emitted — skip
+          if (DEBUG) console.log(`${LOG_PREFIX} [Dedup] Skipping subset user transcription: "${trimmedUserText.substring(0, 50)}"`);
+        } else {
+          // If new text contains the old text (supersedes), update tracking and emit
+          this.lastEmittedUserText = trimmedUserText;
+          this.lastEmittedUserTimestamp = now;
+
+          if (DEBUG) console.log(`${LOG_PREFIX} 👂 INPUT TRANSCRIPTION (caller): "${trimmedUserText}"`);
+          this.emit('transcript:user', {
+            text: trimmedUserText,
+            isFinal: true,
+            timestamp: new Date(),
+          });
+        }
       }
     }
 
@@ -1120,9 +1156,23 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     if (content.output_transcription || content.outputTranscription) {
       const outputTranscription = content.output_transcription || content.outputTranscription;
       const text = outputTranscription.text || outputTranscription.transcript || '';
-      if (text.trim()) {
+      const trimmedAgentText = text.trim();
+      if (trimmedAgentText) {
+        // Dedup: skip if same text emitted within 2s, or shorter substring of recent within 3s
+        const now = Date.now();
+        const timeSinceLast = now - this.lastEmittedAgentTimestamp;
+        if (trimmedAgentText === this.lastEmittedAgentText && timeSinceLast < 2000) {
+          if (DEBUG) console.log(`${LOG_PREFIX} [Dedup] Skipping duplicate agent transcription: "${trimmedAgentText.substring(0, 50)}"`);
+          // Early return from this block — no anti-repetition or emission needed
+        } else if (this.lastEmittedAgentText.includes(trimmedAgentText) && timeSinceLast < 3000) {
+          if (DEBUG) console.log(`${LOG_PREFIX} [Dedup] Skipping subset agent transcription: "${trimmedAgentText.substring(0, 50)}"`);
+        } else {
+        // Not a duplicate — proceed with anti-repetition check and emission
+        this.lastEmittedAgentText = trimmedAgentText;
+        this.lastEmittedAgentTimestamp = now;
+
         // ANTI-REPETITION CHECK: Detect if this is a repeated phrase
-        const normalizedText = text.trim().toLowerCase().replace(/[^\w\s]/g, '');
+        const normalizedText = trimmedAgentText.toLowerCase().replace(/[^\w\s]/g, '');
         const isRepetition = this.recentPhrases.some(phrase => {
           const similarity = this.calculateSimilarity(normalizedText, phrase);
           return similarity > 0.85; // 85% similar = likely repetition
@@ -1183,13 +1233,14 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
             this.recentPhrases.shift(); // Remove oldest
           }
 
-          if (DEBUG) console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${text}"`);
+          if (DEBUG) console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${trimmedAgentText}"`);
           this.emit('transcript:agent', {
-            text: text.trim(),
+            text: trimmedAgentText,
             isFinal: true,
             timestamp: new Date(),
           });
         }
+        } // Close dedup else block
       }
     }
 

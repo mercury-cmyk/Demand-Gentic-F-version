@@ -125,7 +125,6 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/engagement-analytics', roles: ANALYTICS_ROLES, description: 'Engagement Analytics' },
   { pattern: '/call-reports', roles: ANALYTICS_ROLES, description: 'Call Reports' },
   { pattern: /^\/call-reports\//, roles: ANALYTICS_ROLES, description: 'Call Report detail' },
-  { pattern: '/call-recordings', roles: ANALYTICS_ROLES, description: 'Call Recordings' },
   { pattern: '/reports', roles: ANALYTICS_ROLES, description: 'Reports' },
   { pattern: '/agent-reports', roles: ANALYTICS_ROLES, description: 'Agent Reports' },
   { pattern: '/agent-reports-dashboard', roles: ANALYTICS_ROLES, description: 'Agent Reports Dashboard' },

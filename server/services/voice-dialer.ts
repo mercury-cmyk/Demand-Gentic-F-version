@@ -2363,7 +2363,18 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
       }
 
       if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) return;
-      if (!session.telnyxOutboundBuffer || session.telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) return;
+      if (!session.telnyxOutboundBuffer || session.telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) {
+        // Buffer underrun detection: log when pacer is dry mid-utterance (Gemini still generating)
+        const geminiProv = (session as any).geminiProvider;
+        if (session.telnyxOutboundFramesSent > 0 && geminiProv?.isResponding) {
+          const now = Date.now();
+          if (!(session as any)._lastUnderrunAt || (now - (session as any)._lastUnderrunAt) > 2000) {
+            console.warn(`${LOG_PREFIX} [PACER] ⚠️ Buffer underrun mid-utterance (frames_sent=${session.telnyxOutboundFramesSent}, call=${session.callId})`);
+            (session as any)._lastUnderrunAt = now;
+          }
+        }
+        return;
+      }
 
       // Backpressure: skip sending if Telnyx WS write buffer is congested
       const bufferedAmount = (session.telnyxWs as any).bufferedAmount || 0;
@@ -3347,6 +3358,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     provider.on('transcript:user', async (event: any) => {
       if (!event.isFinal) return;
+      if (session.isEnding) return; // Don't accept transcripts after endCall starts
 
       if (shouldFastAbortForEarlyVoicemail(session, event.text)) {
         console.log(`${LOG_PREFIX} [AudioGuard] Gemini early voicemail cue detected - ending call`);
@@ -3644,11 +3656,16 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         ) {
           const reinforcement = buildStateReinforcementMessage(session);
           if (reinforcement) {
-            provider.sendTextMessage(reinforcement);
-            session.conversationState.lastStateReinforcementAt = new Date();
-            session.conversationState.stateReinforcementCount++;
-            session.conversationState.userTurnsSinceLastReinforcement = 0;
-            console.log(`${LOG_PREFIX} [StateReinforcement] Injected state reminder #${session.conversationState.stateReinforcementCount} for call: ${session.callId}`);
+            // Only send if Gemini is NOT mid-response (avoid interrupting its audio stream)
+            if (!provider.isResponding) {
+              provider.sendTextMessage(reinforcement);
+              session.conversationState.lastStateReinforcementAt = new Date();
+              session.conversationState.stateReinforcementCount++;
+              session.conversationState.userTurnsSinceLastReinforcement = 0;
+              console.log(`${LOG_PREFIX} [StateReinforcement] Injected state reminder #${session.conversationState.stateReinforcementCount} for call: ${session.callId}`);
+            } else {
+              console.log(`${LOG_PREFIX} [StateReinforcement] Deferred — provider mid-response for call: ${session.callId}`);
+            }
           }
         }
       }
@@ -3661,6 +3678,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     });
 
     provider.on('transcript:agent', (event: any) => {
+      if (session.isEnding) return; // Don't accept transcripts after endCall starts
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] AI: "${event.text}"`);
 
@@ -3711,6 +3729,12 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     provider.on('response:cancelled', () => {
       console.log(`${LOG_PREFIX} [Gemini] Response cancelled/interrupted for call: ${session.callId}`);
 
+      // Clear stale audio from cancelled response — prevents contact hearing tail of interrupted utterance
+      // (Same pattern as OpenAI barge-in handler at line 5512)
+      session.telnyxOutboundBuffer = Buffer.alloc(0);
+      session.telnyxOutboundLastSendAt = null;
+      session.audioFrameBuffer = [];
+
       if (session.conversationState.identityConfirmed) {
         const timeSinceLastReinforcement = session.conversationState.lastStateReinforcementAt
           ? Date.now() - session.conversationState.lastStateReinforcementAt.getTime()
@@ -3720,16 +3744,18 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         if (timeSinceLastReinforcement > 5000) {
           const reinforcement = buildStateReinforcementMessage(session);
           if (reinforcement) {
-            // Short delay to let the interruption settle before injecting
+            // Delay to let the interruption settle; skip if provider is mid-response to avoid overlapping audio
             setTimeout(() => {
-              if (session.isActive && !session.isEnding) {
+              if (session.isActive && !session.isEnding && !provider.isResponding) {
                 provider.sendTextMessage(reinforcement);
                 session.conversationState.lastStateReinforcementAt = new Date();
                 session.conversationState.stateReinforcementCount++;
                 session.conversationState.userTurnsSinceLastReinforcement = 0;
                 console.log(`${LOG_PREFIX} [StateRecovery] Post-interruption state reinforcement for call: ${session.callId}`);
+              } else if (provider.isResponding) {
+                console.log(`${LOG_PREFIX} [StateRecovery] Skipped reinforcement — provider mid-response for call: ${session.callId}`);
               }
-            }, 300);
+            }, 1500);
           }
         }
       }
@@ -3772,6 +3798,14 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       } else {
         // Reset failure count on success
         session.functionCallFailures.set(event.name, 0);
+      }
+
+      // Clear any buffered audio before sending tool response — Gemini will generate fresh audio
+      // after receiving the function result, and stale pre-tool-call frames would overlap
+      if (session.telnyxOutboundBuffer.length > 0) {
+        console.log(`${LOG_PREFIX} [ToolCall] Clearing ${session.telnyxOutboundBuffer.length}B outbound buffer before tool response`);
+        session.telnyxOutboundBuffer = Buffer.alloc(0);
+        session.telnyxOutboundLastSendAt = null;
       }
 
       provider.respondToFunctionCall(event.callId, result);
@@ -6524,6 +6558,45 @@ function formatCallSummary(summary: CallSummary): string {
   return lines.join("\n");
 }
 
+/**
+ * Finalize in-session transcripts before persistence:
+ * 1. Sort by timestamp (handles out-of-order arrival from provider)
+ * 2. Merge consecutive same-role entries (fixes fragmented agent/contact lines)
+ * 3. Deduplicate substring overlaps (Gemini sometimes re-emits partial text)
+ * 4. Remove empty entries
+ */
+function finalizeTranscripts(session: OpenAIRealtimeSession): void {
+  const transcripts = session.transcripts;
+  if (transcripts.length <= 1) return;
+
+  // Step 1: Sort by timestamp
+  transcripts.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+  // Step 2: Merge consecutive same-role entries + deduplicate
+  const merged: typeof transcripts = [];
+  for (const entry of transcripts) {
+    const trimmedText = entry.text.trim();
+    if (!trimmedText) continue; // Skip empty
+
+    const last = merged[merged.length - 1];
+    if (last && last.role === entry.role) {
+      // Skip if new text is already contained in existing (exact substring dedup)
+      if (last.text.includes(trimmedText)) continue;
+      // If existing text is contained in new text, replace with the longer version
+      if (trimmedText.includes(last.text)) {
+        last.text = trimmedText;
+      } else {
+        // Append with space separator
+        last.text = last.text + ' ' + trimmedText;
+      }
+    } else {
+      merged.push({ role: entry.role, text: trimmedText, timestamp: entry.timestamp });
+    }
+  }
+
+  session.transcripts = merged;
+}
+
 function formatTranscriptNotes(transcripts: OpenAIRealtimeSession["transcripts"]): string | null {
   if (!transcripts.length) {
     return null;
@@ -7536,6 +7609,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   } else {
     console.warn(`${LOG_PREFIX} Skipping bridge end notification for ${callId} because Telnyx hangup command was not confirmed.`);
   }
+
+  // Finalize transcript: sort by timestamp, merge fragments, deduplicate before any consumption
+  finalizeTranscripts(session);
 
   // Build transcript — use Gemini in-session transcripts as a lightweight fallback
   // Full precision transcript comes from post-call analysis (from recording)

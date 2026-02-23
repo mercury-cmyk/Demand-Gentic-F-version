@@ -163,7 +163,7 @@ router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Re
     const [gsProject] = await db.select({
       id: generativeStudioProjects.id,
       metadata: generativeStudioProjects.metadata,
-      type: generativeStudioProjects.type,
+      contentType: generativeStudioProjects.contentType,
     }).from(generativeStudioProjects).where(eq(generativeStudioProjects.id, projectId)).limit(1);
 
     if (gsProject) {
@@ -172,7 +172,7 @@ router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Re
         organizationId: meta.organizationId || null,
         clientProjectId: meta.clientProjectId || null,
         studioProjectId: gsProject.id,
-        studioProjectType: gsProject.type,
+        studioProjectType: gsProject.contentType,
         source: "generative_studio",
       });
     }

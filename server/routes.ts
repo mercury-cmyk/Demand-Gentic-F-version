@@ -87,7 +87,6 @@ import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
 import simulationsRouter from './routes/simulations';
 import voiceProviderRoutes from './routes/voice-provider-routes';
-import recordingsRouter from './routes/recordings';
 import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
@@ -15031,8 +15030,13 @@ Provide JSON response with:
     });
   });
 
-  // ==================== CALL RECORDINGS (AUTHENTICATED) ====================
-  app.use('/api/recordings', requireAuth, recordingsRouter);
+  // ==================== CALL RECORDINGS (DEACTIVATED) ====================
+  // Emergency shutdown: dashboard call recordings API disabled
+  app.use('/api/recordings', requireAuth, (_req, res) => {
+    res.status(410).json({
+      message: 'Call recordings endpoints are deactivated and removed from dashboard access.',
+    });
+  });
 
   // ==================== CALL INTELLIGENCE ====================
   app.use('/api/call-intelligence', callIntelligenceRouter);
