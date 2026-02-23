@@ -4,6 +4,7 @@ import dns from "node:dns/promises";
 import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
+import { enrichCampaignQADefaults, buildCampaignContextBrief, generateQAParametersFromContext } from "./lib/campaign-qa-defaults";
 import { storage } from "./storage";
 import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
@@ -5661,6 +5662,35 @@ export function registerRoutes(app: Express) {
         }
       }
 
+      // Auto-regenerate campaignContextBrief & qaParameters when context fields change
+      const contextFieldKeys = ['campaignObjective', 'successCriteria', 'targetAudienceDescription', 'productServiceInfo', 'talkingPoints'];
+      const contextFieldChanged = contextFieldKeys.some(k => k in updateData);
+
+      if (contextFieldChanged) {
+        const merged = { ...existingCampaign, ...updateData } as Record<string, any>;
+
+        // Regenerate brief if not explicitly being set in this update
+        if (!('campaignContextBrief' in updateData)) {
+          const brief = buildCampaignContextBrief(merged);
+          if (brief) {
+            updateData.campaignContextBrief = brief;
+            console.log('[Campaign Update] Auto-generated campaignContextBrief from context fields');
+          }
+        }
+
+        // Regenerate qaParameters if not explicitly being set and current params are auto-generated or absent
+        if (!('qaParameters' in updateData)) {
+          const existingQaParams = existingCampaign.qaParameters as any;
+          if (!existingQaParams || existingQaParams._auto_generated) {
+            const newQaParams = generateQAParametersFromContext(merged);
+            if (newQaParams) {
+              updateData.qaParameters = newQaParams;
+              console.log('[Campaign Update] Auto-regenerated qaParameters from updated context');
+            }
+          }
+        }
+      }
+
       // Update aiAgentSettings.persona.voice if selectedVoice is provided
       if (updateData.selectedVoice) {
         const existingSettings = (existingCampaign.aiAgentSettings as any) || {};
@@ -6008,19 +6038,34 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Campaign not found" });
       }
 
-      // Create a new campaign based on the original
+      // Create a new campaign based on the original — copy all context & QA fields
+      const cloneData = enrichCampaignQADefaults({
+        name: `${originalCampaign.name} (Copy)`,
+        type: originalCampaign.type,
+        status: 'draft' as const, // Always create as draft
+        clientAccountId: originalCampaign.clientAccountId,
+        projectId: originalCampaign.projectId,
+        audienceRefs: originalCampaign.audienceRefs,
+        emailSubject: originalCampaign.emailSubject,
+        emailHtmlContent: originalCampaign.emailHtmlContent,
+        scheduleJson: null, // Clear schedule for requeue
+        // Copy campaign context fields
+        campaignObjective: originalCampaign.campaignObjective,
+        successCriteria: originalCampaign.successCriteria,
+        targetAudienceDescription: originalCampaign.targetAudienceDescription,
+        talkingPoints: originalCampaign.talkingPoints,
+        productServiceInfo: originalCampaign.productServiceInfo,
+        campaignObjections: originalCampaign.campaignObjections,
+        campaignContextBrief: originalCampaign.campaignContextBrief,
+        callScript: originalCampaign.callScript,
+        // Copy QA configuration
+        qaParameters: originalCampaign.qaParameters,
+        customQaFields: originalCampaign.customQaFields,
+        customQaRules: originalCampaign.customQaRules,
+        parsedQaRules: originalCampaign.parsedQaRules,
+      });
       const newCampaign = await db.insert(campaigns)
-        .values({
-          name: `${originalCampaign.name} (Copy)`,
-          type: originalCampaign.type,
-          status: 'draft', // Always create as draft
-          clientAccountId: originalCampaign.clientAccountId,
-          projectId: originalCampaign.projectId,
-          audienceRefs: originalCampaign.audienceRefs,
-          emailSubject: originalCampaign.emailSubject,
-          emailHtmlContent: originalCampaign.emailHtmlContent,
-          scheduleJson: null, // Clear schedule for requeue
-        })
+        .values(cloneData)
         .returning();
 
       console.log(`[CLONE CAMPAIGN] Created new campaign ${newCampaign[0].id} from ${campaignId}`);

@@ -1,25 +1,23 @@
 /**
- * Unified Intelligence Page
+ * Disposition Intelligence Hub
  *
- * Single unified page combining capabilities from:
- * - Conversation Quality page (filters, list, quality analysis)
- * - Call Intelligence Dashboard (analysis, transcripts)
- * - Test AI Agent call analysis (call analysis summary)
+ * Consolidates these routes/views into one hub:
+ * - Disposition Intelligence
+ * - Conversation Quality
+ * - Showcase Calls
+ * - Reanalysis
  *
- * This page is ADDITIVE - it does not modify or replace existing pages.
- * Existing pages continue to work unchanged.
- *
- * Route: /unified-intelligence
+ * Route: /disposition-intelligence
  */
 
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
 import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, Brain, MessageSquare, BarChart3, Target, FileText, Trophy } from 'lucide-react';
+import { RefreshCw, Brain, MessageSquare, BarChart3, Target, Trophy } from 'lucide-react';
 import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram';
 import {
   ResizablePanelGroup,
@@ -39,13 +37,38 @@ import {
 } from '@/components/unified-intelligence';
 import { DispositionIntelligenceView } from '@/components/disposition-intelligence';
 
-const ReportsPage = lazy(() => import('@/pages/reports'));
 const ShowcaseCallsPage = lazy(() => import('@/pages/showcase-calls'));
 const DispositionReanalysisPage = lazy(() => import('@/pages/disposition-reanalysis'));
 
 interface Campaign {
   id: string;
   name: string;
+}
+
+type HubTab =
+  | 'disposition-intelligence'
+  | 'conversation-quality'
+  | 'showcase-calls'
+  | 'reanalysis';
+
+function normalizeTab(tab: string | null): HubTab {
+  switch (tab) {
+    case 'disposition-intelligence':
+    case 'dispositions':
+      return 'disposition-intelligence';
+    case 'conversation-quality':
+    case 'conversations':
+    case 'recordings':
+      return 'conversation-quality';
+    case 'showcase-calls':
+    case 'showcase':
+      return 'showcase-calls';
+    case 'reanalysis':
+    case 'disposition-reanalysis':
+      return 'reanalysis';
+    default:
+      return 'disposition-intelligence';
+  }
 }
 
 // Adapter function to normalize conversation data from /api/qa/conversations
@@ -195,10 +218,30 @@ function normalizeSpeaker(role: string): 'agent' | 'prospect' | 'system' {
 export default function UnifiedIntelligencePage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [pageTab, setPageTab] = useState<'conversations' | 'disposition-intelligence' | 'reports' | 'showcase-calls' | 'disposition-reanalysis'>('conversations');
+  const [location] = useLocation();
+  const [pageTab, setPageTab] = useState<HubTab>(() =>
+    normalizeTab(new URLSearchParams(window.location.search).get('tab'))
+  );
   const [filters, setFilters] = useState<UnifiedIntelligenceFilters>(defaultUnifiedFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+
+  useEffect(() => {
+    const tabFromUrl = normalizeTab(new URLSearchParams(window.location.search).get('tab'));
+    setPageTab((prev) => (prev === tabFromUrl ? prev : tabFromUrl));
+  }, [location]);
+
+  const handleTabChange = useCallback((nextTab: HubTab) => {
+    setPageTab(nextTab);
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', nextTab);
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      nextSearch ? `${window.location.pathname}?${nextSearch}` : window.location.pathname
+    );
+  }, []);
 
   // Fetch campaigns for filter dropdown
   const { data: campaigns = [] } = useQuery<Campaign[]>({
@@ -361,22 +404,22 @@ export default function UnifiedIntelligencePage() {
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Brain className="h-6 w-6 text-primary" />
-              Unified Intelligence
+              Disposition Intelligence Hub
             </h1>
             <p className="text-sm text-muted-foreground">
-              Complete conversation analysis, reports, and quality insights
+              Disposition intelligence, conversation quality, showcase calls, and reanalysis
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {isPolling && pageTab === 'conversations' && (
+            {isPolling && pageTab === 'conversation-quality' && (
               <span className="text-xs text-muted-foreground flex items-center gap-1">
                 <RefreshCw className="h-3 w-3 animate-spin" />
                 Live updating
               </span>
             )}
-            {pageTab === 'conversations' && (
+            {pageTab === 'conversation-quality' && (
               <>
-                <Link href="/unified-intelligence/potential-leads">
+                <Link href="/disposition-intelligence/potential-leads">
                   <Button variant="outline" size="sm">
                     <Target className="h-4 w-4 mr-2" />
                     Potential Leads
@@ -393,25 +436,21 @@ export default function UnifiedIntelligencePage() {
 
         {/* Page-Level Tabs */}
         <div className="px-4 pb-2">
-          <Tabs value={pageTab} onValueChange={(v) => setPageTab(v as any)}>
+          <Tabs value={pageTab} onValueChange={(v) => handleTabChange(v as HubTab)}>
             <TabsList className="w-full max-w-4xl flex">
-              <TabsTrigger value="conversations" className="gap-1.5 flex-1">
-                <MessageSquare className="h-4 w-4" />
-                Conversations
-              </TabsTrigger>
               <TabsTrigger value="disposition-intelligence" className="gap-1.5 flex-1">
                 <BarChart3 className="h-4 w-4" />
                 Disposition Intelligence
               </TabsTrigger>
-              <TabsTrigger value="reports" className="gap-1.5 flex-1">
-                <FileText className="h-4 w-4" />
-                Reports
+              <TabsTrigger value="conversation-quality" className="gap-1.5 flex-1">
+                <MessageSquare className="h-4 w-4" />
+                Conversation Quality
               </TabsTrigger>
               <TabsTrigger value="showcase-calls" className="gap-1.5 flex-1">
                 <Trophy className="h-4 w-4" />
                 Showcase Calls
               </TabsTrigger>
-              <TabsTrigger value="disposition-reanalysis" className="gap-1.5 flex-1">
+              <TabsTrigger value="reanalysis" className="gap-1.5 flex-1">
                 <RefreshCw className="h-4 w-4" />
                 Reanalysis
               </TabsTrigger>
@@ -425,19 +464,13 @@ export default function UnifiedIntelligencePage() {
         <div className="flex-1 overflow-hidden">
           <DispositionIntelligenceView campaigns={campaigns} />
         </div>
-      ) : pageTab === 'reports' ? (
-        <div className="flex-1 overflow-auto p-6">
-          <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
-            <ReportsPage />
-          </Suspense>
-        </div>
       ) : pageTab === 'showcase-calls' ? (
         <div className="flex-1 overflow-hidden">
           <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
             <ShowcaseCallsPage />
           </Suspense>
         </div>
-      ) : pageTab === 'disposition-reanalysis' ? (
+      ) : pageTab === 'reanalysis' ? (
         <div className="flex-1 overflow-auto">
           <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
             <DispositionReanalysisPage />

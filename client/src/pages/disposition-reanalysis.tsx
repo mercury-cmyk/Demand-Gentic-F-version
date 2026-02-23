@@ -412,6 +412,7 @@ export default function DispositionReanalysisPage() {
   const [contactsMaxTurns, setContactsMaxTurns] = useState('');
   const [contactsDateFrom, setContactsDateFrom] = useState('');
   const [contactsDateTo, setContactsDateTo] = useState('');
+  const [contactsAccuracy, setContactsAccuracy] = useState<'all' | 'accurate' | 'mismatch'>('all');
   const [contactsFiltersExpanded, setContactsFiltersExpanded] = useState(false);
 
   // Client sample validation state
@@ -447,7 +448,7 @@ export default function DispositionReanalysisPage() {
 
   // Contacts by disposition query
   const { data: contactsByDisp, isLoading: contactsLoading, refetch: refetchContacts } = useQuery<ContactsByDispositionResponse>({
-    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, contactsDateFrom, contactsDateTo, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsTranscriptText, contactsPage, contactsSearch],
+    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, contactsDateFrom, contactsDateTo, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsTranscriptText, contactsAccuracy, contactsPage, contactsSearch],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (campaignId) params.set('campaignId', campaignId);
@@ -458,6 +459,7 @@ export default function DispositionReanalysisPage() {
       if (contactsMinTurns) params.set('minTurns', contactsMinTurns);
       if (contactsMaxTurns) params.set('maxTurns', contactsMaxTurns);
       if (contactsTranscriptText) params.set('transcriptText', contactsTranscriptText);
+      if (contactsAccuracy !== 'all') params.set('accuracy', contactsAccuracy);
       params.set('limit', '50');
       params.set('offset', String(contactsPage * 50));
       if (contactsSearch) params.set('search', contactsSearch);
@@ -909,8 +911,9 @@ export default function DispositionReanalysisPage() {
     if (contactsDateFrom) count++;
     if (contactsDateTo) count++;
     if (contactsTranscriptText) count++;
+    if (contactsAccuracy !== 'all') count++;
     return count;
-  }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo, contactsTranscriptText]);
+  }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo, contactsTranscriptText, contactsAccuracy]);
 
   const clearContactsFilters = useCallback(() => {
     setContactsMinDuration('');
@@ -920,6 +923,7 @@ export default function DispositionReanalysisPage() {
     setContactsDateFrom('');
     setContactsDateTo('');
     setContactsTranscriptText('');
+    setContactsAccuracy('all');
     setContactsPage(0);
   }, []);
 
@@ -1666,7 +1670,19 @@ export default function DispositionReanalysisPage() {
                             className="h-8"
                           />
                         </div>
-                        <div />
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Accuracy</Label>
+                          <Select value={contactsAccuracy} onValueChange={(v: 'all' | 'accurate' | 'mismatch') => { setContactsAccuracy(v); setContactsPage(0); }}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
+                              <SelectItem value="mismatch">Mismatch</SelectItem>
+                              <SelectItem value="accurate">Accurate</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

@@ -12,6 +12,7 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { eq, and, desc, sql, inArray, isNull, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { enrichCampaignQADefaults } from '../lib/campaign-qa-defaults';
 import {
   campaignIntakeRequests,
   agenticCampaignSessions,
@@ -371,10 +372,10 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
         // Determine campaign type
         let campaignType = updated.campaignType || context.objective || 'lead_qualification';
 
-        // Create the campaign
+        // Create the campaign with auto-generated QA defaults
         const [campaign] = await db
           .insert(campaigns)
-          .values({
+          .values(enrichCampaignQADefaults({
             name: `Campaign - ${updated.id.slice(0, 8).toUpperCase()}`,
             type: campaignType as any,
             status: 'draft',
@@ -393,7 +394,7 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
             }),
             startDate: (updated.requestedStartDate || new Date()).toISOString().split('T')[0],
             createdBy: actorId,
-          })
+          }))
           .returning();
 
         createdCampaign = campaign;
@@ -837,10 +838,10 @@ router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, 
       }
     }
 
-    // Create campaign
+    // Create campaign with auto-generated QA defaults
     const [campaign] = await db
       .insert(campaigns)
-      .values({
+      .values(enrichCampaignQADefaults({
         name: contextConfig.objective?.slice(0, 100) || 'New Campaign',
         type: 'call',
         status: 'draft',
@@ -867,7 +868,7 @@ router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, 
         intakeRequestId: session.intakeRequestId,
         creationMode: 'agentic',
         ownerId: actorId,
-      })
+      }))
       .returning();
 
     // Update session with campaign link

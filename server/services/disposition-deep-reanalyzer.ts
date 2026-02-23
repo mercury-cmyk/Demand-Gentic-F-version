@@ -1622,6 +1622,8 @@ export async function pushCallsToQA(
           campaignId: callSessions.campaignId,
           contactId: callSessions.contactId,
           aiTranscript: callSessions.aiTranscript,
+          aiDisposition: callSessions.aiDisposition,
+          durationSec: callSessions.durationSec,
           recordingUrl: callSessions.recordingUrl,
           toNumberE164: callSessions.toNumberE164,
         })
@@ -1631,6 +1633,22 @@ export async function pushCallsToQA(
 
       if (!session) {
         results.push({ id: csId, success: false, error: "Session not found" });
+        continue;
+      }
+
+      // GUARD: Only push calls with qualified dispositions to QA
+      const NON_LEAD_DISPOSITIONS = ['no_answer', 'voicemail', 'invalid_data', 'do_not_call', 'busy', 'failed'];
+      const sessionDispo = (session.aiDisposition || '').toLowerCase();
+      if (NON_LEAD_DISPOSITIONS.includes(sessionDispo)) {
+        results.push({ id: csId, success: false, error: `Blocked: disposition '${sessionDispo}' is not lead-qualifying` });
+        continue;
+      }
+
+      // GUARD: Minimum duration for lead creation (45s)
+      const MIN_PUSH_DURATION = 45;
+      const durationSec = session.durationSec || 0;
+      if (durationSec < MIN_PUSH_DURATION) {
+        results.push({ id: csId, success: false, error: `Blocked: duration ${durationSec}s < ${MIN_PUSH_DURATION}s minimum` });
         continue;
       }
 
@@ -1920,6 +1938,7 @@ export async function getContactsByDisposition(
     offset?: number;
     search?: string;
     transcriptText?: string;
+    accuracy?: 'accurate' | 'mismatch';
   }
 ): Promise<{
   contacts: DispositionContactDetail[];
@@ -2174,6 +2193,18 @@ export async function getContactsByDisposition(
       if (filters.minTurns && turnCount < filters.minTurns) return false;
       if (filters.maxTurns && turnCount > filters.maxTurns) return false;
       return true;
+    });
+  }
+
+  // Apply accuracy filter (uses QA records, must be post-query)
+  if (filters.accuracy) {
+    filteredSessions = filteredSessions.filter(s => {
+      const qa = qaMap.get(s.id);
+      if (!qa || qa.dispositionAccurate === null || qa.dispositionAccurate === undefined) {
+        // No QA record = unknown accuracy — exclude from both accurate and mismatch
+        return false;
+      }
+      return filters.accuracy === 'accurate' ? qa.dispositionAccurate === true : qa.dispositionAccurate === false;
     });
   }
 

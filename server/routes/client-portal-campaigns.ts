@@ -32,6 +32,13 @@ import { z } from 'zod';
 import { isFeatureEnabled } from '../feature-flags';
 import multer from 'multer';
 import { notificationService } from '../services/notification-service';
+import {
+  getQueueIntelligenceOverview,
+  getSegmentAnalysis,
+  getContactScores,
+} from '../services/queue-intelligence-service';
+import { pool } from '../db';
+import { analyzeCampaignTimezones } from '../services/campaign-timezone-analyzer';
 
 const router = Router();
 
@@ -1501,6 +1508,335 @@ router.get('/projects-for-campaign', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[CLIENT CAMPAIGNS] Projects list error:', error);
     res.status(500).json({ message: 'Failed to fetch projects' });
+  }
+});
+
+// ==================== HELPER: Campaign Access Verification ====================
+
+async function verifyCampaignAccess(campaignId: string, clientAccountId: string): Promise<{ hasAccess: boolean; campaign?: any }> {
+  const [campaign] = await db
+    .select({ id: campaigns.id, name: campaigns.name, clientAccountId: campaigns.clientAccountId })
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+
+  if (!campaign) return { hasAccess: false };
+
+  if (campaign.clientAccountId === clientAccountId) {
+    return { hasAccess: true, campaign };
+  }
+
+  const [access] = await db
+    .select({ id: clientCampaignAccess.id })
+    .from(clientCampaignAccess)
+    .where(
+      and(
+        eq(clientCampaignAccess.clientAccountId, clientAccountId),
+        or(
+          eq(clientCampaignAccess.campaignId, campaignId),
+          eq(clientCampaignAccess.regularCampaignId, campaignId)
+        )
+      )
+    )
+    .limit(1);
+
+  return { hasAccess: !!access, campaign: access ? campaign : undefined };
+}
+
+// ==================== QUEUE INTELLIGENCE ROUTES (CLIENT PORTAL) ====================
+
+/**
+ * GET /:id/queue-intelligence/overview
+ * Score distribution, tier breakdown, top contacts (read-only for clients)
+ */
+router.get('/:id/queue-intelligence/overview', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { id: campaignId } = req.params;
+    const { hasAccess } = await verifyCampaignAccess(campaignId, clientAccountId);
+    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+    const data = await getQueueIntelligenceOverview(campaignId, clientAccountId);
+    res.json(data);
+  } catch (error: any) {
+    console.error('[CLIENT QI] Overview error:', error);
+    res.status(500).json({ message: error.message || 'Failed to get overview' });
+  }
+});
+
+/**
+ * GET /:id/queue-intelligence/segment-analysis
+ * Detailed tier breakdown with industry/role distribution (read-only)
+ */
+router.get('/:id/queue-intelligence/segment-analysis', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { id: campaignId } = req.params;
+    const { hasAccess } = await verifyCampaignAccess(campaignId, clientAccountId);
+    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+    const data = await getSegmentAnalysis(campaignId, clientAccountId);
+    res.json(data);
+  } catch (error: any) {
+    console.error('[CLIENT QI] Segment analysis error:', error);
+    res.status(500).json({ message: error.message || 'Failed to get segment analysis' });
+  }
+});
+
+/**
+ * GET /:id/queue-intelligence/contact-scores
+ * Paginated, sortable contact list with AI scores (read-only)
+ */
+router.get('/:id/queue-intelligence/contact-scores', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { id: campaignId } = req.params;
+    const { hasAccess } = await verifyCampaignAccess(campaignId, clientAccountId);
+    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+    const sortBy = (req.query.sortBy as string) || 'score';
+    const tier = req.query.tier as string | undefined;
+
+    const data = await getContactScores(campaignId, clientAccountId, { page, limit, sortBy, tier });
+    res.json(data);
+  } catch (error: any) {
+    console.error('[CLIENT QI] Contact scores error:', error);
+    res.status(500).json({ message: error.message || 'Failed to get contact scores' });
+  }
+});
+
+/**
+ * GET /:id/queue-intelligence/live-stats
+ * Live queue stats: country distribution, phone status, priority breakdown,
+ * next-in-line contacts, timezone analysis (read-only)
+ */
+router.get('/:id/queue-intelligence/live-stats', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { id: campaignId } = req.params;
+    const { hasAccess } = await verifyCampaignAccess(campaignId, clientAccountId);
+    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+    // Run all independent queries in parallel
+    const [
+      countryRows,
+      phoneRows,
+      statusRows,
+      nextInLineRows,
+      priorityRows,
+      timezoneAnalysis,
+    ] = await Promise.all([
+      pool.query(`
+        SELECT
+          COALESCE(NULLIF(TRIM(c.country), ''), 'Unknown') AS country,
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE cq.status = 'queued')::int AS queued,
+          COUNT(*) FILTER (WHERE cq.status = 'in_progress')::int AS in_progress,
+          COUNT(*) FILTER (WHERE cq.status = 'done')::int AS done
+        FROM campaign_queue cq
+        INNER JOIN contacts c ON c.id = cq.contact_id
+        WHERE cq.campaign_id = $1
+          AND cq.status IN ('queued', 'in_progress', 'done')
+        GROUP BY COALESCE(NULLIF(TRIM(c.country), ''), 'Unknown')
+        ORDER BY total DESC
+        LIMIT 30
+      `, [campaignId]),
+
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total_queued,
+          COUNT(*) FILTER (
+            WHERE COALESCE(
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone', '')), '')
+            ) IS NOT NULL
+          )::int AS has_phone,
+          COUNT(*) FILTER (
+            WHERE COALESCE(
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone', '')), '')
+            ) IS NULL
+          )::int AS missing_phone,
+          COUNT(*) FILTER (
+            WHERE NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), '') IS NOT NULL
+          )::int AS e164_normalized,
+          COUNT(*) FILTER (
+            WHERE NULLIF(TRIM(COALESCE(to_jsonb(c)->>'phone_verified_at', '')), '') IS NOT NULL
+          )::int AS verified
+        FROM campaign_queue cq
+        INNER JOIN contacts c ON c.id = cq.contact_id
+        WHERE cq.campaign_id = $1
+          AND cq.status = 'queued'
+      `, [campaignId]),
+
+      pool.query(`
+        SELECT status, COUNT(*)::int AS count
+        FROM campaign_queue
+        WHERE campaign_id = $1
+        GROUP BY status
+        ORDER BY count DESC
+      `, [campaignId]),
+
+      pool.query(`
+        SELECT
+          cq.id AS queue_id,
+          cq.priority,
+          NULLIF(TRIM(COALESCE(to_jsonb(cq)->>'ai_priority_score', '')), '')::int AS ai_priority_score,
+          cq.next_attempt_at,
+          cq.status,
+          c.id AS contact_id,
+          COALESCE(c.first_name || ' ' || c.last_name, c.first_name, c.last_name, 'Unknown') AS contact_name,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'job_title', '')), '') AS job_title,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'seniority_level', '')), '') AS seniority_level,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'country', '')), '') AS country,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'timezone', '')), '') AS timezone,
+          COALESCE(
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone_e164', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone_e164', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone', '')), '')
+          ) AS best_phone,
+          a.name AS account_name,
+          COALESCE(
+            NULLIF(TRIM(COALESCE(to_jsonb(a)->>'industry_standardized', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(a)->>'industry_raw', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(a)->>'industry_ai_suggested', '')), '')
+          ) AS industry
+        FROM campaign_queue cq
+        INNER JOIN contacts c ON c.id = cq.contact_id
+        LEFT JOIN accounts a ON a.id = cq.account_id
+        WHERE cq.campaign_id = $1
+          AND cq.status = 'queued'
+          AND (cq.next_attempt_at IS NULL OR cq.next_attempt_at <= NOW())
+        ORDER BY
+          cq.priority DESC,
+          NULLIF(TRIM(COALESCE(to_jsonb(cq)->>'ai_priority_score', '')), '')::int DESC NULLS LAST,
+          cq.created_at ASC
+        LIMIT 15
+      `, [campaignId]),
+
+      pool.query(`
+        SELECT
+          CASE
+            WHEN priority >= 400 THEN 'Top Priority (400+)'
+            WHEN priority >= 200 THEN 'High (200-399)'
+            WHEN priority >= 100 THEN 'Medium (100-199)'
+            WHEN priority >= 50  THEN 'Low (50-99)'
+            ELSE 'Minimal (0-49)'
+          END AS tier,
+          COUNT(*)::int AS count,
+          AVG(priority)::int AS avg_priority,
+          MIN(priority)::int AS min_priority,
+          MAX(priority)::int AS max_priority
+        FROM campaign_queue
+        WHERE campaign_id = $1
+          AND status = 'queued'
+        GROUP BY
+          CASE
+            WHEN priority >= 400 THEN 'Top Priority (400+)'
+            WHEN priority >= 200 THEN 'High (200-399)'
+            WHEN priority >= 100 THEN 'Medium (100-199)'
+            WHEN priority >= 50  THEN 'Low (50-99)'
+            ELSE 'Minimal (0-49)'
+          END
+        ORDER BY max_priority DESC
+      `, [campaignId]),
+
+      analyzeCampaignTimezones(campaignId),
+    ]);
+
+    const statusMap: Record<string, number> = {};
+    let totalInQueue = 0;
+    for (const row of statusRows.rows) {
+      statusMap[row.status] = row.count;
+      totalInQueue += row.count;
+    }
+
+    const phone = phoneRows.rows[0] || { total_queued: 0, has_phone: 0, missing_phone: 0, e164_normalized: 0, verified: 0 };
+
+    res.json({
+      campaignId,
+      generatedAt: new Date().toISOString(),
+      queueStatus: {
+        total: totalInQueue,
+        queued: statusMap['queued'] || 0,
+        inProgress: statusMap['in_progress'] || 0,
+        done: statusMap['done'] || 0,
+        removed: statusMap['removed'] || 0,
+      },
+      countryDistribution: countryRows.rows.map(r => ({
+        country: r.country,
+        total: r.total,
+        queued: r.queued,
+        inProgress: r.in_progress,
+        done: r.done,
+      })),
+      phoneStatus: {
+        totalQueued: Number(phone.total_queued),
+        hasPhone: Number(phone.has_phone),
+        missingPhone: Number(phone.missing_phone),
+        e164Normalized: Number(phone.e164_normalized),
+        verified: Number(phone.verified),
+        phoneRate: phone.total_queued > 0
+          ? Math.round((phone.has_phone / phone.total_queued) * 100)
+          : 0,
+      },
+      priorityTiers: priorityRows.rows.map(r => ({
+        tier: r.tier,
+        count: r.count,
+        avgPriority: r.avg_priority,
+        minPriority: r.min_priority,
+        maxPriority: r.max_priority,
+      })),
+      nextInLine: nextInLineRows.rows.map(r => ({
+        queueId: r.queue_id,
+        contactId: r.contact_id,
+        contactName: r.contact_name,
+        jobTitle: r.job_title,
+        seniorityLevel: r.seniority_level,
+        accountName: r.account_name,
+        industry: r.industry,
+        country: r.country,
+        timezone: r.timezone,
+        bestPhone: r.best_phone ? '****' + r.best_phone.slice(-4) : null,
+        priority: r.priority,
+        aiPriorityScore: r.ai_priority_score,
+        nextAttemptAt: r.next_attempt_at,
+      })),
+      timezoneAnalysis: {
+        totalCallableNow: timezoneAnalysis.totalCallableNow,
+        totalSleeping: timezoneAnalysis.totalSleeping,
+        totalUnknownTimezone: timezoneAnalysis.totalUnknownTimezone,
+        groups: timezoneAnalysis.timezoneGroups.map(g => ({
+          timezone: g.timezone,
+          contactCount: g.contactCount,
+          isCurrentlyOpen: g.isCurrentlyOpen,
+          opensAt: g.opensAt,
+          suggestedPriority: g.suggestedPriority,
+          country: g.country,
+        })),
+      },
+    });
+  } catch (error: any) {
+    console.error('[CLIENT QI] Live stats error:', error);
+    res.status(500).json({ message: error.message || 'Failed to get live stats' });
   }
 });
 

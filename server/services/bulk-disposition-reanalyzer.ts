@@ -712,6 +712,15 @@ async function applyDispositionChange(
             .where(eq(campaignQueue.id, attempt.queueItemId));
           action += " | Flagged for human review (needs_review)";
         }
+
+        // Reject any existing lead created before reanalysis
+        if (existingLeadId) {
+          await db
+            .update(leads)
+            .set({ qaStatus: "rejected", qaDecision: "Reanalysis: Needs review — not qualified", updatedAt: new Date() })
+            .where(eq(leads.id, existingLeadId));
+          action += ` | Lead ${existingLeadId} rejected (needs_review)`;
+        }
         break;
 
       case "voicemail":
@@ -735,9 +744,29 @@ async function applyDispositionChange(
             .where(eq(campaignQueue.id, attempt.queueItemId));
           action += ` | Scheduled retry in ${retryDays} days`;
         }
+
+        // Reject any existing lead created before reanalysis
+        if (existingLeadId) {
+          await db
+            .update(leads)
+            .set({ qaStatus: "rejected", qaDecision: `Reanalysis: ${newDisposition} — not a real conversation`, updatedAt: new Date() })
+            .where(eq(leads.id, existingLeadId));
+          action += ` | Lead ${existingLeadId} rejected (${newDisposition})`;
+        }
         break;
 
       default:
+        // For any other non-qualifying disposition, reject existing leads
+        if (existingLeadId) {
+          const NON_LEAD_DISPOSITIONS = ['invalid_data', 'do_not_call', 'busy', 'failed', 'hung_up'];
+          if (NON_LEAD_DISPOSITIONS.includes(newDisposition)) {
+            await db
+              .update(leads)
+              .set({ qaStatus: "rejected", qaDecision: `Reanalysis: ${newDisposition}`, updatedAt: new Date() })
+              .where(eq(leads.id, existingLeadId));
+            action += ` | Lead ${existingLeadId} rejected (${newDisposition})`;
+          }
+        }
         break;
     }
 

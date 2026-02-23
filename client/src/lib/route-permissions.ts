@@ -105,7 +105,10 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/leads', roles: [...QA_ROLES, USER_ROLES.AGENT], description: 'Leads' },
   { pattern: /^\/leads\//, roles: [...QA_ROLES, USER_ROLES.AGENT], description: 'Lead detail' },
   { pattern: '/lead-forms', roles: MANAGEMENT_ROLES, description: 'Lead Forms' },
+  { pattern: '/disposition-intelligence', roles: ALL_ROLES, description: 'Disposition Intelligence Hub' },
+  { pattern: /^\/disposition-intelligence\//, roles: ALL_ROLES, description: 'Disposition Intelligence Hub pages' },
   { pattern: '/conversation-quality', roles: MANAGEMENT_ROLES, description: 'Conversation Quality' },
+  { pattern: '/disposition-reanalysis', roles: MANAGEMENT_ROLES, description: 'Disposition Reanalysis' },
   { pattern: '/qa-review-center', roles: QA_ROLES, description: 'QA Review Center' },
 
   // ============================================

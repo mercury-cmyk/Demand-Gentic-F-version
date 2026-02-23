@@ -11,6 +11,7 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { eq, and, desc, sql, ne } from 'drizzle-orm';
 import { z } from 'zod';
+import { enrichCampaignQADefaults } from '../lib/campaign-qa-defaults';
 import {
   clientProjects,
   clientAccounts,
@@ -263,10 +264,10 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
           },
         } : null;
 
-        // Create the campaign with project attachments
+        // Create the campaign with project attachments and auto-generated QA defaults
         [createdCampaign] = await db
           .insert(campaigns)
-          .values({
+          .values(enrichCampaignQADefaults({
             name: `${project.name} - Campaign`,
             type: mappedType as any,
             status: 'draft',
@@ -287,7 +288,7 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
             // Transfer project attachments to campaign
             landingPageUrl: project.landingPageUrl || null,
             projectFileUrl: project.projectFileUrl || null,
-          })
+          }))
           .returning();
 
         // Grant client access to the campaign

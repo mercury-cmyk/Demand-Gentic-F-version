@@ -321,13 +321,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     description: 'Unified quality control, data integrity, and lead review',
     items: [
       {
-        id: 'unified-intelligence',
-        title: 'Unified Intelligence',
-        url: '/unified-intelligence',
+        id: 'disposition-intelligence',
+        title: 'Disposition Intelligence',
+        url: '/disposition-intelligence',
         icon: 'BarChart3',
         roles: MANAGEMENT_ROLES,
-        description: 'Comprehensive call quality and intelligence dashboard',
-        badge: { text: 'New', variant: 'new' },
+        description: 'Central hub for disposition intelligence, conversation quality, showcase calls, and reanalysis',
+        badge: { text: 'Updated', variant: 'updated' },
       },
       {
         id: 'qa-lead-review',
@@ -340,10 +340,18 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
       {
         id: 'conversation-quality',
         title: 'Conversation Quality',
-        url: '/conversation-quality',
+        url: '/disposition-intelligence?tab=conversation-quality',
         icon: 'MessageSquare',
         roles: MANAGEMENT_ROLES,
-        description: 'Call quality analysis and scoring',
+        description: 'Conversation quality analysis and scoring',
+      },
+      {
+        id: 'reanalysis',
+        title: 'Reanalysis',
+        url: '/disposition-intelligence?tab=reanalysis',
+        icon: 'RefreshCw',
+        roles: MANAGEMENT_ROLES,
+        description: 'Deep AI reanalysis for disposition corrections',
       },
       {
         id: 'validation-campaigns',
@@ -394,7 +402,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
       {
         id: 'showcase-calls',
         title: 'Showcase Calls',
-        url: '/showcase-calls',
+        url: '/disposition-intelligence?tab=showcase-calls',
         icon: 'Trophy',
         roles: [...QA_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.AGENT],
         description: 'Top meaningful call conversations with recordings, transcript, issues, and recommendations',

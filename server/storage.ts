@@ -4,6 +4,7 @@ import { eq, sql, and, or, isNull, isNotNull, like, ilike, gte, lte, gt, lt, des
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "./db";
 import { buildFilterQuery, buildSuppressionFilter } from "./filter-builder";
+import { enrichCampaignQADefaults } from "./lib/campaign-qa-defaults";
 import type { FilterGroup } from "@shared/filter-types";
 import {
   users, accounts, contacts, campaigns, campaignAgentAssignments, segments, lists, domainSets, domainSetItems, domainSetContactLinks,
@@ -1427,7 +1428,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCampaign(insertCampaign: InsertCampaign): Promise<Campaign> {
-    const [campaign] = await db.insert(campaigns).values(insertCampaign).returning();
+    // Auto-generate qaParameters and campaignContextBrief from wizard context if not set
+    const enriched = enrichCampaignQADefaults(insertCampaign);
+    const [campaign] = await db.insert(campaigns).values(enriched).returning();
     return campaign;
   }
 

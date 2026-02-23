@@ -17,6 +17,7 @@
     "diagnose-audio": "tsx diagnose-audio.ts",
     "test-audio": "tsx test-audio-transmission.ts",
     "check-orchestrator": "tsx check-orchestrator-readiness.ts",
+    "audit:files": "tsx scripts/audit-active-files.ts",
     "start:gemini-relay": "tsx server/gemini-relay.ts",
     "start:livekit-agent": "tsx server/services/livekit/worker.ts dev",
     "vector:backfill": "tsx scripts/backfill-vector-documents.ts",

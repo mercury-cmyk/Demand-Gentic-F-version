@@ -13,6 +13,7 @@ import { accounts, contacts, campaigns, leads, segments } from "@shared/schema";
 import { count, eq, ilike, and, or, desc, gte, lte, inArray, asc, type SQL } from "drizzle-orm";
 import { buildFilterQuery } from "../filter-builder";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import { enrichCampaignQADefaults } from "../lib/campaign-qa-defaults";
 import { VertexAI, FunctionDeclarationSchemaType, Part } from '@google-cloud/vertexai';
 
 const router = Router();
@@ -1160,12 +1161,12 @@ async function executeTool(toolName: string, args: any, context: ToolExecutionCo
         }
 
         const [campaign] = await db.insert(campaigns)
-          .values(campaignData)
-          .returning({ 
-            id: campaigns.id, 
-            name: campaigns.name, 
-            type: campaigns.type, 
-            status: campaigns.status 
+          .values(enrichCampaignQADefaults(campaignData))
+          .returning({
+            id: campaigns.id,
+            name: campaigns.name,
+            type: campaigns.type,
+            status: campaigns.status
           });
 
         return {

@@ -69,12 +69,9 @@ const AIContentGeneratorPage = lazy(() => import("@/pages/ai-content-generator")
 const SocialMediaPublisherPage = lazy(() => import("@/pages/social-media-publisher"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
 const CallReportsPage = lazy(() => import("@/pages/call-reports"));
-const UnifiedIntelligencePage = lazy(() => import("@/pages/unified-intelligence"));
+const DispositionIntelligenceHubPage = lazy(() => import("@/pages/unified-intelligence"));
 const PotentialLeadsPage = lazy(() => import("@/pages/potential-leads"));
-const DispositionReanalysisPage = lazy(() => import("@/pages/disposition-reanalysis"));
-const ShowcaseCallsPage = lazy(() => import("@/pages/showcase-calls"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
-const ConversationQualityPage = lazy(() => import("@/pages/conversation-quality"));
 import UnlicensedDepartmentsPage from "@/pages/unlicensed-departments";
 const EngagementAnalyticsPage = lazy(() => import("@/pages/engagement-analytics"));
 import VirtualAgentsPage from "@/pages/virtual-agents";
@@ -132,7 +129,6 @@ const ClientPortalIntelligence = lazy(() => import("@/pages/client-portal-intell
 const ClientPortalGenerativeStudio = lazy(() => import("@/pages/client-portal-generative-studio"));
 import ClientPortalCampaignQueue from "@/pages/client-portal-campaign-queue";
 const ClientPortalCallReports = lazy(() => import("@/pages/client-portal-call-reports"));
-const ClientPortalCallRecordings = lazy(() => import("@/pages/client-portal-call-recordings"));
 const ClientPortalAnalytics = lazy(() => import("@/pages/client-portal-analytics"));
 const ClientPortalConversationQuality = lazy(() => import("@/pages/client-portal-conversation-quality"));
 const ClientPortalShowcaseCalls = lazy(() => import("@/pages/client-portal-showcase-calls"));
@@ -403,7 +399,9 @@ function AuthenticatedApp() {
               <Route path="/leads" component={LeadsPage} />
               <Route path="/leads/:id" component={LeadDetailPage} />
               <Route path="/lead-forms" component={LeadFormsPage} />
-              <Route path="/conversation-quality" component={ConversationQualityPage} />
+              <Route path="/conversation-quality">
+                <Redirect to="/disposition-intelligence?tab=conversation-quality" />
+              </Route>
               <Route path="/unlicensed-departments" component={UnlicensedDepartmentsPage} />
 
               {/* Content & Marketing */}
@@ -428,10 +426,41 @@ function AuthenticatedApp() {
               <Route path="/call-reports" component={CallReportsPage} />
               <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
               {/* /call-intelligence route removed - page deprecated */}
-              <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
-              <Route path="/unified-intelligence/potential-leads" component={PotentialLeadsPage} />
-              <Route path="/disposition-reanalysis" component={DispositionReanalysisPage} />
-              <Route path="/showcase-calls" component={ShowcaseCallsPage} />
+              <Route path="/unified-intelligence">
+                <Redirect to="/disposition-intelligence" />
+              </Route>
+              <Route path="/unified-intelligence/potential-leads">
+                <Redirect to="/disposition-intelligence/potential-leads" />
+              </Route>
+              <Route path="/unified-intelligence/conversations">
+                <Redirect to="/disposition-intelligence?tab=conversation-quality" />
+              </Route>
+              <Route path="/unified-intelligence/dispositions">
+                <Redirect to="/disposition-intelligence?tab=disposition-intelligence" />
+              </Route>
+              <Route path="/unified-intelligence/showcase">
+                <Redirect to="/disposition-intelligence?tab=showcase-calls" />
+              </Route>
+              <Route path="/unified-intelligence/reanalysis">
+                <Redirect to="/disposition-intelligence?tab=reanalysis" />
+              </Route>
+              <Route path="/unified-intelligence/recordings">
+                <Redirect to="/disposition-intelligence?tab=conversation-quality" />
+              </Route>
+              <Route path="/unified-intelligence/reports">
+                <Redirect to="/reports" />
+              </Route>
+              <Route path="/unified-intelligence/:rest+">
+                <Redirect to="/disposition-intelligence" />
+              </Route>
+              <Route path="/disposition-intelligence" component={DispositionIntelligenceHubPage} />
+              <Route path="/disposition-intelligence/potential-leads" component={PotentialLeadsPage} />
+              <Route path="/disposition-reanalysis">
+                <Redirect to="/disposition-intelligence?tab=reanalysis" />
+              </Route>
+              <Route path="/showcase-calls">
+                <Redirect to="/disposition-intelligence?tab=showcase-calls" />
+              </Route>
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/ai-call-analytics">
                 <Redirect to="/call-reports?tab=ai" />
@@ -730,11 +759,6 @@ function Router() {
       <Route path="/client-portal/call-reports">
         <ClientPortalProtectedRoute>
           <ClientPortalCallReports />
-        </ClientPortalProtectedRoute>
-      </Route>
-      <Route path="/client-portal/call-recordings">
-        <ClientPortalProtectedRoute>
-          <ClientPortalCallRecordings />
         </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/analytics">

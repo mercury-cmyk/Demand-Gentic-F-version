@@ -226,10 +226,28 @@ function agentPerformanceScoreSql() {
   `;
 }
 
+// Only show calls from these campaigns in showcase
+const SHOWCASE_ALLOWED_CAMPAIGNS = [
+  'ringcentral',
+  'ring central',
+  'harver',
+  'argle appointment gen',
+];
+
+/** Restrict showcase to allowed campaign names (case-insensitive partial match). */
+function showcaseCampaignFilterSql() {
+  return or(
+    ...SHOWCASE_ALLOWED_CAMPAIGNS.map(name =>
+      sql`LOWER(COALESCE(${campaigns.name}, '')) LIKE ${`%${name}%`}`
+    )
+  );
+}
+
 /** Outcome-agnostic, analysis-backed filter for showcase candidates. */
 function buildBaseShowcaseWhere(query: any) {
   return and(
     buildFilters(query),
+    showcaseCampaignFilterSql(),
     humanConversationDispositionFilterSql(),
     isNotNull(callQualityRecords.fullTranscript),
     twoSidedTranscriptFilterSql(),
@@ -473,6 +491,7 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
       .select({ count: drizzleCount() })
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
+      .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
       .where(showcaseWhere);
     console.log(`[ShowcaseCalls] Stats check count: ${countCheck?.count}`);
 
@@ -488,6 +507,7 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
       })
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
+      .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
       .where(showcaseWhere); // Using the broader filter, not just isShowcase=true
 
     // If we get 0 despite having data in DB, it might be due to incomplete joins or data issues.
@@ -504,6 +524,7 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
       })
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
+      .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
       .where(showcaseWhere);
 
     // Category breakdown
@@ -514,6 +535,7 @@ router.get("/stats", requireAuth, async (req: Request, res: Response) => {
       })
       .from(callQualityRecords)
       .innerJoin(callSessions, eq(callQualityRecords.callSessionId, callSessions.id))
+      .leftJoin(campaigns, eq(callQualityRecords.campaignId, campaigns.id))
       .where(showcaseWhere)
       .groupBy(callQualityRecords.showcaseCategory);
 

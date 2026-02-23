@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft,
   Users,
@@ -13,6 +15,7 @@ import {
   Clock,
   RefreshCw,
   Loader2,
+  Brain,
 } from "lucide-react";
 import {
   Table,
@@ -22,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ClientQueueIntelligenceView } from "@/components/client-portal/ClientQueueIntelligenceView";
 
 const getToken = () => localStorage.getItem('clientPortalToken');
 
@@ -57,6 +61,7 @@ const statusConfig: Record<QueueStatus, { label: string; icon: any; color: strin
 export default function ClientPortalCampaignQueue() {
   const { id: campaignId } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
+  const [activeTab, setActiveTab] = useState("queue");
 
   const { data: campaign } = useQuery({
     queryKey: ['client-portal-campaign', campaignId],
@@ -126,6 +131,20 @@ export default function ClientPortalCampaignQueue() {
           </CardContent>
         </Card>
 
+        {/* Tabs: Queue + Intelligence */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="bg-slate-100/80 dark:bg-slate-900/50">
+            <TabsTrigger value="queue" className="gap-1.5">
+              <Phone className="h-3.5 w-3.5" />
+              Queue
+            </TabsTrigger>
+            <TabsTrigger value="intelligence" className="gap-1.5">
+              <Brain className="h-3.5 w-3.5" />
+              Intelligence
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="queue" className="space-y-6 mt-0">
         {/* Queue Statistics */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
           {statCards.map((card) => {
@@ -212,6 +231,12 @@ export default function ClientPortalCampaignQueue() {
             )}
           </CardContent>
         </Card>
+          </TabsContent>
+
+          <TabsContent value="intelligence" className="mt-0">
+            <ClientQueueIntelligenceView campaignId={campaignId!} />
+          </TabsContent>
+        </Tabs>
       </div>
     </ClientPortalLayout>
   );

@@ -329,7 +329,7 @@ export function UnifiedIntelligenceDashboard() {
                 { label: "Negative", value: `${stats.conversations.sentiment.negative}%` },
               ]}
               actionLabel="View Conversations"
-              actionUrl="/unified-intelligence/conversations"
+              actionUrl="/disposition-intelligence?tab=conversation-quality"
               color="blue"
             />
 
@@ -344,7 +344,7 @@ export function UnifiedIntelligenceDashboard() {
                 { label: "Leads Created", value: stats.dispositions.qualified_leads },
               ]}
               actionLabel="View Dispositions"
-              actionUrl="/unified-intelligence/dispositions"
+              actionUrl="/disposition-intelligence?tab=disposition-intelligence"
               color="purple"
             />
 
@@ -359,7 +359,7 @@ export function UnifiedIntelligenceDashboard() {
                 { label: "Avg Quality", value: `${stats.recordings.avgQuality}%` },
               ]}
               actionLabel="Browse Recordings"
-              actionUrl="/unified-intelligence/recordings"
+              actionUrl="/disposition-intelligence?tab=conversation-quality"
               color="blue"
             />
 
@@ -374,7 +374,7 @@ export function UnifiedIntelligenceDashboard() {
                 { label: "Updated", value: "Today" },
               ]}
               actionLabel="View Reports"
-              actionUrl="/unified-intelligence/reports"
+              actionUrl="/reports"
               color="amber"
             />
 
@@ -389,7 +389,7 @@ export function UnifiedIntelligenceDashboard() {
                 { label: "This Month", value: "Updated" },
               ]}
               actionLabel="Watch Showcase"
-              actionUrl="/unified-intelligence/showcase"
+              actionUrl="/disposition-intelligence?tab=showcase-calls"
               color="rose"
             />
 
@@ -404,7 +404,7 @@ export function UnifiedIntelligenceDashboard() {
                 { label: "Queue", value: "Active" },
               ]}
               actionLabel="Manage Queue"
-              actionUrl="/unified-intelligence/reanalysis"
+              actionUrl="/disposition-intelligence?tab=reanalysis"
               color="purple"
             />
           </div>
@@ -440,7 +440,7 @@ export function UnifiedIntelligenceDashboard() {
                   </div>
                 </div>
                 <Button className="w-full" asChild>
-                  <a href="/unified-intelligence/conversations">
+                  <a href="/disposition-intelligence?tab=conversation-quality">
                     <MessageSquare className="mr-2 h-4 w-4" />
                     View All Conversations
                   </a>
@@ -482,7 +482,7 @@ export function UnifiedIntelligenceDashboard() {
                   </div>
                 </div>
                 <Button className="w-full" asChild>
-                  <a href="/unified-intelligence/dispositions">
+                  <a href="/disposition-intelligence?tab=disposition-intelligence">
                     <Brain className="mr-2 h-4 w-4" />
                     View Disposition Details
                   </a>
@@ -522,7 +522,7 @@ export function UnifiedIntelligenceDashboard() {
                   </div>
                 </div>
                 <Button className="w-full" asChild>
-                  <a href="/unified-intelligence/recordings">
+                  <a href="/disposition-intelligence?tab=conversation-quality">
                     <Play className="mr-2 h-4 w-4" />
                     Browse Call Recordings
                   </a>
@@ -562,7 +562,7 @@ export function UnifiedIntelligenceDashboard() {
                   </div>
                 </div>
                 <Button className="w-full" asChild>
-                  <a href="/unified-intelligence/reports">
+                  <a href="/reports">
                     <BarChart3 className="mr-2 h-4 w-4" />
                     View All Reports
                   </a>
@@ -602,7 +602,7 @@ export function UnifiedIntelligenceDashboard() {
                   </div>
                 </div>
                 <Button className="w-full" asChild>
-                  <a href="/unified-intelligence/showcase">
+                  <a href="/disposition-intelligence?tab=showcase-calls">
                     <Star className="mr-2 h-4 w-4" />
                     Watch Showcase Calls
                   </a>
@@ -616,25 +616,25 @@ export function UnifiedIntelligenceDashboard() {
       {/* Quick Actions */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Button variant="outline" className="h-12" asChild>
-          <a href="/unified-intelligence/conversations">
+          <a href="/disposition-intelligence?tab=conversation-quality">
             <MessageSquare className="mr-2 h-4 w-4" />
             Conversations
           </a>
         </Button>
         <Button variant="outline" className="h-12" asChild>
-          <a href="/unified-intelligence/dispositions">
+          <a href="/disposition-intelligence?tab=disposition-intelligence">
             <Brain className="mr-2 h-4 w-4" />
             Dispositions
           </a>
         </Button>
         <Button variant="outline" className="h-12" asChild>
-          <a href="/unified-intelligence/recordings">
+          <a href="/disposition-intelligence?tab=conversation-quality">
             <Mic className="mr-2 h-4 w-4" />
             Recordings
           </a>
         </Button>
         <Button variant="outline" className="h-12" asChild>
-          <a href="/unified-intelligence/reports">
+          <a href="/reports">
             <BarChart3 className="mr-2 h-4 w-4" />
             Reports
           </a>

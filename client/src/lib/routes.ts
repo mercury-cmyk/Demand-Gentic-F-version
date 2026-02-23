@@ -109,8 +109,8 @@ export const ROUTES = {
   AGENT_CONSOLE: '/agent-console',
   LEADS: '/leads',
   CONVERSATION_QUALITY: '/conversation-quality',
-  UNIFIED_INTELLIGENCE: '/unified-intelligence',
-  POTENTIAL_LEADS: '/unified-intelligence/potential-leads',
+  DISPOSITION_INTELLIGENCE: '/disposition-intelligence',
+  POTENTIAL_LEADS: '/disposition-intelligence/potential-leads',
 
   // ==========================================
   // Data Routes

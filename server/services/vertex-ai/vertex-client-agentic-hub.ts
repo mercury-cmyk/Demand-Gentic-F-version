@@ -26,6 +26,7 @@ import {
   type GenerationOptions,
 } from "./vertex-client";
 import { db } from "../../db";
+import { enrichCampaignQADefaults } from "../../lib/campaign-qa-defaults";
 import {
   campaigns,
   accounts,
@@ -415,8 +416,8 @@ Return JSON:
         projectType: projectType as any
       }).returning();
 
-      // 2. Create Agentic Campaign
-      const [campaign] = await db.insert(campaigns).values({
+      // 2. Create Agentic Campaign with auto-generated QA defaults
+      const [campaign] = await db.insert(campaigns).values(enrichCampaignQADefaults({
         type: mappedCampaignType as any,
         name: `Campaign - ${orderNumber}`,
         clientAccountId: this.context.clientAccountId,
@@ -426,7 +427,7 @@ Return JSON:
         targetQualifiedLeads: request.volumeRequested,
         dialMode: 'ai_agent',
         startDate: new Date(),
-      }).returning();
+      })).returning();
 
       // 3. Create Verification Campaign (to satisfy default schema FK)
       const [verifCampaign] = await db.insert(verificationCampaigns).values({

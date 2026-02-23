@@ -8,7 +8,7 @@
  *
  * Reuses the same filters and detail panel as Unified Intelligence.
  *
- * Route: /unified-intelligence/potential-leads
+ * Route: /disposition-intelligence/potential-leads
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -195,7 +195,7 @@ function adaptPotentialLeadToDetail(lead: PotentialLeadItem, rawData: any): Unif
 export default function PotentialLeadsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
 
   // Parse URL query params into filters
   const parseUrlParams = useCallback((): PotentialLeadsFilters => {
@@ -233,7 +233,7 @@ export default function PotentialLeadsPage() {
     if (filters.minConfidence) params.set('minConfidence', filters.minConfidence.toString());
 
     const newUrl = params.toString() ? `?${params.toString()}` : '';
-    window.history.replaceState(null, '', `/unified-intelligence/potential-leads${newUrl}`);
+    window.history.replaceState(null, '', `/disposition-intelligence/potential-leads${newUrl}`);
   }, [filters]);
 
   // Fetch campaigns for filter dropdown
@@ -341,7 +341,7 @@ export default function PotentialLeadsPage() {
     },
   });
 
-  const handleBack = () => setLocation('/unified-intelligence');
+  const handleBack = () => setLocation('/disposition-intelligence?tab=conversation-quality');
 
   const updateFilter = <K extends keyof PotentialLeadsFilters>(key: K, value: PotentialLeadsFilters[K]) => {
     setFilters(prev => ({ ...prev, [key]: value }));
