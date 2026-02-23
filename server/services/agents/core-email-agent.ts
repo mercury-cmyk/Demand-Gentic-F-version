@@ -509,7 +509,7 @@ export class CoreEmailAgent extends BaseAgent {
     const layersApplied: string[] = ['foundational_prompt'];
 
     try {
-      const systemPrompt = this.buildCompletePrompt(input);
+      const systemPrompt = await this.buildCompletePrompt(input);
 
       // Track which layers were applied
       if (input.organizationIntelligence) layersApplied.push('organization_intelligence');

@@ -15,6 +15,7 @@ import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { GoogleAuth } from "google-auth-library";
 import { generateJSON, chat } from "./vertex-client";
+import { wrapPromptWithOI } from "../../lib/org-intelligence-helper";
 
 // ==================== TYPES ====================
 
@@ -646,6 +647,7 @@ Return JSON:
   "recommendations": ["specific recommendation 1"]
 }`;
 
+    const enrichedAnalysisPrompt = await wrapPromptWithOI(analysisPrompt);
     const result = await generateJSON<{
       overallScore: number;
       categoryScores: {
@@ -663,7 +665,7 @@ Return JSON:
       strengths: string[];
       improvements: string[];
       recommendations: string[];
-    }>(analysisPrompt, { temperature: 0.3 });
+    }>(enrichedAnalysisPrompt, { temperature: 0.3 });
 
     return {
       ...result,

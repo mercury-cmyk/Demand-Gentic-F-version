@@ -10,7 +10,7 @@ import {
   Target, Clock, CheckCircle, Truck,
   Play, Pause, BarChart3, Plus, Mic, List, Phone, Mail,
   PhoneCall, PhoneOff, PhoneMissed, Voicemail, UserCheck,
-  MoreVertical, Eye, ChevronRight,
+  MoreVertical, Eye, ChevronRight, Ban, Users,
 } from 'lucide-react';
 
 interface Campaign {
@@ -43,6 +43,27 @@ interface Campaign {
     voicemail: number;
     noAnswer: number;
     invalid: number;
+  };
+  emailReport?: {
+    totalRecipients: number;
+    delivered: number;
+    opens: number;
+    clicks: number;
+    unsubscribes: number;
+  };
+  callSnapshot?: {
+    contactsInQueue: number;
+    callsMade: number;
+    callsConnected: number;
+    leadsQualified: number;
+    dncRequests: number;
+  };
+  emailSnapshot?: {
+    totalRecipients: number;
+    delivered: number;
+    opens: number;
+    clicks: number;
+    unsubscribes: number;
   };
   stats?: {
     attempts: number;
@@ -128,14 +149,30 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onOp
   const config = statusConfig[status] || statusConfig.active;
   const StatusIcon = config.icon;
 
-  // Resolve call report (prefer top-level callReport, fall back to stats.callReport)
-  const report = campaign.callReport || campaign.stats?.callReport;
+  // Determine channel type
+  const PHONE_TYPES = ['call', 'telemarketing', 'sql', 'content_syndication', 'appointment_generation',
+    'high_quality_leads', 'live_webinar', 'on_demand_webinar', 'executive_dinner',
+    'leadership_forum', 'conference'];
+  const rawType = (campaign.campaignType || campaign.type || '').toLowerCase();
+  const isEmail = rawType === 'email';
+  const isPhone = PHONE_TYPES.includes(rawType) || campaign.dialMode === 'ai_agent';
 
-  // Stats from callReport (true calls placed by the AI dialer)
-  const callsMade = Number(report?.callsMade || 0);
-  const connected = Number(report?.connected || 0);
-  const qualified = Number(report?.qualified || 0);
-  const voicemail = Number(report?.voicemail || 0);
+  // Resolve call stats (prefer snapshot, then callReport, then stats.callReport)
+  const report = campaign.callReport || campaign.stats?.callReport;
+  const cs = campaign.callSnapshot;
+  const recipients = cs?.contactsInQueue ?? campaign.stats?.queueStats?.total ?? campaign.totalContacts ?? campaign.eligibleCount ?? 0;
+  const callAttempts = cs?.callsMade ?? Number(report?.callsMade || 0);
+  const rpc = cs?.callsConnected ?? Number(report?.connected || 0);
+  const qualifiedLeads = cs?.leadsQualified ?? Number(report?.qualified || 0);
+  const dnc = cs?.dncRequests ?? 0;
+
+  // Resolve email stats (prefer snapshot, then emailReport)
+  const es = campaign.emailSnapshot || campaign.emailReport;
+  const emailRecipients = es?.totalRecipients ?? 0;
+  const emailDelivered = es?.delivered ?? 0;
+  const emailOpens = es?.opens ?? 0;
+  const emailClicks = es?.clicks ?? 0;
+  const emailUnsubs = es?.unsubscribes ?? 0;
 
   const leadsCount = campaign.stats?.leads ?? campaign.verifiedCount ?? 0;
   const queueCount = campaign.stats?.queueStats?.total ?? campaign.totalContacts ?? campaign.eligibleCount ?? 0;
@@ -188,24 +225,55 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onOp
         </div>
       </div>
 
-      {/* Col 2: Mini 2×2 KPI Grid */}
-      <div className="hidden sm:grid grid-cols-4 gap-x-5 gap-y-0 flex-[3] shrink-0">
-        <div className="flex flex-col items-center">
-          <p className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">{callsMade.toLocaleString()}</p>
-          <p className="text-[9px] uppercase tracking-wider text-slate-400">Calls</p>
-        </div>
-        <div className="flex flex-col items-center">
-          <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{connected.toLocaleString()}</p>
-          <p className="text-[9px] uppercase tracking-wider text-slate-400">Connected</p>
-        </div>
-        <div className="flex flex-col items-center">
-          <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{qualified.toLocaleString()}</p>
-          <p className="text-[9px] uppercase tracking-wider text-slate-400">Qualified</p>
-        </div>
-        <div className="flex flex-col items-center">
-          <p className="text-sm font-bold tabular-nums text-amber-600 dark:text-amber-400">{voicemail.toLocaleString()}</p>
-          <p className="text-[9px] uppercase tracking-wider text-slate-400">Voicemail</p>
-        </div>
+      {/* Col 2: 5-column KPI Grid — aligned for phone & email */}
+      <div className="hidden sm:grid grid-cols-5 gap-x-4 gap-y-0 flex-[3] shrink-0">
+        {isEmail ? (
+          <>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">{emailRecipients.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Recipients</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{emailDelivered.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Delivered</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{emailOpens.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Opened</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{emailClicks.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Clicked</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-red-500 dark:text-red-400">{emailUnsubs.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Unsub</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">{recipients.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Recipients</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{callAttempts.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Attempts</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{rpc.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">RPC</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{qualifiedLeads.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">Qualified</p>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="text-sm font-bold tabular-nums text-red-500 dark:text-red-400">{dnc.toLocaleString()}</p>
+              <p className="text-[9px] uppercase tracking-wider text-slate-400">DNC</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Col 3: Primary Action + Overflow Menu */}

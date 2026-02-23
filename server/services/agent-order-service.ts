@@ -14,6 +14,7 @@ import {
 import { eq, and } from "drizzle-orm";
 import { chat as vertexChat, generateJSON } from "./vertex-ai";
 import { v4 as uuid } from "uuid";
+import { wrapPromptWithOI } from "../lib/org-intelligence-helper";
 
 // Types
 export interface OrderConfiguration {
@@ -188,7 +189,8 @@ Based on this goal and context, recommend a campaign configuration. Return a JSO
 - rationale: 2-3 sentences explaining why this configuration is recommended based on the client's ICP and goal`;
 
   try {
-    const response = await generateJSON(prompt, {
+    const enrichedPrompt = await wrapPromptWithOI(prompt);
+    const response = await generateJSON(enrichedPrompt, {
       campaignType: "string",
       suggestedVolume: "number",
       targetAudience: "object",

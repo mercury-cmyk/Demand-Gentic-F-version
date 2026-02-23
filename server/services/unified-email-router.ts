@@ -21,8 +21,9 @@ import {
   contacts,
 } from '../../shared/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { EMAIL_AGENT_FOUNDATIONAL_PROMPT } from './agents/core-email-agent';
+import { unifiedEmailAgent } from './agents/unified/unified-email-agent';
 import crypto from 'crypto';
+import { getSuperOrgOIContext } from '../lib/org-intelligence-helper';
 
 // Provider clients
 import OpenAI from 'openai';
@@ -297,7 +298,7 @@ export class UnifiedEmailRouter {
     }
 
     // Build prompts
-    const systemPrompt = this.buildSystemPrompt(request, layersApplied);
+    const systemPrompt = await this.buildSystemPrompt(request, layersApplied);
     const userPrompt = this.buildUserPrompt(request);
 
     // Determine provider order
@@ -454,13 +455,18 @@ export class UnifiedEmailRouter {
   /**
    * Build the complete system prompt with all applicable layers
    */
-  private buildSystemPrompt(request: EmailGenerationRequest, layersApplied: string[]): string {
-    const parts: string[] = [EMAIL_AGENT_FOUNDATIONAL_PROMPT];
+  private async buildSystemPrompt(request: EmailGenerationRequest, layersApplied: string[]): Promise<string> {
+    // Use the Unified Email Agent's assembled foundational prompt (single source of truth)
+    // This includes Section 0 (core email foundational knowledge from core-email-agent.ts)
+    // plus Sections 1-12 (identity, tone, subject lines, opening hooks, etc.)
+    const parts: string[] = [unifiedEmailAgent.assembleFoundationalPrompt()];
+    layersApplied.push('unified_email_agent_foundational');
 
-    // Add organization context
-    if (request.organizationContext) {
+    // Add organization context (always injected — auto-fetches if not provided)
+    const orgContext = request.organizationContext || await getSuperOrgOIContext();
+    if (orgContext) {
       layersApplied.push('organization_intelligence');
-      parts.push(`\n\n## ORGANIZATION CONTEXT\n${request.organizationContext}`);
+      parts.push(`\n\n## ORGANIZATION CONTEXT\n${orgContext}`);
     }
 
     // Add campaign-specific context

@@ -240,7 +240,10 @@ export default function GenerativeStudioPage() {
   useEffect(() => {
     if (projectIdFromUrl) return;
     const storedOrgId = localStorage.getItem("generativeStudioOrgId");
-    setSelectedOrgId(storedOrgId || SUPER_ORG_ID);
+    if (storedOrgId) {
+      setSelectedOrgId(storedOrgId);
+    }
+    // SUPER_ORG_ID is already the default initial state — no need to set it again
   }, []);
 
   useEffect(() => {
@@ -261,15 +264,43 @@ export default function GenerativeStudioPage() {
     }
   }, [projectIdFromUrl]);
 
-  // Auto-resolve organization from project when projectId is in URL
-  const { data: resolvedOrgData } = useQuery<{ organizationId: string | null }>({
+  // Auto-resolve organization + project type from projectId in URL
+  const { data: resolvedOrgData } = useQuery<{
+    organizationId: string | null;
+    clientProjectId?: string | null;
+    studioProjectId?: string | null;
+    studioProjectType?: string | null;
+    source?: string | null;
+  }>({
     queryKey: [`/api/generative-studio/resolve-project-org?projectId=${projectIdFromUrl || ""}`],
     enabled: !!projectIdFromUrl && !orgIdFromUrl,
   });
 
+  // Track the resolved studio project ID for auto-loading content
+  const [preloadStudioProjectId, setPreloadStudioProjectId] = useState<string | null>(null);
+
   useEffect(() => {
-    if (resolvedOrgData?.organizationId) {
+    if (!resolvedOrgData) return;
+    if (resolvedOrgData.organizationId) {
       setSelectedOrgId(resolvedOrgData.organizationId);
+    }
+    // If the URL points to a generative studio project, auto-switch to the right tab
+    if (resolvedOrgData.source === "generative_studio" && resolvedOrgData.studioProjectId) {
+      setPreloadStudioProjectId(resolvedOrgData.studioProjectId);
+      // Map project type to module tab
+      const typeToModule: Record<string, string> = {
+        landing_page: "landing-page",
+        email_template: "email",
+        blog_post: "blog",
+        ebook: "ebook",
+        solution_brief: "solution-brief",
+      };
+      const moduleId = typeToModule[resolvedOrgData.studioProjectType || ""] || "landing-page";
+      setActiveModule(moduleId);
+      // Also set the client project from metadata if available
+      if (resolvedOrgData.clientProjectId) {
+        setSelectedProjectId(resolvedOrgData.clientProjectId);
+      }
     }
   }, [resolvedOrgData]);
 
@@ -588,6 +619,7 @@ export default function GenerativeStudioPage() {
               organizationId={selectedOrgId || undefined}
               clientProjectId={selectedProjectId || undefined}
               campaignId={campaignIdFromUrl || undefined}
+              preloadProjectId={preloadStudioProjectId || undefined}
             />
           )}
           {activeModule === "email" && (

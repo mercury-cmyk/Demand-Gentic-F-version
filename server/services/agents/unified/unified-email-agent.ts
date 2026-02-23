@@ -33,10 +33,24 @@ import type {
   CapabilityPromptMapping,
   UnifiedAgentConfiguration,
 } from './types';
+import { EMAIL_AGENT_FOUNDATIONAL_PROMPT } from '../core-email-agent';
 
 // ==================== EMAIL AGENT PROMPT SECTIONS ====================
 
 const EMAIL_PROMPT_SECTIONS: PromptSection[] = [
+  // Section 0: Core Foundational Knowledge — imported from core-email-agent.ts
+  // Contains deliverability & compliance, inbox-safe rendering, subject line optimization,
+  // email body architecture, personalization engine, CTA design, sequence/cadence strategy,
+  // and all expert-level email marketing standards.
+  UnifiedBaseAgent['createPromptSection'](
+    'email_foundational_knowledge',
+    'Core Email Foundational Knowledge',
+    0,
+    EMAIL_AGENT_FOUNDATIONAL_PROMPT,
+    'identity',
+    true
+  ),
+
   UnifiedBaseAgent['createPromptSection'](
     'email_identity',
     'Identity & Persona',
@@ -385,6 +399,20 @@ CONTINUOUS IMPROVEMENT:
 
 const EMAIL_CAPABILITIES: AgentCapability[] = [
   {
+    id: 'email_cap_foundational',
+    name: 'Core Email Foundational Knowledge',
+    description: 'Deliverability & compliance, spam filter optimization, inbox-safe rendering, subject line best practices, email body architecture, personalization, CTA design, sequence/cadence strategy — the bedrock knowledge for all email interactions',
+    promptSectionIds: ['email_foundational_knowledge'],
+    learningInputSources: [{
+      id: 'lis_email_foundational', name: 'Email Compliance Audit', type: 'compliance_audit',
+      description: 'Monitors adherence to foundational email marketing standards and deliverability rules', isActive: true,
+    }],
+    performanceScore: 95,
+    trend: 'stable',
+    isActive: true,
+    optimizationWeight: 10,
+  },
+  {
     id: 'email_cap_identity',
     name: 'Identity & Persona',
     description: 'Core identity, role definition, and brand voice',
@@ -649,7 +677,7 @@ export class UnifiedEmailAgent extends UnifiedBaseAgent {
   };
 
   async execute(input: AgentExecutionInput): Promise<AgentExecutionOutput> {
-    const prompt = this.buildCompletePrompt(input);
+    const prompt = await this.buildCompletePrompt(input);
     return {
       success: true,
       content: prompt,
@@ -666,6 +694,69 @@ export class UnifiedEmailAgent extends UnifiedBaseAgent {
         layersApplied: ['foundational', 'organization', 'campaign', 'contact'],
       },
     };
+  }
+
+  // =============================================================================
+  // EMAIL-SPECIFIC UTILITY METHODS
+  // =============================================================================
+
+  /**
+   * Generate a follow-up email based on previous interaction
+   */
+  async generateFollowUpEmail(
+    campaignContext: AgentExecutionInput['campaignContext'] & {},
+    previousEmailContext: string,
+    followUpNumber: number
+  ): Promise<AgentExecutionOutput> {
+    const additionalInstructions = `
+This is follow-up email #${followUpNumber} in a sequence.
+Previous email context: ${previousEmailContext}
+Generate a follow-up that:
+- References the previous outreach naturally
+- Provides new value or angle
+- Maintains consistency with prior messaging
+- Increases urgency appropriately for follow-up #${followUpNumber}
+`;
+
+    return this.execute({
+      agentId: this.id,
+      campaignContext,
+      additionalInstructions,
+    });
+  }
+
+  /**
+   * Generate a transactional/system email
+   */
+  async generateTransactionalEmail(
+    type: 'confirmation' | 'notification' | 'reminder' | 'digest',
+    context: {
+      recipientName?: string;
+      subject: string;
+      mainMessage: string;
+      actionRequired?: string;
+      actionUrl?: string;
+    }
+  ): Promise<AgentExecutionOutput> {
+    const additionalInstructions = `
+Generate a ${type} transactional email with:
+- Subject: ${context.subject}
+- Main Message: ${context.mainMessage}
+${context.actionRequired ? `- Action Required: ${context.actionRequired}` : ''}
+${context.actionUrl ? `- Action URL: ${context.actionUrl}` : ''}
+
+Transactional emails should be:
+- Clear and concise
+- Action-focused
+- Minimal design
+- Highly deliverable (avoid marketing language)
+`;
+
+    return this.execute({
+      agentId: this.id,
+      contactContext: context.recipientName ? { contactId: '', firstName: context.recipientName } : undefined,
+      additionalInstructions,
+    });
   }
 }
 

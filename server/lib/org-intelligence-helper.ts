@@ -360,11 +360,21 @@ export async function getOrganizationLearningSummary(): Promise<string> {
   }
 }
 
+// ==================== SETTINGS CACHE ====================
+let _settingsCache: { settings: OrganizationPromptSettings; fetchedAt: number } | null = null;
+const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Gets the organization's prompt optimization settings for AI agents
- * Prioritizes super org compiledOrgContext, then accountIntelligence, then defaults
+ * Prioritizes super org compiledOrgContext, then accountIntelligence, then defaults.
+ * Cached in memory for 5 minutes.
  */
 export async function getOrganizationPromptSettings(): Promise<OrganizationPromptSettings> {
+  const now = Date.now();
+  if (_settingsCache && (now - _settingsCache.fetchedAt) < SETTINGS_CACHE_TTL_MS) {
+    return _settingsCache.settings;
+  }
+
   try {
     // First: check super org for compiled context
     const [superOrg] = await db.select()
@@ -381,20 +391,24 @@ export async function getOrganizationPromptSettings(): Promise<OrganizationPromp
       .orderBy(desc(accountIntelligence.createdAt))
       .limit(1);
 
-    return {
+    const settings: OrganizationPromptSettings = {
       orgIntelligence: superOrgContext || profile?.orgIntelligence?.trim() || DEFAULT_ORG_INTELLIGENCE,
       compliancePolicy: profile?.compliancePolicy?.trim() || DEFAULT_COMPLIANCE_POLICY,
       platformPolicies: profile?.platformPolicies?.trim() || DEFAULT_PLATFORM_POLICIES,
       agentVoiceDefaults: profile?.agentVoiceDefaults?.trim() || DEFAULT_VOICE_DEFAULTS,
     };
+    _settingsCache = { settings, fetchedAt: now };
+    return settings;
   } catch (error) {
     console.error('[OrgIntelligence] Failed to fetch prompt settings from database:', error);
-    return {
+    const settings: OrganizationPromptSettings = {
       orgIntelligence: DEFAULT_ORG_INTELLIGENCE,
       compliancePolicy: DEFAULT_COMPLIANCE_POLICY,
       platformPolicies: DEFAULT_PLATFORM_POLICIES,
       agentVoiceDefaults: DEFAULT_VOICE_DEFAULTS,
     };
+    _settingsCache = { settings, fetchedAt: now };
+    return settings;
   }
 }
 
@@ -445,6 +459,120 @@ export async function getOrganizationProfile(): Promise<OrganizationProfile | nu
     console.error('[OrgIntelligence] Failed to fetch organization profile:', error);
     return null;
   }
+}
+
+// ==================== SUPER ORG OI CONTEXT (FOR STANDALONE AI SERVICES) ====================
+
+let _superOrgOICache: { context: string; fetchedAt: number } | null = null;
+const SUPER_ORG_OI_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function resolveFieldValue(field: any): string {
+  if (!field) return '';
+  if (typeof field === 'string') return field.trim();
+  if (typeof field === 'object' && field.value) return String(field.value).trim();
+  return '';
+}
+
+/**
+ * Get the super organization's OI context as a prompt-ready string.
+ * Cached in memory for 5 minutes to avoid per-call DB queries.
+ *
+ * Use this for services that use Vertex AI's generateJSON/generateText directly
+ * and need OI context without the full buildAgentSystemPrompt() overhead.
+ */
+export async function getSuperOrgOIContext(): Promise<string> {
+  const now = Date.now();
+  if (_superOrgOICache && (now - _superOrgOICache.fetchedAt) < SUPER_ORG_OI_CACHE_TTL_MS) {
+    return _superOrgOICache.context;
+  }
+
+  try {
+    const profile = await getOrganizationProfile();
+    const settings = await getOrganizationPromptSettings();
+
+    const parts: string[] = [];
+
+    // Start with compiled org context if available (richest source)
+    if (settings.orgIntelligence && settings.orgIntelligence !== DEFAULT_ORG_INTELLIGENCE) {
+      parts.push(settings.orgIntelligence);
+    }
+
+    // Add structured profile data
+    if (profile) {
+      const identity = (profile.identity || {}) as any;
+      const offerings = (profile.offerings || {}) as any;
+      const icp = (profile.icp || {}) as any;
+      const positioning = (profile.positioning || {}) as any;
+      const outreach = (profile.outreach || {}) as any;
+
+      if (profile.domain) parts.push(`Domain: ${profile.domain}`);
+
+      const desc = resolveFieldValue(identity.description);
+      if (desc) parts.push(`Description: ${desc}`);
+      const legalName = resolveFieldValue(identity.legalName);
+      if (legalName) parts.push(`Organization: ${legalName}`);
+      const regions = resolveFieldValue(identity.regions);
+      if (regions) parts.push(`Regions: ${regions}`);
+
+      const coreProducts = resolveFieldValue(offerings.coreProducts);
+      if (coreProducts) parts.push(`Core Products/Services: ${coreProducts}`);
+      const useCases = resolveFieldValue(offerings.useCases);
+      if (useCases) parts.push(`Key Use Cases: ${useCases}`);
+      const problemsSolved = resolveFieldValue(offerings.problemsSolved);
+      if (problemsSolved) parts.push(`Problems Solved: ${problemsSolved}`);
+      const differentiators = resolveFieldValue(offerings.differentiators);
+      if (differentiators) parts.push(`Differentiators: ${differentiators}`);
+
+      const personas = resolveFieldValue(icp.personas);
+      if (personas) parts.push(`Target Personas: ${personas}`);
+      const industries = resolveFieldValue(icp.industries);
+      if (industries) parts.push(`Target Industries: ${industries}`);
+      const objections = resolveFieldValue(icp.objections);
+      if (objections) parts.push(`Common Objections: ${objections}`);
+
+      const oneLiner = resolveFieldValue(positioning.oneLiner);
+      if (oneLiner) parts.push(`Positioning: ${oneLiner}`);
+      const valueProposition = resolveFieldValue(positioning.valueProposition);
+      if (valueProposition) parts.push(`Value Proposition: ${valueProposition}`);
+      const competitors = resolveFieldValue(positioning.competitors);
+      if (competitors) parts.push(`Competitive Landscape: ${competitors}`);
+
+      const emailAngles = resolveFieldValue(outreach.emailAngles);
+      if (emailAngles) parts.push(`Email Messaging Angles: ${emailAngles}`);
+      const callOpeners = resolveFieldValue(outreach.callOpeners);
+      if (callOpeners) parts.push(`Call Openers: ${callOpeners}`);
+    }
+
+    const context = parts.join('\n').trim();
+    _superOrgOICache = { context, fetchedAt: now };
+    return context;
+  } catch (error) {
+    console.error('[OrgIntelligence] Failed to fetch super org OI context:', error);
+    _superOrgOICache = { context: '', fetchedAt: now };
+    return '';
+  }
+}
+
+/**
+ * Wraps an existing system prompt string with OI context.
+ * Use this for Vertex AI services that call generateJSON/generateText
+ * with a raw prompt string (not buildAgentSystemPrompt).
+ *
+ * The OI context is PREPENDED so it acts as foundational context,
+ * while the original prompt instructions remain intact.
+ * If no OI is available, returns the original prompt unchanged.
+ */
+export async function wrapPromptWithOI(existingPrompt: string): Promise<string> {
+  const oiContext = await getSuperOrgOIContext();
+  if (!oiContext) return existingPrompt;
+
+  return `## Organization Intelligence (Mandatory Context)
+All outputs must be aligned with this organizational context. Do not produce generic content.
+${oiContext}
+
+---
+
+${existingPrompt}`;
 }
 
 /**

@@ -20,10 +20,11 @@ import { getPromptByKey } from './prompt-management-service';
 // ==================== FALLBACK PROMPTS ====================
 
 // Import hardcoded prompts for fallback when database is unavailable
-import { VOICE_AGENT_FOUNDATIONAL_PROMPT } from './agents/core-voice-agent';
-import { EMAIL_AGENT_FOUNDATIONAL_PROMPT } from './agents/core-email-agent';
-import { COMPLIANCE_AGENT_FOUNDATIONAL_PROMPT } from './agents/core-compliance-agent';
-import { DATA_MANAGEMENT_AGENT_FOUNDATIONAL_PROMPT } from './agents/core-data-management-agent';
+// All foundational prompts now come through unified agents (single source of truth)
+import { unifiedVoiceAgent } from './agents/unified/unified-voice-agent';
+import { unifiedEmailAgent } from './agents/unified/unified-email-agent';
+import { unifiedQAAgent } from './agents/unified/unified-qa-agent';
+import { unifiedMemoryAgent } from './agents/unified/unified-memory-agent';
 import { DEMAND_INTEL_KNOWLEDGE, DEMAND_QUAL_KNOWLEDGE, DEMAND_ENGAGE_KNOWLEDGE } from './demand-agent-knowledge';
 import { VOICE_AGENT_CONTROL_HEADER, VOICE_AGENT_CONTROL_FOOTER } from './voice-agent-control-defaults';
 
@@ -93,17 +94,18 @@ function buildKnowledgePrompt(knowledge: {
  * Keys must match the promptKey values in the database
  */
 const FALLBACK_PROMPTS: Record<string, string> = {
-  // Voice Agent Prompts
-  'voice.foundational': VOICE_AGENT_FOUNDATIONAL_PROMPT,
+  // Voice Agent Prompts — sourced from unified voice agent (single source of truth)
+  'voice.foundational': unifiedVoiceAgent.assembleFoundationalPrompt(),
   'voice.control.header': VOICE_AGENT_CONTROL_HEADER,
   'voice.control.footer': VOICE_AGENT_CONTROL_FOOTER,
 
-  // Email Agent Prompts
-  'email.foundational': EMAIL_AGENT_FOUNDATIONAL_PROMPT,
+  // Email Agent Prompts — sourced from unified email agent
+  'email.foundational': unifiedEmailAgent.assembleFoundationalPrompt(),
 
-  // Compliance Prompts
-  'compliance.foundational': COMPLIANCE_AGENT_FOUNDATIONAL_PROMPT,
-  'data.management': DATA_MANAGEMENT_AGENT_FOUNDATIONAL_PROMPT,
+  // Compliance Prompts — sourced from unified QA agent (compliance → qa mapping)
+  'compliance.foundational': unifiedQAAgent.assembleFoundationalPrompt(),
+  // Data Management — sourced from unified memory agent (data-management → memory mapping)
+  'data.management': unifiedMemoryAgent.assembleFoundationalPrompt(),
 
   // Intelligence Prompts (demand agents)
   'intel.demand_intel': buildKnowledgePrompt(DEMAND_INTEL_KNOWLEDGE),

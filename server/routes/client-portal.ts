@@ -1239,6 +1239,119 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
   }
 });
 
+// ==================== CLIENT CAMPAIGN BATCH STATS ====================
+router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
+  try {
+    const { campaignIds, types } = req.body as {
+      campaignIds: string[];
+      types: Record<string, { isCall: boolean; isEmail: boolean }>;
+    };
+    if (!campaignIds?.length) return res.json({});
+
+    // Verify client has access to all requested campaigns
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // Bulk leads qualified query
+    const leadsQualifiedRows = await db
+      .select({
+        campaignId: leads.campaignId,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(leads)
+      .where(and(
+        inArray(leads.campaignId, campaignIds),
+        inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
+      ))
+      .groupBy(leads.campaignId);
+    const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
+      leadsQualifiedRows.map((r) => [r.campaignId, r.count])
+    );
+
+    const results: Record<string, any> = {};
+
+    await Promise.all(campaignIds.map(async (campaignId) => {
+      const entry: any = { call: null, email: null };
+      const info = types?.[campaignId] || { isCall: false, isEmail: false };
+
+      try {
+        if (info.isEmail) {
+          const [sentResult] = await db
+            .select({ count: sql<number>`COUNT(*)::int` })
+            .from(campaignQueue)
+            .where(eq(campaignQueue.campaignId, campaignId));
+          const totalSent = sentResult?.count || 0;
+
+          const sendIdSubquery = sql`(SELECT id FROM email_sends WHERE campaign_id = ${campaignId})`;
+          const [opensResult] = await db.execute(sql`
+            SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
+            FROM email_opens WHERE message_id IN ${sendIdSubquery}
+          `).then(r => r.rows as any[]);
+          const [clicksResult] = await db.execute(sql`
+            SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
+            FROM email_link_clicks WHERE message_id IN ${sendIdSubquery}
+          `).then(r => r.rows as any[]);
+
+          entry.email = {
+            totalRecipients: totalSent,
+            delivered: totalSent,
+            opens: opensResult?.unique || 0,
+            clicks: clicksResult?.unique || 0,
+            unsubscribes: 0,
+          };
+        }
+
+        if (info.isCall) {
+          // Queue stats via direct query
+          const [queueResult] = await db
+            .select({ count: sql<number>`COUNT(CASE WHEN status = 'queued' THEN 1 END)::int` })
+            .from(campaignQueue)
+            .where(eq(campaignQueue.campaignId, campaignId));
+          const contactsInQueue = queueResult?.count || 0;
+
+          const connectedDispositions = [
+            'connected', 'qualified', 'callback-requested', 'not_interested',
+            'dnc-request', 'meeting_booked', 'interested', 'do_not_call', 'wrong_number'
+          ];
+          const [humanCallStats] = await db
+            .select({
+              callsMade: sql<number>`COUNT(*)::int`,
+              callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition}::text IN (${sql.join(connectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
+              dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition}::text = 'dnc-request' THEN 1 END)::int`,
+            })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.campaignId, campaignId));
+
+          const aiConnectedDispositions = ['qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review'];
+          const [aiCallStats] = await db
+            .select({
+              callsMade: sql<number>`COUNT(*)::int`,
+              callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(aiConnectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
+              dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'do_not_call' THEN 1 END)::int`,
+            })
+            .from(callSessions)
+            .where(eq(callSessions.campaignId, campaignId));
+
+          entry.call = {
+            contactsInQueue,
+            callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
+            callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
+            leadsQualified: leadsQualifiedByCampaign[campaignId] || 0,
+            dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
+          };
+        }
+      } catch (err) {
+        console.error(`[CLIENT PORTAL BATCH-STATS] Error for campaign ${campaignId}:`, err);
+      }
+
+      results[campaignId] = entry;
+    }));
+
+    res.json(results);
+  } catch (error) {
+    console.error('[CLIENT PORTAL BATCH-STATS] Error:', error);
+    res.status(500).json({ message: "Failed to fetch batch stats" });
+  }
+});
 
 
 // ==================== REQUEST ADDITIONAL LEADS ====================

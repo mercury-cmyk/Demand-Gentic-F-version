@@ -29,10 +29,23 @@ import type {
   CapabilityPromptMapping,
   UnifiedAgentConfiguration,
 } from './types';
+import { DATA_MANAGEMENT_AGENT_FOUNDATIONAL_PROMPT } from '../core-data-management-agent';
 
 // ==================== MEMORY AGENT PROMPT SECTIONS ====================
 
 const MEMORY_PROMPT_SECTIONS: PromptSection[] = [
+  // Section 0: Core Data Management Foundational Knowledge — imported from core-data-management-agent.ts
+  // Contains data segmentation & structuring, data hygiene & maintenance, data enrichment
+  // & intelligence, required inputs, output format, and data quality standards.
+  UnifiedBaseAgent['createPromptSection'](
+    'memory_data_foundational',
+    'Core Data Management Foundational Knowledge',
+    0,
+    DATA_MANAGEMENT_AGENT_FOUNDATIONAL_PROMPT,
+    'knowledge',
+    true
+  ),
+
   UnifiedBaseAgent['createPromptSection'](
     'memory_identity',
     'Identity & Mission',
@@ -364,6 +377,21 @@ Your memory feeds every other agent with rich context for intelligent decision-m
 // ==================== MEMORY AGENT CAPABILITIES ====================
 
 const MEMORY_CAPABILITIES: AgentCapability[] = [
+  {
+    id: 'memory_cap_data_foundational',
+    name: 'Core Data Management Foundational Knowledge',
+    description: 'Data segmentation, hygiene, maintenance, enrichment, intelligence, and quality standards — the bedrock data management layer for all memory operations',
+    promptSectionIds: ['memory_data_foundational'],
+    learningInputSources: [{
+      id: 'lis_memory_data', name: 'Data Quality Audit', type: 'data_quality_audit',
+      description: 'Monitors data accuracy, completeness, and enrichment readiness', isActive: true,
+    }],
+    performanceScore: 92,
+    trend: 'stable',
+    isActive: true,
+    optimizationWeight: 10,
+  },
+
   {
     id: 'memory_cap_conversation',
     name: 'Conversation Memory Management',

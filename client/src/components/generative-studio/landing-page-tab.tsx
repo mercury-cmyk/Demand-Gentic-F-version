@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -18,6 +18,8 @@ interface LandingPageTabProps {
   organizationId?: string;
   clientProjectId?: string;
   campaignId?: string;
+  /** When set, auto-loads an existing generative studio project for preview */
+  preloadProjectId?: string;
 }
 
 export default function LandingPageTab({
@@ -26,6 +28,7 @@ export default function LandingPageTab({
   organizationId,
   clientProjectId,
   campaignId,
+  preloadProjectId,
 }: LandingPageTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -37,6 +40,36 @@ export default function LandingPageTab({
   const [ctaGoal, setCtaGoal] = useState("");
   const [thankYouPageUrl, setThankYouPageUrl] = useState("/thank-you");
   const [assetUrl, setAssetUrl] = useState("");
+
+  // Auto-load existing project content when preloadProjectId is provided (URL navigation)
+  const { data: preloadedProject } = useQuery<{ project: any }>({
+    queryKey: [`/api/generative-studio/projects/${preloadProjectId}`],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/generative-studio/projects/${preloadProjectId}`);
+      return res.json();
+    },
+    enabled: !!preloadProjectId && !result,
+  });
+
+  useEffect(() => {
+    if (preloadedProject?.project && !result) {
+      const p = preloadedProject.project;
+      setProjectId(p.id);
+      // Build the result object matching the generate mutation output shape
+      setResult({
+        html: p.generatedContentHtml || p.generatedContent || null,
+        metaTitle: (p.metadata as any)?.metaTitle || p.title || null,
+        metaDescription: (p.metadata as any)?.metaDescription || null,
+        title: p.title || null,
+      });
+      // If already published, set the published URL
+      if (p.status === "published" && (p.metadata as any)?.publishedUrl) {
+        const pubUrl = (p.metadata as any).publishedUrl;
+        setPublishedUrl(pubUrl);
+        setPublishedSlug(parsePublishedSlug(pubUrl));
+      }
+    }
+  }, [preloadedProject]);
   const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
 
   const { data: submissionStats, isLoading: submissionsLoading } = useQuery<any>({

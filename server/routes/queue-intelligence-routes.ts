@@ -8,6 +8,7 @@
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../auth";
 import { generateJSON } from "../services/vertex-ai/vertex-client";
+import { wrapPromptWithOI } from "../lib/org-intelligence-helper";
 import {
   scoreQueueContacts,
   getQueueIntelligenceOverview,
@@ -368,7 +369,8 @@ Return a JSON object with these exact fields:
 
 Use realistic job titles, industry terms, problem keywords, and solution keywords that match the campaign context. Higher scores (200-400) for best fits, lower (50-150) for decent fits. Negative scores for poor fits.`;
 
-    const config = await generateJSON<Record<string, unknown>>(prompt, { temperature: 0.3, maxTokens: 1000 });
+    const enrichedPrompt = await wrapPromptWithOI(prompt);
+    const config = await generateJSON<Record<string, unknown>>(enrichedPrompt, { temperature: 0.3, maxTokens: 1000 });
 
     res.json({ config });
   } catch (error: any) {

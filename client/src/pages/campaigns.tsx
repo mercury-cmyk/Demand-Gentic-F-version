@@ -649,43 +649,51 @@ export default function CampaignsPage() {
                         </div>
 
                         {/* Inline KPI metrics */}
-                        <div className="hidden md:grid grid-cols-4 gap-x-5 flex-[2.5] shrink-0">
+                        <div className="hidden md:grid grid-cols-5 gap-x-4 flex-[3] shrink-0">
                           {isPhone ? (
                             <>
                               <div className="flex flex-col items-center">
-                                <p className="text-sm font-bold tabular-nums text-foreground">{callAttempts.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Calls</p>
+                                <p className="text-sm font-bold tabular-nums text-foreground">{(callSnapshot?.contactsInQueue ?? campaignQueueStats?.total ?? 0).toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Recipients</p>
                               </div>
                               <div className="flex flex-col items-center">
-                                <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{callConnected.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Connected</p>
+                                <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{callAttempts.toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Attempts</p>
                               </div>
                               <div className="flex flex-col items-center">
-                                <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{connectRate}%</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Rate</p>
+                                <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{callConnected.toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">RPC</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{(callSnapshot?.leadsQualified ?? 0).toLocaleString()}</p>
                                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Qualified</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-red-500 dark:text-red-400">{(callSnapshot?.dncRequests ?? 0).toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">DNC</p>
                               </div>
                             </>
                           ) : (
                             <>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-foreground">{emailRecipients.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Sent</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Recipients</p>
                               </div>
                               <div className="flex flex-col items-center">
-                                <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{emailOpens.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Opens</p>
+                                <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{(emailSnapshot?.delivered ?? 0).toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Delivered</p>
                               </div>
                               <div className="flex flex-col items-center">
-                                <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{engagementRate}%</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Engage</p>
+                                <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{emailOpens.toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Opened</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{(emailSnapshot?.clicks ?? 0).toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Clicks</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Clicked</p>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <p className="text-sm font-bold tabular-nums text-red-500 dark:text-red-400">{(emailSnapshot?.unsubscribes ?? 0).toLocaleString()}</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Unsub</p>
                               </div>
                             </>
                           )}

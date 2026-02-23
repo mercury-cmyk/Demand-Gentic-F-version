@@ -119,19 +119,24 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
     }
   };
 
-  // Auto-select: prioritize super org, then isDefault, then first org
+  // Auto-select: prioritize super org, then isDefault, then first org.
+  // Also triggers when the current selectedOrgId doesn't match any org in the list.
   useEffect(() => {
-    if (orgsData?.organizations && !selectedOrgId) {
-      const superOrg = orgsData.organizations.find((o) => o.organizationType === 'super');
-      if (superOrg) {
-        onOrgChange(superOrg.id);
+    if (!orgsData?.organizations || orgsData.organizations.length === 0) return;
+
+    // If current selection is valid (exists in the list), keep it
+    if (selectedOrgId && orgsData.organizations.some((o) => o.id === selectedOrgId)) return;
+
+    // Otherwise auto-select the best match
+    const superOrg = orgsData.organizations.find((o) => o.organizationType === 'super');
+    if (superOrg) {
+      onOrgChange(superOrg.id);
+    } else {
+      const defaultOrg = orgsData.organizations.find((o) => o.isDefault);
+      if (defaultOrg) {
+        onOrgChange(defaultOrg.id);
       } else {
-        const defaultOrg = orgsData.organizations.find((o) => o.isDefault);
-        if (defaultOrg) {
-          onOrgChange(defaultOrg.id);
-        } else if (orgsData.organizations.length > 0) {
-          onOrgChange(orgsData.organizations[0].id);
-        }
+        onOrgChange(orgsData.organizations[0].id);
       }
     }
   }, [orgsData?.organizations, selectedOrgId, onOrgChange]);
