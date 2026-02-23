@@ -8,7 +8,8 @@ import { eq, or, and, sql } from "drizzle-orm";
 import { mapTelnyxHangupCause, shouldTriggerSuppression } from "../lib/contact-suppression";
 import { updateContactSuppression } from "../services/disposition-engine";
 import { setAmdResultForSession } from "../services/voice-dialer";
-import { autonomousDialerEvents } from "../services/autonomous-ai-dialer";
+// Autonomous dialer temporarily disabled — lazy-import to avoid startup crash
+// import { autonomousDialerEvents } from "../services/autonomous-ai-dialer";
 
 /**
  * Helper function to handle test call webhook events
@@ -471,25 +472,6 @@ router.post("/telnyx", async (req, res) => {
 
         await bridge.handleSimpleWebhookEvent('hangup', payload);
 
-        // Notify autonomous AI dialer that a call has completed
-        // This allows it to immediately fill the freed slot
-        try {
-          let hangupClientState: any = null;
-          if (payload?.client_state) {
-            try {
-              hangupClientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
-            } catch {}
-          }
-          autonomousDialerEvents.emit('call_completed', {
-            callControlId: payload.call_control_id,
-            callId: hangupClientState?.call_id,
-            campaignId: hangupClientState?.campaign_id,
-            queueItemId: hangupClientState?.queue_item_id,
-          });
-        } catch (dialerErr) {
-          // Non-blocking — don't let dialer notification break webhook
-        }
-
         return res.json({ status: "ok", event_type: eventType });
       }
 
@@ -592,15 +574,6 @@ router.post("/telnyx", async (req, res) => {
               console.log(`[Telnyx Webhook] AMD detected machine but no queue_item_id available for disposition`);
             }
 
-            // Notify autonomous dialer: voicemail-hangup frees a slot
-            try {
-              autonomousDialerEvents.emit('call_completed', {
-                callControlId: payload.call_control_id,
-                callId: clientStateData?.call_id,
-                campaignId: clientStateData?.campaign_id,
-                queueItemId: clientStateData?.queue_item_id,
-              });
-            } catch {}
           } catch (hangupErr) {
             console.error(`[Telnyx Webhook] Failed to process machine-detected call:`, hangupErr);
           }
