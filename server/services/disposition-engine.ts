@@ -262,23 +262,29 @@ export async function processDisposition(
 
     let finalDisposition = disposition;
 
-    // SAFETY: Downgrade short AI qualified leads to prevent false positives
+    // SAFETY: Downgrade short AI qualified leads AND callback requests to prevent false positives
     // RE-ENABLED 2026-02-23: Production data shows massive false-positive problem.
-    // Calls as short as 3-7 seconds are being marked qualified_lead with ZERO contact
-    // participation, creating bogus leads that flood the QA queue. Root cause: Gemini AI
-    // hallucinates engagement when talking to screeners/IVR/silence. Very short calls
-    // (< 45s) are downgraded to needs_review; extremely short (< 15s) to no_answer.
-    if (finalDisposition === 'qualified_lead' && callAttempt.agentType === 'ai') {
+    // Calls as short as 3-7 seconds are being marked qualified_lead/callback_requested with
+    // ZERO contact participation, creating bogus leads that flood the QA queue. Root cause:
+    // Gemini AI hallucinates engagement when talking to screeners/IVR/silence/"not in service"
+    // recordings. Very short calls are downgraded automatically.
+    if ((finalDisposition === 'qualified_lead' || finalDisposition === 'callback_requested') && callAttempt.agentType === 'ai') {
         const duration = callAttempt.callDurationSeconds || 0;
+        const originalDisp = finalDisposition;
         if (duration < 15) {
-            console.warn(`[DispositionEngine] 🛡️ Downgrading qualified_lead → no_answer (Ghost AI Call: ${duration}s — no real conversation possible)`);
+            console.warn(`[DispositionEngine] 🛡️ Downgrading ${originalDisp} → no_answer (Ghost AI Call: ${duration}s — no real conversation possible)`);
             finalDisposition = 'no_answer';
-            result.actions.push(`Downgraded from qualified_lead to no_answer (duration ${duration}s < 15s — impossible to qualify)`);
-        } else if (duration < 45) {
+            result.actions.push(`Downgraded from ${originalDisp} to no_answer (duration ${duration}s < 15s — impossible to have real conversation)`);
+        } else if (duration < 30) {
+            console.warn(`[DispositionEngine] 🛡️ Downgrading ${originalDisp} → no_answer (Very Short AI Call: ${duration}s — likely voicemail/IVR)`);
+            finalDisposition = 'no_answer';
+            result.actions.push(`Downgraded from ${originalDisp} to no_answer (duration ${duration}s < 30s — insufficient for callback/qualification)`);
+        } else if (finalDisposition === 'qualified_lead' && duration < 45) {
             console.warn(`[DispositionEngine] 🛡️ Downgrading qualified_lead → needs_review (Short AI Call: ${duration}s)`);
             finalDisposition = 'needs_review';
             result.actions.push(`Downgraded from qualified_lead to needs_review (duration ${duration}s < 45s)`);
         }
+        // callback_requested passes through if duration >= 30s (enough for a real callback request)
     }
 
     // Process based on disposition type
@@ -1121,6 +1127,17 @@ async function processCallbackRequested(
   const callDuration = callAttempt.callDurationSeconds || 0;
 
   console.log(`[DispositionEngine] 📞 CALLBACK REQUESTED: Contact ${callAttempt.contactId} | Duration: ${callDuration}s | Campaign: ${callAttempt.campaignId}`);
+
+  // DURATION GUARD: Block lead creation for impossibly short "callback" calls
+  // Production analysis 2026-02-23: AI submits callback_requested for 3-4s calls where
+  // "This number is not in service" or IVR/voicemail plays. These are NOT real callbacks.
+  const MINIMUM_CALLBACK_DURATION = 30; // Need at least 30s for a real callback request
+  if (callDuration < MINIMUM_CALLBACK_DURATION && callAttempt.agentType === 'ai') {
+    console.warn(`[DispositionEngine] 🚫 BLOCKING callback lead creation: Duration ${callDuration}s < ${MINIMUM_CALLBACK_DURATION}s minimum for AI calls. Not a real callback request.`);
+    result.actions.push(`Blocked callback lead creation (duration ${callDuration}s < ${MINIMUM_CALLBACK_DURATION}s — too short for real callback request)`);
+    result.queueState = 'retry';
+    return;
+  }
 
   // Update campaign queue state - mark as done but flag for callback
   if (callAttempt.queueItemId) {

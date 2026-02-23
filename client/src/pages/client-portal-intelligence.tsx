@@ -409,26 +409,28 @@ export default function ClientPortalIntelligence() {
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
+            let event: any;
             try {
-              const event = JSON.parse(line.slice(6));
-              if (event.type === 'progress') {
-                setAnalysisProgress({
-                  phase: event.phase,
-                  message: event.message,
-                  progress: event.progress,
-                });
-              } else if (event.type === 'complete') {
-                setAnalysisProgress({ phase: 'complete', message: 'Analysis complete!', progress: 100 });
-                queryClient.invalidateQueries({ queryKey: ['client-org-intelligence'] });
-                toast({
-                  title: 'Deep analysis complete',
-                  description: `Analyzed with ${event.data.meta.modelCount} AI models and ${event.data.meta.researchSources} sources.`,
-                });
-              } else if (event.type === 'error') {
-                throw new Error(event.error);
-              }
-            } catch (e) {
-              // Skip invalid JSON
+              event = JSON.parse(line.slice(6));
+            } catch {
+              // Skip invalid JSON lines
+              continue;
+            }
+            if (event.type === 'progress') {
+              setAnalysisProgress({
+                phase: event.phase,
+                message: event.message,
+                progress: event.progress,
+              });
+            } else if (event.type === 'complete') {
+              setAnalysisProgress({ phase: 'complete', message: 'Analysis complete!', progress: 100 });
+              queryClient.invalidateQueries({ queryKey: ['client-org-intelligence'] });
+              toast({
+                title: 'Deep analysis complete',
+                description: `Analyzed with ${event.data?.meta?.modelCount || 0} AI models and ${event.data?.meta?.researchSources || 0} sources.`,
+              });
+            } else if (event.type === 'error') {
+              throw new Error(event.error || 'Analysis failed');
             }
           }
         }

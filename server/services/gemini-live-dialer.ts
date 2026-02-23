@@ -2886,6 +2886,35 @@ Instructions:
                 console.log(`[Gemini Live] ✅ qualified_lead validation PASSED (${isAppointmentCampaign ? 'appointment' : 'non-appointment'}): email=${hasEmailMention}, time=${hasTimeConfirmation}, goodbye=${hasGoodbye}, positive=${hasPositiveResponse}`);
               }
 
+              // ================== CALLBACK_REQUESTED VALIDATION ==================
+              // CRITICAL: Block callback_requested for very short calls
+              // Production analysis 2026-02-23: AI submits callback_requested for 3-4s
+              // calls where "This number is not in service" plays. These are NOT callbacks.
+              if (disposition === 'callback_requested' || disposition === 'call_back' || disposition === 'callback') {
+                const MINIMUM_CALLBACK_DURATION_SEC = 30;
+                const callbackElapsedSec = Math.round((Date.now() - metrics.startTime) / 1000);
+                if (callbackElapsedSec < MINIMUM_CALLBACK_DURATION_SEC) {
+                  console.warn(`[Gemini Live] 🚫 BLOCKING callback_requested DISPOSITION: Call too short (${callbackElapsedSec}s < ${MINIMUM_CALLBACK_DURATION_SEC}s). A real callback request requires enough conversation time for the prospect to actually request a callback.`);
+                  const toolResponse = {
+                    toolResponse: {
+                      functionResponses: [
+                        {
+                          name: call.name,
+                          id: call.id,
+                          response: {
+                            error: `CALL TOO SHORT FOR CALLBACK REQUEST: This call has only been ${callbackElapsedSec} seconds. A callback_requested disposition requires at least ${MINIMUM_CALLBACK_DURATION_SEC} seconds — enough time for the prospect to actually request being called back. Use "no_answer" if no one answered, or "invalid_data" if the number is disconnected/not in service.`
+                          }
+                        }
+                      ]
+                    }
+                  };
+                  if (geminiWs?.readyState === WebSocket.OPEN) {
+                    geminiWs.send(JSON.stringify(toolResponse));
+                  }
+                  return; // Block the disposition
+                }
+              }
+
               // ================== NOT_INTERESTED VALIDATION ==================
               // Prevent misclassifying engaged calls as not_interested
               // If the contact showed positive signals, route to needs_review instead

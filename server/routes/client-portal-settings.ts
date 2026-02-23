@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and, ilike, or } from 'drizzle-orm';
+import { eq, and, ilike, or, desc } from 'drizzle-orm';
 import {
   clientBusinessProfiles,
   clientFeatureAccess,
@@ -17,6 +17,7 @@ import {
   campaignOrganizations,
   campaigns,
   accounts,
+  accountIntelligence,
 } from '@shared/schema';
 import { z } from 'zod';
 import { collectWebsiteContent, type WebsitePageSummary } from '../lib/website-research';
@@ -338,6 +339,45 @@ router.get('/organization-intelligence', async (req: Request, res: Response) => 
       .where(eq(campaigns.problemIntelligenceOrgId, organization.id))
       .limit(20);
 
+    // Check if the org's intelligence fields are empty — if so, try to pull from accountIntelligence
+    const isEmptyObj = (obj: any) => !obj || (typeof obj === 'object' && Object.keys(obj).length === 0);
+    let identity = organization.identity;
+    let offerings = organization.offerings;
+    let icp = organization.icp;
+    let positioning = organization.positioning;
+    let outreach = organization.outreach;
+
+    if (organization.domain && isEmptyObj(identity) && isEmptyObj(offerings)) {
+      // Org record has no intelligence — fallback to accountIntelligence table (admin-analyzed data)
+      const [aiProfile] = await db
+        .select()
+        .from(accountIntelligence)
+        .where(eq(accountIntelligence.domain, organization.domain))
+        .orderBy(desc(accountIntelligence.createdAt))
+        .limit(1);
+
+      if (aiProfile) {
+        identity = aiProfile.identity || identity;
+        offerings = aiProfile.offerings || offerings;
+        icp = aiProfile.icp || icp;
+        positioning = aiProfile.positioning || positioning;
+        outreach = aiProfile.outreach || outreach;
+
+        // Also backfill the campaignOrganizations record so future reads are fast
+        await db
+          .update(campaignOrganizations)
+          .set({
+            identity: aiProfile.identity,
+            offerings: aiProfile.offerings,
+            icp: aiProfile.icp,
+            positioning: aiProfile.positioning,
+            outreach: aiProfile.outreach,
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignOrganizations.id, organization.id));
+      }
+    }
+
     res.json({
       organization: {
         id: organization.id,
@@ -345,11 +385,11 @@ router.get('/organization-intelligence', async (req: Request, res: Response) => 
         domain: organization.domain,
         industry: organization.industry,
         logoUrl: organization.logoUrl,
-        identity: organization.identity,
-        offerings: organization.offerings,
-        icp: organization.icp,
-        positioning: organization.positioning,
-        outreach: organization.outreach,
+        identity,
+        offerings,
+        icp,
+        positioning,
+        outreach,
         branding: (organization as any).branding || {},
         compiledOrgContext: organization.compiledOrgContext,
         updatedAt: organization.updatedAt,
