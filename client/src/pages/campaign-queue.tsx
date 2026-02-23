@@ -74,7 +74,10 @@ export default function CampaignQueuePage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const [pageTab, setPageTab] = useState<"queue" | "intelligence">("queue");
+  // Support deep-linking via ?tab=intelligence URL parameter
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialTab = urlParams.get('tab') === 'intelligence' ? 'intelligence' : 'queue';
+  const [pageTab, setPageTab] = useState<"queue" | "intelligence">(initialTab);
   const rawRoles = (user as any)?.roles ?? user?.role;
   const roleList = Array.isArray(rawRoles) ? rawRoles : rawRoles ? [rawRoles] : [];
   const normalizedRoles = roleList

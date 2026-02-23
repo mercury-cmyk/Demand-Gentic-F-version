@@ -25,6 +25,7 @@ import {
   Zap,
   Mic,
   Check,
+  Brain,
 } from 'lucide-react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { apiRequest, getAuthHeaders } from '@/lib/queryClient';
@@ -476,6 +477,16 @@ export function PhoneCampaignPanel({
         >
           <Users className="w-4 h-4 mr-2" />
           View Queue
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setLocation(`/campaigns/${campaign.id}/queue?tab=intelligence`)}
+          className="text-violet-600 border-violet-300 hover:bg-violet-50 dark:text-violet-400 dark:border-violet-700 dark:hover:bg-violet-950/30"
+        >
+          <Brain className="w-4 h-4 mr-2" />
+          Queue Analysis
         </Button>
 
         {onAssignAgents && (

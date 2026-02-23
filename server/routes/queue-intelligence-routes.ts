@@ -138,24 +138,28 @@ router.get("/api/queue-intelligence/:campaignId/live-stats", requireAuth, async 
           COUNT(*)::int AS total_queued,
           COUNT(*) FILTER (
             WHERE COALESCE(
-              NULLIF(TRIM(c.dialing_phone_e164), ''),
-              NULLIF(TRIM(c.mobile_phone_e164), ''),
-              NULLIF(TRIM(c.direct_phone_e164), ''),
-              NULLIF(TRIM(c.mobile_phone), ''),
-              NULLIF(TRIM(c.direct_phone), '')
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone', '')), '')
             ) IS NOT NULL
           )::int AS has_phone,
           COUNT(*) FILTER (
             WHERE COALESCE(
-              NULLIF(TRIM(c.dialing_phone_e164), ''),
-              NULLIF(TRIM(c.mobile_phone_e164), ''),
-              NULLIF(TRIM(c.direct_phone_e164), ''),
-              NULLIF(TRIM(c.mobile_phone), ''),
-              NULLIF(TRIM(c.direct_phone), '')
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone_e164', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone', '')), ''),
+              NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone', '')), '')
             ) IS NULL
           )::int AS missing_phone,
-          COUNT(*) FILTER (WHERE c.dialing_phone_e164 IS NOT NULL AND TRIM(c.dialing_phone_e164) != '')::int AS e164_normalized,
-          COUNT(*) FILTER (WHERE c.phone_verified_at IS NOT NULL)::int AS verified
+          COUNT(*) FILTER (
+            WHERE NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), '') IS NOT NULL
+          )::int AS e164_normalized,
+          COUNT(*) FILTER (
+            WHERE NULLIF(TRIM(COALESCE(to_jsonb(c)->>'phone_verified_at', '')), '') IS NOT NULL
+          )::int AS verified
         FROM campaign_queue cq
         INNER JOIN contacts c ON c.id = cq.contact_id
         WHERE cq.campaign_id = $1
@@ -178,31 +182,38 @@ router.get("/api/queue-intelligence/:campaignId/live-stats", requireAuth, async 
         SELECT
           cq.id AS queue_id,
           cq.priority,
-          cq.ai_priority_score,
+          NULLIF(TRIM(COALESCE(to_jsonb(cq)->>'ai_priority_score', '')), '')::int AS ai_priority_score,
           cq.next_attempt_at,
           cq.status,
           c.id AS contact_id,
           COALESCE(c.first_name || ' ' || c.last_name, c.first_name, c.last_name, 'Unknown') AS contact_name,
-          c.job_title,
-          c.seniority_level,
-          c.country,
-          c.timezone,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'job_title', '')), '') AS job_title,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'seniority_level', '')), '') AS seniority_level,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'country', '')), '') AS country,
+          NULLIF(TRIM(COALESCE(to_jsonb(c)->>'timezone', '')), '') AS timezone,
           COALESCE(
-            NULLIF(TRIM(c.dialing_phone_e164), ''),
-            NULLIF(TRIM(c.mobile_phone_e164), ''),
-            NULLIF(TRIM(c.direct_phone_e164), ''),
-            NULLIF(TRIM(c.mobile_phone), ''),
-            NULLIF(TRIM(c.direct_phone), '')
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'dialing_phone_e164', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone_e164', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone_e164', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'mobile_phone', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(c)->>'direct_phone', '')), '')
           ) AS best_phone,
           a.name AS account_name,
-          COALESCE(a.industry_standardized, a.industry_raw, a.industry_ai_suggested) AS industry
+          COALESCE(
+            NULLIF(TRIM(COALESCE(to_jsonb(a)->>'industry_standardized', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(a)->>'industry_raw', '')), ''),
+            NULLIF(TRIM(COALESCE(to_jsonb(a)->>'industry_ai_suggested', '')), '')
+          ) AS industry
         FROM campaign_queue cq
         INNER JOIN contacts c ON c.id = cq.contact_id
         LEFT JOIN accounts a ON a.id = cq.account_id
         WHERE cq.campaign_id = $1
           AND cq.status = 'queued'
           AND (cq.next_attempt_at IS NULL OR cq.next_attempt_at <= NOW())
-        ORDER BY cq.priority DESC, cq.ai_priority_score DESC NULLS LAST, cq.created_at ASC
+        ORDER BY
+          cq.priority DESC,
+          NULLIF(TRIM(COALESCE(to_jsonb(cq)->>'ai_priority_score', '')), '')::int DESC NULLS LAST,
+          cq.created_at ASC
         LIMIT 15
       `, [campaignId]),
 
