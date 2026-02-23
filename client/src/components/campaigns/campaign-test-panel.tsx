@@ -728,10 +728,14 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode, hidePrev
                     <div>
                       <Label className="text-muted-foreground">Recording</Label>
                       <div className="mt-2">
-                        <audio controls className="w-full">
-                          <source src={selectedTestCall.recordingUrl} type="audio/mpeg" />
-                          Your browser does not support the audio element.
-                        </audio>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => window.open(selectedTestCall.recordingUrl!, '_blank', 'noopener,noreferrer')}
+                        >
+                          <ExternalLink className="h-4 w-4" /> Play in New Tab
+                        </Button>
                       </div>
                     </div>
                   )}

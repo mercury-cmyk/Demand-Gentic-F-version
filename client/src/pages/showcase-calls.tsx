@@ -34,6 +34,7 @@ import {
   Target,
   Download,
   FileAudio,
+  ExternalLink,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { ShowcaseCallCard, type ShowcaseCall } from "@/components/showcase-calls/showcase-call-card";
@@ -95,7 +96,7 @@ interface CallDetails {
   fullTranscript: string | null;
   playbackUrl: string | null;
   downloadUrl: string | null;
-  streamUrl?: string | null;
+  gcsUrlEndpoint?: string | null;
   hasRecording: boolean;
   durationSec: number | null;
   startedAt: string | null;
@@ -657,25 +658,47 @@ export default function ShowcaseCallsPage() {
                       <CardTitle className="text-sm">Recording</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      {detailData.downloadUrl || detailData.streamUrl || detailData.recordingUrl ? (
-                        <a
-                          href={(detailData.downloadUrl || detailData.streamUrl || detailData.recordingUrl) as string}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          download
-                          className="inline-flex items-center gap-2"
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          className="gap-2"
+                          onClick={async () => {
+                            try {
+                              const res = await apiRequest('GET', `/api/recordings/${detailData.callSessionId}/gcs-url`);
+                              const data = await res.json();
+                              if (data.url) {
+                                window.open(data.url, '_blank', 'noopener,noreferrer');
+                              }
+                            } catch (err) {
+                              console.error('Failed to get recording URL:', err);
+                            }
+                          }}
                         >
-                          <Button variant="outline" className="gap-2">
-                            <Download className="h-4 w-4" />
-                            Download Recording
-                          </Button>
-                        </a>
-                      ) : (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <FileAudio className="h-4 w-4" />
-                          <span>Recording not available for download</span>
-                        </div>
-                      )}
+                          <ExternalLink className="h-4 w-4" />
+                          Play in New Tab
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="gap-2"
+                          onClick={async () => {
+                            try {
+                              const res = await apiRequest('GET', `/api/recordings/${detailData.callSessionId}/gcs-url`);
+                              const data = await res.json();
+                              if (data.url) {
+                                const a = document.createElement('a');
+                                a.href = data.url;
+                                a.download = `recording-${detailData.callSessionId}.mp3`;
+                                a.click();
+                              }
+                            } catch (err) {
+                              console.error('Failed to download recording:', err);
+                            }
+                          }}
+                        >
+                          <Download className="h-4 w-4" />
+                          Download
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 )}

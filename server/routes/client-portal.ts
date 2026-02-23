@@ -2223,40 +2223,47 @@ router.get('/qualified-leads/:id/recording-link', async (req, res) => {
 
     const sourceHint = await getLeadRecordingSourceHint(leadContext.lead).catch(() => null);
 
-    const streamToken = createClientRecordingStreamToken(
-      auth.context.mode === 'client'
-        ? {
-            type: 'client_portal_lead_recording_stream',
-            leadId: id,
-            authMode: 'client',
-            clientUserId: auth.context.clientUser.clientUserId,
-            clientAccountId: auth.context.clientUser.clientAccountId,
-          }
-        : {
-            type: 'client_portal_lead_recording_stream',
-            leadId: id,
-            authMode: 'admin',
-            adminUserId: auth.context.adminUserId,
-          },
-    );
+    // Return GCS presigned URL directly instead of stream proxy
+    const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
+    const { getCallSessionRecordingUrl, getRecordingUrl } = await import('../services/recording-storage');
 
-    const streamUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording-stream?token=${encodeURIComponent(streamToken)}`;
-    if (streamUrl.includes('s3.amazonaws.com') || streamUrl.includes('telephony-recorder-prod')) {
-      return res.status(500).json({
+    let gcsUrl: string | null = null;
+
+    // Try to resolve a GCS presigned URL
+    const result = await getPlayableRecordingLink(id).catch(() => null);
+    if (result) {
+      if (result.source === 'gcs' && !result.url.startsWith('gcs-internal://')) {
+        gcsUrl = result.url;
+      } else {
+        // Try to persist to GCS and get a presigned URL
+        const sessionGcs = await getCallSessionRecordingUrl(id, result.url).catch(() => ({ url: '', source: null as const }));
+        if (sessionGcs.url && sessionGcs.source === 'local' && !sessionGcs.url.startsWith('gcs-internal://')) {
+          gcsUrl = sessionGcs.url;
+        } else {
+          const leadGcs = await getRecordingUrl(id, result.url).catch(() => ({ url: '', source: null as const }));
+          if (leadGcs.url && leadGcs.source === 'local' && !leadGcs.url.startsWith('gcs-internal://')) {
+            gcsUrl = leadGcs.url;
+          }
+        }
+      }
+    }
+
+    if (!gcsUrl) {
+      console.log(`[CLIENT PORTAL] Lead recording-link: GCS URL not available for lead=${id}`);
+      return res.status(404).json({
         success: false,
-        message: 'Invalid recording stream URL generated',
+        message: 'Recording not available in cloud storage yet. Please try again later.',
       });
     }
 
-    console.log(`[CLIENT PORTAL] Lead recording-link resolved | lead=${id} source=${sourceHint?.source || 'unresolved'} via=platform-stream`);
+    console.log(`[CLIENT PORTAL] Lead recording-link resolved | lead=${id} source=${sourceHint?.source || 'gcs'} via=gcs-presigned-url`);
 
     return res.json({
       success: true,
-      url: streamUrl,
-      streamUrl,
-      source: sourceHint?.source || 'stream_proxy',
+      url: gcsUrl,
+      source: 'gcs',
       mimeType: sourceHint?.mimeType || 'audio/mpeg',
-      expiresInSeconds: CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS,
+      expiresInSeconds: 604800,
     });
   } catch (error: any) {
     console.error('[CLIENT PORTAL] Get lead recording-link error:', error);
@@ -2268,39 +2275,11 @@ router.get('/qualified-leads/:id/recording-link', async (req, res) => {
   }
 });
 
-// Stream lead recording audio through platform endpoint using a short-lived token.
+// DEPRECATED: Stream proxy endpoint - no longer used.
+// All recording playback now uses GCS presigned URLs via the recording-link endpoint.
 router.get('/qualified-leads/:id/recording-stream', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const auth = resolveRecordingRequestAuth(req, id);
-    console.log(
-      `[CLIENT PORTAL] recording-stream auth path used: ${auth.context?.authPath || 'none'} ` +
-      `token verified: ${auth.tokenVerified} reason: ${auth.reason || 'ok'}`,
-    );
-    if (!auth.context) {
-      return res.status(401).type('text/plain').send('Authentication required');
-    }
-
-    if (auth.context.mode === 'client') {
-      const context = await getLeadRecordingContextForClientPortal(id, auth.context.clientUser.clientAccountId);
-      if (!context.ok) {
-        return res.status(context.status).type('text/plain').send(context.message);
-      }
-      console.log(
-        `[CLIENT PORTAL] Lead recording stream request | lead=${id} user=${auth.context.clientUser.clientUserId} account=${auth.context.clientUser.clientAccountId}`,
-      );
-    } else {
-      console.log(
-        `[CLIENT PORTAL] Lead recording stream request | lead=${id} adminUser=${auth.context.adminUserId}`,
-      );
-    }
-
-    const { streamRecording } = await import('./recordings');
-    return streamRecording(req as Request, res as Response);
-  } catch (error: any) {
-    console.error('[CLIENT PORTAL] Lead recording stream error:', error);
-    return res.status(500).type('text/plain').send('Failed to stream recording audio');
-  }
+  console.warn(`[CLIENT PORTAL] DEPRECATED recording-stream endpoint called for lead=${req.params.id}. Use recording-link for GCS URLs instead.`);
+  return res.status(410).type('text/plain').send('Recording streaming has been deprecated. Use the recording-link endpoint to get a GCS download URL.');
 });
 
 // Get single lead details (with transcript and recording if visibility allowed)
@@ -3736,6 +3715,181 @@ router.delete('/admin/clients/:clientId/campaigns/:accessId', requireAuth, requi
   } catch (error) {
     console.error('[CLIENT PORTAL] Revoke access error:', error);
     res.status(500).json({ message: "Failed to revoke access" });
+  }
+});
+
+// ==================== PROJECT ASSIGNMENT FOR CLIENTS ====================
+
+/**
+ * GET /admin/available-projects
+ * Get all projects optionally filtered, for assigning to clients.
+ * Query params: ?excludeClientId= to exclude projects already belonging to a client
+ */
+router.get('/admin/available-projects', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const { excludeClientId } = req.query;
+
+    // Get all projects not belonging to the specified client
+    let allProjects;
+    if (excludeClientId && typeof excludeClientId === 'string') {
+      allProjects = await db
+        .select({
+          id: clientProjects.id,
+          name: clientProjects.name,
+          status: clientProjects.status,
+          projectType: clientProjects.projectType,
+          clientAccountId: clientProjects.clientAccountId,
+          clientName: clientAccounts.name,
+          createdAt: clientProjects.createdAt,
+        })
+        .from(clientProjects)
+        .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+        .where(
+          sql`${clientProjects.clientAccountId} != ${excludeClientId}`
+        )
+        .orderBy(desc(clientProjects.createdAt));
+    } else {
+      allProjects = await db
+        .select({
+          id: clientProjects.id,
+          name: clientProjects.name,
+          status: clientProjects.status,
+          projectType: clientProjects.projectType,
+          clientAccountId: clientProjects.clientAccountId,
+          clientName: clientAccounts.name,
+          createdAt: clientProjects.createdAt,
+        })
+        .from(clientProjects)
+        .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+        .orderBy(desc(clientProjects.createdAt));
+    }
+
+    res.json({ success: true, projects: allProjects });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get available projects error:', error);
+    res.status(500).json({ message: "Failed to fetch available projects" });
+  }
+});
+
+/**
+ * POST /admin/clients/:clientId/projects/:projectId/assign
+ * Reassign an existing project to this client
+ */
+router.post('/admin/clients/:clientId/projects/:projectId/assign', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const { clientId, projectId } = req.params;
+
+    // Verify client exists
+    const [client] = await db
+      .select()
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientId))
+      .limit(1);
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Verify project exists
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, projectId))
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    if (project.clientAccountId === clientId) {
+      return res.status(409).json({ message: "Project is already assigned to this client" });
+    }
+
+    // Reassign the project to this client
+    const [updated] = await db
+      .update(clientProjects)
+      .set({
+        clientAccountId: clientId,
+        updatedAt: new Date(),
+      })
+      .where(eq(clientProjects.id, projectId))
+      .returning();
+
+    // Log the activity
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: clientId,
+      action: 'project_assigned',
+      details: `Project "${project.name}" assigned to client by admin`,
+      performedBy: (req as any).user?.userId,
+    });
+
+    res.json({
+      success: true,
+      project: updated,
+      message: `Project "${project.name}" assigned to client successfully`,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Assign project error:', error);
+    res.status(500).json({ message: "Failed to assign project to client" });
+  }
+});
+
+/**
+ * DELETE /admin/clients/:clientId/projects/:projectId/unassign
+ * Remove/disconnect a project from a client.
+ * Since clientAccountId is NOT NULL, this deletes the project and its linked campaigns.
+ */
+router.delete('/admin/clients/:clientId/projects/:projectId/unassign', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const { clientId, projectId } = req.params;
+
+    // Verify the project belongs to this client
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: "Project not found for this client" });
+    }
+
+    // Remove campaign links first (clientProjectCampaigns cascades, but let's be explicit)
+    await db
+      .delete(clientProjectCampaigns)
+      .where(eq(clientProjectCampaigns.projectId, projectId));
+
+    // Unlink any campaigns referencing this project
+    await db
+      .update(campaigns)
+      .set({ projectId: null, updatedAt: new Date() })
+      .where(eq(campaigns.projectId, projectId));
+
+    // Delete the project itself
+    await db
+      .delete(clientProjects)
+      .where(eq(clientProjects.id, projectId));
+
+    // Log the activity
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: clientId,
+      action: 'project_removed',
+      details: `Project "${project.name}" removed from client by admin`,
+      performedBy: (req as any).user?.userId,
+    });
+
+    res.json({
+      success: true,
+      message: `Project "${project.name}" has been removed from this client`,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Unassign project error:', error);
+    res.status(500).json({ message: "Failed to remove project from client" });
   }
 });
 

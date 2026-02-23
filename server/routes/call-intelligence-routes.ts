@@ -713,7 +713,7 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
       recording: {
         available: hasRecording,
         url: playableUrl,
-        streamUrl: hasRecording ? `/api/recordings/${row.id}/stream` : null,
+        gcsUrlEndpoint: hasRecording ? `/api/recordings/${row.id}/gcs-url` : null,
         status: hasRecording ? "stored" : "pending",
         format: "mp3",
         durationSec: row.callDurationSeconds,
@@ -784,7 +784,7 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
       recording: {
         available: hasRecording,
         url: playableUrl,
-        streamUrl: hasRecording ? `/api/recordings/${row.id}/stream` : null,
+        gcsUrlEndpoint: hasRecording ? `/api/recordings/${row.id}/gcs-url` : null,
         status: row.recordingStatus || "pending",
         format: row.recordingFormat,
         durationSec: row.recordingDurationSec,
@@ -1019,7 +1019,7 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
           recording: {
             available: hasRecording,
             url: recordingUrl,
-            streamUrl: `/api/recordings/${sessionResult.id}/stream`,
+            gcsUrlEndpoint: `/api/recordings/${sessionResult.id}/gcs-url`,
             status: sessionResult.recordingStatus || "pending",
             format: sessionResult.recordingFormat,
             durationSec: sessionResult.recordingDurationSec,
@@ -1169,8 +1169,7 @@ router.get("/unified/:id", requireAuth, requireRole('admin', 'manager', 'qa_anal
         recording: {
           available: hasDialerRecording,
           url: playableUrl,
-          streamUrl: `/api/recordings/${dialerResult.id}/stream`,
-          streamTokenUrl: `/api/recordings/${dialerResult.id}/stream-token`,
+          gcsUrlEndpoint: `/api/recordings/${dialerResult.id}/gcs-url`,
           status: hasDialerRecording ? "stored" : "pending",
           format: "mp3",
           durationSec: dialerResult.callDurationSeconds,
