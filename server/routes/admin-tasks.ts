@@ -14,6 +14,7 @@ const createTaskSchema = z.object({
   title: z.string().min(1, "Title is required").max(500),
   assigneeName: z.string().max(120).optional().nullable(),
   details: z.string().max(10000).optional().nullable(),
+  needsAttention: z.boolean().optional(),
 });
 
 const updateTaskSchema = z
@@ -21,9 +22,10 @@ const updateTaskSchema = z
     title: z.string().min(1).max(500).optional(),
     assigneeName: z.string().max(120).nullable().optional(),
     details: z.string().max(10000).nullable().optional(),
+    needsAttention: z.boolean().optional(),
     status: taskStatusSchema.optional(),
   })
-  .refine((value) => value.title !== undefined || value.assigneeName !== undefined || value.details !== undefined || value.status !== undefined, {
+  .refine((value) => value.title !== undefined || value.assigneeName !== undefined || value.details !== undefined || value.needsAttention !== undefined || value.status !== undefined, {
     message: "No fields provided to update",
   });
 
@@ -58,6 +60,7 @@ async function ensureAdminTodoSchema() {
           status admin_todo_task_status NOT NULL DEFAULT 'todo',
           assignee_name varchar(120),
           details text,
+          needs_attention boolean NOT NULL DEFAULT false,
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now()
         );
@@ -66,6 +69,10 @@ async function ensureAdminTodoSchema() {
       await db.execute(sql`
         ALTER TABLE admin_todo_tasks
         ADD COLUMN IF NOT EXISTS details text;
+      `);
+      await db.execute(sql`
+        ALTER TABLE admin_todo_tasks
+        ADD COLUMN IF NOT EXISTS needs_attention boolean NOT NULL DEFAULT false;
       `);
 
       await db.execute(sql`
@@ -102,6 +109,7 @@ export async function listAdminTasks(_req: Request, res: Response) {
         status: adminTodoTasks.status,
         assigneeName: adminTodoTasks.assigneeName,
         details: adminTodoTasks.details,
+        needsAttention: adminTodoTasks.needsAttention,
         createdAt: adminTodoTasks.createdAt,
         updatedAt: adminTodoTasks.updatedAt,
       })
@@ -122,6 +130,7 @@ export async function createAdminTask(req: Request, res: Response) {
     const title = parsed.title.trim();
     const assigneeName = parsed.assigneeName?.trim() || null;
     const details = parsed.details?.trim() || null;
+    const needsAttention = parsed.needsAttention ?? false;
 
     const [task] = await db
       .insert(adminTodoTasks)
@@ -130,6 +139,7 @@ export async function createAdminTask(req: Request, res: Response) {
         status: "todo",
         assigneeName,
         details,
+        needsAttention,
       })
       .returning();
 
@@ -164,6 +174,9 @@ export async function updateAdminTask(req: Request, res: Response) {
     }
     if (parsed.details !== undefined) {
       updates.details = parsed.details?.trim() || null;
+    }
+    if (parsed.needsAttention !== undefined) {
+      updates.needsAttention = parsed.needsAttention;
     }
     if (parsed.status !== undefined) {
       updates.status = parsed.status;

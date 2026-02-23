@@ -14097,6 +14097,7 @@ export const adminTodoTasks = pgTable(
     status: adminTodoTaskStatusEnum("status").notNull().default("todo"),
     assigneeName: varchar("assignee_name", { length: 120 }),
     details: text("details"),
+    needsAttention: boolean("needs_attention").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

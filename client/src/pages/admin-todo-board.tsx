@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -24,6 +25,7 @@ interface AdminTask {
   status: TaskStatus;
   assigneeName: string | null;
   details: string | null;
+  needsAttention: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,6 +80,7 @@ export default function AdminTodoBoardPage() {
   const [editAssigneeName, setEditAssigneeName] = useState("");
   const [editDetails, setEditDetails] = useState("");
   const [editStatus, setEditStatus] = useState<TaskStatus>("todo");
+  const [editNeedsAttention, setEditNeedsAttention] = useState(false);
 
   const [noteDraft, setNoteDraft] = useState("");
 
@@ -134,7 +137,7 @@ export default function AdminTodoBoardPage() {
   const updateTaskMutation = useMutation({
     mutationFn: async (payload: {
       id: string;
-      updates: Partial<Pick<AdminTask, "title" | "status" | "assigneeName" | "details">>;
+      updates: Partial<Pick<AdminTask, "title" | "status" | "assigneeName" | "details" | "needsAttention">>;
     }) => {
       const response = await apiRequest("PATCH", `/api/admin/tasks/${payload.id}`, payload.updates);
       return parseApiJson<AdminTask>(response, `/api/admin/tasks/${payload.id}`);
@@ -194,6 +197,7 @@ export default function AdminTodoBoardPage() {
     setEditAssigneeName(task.assigneeName || "");
     setEditDetails(task.details || "");
     setEditStatus(task.status);
+    setEditNeedsAttention(task.needsAttention || false);
     setIsEditOpen(true);
   };
 
@@ -213,6 +217,7 @@ export default function AdminTodoBoardPage() {
           assigneeName: editAssigneeName.trim() || null,
           details: editDetails.trim() || null,
           status: editStatus,
+          needsAttention: editNeedsAttention,
         },
       },
       {
@@ -301,6 +306,7 @@ export default function AdminTodoBoardPage() {
                       columnTasks.map((task) => {
                         const theme = getAssigneeColorTheme(task.assigneeName);
                         const isDone = column.id === "done" || task.status === "done";
+                        const showWarning = column.id === "in_progress" && task.needsAttention;
                         return (
                           <div
                             key={task.id}
@@ -336,6 +342,14 @@ export default function AdminTodoBoardPage() {
                                 )}
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
+                                {showWarning && (
+                                  <div className="relative h-5 w-5" aria-label="Task warning">
+                                    <div className="absolute inset-0 [clip-path:polygon(50%_0%,0%_100%,100%_100%)] bg-orange-500" />
+                                    <span className="absolute left-1/2 top-[56%] -translate-x-1/2 -translate-y-1/2 text-[10px] font-black text-black">
+                                      !
+                                    </span>
+                                  </div>
+                                )}
                                 <Button
                                   size="icon"
                                   variant="ghost"
@@ -499,6 +513,19 @@ export default function AdminTodoBoardPage() {
                   <SelectItem value="done">{STATUS_LABELS.done}</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div className="space-y-1">
+                <Label htmlFor="todo-edit-warning">Show warning sign</Label>
+                <p className="text-xs text-muted-foreground">
+                  Adds an orange warning triangle on the top-right when this task is in progress.
+                </p>
+              </div>
+              <Switch
+                id="todo-edit-warning"
+                checked={editNeedsAttention}
+                onCheckedChange={setEditNeedsAttention}
+              />
             </div>
           </div>
 
