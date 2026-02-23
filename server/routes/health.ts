@@ -7,6 +7,7 @@ import {
 } from "../services/call-session-store";
 import { poolMetrics } from "../db";
 import { getAiConcurrencyStats } from "../lib/ai-concurrency";
+import { getVertexThrottleStats } from "../services/vertex-ai/vertex-client";
 
 const router = Router();
 
@@ -18,6 +19,7 @@ router.get("/health", async (req, res) => {
   try {
     const dbStats = poolMetrics.getStats();
     const aiStats = getAiConcurrencyStats();
+    const vertexStats = getVertexThrottleStats();
 
     // Basic health check - service is running
     const health = {
@@ -32,6 +34,7 @@ router.get("/health", async (req, res) => {
       },
       dbPool: dbStats,
       aiConcurrency: aiStats,
+      vertexThrottle: vertexStats,
       memory: {
         rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
         heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
@@ -39,8 +42,8 @@ router.get("/health", async (req, res) => {
       },
     };
 
-    // Degrade if DB pool or AI concurrency are stressed
-    if (!dbStats.isHealthy || aiStats.queued > 20) {
+    // Degrade if DB pool, AI concurrency, or Vertex throttle are stressed
+    if (!dbStats.isHealthy || aiStats.queued > 20 || vertexStats.globalCooldownRemainingMs > 0) {
       (health as any).status = "degraded";
     }
 

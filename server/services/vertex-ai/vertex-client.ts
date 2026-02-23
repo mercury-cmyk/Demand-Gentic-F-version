@@ -58,6 +58,127 @@ const defaultConfig: VertexAIConfig = {
 let vertexAIInstance: VertexAI | null = null;
 let currentConfig: VertexAIConfig = defaultConfig;
 
+// ==================== GLOBAL VERTEX AI RATE LIMITER ====================
+// Prevents 429 "Rate exceeded" from Google Cloud by throttling at the app layer.
+// Three defenses: concurrency semaphore, RPM sliding window, global cooldown.
+
+const VERTEX_MAX_CONCURRENT = parseInt(process.env.VERTEX_MAX_CONCURRENT || '15', 10);
+const VERTEX_MAX_RPM = parseInt(process.env.VERTEX_MAX_RPM || '300', 10);
+const VERTEX_SEMAPHORE_TIMEOUT_MS = parseInt(process.env.VERTEX_SEMAPHORE_TIMEOUT_MS || '60000', 10);
+
+// Concurrency semaphore
+let _vertexActive = 0;
+const _vertexWaitQueue: Array<{ resolve: () => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }> = [];
+
+// RPM sliding window (tracks timestamps of recent requests)
+const _rpmWindow: number[] = [];
+
+// Global cooldown (progressive: 5s → 10s → 30s → 60s)
+let _globalCooldownUntil = 0;
+let _consecutiveCooldowns = 0;
+const COOLDOWN_STEPS_MS = [5000, 10000, 30000, 60000];
+
+function _acquireVertexSlot(): Promise<void> {
+  // Check global cooldown first
+  const cooldownRemaining = _globalCooldownUntil - Date.now();
+  if (cooldownRemaining > 0) {
+    return new Promise((resolve) => setTimeout(() => _acquireVertexSlot().then(resolve), Math.min(cooldownRemaining, 5000)));
+  }
+
+  // Check RPM limit
+  const now = Date.now();
+  const windowStart = now - 60000;
+  // Prune old entries
+  while (_rpmWindow.length > 0 && _rpmWindow[0] < windowStart) _rpmWindow.shift();
+  if (_rpmWindow.length >= VERTEX_MAX_RPM) {
+    const waitMs = _rpmWindow[0] - windowStart + 100; // wait until oldest entry expires + buffer
+    return new Promise((resolve) => setTimeout(() => _acquireVertexSlot().then(resolve), Math.min(waitMs, 5000)));
+  }
+
+  // Check concurrency
+  if (_vertexActive < VERTEX_MAX_CONCURRENT) {
+    _vertexActive++;
+    _rpmWindow.push(now);
+    return Promise.resolve();
+  }
+
+  // Queue the request
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const idx = _vertexWaitQueue.findIndex((w) => w.resolve === resolve);
+      if (idx !== -1) _vertexWaitQueue.splice(idx, 1);
+      reject(new Error(
+        `[VertexAI] Semaphore timeout after ${VERTEX_SEMAPHORE_TIMEOUT_MS}ms. ` +
+        `Active: ${_vertexActive}/${VERTEX_MAX_CONCURRENT}, Queued: ${_vertexWaitQueue.length}, RPM: ${_rpmWindow.length}/${VERTEX_MAX_RPM}.`
+      ));
+    }, VERTEX_SEMAPHORE_TIMEOUT_MS);
+    _vertexWaitQueue.push({ resolve, reject, timer });
+  });
+}
+
+function _releaseVertexSlot(): void {
+  if (_vertexWaitQueue.length > 0) {
+    const next = _vertexWaitQueue.shift()!;
+    clearTimeout(next.timer);
+    _rpmWindow.push(Date.now());
+    next.resolve();
+  } else {
+    _vertexActive = Math.max(0, _vertexActive - 1);
+  }
+}
+
+function _triggerGlobalCooldown(reason: string): void {
+  const stepIdx = Math.min(_consecutiveCooldowns, COOLDOWN_STEPS_MS.length - 1);
+  const cooldownMs = COOLDOWN_STEPS_MS[stepIdx];
+  _globalCooldownUntil = Date.now() + cooldownMs;
+  _consecutiveCooldowns++;
+  console.warn(`[VertexAI] ⚠️ Global cooldown ${cooldownMs / 1000}s (step ${_consecutiveCooldowns}, reason: ${reason}). Active: ${_vertexActive}, Queued: ${_vertexWaitQueue.length}, RPM: ${_rpmWindow.length}`);
+}
+
+function _resetCooldownStreak(): void {
+  if (_consecutiveCooldowns > 0) {
+    _consecutiveCooldowns = 0;
+  }
+}
+
+/** Wrap a Vertex AI API call with concurrency + RPM limiting */
+async function withVertexThrottle<T>(fn: () => Promise<T>, label?: string): Promise<T> {
+  const queuedAt = Date.now();
+  await _acquireVertexSlot();
+  const waitMs = Date.now() - queuedAt;
+  if (waitMs > 2000 && label) {
+    console.warn(`[VertexAI] "${label}" waited ${waitMs}ms for slot (active: ${_vertexActive}, queued: ${_vertexWaitQueue.length})`);
+  }
+  try {
+    const result = await fn();
+    _resetCooldownStreak(); // successful call resets progressive cooldown
+    return result;
+  } catch (error: any) {
+    if (isRateLimitError(error)) {
+      _triggerGlobalCooldown(error.message?.substring(0, 80) || 'rate-limit');
+    }
+    throw error;
+  } finally {
+    _releaseVertexSlot();
+  }
+}
+
+/** Get Vertex AI throttle stats for monitoring */
+export function getVertexThrottleStats() {
+  const now = Date.now();
+  const windowStart = now - 60000;
+  const recentRpm = _rpmWindow.filter(t => t >= windowStart).length;
+  return {
+    active: _vertexActive,
+    queued: _vertexWaitQueue.length,
+    maxConcurrent: VERTEX_MAX_CONCURRENT,
+    rpm: recentRpm,
+    maxRpm: VERTEX_MAX_RPM,
+    globalCooldownRemainingMs: Math.max(0, _globalCooldownUntil - now),
+    consecutiveCooldowns: _consecutiveCooldowns,
+  };
+}
+
 // Deep Think circuit breaker (prevents repeated 429 storms)
 const DEEP_THINK_COOLDOWN_MS = Math.max(10000, Number(process.env.VERTEX_DEEP_THINK_COOLDOWN_MS || 120000));
 let deepThinkCooldownUntil = 0;
@@ -227,12 +348,15 @@ export async function generateImage(prompt: string, aspectRatio: string = "16:9"
 // ==================== RETRY HELPER ====================
 
 /**
- * Retry with exponential backoff for Vertex AI rate limit / quota errors
+ * Retry with exponential backoff for Vertex AI rate limit / quota errors.
+ * Now integrated with global throttle — calls go through the concurrency
+ * semaphore and RPM limiter. Skips retries if global cooldown is active
+ * to prevent retry amplification storms.
  */
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await fn();
+      return await withVertexThrottle(fn, attempt > 0 ? `retry-${attempt}` : undefined);
     } catch (error: any) {
       const isRetryable = isRateLimitError(error);
 
@@ -240,7 +364,14 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
         throw error;
       }
 
-      const backoffMs = Math.min(2000 * Math.pow(2, attempt) + Math.random() * 1000, 60000);
+      // If global cooldown is already active, don't retry — another call already triggered it
+      const cooldownRemaining = _globalCooldownUntil - Date.now();
+      if (cooldownRemaining > 2000 && attempt > 0) {
+        console.warn(`[VertexAI] Skipping retry — global cooldown active (${Math.ceil(cooldownRemaining / 1000)}s remaining)`);
+        throw error;
+      }
+
+      const backoffMs = Math.min(3000 * Math.pow(2, attempt) + Math.random() * 1000, 60000);
       console.warn(`[VertexAI] Rate limited (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${Math.round(backoffMs)}ms...`);
       await new Promise((r) => setTimeout(r, backoffMs));
     }
@@ -848,4 +979,5 @@ export default {
   generateWithFunctions,
   generateImage,
   healthCheck,
+  getVertexThrottleStats,
 };

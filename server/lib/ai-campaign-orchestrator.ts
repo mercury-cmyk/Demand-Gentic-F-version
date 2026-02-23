@@ -50,7 +50,7 @@ import {
   sleep as numberPoolSleep,
   type CallerIdResult
 } from '../services/number-pool-integration';
-import { isNumberPoolEnabled, getNumberPoolStatus, forceReleaseAllNumbers } from '../services/number-pool';
+import { isNumberPoolEnabled, getNumberPoolStatus, forceReleaseAllNumbers, releaseStaleNumbers } from '../services/number-pool';
 import {
   acquireProspectLock,
   releaseProspectLock,
@@ -1945,9 +1945,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       );
 
       if (staleNumbers.length > 0) {
-        // Auto-release stale numbers that are clearly leaked (call ended but release was missed)
-        const released = forceReleaseAllNumbers();
-        console.warn(`[AI Orchestrator] 🔓 AUTO-RECOVERED: Force-released ${released} stale number lock(s) — pool should unblock on next tick`);
+        // Targeted release: only free numbers locked beyond the stale threshold.
+        // Unlike forceReleaseAllNumbers(), this is safe during active calling —
+        // it leaves legitimately-in-use numbers alone, preventing double-booking.
+        const released = releaseStaleNumbers(STALE_THRESHOLD_MS);
+        console.warn(`[AI Orchestrator] 🔓 AUTO-RECOVERED: Released ${released} stale number lock(s) — pool should unblock on next tick`);
         // Don't set stall message — pool is now clear, next tick will succeed
         return { initiated, skipped: skipped + poolBusyCount };
       }

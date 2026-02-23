@@ -8,7 +8,7 @@ import { ZodSchema, ZodError } from 'zod';
  * Protects against brute force attacks and API abuse
  */
 
-// Paths exempt from global rate limiting (webhooks, call control, dialer - high volume during concurrent calls)
+// Paths exempt from global rate limiting (webhooks, call control, dialer, number pool - high volume during concurrent calls)
 const RATE_LIMIT_EXEMPT_PREFIXES = [
   '/api/webhooks/',           // Telnyx/external webhooks - must never be rate limited
   '/api/campaign-test-calls/webhook', // Test call webhooks
@@ -18,6 +18,8 @@ const RATE_LIMIT_EXEMPT_PREFIXES = [
   '/api/calls/',              // Agent call control (status polling, hangup)
   '/api/health',              // Health checks
   '/api/recordings/',         // Recording access during/after calls
+  '/api/number-pool/',        // Number pool ops (orchestrator calls at high frequency)
+  '/api/campaigns/',          // Campaign queue/stats polling (10s interval per campaign)
 ];
 
 function getRateLimitKey(req: Request): string {

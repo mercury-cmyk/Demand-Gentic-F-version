@@ -47,6 +47,8 @@ export {
   isNumberPoolEnabled,
   getNumberPoolStatus,
   forceReleaseAllNumbers,
+  releaseStaleNumbers,
+  invalidatePoolCache,
   NoAvailableNumberError,
   CallRoutingError,
   AllNumbersAtHourlyLimitError,

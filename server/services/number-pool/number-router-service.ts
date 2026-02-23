@@ -78,6 +78,12 @@ const MAX_NUMBER_LOCK_MS = 3 * 60 * 1000;
 // Reduced from 60s to catch leaked locks faster and prevent pool exhaustion stalls.
 const CLEANUP_INTERVAL_MS = 30 * 1000;
 
+// === ELIGIBLE POOL CACHE ===
+// The pool query (3-way JOIN) rarely changes but was firing on EVERY call attempt.
+// Cache for 30s to avoid hammering the DB with identical queries.
+let _poolCache: { key: string; pool: EligibleNumber[]; cachedAt: number } | null = null;
+const POOL_CACHE_TTL_MS = 30_000;
+
 /**
  * Periodic cleanup: auto-release numbers stuck in-use beyond MAX_NUMBER_LOCK_MS.
  * This prevents permanent lockouts from lost webhooks, crashed calls, or missed releaseNumber() calls.
@@ -198,15 +204,25 @@ export async function selectNumber(
     // Step 5: Calculate jitter
     const jitterDelayMs = calculateJitter(selected);
     
-    // Step 6: Record decision
-    const decisionId = await recordDecision({
+    // Step 6: Record decision (fire-and-forget — audit insert should NOT block call initiation)
+    // The decision ID is not critical for call flow; it's for post-hoc analytics.
+    const decisionPromise = recordDecision({
       request,
       selected,
       candidatesCount: pool.length,
       filteredOut: filtered,
       latencyMs: Date.now() - startTime,
       jitterDelayMs,
+    }).catch(err => {
+      console.error(`[NumberRouter] Non-blocking recordDecision failed:`, err);
+      return null;
     });
+    
+    // Await briefly (5ms) to get decisionId if it resolves fast, otherwise continue
+    const decisionId = await Promise.race([
+      decisionPromise,
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 5)),
+    ]);
     
     console.log(`[NumberRouter] Selected ${selected.phoneNumberE164} for ${request.prospectNumber} (${selected.selectionReason})`);
 
@@ -279,6 +295,34 @@ export function forceReleaseAllNumbers(): number {
 }
 
 /**
+ * Release only numbers that have been locked longer than the given threshold.
+ * Unlike forceReleaseAllNumbers(), this is safe to call during active calling
+ * because it leaves legitimately-in-use numbers alone.
+ */
+export function releaseStaleNumbers(thresholdMs: number = 120_000): number {
+  const now = Date.now();
+  let released = 0;
+  for (const [numberId, lockedAt] of Array.from(numbersInUse.entries())) {
+    if (now - lockedAt > thresholdMs) {
+      numbersInUse.delete(numberId);
+      released++;
+      console.warn(`[NumberRouter] 🔓 Released stale number ${numberId} (locked for ${Math.round((now - lockedAt) / 1000)}s, threshold=${thresholdMs / 1000}s)`);
+    }
+  }
+  if (released > 0) {
+    console.log(`[NumberRouter] Stale release: freed ${released} number(s), ${numbersInUse.size} still in use`);
+  }
+  return released;
+}
+
+/**
+ * Invalidate the eligible pool cache (call when numbers are added/removed/deactivated)
+ */
+export function invalidatePoolCache(): void {
+  _poolCache = null;
+}
+
+/**
  * Check if number pool routing is enabled
  */
 export function isNumberPoolEnabled(): boolean {
@@ -288,9 +332,17 @@ export function isNumberPoolEnabled(): boolean {
 // ==================== INTERNAL FUNCTIONS ====================
 
 /**
- * Get eligible number pool based on assignments
+ * Get eligible number pool based on assignments.
+ * Results are cached for POOL_CACHE_TTL_MS to avoid per-call DB round-trips.
+ * The pool (active numbers + reputation + assignments) rarely changes mid-campaign.
  */
 async function getEligiblePool(request: NumberSelectionRequest): Promise<EligibleNumber[]> {
+  // Check cache — keyed on campaignId + agentId since assignments differ
+  const cacheKey = `${request.campaignId}|${request.virtualAgentId || ''}`;
+  if (_poolCache && _poolCache.key === cacheKey && (Date.now() - _poolCache.cachedAt) < POOL_CACHE_TTL_MS) {
+    return _poolCache.pool;
+  }
+
   // Get all active numbers with their reputation and assignments
   const results = await db
     .select({
@@ -338,7 +390,11 @@ async function getEligiblePool(request: NumberSelectionRequest): Promise<Eligibl
     }
   }
 
-  return Array.from(numberMap.values());
+  const pool = Array.from(numberMap.values());
+  // Cache for subsequent calls
+  _poolCache = { key: cacheKey, pool, cachedAt: Date.now() };
+
+  return pool;
 }
 
 /**
@@ -628,4 +684,6 @@ export default {
   isNumberPoolEnabled,
   getNumberPoolStatus,
   forceReleaseAllNumbers,
+  releaseStaleNumbers,
+  invalidatePoolCache,
 };

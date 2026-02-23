@@ -21,6 +21,7 @@ export {
   generateEmbedding,
   generateWithFunctions,
   healthCheck,
+  getVertexThrottleStats,
   type VertexAIConfig,
   type GenerationOptions,
   type ChatMessage,

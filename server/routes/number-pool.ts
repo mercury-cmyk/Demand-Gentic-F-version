@@ -34,6 +34,8 @@ import {
   isNumberPoolEnabled,
   getNumberPoolStatus,
   forceReleaseAllNumbers,
+  releaseStaleNumbers,
+  invalidatePoolCache,
   // Reputation engine
   calculateReputation,
   recalculateAllReputations,
@@ -170,6 +172,7 @@ router.post('/numbers', asyncHandler(async (req, res) => {
   }
 
   const number = await createNumber(parsed.data);
+  invalidatePoolCache(); // Clear cached pool so new number is picked up
 
   res.status(201).json({
     success: true,
@@ -193,6 +196,7 @@ router.patch('/numbers/:id', asyncHandler(async (req, res) => {
   }
 
   const number = await updateNumber(req.params.id, parsed.data);
+  invalidatePoolCache(); // Clear cached pool so status changes take effect
 
   res.json({
     success: true,
@@ -206,6 +210,7 @@ router.patch('/numbers/:id', asyncHandler(async (req, res) => {
  */
 router.delete('/numbers/:id', asyncHandler(async (req, res) => {
   await deleteNumber(req.params.id);
+  invalidatePoolCache(); // Clear cached pool so deleted number is excluded
 
   res.json({
     success: true,
@@ -221,6 +226,7 @@ router.delete('/numbers/:id', asyncHandler(async (req, res) => {
  */
 router.post('/sync', asyncHandler(async (req, res) => {
   const result = await syncFromTelnyx();
+  invalidatePoolCache(); // Clear cached pool after sync
   
   // Ensure all numbers have reputation records
   const reputationCreated = await ensureReputationRecords();
@@ -284,6 +290,7 @@ router.post('/bulk-activate', asyncHandler(async (req, res) => {
 
   // Step 4: Force release any stuck in-use locks
   const released = forceReleaseAllNumbers();
+  invalidatePoolCache(); // Clear cached pool after bulk activation
 
   res.json({
     success: true,
@@ -365,6 +372,20 @@ router.post('/force-release', asyncHandler(async (req, res) => {
     success: true,
     data: { released },
     message: `Force-released ${released} number(s) from in-use pool`,
+  });
+}));
+
+/**
+ * POST /api/number-pool/release-stale
+ * Targeted: release only numbers locked beyond threshold (safe during active calling)
+ */
+router.post('/release-stale', asyncHandler(async (req, res) => {
+  const thresholdMs = Math.max(30_000, Number(req.body?.thresholdMs) || 120_000);
+  const released = releaseStaleNumbers(thresholdMs);
+  res.json({
+    success: true,
+    data: { released, thresholdMs },
+    message: `Released ${released} stale number(s) locked >${thresholdMs / 1000}s`,
   });
 }));
 
