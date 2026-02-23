@@ -77,8 +77,9 @@ async function sweepExpiredLocks() {
     }
 
     // 2. Release stuck entries in campaign_queue (power dial)
-    // If a contact is in 'in_progress' state for > 10 minutes, something went wrong
-    // CRITICAL FIX: Add cooldown to prevent immediate retry (back-to-back calls)
+    // Backup safety net — the orchestrator watchdog (3 min) is the primary recovery.
+    // This catches anything the watchdog missed (e.g. orchestrator down entirely).
+    // Threshold: 5 minutes (must be > watchdog's 3 min to avoid double-resetting)
     const releasedPowerEntries = await db.update(campaignQueue)
       .set({
         status: 'queued',
@@ -87,7 +88,7 @@ async function sweepExpiredLocks() {
       })
       .where(and(
         eq(campaignQueue.status, 'in_progress'),
-        lt(campaignQueue.updatedAt, sql`NOW() - INTERVAL '10 minutes'`)
+        lt(campaignQueue.updatedAt, sql`NOW() - INTERVAL '5 minutes'`)
       ))
       .returning({ id: campaignQueue.id });
 

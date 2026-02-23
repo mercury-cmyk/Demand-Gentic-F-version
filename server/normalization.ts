@@ -202,8 +202,14 @@ export function getCountryCodeFromName(countryName: string): string {
 export function normalizePhoneE164(phone: string, country?: string): string | null {
   if (!phone) return null;
 
+  const trimmed = phone.trim();
+  if (!trimmed) return null;
+
+  // Reject scientific notation (Excel corruption) — precision is lost, cannot recover
+  if (/[eE][+\-]\d+/.test(trimmed)) return null;
+
   // Try country-aware normalization first (uses libphonenumber-js)
-  const countryAware = formatPhoneWithCountryCode(phone, country);
+  const countryAware = formatPhoneWithCountryCode(trimmed, country);
   if (countryAware && isValidE164(countryAware)) return countryAware;
 
   // Fallback to heuristic normalization (handles UK 0-prefix, US 10-digit, etc.)

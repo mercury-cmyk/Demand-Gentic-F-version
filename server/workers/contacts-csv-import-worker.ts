@@ -186,12 +186,16 @@ async function processBatchWithCOPY(
       }
 
       // Normalize both phone numbers with country-aware E.164 formatting
-      const directPhoneE164 = record.contact.directPhone
-        ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
+      // Coerce empty strings to null to prevent blank phone records in DB
+      const rawDirectPhone = record.contact.directPhone?.trim() || null;
+      const rawMobilePhone = record.contact.mobilePhone?.trim() || null;
+
+      const directPhoneE164 = rawDirectPhone
+        ? normalizePhoneE164(rawDirectPhone, record.contact.country || undefined)
         : record.contact.directPhoneE164 || null;
 
-      const mobilePhoneE164 = record.contact.mobilePhone
-        ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
+      const mobilePhoneE164 = rawMobilePhone
+        ? normalizePhoneE164(rawMobilePhone, record.contact.country || undefined)
         : record.contact.mobilePhoneE164 || null;
 
       // Auto-detect timezone from location data if not explicitly provided in the CSV
@@ -205,9 +209,9 @@ async function processBatchWithCOPY(
       // Compute unified dialing phone: pre-select best phone so the call queue
       // has a single, validated E.164 number without runtime re-computation.
       const dialingResult = getBestPhoneForContact({
-        directPhone: record.contact.directPhone || null,
+        directPhone: rawDirectPhone,
         directPhoneE164,
-        mobilePhone: record.contact.mobilePhone || null,
+        mobilePhone: rawMobilePhone,
         mobilePhoneE164,
         hqPhone: null,
         hqPhoneE164: null,
@@ -218,6 +222,8 @@ async function processBatchWithCOPY(
         ...record.contact,
         accountId,
         emailNormalized: record.contact.email?.toLowerCase().trim() || null,
+        directPhone: rawDirectPhone,
+        mobilePhone: rawMobilePhone,
         directPhoneE164,
         mobilePhoneE164,
         timezone,
@@ -667,12 +673,16 @@ export async function processContactsCSVImport(
             }
 
             // Normalize phone numbers with country-aware E.164 formatting
-            const directPhoneE164 = record.contact.directPhone
-              ? normalizePhoneE164(record.contact.directPhone, record.contact.country || undefined)
+            // Coerce empty strings to null to prevent blank phone records in DB
+            const rawDirectPhone2 = record.contact.directPhone?.trim() || null;
+            const rawMobilePhone2 = record.contact.mobilePhone?.trim() || null;
+
+            const directPhoneE164 = rawDirectPhone2
+              ? normalizePhoneE164(rawDirectPhone2, record.contact.country || undefined)
               : record.contact.directPhoneE164 || null;
 
-            const mobilePhoneE164 = record.contact.mobilePhone
-              ? normalizePhoneE164(record.contact.mobilePhone, record.contact.country || undefined)
+            const mobilePhoneE164 = rawMobilePhone2
+              ? normalizePhoneE164(rawMobilePhone2, record.contact.country || undefined)
               : record.contact.mobilePhoneE164 || null;
 
             // Auto-detect timezone from location data if not explicitly provided
@@ -685,9 +695,9 @@ export async function processContactsCSVImport(
 
             // Compute unified dialing phone
             const dialingResult = getBestPhoneForContact({
-              directPhone: record.contact.directPhone || null,
+              directPhone: rawDirectPhone2,
               directPhoneE164,
-              mobilePhone: record.contact.mobilePhone || null,
+              mobilePhone: rawMobilePhone2,
               mobilePhoneE164,
               hqPhone: null,
               hqPhoneE164: null,
@@ -699,6 +709,8 @@ export async function processContactsCSVImport(
               ...record.contact,
               accountId,
               emailNormalized: record.contact.email ? record.contact.email.toLowerCase().trim() : null,
+              directPhone: rawDirectPhone2,
+              mobilePhone: rawMobilePhone2,
               directPhoneE164,
               mobilePhoneE164,
               timezone,

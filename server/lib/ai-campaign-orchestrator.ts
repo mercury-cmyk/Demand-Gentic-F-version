@@ -27,6 +27,19 @@ import {
   getBusinessHoursForCountry,
   getNextAvailableTime
 } from '../utils/business-hours';
+import {
+  UK_COUNTRY_KEYS,
+  US_COUNTRY_KEYS,
+  normalizeCountryName,
+  isUnitedStatesCountry,
+  isUnitedKingdomCountry,
+  isCountryEnabled,
+  inferCountryFromPhone,
+  getPhonePriority,
+  phoneMatchesCountry,
+  resolvePhoneForContact,
+  COUNTRY_DIAL_PREFIX,
+} from '../utils/country-utils';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
 import { formatPhoneWithCountryCode } from '../lib/phone-formatter';
@@ -50,7 +63,7 @@ const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CAL
 const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10);
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches (prevents burst overload)
 const PARALLEL_CALL_BATCH_SIZE = 10; // Smaller batches to avoid DB pool exhaustion
-const STUCK_ITEM_TIMEOUT_MS = 120000; // 2 minutes - much more aggressive to catch stuck calls quickly, calls should complete in <90s
+const STUCK_ITEM_TIMEOUT_MS = 180000; // 3 minutes - allows normal call lifecycle (~90s) + buffer; watchdog is the single recovery mechanism
 const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_EMPTY_RECHECK_SECONDS || 60));
 const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
 const ACTIVE_POOL_CACHE_TTL_MS = 30000;
@@ -71,33 +84,7 @@ const STRICT_US_ONLY_CAMPAIGN_IDS = new Set<string>(
     .map((id) => id.trim())
     .filter(Boolean)
 );
-const UK_COUNTRY_KEYS = new Set<string>([
-  'GB',
-  'UK',
-  'UNITED KINGDOM',
-  'UNITED KINGDOM UK',
-  'GREAT BRITAIN',
-  'ENGLAND',
-  'SCOTLAND',
-  'WALES',
-]);
-const UK_SATURDAY_ONE_DAY_OVERRIDE_DATE = '2026-02-21';
-const US_COUNTRY_KEYS = new Set<string>([
-  'US',
-  'USA',
-  'AMERICA',
-  'UNITED STATES',
-  'UNITED STATES OF AMERICA',
-  'UNITEDSTATES',
-  'UNITEDSTATESOFAMERICA',
-  'U S A',
-  'UNITEDF STATES',
-  'UNITED STATE',
-  'UNTED STATES',
-  'UNITD STATES',
-  'UNTIED STATES',
-  'UITED STATES',
-]);
+// UK_COUNTRY_KEYS, US_COUNTRY_KEYS now imported from country-utils.ts
 
 // Cached concurrency limits from DB (refreshed every 60s)
 let _cachedDefaultMaxConcurrent = ENV_DEFAULT_MAX_CONCURRENT_CALLS;
@@ -107,7 +94,6 @@ const CONCURRENCY_CACHE_TTL_MS = 60000; // 1 minute
 let _cachedHasActivePoolNumbers: boolean | null = null;
 let _activePoolLastFetched = 0;
 const campaignEmptyPoolBackoffUntil = new Map<string, number>();
-let ukSaturdayOverrideLoggedForDate: string | null = null;
 
 async function getConcurrencyLimits(): Promise<{ defaultMax: number; globalMax: number }> {
   const now = Date.now();
@@ -206,13 +192,9 @@ function isTelnyxFatalError(error: any): { code: number; detail: string; isWhite
 }
 
 /**
- * Check if a contact is within their local business hours based on country and campaign config
- * Returns { canCall: boolean, timezone: string | null, localTime: string, reason?: string }
- * 
- * If timezone cannot be detected, returns canCall: false to avoid calling at wrong times
- * 
- * @param contact - Contact location info
- * @param campaignBusinessHoursConfig - Optional campaign-specific business hours config (takes precedence over country defaults)
+ * Check if a contact is within their local business hours based on country and campaign config.
+ * Timezone detection delegates to the shared detectContactTimezone() utility.
+ * Debug logging removed from hot path — use structured metrics instead.
  */
 function isContactWithinBusinessHours(
   contact: { country?: string | null; state?: string | null; timezone?: string | null },
@@ -222,7 +204,7 @@ function isContactWithinBusinessHours(
   timezone: string | null;
   localTime: string;
   reason?: string;
-  nextCallableAt?: Date; // When the contact will next be within business hours
+  nextCallableAt?: Date;
 } {
   let contactTz = detectContactTimezone({ 
     country: contact.country || undefined, 
@@ -230,25 +212,18 @@ function isContactWithinBusinessHours(
     timezone: contact.timezone || undefined
   });
   
-  // FALLBACK: If timezone detection failed, try to infer from country
-  // This handles cases where country data exists but detectContactTimezone couldn't map it
+  // Fallback: infer timezone from country when detectContactTimezone couldn't map it
   if (!contactTz && contact.country) {
     const countryUpper = String(contact.country).toUpperCase().trim();
-    // UK fallback
-    if (['GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES'].includes(countryUpper)) {
+    if (isUnitedKingdomCountry(countryUpper)) {
       contactTz = 'Europe/London';
-    }
-    // US fallback
-    else if (['US', 'USA', 'UNITED STATES'].includes(countryUpper)) {
+    } else if (isUnitedStatesCountry(countryUpper)) {
       contactTz = 'America/New_York';
-    }
-    // Canada fallback
-    else if (['CA', 'CANADA'].includes(countryUpper)) {
+    } else if (['CA', 'CANADA'].includes(countryUpper)) {
       contactTz = 'America/Toronto';
     }
   }
   
-  // CRITICAL: If timezone still cannot be detected, do NOT call - skip this contact
   if (!contactTz) {
     return {
       canCall: false,
@@ -260,37 +235,25 @@ function isContactWithinBusinessHours(
   
   const now = new Date();
 
-  // Use campaign-specific business hours config if available, otherwise fall back to country defaults
+  // Use campaign-specific business hours config if available, otherwise country defaults
   let config: any;
-  
   if (campaignBusinessHoursConfig && campaignBusinessHoursConfig.enabled) {
-    // Use campaign config
     config = {
       ...campaignBusinessHoursConfig,
       timezone: contactTz,
-      respectContactTimezone: false, // We already resolved the timezone
+      respectContactTimezone: false,
     };
-    console.log(`[DEBUG BIZ HOURS] Using CAMPAIGN config: operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
   } else {
-    // Fall back to country-specific business hours (handles Middle East Sun-Thu work week)
     const countryConfig = getBusinessHoursForCountry(contact.country, now);
     config = {
       ...countryConfig,
       timezone: contactTz,
-      respectContactTimezone: false, // We already resolved the timezone
+      respectContactTimezone: false,
     };
-    console.log(`[DEBUG BIZ HOURS] Using COUNTRY config: country=${contact.country}, operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
   }
 
-  // Temporary one-day UK exception: allow Saturday calling on 2026-02-21 only.
-  if (isUkSaturdayOneDayOverride(contact.country, now) && !config.operatingDays.includes('saturday')) {
-    config.operatingDays = [...config.operatingDays, 'saturday'];
-  }
-  
-  console.log(`[DEBUG BIZ HOURS] Final config before check: operatingDays=${JSON.stringify(config.operatingDays)}, timezone=${config.timezone}`);
   const canCall = checkBusinessHours(config, undefined, now);
   
-  // Get local time for logging
   const zonedTime = toZonedTime(now, contactTz);
   const hour = getHours(zonedTime);
   const dayOfWeek = getDay(zonedTime);
@@ -300,7 +263,6 @@ function isContactWithinBusinessHours(
   let reason: string | undefined;
   let nextCallableAt: Date | undefined;
   if (!canCall) {
-    // Check if it's a non-working day for this country
     const dayName = dayNames[dayOfWeek].toLowerCase();
     const isWorkingDay = config.operatingDays.includes(
       ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dayOfWeek]
@@ -312,12 +274,9 @@ function isContactWithinBusinessHours(
       reason = `Outside hours (${localTime} ${contactTz}, hours: ${config.startTime}-${config.endTime})`;
     }
 
-    // Compute when this contact will next be within business hours
-    // This is used to set next_attempt_at so out-of-hours contacts don't clog the queue
     try {
       nextCallableAt = getNextAvailableTime(config, undefined, now);
     } catch {
-      // Fallback: try again in 30 minutes
       nextCallableAt = new Date(now.getTime() + 30 * 60 * 1000);
     }
   }
@@ -325,208 +284,10 @@ function isContactWithinBusinessHours(
   return { canCall, timezone: contactTz, localTime, reason, nextCallableAt };
 }
 
-/**
- * Check if phone is a valid UK/USA/Canada number and return priority
- * Priority: 1 = UK mobile (+447), 2 = UK landline (+441/2/3), 
- *          3 = USA/Canada mobile (+1 with mobile area codes), 4 = USA/Canada other (+1),
- *          0 = not a priority country
- */
-function getPhonePriority(phone: string | null | undefined): number {
-  if (!phone) return 0;
-  const cleaned = phone.replace(/[^\d+]/g, '');
-  const e164 = cleaned.startsWith('+') ? cleaned : '+' + cleaned;
-  
-  // UK mobile numbers: +447... (highest priority)
-  if (e164.startsWith('+447')) return 1;
-  
-  // UK landline numbers: +441..., +442..., +443...
-  if (e164.startsWith('+441') || e164.startsWith('+442') || e164.startsWith('+443')) return 2;
-  
-  // USA/Canada numbers: +1...
-  if (e164.startsWith('+1') && e164.length === 12) {
-    // Common mobile area code patterns in US/Canada (less reliable than UK but useful)
-    // Most US mobile numbers are indistinguishable from landlines, so we give all +1 numbers priority 3-4
-    return 3; // USA/Canada numbers get priority 3
-  }
-  
-  // Not a priority country number
-  return 0;
-}
-
-
-/**
- * Enabled calling regions/countries
- * Calls are enabled for: Australia, Middle East, North America (US/Canada), United Kingdom, Europe, Asia, LATAM
- */
-const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
-  // Australia / NZ
-  'AU': true, 'AUSTRALIA': true,
-  'NZ': true, 'NEW ZEALAND': true,
-  
-  // Middle East (Sun-Thu work week)
-  'AE': true, 'UNITED ARAB EMIRATES': true, 'UAE': true, 'DUBAI': true,
-  'SA': true, 'SAUDI ARABIA': true,
-  'IL': true, 'ISRAEL': true,
-  'QA': true, 'QATAR': true,
-  'KW': true, 'KUWAIT': true,
-  'BH': true, 'BAHRAIN': true,
-  'OM': true, 'OMAN': true,
-  
-  // North America
-  'US': true, 'USA': true, 'UNITED STATES': true, 'AMERICA': true,
-  'CA': true, 'CANADA': true,
-  'MX': true, 'MEXICO': true,
-  
-  // United Kingdom / Ireland (including common data variants)
-  'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'UNITED KINGDOM UK': true, 
-  'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
-  'IE': true, 'IRELAND': true,
-  
-  // Europe (Major Markets)
-  'DE': true, 'GERMANY': true,
-  'FR': true, 'FRANCE': true,
-  'IT': true, 'ITALY': true,
-  'ES': true, 'SPAIN': true,
-  'NL': true, 'NETHERLANDS': true,
-  'BE': true, 'BELGIUM': true,
-  'CH': true, 'SWITZERLAND': true,
-  'AT': true, 'AUSTRIA': true,
-  'SE': true, 'SWEDEN': true,
-  'NO': true, 'NORWAY': true,
-  'DK': true, 'DENMARK': true,
-  'FI': true, 'FINLAND': true,
-  'PL': true, 'POLAND': true,
-  'PT': true, 'PORTUGAL': true,
-  'CZ': true, 'CZECHIA': true, 'CZECH REPUBLIC': true,
-  'GR': true, 'GREECE': true,
-  'RO': true, 'ROMANIA': true,
-  'HU': true, 'HUNGARY': true,
-  'BG': true, 'BULGARIA': true,
-  'HR': true, 'CROATIA': true,
-  'SK': true, 'SLOVAKIA': true,
-  'LU': true, 'LUXEMBOURG': true,
-  'LT': true, 'LITHUANIA': true,
-  'LV': true, 'LATVIA': true,
-  'EE': true, 'ESTONIA': true,
-
-  // Asia / Pacific
-  'SG': true, 'SINGAPORE': true,
-  'HK': true, 'HONG KONG': true,
-  'JP': true, 'JAPAN': true,
-  'KR': true, 'SOUTH KOREA': true,
-  'IN': true, 'INDIA': true,
-  'CN': true, 'CHINA': true,
-  'TW': true, 'TAIWAN': true,
-  'MY': true, 'MALAYSIA': true,
-  'PH': true, 'PHILIPPINES': true,
-  'TH': true, 'THAILAND': true,
-  'VN': true, 'VIETNAM': true,
-  'ID': true, 'INDONESIA': true,
-
-  // South America / LATAM
-  'BR': true, 'BRAZIL': true,
-  'AR': true, 'ARGENTINA': true,
-  'CL': true, 'CHILE': true,
-  'CO': true, 'COLOMBIA': true,
-  'PE': true, 'PERU': true,
-
-  // Africa
-  'ZA': true, 'SOUTH AFRICA': true,
-};
-
-/**
- * Normalize country name to handle common typos and variations
- * Maps typos/variations to canonical country names that exist in ENABLED_CALLING_REGIONS
- */
-function normalizeCountryName(country: string): string {
-  const normalized = country.toUpperCase().trim();
-
-  // Common typos and variations mapping to canonical names
-  const COUNTRY_TYPOS: Record<string, string> = {
-    // United States typos
-    'UNITEDF STATES': 'UNITED STATES',
-    'UNITEDSTATES': 'UNITED STATES',
-    'UNITED STATE': 'UNITED STATES',
-    'UNTED STATES': 'UNITED STATES',
-    'UNITD STATES': 'UNITED STATES',
-    'UNTIED STATES': 'UNITED STATES',
-    'UITED STATES': 'UNITED STATES',
-    'U.S.A.': 'USA',
-    'U.S.A': 'USA',
-    'U.S.': 'US',
-    'U.S': 'US',
-    'UNITED STATES OF AMERICA': 'UNITED STATES',
-
-    // United Kingdom typos
-    'UITED KINGDOM': 'UNITED KINGDOM',
-    'UNTED KINGDOM': 'UNITED KINGDOM',
-    'UNITD KINGDOM': 'UNITED KINGDOM',
-    'UNITED KINGDON': 'UNITED KINGDOM',
-    'UNITED KINGOM': 'UNITED KINGDOM',
-    'UNITEDKINGDOM': 'UNITED KINGDOM',
-    'U.K.': 'UK',
-    'U.K': 'UK',
-    'GREAT BRITAIN': 'UNITED KINGDOM',
-    'BRITAIN': 'UNITED KINGDOM',
-
-    // Other common typos
-    'AUSTRLIA': 'AUSTRALIA',
-    'AUSTRALA': 'AUSTRALIA',
-    'AUSTALIA': 'AUSTRALIA',
-    'CANDA': 'CANADA',
-    'CANANDA': 'CANADA',
-    'GEMANY': 'GERMANY',
-    'GERAMNY': 'GERMANY',
-    'FRNCE': 'FRANCE',
-    'INDAI': 'INDIA',
-  };
-
-  return COUNTRY_TYPOS[normalized] || normalized;
-}
-
-function isUkSaturdayOneDayOverride(
-  country: string | null | undefined,
-  referenceTime: Date = new Date()
-): boolean {
-  if (!country) return false;
-
-  const normalizedCountry = String(country).toUpperCase().trim();
-  if (!UK_COUNTRY_KEYS.has(normalizedCountry)) return false;
-
-  const londonNow = toZonedTime(referenceTime, 'Europe/London');
-  const londonDate = format(londonNow, 'yyyy-MM-dd');
-  const londonDay = format(londonNow, 'EEEE').toLowerCase();
-  const enabled = londonDate === UK_SATURDAY_ONE_DAY_OVERRIDE_DATE && londonDay === 'saturday';
-
-  if (enabled && ukSaturdayOverrideLoggedForDate !== londonDate) {
-    ukSaturdayOverrideLoggedForDate = londonDate;
-    console.log(`[AI Orchestrator] UK Saturday one-day override active for ${londonDate} (Europe/London)`);
-  }
-
-  return enabled;
-}
-
-function isUnitedStatesCountry(country: string | null | undefined): boolean {
-  if (!country) return false;
-
-  const raw = String(country).toUpperCase().trim();
-  if (!raw) return false;
-
-  const noParens = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
-  const alnumWithSpace = raw.replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const compact = raw.replace(/[^A-Z0-9]/g, '');
-  const candidates = Array.from(new Set([raw, noParens, alnumWithSpace, compact].filter(Boolean)));
-
-  for (const candidate of candidates) {
-    if (US_COUNTRY_KEYS.has(candidate)) return true;
-    const normalized = normalizeCountryName(candidate);
-    if (US_COUNTRY_KEYS.has(normalized)) return true;
-    const normalizedCompact = normalized.replace(/[^A-Z0-9]/g, '');
-    if (US_COUNTRY_KEYS.has(normalizedCompact)) return true;
-  }
-
-  return false;
-}
+// getPhonePriority, ENABLED_CALLING_REGIONS, normalizeCountryName,
+// isUkSaturdayOneDayOverride, isUnitedStatesCountry, isCountryEnabled,
+// inferCountryFromPhone, COUNTRY_DIAL_PREFIX, phoneMatchesCountry,
+// resolvePhoneForContact — all imported from '../utils/country-utils'
 
 function shouldEnforceStrictUsOnly(campaign: {
   id?: string | null;
@@ -563,223 +324,8 @@ function shouldEnforceStrictUsOnly(campaign: {
   return false;
 }
 
-/**
- * Check if a contact's country is in an enabled calling region
- * Handles various formats: "Indonesia", "indonesia", " Indonesia ", "id", "ID", etc.
- */
-function isCountryEnabled(country: string | null | undefined): boolean {
-  if (!country) return false;
-  
-  // Clean/normalize common data variants e.g. "United Kingdom (UK)", "U.S.A.", etc.
-  const raw = country.toString().trim().toUpperCase();
-  if (!raw) return false;
-
-  const noParens = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
-  const alnumOnly = raw.replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const candidates = Array.from(new Set([raw, noParens, alnumOnly].filter(Boolean)));
-
-  // Try direct and typo-normalized forms
-  for (const cleaned of candidates) {
-    if (ENABLED_CALLING_REGIONS[cleaned] === true) return true;
-    const normalizedCountry = normalizeCountryName(cleaned);
-    if (ENABLED_CALLING_REGIONS[normalizedCountry] === true) return true;
-  }
-  
-  // Try common long-form to short-form mappings
-  const COUNTRY_ALIASES: Record<string, string> = {
-    'REPUBLIC OF INDONESIA': 'INDONESIA',
-    'REPUBLIC OF INDIA': 'INDIA',
-    'PEOPLE\'S REPUBLIC OF CHINA': 'CHINA',
-    'REPUBLIC OF CHINA': 'TAIWAN',
-    'KINGDOM OF SAUDI ARABIA': 'SAUDI ARABIA',
-    'KINGDOM OF BAHRAIN': 'BAHRAIN',
-    'STATE OF QATAR': 'QATAR',
-    'STATE OF KUWAIT': 'KUWAIT',
-    'SULTANATE OF OMAN': 'OMAN',
-    'COMMONWEALTH OF AUSTRALIA': 'AUSTRALIA',
-    'NEW SOUTH WALES': 'AUSTRALIA',
-    'VICTORIA': 'AUSTRALIA',
-    'QUEENSLAND': 'AUSTRALIA',
-    'ENGLAND': 'UNITED KINGDOM',
-    'NORTHERN IRELAND': 'UNITED KINGDOM',
-    'SCOTLAND': 'UNITED KINGDOM',
-    'WALES': 'UNITED KINGDOM',
-    'HONG KONG SAR': 'HONG KONG',
-    'HONG KONG S.A.R.': 'HONG KONG',
-    'MACAO': 'HONG KONG',
-    'MACAU': 'HONG KONG',
-  };
-  
-  for (const cleaned of candidates) {
-    if (COUNTRY_ALIASES[cleaned]) {
-      const aliased = COUNTRY_ALIASES[cleaned];
-      if (ENABLED_CALLING_REGIONS[aliased] === true) return true;
-    }
-  }
-  
-  return false;
-}
-
-/**
- * Infer country from E.164 phone prefix when country metadata is missing.
- * Returns canonical country name/code used by ENABLED_CALLING_REGIONS, or null.
- */
-function inferCountryFromPhone(phone: string | null | undefined): string | null {
-  if (!phone) return null;
-  const digits = String(phone).replace(/[^\d+]/g, '');
-  let e164 = digits;
-  if (e164.startsWith('00')) {
-    e164 = `+${e164.slice(2)}`;
-  } else if (!e164.startsWith('+') && /^\d+$/.test(e164)) {
-    // Best-effort normalization for raw numeric international strings.
-    if (e164.startsWith('971')) e164 = `+${e164}`;
-    else if (e164.startsWith('44')) e164 = `+${e164}`;
-    else if (e164.startsWith('1')) e164 = `+${e164}`;
-    // 10-digit NANP (US/Canada): area code starts 2-9, no country code prefix.
-    // Very common in US CRM data where contacts are stored without the +1.
-    else if (/^[2-9]\d{9}$/.test(e164)) return 'US';
-  }
-  if (!e164.startsWith('+')) return null;
-
-  const prefixMap: Array<{ prefix: string; country: string }> = [
-    { prefix: '+971', country: 'AE' }, { prefix: '+966', country: 'SA' }, { prefix: '+972', country: 'IL' },
-    { prefix: '+974', country: 'QA' }, { prefix: '+965', country: 'KW' }, { prefix: '+973', country: 'BH' },
-    { prefix: '+968', country: 'OM' }, { prefix: '+886', country: 'TW' }, { prefix: '+852', country: 'HK' },
-    { prefix: '+420', country: 'CZ' }, { prefix: '+358', country: 'FI' }, { prefix: '+353', country: 'IE' },
-    { prefix: '+351', country: 'PT' }, { prefix: '+972', country: 'IL' },
-    { prefix: '+971', country: 'AE' },
-    { prefix: '+44', country: 'GB' }, { prefix: '+1', country: 'US' }, { prefix: '+61', country: 'AU' },
-    { prefix: '+64', country: 'NZ' }, { prefix: '+65', country: 'SG' }, { prefix: '+81', country: 'JP' },
-    { prefix: '+82', country: 'KR' }, { prefix: '+91', country: 'IN' }, { prefix: '+86', country: 'CN' },
-    { prefix: '+60', country: 'MY' }, { prefix: '+63', country: 'PH' }, { prefix: '+66', country: 'TH' },
-    { prefix: '+84', country: 'VN' }, { prefix: '+62', country: 'ID' }, { prefix: '+55', country: 'BR' },
-    { prefix: '+54', country: 'AR' }, { prefix: '+56', country: 'CL' }, { prefix: '+57', country: 'CO' },
-    { prefix: '+51', country: 'PE' }, { prefix: '+27', country: 'ZA' }, { prefix: '+49', country: 'DE' },
-    { prefix: '+33', country: 'FR' }, { prefix: '+39', country: 'IT' }, { prefix: '+34', country: 'ES' },
-    { prefix: '+31', country: 'NL' }, { prefix: '+32', country: 'BE' }, { prefix: '+41', country: 'CH' },
-    { prefix: '+43', country: 'AT' }, { prefix: '+46', country: 'SE' }, { prefix: '+47', country: 'NO' },
-    { prefix: '+45', country: 'DK' }, { prefix: '+48', country: 'PL' }, { prefix: '+30', country: 'GR' },
-    { prefix: '+52', country: 'MX' },
-  ];
-
-  // Prefer longest prefix matches first
-  prefixMap.sort((a, b) => b.prefix.length - a.prefix.length);
-  const match = prefixMap.find(p => e164.startsWith(p.prefix));
-  return match?.country ?? null;
-}
-
-/**
- * Country code lookup for phone-country validation.
- * Maps normalized country names/codes to their E.164 dial prefix.
- */
-const COUNTRY_DIAL_PREFIX: Record<string, string> = {
-  'GB': '+44', 'UK': '+44', 'UNITED KINGDOM': '+44', 'ENGLAND': '+44', 'SCOTLAND': '+44', 'WALES': '+44',
-  'US': '+1', 'USA': '+1', 'UNITED STATES': '+1', 'AMERICA': '+1',
-  'CA': '+1', 'CANADA': '+1',
-  'AU': '+61', 'AUSTRALIA': '+61',
-  'NZ': '+64', 'NEW ZEALAND': '+64',
-  'DE': '+49', 'GERMANY': '+49',
-  'FR': '+33', 'FRANCE': '+33',
-  'IT': '+39', 'ITALY': '+39',
-  'ES': '+34', 'SPAIN': '+34',
-  'NL': '+31', 'NETHERLANDS': '+31',
-  'BE': '+32', 'BELGIUM': '+32',
-  'CH': '+41', 'SWITZERLAND': '+41',
-  'AT': '+43', 'AUSTRIA': '+43',
-  'SE': '+46', 'SWEDEN': '+46',
-  'NO': '+47', 'NORWAY': '+47',
-  'DK': '+45', 'DENMARK': '+45',
-  'FI': '+358', 'FINLAND': '+358',
-  'PL': '+48', 'POLAND': '+48',
-  'PT': '+351', 'PORTUGAL': '+351',
-  'IE': '+353', 'IRELAND': '+353',
-  'CZ': '+420', 'CZECH REPUBLIC': '+420', 'CZECHIA': '+420',
-  'GR': '+30', 'GREECE': '+30',
-  'AE': '+971', 'UNITED ARAB EMIRATES': '+971', 'UAE': '+971',
-  'SA': '+966', 'SAUDI ARABIA': '+966',
-  'IL': '+972', 'ISRAEL': '+972',
-  'QA': '+974', 'QATAR': '+974',
-  'KW': '+965', 'KUWAIT': '+965',
-  'BH': '+973', 'BAHRAIN': '+973',
-  'OM': '+968', 'OMAN': '+968',
-  'IN': '+91', 'INDIA': '+91',
-  'CN': '+86', 'CHINA': '+86',
-  'JP': '+81', 'JAPAN': '+81',
-  'KR': '+82', 'SOUTH KOREA': '+82',
-  'SG': '+65', 'SINGAPORE': '+65',
-  'HK': '+852', 'HONG KONG': '+852',
-  'MY': '+60', 'MALAYSIA': '+60',
-  'PH': '+63', 'PHILIPPINES': '+63',
-  'TH': '+66', 'THAILAND': '+66',
-  'VN': '+84', 'VIETNAM': '+84',
-  'ID': '+62', 'INDONESIA': '+62',
-  'TW': '+886', 'TAIWAN': '+886',
-  'BR': '+55', 'BRAZIL': '+55',
-  'AR': '+54', 'ARGENTINA': '+54',
-  'CL': '+56', 'CHILE': '+56',
-  'CO': '+57', 'COLOMBIA': '+57',
-  'MX': '+52', 'MEXICO': '+52',
-  'PE': '+51', 'PERU': '+51',
-  'ZA': '+27', 'SOUTH AFRICA': '+27',
-};
-
-/**
- * Check if a phone number matches the expected country.
- * Returns true if the phone's E.164 prefix matches the country's dial code,
- * or if we can't determine the country (allows it through).
- */
-function phoneMatchesCountry(e164Phone: string, country: string | null | undefined): boolean {
-  if (!country || !e164Phone) return true; // Can't validate → allow
-  const prefix = COUNTRY_DIAL_PREFIX[country.toUpperCase().trim()];
-  if (!prefix) return true; // Unknown country → allow
-  // US (+1) and Canada (+1) share the same prefix — allow either
-  return e164Phone.startsWith(prefix);
-}
-
-/**
- * Resolve the best phone number for a contact, respecting country geography.
- * Priority: mobile → direct → HQ/company phone
- * Only uses phones that match the contact's country dial prefix.
- * Falls back to any available phone if no country-matched phone exists.
- *
- * @returns { phone, priority, source } or null if no phone available
- */
-function resolvePhoneForContact(
-  mobilePhone: string | null,
-  directPhone: string | null,
-  hqPhone: string | null,
-  contactCountry: string | null | undefined,
-): { phone: string; priority: number; source: string } | null {
-  // Build ordered candidate list: mobile > direct > HQ
-  const candidates: Array<{ phone: string; basePriority: number; source: string }> = [];
-  if (mobilePhone) candidates.push({ phone: mobilePhone, basePriority: 1, source: 'mobile' });
-  if (directPhone) candidates.push({ phone: directPhone, basePriority: 3, source: 'direct' });
-  if (hqPhone)     candidates.push({ phone: hqPhone,     basePriority: 7, source: 'hq' });
-
-  if (candidates.length === 0) return null;
-
-  // First pass: find the highest-priority phone that matches the contact's country
-  for (const c of candidates) {
-    if (phoneMatchesCountry(c.phone, contactCountry)) {
-      // Boost UK mobile (+447) to priority 1, UK landline to 2, etc.
-      const ukPriority = getPhonePriority(c.phone);
-      return {
-        phone: c.phone,
-        priority: ukPriority > 0 ? ukPriority : c.basePriority,
-        source: c.source,
-      };
-    }
-  }
-
-  // Second pass: no phone matches the country — use the first available
-  // (better to call on a mismatched phone than not call at all)
-  const first = candidates[0];
-  return {
-    phone: first.phone,
-    priority: first.basePriority + 10, // Lower priority since country doesn't match
-    source: first.source + ':country_mismatch',
-  };
-}
+// isCountryEnabled, inferCountryFromPhone, COUNTRY_DIAL_PREFIX,
+// phoneMatchesCountry, resolvePhoneForContact — all imported from '../utils/country-utils'
 
 interface OrchestratorJobData {
   type: 'tick' | 'campaign-replenish';
@@ -1267,22 +813,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     return { initiated: 0, skipped: 0 };
   }
 
-  // SAFETY: Emergency reset for items that are stuck but haven't hit the watchdog timeout yet
-  // If an item is in_progress for 90+ seconds (normal calls complete in 60-90s), reset it immediately
-  const emergencyResetCount = await db.execute(sql`
-    UPDATE campaign_queue
-    SET status = 'queued', updated_at = NOW(), enqueued_reason = 'emergency_reset|stuck_for_90s'
-    WHERE campaign_id = ${campaignId}
-      AND status = 'in_progress'
-      AND updated_at < NOW() - INTERVAL '90 seconds'
-    RETURNING id
-  `);
-  
-  if (emergencyResetCount && (emergencyResetCount as any).rowCount > 0) {
-    console.warn(`[AI Orchestrator] EMERGENCY RESET: ${(emergencyResetCount as any).rowCount} stuck items (90+ sec) for campaign ${campaignId}`);
-  }
-
-  // Get current in-progress count (after emergency resets)
+  // Get current in-progress count (watchdog handles truly stuck items)
   const inProgressCount = await getInProgressCount(campaignId);
   const { defaultMax } = await getConcurrencyLimits();
   const maxConcurrent = (aiSettings as any).maxConcurrentCalls || defaultMax;
@@ -2109,6 +1640,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           await db.execute(sql`
             UPDATE campaign_queue
             SET status = 'queued',
+                next_attempt_at = NOW() + INTERVAL '30 seconds',
                 updated_at = NOW(),
                 enqueued_reason = COALESCE(enqueued_reason, '') || '|skipped_duplicate_call:' || to_char(NOW(), 'HH24:MI:SS')
             WHERE id = ${item.id}
@@ -2416,7 +1948,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 async function orchestratorTick(): Promise<OrchestratorJobResult> {
   try {
     // WATCHDOG: First, clean up stale in-memory prospect/caller locks, then reset stuck DB items
-    const staleLocksCleaned = cleanupStaleLocks(10); // Clean locks older than 10 minutes
+    const staleLocksCleaned = cleanupStaleLocks(5); // Clean locks older than 5 minutes (aligned with background-jobs threshold)
     if (staleLocksCleaned > 0) {
       console.log(`[AI Orchestrator] WATCHDOG: Cleaned ${staleLocksCleaned} stale in-memory prospect/caller locks`);
     }

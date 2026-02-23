@@ -455,12 +455,9 @@ export function isWithinBusinessHours(
   // Check if it's a working day
   const dayOfWeek = format(zonedTime, 'EEEE').toLowerCase();
   const operatingDays = (config.operatingDays || []).map((day) => String(day).trim().toLowerCase());
-  console.log(`[DEBUG BIZ HOURS] Checking day: ${dayOfWeek}, operatingDays=${JSON.stringify(operatingDays)}`);
   if (!operatingDays.includes(dayOfWeek)) {
-    console.log(`[DEBUG BIZ HOURS] ${dayOfWeek} NOT in operatingDays - returning false`);
     return false; // Not an operating day
   }
-  console.log(`[DEBUG BIZ HOURS] ${dayOfWeek} IS in operatingDays - checking time`);
 
   // Check if it's a holiday
   const dateString = format(zonedTime, 'yyyy-MM-dd');
@@ -488,7 +485,11 @@ export function isWithinBusinessHours(
 }
 
 /**
- * Calculate next available calling time
+ * Calculate next available calling time.
+ *
+ * Algorithm: jump directly to the start-of-business-hours on the next
+ * operating day.  Avoids the old minute-by-minute iteration (up to 20 160
+ * cycles) and completes in O(14) at worst (2 weeks of days).
  */
 export function getNextAvailableTime(
   config: BusinessHoursConfig,
@@ -508,51 +509,55 @@ export function getNextAvailableTime(
     }
   }
 
-  // Start from the next minute
-  let checkTime = new Date(fromTime.getTime() + 60000);
-  const maxIterations = 14 * 24 * 60; // Check up to 2 weeks ahead (in minutes)
   const parsedStartMinutes = parseTimeToMinutes(config.startTime);
   const parsedEndMinutes = parseTimeToMinutes(config.endTime);
-  const supportsFastForward =
-    parsedStartMinutes !== null &&
-    parsedEndMinutes !== null &&
-    parsedStartMinutes <= parsedEndMinutes;
   const startHour = parsedStartMinutes !== null ? Math.floor(parsedStartMinutes / 60) : 9;
   const startMinute = parsedStartMinutes !== null ? parsedStartMinutes % 60 : 0;
-  
-  for (let i = 0; i < maxIterations; i++) {
-    if (isWithinBusinessHours(config, contactInfo, checkTime)) {
-      return checkTime;
-    }
-    
-    // If we're outside hours, jump to start of next business day
+  const operatingDays = (config.operatingDays || []).map(d => String(d).trim().toLowerCase());
+  const operatingDaySet = new Set(operatingDays);
+  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+  // Start from now + 1 minute
+  let checkTime = new Date(fromTime.getTime() + 60000);
+
+  // Try up to 14 days ahead (max iterations = 14)
+  for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
     const zonedTime = toZonedTime(checkTime, targetTimezone);
-    const currentTimeStr = format(zonedTime, 'HH:mm');
-    const currentMinutes = parseTimeToMinutes(currentTimeStr);
-    
-    // If custom time strings don't support fast-forward math, advance minute-by-minute.
-    if (!supportsFastForward || currentMinutes === null || parsedEndMinutes === null) {
-      checkTime = new Date(checkTime.getTime() + 60000);
-      continue;
+    const dayOfWeekIdx = parseInt(format(zonedTime, 'i'), 10) % 7; // 0=Sun
+    const dayName = dayNames[dayOfWeekIdx] || format(zonedTime, 'EEEE').toLowerCase();
+
+    if (operatingDaySet.has(dayName)) {
+      // Check excluded dates
+      const dateString = format(zonedTime, 'yyyy-MM-dd');
+      if (!(config.excludedDates && config.excludedDates.includes(dateString))) {
+        // On the first day (dayOffset===0) we might already be within hours
+        if (dayOffset === 0 && parsedStartMinutes !== null && parsedEndMinutes !== null) {
+          const currentTimeStr = format(zonedTime, 'HH:mm');
+          const currentMinutes = parseTimeToMinutes(currentTimeStr);
+          if (currentMinutes !== null && isWithinDailyWindow(currentMinutes, parsedStartMinutes, parsedEndMinutes)) {
+            return checkTime; // Already within business hours
+          }
+          // Before start time today — jump to start
+          if (currentMinutes !== null && currentMinutes < parsedStartMinutes) {
+            const zonedStart = toZonedTime(checkTime, targetTimezone);
+            zonedStart.setHours(startHour, startMinute, 0, 0);
+            return fromZonedTime(zonedStart, targetTimezone);
+          }
+          // Past end time — fall through to next day
+        } else if (dayOffset > 0) {
+          // Jump to start-of-business on this operating day
+          const zonedTarget = toZonedTime(checkTime, targetTimezone);
+          zonedTarget.setHours(startHour, startMinute, 0, 0);
+          return fromZonedTime(zonedTarget, targetTimezone);
+        }
+      }
     }
-    
-    // If past end time, jump to start time next day
-    if (currentMinutes >= parsedEndMinutes) {
-      const nextDay = new Date(checkTime);
-      nextDay.setDate(nextDay.getDate() + 1);
-      
-      // Parse start time and set it
-      const zonedNextDay = toZonedTime(nextDay, targetTimezone);
-      zonedNextDay.setHours(startHour, startMinute, 0, 0);
-      
-      checkTime = fromZonedTime(zonedNextDay, targetTimezone);
-    } else {
-      // Before start time, jump to start time today
-      const zonedCheckTime = toZonedTime(checkTime, targetTimezone);
-      zonedCheckTime.setHours(startHour, startMinute, 0, 0);
-      
-      checkTime = fromZonedTime(zonedCheckTime, targetTimezone);
-    }
+
+    // Advance to midnight of the next day in the target timezone
+    const zonedMidnight = toZonedTime(checkTime, targetTimezone);
+    zonedMidnight.setDate(zonedMidnight.getDate() + 1);
+    zonedMidnight.setHours(0, 0, 0, 0);
+    checkTime = fromZonedTime(zonedMidnight, targetTimezone);
   }
 
   // Fallback: return 24 hours from now

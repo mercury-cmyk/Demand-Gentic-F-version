@@ -28,75 +28,11 @@ import { seedQueuePriorities } from "./campaign-timezone-analyzer";
 import { processDisposition } from "./disposition-engine";
 import { getCallerIdForCall, handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "./number-pool-integration";
 import { buildUnifiedCallContext } from "./unified-call-context";
+import { isCountryEnabled, getContactCallPriority } from "../utils/country-utils";
 
 const LOG_PREFIX = "[CampaignRunner-WS]";
 
-/**
- * Enabled calling regions/countries
- * Calls are enabled for: Australia, Middle East, North America (US/Canada), United Kingdom
- */
-const ENABLED_CALLING_REGIONS = {
-  // Australia
-  'AU': true, 'AUSTRALIA': true,
-  // Middle East (Sun-Thu work week)
-  'AE': true, 'UNITED ARAB EMIRATES': true, 'UAE': true, 'DUBAI': true,
-  'SA': true, 'SAUDI ARABIA': true,
-  'IL': true, 'ISRAEL': true,
-  'QA': true, 'QATAR': true,
-  'KW': true, 'KUWAIT': true,
-  'BH': true, 'BAHRAIN': true,
-  'OM': true, 'OMAN': true,
-  // North America
-  'US': true, 'USA': true, 'UNITED STATES': true, 'AMERICA': true,
-  'CA': true, 'CANADA': true,
-  // United Kingdom
-  'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
-};
-
-/**
- * Check if a contact's country is in an enabled calling region
- */
-function isCountryEnabled(country: string | null | undefined): boolean {
-  if (!country) return false;
-  return ENABLED_CALLING_REGIONS[country.toUpperCase().trim() as keyof typeof ENABLED_CALLING_REGIONS] === true;
-}
-
-/**
- * Check if contact is within their local business hours
- * Returns priority score: higher = should call sooner
- * - 100: Currently within business hours (should call now)
- * - 50: Known timezone but outside hours (skip for now)
- * - 0: Unknown timezone (skip)
- */
-function getContactCallPriority(contact: {
-  country?: string | null;
-  state?: string | null;
-  timezone?: string | null;
-}): { canCallNow: boolean; priority: number; timezone: string | null; reason?: string } {
-  const timezone = detectContactTimezone({
-    country: contact.country || undefined,
-    state: contact.state || undefined,
-    timezone: contact.timezone || undefined,
-  });
-
-  if (!timezone) {
-    return { canCallNow: false, priority: 0, timezone: null, reason: 'Unknown timezone' };
-  }
-
-  // Get country-specific business hours config
-  const config = getBusinessHoursForCountry(contact.country);
-  config.timezone = timezone;
-  config.respectContactTimezone = false;
-
-  const canCallNow = isWithinBusinessHours(config, undefined, new Date());
-
-  return {
-    canCallNow,
-    priority: canCallNow ? 100 : 50,
-    timezone,
-    reason: canCallNow ? undefined : `Outside business hours (${config.startTime}-${config.endTime} ${timezone})`,
-  };
-}
+// isCountryEnabled, getContactCallPriority — imported from '../utils/country-utils'
 
 export interface CampaignTask {
   taskId: string;

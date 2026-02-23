@@ -48,6 +48,10 @@ import {
   contextToClientStateParams,
   storeCallSession,
 } from './unified-call-context';
+import {
+  isCountryEnabled,
+  getContactCallPriority,
+} from '../utils/country-utils';
 
 const LOG_PREFIX = '[AutonomousAIDialer]';
 const POLL_INTERVAL_MS = 10_000;          // 10 seconds between polling sweeps
@@ -61,55 +65,7 @@ const PRIORITY_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 export const autonomousDialerEvents = new EventEmitter();
 autonomousDialerEvents.setMaxListeners(100);
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Enabled calling regions (same as campaign-runner-ws.ts)
-// ──────────────────────────────────────────────────────────────────────────────
-const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
-  'AU': true, 'AUSTRALIA': true,
-  'AE': true, 'UNITED ARAB EMIRATES': true, 'UAE': true, 'DUBAI': true,
-  'SA': true, 'SAUDI ARABIA': true,
-  'IL': true, 'ISRAEL': true,
-  'QA': true, 'QATAR': true,
-  'KW': true, 'KUWAIT': true,
-  'BH': true, 'BAHRAIN': true,
-  'OM': true, 'OMAN': true,
-  'US': true, 'USA': true, 'UNITED STATES': true, 'AMERICA': true,
-  'CA': true, 'CANADA': true,
-  'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
-};
-
-function isCountryEnabled(country: string | null | undefined): boolean {
-  if (!country) return false;
-  return ENABLED_CALLING_REGIONS[country.toUpperCase().trim()] === true;
-}
-
-function getContactCallPriority(contact: {
-  country?: string | null;
-  state?: string | null;
-  timezone?: string | null;
-}): { canCallNow: boolean; priority: number; timezone: string | null; reason?: string } {
-  const timezone = detectContactTimezone({
-    country: contact.country || undefined,
-    state: contact.state || undefined,
-    timezone: contact.timezone || undefined,
-  });
-
-  if (!timezone) {
-    return { canCallNow: false, priority: 0, timezone: null, reason: 'Unknown timezone' };
-  }
-
-  const config = getBusinessHoursForCountry(contact.country);
-  config.timezone = timezone;
-  config.respectContactTimezone = false;
-
-  const canCallNow = isWithinBusinessHours(config, undefined, new Date());
-  return {
-    canCallNow,
-    priority: canCallNow ? 100 : 50,
-    timezone,
-    reason: canCallNow ? undefined : `Outside business hours (${config.startTime}-${config.endTime} ${timezone})`,
-  };
-}
+// isCountryEnabled, getContactCallPriority — imported from '../utils/country-utils'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // International call info (same as campaign-test-calls.ts)
@@ -214,15 +170,8 @@ class AutonomousAIDialerService {
 
     try {
       // 1. Find all active AI campaigns
-      const activeCampaigns = await db
-        .select({
-          id: campaigns.id,
-          dialMode: campaigns.dialMode,
-          status: campaigns.status,
-          maxConcurrentWorkers: sql<number>`COALESCE(${campaigns.maxConcurrentWorkers}, 1)`,
-          fromNumber: sql<string>`COALESCE(${campaigns.fromNumber}, '')`,
-          virtualAgentId: sql<string | null>`${campaigns.virtualAgentId}`,
-        })
+      const activeCampaignRows = await db
+        .select()
         .from(campaigns)
         .where(
           and(
@@ -230,6 +179,15 @@ class AutonomousAIDialerService {
             eq(campaigns.dialMode, 'ai_agent')
           )
         );
+
+      const activeCampaigns = activeCampaignRows.map(c => {
+        const ext = c as any;
+        return {
+          id: c.id,
+          maxConcurrentWorkers: (ext.maxConcurrentWorkers || 1) as number,
+          fromNumber: (ext.fromNumber || '') as string,
+        };
+      });
 
       if (activeCampaigns.length === 0) {
         // No active AI campaigns — clean up stale tracking
@@ -679,18 +637,19 @@ class AutonomousAIDialerService {
     if (slotsAvailable <= 0) return;
 
     // Verify campaign is still active
-    const [campaign] = await db
-      .select({ status: campaigns.status, fromNumber: sql<string>`COALESCE(${campaigns.fromNumber}, '')` })
+    const [campaignRow] = await db
+      .select()
       .from(campaigns)
       .where(eq(campaigns.id, campaignId))
       .limit(1);
 
-    if (!campaign || campaign.status !== 'active') {
+    if (!campaignRow || campaignRow.status !== 'active') {
       this.campaignConfigs.delete(campaignId);
       return;
     }
 
-    await this.fillSlots(campaignId, slotsAvailable, campaign.fromNumber || '');
+    const campaignExt = campaignRow as any;
+    await this.fillSlots(campaignId, slotsAvailable, campaignExt.fromNumber || '');
   }
 
   // ──────────────────────────────────────────────────────────────────────────
