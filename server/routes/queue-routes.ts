@@ -1773,4 +1773,150 @@ router.get(
   }
 );
 
+/**
+ * POST /campaigns/:campaignId/queues/backfill-phones
+ *
+ * Backfill E164-normalized phone numbers for contacts in this campaign's queue
+ * that have raw phone data (direct_phone / mobile_phone) but NULL E164 fields.
+ * Uses country-aware normalization (libphonenumber-js) with heuristic fallback.
+ *
+ * This fixes the "Missing Phone" issue caused by imports where phone normalization
+ * failed (e.g., missing/wrong country field at import time).
+ */
+router.post(
+  '/campaigns/:campaignId/queues/backfill-phones',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const { campaignId } = req.params;
+    const dryRun = req.query.dryRun === 'true';
+
+    try {
+      // Import normalization functions
+      const { formatPhoneWithCountryCode } = await import('../lib/phone-formatter');
+      const { normalizeToE164, isValidE164, isTollFreeOrServiceNumber } = await import('../lib/phone-utils');
+
+      // Find contacts in this campaign's queue that have raw phone data but no E164
+      const result = await db.execute(sql`
+        SELECT DISTINCT c.id,
+          c.direct_phone,
+          c.direct_phone_e164,
+          c.mobile_phone,
+          c.mobile_phone_e164,
+          c.dialing_phone_e164,
+          c.country,
+          a.hq_phone,
+          a.hq_country
+        FROM campaign_queue cq
+        JOIN contacts c ON c.id = cq.contact_id
+        LEFT JOIN accounts a ON a.id = c.account_id
+        WHERE cq.campaign_id = ${campaignId}
+          AND cq.status = 'queued'
+          AND c.direct_phone_e164 IS NULL
+          AND c.mobile_phone_e164 IS NULL
+          AND (
+            (c.direct_phone IS NOT NULL AND c.direct_phone != '')
+            OR (c.mobile_phone IS NOT NULL AND c.mobile_phone != '')
+            OR (a.hq_phone IS NOT NULL AND a.hq_phone != '')
+          )
+        LIMIT 100000
+      `);
+
+      const rows = result.rows as any[];
+      if (rows.length === 0) {
+        return res.json({
+          message: 'No contacts need phone backfill',
+          total: 0,
+          updated: 0,
+        });
+      }
+
+      // Helper: normalize a raw phone with country-aware + heuristic fallback
+      function normalize(phone: string | null, country: string | null | undefined): string | null {
+        if (!phone || !phone.trim()) return null;
+        const e164 = formatPhoneWithCountryCode(phone, country) || normalizeToE164(phone);
+        if (!e164 || !isValidE164(e164)) return null;
+        if (isTollFreeOrServiceNumber(e164)) return null;
+        return e164;
+      }
+
+      let updated = 0;
+      let skippedNoPhone = 0;
+      const batchSize = 500;
+
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        const updates: Array<{ id: string; directE164: string | null; mobileE164: string | null; dialingE164: string | null }> = [];
+
+        for (const row of batch) {
+          const country = row.country || undefined;
+          const directE164 = normalize(row.direct_phone, country);
+          const mobileE164 = normalize(row.mobile_phone, country);
+
+          // If both still null, try HQ phone as last resort for dialing_phone_e164
+          const hqE164 = (!directE164 && !mobileE164)
+            ? normalize(row.hq_phone, row.hq_country || country)
+            : null;
+
+          const dialingE164 = directE164 || mobileE164 || hqE164;
+
+          if (!directE164 && !mobileE164 && !dialingE164) {
+            skippedNoPhone++;
+            continue;
+          }
+
+          updates.push({ id: row.id, directE164, mobileE164, dialingE164 });
+        }
+
+        if (updates.length > 0 && !dryRun) {
+          // Use a single SQL UPDATE with CASE for efficiency
+          // Process in sub-batches of 200 to avoid SQL size limits
+          const subBatchSize = 200;
+          for (let j = 0; j < updates.length; j += subBatchSize) {
+            const subBatch = updates.slice(j, j + subBatchSize);
+            const ids = subBatch.map(u => u.id);
+
+            // Build individual UPDATE statements batched in a transaction
+            for (const update of subBatch) {
+              await db.execute(sql`
+                UPDATE contacts
+                SET direct_phone_e164 = COALESCE(direct_phone_e164, ${update.directE164}),
+                    mobile_phone_e164 = COALESCE(mobile_phone_e164, ${update.mobileE164}),
+                    dialing_phone_e164 = COALESCE(dialing_phone_e164, ${update.dialingE164}),
+                    updated_at = NOW()
+                WHERE id = ${update.id}
+                  AND direct_phone_e164 IS NULL
+                  AND mobile_phone_e164 IS NULL
+              `);
+            }
+          }
+          updated += updates.length;
+        } else if (dryRun) {
+          updated += updates.length;
+        }
+
+        // Log progress for large batches
+        if (i > 0 && i % 5000 === 0) {
+          console.log(`[Phone Backfill] Progress: ${i}/${rows.length} processed, ${updated} updated`);
+        }
+      }
+
+      console.log(`[Phone Backfill] Campaign ${campaignId}: ${updated} contacts updated, ${skippedNoPhone} skipped (no normalizable phone), ${rows.length} total processed${dryRun ? ' (DRY RUN)' : ''}`);
+
+      return res.json({
+        message: dryRun ? 'Dry run complete' : 'Phone backfill complete',
+        total: rows.length,
+        updated,
+        skippedNoPhone,
+        dryRun,
+      });
+    } catch (error: any) {
+      console.error('[Phone Backfill] Error:', error);
+      return res.status(500).json({
+        error: 'backfill_failed',
+        message: error.message,
+      });
+    }
+  }
+);
+
 export default router;

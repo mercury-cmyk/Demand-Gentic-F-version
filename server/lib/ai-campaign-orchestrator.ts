@@ -353,40 +353,6 @@ function getPhonePriority(phone: string | null | undefined): number {
   return 0;
 }
 
-// Alias for backward compatibility
-const getUkPhonePriority = getPhonePriority;
-
-/**
- * Get the best priority phone for a contact (UK mobile > UK landline > USA/Canada > other)
- */
-function getBestPriorityPhone(contact: any): { phone: string | null; priority: number } {
-  // Check mobile first (highest priority for UK mobile)
-  const mobilePriority = getPhonePriority(contact?.mobilePhoneE164);
-  if (mobilePriority === 1) {
-    return { phone: contact.mobilePhoneE164, priority: 1 };
-  }
-  
-  // Check direct phone for UK landline or USA/Canada
-  const directPriority = getPhonePriority(contact?.directPhoneE164);
-  if (directPriority > 0 && directPriority <= mobilePriority) {
-    return { phone: contact.directPhoneE164, priority: directPriority };
-  }
-  
-  // Return mobile if it has any priority (UK landline in mobile field or USA/Canada)
-  if (mobilePriority > 0) {
-    return { phone: contact.mobilePhoneE164, priority: mobilePriority };
-  }
-  
-  // Return direct if it has any priority
-  if (directPriority > 0) {
-    return { phone: contact.directPhoneE164, priority: directPriority };
-  }
-  
-  return { phone: null, priority: 0 };
-}
-
-// Alias for backward compatibility
-const getBestUkPhone = getBestPriorityPhone;
 
 /**
  * Enabled calling regions/countries
@@ -700,6 +666,119 @@ function inferCountryFromPhone(phone: string | null | undefined): string | null 
   prefixMap.sort((a, b) => b.prefix.length - a.prefix.length);
   const match = prefixMap.find(p => e164.startsWith(p.prefix));
   return match?.country ?? null;
+}
+
+/**
+ * Country code lookup for phone-country validation.
+ * Maps normalized country names/codes to their E.164 dial prefix.
+ */
+const COUNTRY_DIAL_PREFIX: Record<string, string> = {
+  'GB': '+44', 'UK': '+44', 'UNITED KINGDOM': '+44', 'ENGLAND': '+44', 'SCOTLAND': '+44', 'WALES': '+44',
+  'US': '+1', 'USA': '+1', 'UNITED STATES': '+1', 'AMERICA': '+1',
+  'CA': '+1', 'CANADA': '+1',
+  'AU': '+61', 'AUSTRALIA': '+61',
+  'NZ': '+64', 'NEW ZEALAND': '+64',
+  'DE': '+49', 'GERMANY': '+49',
+  'FR': '+33', 'FRANCE': '+33',
+  'IT': '+39', 'ITALY': '+39',
+  'ES': '+34', 'SPAIN': '+34',
+  'NL': '+31', 'NETHERLANDS': '+31',
+  'BE': '+32', 'BELGIUM': '+32',
+  'CH': '+41', 'SWITZERLAND': '+41',
+  'AT': '+43', 'AUSTRIA': '+43',
+  'SE': '+46', 'SWEDEN': '+46',
+  'NO': '+47', 'NORWAY': '+47',
+  'DK': '+45', 'DENMARK': '+45',
+  'FI': '+358', 'FINLAND': '+358',
+  'PL': '+48', 'POLAND': '+48',
+  'PT': '+351', 'PORTUGAL': '+351',
+  'IE': '+353', 'IRELAND': '+353',
+  'CZ': '+420', 'CZECH REPUBLIC': '+420', 'CZECHIA': '+420',
+  'GR': '+30', 'GREECE': '+30',
+  'AE': '+971', 'UNITED ARAB EMIRATES': '+971', 'UAE': '+971',
+  'SA': '+966', 'SAUDI ARABIA': '+966',
+  'IL': '+972', 'ISRAEL': '+972',
+  'QA': '+974', 'QATAR': '+974',
+  'KW': '+965', 'KUWAIT': '+965',
+  'BH': '+973', 'BAHRAIN': '+973',
+  'OM': '+968', 'OMAN': '+968',
+  'IN': '+91', 'INDIA': '+91',
+  'CN': '+86', 'CHINA': '+86',
+  'JP': '+81', 'JAPAN': '+81',
+  'KR': '+82', 'SOUTH KOREA': '+82',
+  'SG': '+65', 'SINGAPORE': '+65',
+  'HK': '+852', 'HONG KONG': '+852',
+  'MY': '+60', 'MALAYSIA': '+60',
+  'PH': '+63', 'PHILIPPINES': '+63',
+  'TH': '+66', 'THAILAND': '+66',
+  'VN': '+84', 'VIETNAM': '+84',
+  'ID': '+62', 'INDONESIA': '+62',
+  'TW': '+886', 'TAIWAN': '+886',
+  'BR': '+55', 'BRAZIL': '+55',
+  'AR': '+54', 'ARGENTINA': '+54',
+  'CL': '+56', 'CHILE': '+56',
+  'CO': '+57', 'COLOMBIA': '+57',
+  'MX': '+52', 'MEXICO': '+52',
+  'PE': '+51', 'PERU': '+51',
+  'ZA': '+27', 'SOUTH AFRICA': '+27',
+};
+
+/**
+ * Check if a phone number matches the expected country.
+ * Returns true if the phone's E.164 prefix matches the country's dial code,
+ * or if we can't determine the country (allows it through).
+ */
+function phoneMatchesCountry(e164Phone: string, country: string | null | undefined): boolean {
+  if (!country || !e164Phone) return true; // Can't validate → allow
+  const prefix = COUNTRY_DIAL_PREFIX[country.toUpperCase().trim()];
+  if (!prefix) return true; // Unknown country → allow
+  // US (+1) and Canada (+1) share the same prefix — allow either
+  return e164Phone.startsWith(prefix);
+}
+
+/**
+ * Resolve the best phone number for a contact, respecting country geography.
+ * Priority: mobile → direct → HQ/company phone
+ * Only uses phones that match the contact's country dial prefix.
+ * Falls back to any available phone if no country-matched phone exists.
+ *
+ * @returns { phone, priority, source } or null if no phone available
+ */
+function resolvePhoneForContact(
+  mobilePhone: string | null,
+  directPhone: string | null,
+  hqPhone: string | null,
+  contactCountry: string | null | undefined,
+): { phone: string; priority: number; source: string } | null {
+  // Build ordered candidate list: mobile > direct > HQ
+  const candidates: Array<{ phone: string; basePriority: number; source: string }> = [];
+  if (mobilePhone) candidates.push({ phone: mobilePhone, basePriority: 1, source: 'mobile' });
+  if (directPhone) candidates.push({ phone: directPhone, basePriority: 3, source: 'direct' });
+  if (hqPhone)     candidates.push({ phone: hqPhone,     basePriority: 7, source: 'hq' });
+
+  if (candidates.length === 0) return null;
+
+  // First pass: find the highest-priority phone that matches the contact's country
+  for (const c of candidates) {
+    if (phoneMatchesCountry(c.phone, contactCountry)) {
+      // Boost UK mobile (+447) to priority 1, UK landline to 2, etc.
+      const ukPriority = getPhonePriority(c.phone);
+      return {
+        phone: c.phone,
+        priority: ukPriority > 0 ? ukPriority : c.basePriority,
+        source: c.source,
+      };
+    }
+  }
+
+  // Second pass: no phone matches the country — use the first available
+  // (better to call on a mismatched phone than not call at all)
+  const first = candidates[0];
+  return {
+    phone: first.phone,
+    priority: first.basePriority + 10, // Lower priority since country doesn't match
+    source: first.source + ':country_mismatch',
+  };
 }
 
 interface OrchestratorJobData {
@@ -1324,27 +1403,6 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     }
   }
 
-  // 5. Batch fetch contacts for phone validation
-  const contactIdsToFetch = queueItems.filter(item => item.contactId).map(item => item.contactId);
-  const contactsMap = new Map<string, any>();
-  if (contactIdsToFetch.length > 0) {
-    const batchSize = 100;
-    for (let i = 0; i < contactIdsToFetch.length; i += batchSize) {
-      const batch = contactIdsToFetch.slice(i, i + batchSize);
-      const contactsResult = await db.select({
-        id: contacts.id,
-        directPhone: contacts.directPhone,
-        directPhoneE164: contacts.directPhoneE164,
-        mobilePhone: contacts.mobilePhone,
-        mobilePhoneE164: contacts.mobilePhoneE164,
-        country: contacts.country,
-      }).from(contacts).where(inArray(contacts.id, batch));
-      for (const contact of contactsResult) {
-        contactsMap.set(contact.id, contact);
-      }
-    }
-  }
-
   // Filter eligible items - check business hours per contact based on country
   const eligibleItems: any[] = [];
   let skipped = 0;
@@ -1536,41 +1594,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     
     tzStat.callable++;
     
-    // Prioritize mobile over direct, then HQ phone as last resort
-    if (mobilePhone && getUkPhonePriority(mobilePhone) > 0) {
-      phone = mobilePhone;
-      priority = getUkPhonePriority(mobilePhone);
-    } else if (directPhone && getUkPhonePriority(directPhone) > 0) {
-      phone = directPhone;
-      priority = getUkPhonePriority(directPhone);
-    } else if (mobilePhone) {
-      // Non-UK mobile
-      phone = mobilePhone;
-      priority = 5;
-    } else if (directPhone) {
-      // Non-UK direct
-      phone = directPhone;
-      priority = 6;
-    } else if (hqPhone) {
-      // Company/HQ phone (last resort from query)
-      phone = hqPhone;
-      priority = 8;
-    }
-
-    // Fallback to contact lookup if phone not in query result
-    if (!phone && item.contactId && contactsMap.has(item.contactId)) {
-      contact = contactsMap.get(item.contactId);
-      const ukPhone = getBestUkPhone(contact);
-      if (ukPhone.priority > 0) {
-        phone = ukPhone.phone;
-        priority = ukPhone.priority;
-      } else if (contact.mobilePhoneE164) {
-        phone = contact.mobilePhoneE164;
-        priority = 5;
-      } else if (contact.directPhoneE164) {
-        phone = contact.directPhoneE164;
-        priority = 6;
-      }
+    // Country-aware phone resolution: mobile > direct > HQ, validated against contact country
+    const resolved = resolvePhoneForContact(mobilePhone, directPhone, hqPhone, effectiveCountry);
+    if (resolved) {
+      phone = resolved.phone;
+      priority = resolved.priority;
     }
 
     // Skip contacts without valid phone numbers

@@ -18,6 +18,52 @@ export interface ContactTimezoneInfo {
   country?: string | null;
 }
 
+function parseTimeToMinutes(rawTime: string): number | null {
+  if (typeof rawTime !== 'string') return null;
+
+  const match = rawTime
+    .trim()
+    .toLowerCase()
+    .match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(am|pm)?$/i);
+
+  if (!match) return null;
+
+  const hourRaw = Number(match[1]);
+  const minute = Number(match[2] ?? '0');
+  const meridiem = match[3];
+
+  if (!Number.isFinite(hourRaw) || !Number.isFinite(minute) || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  let hour = hourRaw;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === 'am') {
+      hour = hour === 12 ? 0 : hour;
+    } else {
+      hour = hour === 12 ? 12 : hour + 12;
+    }
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+
+  return hour * 60 + minute;
+}
+
+function isWithinDailyWindow(currentMinutes: number, startMinutes: number, endMinutes: number): boolean {
+  // Equal start/end means full-day availability.
+  if (startMinutes === endMinutes) return true;
+
+  // Standard same-day window (e.g. 09:00-17:00).
+  if (startMinutes < endMinutes) {
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  }
+
+  // Overnight window (e.g. 22:00-06:00).
+  return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+}
+
 /**
  * Default business hours configuration (Western Mon-Sat)
  * Saturday is now included by default as a business day
@@ -408,8 +454,9 @@ export function isWithinBusinessHours(
 
   // Check if it's a working day
   const dayOfWeek = format(zonedTime, 'EEEE').toLowerCase();
-  console.log(`[DEBUG BIZ HOURS] Checking day: ${dayOfWeek}, operatingDays=${JSON.stringify(config.operatingDays)}`);
-  if (!config.operatingDays.includes(dayOfWeek)) {
+  const operatingDays = (config.operatingDays || []).map((day) => String(day).trim().toLowerCase());
+  console.log(`[DEBUG BIZ HOURS] Checking day: ${dayOfWeek}, operatingDays=${JSON.stringify(operatingDays)}`);
+  if (!operatingDays.includes(dayOfWeek)) {
     console.log(`[DEBUG BIZ HOURS] ${dayOfWeek} NOT in operatingDays - returning false`);
     return false; // Not an operating day
   }
@@ -423,8 +470,16 @@ export function isWithinBusinessHours(
 
   // Check time range
   const currentTimeStr = format(zonedTime, 'HH:mm');
+  const currentMinutes = parseTimeToMinutes(currentTimeStr);
+  const startMinutes = parseTimeToMinutes(config.startTime);
+  const endMinutes = parseTimeToMinutes(config.endTime);
 
-  // Parse start and end times for comparison
+  if (currentMinutes !== null && startMinutes !== null && endMinutes !== null) {
+    return isWithinDailyWindow(currentMinutes, startMinutes, endMinutes);
+  }
+
+  // Legacy fallback for unexpected formats.
+  console.warn(`[BusinessHours] Falling back to lexical time comparison: start="${config.startTime}" end="${config.endTime}"`);
   if (currentTimeStr < config.startTime || currentTimeStr >= config.endTime) {
     return false; // Outside operating hours
   }
@@ -456,6 +511,14 @@ export function getNextAvailableTime(
   // Start from the next minute
   let checkTime = new Date(fromTime.getTime() + 60000);
   const maxIterations = 14 * 24 * 60; // Check up to 2 weeks ahead (in minutes)
+  const parsedStartMinutes = parseTimeToMinutes(config.startTime);
+  const parsedEndMinutes = parseTimeToMinutes(config.endTime);
+  const supportsFastForward =
+    parsedStartMinutes !== null &&
+    parsedEndMinutes !== null &&
+    parsedStartMinutes <= parsedEndMinutes;
+  const startHour = parsedStartMinutes !== null ? Math.floor(parsedStartMinutes / 60) : 9;
+  const startMinute = parsedStartMinutes !== null ? parsedStartMinutes % 60 : 0;
   
   for (let i = 0; i < maxIterations; i++) {
     if (isWithinBusinessHours(config, contactInfo, checkTime)) {
@@ -465,21 +528,26 @@ export function getNextAvailableTime(
     // If we're outside hours, jump to start of next business day
     const zonedTime = toZonedTime(checkTime, targetTimezone);
     const currentTimeStr = format(zonedTime, 'HH:mm');
+    const currentMinutes = parseTimeToMinutes(currentTimeStr);
+    
+    // If custom time strings don't support fast-forward math, advance minute-by-minute.
+    if (!supportsFastForward || currentMinutes === null || parsedEndMinutes === null) {
+      checkTime = new Date(checkTime.getTime() + 60000);
+      continue;
+    }
     
     // If past end time, jump to start time next day
-    if (currentTimeStr >= config.endTime) {
+    if (currentMinutes >= parsedEndMinutes) {
       const nextDay = new Date(checkTime);
       nextDay.setDate(nextDay.getDate() + 1);
       
       // Parse start time and set it
-      const [startHour, startMinute] = config.startTime.split(':').map(Number);
       const zonedNextDay = toZonedTime(nextDay, targetTimezone);
       zonedNextDay.setHours(startHour, startMinute, 0, 0);
       
       checkTime = fromZonedTime(zonedNextDay, targetTimezone);
     } else {
       // Before start time, jump to start time today
-      const [startHour, startMinute] = config.startTime.split(':').map(Number);
       const zonedCheckTime = toZonedTime(checkTime, targetTimezone);
       zonedCheckTime.setHours(startHour, startMinute, 0, 0);
       

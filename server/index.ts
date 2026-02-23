@@ -308,6 +308,17 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Campaign Runner WS initialization failed (non-blocking):', err);
   }
 
+  // Initialize Autonomous AI Dialer
+  // Server-side autonomous calling engine that reads maxConcurrentWorkers from
+  // each active AI campaign and maintains concurrent Telnyx outbound calls
+  try {
+    const { initializeAutonomousDialer } = await import("./services/autonomous-ai-dialer");
+    initializeAutonomousDialer();
+    console.log('[STARTUP] ✓ Autonomous AI Dialer initialized');
+  } catch (err) {
+    console.error('[STARTUP] Autonomous AI Dialer initialization failed (non-blocking):', err);
+  }
+
   // Initialize Log Streaming Service
   // Always create the service so WebSocket connections succeed.
   // Pub/Sub streaming is optional; console-intercept fallback is always active.
