@@ -1060,7 +1060,7 @@ async function getQueuedItems(
 
   // Fetch queue items with contact data - simplified to just get the DATA, not compute business hours in SQL
   // JavaScript will handle all business hours logic to ensure consistency
-  // IMPORTANT: Also select raw phone fields (direct_phone, mobile_phone) and account hq_phone
+  // IMPORTANT: Also select raw phone fields (direct_phone, mobile_phone) and account main_phone
   // so we can normalize at runtime when E164 fields are NULL (common for imports with missing country)
   const result = await db.execute(sql`
     SELECT cq.*,
@@ -1069,7 +1069,7 @@ async function getQueuedItems(
       c.dialing_phone_e164,
       c.direct_phone as raw_direct_phone,
       c.mobile_phone as raw_mobile_phone,
-      a.hq_phone as raw_hq_phone,
+      a.main_phone as raw_hq_phone,
       c.country,
       c.state,
       c.timezone,
@@ -1118,7 +1118,7 @@ async function getQueuedItems(
         WHEN c.direct_phone IS NOT NULL AND c.direct_phone != '' THEN 20
         WHEN c.mobile_phone IS NOT NULL AND c.mobile_phone != '' THEN 21
         -- Account HQ phone as last resort
-        WHEN a.hq_phone IS NOT NULL AND a.hq_phone != '' THEN 30
+        WHEN a.main_phone IS NOT NULL AND a.main_phone != '' THEN 30
         ELSE 99
       END as phone_priority
     FROM campaign_queue cq
@@ -1133,7 +1133,7 @@ async function getQueuedItems(
         OR c.dialing_phone_e164 IS NOT NULL
         OR (c.direct_phone IS NOT NULL AND c.direct_phone != '')
         OR (c.mobile_phone IS NOT NULL AND c.mobile_phone != '')
-        OR (a.hq_phone IS NOT NULL AND a.hq_phone != '')
+        OR (a.main_phone IS NOT NULL AND a.main_phone != '')
       )
       ${strictUsOnlySql}
       -- Exclude contacts already called today (any agent type - prevents duplicate calls)

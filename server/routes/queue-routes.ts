@@ -1804,7 +1804,7 @@ router.post(
           c.mobile_phone_e164,
           c.dialing_phone_e164,
           c.country,
-          a.hq_phone,
+          a.main_phone,
           a.hq_country
         FROM campaign_queue cq
         JOIN contacts c ON c.id = cq.contact_id
@@ -1816,7 +1816,7 @@ router.post(
           AND (
             (c.direct_phone IS NOT NULL AND c.direct_phone != '')
             OR (c.mobile_phone IS NOT NULL AND c.mobile_phone != '')
-            OR (a.hq_phone IS NOT NULL AND a.hq_phone != '')
+            OR (a.main_phone IS NOT NULL AND a.main_phone != '')
           )
         LIMIT 100000
       `);
@@ -1854,7 +1854,7 @@ router.post(
 
           // If both still null, try HQ phone as last resort for dialing_phone_e164
           const hqE164 = (!directE164 && !mobileE164)
-            ? normalize(row.hq_phone, row.hq_country || country)
+            ? normalize(row.main_phone, row.hq_country || country)
             : null;
 
           const dialingE164 = directE164 || mobileE164 || hqE164;
