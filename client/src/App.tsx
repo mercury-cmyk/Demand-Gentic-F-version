@@ -113,6 +113,7 @@ import ClientPortalAdmin from "@/pages/client-portal-admin";
 import OrganizationManagerPage from "@/pages/organization-manager";
 import AdminProjectRequests from "@/pages/admin-project-requests";
 import AdminTodoBoardPage from "@/pages/admin-todo-board";
+import DataManagementPage from "@/pages/data-management";
 import PublicBookingPage from "@/pages/public-booking";
 import AdminBookingsPage from "@/pages/admin-bookings";
 import ClientPortalLogin from "@/pages/client-portal-login";
@@ -536,6 +537,7 @@ function AuthenticatedApp() {
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
               <Route path="/admin/project-requests" component={AdminProjectRequests} />
               <Route path="/admin/todo-board" component={AdminTodoBoardPage} />
+              <Route path="/data-management" component={DataManagementPage} />
               <Route path="/admin/bookings" component={AdminBookingsPage} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
               <Route path="/qa-review-center" component={QAReviewCenter} />

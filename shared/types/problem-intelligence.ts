@@ -114,6 +114,7 @@ export interface DetectionRules {
  */
 export interface ProblemDefinitionFull {
   id: number;
+  organizationId?: string;
   problemStatement: string;
   problemCategory: 'efficiency' | 'growth' | 'risk' | 'cost' | 'compliance' | 'innovation';
   symptoms: ProblemSymptom[];
@@ -122,6 +123,8 @@ export interface ProblemDefinitionFull {
   messagingAngles: MessagingAngle[];
   detectionRules: DetectionRules;
   isActive: boolean;
+  createdAt?: Date | null;
+  updatedAt?: Date | null;
 }
 
 // ==================== ACCOUNT SIGNALS TYPES ====================

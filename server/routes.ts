@@ -100,6 +100,7 @@ import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
 import adminProjectRequestsRouter from './routes/admin-project-requests';
 import adminTasksRouter from './routes/admin-tasks';
+import dataManagementRouter from './routes/data-management-routes';
 import telephonyProvidersRouter from './routes/telephony-providers';
 import telnyxWebhookRouter from './routes/telnyx-webhook-management';
 import transcriptionManagementRouter from './routes/transcription-management';
@@ -15220,6 +15221,9 @@ Provide JSON response with:
 
   // ==================== ADMIN TO-DO TASK BOARD ====================
   app.use('/api/admin/tasks', adminTasksRouter);
+
+  // ==================== DATA MANAGEMENT ====================
+  app.use('/api/data-management', dataManagementRouter);
 
   // ==================== CLOUD LOGGING ====================
   app.use('/api/cloud-logs', cloudLogsRouter);

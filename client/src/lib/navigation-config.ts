@@ -455,6 +455,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: [USER_ROLES.ADMIN],
         description: 'Manage clients, client users, and portal access',
       },
+      {
+        id: 'data-management',
+        title: 'Data Management',
+        url: '/data-management',
+        icon: 'Database',
+        roles: [USER_ROLES.ADMIN],
+        description: 'Manage data uploads, quality, templates, and requests',
+      },
     ],
   },
 
