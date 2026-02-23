@@ -10,42 +10,62 @@ interface RecordingPlayerProps {
   leadId?: string;
 }
 
-export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) {
+export function RecordingPlayer({ recordingUrl: _recordingUrl, leadId }: RecordingPlayerProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const openRecordingInNewTab = async () => {
+  const resolveRecordingLinks = async () => {
     if (!leadId) {
-      setError('Recording playback requires a lead identifier.');
-      return;
+      throw new Error('Recording playback requires a lead identifier.');
     }
 
+    const token = localStorage.getItem('clientPortalToken');
+    const res = await fetch(`/api/client-portal/qualified-leads/${encodeURIComponent(leadId)}/recording-link`, {
+      headers: {
+        Authorization: `Bearer ${token || ''}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.message || body?.error || 'Failed to resolve recording URL');
+    }
+
+    const body = await res.json();
+    const streamUrl = body?.streamUrl || body?.url || null;
+    const downloadUrl = body?.downloadUrl || streamUrl || null;
+
+    if (!streamUrl) {
+      throw new Error('No recording URL available.');
+    }
+
+    return { streamUrl, downloadUrl };
+  };
+
+  const openRecordingInNewTab = async () => {
     setIsLoading(true);
     setError(null);
-
     try {
-      const token = localStorage.getItem('clientPortalToken');
-      const res = await fetch(`/api/client-portal/qualified-leads/${encodeURIComponent(leadId)}/recording-link`, {
-        headers: {
-          Authorization: `Bearer ${token || ''}`,
-        },
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.message || body?.error || 'Failed to get recording URL');
-      }
-
-      const body = await res.json();
-      const gcsUrl = body?.url || null;
-
-      if (gcsUrl) {
-        window.open(gcsUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        setError('No recording URL available. The recording may not be stored in cloud storage yet.');
-      }
+      const { streamUrl } = await resolveRecordingLinks();
+      window.open(streamUrl, '_blank', 'noopener,noreferrer');
     } catch (err: any) {
-      setError(err?.message || 'Failed to get recording URL.');
+      setError(err?.message || 'Failed to open recording.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const downloadRecording = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { downloadUrl } = await resolveRecordingLinks();
+      if (!downloadUrl) {
+        throw new Error('Download URL is not available.');
+      }
+      window.open(downloadUrl, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to download recording.');
     } finally {
       setIsLoading(false);
     }
@@ -71,7 +91,7 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
               size="sm"
               onClick={() => {
                 setError(null);
-                openRecordingInNewTab();
+                void openRecordingInNewTab();
               }}
               disabled={isLoading}
               className="gap-2"
@@ -85,7 +105,7 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
             <Button
               variant="default"
               size="sm"
-              onClick={openRecordingInNewTab}
+              onClick={() => void openRecordingInNewTab()}
               disabled={isLoading}
               className="gap-2"
             >
@@ -99,7 +119,7 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
             <Button
               variant="outline"
               size="sm"
-              onClick={openRecordingInNewTab}
+              onClick={() => void downloadRecording()}
               disabled={isLoading}
               className="gap-2"
             >
@@ -109,7 +129,7 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
             <Button
               variant="ghost"
               size="sm"
-              onClick={openRecordingInNewTab}
+              onClick={() => void openRecordingInNewTab()}
               disabled={isLoading}
               title="Open in new tab"
             >

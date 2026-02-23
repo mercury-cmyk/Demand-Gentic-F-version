@@ -58,8 +58,8 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
   const [pageSize] = useState(25);
   const [search, setSearch] = useState('');
   const [campaignFilter, setCampaignFilter] = useState<string>('all');
-  const [sortBy, setSortBy] = useState('approvedAt');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const getToken = () => localStorage.getItem('clientPortalToken');
 

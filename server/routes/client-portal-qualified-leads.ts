@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../db';
-import { leads, campaigns, callSessions, clientCampaignAccess } from '@shared/schema';
+import { leads, campaigns, callSessions, clientCampaignAccess, contacts, accounts } from '@shared/schema';
 import { eq, and, isNotNull, desc, asc, inArray, like, or, sql } from 'drizzle-orm';
 import { requireAuth } from '../auth';
 import jwt from 'jsonwebtoken';
@@ -83,9 +83,10 @@ router.get('/', requireAuth, async (req, res) => {
         id: leads.id,
         contactName: leads.contactName,
         contactEmail: leads.contactEmail,
-        accountName: leads.accountName,
-        accountIndustry: leads.accountIndustry,
+        accountName: sql<string | null>`COALESCE(${accounts.name}, ${leads.accountName})`.as('account_name_resolved'),
+        accountIndustry: sql<string | null>`COALESCE(${accounts.industryStandardized}, ${leads.accountIndustry})`.as('account_industry_resolved'),
         campaignId: leads.campaignId,
+        campaignName: campaigns.name,
         aiScore: leads.aiScore,
         callDuration: leads.callDuration,
         recordingUrl: leads.recordingUrl,
@@ -100,6 +101,9 @@ router.get('/', requireAuth, async (req, res) => {
         approvedAt: leads.approvedAt,
       })
       .from(leads)
+      .leftJoin(contacts, eq(leads.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
       .where(qualifiedLeadFilter)
       .orderBy(isAscSort ? asc(sortColumn) : desc(sortColumn))
       .limit(pageSize)

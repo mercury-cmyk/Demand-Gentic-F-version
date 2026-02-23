@@ -3677,13 +3677,13 @@ export class DatabaseStorage implements IStorage {
         contactState: contacts.state,
         contactCountry: contacts.country,
         contactLinkedin: contacts.linkedinUrl,
-        // Account info
-        accountName: accounts.name,
+        // Account info — prefer joined accounts.name, fall back to denormalized leads.accountName
+        accountName: sql<string | null>`COALESCE(${accounts.name}, ${leads.accountName})`.as('account_name_resolved'),
         accountId: contacts.accountId,
         accountCity: accounts.hqCity,
         accountState: accounts.hqState,
         accountCountry: accounts.hqCountry,
-        accountIndustry: accounts.industryStandardized,
+        accountIndustry: sql<string | null>`COALESCE(${accounts.industryStandardized}, ${leads.accountIndustry})`.as('account_industry_resolved'),
         accountRevenueRange: accounts.revenueRange,
         accountEmployeesRange: accounts.employeesSizeRange,
         accountLinkedin: accounts.linkedinUrl,
@@ -4099,13 +4099,13 @@ export class DatabaseStorage implements IStorage {
         contactState: contacts.state,
         contactCountry: contacts.country,
         contactLinkedin: contacts.linkedinUrl,
-        // Account info
-        accountName: accounts.name,
+        // Account info — prefer joined accounts.name, fall back to denormalized leads.accountName
+        accountName: sql<string | null>`COALESCE(${accounts.name}, ${leads.accountName})`.as('account_name_resolved'),
         accountId: contacts.accountId,
         accountCity: accounts.hqCity,
         accountState: accounts.hqState,
         accountCountry: accounts.hqCountry,
-        accountIndustry: accounts.industryStandardized,
+        accountIndustry: sql<string | null>`COALESCE(${accounts.industryStandardized}, ${leads.accountIndustry})`.as('account_industry_resolved'),
         accountRevenueRange: accounts.revenueRange,
         accountEmployeesRange: accounts.employeesSizeRange,
         accountLinkedin: accounts.linkedinUrl,
