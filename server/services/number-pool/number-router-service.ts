@@ -70,10 +70,13 @@ const JITTER_MAX_MS = 1500;  // Minimal jitter — limits removed
 // Map<numberId, lockedAtTimestamp> — timestamps allow stuck-number detection
 const numbersInUse = new Map<string, number>();
 
-// Maximum time a number can stay locked before auto-release (10 minutes)
-const MAX_NUMBER_LOCK_MS = 10 * 60 * 1000;
-// How often to run the stale-lock cleanup sweep (60 seconds)
-const CLEANUP_INTERVAL_MS = 60 * 1000;
+// Maximum time a number can stay locked before auto-release (3 minutes)
+// Reduced from 10min: if a number is locked >3min without explicit release,
+// the call is already done or failed — keeping it locked starves the pool.
+const MAX_NUMBER_LOCK_MS = 3 * 60 * 1000;
+// How often to run the stale-lock cleanup sweep (30 seconds)
+// Reduced from 60s to catch leaked locks faster and prevent pool exhaustion stalls.
+const CLEANUP_INTERVAL_MS = 30 * 1000;
 
 /**
  * Periodic cleanup: auto-release numbers stuck in-use beyond MAX_NUMBER_LOCK_MS.
@@ -231,11 +234,13 @@ export async function selectNumber(
 }
 
 /**
- * Release a number after call completes (with compulsory 30s gap)
+ * Release a number after call completes (with compulsory gap to prevent immediate re-dial)
  */
 export function releaseNumber(numberId: string): void {
-  // Enforce 30 second gap between calls on the same number per user requirement
-  const COMPULSORY_DELAY_MS = 30000;
+  // Enforce gap between calls on the same number.
+  // Reduced from 30s to 10s: 30s was starving small pools (N numbers × 30s = very low throughput).
+  // 10s is sufficient to prevent carrier-flagged "robo-dialer" burst patterns.
+  const COMPULSORY_DELAY_MS = 10000;
 
   const lockedAt = numbersInUse.get(numberId);
   const lockDurationSec = lockedAt ? Math.round((Date.now() - lockedAt) / 1000) : 0;

@@ -50,7 +50,7 @@ import {
   sleep as numberPoolSleep,
   type CallerIdResult
 } from '../services/number-pool-integration';
-import { isNumberPoolEnabled } from '../services/number-pool';
+import { isNumberPoolEnabled, getNumberPoolStatus, forceReleaseAllNumbers } from '../services/number-pool';
 import {
   acquireProspectLock,
   releaseProspectLock,
@@ -1562,11 +1562,13 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           if (err?.name === 'NoAvailableNumberError') {
              console.log(`[AI Orchestrator] No numbers available (all busy/cooling) - re-queuing item ${item.id}`);
              try {
+               // Re-queue with short delay (15s) — numbers release after ~10s compulsory gap,
+               // so items are ready when numbers free up. Previous 60s delay caused pool idle gaps.
                await db.execute(sql`
                 UPDATE campaign_queue
                 SET status = 'queued',
                     updated_at = NOW(),
-                    next_attempt_at = NOW() + INTERVAL '60 seconds',
+                    next_attempt_at = NOW() + INTERVAL '15 seconds',
                     enqueued_reason = COALESCE(enqueued_reason, '') || '|pool_busy'
                 WHERE id = ${item.id}
               `);
@@ -1585,7 +1587,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
                 UPDATE campaign_queue
                 SET status = 'queued',
                     updated_at = NOW(),
-                    next_attempt_at = NOW() + INTERVAL '60 seconds',
+                    next_attempt_at = NOW() + INTERVAL '15 seconds',
                     enqueued_reason = COALESCE(enqueued_reason, '') || '|pool_error_requeue'
                 WHERE id = ${item.id}
               `);
@@ -1877,13 +1879,15 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       const reason = s.reason;
       console.error(`[AI Orchestrator] Unhandled batch promise rejection for item ${item.id}:`, reason);
 
-      // CRITICAL FIX: Reset stuck item immediately if the promise rejected (e.g. timeout)
+      // CRITICAL FIX: Reset stuck item immediately if the promise rejected (e.g. timeout).
+      // Note: The inner initiationPromise continues in background — its catch handler will
+      // release the number lock. If it's truly stuck, the 3-minute auto-cleanup catches it.
       try {
         await db.execute(sql`
           UPDATE campaign_queue
           SET status = 'queued',
               removed_reason = ${String(reason).substring(0, 255)},
-              next_attempt_at = NOW() + INTERVAL '1 minute',
+              next_attempt_at = NOW() + INTERVAL '30 seconds',
               updated_at = NOW()
           WHERE id = ${item.id}
         `);
@@ -1922,12 +1926,37 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       return { initiated, skipped, hourlyLimitPaused: true };
     }
 
-    // Check if ALL items in batch were skipped due to pool busy — stop processing to avoid tight loop
+    // Check if ALL items in batch were skipped due to pool busy — apply smart recovery
     const allSkipped = results.every((r: any) => r && !r.success);
     const poolBusyCount = results.filter((r: any) => r && r.skipped).length;
     if (allSkipped && poolBusyCount > 0 && batchSuccess === 0) {
-      console.warn(`[AI Orchestrator] 🚫 ALL ${batch.length} items in batch skipped (${poolBusyCount} pool-busy) — stopping campaign ${campaignId} to avoid spin loop`);
-      await setOrchestratorStallReason(campaignId, 'All phone numbers busy. Calls will resume when numbers become available.');
+      // === POOL-AWARE STALL RECOVERY ===
+      // Instead of blindly setting a stall message and giving up, diagnose the pool
+      // and auto-release numbers that are clearly leaked (locked too long without release).
+      const poolStatus = getNumberPoolStatus();
+      const now = Date.now();
+      const STALE_THRESHOLD_MS = 120_000; // 2 minutes — calls should release within ~90s max
+      const staleNumbers = poolStatus.numbers.filter(n => n.lockedForSec > STALE_THRESHOLD_MS / 1000);
+
+      console.warn(
+        `[AI Orchestrator] 🚫 ALL ${batch.length} items in batch skipped (${poolBusyCount} pool-busy) for campaign ${campaignId}\n` +
+        `  Pool status: ${poolStatus.inUse} numbers locked | ${staleNumbers.length} stale (>${STALE_THRESHOLD_MS / 1000}s)\n` +
+        `  Locked numbers: ${poolStatus.numbers.map(n => `${n.id}(${n.lockedForSec}s)`).join(', ') || 'none'}`
+      );
+
+      if (staleNumbers.length > 0) {
+        // Auto-release stale numbers that are clearly leaked (call ended but release was missed)
+        const released = forceReleaseAllNumbers();
+        console.warn(`[AI Orchestrator] 🔓 AUTO-RECOVERED: Force-released ${released} stale number lock(s) — pool should unblock on next tick`);
+        // Don't set stall message — pool is now clear, next tick will succeed
+        return { initiated, skipped: skipped + poolBusyCount };
+      }
+
+      // All numbers are legitimately in active calls — set informational stall and let next tick retry
+      await setOrchestratorStallReason(
+        campaignId,
+        `All ${poolStatus.inUse} phone numbers in active calls. Calls will resume when numbers become available.`
+      );
       return { initiated, skipped: skipped + poolBusyCount };
     }
 
