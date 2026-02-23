@@ -28,7 +28,7 @@ import {
   Play,
   ChevronRight,
 } from "lucide-react";
-import { BRAND, TAGLINE, STATS, FOOTER } from "@shared/brand-messaging";
+import { BRAND, TAGLINE, STATS, FOOTER, PUBLIC_PAGES_MESSAGING } from "@shared/brand-messaging";
 
 export default function AboutPage() {
   const [, setLocation] = useLocation();
@@ -51,17 +51,18 @@ export default function AboutPage() {
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
-            <a href="/welcome#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Platform</a>
+            <a href="/welcome#how-it-works" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
+            <a href="/welcome#capabilities" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Capabilities</a>
             <a href="/welcome#services" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Services</a>
-            <a href="/welcome#data" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Data</a>
+            <a href="/resources-centre" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Resources</a>
             <span className="text-sm font-medium text-foreground">About</span>
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => setLocation("/login")}>
-              Sign In
+            <Button variant="ghost" onClick={() => setLocation("/client-portal/login")}>
+              Client Login
             </Button>
-            <Button onClick={() => setLocation("/login")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
-              Schedule Demo
+            <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
+              Book a Demo
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
@@ -576,19 +577,23 @@ export default function AboutPage() {
               Integrity?
             </span>
           </h2>
-          <p className="text-xl text-slate-400 mb-8 max-w-2xl mx-auto">
-            Join the global tech leaders who trust DemandGentic.ai to turn data into meaningful relationships.
-            Experience demand generation built on purpose, not just performance.
+          <p className="text-xl text-slate-400 mb-4 max-w-2xl mx-auto">
+            {PUBLIC_PAGES_MESSAGING.closingStatement.contrast}{" "}
+            <span className="text-white font-semibold">{PUBLIC_PAGES_MESSAGING.closingStatement.assertion}</span>
+          </p>
+          <p className="text-lg text-slate-400 mb-8 max-w-2xl mx-auto">
+            Join the B2B leaders who trust DemandGentic.ai to turn intelligence into revenue
+            with reasoning-first agents, compliance-first execution, and brand-controlled demand.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" className="text-base h-14 px-8 bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
-              Schedule Strategy Call
+            <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
+              Book a Demo
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
-            <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2 border-white/20 text-white hover:bg-white/10">
-              <Play className="mr-2 h-5 w-5" />
-              See the Platform
+            <Button size="lg" variant="outline" onClick={() => setLocation("/proposal-request")} className="text-base h-14 px-8 border-2 border-white/20 text-white hover:bg-white/10">
+              Request a Proposal
+              <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
           </div>
         </div>
@@ -625,10 +630,11 @@ export default function AboutPage() {
             <div>
               <h4 className="font-semibold mb-4">Platform</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="/welcome#platform" className="hover:text-white transition-colors">AI Agents</a></li>
+                <li><a href="/welcome#capabilities" className="hover:text-white transition-colors">AI Agents</a></li>
+                <li><a href="/welcome#capabilities" className="hover:text-white transition-colors">Voice AI</a></li>
+                <li><a href="/welcome#capabilities" className="hover:text-white transition-colors">Content Studio</a></li>
+                <li><a href="/welcome#capabilities" className="hover:text-white transition-colors">Pipeline Intelligence</a></li>
                 <li><a href="/welcome#data" className="hover:text-white transition-colors">Data & Intelligence</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Integrations</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Security</a></li>
               </ul>
             </div>
 
@@ -636,9 +642,11 @@ export default function AboutPage() {
               <h4 className="font-semibold mb-4">Services</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
                 <li><a href="/welcome#services" className="hover:text-white transition-colors">AI-Led ABM</a></li>
-                <li><a href="/welcome#services" className="hover:text-white transition-colors">Content Demand</a></li>
+                <li><a href="/welcome#services" className="hover:text-white transition-colors">Conversational Voice AI</a></li>
+                <li><a href="/welcome#services" className="hover:text-white transition-colors">Generative Content</a></li>
                 <li><a href="/welcome#services" className="hover:text-white transition-colors">AI SDR</a></li>
                 <li><a href="/welcome#services" className="hover:text-white transition-colors">Appointments</a></li>
+                <li><a href="/welcome#services" className="hover:text-white transition-colors">Data Services</a></li>
               </ul>
             </div>
 

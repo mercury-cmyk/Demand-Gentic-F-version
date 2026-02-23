@@ -137,13 +137,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: MANAGEMENT_ROLES,
             description: 'Unified agentic operations panel',
           },
-          {
-            id: 'agent-prompts',
-            title: 'Agent Prompts',
-            url: '/ai-studio/agent-prompts',
-            roles: ['admin'],
-            description: 'Manage agent prompts by role',
-          },
+          // Agent Prompts moved inside Unified Agent Architecture (AgentX)
           {
             id: 'campaign-manager',
             title: 'Campaign Manager',
@@ -256,12 +250,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: MANAGEMENT_ROLES,
           },
           {
-            id: 'opportunities',
-            title: 'Opportunities',
-            url: '/pipeline',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
             id: 'import-opportunities',
             title: 'Import Opportunities',
             url: '/pipeline/import',
@@ -272,13 +260,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             title: 'Revenue Inbox',
             url: '/inbox',
             roles: MANAGEMENT_ROLES,
-          },
-          {
-            id: 'clients',
-            title: 'Clients',
-            url: '/client-portal-admin',
-            roles: MANAGEMENT_ROLES,
-            description: 'Manage client accounts and portal access',
           },
           {
             id: 'email-sequences',
@@ -363,14 +344,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'MessageSquare',
         roles: MANAGEMENT_ROLES,
         description: 'Call quality analysis and scoring',
-      },
-      {
-        id: 'data-integrity',
-        title: 'Data Integrity',
-        url: '/data-integrity',
-        icon: 'ShieldCheck',
-        roles: DATA_ROLES,
-        description: 'Data quality and integrity checks',
       },
       {
         id: 'validation-campaigns',
@@ -465,6 +438,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'Briefcase',
         roles: MANAGEMENT_ROLES,
         description: 'Review QA-approved leads before client delivery',
+      },
+      {
+        id: 'organization-manager',
+        title: 'Organizations',
+        url: '/organization-manager',
+        icon: 'Building',
+        roles: [USER_ROLES.ADMIN],
+        description: 'Manage super, client, and campaign organizations',
       },
       {
         id: 'client-management',

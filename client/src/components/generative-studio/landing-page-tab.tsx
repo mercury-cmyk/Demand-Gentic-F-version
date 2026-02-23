@@ -185,8 +185,6 @@ export default function LandingPageTab({
           initialValues={campaignDetails ? {
             title: `${campaignDetails.name || "Campaign"} Landing Page`,
             prompt: prefilledPrompt,
-            targetAudience: campaignDetails.targetAudienceDescription || undefined,
-            industry: campaignDetails.industry || orgIntelligence?.identity?.industry?.value || undefined,
             additionalContext: prefilledAdditionalContext || undefined,
           } : undefined}
           initialValuesKey={campaignId}

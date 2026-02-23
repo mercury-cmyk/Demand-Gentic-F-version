@@ -14,6 +14,7 @@ import {
   contentPromotionPageViews,
   contentAssets,
   clientProjects,
+  SUPER_ORG_ID,
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, verifyToken } from "../auth";
@@ -360,9 +361,22 @@ router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Respon
 // ============================================================================
 
 /**
+ * Ensures organizationId is present in the request body.
+ * Falls back to the super org (platform default) when none is provided.
+ */
+function requireOrganizationId(req: Request, res: Response): boolean {
+  const orgId = req.body?.organizationId;
+  if (!orgId || typeof orgId !== 'string' || !orgId.trim()) {
+    req.body.organizationId = SUPER_ORG_ID;
+  }
+  return true;
+}
+
+/**
  * POST /generate/landing-page
  */
 router.post("/generate/landing-page", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -381,6 +395,7 @@ router.post("/generate/landing-page", requireDualAuth, async (req: Request, res:
  * POST /generate/email-template
  */
 router.post("/generate/email-template", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -399,6 +414,7 @@ router.post("/generate/email-template", requireDualAuth, async (req: Request, re
  * POST /generate/blog-post
  */
 router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -417,6 +433,7 @@ router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Re
  * POST /generate/ebook
  */
 router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 
@@ -435,6 +452,7 @@ router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Respon
  * POST /generate/solution-brief
  */
 router.post("/generate/solution-brief", requireDualAuth, async (req: Request, res: Response) => {
+  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
 

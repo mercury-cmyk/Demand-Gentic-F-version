@@ -461,7 +461,7 @@ export default function CreateAIAgentPage() {
 
   // Fetch available OI sources
   const { data: oiSources, isLoading: sourcesLoading } = useQuery<OrgSourcesResponse>({
-    queryKey: ['/api/org-intelligence-injection/available-sources'],
+    queryKey: ['/api/unified-agents/org-intelligence/available-sources'],
     initialData: {
       masterOrgIntelligence: null,
       reusableSnapshots: [],
@@ -478,7 +478,7 @@ export default function CreateAIAgentPage() {
       notes?: string;
       saveAsReusable?: boolean;
     }) => {
-      const response = await apiRequest('POST', '/api/org-intelligence-injection/research', input);
+      const response = await apiRequest('POST', '/api/unified-agents/org-intelligence/research', input);
       return response.json();
     },
     onSuccess: (data) => {
@@ -489,7 +489,7 @@ export default function CreateAIAgentPage() {
         companyInfo: data.companyInfo,
       });
       setOiConfig(prev => ({ ...prev, snapshotId: data.snapshot.id }));
-      queryClient.invalidateQueries({ queryKey: ['/api/org-intelligence-injection/available-sources'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/unified-agents/org-intelligence/available-sources'] });
       toast({
         title: 'Research Complete',
         description: 'Review the findings below before continuing.',

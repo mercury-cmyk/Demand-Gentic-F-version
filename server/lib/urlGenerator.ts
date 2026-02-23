@@ -5,7 +5,25 @@
  * Supports two modes:
  * 1. Direct generation: Pass actual values to generate final URLs
  * 2. Template generation: Generate URLs with merge tags for email templates
+ *
+ * Security Features:
+ * - HTTPS enforcement to prevent spam filter triggers
+ * - Domain validation to block suspicious URLs
+ * - Parameter sanitization for XSS prevention
+ * - URL shortener detection (spam indicator)
  */
+
+// Spam-triggering URL shorteners (ISPs flag these)
+const BLOCKED_URL_SHORTENERS = [
+  'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly',
+  'is.gd', 'buff.ly', 'adf.ly', 'short.io'
+];
+
+// Suspicious TLDs that trigger spam filters
+const SUSPICIOUS_TLDS = [
+  '.tk', '.ml', '.ga', '.cf', '.gq', // Free domains
+  '.top', '.xyz', '.pw', '.cc'  // Often abused
+];
 
 export interface TrackingParams {
   contactId?: string;
@@ -100,14 +118,82 @@ export const PREFILL_MERGE_TAGS = {
 };
 
 /**
+ * Validates URL safety for email deliverability
+ * @param url - URL to validate
+ * @returns Validation result with warnings
+ */
+export function validateUrlSafety(url: string): {
+  isValid: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+
+  try {
+    const parsed = new URL(url);
+
+    // 1. HTTPS enforcement (critical for deliverability)
+    if (parsed.protocol !== 'https:') {
+      warnings.push('⚠️ HTTP links trigger spam filters. Use HTTPS only.');
+    }
+
+    // 2. IP address detection (major phishing indicator)
+    const ipPattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+    if (ipPattern.test(parsed.hostname)) {
+      warnings.push('❌ IP addresses (not domain names) are blocked by most ISPs.');
+      return { isValid: false, warnings };
+    }
+
+    // 3. URL shortener detection
+    const isShortener = BLOCKED_URL_SHORTENERS.some(shortener =>
+      parsed.hostname.includes(shortener)
+    );
+    if (isShortener) {
+      warnings.push('⚠️ URL shorteners (bit.ly, etc.) trigger spam filters.');
+    }
+
+    // 4. Suspicious TLD check
+    const hasSuspiciousTLD = SUSPICIOUS_TLDS.some(tld =>
+      parsed.hostname.endsWith(tld)
+    );
+    if (hasSuspiciousTLD) {
+      warnings.push('⚠️ This domain extension is commonly flagged as spam.');
+    }
+
+    // 5. Domain length check
+    if (parsed.hostname.length > 63) {
+      warnings.push('⚠️ Extremely long domain names may trigger filters.');
+    }
+
+    // 6. Excessive subdomain nesting
+    const subdomainLevels = parsed.hostname.split('.').length - 2;
+    if (subdomainLevels > 3) {
+      warnings.push('⚠️ Too many subdomains can appear suspicious.');
+    }
+
+    return { isValid: true, warnings };
+  } catch (error) {
+    warnings.push('❌ Invalid URL format');
+    return { isValid: false, warnings };
+  }
+}
+
+/**
  * Generates a tracking URL with pre-filled parameters
+ * SECURITY: Enforces HTTPS and validates domains to prevent spam filter triggers
  * @param baseUrl - Base URL of the content (e.g., https://resources.example.com/event/ai-summit)
  * @param params - Tracking and prefill parameters
  * @returns Complete URL with query parameters
  */
 export function generateTrackingUrl(baseUrl: string, params: TrackingParams): string {
   try {
-    const url = new URL(baseUrl);
+    // Enforce HTTPS for security and deliverability
+    let safeUrl = baseUrl;
+    if (baseUrl.startsWith('http://')) {
+      safeUrl = baseUrl.replace('http://', 'https://');
+      console.warn('[URL Generator] Auto-upgraded HTTP to HTTPS:', baseUrl, '→', safeUrl);
+    }
+
+    const url = new URL(safeUrl);
     
     // Add contact tracking parameters
     if (params.contactId) {

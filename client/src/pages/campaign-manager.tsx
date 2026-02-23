@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Loader2, Wand2, Save, CheckCircle2, Megaphone, Share2, Calendar, Target } from "lucide-react";
+import { Loader2, Wand2, Save, CheckCircle2, Megaphone, Share2, Calendar, Target, BrainCircuit, Building2, Users, TrendingUp } from "lucide-react";
 
 type CampaignOption = {
   id: string;
@@ -35,6 +35,28 @@ type SavedPlanResponse = {
   planMeta: any | null;
 };
 
+type OrgContextResponse = {
+  success: boolean;
+  hasOrgIntelligence: boolean;
+  orgContext: {
+    orgName: string | null;
+    orgDescription: string | null;
+    orgIndustry: string | null;
+    domain: string | null;
+    targetMarket: string | null;
+    valueProposition: string | null;
+    keyChallenges: string[];
+    icpPersonas: string[];
+    coreProducts: string[];
+    differentiators: string[];
+    competitors: string[];
+    whyUs: string[];
+    emailAngles: string[];
+    callOpeners: string[];
+    learningSummary: string | null;
+  };
+};
+
 const now = new Date();
 const defaultQuarter = Math.floor(now.getMonth() / 3) + 1;
 const defaultYear = now.getFullYear();
@@ -56,6 +78,33 @@ export default function CampaignManagerPage() {
   const [includeSocial, setIncludeSocial] = useState<boolean>(true);
   const [generatedPlan, setGeneratedPlan] = useState<any | null>(null);
   const [socialPack, setSocialPack] = useState<any | null>(null);
+  const [orgApplied, setOrgApplied] = useState<boolean>(false);
+
+  // Fetch org intelligence as the primary source of truth
+  const { data: orgContextData, isLoading: orgLoading } = useQuery<OrgContextResponse>({
+    queryKey: ["/api/campaign-manager/org-context"],
+    queryFn: async () => {
+      const res = await fetch("/api/campaign-manager/org-context", {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken") || ""}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to load organization intelligence");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Pre-populate form fields from org intelligence when loaded
+  useEffect(() => {
+    if (!orgContextData?.hasOrgIntelligence || orgApplied) return;
+
+    const ctx = orgContextData.orgContext;
+    if (ctx.targetMarket) setTargetMarket(ctx.targetMarket);
+    if (ctx.valueProposition) setValueProposition(ctx.valueProposition);
+    if (ctx.keyChallenges?.length > 0) setKeyChallenges(ctx.keyChallenges.join("; "));
+    setOrgApplied(true);
+  }, [orgContextData, orgApplied]);
 
   const { data: campaigns = [], isLoading: campaignsLoading } = useQuery<CampaignOption[]>({
     queryKey: ["/api/campaigns"],
@@ -162,7 +211,7 @@ export default function CampaignManagerPage() {
       setGeneratedPlan(data.plan);
       toast({
         title: "Quarterly plan generated",
-        description: "Campaign strategy, channel playbooks, and social narrative are ready for review.",
+        description: "Campaign strategy built from organization intelligence, channel playbooks, and social narrative are ready for review.",
       });
     },
     onError: (error: any) => {
@@ -229,6 +278,9 @@ export default function CampaignManagerPage() {
     },
   });
 
+  const orgCtx = orgContextData?.orgContext;
+  const hasOrg = orgContextData?.hasOrgIntelligence ?? false;
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 text-white p-6 shadow-lg">
@@ -240,18 +292,76 @@ export default function CampaignManagerPage() {
             </div>
             <h1 className="text-3xl font-semibold">AI Quarterly Campaign Manager</h1>
             <p className="text-white/80 mt-2 max-w-3xl">
-              Internal-first planning workspace for positioning, messaging architecture, cross-channel strategy,
-              governance approvals, and social narrative consistency.
+              Plans quarterly campaigns based on your Organization Intelligence — identity, ICP, positioning, offerings,
+              outreach strategies, and performance learnings. Everything is grounded in your org's source of truth.
             </p>
           </div>
-          <Badge className="bg-white/20 text-white border-white/30">Internal-first</Badge>
+          <Badge className="bg-white/20 text-white border-white/30">Org Intelligence First</Badge>
         </div>
       </div>
+
+      {/* Organization Intelligence Source Card */}
+      <Card className={hasOrg ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20" : "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"}>
+        <CardContent className="pt-5 pb-4">
+          {orgLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading organization intelligence...</span>
+            </div>
+          ) : hasOrg ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <BrainCircuit className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                <span className="font-semibold text-emerald-700 dark:text-emerald-300">Organization Intelligence Connected</span>
+                <Badge variant="outline" className="text-xs border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300">Source of Truth</Badge>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                {orgCtx?.orgName && (
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">Organization:</span>
+                    <span className="font-medium">{orgCtx.orgName}</span>
+                  </div>
+                )}
+                {orgCtx?.icpPersonas && orgCtx.icpPersonas.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">ICP Personas:</span>
+                    <span className="font-medium">{orgCtx.icpPersonas.length}</span>
+                  </div>
+                )}
+                {orgCtx?.coreProducts && orgCtx.coreProducts.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">Products:</span>
+                    <span className="font-medium">{orgCtx.coreProducts.length}</span>
+                  </div>
+                )}
+              </div>
+              {orgCtx?.learningSummary && (
+                <p className="text-xs text-muted-foreground mt-1">Performance learnings from recent campaigns will be included in the plan.</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <BrainCircuit className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              <span className="text-sm text-amber-700 dark:text-amber-300">
+                No organization intelligence configured. Using default brand positioning.
+                Configure org intelligence for more targeted quarterly plans.
+              </span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
           <CardTitle>Plan Inputs</CardTitle>
-          <CardDescription>Define the campaign context and generate a structured quarterly plan.</CardDescription>
+          <CardDescription>
+            {hasOrg
+              ? "Fields are pre-populated from your organization intelligence. Override any value as needed."
+              : "Define the campaign context and generate a structured quarterly plan."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -282,7 +392,10 @@ export default function CampaignManagerPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Target market</Label>
+            <Label>
+              Target market
+              {hasOrg && orgCtx?.targetMarket && <span className="text-xs text-emerald-600 ml-1">(from Org Intelligence)</span>}
+            </Label>
             <Input value={targetMarket} onChange={(event) => setTargetMarket(event.target.value)} />
           </div>
 
@@ -292,12 +405,18 @@ export default function CampaignManagerPage() {
           </div>
 
           <div className="space-y-2 lg:col-span-2">
-            <Label>Value proposition</Label>
+            <Label>
+              Value proposition
+              {hasOrg && orgCtx?.valueProposition && <span className="text-xs text-emerald-600 ml-1">(from Org Intelligence)</span>}
+            </Label>
             <Textarea value={valueProposition} onChange={(event) => setValueProposition(event.target.value)} rows={3} />
           </div>
 
           <div className="space-y-2 lg:col-span-2">
-            <Label>Key challenges (separate with semicolons)</Label>
+            <Label>
+              Key challenges (separate with semicolons)
+              {hasOrg && orgCtx?.keyChallenges && orgCtx.keyChallenges.length > 0 && <span className="text-xs text-emerald-600 ml-1">(from Org Intelligence)</span>}
+            </Label>
             <Textarea value={keyChallenges} onChange={(event) => setKeyChallenges(event.target.value)} rows={2} />
           </div>
 
@@ -360,6 +479,9 @@ export default function CampaignManagerPage() {
             <CardTitle className="flex items-center gap-2"><Target className="h-5 w-5" />Generated Quarterly Plan</CardTitle>
             <CardDescription>
               {generatedPlan?.meta?.window?.label || "Quarter"} · {selectedCampaign?.name || campaignName || "Unbound Campaign"}
+              {generatedPlan?.meta?.sourceOfTruth === "organization-intelligence" && (
+                <span className="ml-2 text-emerald-600 font-medium">· Powered by Org Intelligence</span>
+              )}
             </CardDescription>
             {selectedCampaignId && savedPlanData && (
               <div className="pt-2 flex flex-wrap items-center gap-2">
@@ -390,6 +512,42 @@ export default function CampaignManagerPage() {
               </div>
             </div>
 
+            {/* Org Intelligence Summary in generated plan */}
+            {generatedPlan?.organizationIntelligenceSummary?.hasOrgIntelligence && (
+              <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 p-4">
+                <h4 className="font-semibold mb-2 flex items-center gap-2">
+                  <BrainCircuit className="h-4 w-4 text-emerald-600" />
+                  Organization Intelligence Applied
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  {generatedPlan.organizationIntelligenceSummary.orgName && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Organization</p>
+                      <p className="font-medium">{generatedPlan.organizationIntelligenceSummary.orgName}</p>
+                    </div>
+                  )}
+                  {generatedPlan.organizationIntelligenceSummary.icpPersonas?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">ICP Personas</p>
+                      <p className="font-medium">{generatedPlan.organizationIntelligenceSummary.icpPersonas.join(", ")}</p>
+                    </div>
+                  )}
+                  {generatedPlan.organizationIntelligenceSummary.coreProducts?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Core Products</p>
+                      <p className="font-medium">{generatedPlan.organizationIntelligenceSummary.coreProducts.join(", ")}</p>
+                    </div>
+                  )}
+                  {generatedPlan.organizationIntelligenceSummary.competitors?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Competitors</p>
+                      <p className="font-medium">{generatedPlan.organizationIntelligenceSummary.competitors.join(", ")}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="rounded-lg border p-4">
               <h4 className="font-semibold mb-2">Core narrative</h4>
               <p className="text-sm text-muted-foreground">
@@ -398,18 +556,34 @@ export default function CampaignManagerPage() {
             </div>
 
             <div className="rounded-lg border p-4">
-              <h4 className="font-semibold mb-2">Product optimization focus</h4>
+              <h4 className="font-semibold mb-2">Product positioning</h4>
               <p className="text-sm text-muted-foreground mb-2">
                 {generatedPlan?.productPositioning?.summary || "No product summary available."}
               </p>
               {(generatedPlan?.productPositioning?.keyProductMessages || []).length > 0 ? (
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                  {(generatedPlan?.productPositioning?.keyProductMessages || []).slice(0, 6).map((message: string, index: number) => (
+                  {(generatedPlan?.productPositioning?.keyProductMessages || []).slice(0, 8).map((message: string, index: number) => (
                     <li key={`product-message-${index}`}>{message}</li>
                   ))}
                 </ul>
               ) : null}
             </div>
+
+            {/* Persona Angles from Org Intelligence */}
+            {generatedPlan?.messagingArchitecture?.personaAngles?.length > 0 && (
+              <div className="rounded-lg border p-4">
+                <h4 className="font-semibold mb-2">Persona angles</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {generatedPlan.messagingArchitecture.personaAngles.map((angle: any, index: number) => (
+                    <div key={`persona-${index}`} className="rounded border p-3">
+                      <p className="font-medium text-sm">{angle.persona}</p>
+                      <p className="text-xs text-muted-foreground mt-1"><strong>Pain:</strong> {angle.pain}</p>
+                      <p className="text-xs text-muted-foreground"><strong>Message:</strong> {angle.message}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-lg border p-4">
@@ -431,6 +605,17 @@ export default function CampaignManagerPage() {
                 </ul>
               </div>
             </div>
+
+            {/* Performance Learnings */}
+            {generatedPlan?.performanceLearnings && (
+              <div className="rounded-lg border p-4">
+                <h4 className="font-semibold mb-2 flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4" />
+                  Performance learnings (recent campaigns)
+                </h4>
+                <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-sans">{generatedPlan.performanceLearnings}</pre>
+              </div>
+            )}
 
             {generatedPlan?.outcomeModel?.primarySuccessCriteria ? (
               <div className="rounded-lg border p-4">

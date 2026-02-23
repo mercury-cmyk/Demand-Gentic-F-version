@@ -2712,7 +2712,7 @@ export default function ClientPortalDashboard() {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-1.5">
                 {filteredCampaigns.map((campaign) => (
                   <CampaignCard
                     key={campaign.id}

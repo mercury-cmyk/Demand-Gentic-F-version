@@ -12,7 +12,7 @@ import {
   clientAccounts,
   contentAssets,
 } from "@shared/schema";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { generateContentPromotionPage } from "../services/ai-content-promotion";
 
@@ -225,7 +225,7 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
       updatedAt: page.updatedAt,
       sourceType: "content_studio",
       sourceProjectId: page.projectId,
-      previewPath: `/generative-studio/public/${page.slug}`,
+      previewPath: `/api/generative-studio/public/${page.slug}`,
     }));
 
     const mappedStudioProjects = studioProjects
@@ -269,7 +269,7 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
         updatedAt: project.updatedAt,
         sourceType: "content_studio",
         sourceProjectId: project.id,
-        previewPath: `/generative-studio?projectId=${project.id}`,
+        previewPath: null,
       }));
 
     const unifiedPages = [...pages, ...mappedStudioPages, ...mappedStudioProjects].sort((a, b) => {
@@ -321,9 +321,18 @@ router.get("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
 });
 
 // Generate landing page with AI based on campaign/project context
+// Requires organizationId — Organizational Intelligence is mandatory for all AI generation
 router.post("/api/content-promotion/pages/generate", requireAuth, async (req, res) => {
   try {
     const { campaignId, projectId, organizationId, clientId } = req.body;
+
+    // Enforce organizationId — OI is mandatory for AI generation
+    if (!organizationId || typeof organizationId !== 'string' || !organizationId.trim()) {
+      return res.status(400).json({
+        error: 'Organization is required for AI generation. All landing page generation must be derived from Organizational Intelligence.',
+        code: 'ORG_REQUIRED',
+      });
+    }
 
     if (!campaignId && !projectId) {
       return res.status(400).json({ error: "Campaign or Project ID is required for AI generation" });
@@ -388,10 +397,23 @@ router.post("/api/content-promotion/pages/generate", requireAuth, async (req, re
       })),
     };
 
-    const result = await generateContentPromotionPage(context);
+    const result = await generateContentPromotionPage(context, organizationId);
 
     res.json(result);
   } catch (error: any) {
+    // Handle OI assertion errors gracefully
+    if (error?.code === 'ORG_INTELLIGENCE_REQUIRED') {
+      return res.status(422).json({
+        error: error.message,
+        code: 'ORG_INTELLIGENCE_REQUIRED',
+      });
+    }
+    if (error?.code === 'ORG_REQUIRED') {
+      return res.status(400).json({
+        error: error.message,
+        code: 'ORG_REQUIRED',
+      });
+    }
     console.error("[Content Promotion] Error generating with AI:", error);
     res.status(500).json({ error: error.message || "Failed to generate with AI" });
   }
@@ -507,23 +529,117 @@ router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
   }
 });
 
-// Delete (archive) page
+// Delete page/content
 router.delete("/api/content-promotion/pages/:id", requireAuth, async (req, res) => {
   try {
+    const rawId = req.params.id;
+    const tenantId = (req as any).user?.tenantId;
+    const userId =
+      (req as any).user?.id ||
+      (req as any).user?.userId ||
+      (req as any).user?.clientUserId;
+
+    const canAccessStudioRecord = (record: { tenantId?: string | null; ownerId?: string | null }) => {
+      if (tenantId && record.tenantId && record.tenantId === tenantId) return true;
+      if (userId && record.ownerId && record.ownerId === userId) return true;
+      return false;
+    };
+
+    // Content Studio published page
+    if (rawId.startsWith("studio:")) {
+      const studioPageId = rawId.slice("studio:".length);
+      if (!studioPageId) {
+        return res.status(400).json({ error: "Invalid content studio page id" });
+      }
+
+      const [publishedPage] = await db
+        .select()
+        .from(generativeStudioPublishedPages)
+        .where(eq(generativeStudioPublishedPages.id, studioPageId))
+        .limit(1);
+
+      if (!publishedPage) {
+        return res.status(404).json({ error: "Content Studio page not found" });
+      }
+      if (!canAccessStudioRecord(publishedPage)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      await db.delete(contentPromotionPageViews).where(eq(contentPromotionPageViews.pageId, publishedPage.id));
+      await db.delete(generativeStudioPublishedPages).where(eq(generativeStudioPublishedPages.id, publishedPage.id));
+
+      if (publishedPage.projectId) {
+        const [project] = await db
+          .select()
+          .from(generativeStudioProjects)
+          .where(eq(generativeStudioProjects.id, publishedPage.projectId))
+          .limit(1);
+
+        if (project && canAccessStudioRecord(project)) {
+          await db.delete(generativeStudioProjects).where(eq(generativeStudioProjects.id, project.id));
+        }
+      }
+
+      return res.json({ success: true, deletedType: "content_studio_published" });
+    }
+
+    // Content Studio draft/generated project
+    if (rawId.startsWith("studio-project:")) {
+      const studioProjectId = rawId.slice("studio-project:".length);
+      if (!studioProjectId) {
+        return res.status(400).json({ error: "Invalid content studio project id" });
+      }
+
+      const [project] = await db
+        .select()
+        .from(generativeStudioProjects)
+        .where(eq(generativeStudioProjects.id, studioProjectId))
+        .limit(1);
+
+      if (!project) {
+        return res.status(404).json({ error: "Content Studio project not found" });
+      }
+      if (!canAccessStudioRecord(project)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const publishedRows = await db
+        .select({ id: generativeStudioPublishedPages.id })
+        .from(generativeStudioPublishedPages)
+        .where(eq(generativeStudioPublishedPages.projectId, studioProjectId));
+
+      const publishedIds = publishedRows.map((row) => row.id).filter(Boolean);
+      if (publishedIds.length > 0) {
+        await db
+          .delete(contentPromotionPageViews)
+          .where(inArray(contentPromotionPageViews.pageId, publishedIds));
+      }
+
+      await db
+        .delete(generativeStudioPublishedPages)
+        .where(eq(generativeStudioPublishedPages.projectId, studioProjectId));
+      await db
+        .delete(generativeStudioProjects)
+        .where(eq(generativeStudioProjects.id, studioProjectId));
+
+      return res.json({ success: true, deletedType: "content_studio_project" });
+    }
+
+    // Native Content Promotion page
+    await db.delete(contentPromotionPageViews).where(eq(contentPromotionPageViews.pageId, rawId));
     const [page] = await db
-      .update(contentPromotionPages)
-      .set({ status: "archived" as any, updatedAt: new Date() })
-      .where(eq(contentPromotionPages.id, req.params.id))
+      .delete(contentPromotionPages)
+      .where(eq(contentPromotionPages.id, rawId))
       .returning();
 
     if (!page) {
       return res.status(404).json({ error: "Page not found" });
     }
 
-    res.json({ success: true });
+    return res.json({ success: true, deletedType: "content_promotion" });
   } catch (error: any) {
-    console.error("[Content Promotion] Error archiving page:", error);
-    res.status(500).json({ error: "Failed to archive content promotion page" });
+    console.error("[Content Promotion] Error deleting page:", error);
+    res.status(500).json({ error: "Failed to delete content" });
   }
 });
 
@@ -700,18 +816,26 @@ router.get("/api/public/promo/:slug", async (req, res) => {
   try {
     const { slug } = req.params;
 
+    // Allow preview of draft pages with preview token for authenticated users
+    const allowDraft = req.query.preview === 'true' && req.headers.authorization;
+
+    const conditions: any[] = [eq(contentPromotionPages.slug, slug)];
+    if (!allowDraft) {
+      conditions.push(eq(contentPromotionPages.status, "published" as any));
+    }
+
     const [page] = await db
       .select()
       .from(contentPromotionPages)
-      .where(
-        and(
-          eq(contentPromotionPages.slug, slug),
-          eq(contentPromotionPages.status, "published" as any)
-        )
-      )
+      .where(and(...conditions))
       .limit(1);
 
     if (!page) {
+      return res.status(404).json({ error: "Page not found" });
+    }
+
+    // For draft pages, verify authentication
+    if (page.status !== "published" && !req.headers.authorization) {
       return res.status(404).json({ error: "Page not found" });
     }
 

@@ -56,7 +56,7 @@ export const TAGLINE = {
   /** The full branded tagline with product name */
   full: 'DemandGentic\u2014Human-Led Strategy. AI-Powered Execution.',
   /** Our identity statement */
-  identity: 'The Problem Solvers',
+  identity: 'Demand Problem Solvers',
   /** The agentic identity for the agent council */
   agenticIdentity: 'The Agentic Demand Council',
   /** Mission statement */
@@ -171,7 +171,7 @@ export const PROBLEM_FRAMEWORK = {
 
 export const SOLUTION_PILLARS = [
   {
-    badge: 'The Problem Solvers',
+    badge: 'Demand Problem Solvers',
     title: 'Human-Led Strategy',
     description: '11+ years of front-line B2B demand experience. We lead with problem intelligence, solution mapping, and empathy \u2014 AI executes what humans architect.',
     quote: 'Truth, human connection, and empathy are never optional.',
@@ -528,7 +528,7 @@ export const BRAND_VOICE = {
   vocabulary: {
     /** Words and phrases to use frequently */
     preferred: [
-      'reasoning', 'intelligence', 'stewardship', 'problem-solving',
+      'reasoning', 'intelligence', 'stewardship', 'demand problem-solving',
       'human connection', 'empathy', 'compliance', 'trust',
       'context', 'precision', 'verified', 'qualified',
       'front-line experience', 'organization intelligence',
@@ -549,7 +549,7 @@ export const BRAND_VOICE = {
     'No interaction is ever forgotten',
     'Truth, human connection, and empathy are never optional',
     'Human-Led Strategy. AI-Powered Execution.',
-    'We are The Problem Solvers',
+    'We are Demand Problem Solvers',
     'Problem Intelligence. Solution Mapping. Pinpoint Context.',
     'Reasoning first. Compliance first. Nothing forgotten.',
     'The machine is the map; the human spirit is the compass.',
@@ -708,6 +708,47 @@ export const CONTENT_STUDIO = {
     { title: 'Refine', description: 'Chat with the AI to iterate. Adjust tone, expand sections, add CTAs, or rework entire pieces \u2014 all through natural conversation.', iconName: 'PenTool', color: 'emerald' },
     { title: 'Publish', description: 'One click to go live. Landing pages publish to branded URLs with full SEO. Content saves to your asset library for campaign use across all channels.', iconName: 'Globe', color: 'blue' },
   ],
+} as const;
+
+// ==================== PUBLIC PAGES MESSAGING ====================
+
+export const PUBLIC_PAGES_MESSAGING = {
+  /** Primary headline for public-facing pages */
+  headline: 'The End of Algorithmic Noise.',
+  /** Secondary headline */
+  subHeadline: 'The Era of Agentic Reasoning.',
+  /** Category positioning statement */
+  category: 'Agentic Account-Based Marketing for B2B Vendors',
+  /** Core positioning tagline for public pages */
+  tagline: 'Human-led ABM strategy. Reasoning-first AI execution. Brand-controlled demand.',
+  /** Main value proposition paragraph */
+  valueProposition: 'DemandGentic transforms your ABM strategy into coordinated, multi-channel execution across email, voice, and intelligent workflows\u2014delivering high-quality pipeline from target accounts without compromising compliance, accuracy, or brand integrity.',
+  /** Pipeline protection messaging */
+  pipelineProtection: {
+    headline: 'We do more than generate sales pipeline.',
+    subHeadline: 'We protect it.',
+    description: 'In a market saturated with fabricated engagement, bot-driven clicks, and budget-inflated "performance," B2B organizations are unknowingly buying noise instead of intent. Millions are spent on activity that never converts to revenue.',
+    resolution: 'DemandGentic safeguards your pipeline from artificial engagement and misaligned traffic. Every touchpoint is reasoning-driven, ICP-aligned, and strategically orchestrated\u2014ensuring your brand reaches real decision-makers inside real accounts.',
+  },
+  /** Precision statement */
+  precisionStatement: {
+    contrast: 'This is not automation at scale.',
+    assertion: 'This is precision at scale.',
+  },
+  /** What We Deliver section */
+  deliverables: [
+    'Strategic, human-designed ABM frameworks',
+    'Agentic AI execution grounded in contextual reasoning',
+    'Multi-channel orchestration (email, voice, workflow triggers)',
+    'Verified, compliant engagement (GDPR, CCPA, TCPA aligned)',
+    'Pipeline protection against fabricated or low-intent activity',
+    'Brand-controlled messaging across every interaction',
+  ],
+  /** Closing statement */
+  closingStatement: {
+    contrast: 'Algorithmic noise created the illusion of scale.',
+    assertion: 'Agentic reasoning creates revenue.',
+  },
 } as const;
 
 // ==================== FOUNDER QUOTES ====================

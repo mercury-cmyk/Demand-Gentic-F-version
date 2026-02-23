@@ -8,6 +8,20 @@ import {
 
 const LOG_PREFIX = "[TZ-Analyzer]";
 
+/* ── Timezone Priority Override types ── */
+export interface TimezonePriorityOverride {
+  timezone: string;       // IANA timezone string, or "__unknown__"
+  country?: string;       // Human-readable label for UI
+  priorityBoost: number;  // Additive: positive=boost, negative=deprioritize
+}
+
+export interface TimezonePriorityConfig {
+  enabled: boolean;
+  overrides: TimezonePriorityOverride[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 export interface TimezoneGroupAnalysis {
   timezone: string;
   contactCount: number;
@@ -167,18 +181,37 @@ export async function analyzeCampaignTimezones(
  *    10 = unknown timezone
  */
 export async function seedQueuePriorities(
-  campaignId: string
+  campaignId: string,
+  priorityConfig?: TimezonePriorityConfig | null
 ): Promise<{ updated: number }> {
+  // Auto-load config from campaign if not explicitly provided
+  if (priorityConfig === undefined) {
+    const campaignRow = await pool.query(
+      `SELECT timezone_priority_config FROM campaigns WHERE id = $1`,
+      [campaignId]
+    );
+    priorityConfig = (campaignRow.rows[0]?.timezone_priority_config as TimezonePriorityConfig | null) ?? null;
+  }
+
   const analysis = await analyzeCampaignTimezones(campaignId);
   let totalUpdated = 0;
 
+  /** Look up the additive boost for a timezone key (IANA string or "__unknown__") */
+  function getBoost(tzKey: string): number {
+    if (!priorityConfig?.enabled || !priorityConfig.overrides?.length) return 0;
+    const override = priorityConfig.overrides.find(o => o.timezone === tzKey);
+    return override?.priorityBoost ?? 0;
+  }
+
   for (const group of analysis.timezoneGroups) {
     if (group.timezone === "Unknown") {
-      // Unknown timezone: low priority, delay 2 hours
+      const basePriority = 10;
+      const effectivePriority = Math.max(0, basePriority + getBoost("__unknown__"));
+      // Unknown timezone: low priority (unless boosted), delay 2 hours
       const result = await pool.query(
         `
         UPDATE campaign_queue cq
-        SET priority = 10,
+        SET priority = $2,
             next_attempt_at = NOW() + INTERVAL '2 hours',
             updated_at = NOW()
         FROM contacts c
@@ -189,13 +222,14 @@ export async function seedQueuePriorities(
           AND c.country IS NULL
           AND c.state IS NULL
       `,
-        [campaignId]
+        [campaignId, effectivePriority]
       );
       totalUpdated += result.rowCount || 0;
       continue;
     }
 
-    const priority = group.suggestedPriority;
+    const basePriority = group.suggestedPriority;
+    const effectivePriority = Math.max(0, basePriority + getBoost(group.timezone));
 
     if (group.isCurrentlyOpen) {
       // Currently open: high priority, clear any delay
@@ -216,7 +250,7 @@ export async function seedQueuePriorities(
       `,
         [
           campaignId,
-          priority,
+          effectivePriority,
           group.timezone,
           getCountryKeysForTimezone(group.timezone, group.country),
         ]
@@ -241,7 +275,7 @@ export async function seedQueuePriorities(
       `,
         [
           campaignId,
-          priority,
+          effectivePriority,
           group.opensAt,
           group.timezone,
           getCountryKeysForTimezone(group.timezone, group.country),
@@ -251,8 +285,9 @@ export async function seedQueuePriorities(
     }
   }
 
+  const hasOverrides = priorityConfig?.enabled && (priorityConfig.overrides?.length ?? 0) > 0;
   console.log(
-    `${LOG_PREFIX} Seeded priorities for campaign ${campaignId}: ${totalUpdated} items updated across ${analysis.timezoneGroups.length} timezone groups`
+    `${LOG_PREFIX} Seeded priorities for campaign ${campaignId}: ${totalUpdated} items updated across ${analysis.timezoneGroups.length} timezone groups${hasOverrides ? ` (with ${priorityConfig!.overrides.length} user overrides)` : ''}`
   );
   return { updated: totalUpdated };
 }

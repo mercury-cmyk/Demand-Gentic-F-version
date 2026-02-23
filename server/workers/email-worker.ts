@@ -9,6 +9,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import { db } from '../db';
 import { emailSends } from '@shared/schema';
 import { eq } from 'drizzle-orm';
+import { generateBulkEmailHeaders, validateSenderAuthentication } from '../lib/email-security';
 
 /**
  * Email job data structure
@@ -52,14 +53,31 @@ async function sendViaMailgun(options: EmailJobData['options']): Promise<{ messa
   const apiKey = process.env.MAILGUN_API_KEY;
   const domain = process.env.MAILGUN_DOMAIN;
   const apiBase = process.env.MAILGUN_API_BASE || 'https://api.mailgun.net/v3';
+  const appBaseUrl = process.env.APP_BASE_URL || 'https://beta-platform.pivotal-b2b.com';
 
   if (!apiKey || !domain) {
     throw new Error('Mailgun not configured. Set MAILGUN_API_KEY and MAILGUN_DOMAIN environment variables.');
   }
 
+  // Validate sender authentication
+  const authValidation = validateSenderAuthentication(options.from, appBaseUrl);
+  if (authValidation.warnings.length > 0) {
+    console.warn('[Email Security] Sender authentication warnings:');
+    authValidation.warnings.forEach(warning => console.warn(`  ${warning}`));
+  }
+
   const from = options.fromName 
     ? `${options.fromName} <${options.from}>`
     : options.from;
+
+  // Generate all compliance headers
+  const securityHeaders = generateBulkEmailHeaders({
+    fromEmail: options.from,
+    recipientEmail: options.to,
+    campaignId: options.campaignId,
+    unsubscribeBaseUrl: appBaseUrl,
+    messageId: options.sendId,
+  });
 
   // Build form data for Mailgun API
   const formData = new FormData();
@@ -76,12 +94,13 @@ async function sendViaMailgun(options: EmailJobData['options']): Promise<{ messa
     formData.append('h:Reply-To', options.replyTo);
   }
   
-  if (options.listUnsubscribeUrl) {
-    formData.append('h:List-Unsubscribe', `<${options.listUnsubscribeUrl}>`);
-  }
+  // Add all security headers (List-Unsubscribe, List-Unsubscribe-Post, etc.)
+  Object.entries(securityHeaders).forEach(([header, value]) => {
+    formData.append(`h:${header}`, value);
+  });
   
+  // Add Mailgun-specific tracking variables
   if (options.campaignId) {
-    formData.append('h:X-Campaign-Id', options.campaignId);
     formData.append('v:campaign_id', options.campaignId);
   }
   
@@ -119,6 +138,7 @@ async function sendViaMailgun(options: EmailJobData['options']): Promise<{ messa
   }
 
   const result = await response.json();
+  console.log(`[Email Security] Sent with compliance headers: List-Unsubscribe, List-Unsubscribe-Post, Precedence`);
   return { messageId: result.id || result.message };
 }
 

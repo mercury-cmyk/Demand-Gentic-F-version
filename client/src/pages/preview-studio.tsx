@@ -170,6 +170,38 @@ export default function PreviewStudioPage() {
     },
   });
 
+  // Fetch campaign details with assigned voices
+  interface CampaignDetails {
+    id: string;
+    name: string;
+    assigned_voices?: Array<{ id: string; name: string }> | null;
+  }
+  const { data: campaignDetails } = useQuery<CampaignDetails>({
+    queryKey: ['/api/campaigns', selectedCampaignId, 'details'],
+    queryFn: async () => {
+      if (!selectedCampaignId) return null;
+      const res = await apiRequest('GET', `/api/campaigns/${selectedCampaignId}`);
+      if (!res.ok) throw new Error('Failed to fetch campaign details');
+      return res.json();
+    },
+    enabled: !!selectedCampaignId,
+  });
+
+  // Determine available voices for the campaign
+  const availableVoicesForCampaign = campaignDetails?.assigned_voices && Array.isArray(campaignDetails.assigned_voices) && campaignDetails.assigned_voices.length > 0
+    ? GEMINI_VOICES.filter(v => campaignDetails.assigned_voices.some(av => av.id === v.id))
+    : GEMINI_VOICES;
+
+  // Auto-select first available voice if campaign changes
+  useEffect(() => {
+    if (campaignDetails?.assigned_voices && Array.isArray(campaignDetails.assigned_voices) && campaignDetails.assigned_voices.length > 0) {
+      const firstAssignedVoiceId = campaignDetails.assigned_voices[0].id;
+      if (selectedVoice !== firstAssignedVoiceId) {
+        setSelectedVoice(firstAssignedVoiceId);
+      }
+    }
+  }, [campaignDetails?.assigned_voices, selectedCampaignId]);
+
   // Fetch accounts for selected campaign
   const { data: accounts = [], isLoading: accountsLoading } = useQuery<Account[]>({
     queryKey: ['/api/knowledge-blocks/campaigns', selectedCampaignId, 'accounts'],
@@ -514,6 +546,8 @@ export default function PreviewStudioPage() {
             campaignId={selectedCampaignId}
             accountId={selectedAccountId}
             contactId={selectedContactId}
+            availableVoices={availableVoicesForCampaign}
+            campaignHasConfiguredVoices={campaignDetails?.assigned_voices ? Array.isArray(campaignDetails.assigned_voices) && campaignDetails.assigned_voices.length > 0 : false}
           />
         </div>
       </div>
@@ -541,6 +575,8 @@ interface VoicePreviewSectionProps {
   campaignId: string | null;
   accountId: string | null;
   contactId: string | null;
+  availableVoices: VoiceOption[];
+  campaignHasConfiguredVoices: boolean;
 }
 
 function VoicePreviewSection({
@@ -561,9 +597,11 @@ function VoicePreviewSection({
   campaignId,
   accountId,
   contactId,
+  availableVoices,
+  campaignHasConfiguredVoices,
 }: VoicePreviewSectionProps) {
-  const maleVoices = GEMINI_VOICES.filter(v => v.gender === 'male');
-  const femaleVoices = GEMINI_VOICES.filter(v => v.gender === 'female');
+  const maleVoices = availableVoices.filter(v => v.gender === 'male');
+  const femaleVoices = availableVoices.filter(v => v.gender === 'female');
 
   return (
     <div className="h-full flex">
@@ -576,7 +614,17 @@ function VoicePreviewSection({
             </div>
             Voice Configuration
           </h3>
-          <p className="text-xs text-white/40 mt-1 ml-10">24 Gemini voices available</p>
+          <p className="text-xs text-white/40 mt-1 ml-10">
+            {campaignHasConfiguredVoices 
+              ? `${availableVoices.length} campaign voice${availableVoices.length !== 1 ? 's' : ''} assigned` 
+              : '24 Gemini voices available'}
+          </p>
+          {campaignHasConfiguredVoices && (
+            <p className="text-xs text-green-400/70 mt-1 ml-10 flex items-center gap-1">
+              <Zap className="h-3 w-3" />
+              Using campaign voice pool
+            </p>
+          )}
         </div>
 
         <ScrollArea className="flex-1 px-6 pb-6">

@@ -10,11 +10,9 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import {
-  Home,
   Users,
   Building2,
   Mail,
-  Phone,
   ListChecks,
   LayoutDashboard,
   Settings,
@@ -22,7 +20,6 @@ import {
   Moon,
   Sun,
   UserPlus,
-  FolderPlus,
   KanbanSquare,
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
@@ -39,7 +36,7 @@ interface CommandAction {
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [, navigate] = useLocation();
-  const { theme, setTheme } = useTheme();
+  const { setTheme } = useTheme();
 
   // Toggle command palette with ⌘K (Mac) or Ctrl+K (Windows/Linux)
   useEffect(() => {
@@ -93,14 +90,6 @@ export function CommandPalette() {
       keywords: ["email", "marketing"],
     },
     {
-      id: "nav-telemarketing",
-      label: "Telemarketing",
-      icon: Phone,
-      onSelect: () => navigate("/phone-campaigns"),
-      section: "Navigation",
-      keywords: ["calls", "calling", "phone"],
-    },
-    {
       id: "nav-leads",
       label: "Leads & QA",
       icon: ListChecks,
@@ -129,19 +118,11 @@ export function CommandPalette() {
   const quickActions: CommandAction[] = [
     {
       id: "action-new-campaign",
-      label: "New Email Campaign",
-      icon: FolderPlus,
-      onSelect: () => navigate("/campaigns/email/new"),
+      label: "New Campaign",
+      icon: Mail,
+      onSelect: () => navigate("/campaigns/create"),
       section: "Quick Actions",
-      keywords: ["create", "add"],
-    },
-    {
-      id: "action-new-tele-campaign",
-      label: "New Phone Campaign",
-      icon: Phone,
-      onSelect: () => navigate("/phone-campaigns/create"),
-      section: "Quick Actions",
-      keywords: ["create", "add", "call", "phone", "telemarketing"],
+      keywords: ["create", "add", "email", "phone", "campaign"],
     },
     {
       id: "action-invite-user",

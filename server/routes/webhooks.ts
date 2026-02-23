@@ -401,6 +401,8 @@ router.post("/telnyx", async (req, res) => {
           return res.json({ status: "ok", event_type: eventType });
         }
 
+        // TeXML calls handle voice via Gemini Live native audio through /voice-dialer WebSocket
+        // No TTS greeting needed here - the <Stream> verb auto-connects to Gemini
         await bridge.handleSimpleWebhookEvent('answered', payload);
         return res.json({ status: "ok", event_type: eventType });
 

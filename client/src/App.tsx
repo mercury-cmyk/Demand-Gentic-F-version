@@ -110,6 +110,7 @@ import LeadFormsPage from "@/pages/lead-forms";
 import LeadFormPublicPage from "@/pages/lead-form-public";
 import AIProjectCreatorPage from "@/pages/ai-project-creator";
 import ClientPortalAdmin from "@/pages/client-portal-admin";
+import OrganizationManagerPage from "@/pages/organization-manager";
 import AdminProjectRequests from "@/pages/admin-project-requests";
 import AdminTodoBoardPage from "@/pages/admin-todo-board";
 import PublicBookingPage from "@/pages/public-booking";
@@ -142,10 +143,11 @@ import QAReviewCenter from "@/pages/qa-review-center";
 const OrganizationIntelligencePage = lazy(() => import("@/pages/ai-studio/intelligence"));
 const AIAgentsPage = lazy(() => import("@/pages/ai-studio/agents"));
 const AgenticCRMOperatorPage = lazy(() => import("@/pages/ai-studio/operator"));
-const AgentPromptsPage = lazy(() => import("@/pages/ai-studio/agent-prompts"));
+// AgentPromptsPage moved into Unified Agent Architecture — old route redirects
 const IntelligenceStudioDashboard = lazy(() => import("@/pages/ai-studio/dashboard"));
 const CampaignIntelligencePage = lazy(() => import("@/pages/ai-studio/campaign-intelligence"));
 import AgentCommandCenter from "@/pages/agent-command-center";
+import UnifiedAgentArchitectureDashboard from "@/pages/unified-agent-architecture";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
 import IntelligentCampaignCreatePage from "@/pages/intelligent-campaign-create";
@@ -172,6 +174,7 @@ import BrandKitsPage from "@/pages/brand-kits";
 import { EmailBuilderDnD } from "@/components/email-builder/EmailBuilderDnD";
 import ContentPromoPublicPage from "@/pages/content-promo-public";
 import ContentPromotionManagerPage from "@/pages/content-promotion-manager";
+import OpsHubPage from "@/pages/ops-hub";
 
 // IAM - Identity & Access Management
 import IamOverview from "@/pages/iam/iam-overview";
@@ -440,6 +443,7 @@ function AuthenticatedApp() {
               <Route path="/agent-console" component={AgentConsolePage} />
               <Route path="/unified-agent-console" component={UnifiedAgentConsolePage} />
               <Route path="/agent-command-center" component={AgentCommandCenter} />
+              <Route path="/unified-agent-architecture" component={UnifiedAgentArchitectureDashboard} />
               <Route path="/virtual-agents" component={VirtualAgentsPage} />
               <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
@@ -480,6 +484,9 @@ function AuthenticatedApp() {
               <Route path="/iam/audit" component={IamAudit} />
               <Route path="/iam/secrets" component={IamSecrets} />
 
+              {/* Operations Hub - GCP Infrastructure Management Dashboard */}
+              <Route path="/ops-hub" component={OpsHubPage} />
+
               {/* Legacy settings routes (kept for backwards compatibility) */}
               <Route path="/user-management" component={UsersSettingsPage} />
               <Route path="/sender-profiles" component={SenderProfilesPage} />
@@ -517,12 +524,15 @@ function AuthenticatedApp() {
               <Route path="/ai-studio/intelligence" component={OrganizationIntelligencePage} />
               <Route path="/ai-studio/agents" component={AIAgentsPage} />
               <Route path="/ai-studio/operator" component={AgenticCRMOperatorPage} />
-              <Route path="/ai-studio/agent-prompts" component={AgentPromptsPage} />
+              <Route path="/ai-studio/agent-prompts">
+                <Redirect to="/unified-agent-architecture" />
+              </Route>
               <Route path="/ai-studio/campaign-manager" component={CampaignManagerPage} />
               <Route path="/ai-studio/campaign-intelligence" component={CampaignIntelligencePage} />
               <Route path="/create-ai-agent" component={CreateAIAgentPage} />
               
-              {/* Client Portal & Hierarchy Management */}
+              {/* Organization & Client Portal Management */}
+              <Route path="/organization-manager" component={OrganizationManagerPage} />
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
               <Route path="/admin/project-requests" component={AdminProjectRequests} />
               <Route path="/admin/todo-board" component={AdminTodoBoardPage} />

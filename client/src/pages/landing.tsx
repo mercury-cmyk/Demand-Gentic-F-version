@@ -46,6 +46,7 @@ import {
   PRINCIPLES,
   FOUNDER_QUOTES,
   FOOTER,
+  PUBLIC_PAGES_MESSAGING,
 } from "@shared/brand-messaging";
 
 export default function LandingPage() {
@@ -98,27 +99,26 @@ export default function LandingPage() {
           <div className="text-center max-w-4xl mx-auto">
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
-              Agentic ABM for B2B Vendors
+              {PUBLIC_PAGES_MESSAGING.category}
             </Badge>
+
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               <span className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 bg-clip-text text-transparent">
-                Agentic Account-Based Marketing
+                {PUBLIC_PAGES_MESSAGING.headline}
               </span>
               <br />
               <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 bg-clip-text text-transparent">
-                for B2B Vendors
+                {PUBLIC_PAGES_MESSAGING.subHeadline}
               </span>
             </h1>
 
             <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed max-w-3xl mx-auto font-medium">
-              Human-led ABM strategy. Reasoning-first AI execution. Brand-controlled demand.
+              {PUBLIC_PAGES_MESSAGING.tagline}
             </p>
 
             <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed max-w-3xl mx-auto">
-              DemandGentic turns your ABM strategy into coordinated outreach across email, voice,
-              and workflows—so you generate higher-quality pipeline from target accounts without
-              sacrificing compliance, accuracy, or brand integrity.
+              {PUBLIC_PAGES_MESSAGING.valueProposition}
             </p>
 
             {/* Trust Line */}
@@ -139,6 +139,25 @@ export default function LandingPage() {
               </Button>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ─── PROBLEM / REFRAME ────────────────────────────────────────── */}
+      <section className="py-12 px-6 bg-white">
+        <div className="max-w-4xl mx-auto text-center">
+          <p className="text-sm md:text-base text-muted-foreground">
+            {PUBLIC_PAGES_MESSAGING.closingStatement.contrast}
+          </p>
+          <p className="text-xl md:text-2xl font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+            {PUBLIC_PAGES_MESSAGING.closingStatement.assertion}
+          </p>
+          <p className="text-sm md:text-base text-muted-foreground">
+            <span className="font-semibold text-foreground">Human-Led Strategy</span> +{" "}
+            <span className="font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+              Agentic ABM Execution
+            </span>
+            —guided by your brand, constrained by your rules, built for what's next.
+          </p>
         </div>
       </section>
 
@@ -205,6 +224,42 @@ export default function LandingPage() {
                 </p>
               </CardContent>
             </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── PIPELINE PROTECTION ──────────────────────────────────────── */}
+      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
+
+        <div className="max-w-5xl mx-auto relative">
+          <div className="text-center mb-12">
+            <Badge className="mb-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">
+              <Shield className="h-3.5 w-3.5 mr-2" />
+              Pipeline Protection
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-2">
+              {PUBLIC_PAGES_MESSAGING.pipelineProtection.headline}
+            </h2>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+              <span className="text-emerald-400">{PUBLIC_PAGES_MESSAGING.pipelineProtection.subHeadline}</span>
+            </h2>
+            <p className="text-xl text-slate-400 max-w-3xl mx-auto mb-8">
+              {PUBLIC_PAGES_MESSAGING.pipelineProtection.description}
+            </p>
+            <p className="text-lg text-slate-300 max-w-3xl mx-auto">
+              {PUBLIC_PAGES_MESSAGING.pipelineProtection.resolution}
+            </p>
+          </div>
+
+          {/* Precision Statement */}
+          <div className="p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur text-center">
+            <p className="text-2xl md:text-3xl font-bold">
+              <span className="text-slate-400">{PUBLIC_PAGES_MESSAGING.precisionStatement.contrast}</span>{" "}
+              <span className="bg-gradient-to-r from-violet-400 to-emerald-400 bg-clip-text text-transparent">
+                {PUBLIC_PAGES_MESSAGING.precisionStatement.assertion}
+              </span>
+            </p>
           </div>
         </div>
       </section>
@@ -864,19 +919,78 @@ export default function LandingPage() {
 
 
 
-      {/* ─── POSITIONING CLOSE ────────────────────────────────────────── */}
+
+      {/* ─── WHAT WE DELIVER ───────────────────────────────────────────── */}
+      <section className="py-24 px-6 relative overflow-hidden" id="built-for-you">
+        <div className="absolute inset-0 bg-gradient-to-b from-white to-slate-50" />
+
+        <div className="max-w-7xl mx-auto relative">
+          <div className="text-center mb-16">
+            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
+              <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
+              What We Deliver
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+              Everything You Need for{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Precision ABM</span>
+            </h2>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+            {[
+              { icon: Users, title: PUBLIC_PAGES_MESSAGING.deliverables[0], color: "violet" },
+              { icon: Brain, title: PUBLIC_PAGES_MESSAGING.deliverables[1], color: "indigo" },
+              { icon: Zap, title: PUBLIC_PAGES_MESSAGING.deliverables[2], color: "blue" },
+              { icon: Shield, title: PUBLIC_PAGES_MESSAGING.deliverables[3], color: "emerald" },
+              { icon: Eye, title: PUBLIC_PAGES_MESSAGING.deliverables[4], color: "amber" },
+              { icon: MessageSquare, title: PUBLIC_PAGES_MESSAGING.deliverables[5], color: "rose" },
+            ].map((item, i) => (
+              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
+                <CardContent className="p-6 flex items-start gap-4">
+                  <div className={`h-12 w-12 rounded-xl bg-${item.color}-100 flex items-center justify-center shrink-0`}>
+                    <item.icon className={`h-6 w-6 text-${item.color}-600`} />
+                  </div>
+                  <p className="font-semibold text-sm pt-3">{item.title}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Built For section */}
+          <div className="p-8 rounded-2xl bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200">
+            <div className="text-center mb-6">
+              <h3 className="text-2xl font-bold mb-2">Built For Your Team</h3>
+              <p className="text-muted-foreground">Designed for the people who drive revenue.</p>
+            </div>
+            <div className="flex flex-wrap gap-3 justify-center">
+              {["CMOs & VP Marketing", "VP Sales & CROs", "Demand Gen Directors", "RevOps Leaders", "ABM Teams", "Sales Development Leaders", "Agency Owners", "Growth Leaders"].map((persona, i) => (
+                <div key={i} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-violet-200 shadow-sm">
+                  <CheckCircle2 className="h-4 w-4 text-violet-500" />
+                  <span className="text-sm font-medium">{persona}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── CLOSING STATEMENT ─────────────────────────────────────────── */}
       <section className="py-20 px-6">
         <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl md:text-4xl font-bold mb-6">
-            This isn't traditional demand generation.
+          <h2 className="text-3xl md:text-4xl font-bold mb-4">
+            <span className="text-muted-foreground">{PUBLIC_PAGES_MESSAGING.closingStatement.contrast}</span>
           </h2>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
-            It's{" "}
+          <h2 className="text-3xl md:text-4xl font-bold mb-8">
+            <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+              {PUBLIC_PAGES_MESSAGING.closingStatement.assertion}
+            </span>
+          </h2>
+          <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             <span className="font-semibold text-foreground">Human-Led Strategy</span> +{" "}
             <span className="font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
               Agentic ABM Execution
             </span>
-            —guided by your brand and built for what's next.
+            —guided by your brand, constrained by your rules, built for what's next.
           </p>
         </div>
       </section>

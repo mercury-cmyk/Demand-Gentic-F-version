@@ -1843,10 +1843,27 @@ router.get("/profile", requireDualAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: "organizationId is required" });
     }
 
-    const [org] = await db.select()
+    // Try to find organization by ID first (UUID), then by domain or name
+    let [org] = await db.select()
       .from(campaignOrganizations)
       .where(eq(campaignOrganizations.id, organizationId))
       .limit(1);
+
+    // If not found by ID, try by domain
+    if (!org) {
+      [org] = await db.select()
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.domain, organizationId))
+        .limit(1);
+    }
+
+    // If still not found, try by name
+    if (!org) {
+      [org] = await db.select()
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.name, organizationId))
+        .limit(1);
+    }
 
     if (!org) {
       return res.json({ profile: null });

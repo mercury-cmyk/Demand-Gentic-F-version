@@ -7,8 +7,8 @@
  */
 
 import { db } from "../db";
-import { accountIntelligence, callAttempts, emailEvents, leads } from "@shared/schema";
-import { desc, gte, sql } from "drizzle-orm";
+import { accountIntelligence, campaignOrganizations, callAttempts, emailEvents, leads } from "@shared/schema";
+import { desc, eq, gte, sql } from "drizzle-orm";
 import { buildUnifiedKnowledgePrompt } from "../services/unified-knowledge-hub";
 import { AGENT_DEFAULTS } from "@shared/brand-messaging";
 
@@ -362,27 +362,33 @@ export async function getOrganizationLearningSummary(): Promise<string> {
 
 /**
  * Gets the organization's prompt optimization settings for AI agents
- * Reads from database first, falls back to sensible defaults if not configured
+ * Prioritizes super org compiledOrgContext, then accountIntelligence, then defaults
  */
 export async function getOrganizationPromptSettings(): Promise<OrganizationPromptSettings> {
   try {
-    // Get the most recent organization intelligence profile
+    // First: check super org for compiled context
+    const [superOrg] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.organizationType, 'super'))
+      .limit(1);
+
+    // If super org has a compiled context, use it as orgIntelligence
+    const superOrgContext = superOrg?.compiledOrgContext?.trim();
+
+    // Also check accountIntelligence for prompt settings (compliance, platform, voice)
     const [profile] = await db.select()
       .from(accountIntelligence)
       .orderBy(desc(accountIntelligence.createdAt))
       .limit(1);
 
-    // Use database values if set, otherwise use defaults
-    // This ensures agents always have baseline guidance even without configuration
     return {
-      orgIntelligence: profile?.orgIntelligence?.trim() || DEFAULT_ORG_INTELLIGENCE,
+      orgIntelligence: superOrgContext || profile?.orgIntelligence?.trim() || DEFAULT_ORG_INTELLIGENCE,
       compliancePolicy: profile?.compliancePolicy?.trim() || DEFAULT_COMPLIANCE_POLICY,
       platformPolicies: profile?.platformPolicies?.trim() || DEFAULT_PLATFORM_POLICIES,
       agentVoiceDefaults: profile?.agentVoiceDefaults?.trim() || DEFAULT_VOICE_DEFAULTS,
     };
   } catch (error) {
     console.error('[OrgIntelligence] Failed to fetch prompt settings from database:', error);
-    // Return defaults on error - agents should still have baseline guidance
     return {
       orgIntelligence: DEFAULT_ORG_INTELLIGENCE,
       compliancePolicy: DEFAULT_COMPLIANCE_POLICY,
@@ -394,9 +400,30 @@ export async function getOrganizationPromptSettings(): Promise<OrganizationPromp
 
 /**
  * Gets the full organization profile including identity, offerings, ICP, etc.
+ * Prioritizes the super organization (Pivotal B2B) from campaignOrganizations,
+ * which is the platform's source of truth. Falls back to accountIntelligence
+ * only if the super org has no intelligence data.
  */
 export async function getOrganizationProfile(): Promise<OrganizationProfile | null> {
   try {
+    // First: try the super organization from campaignOrganizations (source of truth)
+    const [superOrg] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.organizationType, 'super'))
+      .limit(1);
+
+    if (superOrg && superOrg.identity && Object.keys(superOrg.identity as any).length > 0) {
+      return {
+        domain: superOrg.domain || 'pivotalb2b.com',
+        identity: superOrg.identity,
+        offerings: superOrg.offerings,
+        icp: superOrg.icp,
+        positioning: superOrg.positioning,
+        outreach: superOrg.outreach || {},
+      };
+    }
+
+    // Fallback: legacy accountIntelligence table (org_intelligence_profiles)
     const [profile] = await db.select()
       .from(accountIntelligence)
       .orderBy(desc(accountIntelligence.createdAt))
@@ -436,13 +463,13 @@ export async function buildAgentSystemPrompt(basePrompt: string): Promise<string
 
   const promptParts = [basePrompt];
 
-  // ==================== CORE AGENT IDENTITY: PROBLEM-SOLVER MENTALITY ====================
+  // ==================== CORE AGENT IDENTITY: DEMAND PROBLEM-SOLVER MENTALITY ====================
   // This is injected into ALL agent types as a foundational behavioral trait.
   promptParts.push(`
-## Core Agent Identity: Problem-Solver Mentality
-You are, above all, a problem solver. This is your default operating mode regardless of your specific role or task. Apply these principles in every interaction:
+## Core Agent Identity: Demand Problem-Solver Mentality
+You are, above all, a demand problem solver. This is your default operating mode regardless of your specific role or task. Apply these principles in every interaction:
 
-- **Solution-Oriented Thinking**: Never stop at identifying a problem — always push toward a resolution. When you encounter an obstacle, immediately shift to "how can we solve this?" rather than dwelling on the issue itself.
+- **Solution-Oriented Thinking**: Never stop at identifying a demand problem — always push toward a resolution. When you encounter an obstacle, immediately shift to "how can we solve this demand problem?" rather than dwelling on the issue itself.
 - **Resourcefulness**: Use every piece of context, data, and knowledge available to you to find creative and effective solutions. If one approach doesn't work, try another. Explore alternatives before concluding something can't be done.
 - **Proactive Problem Detection**: Anticipate potential issues before they arise. Flag risks early and suggest preventive measures alongside your primary output.
 - **Root Cause Focus**: Don't treat symptoms — dig into the underlying cause. When analyzing data, evaluating leads, generating content, or handling conversations, always ask "why" to get to the real issue.

@@ -28,7 +28,7 @@ import {
   type OrganizationMemberRole,
   type CredentialCategory,
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql, ilike, or, count, gte } from "drizzle-orm";
 import { BRAND, TAGLINE, STATS } from "@shared/brand-messaging";
 
 // ==================== SUPER ORGANIZATION INITIALIZATION ====================
@@ -57,44 +57,94 @@ export async function initializeSuperOrganization(): Promise<CampaignOrganizatio
       id: SUPER_ORG_ID,
       name: SUPER_ORG_NAME,
       domain: BRAND.domains.primary,
-      description: `${TAGLINE.identity}. ${TAGLINE.primary} ${STATS.yearsExperience} years of front-line B2B demand expertise.`,
-      industry: BRAND.company.industry,
+      description: `${TAGLINE.identity}. ${TAGLINE.primary} The world's first account-aware, ethically-aligned AI demand generation platform built on ${STATS.yearsExperience} years of front-line B2B experience.`,
+      industry: 'Technology / B2B Demand Generation / AI-Powered Revenue Operations',
       organizationType: 'super',
       parentOrganizationId: null, // Super org has no parent
       isDefault: true, // Super org is default for campaigns
       isActive: true,
       identity: {
-        legalName: { value: BRAND.company.legalName, confidence: 1.0 },
+        legalName: { value: BRAND.company.legalName, confidence: 1.0, status: 'verified' },
+        brandName: { value: BRAND.company.productName, confidence: 1.0, status: 'verified' },
+        domain: { value: BRAND.domains.primary, confidence: 1.0, status: 'verified' },
         description: {
-          value: `${BRAND.company.productName} is an AI-powered demand generation platform built on ${STATS.yearsExperience} years of front-line B2B experience. ${TAGLINE.corePromise}`,
+          value: `${BRAND.company.productName} is the world's first account-aware, ethically-aligned AI demand generation platform. Built on ${STATS.yearsExperience} years of front-line B2B experience across ${STATS.industriesServed} industries, we combine Problem Intelligence, Solution Mapping, and Pinpoint Context to replace algorithmic noise with reasoned, compliant, high-converting demand. ${TAGLINE.corePromise}`,
           confidence: 1.0,
+          status: 'verified',
         },
-        industry: { value: BRAND.company.industry, confidence: 1.0 },
+        industry: { value: 'Technology / B2B Demand Generation / AI-Powered Revenue Operations', confidence: 1.0, status: 'verified' },
+        regions: { value: `Global — headquartered in ${BRAND.company.location}. Founded in ${BRAND.company.foundedLocation} (${BRAND.company.foundedYear}). Serving clients in ${STATS.countriesCovered} countries.`, confidence: 1.0, status: 'verified' },
+        foundedYear: { value: String(BRAND.company.foundedYear), confidence: 1.0, status: 'verified' },
+        mission: { value: `${TAGLINE.mission} — ${TAGLINE.philosophy}. ${TAGLINE.corePromise}`, confidence: 1.0, status: 'verified' },
+        founder: { value: `${BRAND.founder.name} — ${BRAND.founder.title}`, confidence: 1.0, status: 'verified' },
       },
       offerings: {
         coreProducts: {
-          value: 'AI Voice Agents, Intelligent Email Marketing, Generative Content Studio, Pipeline Management, B2B Data & Intelligence',
+          value: [
+            `AI Voice Agents — Real-time outbound calling with natural speech, objection handling, BANT qualification, and meeting booking`,
+            `Intelligent Email Marketing — Persona-specific sequences with send-time optimization and sentiment analysis`,
+            `Generative Content Studio — ${STATS.contentEngines}-module hub: Landing Pages, Emails, Blogs, eBooks, Solution Briefs, Chat, Images`,
+            `AI-Led ABM — Cross-channel orchestration with buying committee mapping and account-level reasoning`,
+            `Pipeline Intelligence — AI-powered AE assignment, buyer journey staging, and revenue forecasting`,
+            `Market & Account Intelligence — Multi-model research (Gemini + OpenAI + Anthropic + DeepSeek)`,
+            `B2B Data & Enrichment — ${STATS.verifiedContacts} verified contacts, ${STATS.countriesCovered} countries, ${STATS.emailAccuracy} accuracy`,
+            `AI SDR-as-a-Service — Autonomous outreach, qualification, and meeting booking 24/7`,
+            `Quality Control Center — AI-powered QA, conversation quality, lead scoring, disposition reanalysis`,
+          ],
           confidence: 1.0,
+          status: 'verified',
         },
         useCases: {
-          value: 'AI-led ABM, AI SDR-as-a-Service, Qualified Appointment Generation, Market & Account Intelligence, Generative Content Creation',
+          value: 'Enterprise ABM campaigns, AI-powered outbound at scale, multi-channel demand generation, content-led lead generation, database enrichment & verification, qualified appointment setting, market intelligence, pipeline acceleration, global campaign execution, agency/client service model',
           confidence: 1.0,
+          status: 'verified',
         },
         differentiators: {
-          value: `Reasoning-first AI agents, Organization Intelligence, Problem-to-Solution mapping, Compliance-first design, ${STATS.verifiedContacts} verified contacts across ${STATS.countriesCovered} countries`,
+          value: [
+            `Reasoning-first AI — every interaction reasoned before execution (Problem Intelligence → Solution Mapping → Pinpoint Context)`,
+            `Nothing-forgotten architecture — every conversation remembered at contact and account level`,
+            `${STATS.yearsExperience} years of real front-line B2B experience, not theory`,
+            `The Agentic Demand Council — 6 purpose-built AI agents working in concert`,
+            `Unified platform replacing 5-7 tools — voice, email, content, pipeline, data, analytics`,
+            `${STATS.verifiedContacts} verified contacts across ${STATS.countriesCovered} countries with ${STATS.emailAccuracy} accuracy`,
+            `Compliance-first by design — TCPA, GDPR, CCPA woven into every layer`,
+            `${STATS.contentEngines}-engine Generative Studio with Organization Intelligence context`,
+          ],
           confidence: 1.0,
+          status: 'verified',
         },
       },
       icp: {
-        industries: { value: 'B2B, SaaS, Technology, Professional Services, 40+ industries', confidence: 1.0 },
-        personas: { value: 'Sales Leaders, Marketing Directors, Revenue Operations, CROs, VP Sales', confidence: 1.0 },
+        industries: { value: 'Technology/SaaS, Professional Services, Financial Services, Healthcare Tech, Manufacturing, Telecom, EdTech, PropTech, Energy/Cleantech, MarTech, 40+ industries', confidence: 1.0, status: 'verified' },
+        personas: { value: 'VP Sales/CRO, VP Marketing/CMO, Director of Demand Gen, Director of Sales Dev, Revenue Ops, Head of Growth, CEO/Founder (SMB/Mid-Market), Agency Owners', confidence: 1.0, status: 'verified' },
+        companySize: { value: '50-5,000 employees, $5M-$500M ARR sweet spot', confidence: 0.95, status: 'verified' },
       },
       positioning: {
-        oneLiner: { value: `${TAGLINE.identity}. ${TAGLINE.primary}`, confidence: 1.0 },
+        oneLiner: { value: `${BRAND.company.productName} — ${TAGLINE.identity}. ${TAGLINE.primary}`, confidence: 1.0, status: 'verified' },
         valueProposition: {
-          value: `${TAGLINE.mission}: ${TAGLINE.corePromise} Problem Intelligence, Solution Mapping, Pinpoint Context, Compliance First.`,
+          value: `Three forces no other platform delivers together: (1) Human Expertise — ${STATS.yearsExperience} years of front-line strategists. (2) Agentic Intelligence — 6 purpose-built AI agents that reason first. (3) Precision Data — ${STATS.verifiedContacts} contacts, ${STATS.countriesCovered} countries, ${STATS.emailAccuracy} accuracy.`,
           confidence: 1.0,
+          status: 'verified',
         },
+        tagline: { value: TAGLINE.primary, confidence: 1.0, status: 'verified' },
+        whyUs: {
+          value: `Reasoning not automation, one platform not seven, real experience not theory, compliance-first, global scale (${STATS.verifiedContacts} contacts, ${STATS.countriesCovered} countries), human + AI partnership.`,
+          confidence: 1.0,
+          status: 'verified',
+        },
+      },
+      outreach: {
+        principles: {
+          value: ['Reasoning First', 'Nothing Forgotten', 'Compliance First', 'Truth & Empathy', 'Permission is Earned', 'Context Over Content', 'Data is Evidence', 'Judgment at Scale'],
+          confidence: 1.0,
+          status: 'verified',
+        },
+        channels: { value: 'Voice (AI Live Calling), Email (Intelligent Sequences), Content (Generative Studio), Digital (Landing Pages, Content Promotion)', confidence: 1.0, status: 'verified' },
+      },
+      branding: {
+        tone: { value: 'Empathetic, authoritative, transparent, purposeful, human-centric', confidence: 1.0 },
+        keywords: ['reasoning', 'intelligence', 'stewardship', 'problem-solving', 'human connection', 'empathy', 'compliance', 'trust', 'context', 'precision', 'agentic', 'purpose-built'],
+        forbiddenTerms: ['spam', 'blast', 'spray-and-pray', 'growth hack', 'disrupt', 'synergy', 'leverage', 'crush it', 'hustle', 'ninja', 'guru'],
       },
     })
     .returning();
@@ -131,6 +181,9 @@ export async function updateSuperOrganization(
     icp?: any;
     positioning?: any;
     outreach?: any;
+    branding?: any;
+    events?: any;
+    forums?: any;
     compiledOrgContext?: string;
   }
 ): Promise<CampaignOrganization | null> {
@@ -163,6 +216,7 @@ export async function updateClientOrganization(
     industry?: string;
     logoUrl?: string;
     isActive?: boolean;
+    isCampaignOrg?: boolean;
     identity?: any;
     offerings?: any;
     icp?: any;
@@ -593,6 +647,7 @@ export async function createClientOrganization(
     description?: string;
     industry?: string;
     logoUrl?: string;
+    isCampaignOrg?: boolean;
   },
   createdBy?: string
 ): Promise<CampaignOrganization> {
@@ -601,14 +656,16 @@ export async function createClientOrganization(
     throw new Error('Super organization not initialized');
   }
 
+  const { isCampaignOrg, ...rest } = data;
   const [org] = await db
     .insert(campaignOrganizations)
     .values({
-      ...data,
+      ...rest,
       organizationType: 'client',
       parentOrganizationId: superOrg.id,
       createdBy,
       isDefault: false,
+      isCampaignOrg: isCampaignOrg ?? false,
     })
     .returning();
 
@@ -629,6 +686,131 @@ export async function getClientOrganizations(): Promise<CampaignOrganization[]> 
       )
     )
     .orderBy(campaignOrganizations.name);
+}
+
+// ==================== ALL ORGANIZATIONS ====================
+
+/**
+ * Get all organizations with optional filtering
+ */
+export async function getAllOrganizations(filters?: {
+  type?: 'super' | 'client' | 'campaign';
+  isActive?: boolean;
+  search?: string;
+}): Promise<CampaignOrganization[]> {
+  const conditions = [];
+
+  if (filters?.type) {
+    conditions.push(eq(campaignOrganizations.organizationType, filters.type));
+  }
+
+  if (filters?.isActive !== undefined) {
+    conditions.push(eq(campaignOrganizations.isActive, filters.isActive));
+  }
+
+  if (filters?.search) {
+    conditions.push(
+      or(
+        ilike(campaignOrganizations.name, `%${filters.search}%`),
+        ilike(campaignOrganizations.domain, `%${filters.search}%`)
+      )
+    );
+  }
+
+  const query = db
+    .select()
+    .from(campaignOrganizations);
+
+  if (conditions.length > 0) {
+    return query
+      .where(and(...conditions))
+      .orderBy(
+        sql`CASE WHEN ${campaignOrganizations.organizationType} = 'super' THEN 0 WHEN ${campaignOrganizations.organizationType} = 'client' THEN 1 ELSE 2 END`,
+        campaignOrganizations.name
+      );
+  }
+
+  return query.orderBy(
+    sql`CASE WHEN ${campaignOrganizations.organizationType} = 'super' THEN 0 WHEN ${campaignOrganizations.organizationType} = 'client' THEN 1 ELSE 2 END`,
+    campaignOrganizations.name
+  );
+}
+
+/**
+ * Get organization statistics
+ */
+export async function getOrganizationStats(): Promise<{
+  total: number;
+  active: number;
+  inactive: number;
+  byType: { super: number; client: number; campaign: number };
+  recentlyCreated: number;
+}> {
+  const allOrgs = await db
+    .select()
+    .from(campaignOrganizations);
+
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const stats = {
+    total: allOrgs.length,
+    active: allOrgs.filter(o => o.isActive).length,
+    inactive: allOrgs.filter(o => !o.isActive).length,
+    byType: {
+      super: allOrgs.filter(o => o.organizationType === 'super').length,
+      client: allOrgs.filter(o => o.organizationType === 'client').length,
+      campaign: allOrgs.filter(o => o.organizationType === 'campaign').length,
+    },
+    recentlyCreated: allOrgs.filter(o => o.createdAt && new Date(o.createdAt) >= thirtyDaysAgo).length,
+  };
+
+  return stats;
+}
+
+/**
+ * Create a campaign organization under the super organization
+ */
+export async function createCampaignOrganization(
+  data: {
+    name: string;
+    domain?: string;
+    description?: string;
+    industry?: string;
+    logoUrl?: string;
+  },
+  createdBy?: string
+): Promise<CampaignOrganization> {
+  const superOrg = await getSuperOrganization();
+  if (!superOrg) {
+    throw new Error('Super organization not initialized');
+  }
+
+  const [org] = await db
+    .insert(campaignOrganizations)
+    .values({
+      ...data,
+      organizationType: 'campaign',
+      parentOrganizationId: superOrg.id,
+      createdBy,
+      isDefault: false,
+      isCampaignOrg: true,
+    })
+    .returning();
+
+  return org;
+}
+
+/**
+ * Get member count for an organization
+ */
+export async function getOrganizationMemberCount(organizationId: string): Promise<number> {
+  const [result] = await db
+    .select({ count: count() })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.organizationId, organizationId));
+
+  return result?.count ?? 0;
 }
 
 // ==================== INITIALIZATION HELPER ====================

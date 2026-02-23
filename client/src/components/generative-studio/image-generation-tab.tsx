@@ -76,7 +76,8 @@ export default function ImageGenerationTab({
   const [brokenImages, setBrokenImages] = useState<Set<number>>(new Set());
   const [expandedImage, setExpandedImage] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const isDisabled = !organizationId;
+  const hasOrgIntel = !!orgIntelligence?.identity?.legalName?.value;
+  const isDisabled = !organizationId || !hasOrgIntel;
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -266,9 +267,16 @@ export default function ImageGenerationTab({
         </Button>
 
         {isDisabled && (
-          <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-            Select an organization first
+          <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Organizational Intelligence Required</p>
+              <p className="mt-0.5 text-red-600">
+                {!organizationId 
+                  ? "Select an organization to generate images."
+                  : "Complete the Organization Intelligence profile before generating images. All outputs must reflect brand identity."}
+              </p>
+            </div>
           </div>
         )}
 

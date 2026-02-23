@@ -1904,6 +1904,9 @@ export class TelnyxAiBridge extends EventEmitter {
   }
 
   // Handle simple webhook events from Telnyx (called from webhook route)
+  // NOTE: This is the legacy Speak/Gather path. All calls (queue + test) now use
+  // Gemini Live native audio via TeXML <Stream> → /voice-dialer WebSocket.
+  // The 'answered' case here only applies to legacy Call Control API calls.
   async handleSimpleWebhookEvent(eventType: string, payload: any): Promise<void> {
     const callControlId = payload.call_control_id;
     const call = this.findCallByControlId(callControlId);
@@ -1928,6 +1931,8 @@ export class TelnyxAiBridge extends EventEmitter {
           const voiceSetting = call.agent.getVoiceSetting();
           await this.speakText(callControlId, openingMessage, voiceSetting);
         }
+        // Test calls and TeXML calls are handled by Gemini Live native audio
+        // via the /voice-dialer WebSocket stream - no TTS needed here
         break;
 
       case 'speak_ended':

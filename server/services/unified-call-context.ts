@@ -437,16 +437,16 @@ export function contextToClientStateParams(ctx: UnifiedCallContext): Record<stri
     // Phone numbers
     called_number: ctx.calledNumber,
     from_number: ctx.fromNumber,
-    caller_number_id: ctx.callerNumberId,
-    caller_number_decision_id: ctx.callerNumberDecisionId,
+    caller_number_id: ctx.callerNumberId ?? undefined,
+    caller_number_decision_id: ctx.callerNumberDecisionId ?? undefined,
 
     // Agent configuration
     virtual_agent_id: ctx.virtualAgentId,
     agent_name: ctx.agentName,
     voice: ctx.voice,
     first_message: ctx.firstMessage,
-    // system_prompt stored in Redis, not in URL to avoid length issues
-    agent_settings: ctx.agentSettings,
+    // system_prompt and agent_settings stored in Redis (via storeCallSession),
+    // not in URL, to avoid length issues that break Telnyx TeXML URL fetching
 
     // Contact information - both underscore and dot notation for compatibility
     contact_name: ctx.contactName,
@@ -502,8 +502,8 @@ export async function storeCallSession(ctx: UnifiedCallContext): Promise<void> {
     contact_id: ctx.contactId,
     called_number: ctx.calledNumber,
     from_number: ctx.fromNumber,
-    caller_number_id: ctx.callerNumberId,
-    caller_number_decision_id: ctx.callerNumberDecisionId,
+    caller_number_id: ctx.callerNumberId ?? undefined,
+    caller_number_decision_id: ctx.callerNumberDecisionId ?? undefined,
     virtual_agent_id: ctx.virtualAgentId ?? undefined,
     is_test_call: ctx.isTestCall,
     test_call_id: ctx.testCallId ?? undefined,
@@ -512,6 +512,7 @@ export async function storeCallSession(ctx: UnifiedCallContext): Promise<void> {
     agent_name: ctx.agentName,
     organization_name: ctx.organizationName,
     system_prompt: ctx.systemPrompt ?? undefined,
+    agent_settings: ctx.agentSettings ?? undefined,
     provider: ctx.provider,
     test_contact: ctx.isTestCall ? {
       name: ctx.contactName,

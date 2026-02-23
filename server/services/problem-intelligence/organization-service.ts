@@ -68,11 +68,30 @@ export async function getOrganizations(userId?: string): Promise<CampaignOrganiz
  * Get organization by ID
  */
 export async function getOrganizationById(id: string): Promise<CampaignOrganization | null> {
-  const [org] = await db
+  // Try to find by UUID first
+  let [org] = await db
     .select()
     .from(campaignOrganizations)
     .where(eq(campaignOrganizations.id, id))
     .limit(1);
+
+  // If not found by ID, try by domain
+  if (!org) {
+    [org] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.domain, id))
+      .limit(1);
+  }
+
+  // If still not found, try by name
+  if (!org) {
+    [org] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.name, id))
+      .limit(1);
+  }
 
   return org || null;
 }
@@ -303,6 +322,7 @@ ${getValue(outreach, "emailAngles") ? `Email Angles: ${getValue(outreach, "email
 /**
  * Get organizations for campaign dropdown
  * Returns simplified list for UI selection
+ * Includes organizationType for proper defaulting (super org first)
  */
 export async function getOrganizationsForDropdown(userId?: string): Promise<
   Array<{
@@ -311,6 +331,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
     domain: string | null;
     industry: string | null;
     isDefault: boolean;
+    organizationType: 'super' | 'client' | 'campaign';
   }>
 > {
   let query = db
@@ -320,6 +341,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
       domain: campaignOrganizations.domain,
       industry: campaignOrganizations.industry,
       isDefault: campaignOrganizations.isDefault,
+      organizationType: campaignOrganizations.organizationType,
     })
     .from(campaignOrganizations)
     .where(eq(campaignOrganizations.isActive, true));
@@ -329,21 +351,30 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
       .select({ orgId: organizationMembers.organizationId })
       .from(organizationMembers)
       .where(eq(organizationMembers.userId, userId));
-     
+
     const orgIds = memberOrgs.map(m => m.orgId);
-    
+
     // Also include created orgs
     const createdOrgs = await db
         .select({ id: campaignOrganizations.id })
         .from(campaignOrganizations)
         .where(eq(campaignOrganizations.createdBy, userId));
-    
+
     createdOrgs.forEach(o => {
         if (!orgIds.includes(o.id)) orgIds.push(o.id);
     });
 
+    // Always include the super org so all users can access platform OI
+    const superOrgs = await db
+        .select({ id: campaignOrganizations.id })
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.organizationType, 'super'));
+    superOrgs.forEach(o => {
+        if (!orgIds.includes(o.id)) orgIds.push(o.id);
+    });
+
     if (orgIds.length === 0) return [];
-    
+
     query = db
         .select({
             id: campaignOrganizations.id,
@@ -351,6 +382,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
             domain: campaignOrganizations.domain,
             industry: campaignOrganizations.industry,
             isDefault: campaignOrganizations.isDefault,
+            organizationType: campaignOrganizations.organizationType,
         })
         .from(campaignOrganizations)
         .where(and(
@@ -359,5 +391,15 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
         ));
   }
 
-  return query.orderBy(desc(campaignOrganizations.isDefault), campaignOrganizations.name);
+  // Order by: super org first, then by isDefault, then by name
+  return query
+    .then(results => {
+      return results.sort((a, b) => {
+        if (a.organizationType === 'super' && b.organizationType !== 'super') return -1;
+        if (b.organizationType === 'super' && a.organizationType !== 'super') return 1;
+        if (a.isDefault && !b.isDefault) return -1;
+        if (!a.isDefault && b.isDefault) return 1;
+        return a.name.localeCompare(b.name);
+      });
+    });
 }

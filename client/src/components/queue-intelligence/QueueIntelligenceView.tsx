@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, BarChart3, Layers, List, Loader2, Settings2, Zap } from "lucide-react";
+import { Brain, BarChart3, Layers, List, Loader2, Settings2, Zap, Activity } from "lucide-react";
 import { ScoreOverviewPanel } from "./ScoreOverviewPanel";
 import { SegmentAnalysisPanel } from "./SegmentAnalysisPanel";
 import { ContactScoresTable } from "./ContactScoresTable";
+import { LiveStatsPanel, type LiveStatsData } from "./LiveStatsPanel";
 import { QueueIntelligenceConfig } from "@/components/campaigns/queue-intelligence-config";
 import type { ScoreOverview, SegmentAnalysis, ScoreResult } from "./types";
 
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export function QueueIntelligenceView({ campaignId }: Props) {
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("live-stats");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [queueQaParameters, setQueueQaParameters] = useState<any>({});
   const { toast } = useToast();
@@ -52,6 +53,18 @@ export function QueueIntelligenceView({ campaignId }: Props) {
       return res.json();
     },
     enabled: !!campaignId && activeTab === "segments",
+  });
+
+  // Live stats data
+  const { data: liveStats, isLoading: liveStatsLoading, error: liveStatsError } = useQuery<LiveStatsData>({
+    queryKey: ["/api/queue-intelligence", campaignId, "live-stats"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/queue-intelligence/${campaignId}/live-stats`);
+      return res.json();
+    },
+    enabled: !!campaignId && activeTab === "live-stats",
+    refetchInterval: activeTab === "live-stats" ? 30000 : false, // Auto-refresh every 30s when tab is active
+    retry: 1,
   });
 
   // Score mutation
@@ -169,88 +182,88 @@ export function QueueIntelligenceView({ campaignId }: Props) {
         </div>
       </div>
 
-      {/* No Scores State */}
-      {!overviewLoading && !hasScores && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Brain className="h-12 w-12 text-muted-foreground/30 mb-4" />
-          <h4 className="text-lg font-medium mb-2">No Queue Scores Yet</h4>
-          <p className="text-sm text-muted-foreground max-w-md mb-4">
-            Click "Score Queue" to analyze all queued contacts and prioritize them based on
-            industry alignment, topic relevance, account fit, role match, and historical conversion data.
-          </p>
-          <Button
-            variant="outline"
-            onClick={openSettings}
-            data-testid="button-open-queue-settings-empty-state"
-          >
-            <Settings2 className="h-4 w-4 mr-1" />
-            Queue Settings
-          </Button>
-          <Button
-            onClick={() => scoreMutation.mutate()}
-            disabled={scoreMutation.isPending}
-          >
-            {scoreMutation.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                Scoring...
-              </>
-            ) : (
-              <>
-                <Zap className="h-4 w-4 mr-1" />
-                Score Queue Now
-              </>
-            )}
-          </Button>
-        </div>
-      )}
+      {/* Tabs — Live Stats always available; score-dependent tabs show when scored */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="live-stats" className="gap-1.5">
+            <Activity className="h-3.5 w-3.5" />
+            Live Stats
+          </TabsTrigger>
+          {hasScores && (
+            <>
+              <TabsTrigger value="overview" className="gap-1.5">
+                <BarChart3 className="h-3.5 w-3.5" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="segments" className="gap-1.5">
+                <Layers className="h-3.5 w-3.5" />
+                Segments
+              </TabsTrigger>
+              <TabsTrigger value="contacts" className="gap-1.5">
+                <List className="h-3.5 w-3.5" />
+                Contact Scores
+                <Badge variant="secondary" className="ml-1 text-xs">
+                  {overview?.totalScored || 0}
+                </Badge>
+              </TabsTrigger>
+            </>
+          )}
+        </TabsList>
 
-      {/* Tabs */}
-      {hasScores && (
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
-            <TabsTrigger value="overview" className="gap-1.5">
-              <BarChart3 className="h-3.5 w-3.5" />
-              Overview
-            </TabsTrigger>
-            <TabsTrigger value="segments" className="gap-1.5">
-              <Layers className="h-3.5 w-3.5" />
-              Segments
-            </TabsTrigger>
-            <TabsTrigger value="contacts" className="gap-1.5">
-              <List className="h-3.5 w-3.5" />
-              Contact Scores
-              <Badge variant="secondary" className="ml-1 text-xs">
-                {overview?.totalScored || 0}
-              </Badge>
-            </TabsTrigger>
-          </TabsList>
+        <TabsContent value="live-stats" className="mt-4">
+          {liveStatsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : liveStatsError ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Activity className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm font-medium mb-1">Could not load live stats</p>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                {(liveStatsError as any)?.message || "The queue may not have any contacts yet, or the endpoint is unavailable. Try syncing or setting the queue first."}
+              </p>
+            </div>
+          ) : liveStats ? (
+            <LiveStatsPanel data={liveStats} />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Activity className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm font-medium mb-1">No Queue Data</p>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Queue contacts into this campaign first, then live stats will appear here showing country distribution, phone status, priority breakdown, and next-in-line contacts.
+              </p>
+            </div>
+          )}
+        </TabsContent>
 
-          <TabsContent value="overview" className="mt-4">
-            {overviewLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin" />
-              </div>
-            ) : overview ? (
-              <ScoreOverviewPanel data={overview} />
-            ) : null}
-          </TabsContent>
+        {hasScores && (
+          <>
+            <TabsContent value="overview" className="mt-4">
+              {overviewLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : overview ? (
+                <ScoreOverviewPanel data={overview} />
+              ) : null}
+            </TabsContent>
 
-          <TabsContent value="segments" className="mt-4">
-            {segmentsLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin" />
-              </div>
-            ) : segments ? (
-              <SegmentAnalysisPanel data={segments} />
-            ) : null}
-          </TabsContent>
+            <TabsContent value="segments" className="mt-4">
+              {segmentsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : segments ? (
+                <SegmentAnalysisPanel data={segments} />
+              ) : null}
+            </TabsContent>
 
-          <TabsContent value="contacts" className="mt-4">
-            <ContactScoresTable campaignId={campaignId} />
-          </TabsContent>
-        </Tabs>
-      )}
+            <TabsContent value="contacts" className="mt-4">
+              <ContactScoresTable campaignId={campaignId} />
+            </TabsContent>
+          </>
+        )}
+      </Tabs>
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] p-0">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { SUPER_ORG_ID } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +81,10 @@ export interface OrgIntelligenceProfile {
   branding?: {
     tone?: { value?: string };
     keywords?: { value?: string };
+    forbiddenTerms?: { value?: string };
+    communicationStyle?: { value?: string };
+    primaryColor?: { value?: string };
+    secondaryColor?: { value?: string };
   };
   events?: {
     upcoming?: string | { value?: string };
@@ -194,7 +199,7 @@ export default function GenerativeStudioPage() {
 
   const [activeModule, setActiveModule] = useState("image");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(SUPER_ORG_ID);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -231,13 +236,11 @@ export default function GenerativeStudioPage() {
 
   const brandKits = (brandKitsData as any)?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
 
-  // Skip localStorage org restoration when URL has a projectId to resolve
+  // Restore org from localStorage, always falling back to super org
   useEffect(() => {
     if (projectIdFromUrl) return;
     const storedOrgId = localStorage.getItem("generativeStudioOrgId");
-    if (storedOrgId) {
-      setSelectedOrgId(storedOrgId);
-    }
+    setSelectedOrgId(storedOrgId || SUPER_ORG_ID);
   }, []);
 
   useEffect(() => {
@@ -347,6 +350,8 @@ export default function GenerativeStudioPage() {
   );
 
   const hasScope = !!selectedOrgId;
+  // OI is mandatory — generation is blocked without it
+  const oiMissing = !hasOrgIntel && !!selectedOrgId && !orgIntelLoading;
 
   const currentModule = MODULES.find((m) => m.id === activeModule) || MODULES[0];
 
@@ -476,11 +481,17 @@ export default function GenerativeStudioPage() {
         </div>
       </div>
 
-      {/* No Org Warning */}
+      {/* Mandatory OI Gate */}
       {!hasScope && (
-        <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 px-4 py-1.5">
+        <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border-b border-red-200 px-4 py-2">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          Select an organization above to unlock Creative Studio content creation.
+          <span className="font-medium">Organization required.</span> Select an organization above to unlock Creative Studio. All outputs must be derived from Organizational Intelligence.
+        </div>
+      )}
+      {oiMissing && (
+        <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 px-4 py-2">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-medium">Organizational Intelligence profile incomplete.</span> Go to AI Studio &gt; Organization Intelligence to analyze and complete the profile before generating content.
         </div>
       )}
 

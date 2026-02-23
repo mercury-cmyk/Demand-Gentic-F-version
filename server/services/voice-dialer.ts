@@ -630,6 +630,93 @@ export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
   return regexCues.some((pattern) => pattern.test(lower));
 }
 
+/**
+ * Detect automated verbal gatekeeper/receptionist systems that expect a VERBAL response.
+ * These are different from Google Call Screening (isAutomatedCallScreenerTranscript).
+ * Examples:
+ *   - "Thank you for calling [Company]. Who are you trying to reach?"
+ *   - "Please say the name of the person you'd like to speak with"
+ *   - "What is the purpose of your call?"
+ *   - "Who should I say is calling?"
+ *   - "Please state your name"
+ *   - "How may I direct your call?"
+ *
+ * These systems require the agent to SPEAK (not press DTMF digits).
+ * Without responding, the call stalls indefinitely.
+ */
+export function isAutomatedVerbalGatekeeperPrompt(transcript: string): boolean {
+  const lower = normalizeTranscriptForComparison(transcript);
+  if (!lower) return false;
+
+  // Already handled by call screener detection
+  if (isAutomatedCallScreenerTranscript(lower)) return false;
+
+  const cues = [
+    "who are you trying to reach",
+    "who are you calling for",
+    "who would you like to speak with",
+    "who would you like to speak to",
+    "who do you want to speak with",
+    "who do you want to speak to",
+    "who are you looking for",
+    "who may i connect you with",
+    "who may i connect you to",
+    "who can i connect you with",
+    "who should i say is calling",
+    "who shall i say is calling",
+    "may i have your name",
+    "can i have your name",
+    "can i get your name",
+    "what is your name",
+    "what s your name",
+    "please state your name",
+    "please say your name",
+    "state the name of the person",
+    "say the name of the person",
+    "say the name of the party",
+    "name of the person you are trying to reach",
+    "name of the party you are trying to reach",
+    "name of the person you d like to speak with",
+    "how may i direct your call",
+    "how can i direct your call",
+    "how may i help you",
+    "how can i help you",
+    "what is the purpose of your call",
+    "what s the purpose of your call",
+    "purpose of your call",
+    "reason for your call",
+    "what is this call regarding",
+    "who is this for",
+    "who is this call for",
+    "please say the name",
+    "please state the name",
+    "say or spell the name",
+    "spell the name of the person",
+    "dial by name",
+    "company directory",
+    "if you know the extension",
+    "if you know your party s extension",
+    "say the department",
+    "which department",
+    "please say the department",
+  ];
+
+  if (cues.some((cue) => lower.includes(cue))) return true;
+
+  const regexCues = [
+    /who (are you|would you like to|do you want to) (trying to )?(reach|speak|call|talk)/i,
+    /who (should|shall|may|can) i say is calling/i,
+    /(may|can) i (have|get) your name/i,
+    /please (say|state|spell) (your |the )?name/i,
+    /how (may|can) i (direct|help|assist)/i,
+    /what is (the |your )?(purpose|reason) (of|for) (your |this |the )?call/i,
+    /(say|state|spell) the name of the (person|party|individual)/i,
+    /if you know (the|your) (party s |)extension/i,
+  ];
+
+  return regexCues.some((pattern) => pattern.test(lower));
+}
+
 async function injectAutomatedScreenerResponse(
   session: OpenAIRealtimeSession,
   screenerTranscript: string
@@ -1435,6 +1522,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                       if (!customParams.organization_name && storedParams.organization_name) {
                         customParams.organization_name = storedParams.organization_name;
                       }
+                      if (!customParams.agent_settings && storedParams.agent_settings) {
+                        customParams.agent_settings = storedParams.agent_settings;
+                        console.log(`${LOG_PREFIX} Retrieved agent_settings from session store for ${mergeCallId}`);
+                      }
                       console.log(`${LOG_PREFIX} ✅ Merged session store params for pending-call-state`);
                     }
                   } catch (storeErr) {
@@ -1542,6 +1633,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                     }
                     if (!customParams.account_name && storedParams.account_name) {
                       customParams.account_name = storedParams.account_name;
+                    }
+                    if (!customParams.agent_settings && storedParams.agent_settings) {
+                      customParams.agent_settings = storedParams.agent_settings;
+                      console.log(`${LOG_PREFIX} Retrieved agent_settings from session store for ${callId}`);
                     }
                     console.log(`${LOG_PREFIX} ✅ Merged session store params for unified call context`);
                   }
@@ -2853,27 +2948,33 @@ openaiWs.on("open", async () => {
         });
         sendOpeningMessage(openaiWs, openingScript);
 
-        // SAFETY NET: If greeting was sent but no agent audio within 5s, retry once
+        // SAFETY NET: If greeting was sent but no agent audio within 10s, retry ONCE.
+        // Increased from 5s to 10s to avoid racing with AI audio generation latency.
+        // Limited to one retry to prevent the agent from repeating its intro multiple times.
         if ((session as any).greetingRetryTimer) {
           clearTimeout((session as any).greetingRetryTimer);
         }
         const greetingRetryTimer = setTimeout(() => {
           if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
-            console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 5s — retrying opening message`);
+            if (session.openingRestartCount >= 1) {
+              console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): No agent audio after 10s but already retried ${session.openingRestartCount} time(s) — skipping to avoid repeated intro`);
+              queueSessionEvent(session, "realtime.loop_detected", {
+                valueText: "opening_retry_suppressed",
+                metadata: { provider: "openai", count: session.openingRestartCount },
+              });
+              return;
+            }
+            console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 10s — retrying opening message (once)`);
             session.openingRestartCount += 1;
+            // Force the next agent transcript to start a new entry so the retry is visible
+            (session as any)._forceNewAgentTranscript = true;
             queueSessionEvent(session, "opening.restart_count", {
               valueNum: session.openingRestartCount,
               metadata: { provider: "openai" },
             });
-            if (session.openingRestartCount > 1) {
-              queueSessionEvent(session, "realtime.loop_detected", {
-                valueText: "opening_restart_limit_exceeded",
-                metadata: { provider: "openai", count: session.openingRestartCount },
-              });
-            }
             sendOpeningMessage(openaiWs, openingScript);
           }
-        }, 5000);
+        }, 10000);
         (session as any).greetingRetryTimer = greetingRetryTimer;
       };
 
@@ -3369,6 +3470,37 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         return;
       }
 
+      // AUTOMATED VERBAL GATEKEEPER: Inject a contextual nudge if Gemini hasn't responded yet
+      // These systems ask questions like "Who are you trying to reach?" and need a verbal response.
+      // Gemini hears the audio natively, but may stay silent because it sounds robotic.
+      // We inject a text nudge to ensure Gemini responds with the contact name.
+      if (isAutomatedVerbalGatekeeperPrompt(event.text)) {
+        const geminiProvider = (session as any).geminiProvider;
+        if (geminiProvider && session.isActive && !session.isEnding) {
+          // Transition to gatekeeper state
+          if (session.conversationState.currentState !== 'GATEKEEPER') {
+            session.conversationState.currentState = 'GATEKEEPER';
+            session.conversationState.stateHistory.push('GATEKEEPER');
+          }
+          const contactFirstName = (session as any).contactFirstName || (session as any).contactInfo?.firstName || 'the contact';
+          const contactFullName = (session as any).contactFullName || (session as any).contactInfo?.fullName ||
+            ((session as any).contactInfo?.firstName && (session as any).contactInfo?.lastName
+              ? `${(session as any).contactInfo.firstName} ${(session as any).contactInfo.lastName}`
+              : contactFirstName);
+          const agentName = (session as any).agentName || (session as any).agentConfig?.name || '';
+
+          console.log(`${LOG_PREFIX} [Gemini] Automated verbal gatekeeper detected - injecting response nudge for call: ${session.callId}`);
+          const compactTranscript = (event.text || "").replace(/\s+/g, " ").trim().slice(0, 220);
+          geminiProvider.sendTextMessage(
+            `[AUTOMATED SYSTEM PROMPT DETECTED] The automated phone system just said: "${compactTranscript}"\n\n` +
+            `You MUST respond verbally NOW. This is an automated receptionist/gatekeeper waiting for your answer.\n` +
+            `Say: "Hi, I'm trying to reach ${contactFullName}, please."` +
+            (agentName ? ` If asked who is calling, say: "${agentName}."` : '') +
+            `\nDo NOT stay silent. The call will stall if you do not respond.`
+          );
+        }
+      }
+
       if (!session.audioDetection.humanDetected) {
         session.audioDetection.humanDetected = true;
         session.audioDetection.humanDetectedAt = new Date();
@@ -3522,10 +3654,16 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] AI: "${event.text}"`);
 
-        // FIXED: Accumulate consecutive assistant transcripts instead of creating new entries
-        // Gemini sends word-by-word transcriptions, so we need to merge them
+        // Accumulate consecutive assistant transcripts instead of creating new entries
+        // Gemini sends word-by-word transcriptions, so we need to merge them.
+        // EXCEPTION: If the opening was retried (openingRestartCount > 0 and forceNewTranscriptEntry),
+        // start a new entry so repeated intros are visible separately in the transcript.
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
-        if (lastTranscript?.role === 'assistant') {
+        const forceNew = (session as any)._forceNewAgentTranscript === true;
+        if (forceNew) {
+          (session as any)._forceNewAgentTranscript = false;
+        }
+        if (lastTranscript?.role === 'assistant' && !forceNew) {
           // Append to existing assistant transcript with a space
           lastTranscript.text += ' ' + event.text;
           maybeRecordPurposeStart(session, lastTranscript.text);
@@ -3749,26 +3887,33 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     scheduleFallbackGreetingCheck(6500);
 
-    // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 5s,
-    // force-retry the opening. This catches edge cases where the greeting was dropped
-    // (WebSocket reset, setup race condition, Gemini ignoring the trigger).
+    // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 10s,
+    // retry the opening ONCE. Increased from 5s to 10s to avoid racing with Gemini's
+    // audio generation latency which can take 3-7s on cold starts.
+    // The retry timer is cleared as soon as the first agent audio chunk arrives (line ~3320).
     const greetingRetryTimer = setTimeout(() => {
       if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
-        console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 5s — retrying opening message`);
+        // Only retry ONCE — never send the opening more than twice total.
+        // Multiple retries cause the agent to repeat its intro, confusing the prospect.
+        if (session.openingRestartCount >= 1) {
+          console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: No agent audio after 10s but already retried ${session.openingRestartCount} time(s) — skipping to avoid repeated intro`);
+          queueSessionEvent(session, "realtime.loop_detected", {
+            valueText: "opening_retry_suppressed",
+            metadata: { provider: "google", count: session.openingRestartCount },
+          });
+          return;
+        }
+        console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 10s — retrying opening message (once)`);
         session.openingRestartCount += 1;
+        // Force the next agent transcript to start a new entry so the retry is visible
+        (session as any)._forceNewAgentTranscript = true;
         queueSessionEvent(session, "opening.restart_count", {
           valueNum: session.openingRestartCount,
           metadata: { provider: "google" },
         });
-        if (session.openingRestartCount > 1) {
-          queueSessionEvent(session, "realtime.loop_detected", {
-            valueText: "opening_restart_limit_exceeded",
-            metadata: { provider: "google", count: session.openingRestartCount },
-          });
-        }
         provider.sendOpeningMessage(openingScript);
       }
-    }, 5000);
+    }, 10000);
     (session as any).greetingRetryTimer = greetingRetryTimer;
 
     console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);
@@ -4422,6 +4567,39 @@ Only AFTER completing these steps can you submit the disposition.`
         success: true,
         message: `Please read back to the prospect: "Just to confirm - we're looking at ${args.proposed_date} at ${args.proposed_time}, and I'll send the calendar invite to ${args.email_to_confirm}. Does that all sound correct?" Wait for their confirmation before calling book_meeting.`
       };
+    }
+    case 'detect_voicemail_and_hangup': {
+      console.log(`${LOG_PREFIX} [Gemini] 📞 AI called detect_voicemail_and_hangup - ending call as voicemail`);
+
+      if (session.detectedDisposition === 'voicemail') {
+        console.log(`${LOG_PREFIX} [Gemini] Voicemail already detected, ensuring call ends`);
+        if (session.isActive && !session.isEnding) {
+          setImmediate(() => endCall(session.callId, 'voicemail'));
+        }
+        return { success: true, message: 'Voicemail already detected, call ending' };
+      }
+
+      session.detectedDisposition = 'voicemail';
+      session.callOutcome = 'voicemail';
+      recordVoicemailDetectedEvent(session, "gemini_ai_tool_call");
+
+      if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
+        setImmediate(async () => {
+          try {
+            await db.update(dialerCallAttempts).set({
+              voicemailDetected: true,
+              connected: false,
+              updatedAt: new Date()
+            }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+            console.log(`${LOG_PREFIX} ✅ [Gemini] Updated voicemailDetected=true (AI tool call) for call attempt ${session.callAttemptId}`);
+          } catch (err) {
+            console.error(`${LOG_PREFIX} [Gemini] Failed to update voicemailDetected flag:`, err);
+          }
+        });
+      }
+
+      await endCall(session.callId, 'voicemail');
+      return { success: true, message: 'Voicemail detected, call ended' };
     }
     default: return { success: false, error: 'Unknown function' };
   }
@@ -5582,6 +5760,14 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
   }
 
   console.log(`${LOG_PREFIX} ${LOG_TAG} Analyzing: "${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '...' : ''}"`);
+
+  // AUTOMATED VERBAL GATEKEEPER SYSTEMS - These ask questions that require a VERBAL response.
+  // Must be classified as 'human' so the AI responds instead of staying silent.
+  // Check BEFORE call screener and IVR patterns to prevent false IVR classification.
+  if (isAutomatedVerbalGatekeeperPrompt(normalizedText)) {
+    console.log(`${LOG_PREFIX} ${LOG_TAG} AUTOMATED VERBAL GATEKEEPER detected: "${normalizedText.substring(0, 60)}..."`);
+    return { type: 'human', confidence: 0.92 };
+  }
 
   // AI call screeners are automated systems, but NOT voicemail.
   // We should engage once and wait for a human, not hang up as voicemail.
@@ -6852,6 +7038,40 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                     });
                   });
                   return;
+                }
+
+                // FULL VOICEMAIL DETECTION (beyond early window) - catches late voicemail cues
+                // shouldFastAbortForEarlyVoicemail only works within the early window; this catches the rest
+                if (!session.detectedDisposition && isVoicemailCueTranscript(segment.text)) {
+                  const shouldOverride = !session.detectedDisposition ||
+                    session.detectedDisposition === 'not_interested' ||
+                    session.detectedDisposition === 'no_answer' ||
+                    session.detectedDisposition === 'qualified_lead';
+                  if (shouldOverride) {
+                    console.log(`${LOG_PREFIX} [Deepgram] VOICEMAIL DETECTED (late window) via transcript: "${segment.text.substring(0, 60)}..."`);
+                    session.detectedDisposition = 'voicemail';
+                    session.callOutcome = 'voicemail';
+                    recordVoicemailDetectedEvent(session, "deepgram_late_voicemail_cue");
+                    if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
+                      setImmediate(async () => {
+                        try {
+                          await db.update(dialerCallAttempts).set({
+                            voicemailDetected: true,
+                            connected: false,
+                            updatedAt: new Date()
+                          }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+                        } catch (err) {
+                          console.error(`${LOG_PREFIX} [Deepgram] Failed to update voicemailDetected flag:`, err);
+                        }
+                      });
+                    }
+                    setImmediate(() => {
+                      endCall(session.callId, 'voicemail').catch((err) => {
+                        console.error(`${LOG_PREFIX} Failed to end call after Deepgram late voicemail cue:`, err);
+                      });
+                    });
+                    return;
+                  }
                 }
 
                 if (isLikelyChannelBleed(session, segment.text)) {
@@ -9080,6 +9300,8 @@ During this initial silence, LISTEN carefully to what the caller says:
 **NEVER say "thanks for confirming" or "great" or any acknowledgment UNLESS the person has EXPLICITLY confirmed their identity in response to YOUR question.**
 **NEVER assume identity is confirmed just because someone answered the phone.**
 **A person saying "Hello?" is NOT confirming anything — they are simply answering the phone.**
+
+**OPENING CLARITY**: Your first words after the prospect speaks MUST be clear, complete, and audible. Do NOT mumble, rush, or start speaking before the prospect finishes their greeting. Wait for a brief natural pause (0.5-1 second) after they say "Hello?" before beginning your response. Speak at a normal conversational pace — not too fast, not too slow.
 </critical_listening_rule>
 
 <call_flow>
@@ -9087,9 +9309,21 @@ During this initial silence, LISTEN carefully to what the caller says:
 
 ### Pre-Phase: Audio Readiness (MANDATORY)
 - Ringing/ringback tone is NOT a person. Do NOT speak during ringtone.
-- If there is silence, hold music, IVR, or robotic audio, do NOT deliver your greeting.
-- Speak only after an actual person starts talking.
-- If you hear voicemail cues in the first moments ("leave a message", "after the beep", "not available"), IMMEDIATELY submit_disposition("voicemail") and then end_call. Do not continue the script.
+- If there is silence, hold music, or ringtone audio, do NOT deliver your greeting.
+- Speak only after you hear someone (human OR automated system) start talking.
+- **IMPORTANT**: If an automated system ASKS YOU A QUESTION (e.g., "Who are you trying to reach?", "Please say the name of the person", "How may I direct your call?", "What is your name?"), you MUST respond verbally. These systems require a spoken answer — staying silent will stall the call indefinitely. Say: "I'm trying to reach [Contact Name], please." If asked for your name, give it.
+- **VOICEMAIL ABORT (HIGHEST PRIORITY — REACT WITHIN 1-2 SECONDS):**
+  If you hear ANY of these cues, STOP SPEAKING IMMEDIATELY mid-word if needed, call detect_voicemail_and_hangup, then submit_disposition("voicemail") and end_call. Do NOT finish your sentence. Do NOT deliver any pitch. Do NOT say goodbye:
+  - "Leave a message" / "Leave your message" / "Please leave"
+  - "After the beep" / "After the tone" / "At the tone"
+  - "Not available to take your call" / "Can't take your call" / "Unable to answer"
+  - "You've reached the voicemail of..." / "Hi, you've reached..."
+  - "Mailbox" / "Voicemail" / "Voice mail"
+  - "I'll get back to you" / "Call you back"
+  - "Come to the phone" / "Away from my phone"
+  - A long beep/tone after a greeting
+  - Any pre-recorded personal greeting followed by a beep
+  **Even if you already started speaking your opening, STOP the instant you recognize these patterns. Every word you say to a voicemail is wasted.**
 - If you hear AI screener prompts ("record/state your name and reason", "before I try to connect you"), follow the screener protocol and DO NOT mark voicemail unless the screener explicitly rejects the call.
 
 ### Phase 1: Identity Verification
@@ -9103,23 +9337,34 @@ Greetings like "Hello?" or "Hi" are NOT identity confirmation — they are just 
 
 If they ask "Who is this?": "Oh hi, this is [your first name]. Am I speaking with [Contact Name]?"
 If they ask "What's this about?": "Just wanted to connect briefly. Is this [Contact Name]?"
+If they correct the name (e.g., "No, this is James"): Accept the corrected name immediately, then flow straight into Phase 3 with the corrected name — do NOT re-ask identity. Treat name correction as identity confirmation.
 
 ### Phase 2: Gatekeeper & IVR Handling
 If someone else answers (receptionist, assistant, automated system):
 - "Could you please connect me with [Contact Name]?"
 - If pressed: "It's related to some of the services we offer."
 - Maximum two polite attempts. If refused, thank them and end the call.
-- For IVR menus: use send_dtmf after listening to ALL options.
+- For DTMF IVR menus (e.g., "Press 1 for sales"): use send_dtmf after listening to ALL options.
+- For VERBAL automated systems (e.g., "Who are you trying to reach?", "Please say the name", "How may I direct your call?"): respond VERBALLY with "I'm trying to reach [Contact Name], please." Do NOT stay silent — the system is waiting for your spoken answer.
+- If asked "What is your name?" or "Who should I say is calling?": say "[Your Name] calling from [Organization]."
 
 If transferred to a new voice, re-verify identity: "Hi, just to confirm — am I speaking with [Contact Name]?"
 
-### Phase 3: Introduction & Value Hook
-Once identity is confirmed, move IMMEDIATELY in the very next sentence (no filler, no pause):
-1. "Hi [First Name], this is [Agent Name] calling on behalf of [Organization Name]."
-2. In the SAME breath, state purpose/value aligned with campaign objective.
-3. Follow with the ask — do NOT ask "do you have a moment?" first.
-4. STOP and wait for their response.
-5. Be warm, kind, and respectful throughout.
+### Phase 3: Introduction & Value Hook (ZERO-GAP TRANSITION — CRITICAL)
+Once identity is confirmed ("Yes" / "Speaking" / "That's me"), you have a 3-SECOND WINDOW before the prospect disengages. Execute this in ONE continuous breath:
+1. "Hi [First Name], this is [Agent Name] calling on behalf of [Organization Name] — [ONE sentence value proposition/reason for calling]."
+2. Follow IMMEDIATELY with the ask — do NOT ask "do you have a moment?" first.
+3. STOP and wait for their response.
+
+**CRITICAL TIMING RULES:**
+- Do NOT insert filler phrases like "Great!", "Wonderful!", "Thanks for confirming!" before your intro. These waste the engagement window.
+- Do NOT pause between your name and the value proposition. Combine them in ONE flowing sentence.
+- Do NOT ask "How are you?" or "Do you have a moment?" — these trigger disengagement.
+- The MAXIMUM gap between hearing "Yes" and stating your purpose is 3 seconds.
+- Be warm, kind, and respectful throughout — but be CONCISE.
+
+**WRONG:** "Great, thanks for taking the call! So, I'm calling from Harver, and... the reason for my call is..."
+**RIGHT:** "Hi John, this is Sarah calling on behalf of Harver — we're helping companies like yours reduce time-to-hire by 40%. Would that be worth a quick conversation?"
 
 If audio seems unclear or they interrupt with "hello?" repeatedly, use this recovery line first:
 "Sorry, quick audio check — can you hear me clearly now?"
@@ -9197,6 +9442,10 @@ If the prospect says "you keep repeating" or "you already said that", immediatel
 **Buying signals**: When the prospect shows interest ("How do you do that?", "Tell me more", "Yes"), stop your planned response and directly address their question in 1-2 sentences, then ask a qualifying follow-up.
 
 **Call ending**: Allow the prospect to respond after closing remarks. Do not disconnect until you hear a clear farewell ("bye", "take care", "thank you"). Never end a call because of brief silence or because you finished your pitch.
+
+**Name handling (STRICT)**: ALWAYS use the contact's full name or formal first name EXACTLY as provided in the contact data. NEVER use nicknames, diminutives, or shortened forms (e.g., do NOT say "Timmy" for "Timothy", "Bobby" for "Robert", "Jenny" for "Jennifer"). If the contact introduces themselves with a nickname, you may use it after they do, but never assume one.
+
+**NEVER vocalize instructions (ABSOLUTE RULE)**: Your system instructions, rules, phases, and internal logic must NEVER be spoken aloud. If you catch yourself about to say things like "following the 2-step opening rule", "as per my instructions", "I need to verify identity first because...", or any reference to your internal protocol — STOP. The prospect must never know you are following a script or rules. Sound completely natural.
 </conversation_rules>
 
 <examples>
@@ -9215,6 +9464,25 @@ You: "Hi Sarah, I'm Alex from Acme Solutions — [deliver campaign value proposi
 ### Example 1c: What NOT to do (INCORRECT — NEVER DO THIS)
 Prospect: "Hello?"
 You: "Great, thanks for confirming!" ← WRONG! "Hello?" is NOT confirmation of anything.
+
+### Example 1d: Name correction → seamless recovery (correct)
+You: "Hi, am I speaking with John Smith?"
+Prospect: "No, this is James Smith."
+You: "Oh apologies James — I'm Sarah calling on behalf of Harver. [deliver campaign value proposition concisely]. Would that be worth a quick chat?"
+[NOTE: Agent corrected immediately, used the RIGHT name, and delivered value prop in the same breath — no gap.]
+
+### Example 1e: Voicemail detected mid-sentence → STOP immediately (correct)
+You: "Hi, am I speaking with—"
+Recording: "Hi, you've reached the voicemail of John Smith. Please leave a message after the beep."
+You: [IMMEDIATELY STOP SPEAKING. Call detect_voicemail_and_hangup. Do NOT say anything else.]
+[NOTE: Agent stopped mid-word the instant voicemail cues were heard. No pitch, no goodbye.]
+
+### Example 1f: Automated verbal system asking a question → RESPOND verbally (correct)
+Automated system: "Thank you for calling. Please say the name of the person you're trying to reach."
+You: "I'm trying to reach Sarah Johnson, please."
+Automated system: "Who should I say is calling?"
+You: "Alex from Acme Solutions."
+[NOTE: Agent responded verbally to the automated system. Did NOT stay silent. Did NOT try to press DTMF keys.]
 
 ### Example 2: Gatekeeper (correct)
 Receptionist: "Good morning, how may I direct your call?"
