@@ -120,7 +120,12 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
       })
       .from(clientCampaignAccess)
       .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
-      .where(eq(clientCampaignAccess.clientAccountId, clientAccountId))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          eq(campaigns.clientAccountId, clientAccountId),
+        ),
+      )
       .orderBy(desc(campaigns.createdAt));
 
     const accessMappedCampaigns = await db
@@ -132,7 +137,12 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
       })
       .from(clientCampaignAccess)
       .innerJoin(campaigns, eq(clientCampaignAccess.campaignId, campaigns.id))
-      .where(eq(clientCampaignAccess.clientAccountId, clientAccountId))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          eq(campaigns.clientAccountId, clientAccountId),
+        ),
+      )
       .orderBy(desc(campaigns.createdAt));
 
     const accessCampaigns = [...accessRegularCampaigns];
@@ -154,7 +164,12 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
       })
       .from(campaigns)
       .innerJoin(workOrders, eq(campaigns.id, workOrders.campaignId))
-      .where(eq(workOrders.clientAccountId, clientAccountId))
+      .where(
+        and(
+          eq(workOrders.clientAccountId, clientAccountId),
+          eq(campaigns.clientAccountId, clientAccountId),
+        ),
+      )
       .orderBy(desc(campaigns.createdAt));
 
     const campaignIds = new Set([...accessCampaigns, ...woCampaigns].map(c => c.id));
@@ -173,6 +188,7 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
       .innerJoin(campaignIntakeRequests, eq(campaigns.id, campaignIntakeRequests.campaignId))
       .where(and(
         eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+        eq(campaigns.clientAccountId, clientAccountId),
         inArray(campaignIntakeRequests.status, approvedIntakeStatuses as any)
       ))
       .orderBy(desc(campaigns.createdAt));
@@ -380,6 +396,28 @@ describe('Client Campaign Listing V2 — Query Logic', () => {
     const idsB = resultB.map(c => c.id);
     expect(idsB).toContain(campaignB.id);
     expect(idsB).not.toContain(campaignA.id);
+  });
+
+  it('excludes cross-tenant campaigns even when clientCampaignAccess row exists', async () => {
+    const [argyleOwnedCampaign] = await db
+      .insert(campaigns)
+      .values({ type: 'call', name: 'Argyle Owned Campaign', status: 'active', clientAccountId: clientBId })
+      .returning();
+    createdCampaignIds.push(argyleOwnedCampaign.id);
+
+    const [badAccess] = await db
+      .insert(clientCampaignAccess)
+      .values({
+        clientAccountId: clientAId,
+        regularCampaignId: argyleOwnedCampaign.id,
+      } as any)
+      .returning();
+    createdAccessIds.push(badAccess.id);
+
+    const result = await simulateCampaignListing(clientAId, true);
+    const ids = result.map((c) => c.id);
+
+    expect(ids).not.toContain(argyleOwnedCampaign.id);
   });
 
   it('tenant isolation: Client A WO campaigns invisible to Client B', async () => {

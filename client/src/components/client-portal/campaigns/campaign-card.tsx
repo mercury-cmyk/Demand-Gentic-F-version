@@ -150,7 +150,7 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onOp
   const StatusIcon = config.icon;
 
   // Determine channel type
-  const PHONE_TYPES = ['call', 'telemarketing', 'sql', 'content_syndication', 'appointment_generation',
+  const PHONE_TYPES = ['call', 'telemarketing', 'sql', 'content_syndication', 'appointment_generation', 'appointment_setting',
     'high_quality_leads', 'live_webinar', 'on_demand_webinar', 'executive_dinner',
     'leadership_forum', 'conference'];
   const rawType = (campaign.campaignType || campaign.type || '').toLowerCase();

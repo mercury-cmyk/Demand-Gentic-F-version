@@ -691,7 +691,7 @@ export default function ClientPortalDashboard() {
   });
 
   // Batch-stats for call/email metrics on campaign cards
-  const PHONE_TYPES = ['call', 'telemarketing', 'sql', 'content_syndication', 'appointment_generation',
+  const PHONE_TYPES = ['call', 'telemarketing', 'sql', 'content_syndication', 'appointment_generation', 'appointment_setting',
     'high_quality_leads', 'live_webinar', 'on_demand_webinar', 'executive_dinner',
     'leadership_forum', 'conference'];
 
@@ -1613,7 +1613,7 @@ export default function ClientPortalDashboard() {
     let matchesType = true;
     if (campaignTypeFilter !== 'all') {
         const type = (campaign.type || campaign.campaignType || '').toLowerCase();
-        if (campaignTypeFilter === 'voice') matchesType = type.includes('voice') || type.includes('call') || type.includes('phone');
+        if (campaignTypeFilter === 'voice') matchesType = type.includes('voice') || type.includes('call') || type.includes('phone') || type.includes('appointment');
         else if (campaignTypeFilter === 'email') matchesType = type.includes('email') || type.includes('mail');
         else if (campaignTypeFilter === 'combined') matchesType = type.includes('combo') || type.includes('hybrid');
         else if (campaignTypeFilter === 'data') matchesType = type.includes('data');
@@ -5964,4 +5964,3 @@ function CampaignQueueDialog({ open, onOpenChange, campaignId }: { open: boolean
     </Dialog>
   );
 }
-

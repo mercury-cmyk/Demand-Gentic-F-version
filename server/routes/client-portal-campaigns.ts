@@ -190,6 +190,7 @@ router.get('/', async (req: Request, res: Response) => {
         endDate: campaigns.endDate,
         targetQualifiedLeads: campaigns.targetQualifiedLeads,
         costPerLead: campaigns.costPerLead,
+        clientAccountId: campaigns.clientAccountId,
       })
       .from(clientCampaignAccess)
       .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
@@ -197,6 +198,7 @@ router.get('/', async (req: Request, res: Response) => {
         and(
           eq(clientCampaignAccess.clientAccountId, clientAccountId),
           isNotNull(clientCampaignAccess.regularCampaignId),
+          eq(campaigns.clientAccountId, clientAccountId),
         ),
       )
       .orderBy(desc(campaigns.createdAt));
@@ -213,6 +215,7 @@ router.get('/', async (req: Request, res: Response) => {
         endDate: campaigns.endDate,
         targetQualifiedLeads: campaigns.targetQualifiedLeads,
         costPerLead: campaigns.costPerLead,
+        clientAccountId: campaigns.clientAccountId,
       })
       .from(clientCampaignAccess)
       .innerJoin(campaigns, eq(clientCampaignAccess.campaignId, campaigns.id))
@@ -220,6 +223,7 @@ router.get('/', async (req: Request, res: Response) => {
         and(
           eq(clientCampaignAccess.clientAccountId, clientAccountId),
           isNotNull(clientCampaignAccess.campaignId),
+          eq(campaigns.clientAccountId, clientAccountId),
         ),
       )
       .orderBy(desc(campaigns.createdAt));
@@ -290,6 +294,7 @@ router.get('/', async (req: Request, res: Response) => {
         endDate: campaigns.endDate,
         targetQualifiedLeads: campaigns.targetQualifiedLeads,
         costPerLead: campaigns.costPerLead,
+        clientAccountId: campaigns.clientAccountId,
         
         // Work Order fields
         orderNumber: workOrders.orderNumber,
@@ -308,7 +313,12 @@ router.get('/', async (req: Request, res: Response) => {
       })
       .from(campaigns)
       .innerJoin(workOrders, eq(campaigns.id, workOrders.campaignId))
-      .where(eq(workOrders.clientAccountId, clientAccountId))
+      .where(
+        and(
+          eq(workOrders.clientAccountId, clientAccountId),
+          eq(campaigns.clientAccountId, clientAccountId),
+        ),
+      )
       .orderBy(desc(campaigns.createdAt));
 
     const campaignIds = new Set(
@@ -333,13 +343,19 @@ router.get('/', async (req: Request, res: Response) => {
         endDate: campaigns.endDate,
         targetQualifiedLeads: campaigns.targetQualifiedLeads,
         costPerLead: campaigns.costPerLead,
+        clientAccountId: campaigns.clientAccountId,
         intakeStatus: campaignIntakeRequests.status,
         intakeRequestId: campaignIntakeRequests.id,
         requestedLeadCount: campaignIntakeRequests.requestedLeadCount,
       })
       .from(campaigns)
       .innerJoin(campaignIntakeRequests, eq(campaigns.id, campaignIntakeRequests.campaignId))
-      .where(eq(campaignIntakeRequests.clientAccountId, clientAccountId))
+      .where(
+        and(
+          eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+          eq(campaigns.clientAccountId, clientAccountId),
+        ),
+      )
       .orderBy(desc(campaigns.createdAt));
 
     const mappedIntakeCampaigns = intakeCampaigns
@@ -387,9 +403,10 @@ router.get('/', async (req: Request, res: Response) => {
           startDate: campaigns.startDate,
           endDate: campaigns.endDate,
           targetQualifiedLeads: campaigns.targetQualifiedLeads,
-          costPerLead: campaigns.costPerLead,
-          approvalStatus: campaigns.approvalStatus,
-        })
+        costPerLead: campaigns.costPerLead,
+        approvalStatus: campaigns.approvalStatus,
+        clientAccountId: campaigns.clientAccountId,
+      })
         .from(campaigns)
         .where(eq(campaigns.clientAccountId, clientAccountId))
         .orderBy(desc(campaigns.createdAt));
@@ -540,6 +557,23 @@ router.get('/', async (req: Request, res: Response) => {
         },
       };
     });
+
+    const tenantMismatches = campaignsWithStats.filter(
+      (campaign) =>
+        (campaign as any).type !== 'verification' &&
+        (campaign as any).type !== 'client_campaign' &&
+        (campaign as any).id &&
+        (campaign as any).clientAccountId &&
+        (campaign as any).clientAccountId !== clientAccountId,
+    );
+    if (tenantMismatches.length > 0) {
+      console.error(
+        `[CLIENT CAMPAIGNS] tenant assertion failed | client=${clientAccountId} mismatches=${tenantMismatches
+          .map((c) => c.id)
+          .join(',')}`,
+      );
+      return res.status(500).json({ message: 'Campaign tenant scope assertion failed' });
+    }
 
     console.log(
       `[CLIENT CAMPAIGNS] list success | client=${clientAccountId} total=${campaignsWithStats.length}` +

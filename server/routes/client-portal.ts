@@ -56,6 +56,7 @@ import clientPortalOrdersRouter from './client-portal-orders';
 import argyleEventsRouter from '../integrations/argyle_events/routes';
 import { ukefReportsRouter } from '../integrations/ukef_reports';
 import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
+import { UKEF_CLIENT_ACCOUNT_ID } from '../integrations/ukef_reports/types';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
@@ -89,11 +90,62 @@ async function logClientPortalActivity(params: {
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 const JWT_EXPIRES_IN = "7d";
 const CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS = 15 * 60;
+const LIGHTCAST_UKEF_2026_CUTOFF = new Date('2026-01-01T00:00:00.000Z');
 const PORTAL_BASE_URL =
   process.env.CLIENT_PORTAL_BASE_URL ||
   process.env.APP_BASE_URL ||
   process.env.MSFT_OAUTH_APP_URL ||
   "";
+
+export function isUkefCampaignName(name: string | null | undefined): boolean {
+  const value = String(name || '').toLowerCase();
+  return value.includes('ukef') || value.includes('uk export finance');
+}
+
+export function isProtonCampaignName(name: string | null | undefined): boolean {
+  return String(name || '').toLowerCase().includes('proton');
+}
+
+export function shouldApplyLightcastUkef2026Cutoff(clientAccountId: string, campaignName: string | null | undefined): boolean {
+  if (clientAccountId !== UKEF_CLIENT_ACCOUNT_ID) return false;
+  if (!campaignName) return false;
+  if (isProtonCampaignName(campaignName)) return false;
+  return isUkefCampaignName(campaignName);
+}
+
+async function classifyCampaignsForLeadCutoff(clientAccountId: string, campaignIds: string[]) {
+  if (campaignIds.length === 0) {
+    return { restrictedIds: [] as string[], unrestrictedIds: [] as string[] };
+  }
+
+  if (clientAccountId !== UKEF_CLIENT_ACCOUNT_ID) {
+    return { restrictedIds: [] as string[], unrestrictedIds: campaignIds };
+  }
+
+  const campaignRows = await db
+    .select({ id: campaigns.id, name: campaigns.name })
+    .from(campaigns)
+    .where(inArray(campaigns.id, campaignIds));
+
+  const restrictedIds: string[] = [];
+  const unrestrictedIds: string[] = [];
+
+  const campaignNameById = new Map(campaignRows.map((c) => [c.id, c.name]));
+  for (const campaignId of campaignIds) {
+    const campaignName = campaignNameById.get(campaignId) || null;
+    if (shouldApplyLightcastUkef2026Cutoff(clientAccountId, campaignName)) {
+      restrictedIds.push(campaignId);
+    } else {
+      unrestrictedIds.push(campaignId);
+    }
+  }
+
+  return { restrictedIds, unrestrictedIds };
+}
+
+function getEffectiveLeadTimestampExpr() {
+  return sql`COALESCE(${dialerCallAttempts.callStartedAt}, ${leads.createdAt})`;
+}
 
 export interface ClientJWTPayload {
   clientUserId: string;
@@ -1543,8 +1595,8 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       campaignId,
       page = '1',
       pageSize = '50',
-      sortBy = 'approvedAt',
-      sortOrder = 'desc',
+      sortBy = 'createdAt',
+      sortOrder = 'asc',
       search,
       debug,
     } = req.query;
@@ -1569,6 +1621,11 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     const accessibleCampaignIds = accessList
       .map(a => a.regularCampaignId)
       .filter((id): id is string => id !== null);
+
+    const { restrictedIds, unrestrictedIds } = await classifyCampaignsForLeadCutoff(
+      req.clientUser!.clientAccountId,
+      accessibleCampaignIds,
+    );
 
     const buildTelnyxFallbackLeads = async () => ({
       leads: [],
@@ -1598,8 +1655,24 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     // Clients see leads that are:
     //   1) QA approved/published AND submitted to client, OR
     //   2) AI agent qualified with score >= 50 (showcase calls)
+    const campaignScopeConditions: any[] = [];
+    const effectiveLeadTimestamp = getEffectiveLeadTimestampExpr();
+    if (unrestrictedIds.length > 0) {
+      campaignScopeConditions.push(inArray(leads.campaignId, unrestrictedIds));
+    }
+    if (restrictedIds.length > 0) {
+      campaignScopeConditions.push(
+        and(
+          inArray(leads.campaignId, restrictedIds),
+          gte(effectiveLeadTimestamp, LIGHTCAST_UKEF_2026_CUTOFF),
+        ),
+      );
+    }
+
     const whereConditions: any[] = [
-      inArray(leads.campaignId, accessibleCampaignIds),
+      campaignScopeConditions.length === 1
+        ? campaignScopeConditions[0]
+        : or(...campaignScopeConditions),
       or(
         and(
           inArray(leads.qaStatus, ['approved', 'published']),
@@ -1633,16 +1706,19 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     const [countResult] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(leads)
+      .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
       .where(and(...whereConditions));
 
     const total = countResult?.count || 0;
 
     // Get leads with campaign info
     const sortColumn = sortBy === 'approvedAt' ? leads.approvedAt :
+                      sortBy === 'createdAt' ? effectiveLeadTimestamp :
+                      sortBy === 'callStartedAt' ? effectiveLeadTimestamp :
                       sortBy === 'aiScore' ? leads.aiScore :
                       sortBy === 'callDuration' ? leads.callDuration :
                       sortBy === 'accountName' ? leads.accountName :
-                      leads.approvedAt;
+                      effectiveLeadTimestamp;
 
     const orderDirection = sortOrder === 'asc' ? asc : desc;
 
@@ -1662,6 +1738,7 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
         hasRecording: sql<boolean>`${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL`,
         hasTranscript: sql<boolean>`${leads.transcript} IS NOT NULL AND ${leads.transcript} != ''`,
         callSessionId: dialerCallAttempts.callSessionId,
+        callStartedAt: dialerCallAttempts.callStartedAt,
         qaStatus: leads.qaStatus,
         createdAt: leads.createdAt,
         approvedAt: leads.approvedAt,
@@ -1706,6 +1783,12 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
       pageSize: pageSizeNum,
       debug: includeDebug ? {
         accessMode: 'db_leads',
+        clientAccountId: req.clientUser!.clientAccountId,
+        selectedCampaignId: campaignId && typeof campaignId === 'string' ? campaignId : null,
+        ukefCutoffApplied: restrictedIds.length > 0,
+        orderBy: sortBy,
+        orderDirection: sortOrder === 'asc' ? 'asc' : 'desc',
+        timestampField: 'COALESCE(dialer_call_attempts.call_started_at, leads.created_at)',
         accessibleCampaignIdsCount: accessibleCampaignIds.length,
         dbLeadsCount: normalizedLeadsData.length,
       } : undefined,
@@ -1736,13 +1819,34 @@ router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
       .map(a => a.regularCampaignId)
       .filter((id): id is string => id !== null);
 
+    const { restrictedIds, unrestrictedIds } = await classifyCampaignsForLeadCutoff(
+      req.clientUser!.clientAccountId,
+      accessibleCampaignIds,
+    );
+
     if (accessibleCampaignIds.length === 0) {
       return res.status(404).json({ message: "No campaigns found" });
     }
 
     // Build where conditions - QA approved/published submitted to client OR AI qualified with 50+ score
+    const campaignScopeConditions: any[] = [];
+    const effectiveLeadTimestamp = getEffectiveLeadTimestampExpr();
+    if (unrestrictedIds.length > 0) {
+      campaignScopeConditions.push(inArray(leads.campaignId, unrestrictedIds));
+    }
+    if (restrictedIds.length > 0) {
+      campaignScopeConditions.push(
+        and(
+          inArray(leads.campaignId, restrictedIds),
+          gte(effectiveLeadTimestamp, LIGHTCAST_UKEF_2026_CUTOFF),
+        ),
+      );
+    }
+
     const whereConditions: any[] = [
-      inArray(leads.campaignId, accessibleCampaignIds),
+      campaignScopeConditions.length === 1
+        ? campaignScopeConditions[0]
+        : or(...campaignScopeConditions),
       or(
         and(
           inArray(leads.qaStatus, ['approved', 'published']),
@@ -1777,6 +1881,7 @@ router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
       })
       .from(leads)
       .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
       .where(and(...whereConditions))
       .orderBy(desc(leads.approvedAt));
 
@@ -1877,24 +1982,32 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
     // Get lead counts per campaign - QA approved/published submitted to client OR AI qualified 50+ score
     const campaignData = await Promise.all(
       accessList.map(async (row) => {
+        const applyUkefCutoff = shouldApplyLightcastUkef2026Cutoff(
+          req.clientUser!.clientAccountId,
+          row.name,
+        );
+        const campaignLeadConditions: any[] = [
+          eq(leads.campaignId, row.id),
+          or(
+            and(
+              inArray(leads.qaStatus, ['approved', 'published']),
+              eq(leads.submittedToClient, true)
+            ),
+            and(
+              eq(leads.aiQualificationStatus, 'qualified'),
+              gte(sql`CAST(${leads.aiScore} AS numeric)`, sql`50`)
+            )
+          ),
+        ];
+        if (applyUkefCutoff) {
+          campaignLeadConditions.push(gte(getEffectiveLeadTimestampExpr(), LIGHTCAST_UKEF_2026_CUTOFF));
+        }
+
         const [count] = await db
           .select({ count: sql<number>`count(*)::int` })
           .from(leads)
-          .where(
-            and(
-              eq(leads.campaignId, row.id),
-              or(
-                and(
-                  inArray(leads.qaStatus, ['approved', 'published']),
-                  eq(leads.submittedToClient, true)
-                ),
-                and(
-                  eq(leads.aiQualificationStatus, 'qualified'),
-                  gte(sql`CAST(${leads.aiScore} AS numeric)`, sql`50`)
-                )
-              )
-            )
-          );
+          .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
+          .where(and(...campaignLeadConditions));
 
         return {
           id: row.id,
@@ -2094,11 +2207,15 @@ async function getLeadRecordingContextForClientPortal(leadId: string, clientAcco
     .select({
       id: leads.id,
       campaignId: leads.campaignId,
+      campaignName: campaigns.name,
+      createdAt: leads.createdAt,
+      callStartedAt: dialerCallAttempts.callStartedAt,
       recordingUrl: leads.recordingUrl,
       recordingS3Key: leads.recordingS3Key,
       callSessionId: dialerCallAttempts.callSessionId,
     })
     .from(leads)
+    .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
     .leftJoin(dialerCallAttempts, eq(leads.callAttemptId, dialerCallAttempts.id))
     .where(eq(leads.id, leadId))
     .limit(1);
@@ -2124,6 +2241,13 @@ async function getLeadRecordingContextForClientPortal(leadId: string, clientAcco
   const hasAccess = await hasClientAccessToCampaign(clientAccountId, accessCampaignId);
   if (!hasAccess) {
     return { ok: false as const, status: 403, message: "You don't have access to this lead" };
+  }
+
+  if (
+    shouldApplyLightcastUkef2026Cutoff(clientAccountId, lead.campaignName) &&
+    new Date(lead.callStartedAt || lead.createdAt || 0) < LIGHTCAST_UKEF_2026_CUTOFF
+  ) {
+    return { ok: false as const, status: 404, message: 'Lead not found' };
   }
 
   if (!lead.recordingS3Key && !lead.recordingUrl && !lead.callSessionId) {
@@ -2241,6 +2365,7 @@ router.get('/qualified-leads/:id/recording-link', async (req, res) => {
     );
 
     const streamUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording-stream?token=${encodeURIComponent(streamToken)}`;
+    const downloadUrl = `/api/client-portal/qualified-leads/${encodeURIComponent(id)}/recording-download?token=${encodeURIComponent(streamToken)}`;
     if (streamUrl.includes('s3.amazonaws.com') || streamUrl.includes('telephony-recorder-prod')) {
       return res.status(500).json({
         success: false,
@@ -2254,6 +2379,7 @@ router.get('/qualified-leads/:id/recording-link', async (req, res) => {
       success: true,
       url: streamUrl,
       streamUrl,
+      downloadUrl,
       source: sourceHint?.source || 'stream_proxy',
       mimeType: sourceHint?.mimeType || 'audio/mpeg',
       expiresInSeconds: CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS,
@@ -2300,6 +2426,42 @@ router.get('/qualified-leads/:id/recording-stream', async (req, res) => {
   } catch (error: any) {
     console.error('[CLIENT PORTAL] Lead recording stream error:', error);
     return res.status(500).type('text/plain').send('Failed to stream recording audio');
+  }
+});
+
+// Download lead recording audio through a platform endpoint (never raw storage links).
+router.get('/qualified-leads/:id/recording-download', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const auth = resolveRecordingRequestAuth(req, id);
+    console.log(
+      `[CLIENT PORTAL] recording-download auth path used: ${auth.context?.authPath || 'none'} ` +
+      `token verified: ${auth.tokenVerified} reason: ${auth.reason || 'ok'}`,
+    );
+    if (!auth.context) {
+      return res.status(401).type('text/plain').send('Authentication required');
+    }
+
+    if (auth.context.mode === 'client') {
+      const context = await getLeadRecordingContextForClientPortal(id, auth.context.clientUser.clientAccountId);
+      if (!context.ok) {
+        return res.status(context.status).type('text/plain').send(context.message);
+      }
+      console.log(
+        `[CLIENT PORTAL] Lead recording download request | lead=${id} user=${auth.context.clientUser.clientUserId} account=${auth.context.clientUser.clientAccountId}`,
+      );
+    } else {
+      console.log(
+        `[CLIENT PORTAL] Lead recording download request | lead=${id} adminUser=${auth.context.adminUserId}`,
+      );
+    }
+
+    (req as any).query = { ...(req.query || {}), download: '1' };
+    const { streamRecording } = await import('./recordings');
+    return streamRecording(req as Request, res as Response);
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Lead recording download error:', error);
+    return res.status(500).type('text/plain').send('Failed to download recording audio');
   }
 });
 
@@ -2353,6 +2515,7 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
         transcript: leads.transcript,
         structuredTranscript: leads.structuredTranscript,
         callSessionId: dialerCallAttempts.callSessionId,
+        callStartedAt: dialerCallAttempts.callStartedAt,
         // Timestamps
         createdAt: leads.createdAt,
         approvedAt: leads.approvedAt,
@@ -2372,6 +2535,13 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
     const hasAccess = await hasClientAccessToCampaign(req.clientUser!.clientAccountId, lead.campaignId!);
     if (!hasAccess) {
       return res.status(403).json({ message: "You don't have access to this lead" });
+    }
+
+    if (
+      shouldApplyLightcastUkef2026Cutoff(req.clientUser!.clientAccountId, lead.campaignName) &&
+      new Date(lead.callStartedAt || lead.createdAt || 0) < LIGHTCAST_UKEF_2026_CUTOFF
+    ) {
+      return res.status(404).json({ message: "Lead not found" });
     }
 
     // Get additional contact info if available

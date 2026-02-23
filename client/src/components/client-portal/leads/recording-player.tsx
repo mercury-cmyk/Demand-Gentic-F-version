@@ -12,7 +12,7 @@ interface RecordingPlayerProps {
   leadId?: string;
 }
 
-export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) {
+export function RecordingPlayer({ recordingUrl: _recordingUrl, leadId }: RecordingPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -21,7 +21,8 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
   const [isMuted, setIsMuted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(recordingUrl ?? null);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [resolvedDownloadUrl, setResolvedDownloadUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +31,7 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
       setError(null);
       setIsLoading(true);
       setResolvedUrl(null);
+      setResolvedDownloadUrl(null);
 
       if (!leadId) {
         setError('Recording playback requires a lead identifier.');
@@ -48,8 +50,10 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
         if (res.ok) {
           const body = await res.json();
           const streamUrl = body?.streamUrl || body?.url || null;
+          const downloadUrl = body?.downloadUrl || null;
           if (!cancelled && streamUrl) {
             setResolvedUrl(streamUrl);
+            setResolvedDownloadUrl(downloadUrl);
             setIsLoading(false);
             return;
           }
@@ -180,13 +184,49 @@ export function RecordingPlayer({ recordingUrl, leadId }: RecordingPlayerProps) 
   };
 
   const downloadRecording = () => {
-    if (!resolvedUrl) {
+    if (!leadId) {
       setError('Recording URL is not available.');
       return;
     }
-    const separator = resolvedUrl.includes('?') ? '&' : '?';
-    const downloadUrl = `${resolvedUrl}${separator}download=1`;
-    window.open(downloadUrl, '_blank');
+
+    const token = localStorage.getItem('clientPortalToken');
+    const endpoint = `/api/client-portal/qualified-leads/${encodeURIComponent(leadId)}/recording-download`;
+
+    void (async () => {
+      try {
+        const response = await fetch(endpoint, {
+          headers: {
+            Authorization: `Bearer ${token || ''}`,
+          },
+        });
+
+        if (!response.ok) {
+          const details = await response.text().catch(() => 'Failed to download recording.');
+          setError(details || 'Failed to download recording.');
+          return;
+        }
+
+        const blob = await response.blob();
+        const contentDisposition = response.headers.get('content-disposition') || '';
+        const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+        const fileName = fileNameMatch?.[1] || `recording-${leadId}.mp3`;
+
+        const blobUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = blobUrl;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        if (resolvedDownloadUrl) {
+          window.open(resolvedDownloadUrl, '_blank');
+          return;
+        }
+        setError('Failed to download recording.');
+      }
+    })();
   };
 
   return (
