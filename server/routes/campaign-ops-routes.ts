@@ -6,7 +6,7 @@ import { campaignQueue, contacts, accounts, campaigns, lists } from '@shared/sch
 import { requireAuth } from '../auth';
 import { z } from 'zod';
 import * as crypto from 'crypto';
-import { seedQueuePriorities, analyzeCampaignTimezones } from '../services/campaign-timezone-analyzer';
+import { seedQueuePriorities, analyzeCampaignTimezones, type TimezonePriorityConfig } from '../services/campaign-timezone-analyzer';
 
 const router = Router();
 
@@ -203,6 +203,120 @@ router.get(
       res.json(analysis);
     } catch (error: any) {
       console.error('Error analyzing timezones:', error);
+      res.status(500).json({ error: 'internal_server_error', message: error.message });
+    }
+  }
+);
+
+// GET /api/campaigns/:id/ops/timezone-priority-config
+// Returns saved timezone priority config merged with live timezone analysis
+router.get(
+  '/campaigns/:id/ops/timezone-priority-config',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.id;
+
+      const campaignRow = await pool.query(
+        `SELECT timezone_priority_config FROM campaigns WHERE id = $1`,
+        [campaignId]
+      );
+
+      if (!campaignRow.rows[0]) {
+        return res.status(404).json({ error: 'not_found', message: 'Campaign not found' });
+      }
+
+      const config = (campaignRow.rows[0].timezone_priority_config as TimezonePriorityConfig | null) ?? {
+        enabled: false,
+        overrides: [],
+      };
+
+      // Fetch live timezone analysis
+      const analysis = await analyzeCampaignTimezones(campaignId);
+
+      // Merge: enrich each group with override info
+      const enrichedGroups = analysis.timezoneGroups.map(group => {
+        const tzKey = group.timezone === 'Unknown' ? '__unknown__' : group.timezone;
+        const override = config.enabled
+          ? config.overrides?.find(o => o.timezone === tzKey)
+          : undefined;
+        const boost = override?.priorityBoost ?? 0;
+        return {
+          ...group,
+          priorityBoost: boost,
+          effectivePriority: Math.max(0, group.suggestedPriority + boost),
+          hasOverride: !!override,
+        };
+      });
+
+      res.json({
+        config,
+        analysis: {
+          ...analysis,
+          timezoneGroups: enrichedGroups,
+        },
+      });
+    } catch (error: any) {
+      console.error('Error fetching timezone priority config:', error);
+      res.status(500).json({ error: 'internal_server_error', message: error.message });
+    }
+  }
+);
+
+// PUT /api/campaigns/:id/ops/timezone-priority-config
+// Saves timezone priority overrides and optionally re-seeds queue priorities
+const timezonePriorityConfigSchema = z.object({
+  enabled: z.boolean(),
+  overrides: z.array(z.object({
+    timezone: z.string().min(1),
+    country: z.string().optional(),
+    priorityBoost: z.number().int().min(-500).max(500),
+  })),
+  reseed: z.boolean().optional().default(true),
+});
+
+router.put(
+  '/campaigns/:id/ops/timezone-priority-config',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.id;
+      const userId = (req as any).user?.userId || (req as any).user?.id;
+      const body = timezonePriorityConfigSchema.parse(req.body);
+
+      const config: TimezonePriorityConfig = {
+        enabled: body.enabled,
+        overrides: body.overrides,
+        updatedAt: new Date().toISOString(),
+        updatedBy: userId,
+      };
+
+      // Save config to campaign
+      const result = await pool.query(
+        `UPDATE campaigns SET timezone_priority_config = $1, updated_at = NOW() WHERE id = $2 RETURNING id`,
+        [JSON.stringify(config), campaignId]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: 'not_found', message: 'Campaign not found' });
+      }
+
+      // Optionally re-seed priorities immediately (safe: only touches status='queued')
+      let seedResult = null;
+      if (body.reseed) {
+        seedResult = await seedQueuePriorities(campaignId, config);
+      }
+
+      res.json({
+        config,
+        reseeded: body.reseed,
+        seedResult,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'validation_error', details: error.errors });
+      }
+      console.error('Error saving timezone priority config:', error);
       res.status(500).json({ error: 'internal_server_error', message: error.message });
     }
   }

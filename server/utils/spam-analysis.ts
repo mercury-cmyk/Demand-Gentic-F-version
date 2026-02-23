@@ -86,7 +86,67 @@ export function analyzeSpamRisk(subject: string, html: string): SpamAnalysisResu
     score += 5;
   }
 
-  // 3. Compliance checks
+  // 3. Link Safety Checks
+  
+  // HTTP (non-HTTPS) links detection
+  const httpLinkCount = (html.match(/href=["']http:\/\//gi) || []).length;
+  if (httpLinkCount > 0) {
+    triggers.push({
+      type: 'technical',
+      label: `${httpLinkCount} non-HTTPS link(s) found`,
+      message: 'HTTP links (not HTTPS) trigger spam filters. Always use HTTPS.',
+      severity: 'high'
+    });
+    score += 25;
+  }
+
+  // URL shorteners detection (spam indicator)
+  const urlShorteners = ['bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly'];
+  const hasShorteners = urlShorteners.some(shortener => contentLower.includes(shortener));
+  if (hasShorteners) {
+    triggers.push({
+      type: 'technical',
+      label: 'URL shortener detected',
+      message: 'URL shorteners (bit.ly, etc.) are heavily filtered by ISPs.',
+      severity: 'high'
+    });
+    score += 30;
+  }
+
+  // IP address links (major phishing indicator)
+  const ipLinkPattern = /href=["']https?:\/\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/gi;
+  if (ipLinkPattern.test(html)) {
+    triggers.push({
+      type: 'technical',
+      label: 'IP address link detected',
+      message: 'Links with IP addresses (not domains) are blocked by most ISPs.',
+      severity: 'high'
+    });
+    score += 40;
+  }
+
+  // Display text vs. actual URL mismatch (phishing indicator)
+  const linkMismatchPattern = /<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>(?!\1)([^<]+)<\/a>/gi;
+  let linkMismatchCount = 0;
+  let match;
+  while ((match = linkMismatchPattern.exec(html)) !== null) {
+    const url = match[1];
+    const displayText = match[2];
+    if (displayText.includes('http') && !displayText.includes(url)) {
+      linkMismatchCount++;
+    }
+  }
+  if (linkMismatchCount > 0) {
+    triggers.push({
+      type: 'technical',
+      label: 'Link text mismatch detected',
+      message: 'Display text should match the actual URL to avoid phishing flags.',
+      severity: 'medium'
+    });
+    score += 15;
+  }
+
+  // 4. Compliance checks
   if (!contentLower.includes('unsubscribe')) {
     triggers.push({
       type: 'technical',
@@ -95,6 +155,18 @@ export function analyzeSpamRisk(subject: string, html: string): SpamAnalysisResu
       severity: 'high'
     });
     score += 40;
+  }
+
+  // Physical address check (CAN-SPAM requirement)
+  const hasAddress = /\d+\s+[A-Za-z]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd)/i.test(html);
+  if (!hasAddress) {
+    triggers.push({
+      type: 'technical',
+      label: 'Physical address may be missing',
+      message: 'CAN-SPAM requires a valid physical postal address in emails.',
+      severity: 'medium'
+    });
+    score += 10;
   }
 
   // Final Rating

@@ -586,7 +586,7 @@ router.get('/:agentType/assembled-prompt', (req: Request, res: Response) => {
  * Get the full assembled prompt enriched with Organization Intelligence.
  *
  * This merges the agent's foundational prompt sections with:
- *  - Core Agent Identity (problem-solver, human-first warmth, authentic AI)
+ *  - Core Agent Identity (demand problem-solver, human-first warmth, authentic AI)
  *  - Unified Knowledge Hub (compliance, gatekeeper, dispositioning, etc.)
  *  - Organization-specific context (super org profile, compliance, policies)
  *  - Campaign & engagement learning summary

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { SUPER_ORG_ID } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -198,7 +199,7 @@ export default function GenerativeStudioPage() {
 
   const [activeModule, setActiveModule] = useState("image");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(SUPER_ORG_ID);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -235,13 +236,11 @@ export default function GenerativeStudioPage() {
 
   const brandKits = (brandKitsData as any)?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
 
-  // Skip localStorage org restoration when URL has a projectId to resolve
+  // Restore org from localStorage, always falling back to super org
   useEffect(() => {
     if (projectIdFromUrl) return;
     const storedOrgId = localStorage.getItem("generativeStudioOrgId");
-    if (storedOrgId) {
-      setSelectedOrgId(storedOrgId);
-    }
+    setSelectedOrgId(storedOrgId || SUPER_ORG_ID);
   }, []);
 
   useEffect(() => {

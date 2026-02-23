@@ -44,6 +44,15 @@ export {
   getServicesForPersona,
 } from "./service-catalog-service";
 
+// Problem Definitions - CRUD for problem framework
+export {
+  getProblemDefinitions,
+  getProblemDefinitionById,
+  createProblemDefinition,
+  updateProblemDefinition,
+  deleteProblemDefinition,
+} from "./problem-definition-service";
+
 // Problem Detection - Signal extraction and matching
 export {
   detectAccountSignals,

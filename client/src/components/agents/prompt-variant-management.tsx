@@ -87,7 +87,7 @@ const PERSPECTIVES = [
   },
   {
     id: "pain_point",
-    name: "The Problem Solver",
+    name: "The Demand Problem Solver",
     description: "Address specific pain points",
     icon: "🔧",
   },

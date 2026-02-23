@@ -23,7 +23,7 @@ const generateQuarterlyPlanSchema = z.object({
   targetMarket: z.string().min(3).max(1000),
   primaryGoal: z.string().min(3).max(1000),
   valueProposition: z.string().min(3).max(1500),
-  keyChallenges: z.array(z.string().min(2).max(300)).min(1).max(12),
+  keyChallenges: z.array(z.string().min(2)).min(1).max(12),
   channels: z.array(z.enum(['email', 'phone', 'automation', 'social'])).min(1),
   internalOnly: z.boolean().optional().default(true),
 });

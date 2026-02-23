@@ -14,6 +14,7 @@ import {
   contentPromotionPageViews,
   contentAssets,
   clientProjects,
+  SUPER_ORG_ID,
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, verifyToken } from "../auth";
@@ -360,18 +361,13 @@ router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Respon
 // ============================================================================
 
 /**
- * Validates that organizationId is present in the request body.
- * Organizational Intelligence is mandatory context for all generation.
+ * Ensures organizationId is present in the request body.
+ * Falls back to the super org (platform default) when none is provided.
  */
 function requireOrganizationId(req: Request, res: Response): boolean {
   const orgId = req.body?.organizationId;
   if (!orgId || typeof orgId !== 'string' || !orgId.trim()) {
-    res.status(400).json({
-      error: 'Organization is required for content generation.',
-      code: 'ORG_REQUIRED',
-      message: 'All Creative Studio outputs must be derived from Organizational Intelligence. Please select an organization before generating content.',
-    });
-    return false;
+    req.body.organizationId = SUPER_ORG_ID;
   }
   return true;
 }

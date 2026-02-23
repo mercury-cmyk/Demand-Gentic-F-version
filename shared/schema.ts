@@ -2053,6 +2053,9 @@ export const campaigns = pgTable("campaigns", {
   // Business Hours Configuration for Auto-Dialer
   businessHoursConfig: jsonb("business_hours_config"), // { enabled: bool, timezone: string, operatingDays: string[], startTime: string, endTime: string, respectContactTimezone: bool, excludedDates: string[] }
 
+  // Timezone Priority Configuration - manual overrides for timezone/country queue ordering
+  timezonePriorityConfig: jsonb("timezone_priority_config"), // { enabled: bool, overrides: [{timezone, country?, priorityBoost}], updatedAt?, updatedBy? }
+
   // Campaign goals and timeline (Phase 31)
   targetQualifiedLeads: integer("target_qualified_leads"),
   startDate: date("start_date"),

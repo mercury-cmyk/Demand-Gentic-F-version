@@ -14,6 +14,7 @@ import { db } from "../db";
 import {
   campaignOrganizations,
   brandKits,
+  SUPER_ORG_ID,
 } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { chat as vertexChat } from "./vertex-ai/vertex-client";
@@ -184,6 +185,7 @@ export async function getFullOrganizationIntelligence(organizationId?: string): 
       branding: campaignOrganizations.branding,
       events: campaignOrganizations.events,
       forums: campaignOrganizations.forums,
+      compiledOrgContext: campaignOrganizations.compiledOrgContext,
     })
     .from(campaignOrganizations)
     .where(eq(campaignOrganizations.id, organizationId))
@@ -275,6 +277,21 @@ export async function getFullOrganizationIntelligence(organizationId?: string): 
   const forumStrategy = resolveFieldValue(forums.engagement_strategy);
   if (forumStrategy) parts.push(`Community Strategy: ${forumStrategy}`);
 
+  // If structured OI fields are empty, fall back to compiledOrgContext (super org knowledge)
+  const compiledCtx = org.compiledOrgContext?.trim();
+  if (parts.length === 0 && compiledCtx) {
+    return {
+      raw: compiledCtx,
+      tone: undefined,
+      primaryColor: undefined,
+      secondaryColor: undefined,
+      keywords: undefined,
+      forbiddenTerms: undefined,
+      communicationStyle: undefined,
+      populated: true,
+    };
+  }
+
   return {
     raw: parts.length > 0 ? parts.join('\n') : '',
     tone: brandTone || undefined,
@@ -292,24 +309,25 @@ export async function getFullOrganizationIntelligence(organizationId?: string): 
  * Throws if missing — generation MUST NOT proceed without OI.
  */
 export async function assertOrganizationIntelligence(organizationId?: string): Promise<OrgIntelligenceContext> {
-  if (!organizationId) {
-    throw Object.assign(
-      new Error('Organization is required. All landing page generation must be derived from Organizational Intelligence.'),
-      { statusCode: 400, code: 'ORG_REQUIRED' }
-    );
+  // Default to super org when none provided
+  const effectiveOrgId = organizationId || SUPER_ORG_ID;
+
+  const ctx = await getFullOrganizationIntelligence(effectiveOrgId);
+  if (ctx.populated) return ctx;
+
+  // If the requested org has no OI, fall back to the super org's context
+  if (effectiveOrgId !== SUPER_ORG_ID) {
+    const superCtx = await getFullOrganizationIntelligence(SUPER_ORG_ID);
+    if (superCtx.populated) return superCtx;
   }
-  const ctx = await getFullOrganizationIntelligence(organizationId);
-  if (!ctx.populated) {
-    throw Object.assign(
-      new Error(
-        'Organizational Intelligence is unavailable or incomplete for this organization. ' +
-        'Please complete the Organization Intelligence profile before generating content. ' +
-        'All landing page outputs must be derived from and validated against Organizational Intelligence.'
-      ),
-      { statusCode: 422, code: 'ORG_INTELLIGENCE_REQUIRED' }
-    );
-  }
-  return ctx;
+
+  throw Object.assign(
+    new Error(
+      'Organizational Intelligence is unavailable or incomplete. ' +
+      'Please complete the Organization Intelligence profile before generating content.'
+    ),
+    { statusCode: 422, code: 'ORG_INTELLIGENCE_REQUIRED' }
+  );
 }
 
 // ============================================================================

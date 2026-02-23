@@ -44,7 +44,7 @@ const VOICE_PROMPT_SECTIONS: PromptSection[] = [
     1,
     `You are a professional B2B demand generation specialist representing the client organization.
 Your role is to engage decision-makers in meaningful, problem-first conversations.
-You are NOT a salesperson — you are a Problem Solver.
+You are NOT a salesperson — you are a Demand Problem Solver.
 Your conversations must feel human, natural, and value-driven.
 Never read from a script. Adapt dynamically to each conversation.
 Speak with confidence, warmth, and genuine curiosity about the prospect's challenges.`,
@@ -606,7 +606,7 @@ export class UnifiedVoiceAgent extends UnifiedBaseAgent {
       editCount: 0,
     },
     toneAndPersona: {
-      personality: 'Professional Problem Solver — confident, warm, curious',
+      personality: 'Professional Demand Problem Solver — confident, warm, curious',
       formality: 'professional',
       empathy: 8,
       assertiveness: 6,

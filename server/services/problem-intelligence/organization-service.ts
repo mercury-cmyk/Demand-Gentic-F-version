@@ -322,6 +322,7 @@ ${getValue(outreach, "emailAngles") ? `Email Angles: ${getValue(outreach, "email
 /**
  * Get organizations for campaign dropdown
  * Returns simplified list for UI selection
+ * Includes organizationType for proper defaulting (super org first)
  */
 export async function getOrganizationsForDropdown(userId?: string): Promise<
   Array<{
@@ -330,6 +331,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
     domain: string | null;
     industry: string | null;
     isDefault: boolean;
+    organizationType: 'super' | 'client' | 'campaign';
   }>
 > {
   let query = db
@@ -339,6 +341,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
       domain: campaignOrganizations.domain,
       industry: campaignOrganizations.industry,
       isDefault: campaignOrganizations.isDefault,
+      organizationType: campaignOrganizations.organizationType,
     })
     .from(campaignOrganizations)
     .where(eq(campaignOrganizations.isActive, true));
@@ -348,21 +351,30 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
       .select({ orgId: organizationMembers.organizationId })
       .from(organizationMembers)
       .where(eq(organizationMembers.userId, userId));
-     
+
     const orgIds = memberOrgs.map(m => m.orgId);
-    
+
     // Also include created orgs
     const createdOrgs = await db
         .select({ id: campaignOrganizations.id })
         .from(campaignOrganizations)
         .where(eq(campaignOrganizations.createdBy, userId));
-    
+
     createdOrgs.forEach(o => {
         if (!orgIds.includes(o.id)) orgIds.push(o.id);
     });
 
+    // Always include the super org so all users can access platform OI
+    const superOrgs = await db
+        .select({ id: campaignOrganizations.id })
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.organizationType, 'super'));
+    superOrgs.forEach(o => {
+        if (!orgIds.includes(o.id)) orgIds.push(o.id);
+    });
+
     if (orgIds.length === 0) return [];
-    
+
     query = db
         .select({
             id: campaignOrganizations.id,
@@ -370,6 +382,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
             domain: campaignOrganizations.domain,
             industry: campaignOrganizations.industry,
             isDefault: campaignOrganizations.isDefault,
+            organizationType: campaignOrganizations.organizationType,
         })
         .from(campaignOrganizations)
         .where(and(
@@ -378,5 +391,15 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
         ));
   }
 
-  return query.orderBy(desc(campaignOrganizations.isDefault), campaignOrganizations.name);
+  // Order by: super org first, then by isDefault, then by name
+  return query
+    .then(results => {
+      return results.sort((a, b) => {
+        if (a.organizationType === 'super' && b.organizationType !== 'super') return -1;
+        if (b.organizationType === 'super' && a.organizationType !== 'super') return 1;
+        if (a.isDefault && !b.isDefault) return -1;
+        if (!a.isDefault && b.isDefault) return 1;
+        return a.name.localeCompare(b.name);
+      });
+    });
 }

@@ -56,7 +56,7 @@ export const TAGLINE = {
   /** The full branded tagline with product name */
   full: 'DemandGentic\u2014Human-Led Strategy. AI-Powered Execution.',
   /** Our identity statement */
-  identity: 'The Problem Solvers',
+  identity: 'Demand Problem Solvers',
   /** The agentic identity for the agent council */
   agenticIdentity: 'The Agentic Demand Council',
   /** Mission statement */
@@ -171,7 +171,7 @@ export const PROBLEM_FRAMEWORK = {
 
 export const SOLUTION_PILLARS = [
   {
-    badge: 'The Problem Solvers',
+    badge: 'Demand Problem Solvers',
     title: 'Human-Led Strategy',
     description: '11+ years of front-line B2B demand experience. We lead with problem intelligence, solution mapping, and empathy \u2014 AI executes what humans architect.',
     quote: 'Truth, human connection, and empathy are never optional.',
@@ -528,7 +528,7 @@ export const BRAND_VOICE = {
   vocabulary: {
     /** Words and phrases to use frequently */
     preferred: [
-      'reasoning', 'intelligence', 'stewardship', 'problem-solving',
+      'reasoning', 'intelligence', 'stewardship', 'demand problem-solving',
       'human connection', 'empathy', 'compliance', 'trust',
       'context', 'precision', 'verified', 'qualified',
       'front-line experience', 'organization intelligence',
@@ -549,7 +549,7 @@ export const BRAND_VOICE = {
     'No interaction is ever forgotten',
     'Truth, human connection, and empathy are never optional',
     'Human-Led Strategy. AI-Powered Execution.',
-    'We are The Problem Solvers',
+    'We are Demand Problem Solvers',
     'Problem Intelligence. Solution Mapping. Pinpoint Context.',
     'Reasoning first. Compliance first. Nothing forgotten.',
     'The machine is the map; the human spirit is the compass.',

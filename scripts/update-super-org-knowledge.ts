@@ -24,7 +24,7 @@ async function main() {
       status: 'verified',
     },
     mission: {
-      value: 'Systematized Sincerity — Restoring the Human in the Loop. To end algorithmic noise and usher in the era of agentic ABM demand reasoning. We don\'t generate demand; we map solutions to human challenges.',
+      value: 'Systematized Sincerity — Restoring the Human in the Loop. To end algorithmic noise and usher in the era of agentic ABM demand reasoning. We don\'t generate demand; we solve demand problems by mapping solutions to human challenges.',
       confidence: 1.0,
       status: 'verified',
     },
@@ -187,7 +187,7 @@ async function main() {
   // ==================== POSITIONING ====================
   const positioning = {
     oneLiner: {
-      value: 'DemandGentic.ai — The Problem Solvers. Human-Led Strategy. AI-Powered Execution. The world\'s first account-aware, ethically-aligned demand generation platform.',
+      value: 'DemandGentic.ai — Demand Problem Solvers. Human-Led Strategy. AI-Powered Execution. The world\'s first account-aware, ethically-aligned demand generation platform.',
       confidence: 1.0,
       status: 'verified',
     },
@@ -250,7 +250,7 @@ async function main() {
         'DATA QUALITY ANGLE: "30% of your database decayed since last year. That means almost 1 in 3 emails you send this quarter will bounce, damage your domain reputation, or reach someone who left the company. We can fix that in 48 hours."',
         'COMPETITIVE INTELLIGENCE ANGLE: "Your competitors are already using AI for outbound. The question isn\'t whether AI will change B2B sales — it\'s whether you\'ll lead or follow. Here\'s what the leaders are doing differently..."',
         'CONTENT BOTTLENECK ANGLE: "How long does it take your team to create a campaign? Landing page (2 weeks), email sequence (1 week), blog post (1 week), eBook (3 weeks). Our Generative Studio does all of it in minutes. Same brand voice. Same quality. Zero bottleneck."',
-        'PROBLEM-SOLVER ANGLE: "We don\'t generate demand — we map solutions to human challenges. If your product solves real problems but your outbound feels like noise, the issue isn\'t your product — it\'s your approach. Let\'s talk about Problem Intelligence."',
+        'DEMAND PROBLEM-SOLVER ANGLE: "We don\'t generate demand — we solve demand problems by mapping solutions to human challenges. If your product solves real problems but your outbound feels like noise, the issue isn\'t your product — it\'s your approach. Let\'s talk about Problem Intelligence."',
         'FOUNDER STORY ANGLE: "We started DemandGentic in Afghanistan in 2017, serving global tech markets against all odds. That experience taught us that every interaction counts. We built a platform that treats your prospects with the same respect — reasoning first, compliance first, nothing forgotten."',
       ],
       confidence: 1.0,
@@ -333,7 +333,7 @@ async function main() {
         'No interaction is ever forgotten',
         'Truth, human connection, and empathy are never optional',
         'Human-Led Strategy. AI-Powered Execution.',
-        'We are The Problem Solvers',
+        'We are Demand Problem Solvers',
         'Problem Intelligence. Solution Mapping. Pinpoint Context.',
         'Reasoning first. Compliance first. Nothing forgotten.',
         'The machine is the map; the human spirit is the compass.',
@@ -365,7 +365,7 @@ async function main() {
 - **Founded**: 2017 in Kabul, Afghanistan by **Zahid Mohammadi** (CEO & The Architect)
 - **Headquarters**: Lewes, Delaware, USA
 - **Tagline**: Human-Led Strategy. AI-Powered Execution.
-- **Identity**: The Problem Solvers
+- **Identity**: Demand Problem Solvers
 - **Mission**: Systematized Sincerity — Restoring the Human in the Loop
 - **Core Promise**: No interaction happens without reasoning first, and no interaction is ever forgotten.
 
@@ -487,7 +487,7 @@ In a market saturated with fabricated engagement, bot-driven clicks, and budget-
 
   try {
     await updateSuperOrganization({
-      description: 'The Problem Solvers. Human-Led Strategy. AI-Powered Execution. The world\'s first account-aware, ethically-aligned AI demand generation platform built on 11+ years of front-line B2B experience.',
+      description: 'Demand Problem Solvers. Human-Led Strategy. AI-Powered Execution. The world\'s first account-aware, ethically-aligned AI demand generation platform built on 11+ years of front-line B2B experience.',
       industry: 'Technology / B2B Demand Generation / AI-Powered Revenue Operations',
       identity,
       offerings,

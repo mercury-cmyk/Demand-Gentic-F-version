@@ -24,6 +24,7 @@ import { Switch } from "@/components/ui/switch";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
 import type { FilterGroup } from "@shared/filter-types";
 import { motion, AnimatePresence } from "framer-motion";
+import { TimezonePriorityManager } from "@/components/timezone-priority-manager";
 
 interface QueueControlsProps {
   campaignId: string;
@@ -503,6 +504,9 @@ export function QueueControls({ campaignId, agentId, onQueueUpdated, compact = f
                       )}
                     </div>
                   </div>
+
+                  {/* Timezone Priority Configuration */}
+                  <TimezonePriorityManager campaignId={campaignId} />
 
                   {/* Agent Guidance - Filter Examples */}
                   <motion.div 

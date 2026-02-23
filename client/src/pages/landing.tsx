@@ -102,6 +102,7 @@ export default function LandingPage() {
               {PUBLIC_PAGES_MESSAGING.category}
             </Badge>
 
+
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               <span className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 bg-clip-text text-transparent">
                 {PUBLIC_PAGES_MESSAGING.headline}
@@ -138,6 +139,25 @@ export default function LandingPage() {
               </Button>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ─── PROBLEM / REFRAME ────────────────────────────────────────── */}
+      <section className="py-12 px-6 bg-white">
+        <div className="max-w-4xl mx-auto text-center">
+          <p className="text-sm md:text-base text-muted-foreground">
+            {PUBLIC_PAGES_MESSAGING.closingStatement.contrast}
+          </p>
+          <p className="text-xl md:text-2xl font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+            {PUBLIC_PAGES_MESSAGING.closingStatement.assertion}
+          </p>
+          <p className="text-sm md:text-base text-muted-foreground">
+            <span className="font-semibold text-foreground">Human-Led Strategy</span> +{" "}
+            <span className="font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+              Agentic ABM Execution
+            </span>
+            —guided by your brand, constrained by your rules, built for what's next.
+          </p>
         </div>
       </section>
 
@@ -204,6 +224,42 @@ export default function LandingPage() {
                 </p>
               </CardContent>
             </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── PIPELINE PROTECTION ──────────────────────────────────────── */}
+      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
+
+        <div className="max-w-5xl mx-auto relative">
+          <div className="text-center mb-12">
+            <Badge className="mb-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">
+              <Shield className="h-3.5 w-3.5 mr-2" />
+              Pipeline Protection
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-2">
+              {PUBLIC_PAGES_MESSAGING.pipelineProtection.headline}
+            </h2>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+              <span className="text-emerald-400">{PUBLIC_PAGES_MESSAGING.pipelineProtection.subHeadline}</span>
+            </h2>
+            <p className="text-xl text-slate-400 max-w-3xl mx-auto mb-8">
+              {PUBLIC_PAGES_MESSAGING.pipelineProtection.description}
+            </p>
+            <p className="text-lg text-slate-300 max-w-3xl mx-auto">
+              {PUBLIC_PAGES_MESSAGING.pipelineProtection.resolution}
+            </p>
+          </div>
+
+          {/* Precision Statement */}
+          <div className="p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur text-center">
+            <p className="text-2xl md:text-3xl font-bold">
+              <span className="text-slate-400">{PUBLIC_PAGES_MESSAGING.precisionStatement.contrast}</span>{" "}
+              <span className="bg-gradient-to-r from-violet-400 to-emerald-400 bg-clip-text text-transparent">
+                {PUBLIC_PAGES_MESSAGING.precisionStatement.assertion}
+              </span>
+            </p>
           </div>
         </div>
       </section>
@@ -863,41 +919,6 @@ export default function LandingPage() {
 
 
 
-      {/* ─── PIPELINE PROTECTION ──────────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
-
-        <div className="max-w-5xl mx-auto relative">
-          <div className="text-center mb-12">
-            <Badge className="mb-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">
-              <Shield className="h-3.5 w-3.5 mr-2" />
-              Pipeline Protection
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-2">
-              {PUBLIC_PAGES_MESSAGING.pipelineProtection.headline}
-            </h2>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              <span className="text-emerald-400">{PUBLIC_PAGES_MESSAGING.pipelineProtection.subHeadline}</span>
-            </h2>
-            <p className="text-xl text-slate-400 max-w-3xl mx-auto mb-8">
-              {PUBLIC_PAGES_MESSAGING.pipelineProtection.description}
-            </p>
-            <p className="text-lg text-slate-300 max-w-3xl mx-auto">
-              {PUBLIC_PAGES_MESSAGING.pipelineProtection.resolution}
-            </p>
-          </div>
-
-          {/* Precision Statement */}
-          <div className="p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur text-center">
-            <p className="text-2xl md:text-3xl font-bold">
-              <span className="text-slate-400">{PUBLIC_PAGES_MESSAGING.precisionStatement.contrast}</span>{" "}
-              <span className="bg-gradient-to-r from-violet-400 to-emerald-400 bg-clip-text text-transparent">
-                {PUBLIC_PAGES_MESSAGING.precisionStatement.assertion}
-              </span>
-            </p>
-          </div>
-        </div>
-      </section>
 
       {/* ─── WHAT WE DELIVER ───────────────────────────────────────────── */}
       <section className="py-24 px-6 relative overflow-hidden" id="built-for-you">

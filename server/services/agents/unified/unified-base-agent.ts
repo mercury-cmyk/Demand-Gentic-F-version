@@ -370,7 +370,7 @@ export abstract class UnifiedBaseAgent implements IUnifiedAgent {
    * Assemble the full agent prompt enriched with Organization Intelligence.
    *
    * Layers merged from org-intelligence-helper:
-   *  1. Core Agent Identity (problem-solver, human-first warmth, authentic AI)
+  *  1. Core Agent Identity (demand problem-solver, human-first warmth, authentic AI)
    *  2. Unified Knowledge Hub (compliance, gatekeeper, dispositioning, etc.)
    *  3. Organization-specific context (super org profile, compliance, policies)
    *  4. Campaign & engagement learning summary
