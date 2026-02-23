@@ -262,20 +262,24 @@ export async function processDisposition(
 
     let finalDisposition = disposition;
 
-    // SAFETY: Downgrade short AI qualified leads to needs_review to prevent false positives
-    /* 
-    DEPRECATED: This logic overrides processQualifiedLead's internal QA flagging.
-    We WANT short calls to appear in the Leads table as "Under Review", not disappear into the retry queue.
-    
+    // SAFETY: Downgrade short AI qualified leads to prevent false positives
+    // RE-ENABLED 2026-02-23: Production data shows massive false-positive problem.
+    // Calls as short as 3-7 seconds are being marked qualified_lead with ZERO contact
+    // participation, creating bogus leads that flood the QA queue. Root cause: Gemini AI
+    // hallucinates engagement when talking to screeners/IVR/silence. Very short calls
+    // (< 45s) are downgraded to needs_review; extremely short (< 15s) to no_answer.
     if (finalDisposition === 'qualified_lead' && callAttempt.agentType === 'ai') {
         const duration = callAttempt.callDurationSeconds || 0;
-        if (duration < 30) {
-            console.warn(`[DispositionEngine] 🛡️ Downgrading qualified_lead to needs_review (Short AI Call: ${duration}s)`);
+        if (duration < 15) {
+            console.warn(`[DispositionEngine] 🛡️ Downgrading qualified_lead → no_answer (Ghost AI Call: ${duration}s — no real conversation possible)`);
+            finalDisposition = 'no_answer';
+            result.actions.push(`Downgraded from qualified_lead to no_answer (duration ${duration}s < 15s — impossible to qualify)`);
+        } else if (duration < 45) {
+            console.warn(`[DispositionEngine] 🛡️ Downgrading qualified_lead → needs_review (Short AI Call: ${duration}s)`);
             finalDisposition = 'needs_review';
-            result.actions.push(`Downgraded from qualified_lead (duration ${duration}s < 30s)`);
+            result.actions.push(`Downgraded from qualified_lead to needs_review (duration ${duration}s < 45s)`);
         }
     }
-    */
 
     // Process based on disposition type
     switch (finalDisposition) {
@@ -411,15 +415,25 @@ async function processQualifiedLead(
   console.log(`[DispositionEngine] ==> Starting processQualifiedLead for call attempt: ${callAttempt.id}`);
   console.log(`[DispositionEngine] Call Data Received: ${JSON.stringify(callData, null, 2)}`);
 
-  // QUALITY GATE: Flag short calls for review but don't prevent lead creation
-  // All qualified dispositions should create leads regardless of duration.
-  // Short calls are flagged for immediate QA review but still appear as leads.
-  // This allows manual agents to mark ANY call as qualified without duration gates.
-  const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 20; // Minimal threshold - mostly just spam filter
+  // QUALITY GATE: Block or flag short calls to prevent false lead creation.
+  // AI agents should NEVER produce qualified leads from calls < 45s — these are
+  // screener/IVR/ghost calls. Human agents bypass the hard block but are still flagged.
+  const MINIMUM_AI_QUALIFIED_DURATION_SECONDS = 45;  // AI calls: hard block below this
+  const MINIMUM_HUMAN_QUALIFIED_DURATION_SECONDS = 20; // Human calls: flag for review
   const callDuration = callAttempt.callDurationSeconds || 0;
+  const isAiAgent = callAttempt.agentType === 'ai';
+
+  // AI agents: block lead creation entirely for very short calls
+  if (isAiAgent && callDuration < MINIMUM_AI_QUALIFIED_DURATION_SECONDS) {
+    console.warn(`[DispositionEngine] 🚫 BLOCKING lead creation: AI qualified_lead with ${callDuration}s duration (minimum ${MINIMUM_AI_QUALIFIED_DURATION_SECONDS}s for AI). Call attempt: ${callAttempt.id}`);
+    result.actions.push(`🚫 Lead creation BLOCKED: AI call ${callDuration}s < ${MINIMUM_AI_QUALIFIED_DURATION_SECONDS}s minimum`);
+    return; // Exit without creating a lead
+  }
 
   // Determine if call should be flagged for review based on duration
-  const isShortDurationCall = callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
+  const isShortDurationCall = isAiAgent
+    ? callDuration < MINIMUM_AI_QUALIFIED_DURATION_SECONDS
+    : callDuration < MINIMUM_HUMAN_QUALIFIED_DURATION_SECONDS;
 
   if (isShortDurationCall) {
     console.warn(`[DispositionEngine] ⚠️ SHORT DURATION: Call ${callAttempt.id} marked as qualified_lead but duration (${callDuration}s) is below preferred threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Flagging for QA review.`);

@@ -2734,6 +2734,58 @@ Instructions:
               // CRITICAL: Validate that qualified_lead actually met the criteria
               // This prevents false qualifications that damage campaign metrics
               if (disposition === 'qualified_lead') {
+                // ===== DURATION GATE =====
+                // A real qualified call CANNOT happen in under 45 seconds.
+                // Most false positives come from 7-35s "ghost" calls where the AI
+                // talks to a screener/IVR/silence and hallucinates engagement.
+                const MINIMUM_QUALIFIED_DURATION_SEC = 45;
+                const callElapsedSec = Math.round((Date.now() - metrics.startTime) / 1000);
+                if (callElapsedSec < MINIMUM_QUALIFIED_DURATION_SEC) {
+                  console.warn(`[Gemini Live] 🚫 BLOCKING qualified_lead DISPOSITION: Call too short (${callElapsedSec}s < ${MINIMUM_QUALIFIED_DURATION_SEC}s minimum). A real qualification requires a meaningful conversation.`);
+                  const toolResponse = {
+                    toolResponse: {
+                      functionResponses: [
+                        {
+                          name: call.name,
+                          id: call.id,
+                          response: {
+                            error: `CALL TOO SHORT FOR QUALIFICATION: This call has only been ${callElapsedSec} seconds. A qualified_lead requires at minimum a ${MINIMUM_QUALIFIED_DURATION_SEC}-second conversation with real engagement. If the prospect seems interested but the call is ending early, use "needs_review" instead. If the call is over, use "no_answer" or "not_interested" as appropriate.`
+                          }
+                        }
+                      ]
+                    }
+                  };
+                  if (geminiWs?.readyState === WebSocket.OPEN) {
+                    geminiWs.send(JSON.stringify(toolResponse));
+                  }
+                  return; // Block the disposition
+                }
+
+                // ===== CONTACT PARTICIPATION GATE =====
+                // If Gemini's input_transcription captured ZERO contact turns,
+                // the AI was talking to itself / a screener / voicemail.
+                const realContactTurns = transcriptTurns.filter(t => t.role === 'contact');
+                if (realContactTurns.length < 3) {
+                  console.warn(`[Gemini Live] 🚫 BLOCKING qualified_lead DISPOSITION: Only ${realContactTurns.length} contact turns captured (minimum 3 required). The prospect did not participate meaningfully.`);
+                  const toolResponse = {
+                    toolResponse: {
+                      functionResponses: [
+                        {
+                          name: call.name,
+                          id: call.id,
+                          response: {
+                            error: `INSUFFICIENT CONTACT PARTICIPATION: Only ${realContactTurns.length} responses were detected from the contact. A qualified_lead requires at least 3 substantive responses where the prospect engages with the pitch. If the prospect barely spoke, use "no_answer" or "not_interested". If you think they were engaged but the call ended abruptly, use "needs_review".`
+                          }
+                        }
+                      ]
+                    }
+                  };
+                  if (geminiWs?.readyState === WebSocket.OPEN) {
+                    geminiWs.send(JSON.stringify(toolResponse));
+                  }
+                  return; // Block the disposition
+                }
+
                 // Build transcript text from captured turns for validation
                 const allTranscriptText = transcriptTurns
                   .map(t => t.text.toLowerCase())

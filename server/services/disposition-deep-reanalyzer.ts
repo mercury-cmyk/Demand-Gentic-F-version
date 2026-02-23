@@ -773,9 +773,17 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
       "qualified_lead", "not_interested", "do_not_call", "voicemail",
       "no_answer", "invalid_data", "needs_review", "callback_requested",
     ];
-    const suggestedDisp = validDispositions.includes(parsed.dispositionAssessment?.suggestedDisposition)
+    let suggestedDisp = validDispositions.includes(parsed.dispositionAssessment?.suggestedDisposition)
       ? parsed.dispositionAssessment.suggestedDisposition
       : currentDisposition;
+
+    // DURATION GUARD: Never allow AI to suggest qualified_lead for short calls.
+    // This prevents the reanalyzer from promoting ghost/screener calls to qualified_lead.
+    const MIN_QUALIFIED_DURATION = 45;
+    if (suggestedDisp === "qualified_lead" && durationSec < MIN_QUALIFIED_DURATION) {
+      console.warn(`${LOG_PREFIX} 🚫 Overriding AI suggested qualified_lead → needs_review (duration ${durationSec}s < ${MIN_QUALIFIED_DURATION}s minimum)`);
+      suggestedDisp = "needs_review";
+    }
 
     // Accept AI's override decision — it has already been instructed to only override when evidence is clear
     const confidence = Math.min(Math.max(parsed.dispositionAssessment?.confidence ?? 0.5, 0), 1);
