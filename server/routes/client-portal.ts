@@ -1260,7 +1260,7 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
       .from(leads)
       .where(and(
         inArray(leads.campaignId, campaignIds),
-        inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
+        inArray(leads.qaStatus, ['new', 'under_review', 'approved', 'pending_pm_review', 'published'])
       ))
       .groupBy(leads.campaignId);
     const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(

@@ -1,5 +1,6 @@
 // Normalization utilities for data quality and deduplication
 import { formatPhoneWithCountryCode } from './lib/phone-formatter.js';
+import { normalizeToE164, isValidE164 } from './lib/phone-utils.js';
 
 /**
  * Normalizes an email address for deduplication
@@ -189,14 +190,27 @@ export function getCountryCodeFromName(countryName: string): string {
 /**
  * Validates and normalizes a phone number to E.164 format
  * Returns null if invalid
- * 
+ *
  * Uses the fixed phone formatter that properly handles country-specific formatting
  * This properly formats UK numbers: 01908802874 → +441908802874 (not +4401908802874)
+ *
+ * Falls back to heuristic normalizer (normalizeToE164) which handles:
+ *   - UK numbers starting with 0 (e.g. 07429015688 → +447429015688)
+ *   - US 10-digit numbers (e.g. 2125551234 → +12125551234)
+ *   - International numbers with 00 prefix (e.g. 00447429015688 → +447429015688)
  */
 export function normalizePhoneE164(phone: string, country?: string): string | null {
   if (!phone) return null;
-  
-  return formatPhoneWithCountryCode(phone, country);
+
+  // Try country-aware normalization first (uses libphonenumber-js)
+  const countryAware = formatPhoneWithCountryCode(phone, country);
+  if (countryAware && isValidE164(countryAware)) return countryAware;
+
+  // Fallback to heuristic normalization (handles UK 0-prefix, US 10-digit, etc.)
+  const heuristic = normalizeToE164(phone);
+  if (heuristic && isValidE164(heuristic)) return heuristic;
+
+  return null;
 }
 
 /**

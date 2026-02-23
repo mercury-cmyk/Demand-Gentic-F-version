@@ -24,7 +24,9 @@ import { getDay, getHours } from 'date-fns';
 import {
   isWithinBusinessHours as checkBusinessHours,
   detectContactTimezone,
-  getBusinessHoursForCountry
+  getBusinessHoursForCountry,
+  getNextAvailableTime,
+  BusinessHoursConfig
 } from '../utils/business-hours';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
@@ -969,10 +971,16 @@ async function getQueuedItems(
 
   // Fetch queue items with contact data - simplified to just get the DATA, not compute business hours in SQL
   // JavaScript will handle all business hours logic to ensure consistency
+  // IMPORTANT: Also select raw phone fields (direct_phone, mobile_phone) and account hq_phone
+  // so we can normalize at runtime when E164 fields are NULL (common for imports with missing country)
   const result = await db.execute(sql`
-    SELECT cq.*, 
+    SELECT cq.*,
       c.direct_phone_e164,
       c.mobile_phone_e164,
+      c.dialing_phone_e164,
+      c.direct_phone as raw_direct_phone,
+      c.mobile_phone as raw_mobile_phone,
+      a.hq_phone as raw_hq_phone,
       c.country,
       c.state,
       c.timezone,
@@ -981,7 +989,8 @@ async function getQueuedItems(
       c.email as contact_email,
       c.job_title as contact_job_title,
       a.name as account_name,
-      -- Infer timezone from: explicit timezone > country > phone prefix
+      a.hq_country as account_country,
+      -- Infer timezone from: explicit timezone > country > phone prefix (check both E164 and raw)
       -- 10-digit phones (NANP/US format stored without +1) are treated as US
       COALESCE(
         c.timezone,
@@ -991,6 +1000,11 @@ async function getQueuedItems(
           WHEN UPPER(c.country) IN ('CA', 'CANADA') THEN 'America/Toronto'
           WHEN c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%' THEN 'Europe/London'
           WHEN c.mobile_phone_e164 LIKE '+1%' OR c.direct_phone_e164 LIKE '+1%' THEN 'America/New_York'
+          -- Also check raw phone fields for +44/+1 prefix
+          WHEN c.direct_phone LIKE '+44%' OR c.mobile_phone LIKE '+44%' THEN 'Europe/London'
+          WHEN c.direct_phone LIKE '+1%' OR c.mobile_phone LIKE '+1%' THEN 'America/New_York'
+          -- UK local numbers (0-prefixed, 11 digits)
+          WHEN c.direct_phone ~ '^0[1-9][0-9]{9}$' OR c.mobile_phone ~ '^0[1-9][0-9]{9}$' THEN 'Europe/London'
           -- 10-digit NANP (US contacts stored without +1 country code)
           WHEN c.mobile_phone_e164 ~ '^[2-9][0-9]{9}$' OR c.direct_phone_e164 ~ '^[2-9][0-9]{9}$' THEN 'America/New_York'
           -- 11-digit US (1XXXXXXXXXX stored without +)
@@ -998,8 +1012,8 @@ async function getQueuedItems(
           ELSE NULL
         END
       ) as inferred_timezone,
-      CASE 
-        -- UK mobile (highest priority)
+      CASE
+        -- UK mobile (highest priority) - check both E164 and raw fields
         WHEN c.mobile_phone_e164 LIKE '+447%' THEN 1
         WHEN c.direct_phone_e164 LIKE '+447%' THEN 2
         -- UK landline
@@ -1008,9 +1022,14 @@ async function getQueuedItems(
         -- USA/Canada (+1)
         WHEN c.mobile_phone_e164 LIKE '+1%' AND LENGTH(c.mobile_phone_e164) = 12 THEN 5
         WHEN c.direct_phone_e164 LIKE '+1%' AND LENGTH(c.direct_phone_e164) = 12 THEN 6
-        -- Other countries with phone numbers
+        -- Other countries with E164 phone numbers
         WHEN c.mobile_phone_e164 IS NOT NULL THEN 10
         WHEN c.direct_phone_e164 IS NOT NULL THEN 11
+        -- Raw phone fields available (will be normalized at runtime)
+        WHEN c.direct_phone IS NOT NULL AND c.direct_phone != '' THEN 20
+        WHEN c.mobile_phone IS NOT NULL AND c.mobile_phone != '' THEN 21
+        -- Account HQ phone as last resort
+        WHEN a.hq_phone IS NOT NULL AND a.hq_phone != '' THEN 30
         ELSE 99
       END as phone_priority
     FROM campaign_queue cq
@@ -1019,16 +1038,23 @@ async function getQueuedItems(
     WHERE cq.campaign_id = ${campaignId}
       AND cq.status = 'queued'
       AND (cq.next_attempt_at IS NULL OR cq.next_attempt_at <= NOW())
-      AND (c.direct_phone_e164 IS NOT NULL OR c.mobile_phone_e164 IS NOT NULL)
+      AND (
+        c.direct_phone_e164 IS NOT NULL
+        OR c.mobile_phone_e164 IS NOT NULL
+        OR c.dialing_phone_e164 IS NOT NULL
+        OR (c.direct_phone IS NOT NULL AND c.direct_phone != '')
+        OR (c.mobile_phone IS NOT NULL AND c.mobile_phone != '')
+        OR (a.hq_phone IS NOT NULL AND a.hq_phone != '')
+      )
       ${strictUsOnlySql}
       -- Exclude contacts already called today (any agent type - prevents duplicate calls)
       -- Match by contact_id first (reliable), then by phone number (catches manual imports)
       AND NOT EXISTS (
-        SELECT 1 FROM call_sessions cs 
+        SELECT 1 FROM call_sessions cs
         WHERE cs.created_at >= CURRENT_DATE
           AND (
             cs.contact_id = cq.contact_id
-            OR cs.to_number_e164 = c.direct_phone_e164 
+            OR cs.to_number_e164 = c.direct_phone_e164
             OR cs.to_number_e164 = c.mobile_phone_e164
           )
       )
@@ -1197,7 +1223,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     console.log(`[AI Orchestrator] Sample queue items (first 3):`);
     for (let i = 0; i < Math.min(3, queueItems.length); i++) {
       const item = queueItems[i];
-      console.log(`  [${i}] country="${item.country}" timezone="${item.timezone}" inferred_tz="${item.inferred_timezone}" mobile="${item.mobile_phone_e164}" direct="${item.direct_phone_e164}"`);
+      console.log(`  [${i}] country="${item.country}" timezone="${item.timezone}" inferred_tz="${item.inferred_timezone}" mobile="${item.mobile_phone_e164}" direct="${item.direct_phone_e164}" rawDirect="${item.raw_direct_phone}" rawMobile="${item.raw_mobile_phone}" hq="${item.raw_hq_phone}"`);
     }
   }
   
@@ -1331,13 +1357,49 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     let priority = 0;
     
     // Queue items now include phone and country data from the JOIN query
-    const mobilePhone = (item as any).mobile_phone_e164;
-    const directPhone = (item as any).direct_phone_e164;
+    // Also includes raw phone fields for runtime normalization when E164 is NULL
     const country = (item as any).country;
     const state = (item as any).state;
     const timezone = (item as any).timezone;
     const inferredTimezone = (item as any).inferred_timezone;
-    const geoPhone = mobilePhone || directPhone;
+    const rawDirectPhone = (item as any).raw_direct_phone;
+    const rawMobilePhone = (item as any).raw_mobile_phone;
+    const rawHqPhone = (item as any).raw_hq_phone;
+    const accountCountry = (item as any).account_country;
+
+    // Resolve E164 phones: prefer pre-normalized, then normalize raw fields at runtime
+    let mobilePhone = (item as any).mobile_phone_e164 || null;
+    let directPhone = (item as any).direct_phone_e164 || null;
+    const dialingPhone = (item as any).dialing_phone_e164 || null;
+
+    // Runtime normalization for contacts whose E164 was NULL at import time
+    // Uses country-aware formatter first, then heuristic fallback (handles UK 0-prefix, US 10-digit etc.)
+    if (!directPhone && rawDirectPhone) {
+      const normalized = formatPhoneWithCountryCode(rawDirectPhone, country) || normalizeToE164(rawDirectPhone);
+      if (normalized && isValidE164(normalized)) {
+        directPhone = normalized;
+      }
+    }
+    if (!mobilePhone && rawMobilePhone) {
+      const normalized = formatPhoneWithCountryCode(rawMobilePhone, country) || normalizeToE164(rawMobilePhone);
+      if (normalized && isValidE164(normalized)) {
+        mobilePhone = normalized;
+      }
+    }
+    // HQ/company phone as last resort (use account country for formatting)
+    let hqPhone: string | null = null;
+    if (!directPhone && !mobilePhone && rawHqPhone) {
+      const normalized = formatPhoneWithCountryCode(rawHqPhone, accountCountry || country) || normalizeToE164(rawHqPhone);
+      if (normalized && isValidE164(normalized)) {
+        hqPhone = normalized;
+      }
+    }
+    // Also try dialing_phone_e164 if no other phone resolved
+    if (!directPhone && !mobilePhone && !hqPhone && dialingPhone && isValidE164(dialingPhone)) {
+      directPhone = dialingPhone;
+    }
+
+    const geoPhone = mobilePhone || directPhone || hqPhone;
     const normalizedCountry = typeof country === 'string' ? country.trim() : country;
     const inferredCountry = inferCountryFromPhone(geoPhone);
 
@@ -1437,7 +1499,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     
     tzStat.callable++;
     
-    // Prioritize mobile over direct
+    // Prioritize mobile over direct, then HQ phone as last resort
     if (mobilePhone && getUkPhonePriority(mobilePhone) > 0) {
       phone = mobilePhone;
       priority = getUkPhonePriority(mobilePhone);
@@ -1452,8 +1514,12 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       // Non-UK direct
       phone = directPhone;
       priority = 6;
+    } else if (hqPhone) {
+      // Company/HQ phone (last resort from query)
+      phone = hqPhone;
+      priority = 8;
     }
-    
+
     // Fallback to contact lookup if phone not in query result
     if (!phone && item.contactId && contactsMap.has(item.contactId)) {
       contact = contactsMap.get(item.contactId);
@@ -1469,12 +1535,12 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         priority = 6;
       }
     }
-    
+
     // Skip contacts without valid phone numbers
     if (!phone) {
       noPhone++;
       if (noPhone <= 2) {
-        console.log(`[AI Orchestrator] 📵 Contact ${item.contact_id} has no phone (mobile="${mobilePhone}" direct="${directPhone}")`);
+        console.log(`[AI Orchestrator] 📵 Contact ${item.contact_id} has no phone (mobile="${mobilePhone}" direct="${directPhone}" hq="${hqPhone}" rawDirect="${rawDirectPhone}" rawMobile="${rawMobilePhone}" rawHq="${rawHqPhone}")`);
       }
       continue;
     }
@@ -2440,14 +2506,15 @@ export async function initializeAiCampaignOrchestrator(
       if (!orchestratorQueue) return;
 
       try {
-        const [activeCount, waitingCount] = await Promise.all([
+        const [activeCount, waitingCount, delayedCount] = await Promise.all([
           orchestratorQueue.getActiveCount(),
           orchestratorQueue.getWaitingCount(),
+          orchestratorQueue.getDelayedCount(),
         ]);
 
         const now = Date.now();
         const staleTick = now - lastOrchestratorTickAt > ORCHESTRATOR_HEARTBEAT_MS;
-        const queueIdle = activeCount === 0 && waitingCount === 0;
+        const queueIdle = activeCount === 0 && waitingCount === 0 && delayedCount === 0;
 
         if (staleTick || queueIdle) {
           await orchestratorQueue.add(
@@ -2459,7 +2526,9 @@ export async function initializeAiCampaignOrchestrator(
               removeOnFail: true,
             }
           );
-          console.warn(`[AI Orchestrator] Heartbeat enqueued rescue tick (staleTick=${staleTick}, queueIdle=${queueIdle})`);
+          console.warn(
+            `[AI Orchestrator] Heartbeat enqueued rescue tick (staleTick=${staleTick}, queueIdle=${queueIdle}, active=${activeCount}, waiting=${waitingCount}, delayed=${delayedCount})`
+          );
         }
       } catch (err) {
         console.error('[AI Orchestrator] Heartbeat check failed:', err);
