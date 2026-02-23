@@ -291,16 +291,25 @@ export async function getCooldownStatus(
 export async function processExpiredCooldowns(): Promise<number> {
   const now = new Date();
 
-  // Find expired cooldowns that are still marked active
-  const expired = await db
-    .select()
-    .from(numberCooldowns)
-    .where(
-      and(
-        eq(numberCooldowns.isActive, true),
-        lt(numberCooldowns.endsAt, now)
-      )
-    );
+  let expired: NumberCooldown[] = [];
+  try {
+    // Find expired cooldowns that are still marked active
+    expired = await db
+      .select()
+      .from(numberCooldowns)
+      .where(
+        and(
+          eq(numberCooldowns.isActive, true),
+          lt(numberCooldowns.endsAt, now)
+        )
+      );
+  } catch (error: any) {
+    if (error?.code === '42P01') {
+      console.warn('[CooldownManager] number_cooldowns table is missing. Run DB migrations for number pool features.');
+      return 0;
+    }
+    throw error;
+  }
 
   let processed = 0;
 
