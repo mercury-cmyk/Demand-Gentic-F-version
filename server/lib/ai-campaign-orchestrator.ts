@@ -25,8 +25,7 @@ import {
   isWithinBusinessHours as checkBusinessHours,
   detectContactTimezone,
   getBusinessHoursForCountry,
-  getNextAvailableTime,
-  BusinessHoursConfig
+  getNextAvailableTime
 } from '../utils/business-hours';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
@@ -223,6 +222,7 @@ function isContactWithinBusinessHours(
   timezone: string | null;
   localTime: string;
   reason?: string;
+  nextCallableAt?: Date; // When the contact will next be within business hours
 } {
   let contactTz = detectContactTimezone({ 
     country: contact.country || undefined, 
@@ -298,21 +298,31 @@ function isContactWithinBusinessHours(
   const localTime = `${dayNames[dayOfWeek]} ${hour}:00`;
   
   let reason: string | undefined;
+  let nextCallableAt: Date | undefined;
   if (!canCall) {
     // Check if it's a non-working day for this country
     const dayName = dayNames[dayOfWeek].toLowerCase();
     const isWorkingDay = config.operatingDays.includes(
       ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dayOfWeek]
     );
-    
+
     if (!isWorkingDay) {
       reason = `Non-working day (${localTime} ${contactTz})`;
     } else {
       reason = `Outside hours (${localTime} ${contactTz}, hours: ${config.startTime}-${config.endTime})`;
     }
+
+    // Compute when this contact will next be within business hours
+    // This is used to set next_attempt_at so out-of-hours contacts don't clog the queue
+    try {
+      nextCallableAt = getNextAvailableTime(config, undefined, now);
+    } catch {
+      // Fallback: try again in 30 minutes
+      nextCallableAt = new Date(now.getTime() + 30 * 60 * 1000);
+    }
   }
-  
-  return { canCall, timezone: contactTz, localTime, reason };
+
+  return { canCall, timezone: contactTz, localTime, reason, nextCallableAt };
 }
 
 /**
@@ -1065,7 +1075,7 @@ async function getQueuedItems(
           AND dca.campaign_id = ${campaignId}
       )
     ORDER BY cq.ai_priority_score DESC NULLS LAST, phone_priority ASC, cq.priority DESC, cq.created_at ASC
-    LIMIT ${limit * 3}
+    LIMIT ${limit * 10}
   `);
   
   // Normalize snake_case columns from raw SQL to camelCase for consistency
@@ -1344,10 +1354,14 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
   // Build prioritized list with phone priority scores
   const candidateItems: Array<{ item: any; phone: string; priority: number; contact: any }> = [];
-  
+
+  // Collect out-of-hours queue items for batch next_attempt_at update
+  // This prevents them from clogging the queue on subsequent ticks
+  const outsideHoursUpdates: Array<{ queueItemId: string; nextCallableAt: Date }> = [];
+
   // Track timezone stats for logging
   const timezoneStats = new Map<string, { total: number; callable: number }>();
-  
+
   // Track rejected countries for debugging
   const rejectedCountries = new Map<string, number>();
 
@@ -1420,6 +1434,14 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       const countryKey = effectiveCountry ? String(effectiveCountry).toUpperCase() : 'NULL/EMPTY';
       rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
 
+      // Defer for 24h so non-US contacts don't clog the queue
+      if (item.id) {
+        outsideHoursUpdates.push({
+          queueItemId: item.id,
+          nextCallableAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        });
+      }
+
       if (countryNotEnabled <= 3) {
         console.log(`[AI Orchestrator] ❌ Contact ${item.contact_id} rejected by strict USA-only filter: country='${country}'`);
       }
@@ -1454,7 +1476,15 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       // Track which countries are being rejected
       const countryKey = effectiveCountry ? String(effectiveCountry).toUpperCase() : 'NULL/EMPTY';
       rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
-      
+
+      // Defer for 24h so they don't clog the queue (country data may be corrected via re-import)
+      if (item.id) {
+        outsideHoursUpdates.push({
+          queueItemId: item.id,
+          nextCallableAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        });
+      }
+
       // DEBUG: Log first few country rejections
       if (countryNotEnabled <= 3) {
         console.log(`[AI Orchestrator] ❌ Contact ${item.contact_id} rejected: country='${country}' normaliz='${normalizedCountry}' inferred='${inferredCountry}' phone='${geoPhone}'`);
@@ -1484,10 +1514,17 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     
     if (!bizHoursCheck.canCall) {
       outsideBusinessHours++;
-      // Don't remove from queue - just skip for now (will be tried next time during their business hours)
+      // Schedule retry at next business hours window so these contacts don't clog the queue
+      // The queue query filters: AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+      if (bizHoursCheck.nextCallableAt && item.id) {
+        outsideHoursUpdates.push({
+          queueItemId: item.id,
+          nextCallableAt: bizHoursCheck.nextCallableAt,
+        });
+      }
       // Log reason for first few skips of each timezone
       if (tzStat.total <= 5) {
-        console.log(`[AI Orchestrator] ⏰ Contact ${item.contact_id} outside hours: ${bizHoursCheck.reason}`);
+        console.log(`[AI Orchestrator] ⏰ Contact ${item.contact_id} outside hours: ${bizHoursCheck.reason} (next callable: ${bizHoursCheck.nextCallableAt?.toISOString() || 'unknown'})`);
       }
       continue;
     }
@@ -1539,6 +1576,13 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     // Skip contacts without valid phone numbers
     if (!phone) {
       noPhone++;
+      // Defer for 24h — phone data won't change until a re-import
+      if (item.id) {
+        outsideHoursUpdates.push({
+          queueItemId: item.id,
+          nextCallableAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        });
+      }
       if (noPhone <= 2) {
         console.log(`[AI Orchestrator] 📵 Contact ${item.contact_id} has no phone (mobile="${mobilePhone}" direct="${directPhone}" hq="${hqPhone}" rawDirect="${rawDirectPhone}" rawMobile="${rawMobilePhone}" rawHq="${rawHqPhone}")`);
       }
@@ -1590,16 +1634,49 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   
   // Sort by priority: UK mobile (1) first, then UK landline (2), then other phones
   candidateItems.sort((a, b) => a.priority - b.priority);
-  
+
   // Take up to slotsAvailable items
   for (const candidate of candidateItems) {
     if (eligibleItems.length >= slotsAvailable) break;
-    
+
     candidate.item._resolvedPhone = candidate.phone;
     candidate.item._resolvedContact = candidate.contact;
     eligibleItems.push(candidate.item);
   }
-  
+
+  // CRITICAL: Batch-update next_attempt_at for out-of-hours contacts
+  // This prevents them from clogging the queue on subsequent ticks.
+  // Without this, the same out-of-hours contacts consume LIMIT slots every 10s
+  // and starve the callable contacts further down the queue.
+  if (outsideHoursUpdates.length > 0) {
+    try {
+      // Group by next_callable_at (rounded to nearest 5min) for efficient batch updates
+      const updateGroups = new Map<string, string[]>();
+      for (const update of outsideHoursUpdates) {
+        // Round to nearest 5 minutes to batch similar times together
+        const rounded = new Date(Math.ceil(update.nextCallableAt.getTime() / (5 * 60 * 1000)) * (5 * 60 * 1000));
+        const key = rounded.toISOString();
+        if (!updateGroups.has(key)) updateGroups.set(key, []);
+        updateGroups.get(key)!.push(update.queueItemId);
+      }
+
+      for (const [nextTimeISO, ids] of updateGroups) {
+        if (ids.length > 0) {
+          await db.execute(sql`
+            UPDATE campaign_queue
+            SET next_attempt_at = ${new Date(nextTimeISO)},
+                updated_at = NOW()
+            WHERE id = ANY(${ids})
+              AND status = 'queued'
+          `);
+        }
+      }
+      console.log(`[AI Orchestrator] 📅 Deferred ${outsideHoursUpdates.length} out-of-hours contacts (set next_attempt_at to their business hours)`);
+    } catch (err) {
+      console.error(`[AI Orchestrator] Failed to batch-update next_attempt_at for out-of-hours contacts:`, err);
+    }
+  }
+
   // Log business hours filtering by timezone
   if (countryNotEnabled > 0) {
     console.log(`[AI Orchestrator] Region filter: ${countryNotEnabled} contacts skipped (country NULL or not in enabled regions)`);
