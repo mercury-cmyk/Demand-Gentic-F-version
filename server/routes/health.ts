@@ -25,6 +25,11 @@ router.get("/health", async (req, res) => {
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       environment: process.env.NODE_ENV || "development",
+      build: {
+        gitSha: process.env.APP_GIT_SHA || process.env.COMMIT_SHA || null,
+        revision: process.env.K_REVISION || null,
+        service: process.env.K_SERVICE || null,
+      },
       dbPool: dbStats,
       aiConcurrency: aiStats,
       memory: {

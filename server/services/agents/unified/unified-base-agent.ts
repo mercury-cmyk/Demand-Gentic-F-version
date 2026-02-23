@@ -437,7 +437,7 @@ export abstract class UnifiedBaseAgent implements IUnifiedAgent {
       category,
       isRequired,
       isActive: true,
-      versionHash: createHash('md5').update(content).digest('hex').slice(0, 8),
+      versionHash: createHash('md5').update(content || '').digest('hex').slice(0, 8),
       lastUpdated: new Date(),
       changeHistory: [],
     };

@@ -25,7 +25,18 @@ import {
   renderEndpointDirectory,
 } from './endpoint-registry';
 import OpenAI from 'openai';
-import { unifiedEmailRouter, type EmailGenerationRequest, type EmailGenerationResponse } from '../unified-email-router';
+import type { EmailGenerationRequest, EmailGenerationResponse } from '../unified-email-router';
+
+// Lazy-load to break circular dependency:
+// core-email-agent → unified-email-router → unified-email-agent → core-email-agent
+let _unifiedEmailRouter: typeof import('../unified-email-router')['unifiedEmailRouter'] | null = null;
+async function getUnifiedEmailRouter() {
+  if (!_unifiedEmailRouter) {
+    const mod = await import('../unified-email-router');
+    _unifiedEmailRouter = mod.unifiedEmailRouter;
+  }
+  return _unifiedEmailRouter;
+}
 
 // ==================== FOUNDATIONAL PROMPT ====================
 
@@ -727,7 +738,8 @@ Transactional emails should be:
       useCache: options?.useCache ?? true,
     };
 
-    return unifiedEmailRouter.generateEmail(request);
+    const router = await getUnifiedEmailRouter();
+    return router.generateEmail(request);
   }
 
   /**
@@ -771,7 +783,8 @@ Transactional emails should be:
       allowFallback: true,
     };
 
-    return unifiedEmailRouter.generateBatchEmails(baseRequest, contacts);
+    const router = await getUnifiedEmailRouter();
+    return router.generateBatchEmails(baseRequest, contacts);
   }
 
   /**
@@ -823,7 +836,8 @@ Generate a follow-up that:
       allowFallback: true,
     };
 
-    return unifiedEmailRouter.generateEmail(request);
+    const router = await getUnifiedEmailRouter();
+    return router.generateEmail(request);
   }
 
   /**
