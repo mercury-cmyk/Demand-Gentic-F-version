@@ -159,8 +159,9 @@ export default function CampaignsPage() {
       return snapshots;
     },
     enabled: campaigns.length > 0,
-    refetchInterval: 15000,
-    staleTime: 10000,
+    refetchInterval: 30000, // Reduced from 15s to 30s to lower server load
+    refetchIntervalInBackground: false, // Don't poll when tab is inactive
+    staleTime: 20000,
   });
 
   // Fetch queue stats for phone campaigns (all types that support phone/AI calling)
@@ -209,8 +210,9 @@ export default function CampaignsPage() {
       return stats;
     },
     enabled: phoneCampaigns.length > 0 && !!token,
-    refetchInterval: 10000, // Refresh every 10 seconds (reduced from 2s to prevent server overload)
-    staleTime: 5000,
+    refetchInterval: 20000, // Reduced from 10s to 20s to lower API load
+    refetchIntervalInBackground: false, // Don't poll when tab is inactive
+    staleTime: 10000,
   });
 
   // Toggle status mutation

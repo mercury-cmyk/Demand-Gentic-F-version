@@ -236,6 +236,7 @@ function SystemOverview({ onSelectAgent }: { onSelectAgent: (type: string) => vo
     queryKey: ["unified-agents-summary"],
     queryFn: () => fetchJson(API_BASE),
     refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
 
   if (isLoading) {
@@ -430,6 +431,7 @@ function PipelineSummarySection() {
     queryKey: ["unified-agents-pipeline-summary"],
     queryFn: () => fetchJson(`${API_BASE}/pipeline-summary`),
     refetchInterval: 60000,
+    refetchIntervalInBackground: false,
   });
 
   if (!pipelines || Object.keys(pipelines).length === 0) return null;
@@ -478,7 +480,8 @@ function AgentDetailView({
   const { data: detail, isLoading } = useQuery({
     queryKey: ["unified-agent-detail", agentType],
     queryFn: () => fetchJson(`${API_BASE}/${agentType}`),
-    refetchInterval: 15000,
+    refetchInterval: 30000, // Increased from 15s to 30s
+    refetchIntervalInBackground: false,
   });
 
   if (isLoading) {
@@ -940,7 +943,8 @@ function RecommendationsTab({ agentType }: { agentType: string }) {
   const { data: recs } = useQuery({
     queryKey: ["unified-agent-recommendations", agentType],
     queryFn: () => fetchJson(`${API_BASE}/${agentType}/recommendations`),
-    refetchInterval: 10000,
+    refetchInterval: 30000, // Increased from 10s to 30s
+    refetchIntervalInBackground: false,
   });
 
   const applyRec = useMutation({
@@ -1104,7 +1108,8 @@ function LearningPipelineTab({ agentType }: { agentType: string }) {
   const { data: pipeline } = useQuery({
     queryKey: ["unified-agent-pipeline", agentType],
     queryFn: () => fetchJson(`${API_BASE}/${agentType}/learning-pipeline`),
-    refetchInterval: 10000,
+    refetchInterval: 30000, // Increased from 10s to 30s
+    refetchIntervalInBackground: false,
   });
 
   const triggerAnalysis = useMutation({

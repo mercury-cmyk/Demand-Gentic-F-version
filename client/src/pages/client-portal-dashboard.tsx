@@ -739,8 +739,9 @@ export default function ClientPortalDashboard() {
       return res.json();
     },
     enabled: campaigns.length > 0 && !!user,
-    refetchInterval: 15000,
-    staleTime: 10000,
+    refetchInterval: 30000, // Reduced from 15s to 30s to lower server load
+    refetchIntervalInBackground: false, // Don't poll when tab is inactive
+    staleTime: 20000,
   });
 
   const { data: orders = [], isLoading: ordersLoading, refetch: refetchOrders } = useQuery<Order[]>({

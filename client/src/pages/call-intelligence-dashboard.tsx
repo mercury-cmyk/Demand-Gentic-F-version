@@ -108,6 +108,7 @@ export default function CallIntelligenceDashboard() {
       return response.json();
     },
     refetchInterval: autoRefresh ? 30000 : false, // Refresh stats every 30s if auto-refresh is on
+    refetchIntervalInBackground: false,
   });
 
   const stats = statsData?.data;
@@ -124,7 +125,8 @@ export default function CallIntelligenceDashboard() {
       const response = await apiRequest('GET', `/api/call-intelligence/unified?${params}`);
       return response.json();
     },
-    refetchInterval: autoRefresh ? 10000 : false,
+    refetchInterval: autoRefresh ? 30000 : false, // Reduced from 10s to 30s
+    refetchIntervalInBackground: false,
   });
 
   // Fetch selected call details
@@ -138,7 +140,8 @@ export default function CallIntelligenceDashboard() {
       return response.json();
     },
     enabled: !!selectedCallId,
-    refetchInterval: autoRefresh ? 3000 : false, // Fast poll for active details
+    refetchInterval: autoRefresh ? 15000 : false, // Reduced from 3s to 15s
+    refetchIntervalInBackground: false,
   });
 
   const selectedCall = selectedCallData?.data;

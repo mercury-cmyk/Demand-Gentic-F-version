@@ -79,6 +79,7 @@ export default function EmailCampaignsPage() {
     },
     enabled: emailCampaigns.length > 0,
     refetchInterval: 10000,
+    refetchIntervalInBackground: false,
   });
 
   const { data: segments = [] } = useQuery<Segment[]>({

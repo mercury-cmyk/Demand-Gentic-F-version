@@ -126,6 +126,7 @@ export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConf
     },
     enabled: !!token,
     refetchInterval: 30000, // Poll every 30 seconds
+    refetchIntervalInBackground: false,
   });
 
   // Get voices for a specific provider

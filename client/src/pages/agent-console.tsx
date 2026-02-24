@@ -488,7 +488,8 @@ export default function AgentConsolePage() {
     assignedAt: Date;
   } | null>({
     queryKey: ['/api/agents/me/active-campaign'],
-    refetchInterval: 10000,
+    refetchInterval: 30000, // Reduced from 10s to 30s - assignments don't change frequently
+    refetchIntervalInBackground: false, // Don't poll when tab is inactive
   });
 
   // Track the last known active campaign to detect real reassignments vs refetch noise
@@ -1278,7 +1279,8 @@ export default function AgentConsolePage() {
   // Get agent's assigned campaigns (poll to detect reassignments)
   const { data: agentAssignments = [] } = useQuery<Array<{ campaignId: string; campaignName: string }>>({
     queryKey: ['/api/campaigns/agent-assignments'],
-    refetchInterval: 10000,
+    refetchInterval: 30000, // Reduced from 10s to 30s - assignments don't change frequently
+    refetchIntervalInBackground: false, // Don't poll when tab is inactive
   });
 
   const campaigns: Campaign[] = agentAssignments.length > 0 

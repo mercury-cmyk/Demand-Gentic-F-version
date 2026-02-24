@@ -89,7 +89,8 @@ export default function VerificationConsolePage() {
 
   const { data: stats } = useQuery({
     queryKey: ["/api/verification-campaigns", campaignId, "stats"],
-    refetchInterval: 10000,
+    refetchInterval: 30000, // Increased from 10s to 30s
+    refetchIntervalInBackground: false,
   });
 
   // Query enrichment jobs to detect active jobs

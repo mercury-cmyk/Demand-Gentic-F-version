@@ -69,6 +69,7 @@ export default function AgentReportsDashboard() {
   }>({
     queryKey: ['/api/leaderboard/current'],
     refetchInterval: 60000, // Refresh every minute
+    refetchIntervalInBackground: false,
   });
 
   // Fetch agent goals

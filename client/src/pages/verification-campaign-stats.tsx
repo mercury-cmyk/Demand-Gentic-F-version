@@ -49,7 +49,8 @@ interface AccountCapStat {
 function AccountLeadCapsSection({ campaignId }: { campaignId: string }) {
   const { data: accountCaps = [], isLoading } = useQuery<AccountCapStat[]>({
     queryKey: ["/api/verification-campaigns", campaignId, "account-caps"],
-    refetchInterval: 10000,
+    refetchInterval: 30000, // Increased from 10s to 30s
+    refetchIntervalInBackground: false,
   });
 
   if (isLoading) {
@@ -190,7 +191,8 @@ export default function VerificationCampaignStatsPage() {
 
   const { data: stats } = useQuery<CampaignStats>({
     queryKey: ["/api/verification-campaigns", campaignId, "stats"],
-    refetchInterval: 10000,
+    refetchInterval: 30000, // Increased from 10s to 30s
+    refetchIntervalInBackground: false,
   });
 
   const { data: customFields = [] } = useQuery<CustomFieldDefinition[]>({

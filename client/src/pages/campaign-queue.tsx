@@ -200,6 +200,7 @@ export default function CampaignQueuePage() {
     },
     enabled: !!campaignId,
     refetchInterval: 15000,
+    refetchIntervalInBackground: false,
   });
 
   const invalidCount = serverStats?.invalid ?? 0;

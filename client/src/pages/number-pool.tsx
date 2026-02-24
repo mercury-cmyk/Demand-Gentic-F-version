@@ -160,6 +160,7 @@ export default function NumberPoolPage() {
       return res.json();
     },
     refetchInterval: 30000, // Refresh every 30 seconds
+    refetchIntervalInBackground: false,
   });
 
   // Sync from Telnyx mutation
