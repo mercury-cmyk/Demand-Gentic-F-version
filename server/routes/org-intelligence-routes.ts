@@ -1966,6 +1966,216 @@ router.post("/enrich", requireAuth, requireRole('admin', 'campaign_manager'), as
   }
 });
 
+// ==================== AI-POWERED PROFILE ENHANCEMENT ====================
+
+const FIELD_LABELS: Record<string, Record<string, string>> = {
+  identity: {
+    legalName: "Legal Name", domain: "Domain", description: "Company Description",
+    industry: "Industry", employees: "Company Size", regions: "Headquarters / Regions"
+  },
+  offerings: {
+    coreProducts: "Core Products/Services", useCases: "Primary Use Cases",
+    problemsSolved: "Problems Solved", differentiators: "Key Differentiators"
+  },
+  icp: {
+    industries: "Best-fit Industries", personas: "Key Personas", objections: "Typical Objections"
+  },
+  positioning: {
+    oneLiner: "One-Liner", competitors: "Top Competitors", whyUs: "Why Us?"
+  },
+  outreach: {
+    emailAngles: "Recommended Email Angles", callOpeners: "Call Opener Variations"
+  }
+};
+
+const ENHANCE_SYSTEM_PROMPT = `You are an elite B2B intelligence analyst performing a STRATEGIC MERGE of new information into an existing organization intelligence profile.
+
+## Your Task
+You will receive:
+1. An EXISTING organization profile (JSON with IntelligenceField objects containing value, source, confidence, status, locked)
+2. NEW INFORMATION pasted by the user (raw text - could be product updates, competitor intel, case studies, positioning changes, etc.)
+
+## Merge Rules
+
+### LOCKED FIELDS (locked: true)
+- NEVER modify locked fields. Return them exactly as-is.
+
+### VERIFIED FIELDS (status: "verified")
+- Only update if the new information is clearly more current/accurate AND contradicts the verified data.
+
+### EDITED FIELDS (status: "edited")
+- These were manually edited by a human. Treat with high respect.
+- Only supplement/enhance, do not overwrite unless the new info clearly supersedes.
+
+### SUGGESTED FIELDS (status: "suggested")
+- These are AI-generated and can be freely updated if the new information improves them.
+
+## Merge Strategy
+1. **Update**: When new info directly replaces or corrects existing data (e.g., new employee count, updated product list)
+2. **Enrich**: When new info adds to existing data without contradicting it (e.g., additional use cases, new personas)
+3. **Preserve**: When existing data is still valid and new info doesn't affect it
+4. **Synthesize**: When both old and new info are partially correct, create a combined version that incorporates the best of both
+
+## Output Format
+Return valid JSON only (no markdown, no code fences, no explanation):
+{
+  "identity": {
+    "legalName": {"value": "...", "reason": "unchanged"},
+    "domain": {"value": "...", "reason": "unchanged"},
+    "description": {"value": "...", "reason": "why changed or unchanged"},
+    "industry": {"value": "...", "reason": "..."},
+    "employees": {"value": "...", "reason": "..."},
+    "regions": {"value": "...", "reason": "..."}
+  },
+  "offerings": {
+    "coreProducts": {"value": "...", "reason": "..."},
+    "useCases": {"value": "...", "reason": "..."},
+    "problemsSolved": {"value": "...", "reason": "..."},
+    "differentiators": {"value": "...", "reason": "..."}
+  },
+  "icp": {
+    "industries": {"value": "...", "reason": "..."},
+    "personas": {"value": "...", "reason": "..."},
+    "objections": {"value": "...", "reason": "..."}
+  },
+  "positioning": {
+    "oneLiner": {"value": "...", "reason": "..."},
+    "competitors": {"value": "...", "reason": "..."},
+    "whyUs": {"value": "...", "reason": "..."}
+  },
+  "outreach": {
+    "emailAngles": {"value": "...", "reason": "..."},
+    "callOpeners": {"value": "...", "reason": "..."}
+  },
+  "summary": "1-2 sentence summary of all changes made"
+}
+
+For unchanged fields, set reason to "unchanged" and keep the exact same value.
+For updated/enriched fields, explain WHY in the reason field (e.g., "New product launch info supersedes previous listing").`;
+
+/**
+ * POST /api/org-intelligence/enhance
+ * AI-powered strategic merge of new pasted content into existing OI profile
+ */
+router.post("/enhance", requireDualAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const allowAccess = hasAnyRole(user, ['admin', 'campaign_manager', 'client', 'client_user']);
+    if (!allowAccess) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const { domain, existingProfile, pastedContent } = req.body;
+
+    if (!domain || !existingProfile || !pastedContent) {
+      return res.status(400).json({ error: "domain, existingProfile, and pastedContent are required" });
+    }
+
+    // Truncate pasted content to prevent excessive token usage
+    const trimmedContent = pastedContent.length > 10000 ? pastedContent.slice(0, 10000) : pastedContent;
+
+    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ error: "OpenAI API key not configured" });
+    }
+
+    const OpenAI = (await import('openai')).default;
+    const openai = new OpenAI({ apiKey });
+    const model = process.env.ORG_INTELLIGENCE_MODEL || process.env.OPENAI_MODEL || 'gpt-4o';
+
+    const userPrompt = `## Existing Organization Profile
+Domain: ${domain}
+
+${JSON.stringify(existingProfile, null, 2)}
+
+## New Information (pasted by user)
+${trimmedContent}
+
+Strategically merge the new information into the existing profile following the merge rules. Return the complete merged profile in JSON format.`;
+
+    console.log(`[Org-Intelligence] Enhance request for ${domain} (${trimmedContent.length} chars of new content)`);
+
+    const completion = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: ENHANCE_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.3,
+      max_tokens: 4000,
+    });
+
+    const aiResult = extractJson(completion.choices[0]?.message?.content || "");
+    if (!aiResult) {
+      console.error('[Org-Intelligence] AI returned unparseable response for enhance');
+      return res.status(500).json({ error: "AI returned invalid response. Please try again." });
+    }
+
+    // Build the merged profile, preserving field metadata from existing profile
+    const mergedProfile: any = JSON.parse(JSON.stringify(existingProfile)); // deep clone
+    const changes: Array<{
+      section: string; field: string; label: string;
+      previousValue: string; newValue: string;
+      changeType: string; reason: string;
+    }> = [];
+
+    const sections = ['identity', 'offerings', 'icp', 'positioning', 'outreach'] as const;
+
+    for (const section of sections) {
+      const existingSection = (existingProfile as any)[section];
+      const aiSection = aiResult[section];
+      if (!aiSection || !existingSection) continue;
+
+      for (const [field, aiData] of Object.entries(aiSection)) {
+        const existingField = existingSection[field];
+        if (!existingField) continue;
+
+        // Enforce locked field protection server-side
+        if (existingField.locked) continue;
+
+        const newValue = (aiData as any).value;
+        const reason = (aiData as any).reason || "";
+
+        if (reason === "unchanged" || newValue === existingField.value) continue;
+
+        // Update the merged profile field
+        mergedProfile[section][field] = {
+          ...existingField,
+          value: newValue,
+          source: "AI Enhancement",
+          confidence: Math.min((existingField.confidence || 0.8) + 0.05, 1.0),
+          status: "suggested" as const,
+        };
+
+        changes.push({
+          section,
+          field,
+          label: FIELD_LABELS[section]?.[field] || field,
+          previousValue: existingField.value || "",
+          newValue,
+          changeType: existingField.value ? "updated" : "enriched",
+          reason,
+        });
+      }
+    }
+
+    const summary = aiResult.summary || `${changes.length} field(s) updated based on the new information.`;
+
+    console.log(`[Org-Intelligence] Enhance complete for ${domain}: ${changes.length} changes`);
+
+    res.json({
+      success: true,
+      mergedProfile,
+      changes,
+      summary,
+    });
+
+  } catch (error: any) {
+    console.error('[Org-Intelligence] Enhance error:', error);
+    res.status(500).json({ error: "Failed to enhance organization profile", details: error.message });
+  }
+});
+
 // ==================== PROMPT OPTIMIZATION INTELLIGENCE ====================
 
 /**

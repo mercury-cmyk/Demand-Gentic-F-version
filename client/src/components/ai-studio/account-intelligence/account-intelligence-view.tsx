@@ -18,6 +18,14 @@ import {
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // --- Types ---
 
@@ -361,6 +369,52 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
     }
   };
 
+  // === AI-Powered Enhancement State ===
+  const [enhanceDialogOpen, setEnhanceDialogOpen] = useState(false);
+  const [enhanceContent, setEnhanceContent] = useState("");
+  const [enhanceState, setEnhanceState] = useState<"input" | "processing" | "review">("input");
+  const [enhanceResult, setEnhanceResult] = useState<{
+    mergedProfile: AccountProfile;
+    changes: Array<{ section: string; field: string; label: string; previousValue: string; newValue: string; changeType: string; reason: string }>;
+    summary: string;
+  } | null>(null);
+
+  const handleEnhance = async () => {
+    if (!enhanceContent.trim() || !profile || !domain) return;
+    setEnhanceState("processing");
+
+    try {
+      const response = await apiRequest("POST", "/api/org-intelligence/enhance", {
+        domain,
+        existingProfile: profile,
+        pastedContent: enhanceContent.trim(),
+      }, { timeout: 90000 });
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+
+      setEnhanceResult({
+        mergedProfile: normalizeProfile(data.mergedProfile),
+        changes: data.changes,
+        summary: data.summary,
+      });
+      setEnhanceState("review");
+    } catch (err: any) {
+      toast({ title: "Enhancement Failed", description: err.message || "Failed to enhance profile", variant: "destructive" });
+      setEnhanceState("input");
+    }
+  };
+
+  const handleApplyEnhancement = () => {
+    if (!enhanceResult) return;
+    setProfile(enhanceResult.mergedProfile);
+    setEnhanceDialogOpen(false);
+    setEnhanceState("input");
+    setEnhanceContent("");
+    setEnhanceResult(null);
+    toast({ title: "Profile Updated", description: "AI-merged changes applied. Review and click Save Profile when ready." });
+  };
+
   // Load existing profile when organizationId changes
   useEffect(() => {
     // Skip loading if no organizationId provided
@@ -566,6 +620,10 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
              </div>
              
           <div className="flex gap-2">
+            <Button variant="outline" className="border-purple-200 text-purple-700 hover:bg-purple-50" onClick={() => setEnhanceDialogOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              AI-Powered Update
+            </Button>
             <Button variant="outline" onClick={() => setState("idle")}>
               <RotateCcw className="mr-2 h-4 w-4" />
               Analyze New
@@ -792,6 +850,140 @@ export function AccountIntelligenceView({ organizationId }: AccountIntelligenceV
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* AI-Powered Enhancement Dialog */}
+        <Dialog open={enhanceDialogOpen} onOpenChange={(open) => {
+          setEnhanceDialogOpen(open);
+          if (!open) { setEnhanceState("input"); setEnhanceResult(null); }
+        }}>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-purple-600" />
+                AI-Powered Profile Update
+              </DialogTitle>
+              <DialogDescription>
+                Paste any new information about your organization. The AI will strategically
+                merge it with your existing profile, updating fields where the new info is
+                more current or complete.
+              </DialogDescription>
+            </DialogHeader>
+
+            {enhanceState === "input" && (
+              <div className="space-y-4">
+                <Textarea
+                  placeholder="Paste updated product info, new case studies, competitor intel, positioning changes, new ICP data, pricing updates..."
+                  className="min-h-[200px] text-sm"
+                  value={enhanceContent}
+                  onChange={(e) => setEnhanceContent(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Examples: product launch announcement, updated competitor analysis,
+                  new customer testimonials, revised target personas, pricing changes, company news
+                </p>
+              </div>
+            )}
+
+            {enhanceState === "processing" && (
+              <div className="flex flex-col items-center py-12 space-y-4">
+                <div className="relative">
+                  <div className="absolute inset-0 animate-ping rounded-full bg-purple-200 opacity-30" />
+                  <div className="relative bg-purple-100 p-4 rounded-full">
+                    <Sparkles className="h-8 w-8 text-purple-600 animate-pulse" />
+                  </div>
+                </div>
+                <p className="text-sm font-medium">AI is analyzing and merging your new information...</p>
+                <p className="text-xs text-muted-foreground">This usually takes 10-20 seconds</p>
+              </div>
+            )}
+
+            {enhanceState === "review" && enhanceResult && (
+              <div className="flex-1 overflow-hidden flex flex-col space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">{enhanceResult.summary}</p>
+                  <Badge variant="secondary" className="bg-purple-50 text-purple-700 border-purple-200">
+                    {enhanceResult.changes.length} change{enhanceResult.changes.length !== 1 ? 's' : ''}
+                  </Badge>
+                </div>
+
+                {enhanceResult.changes.length === 0 ? (
+                  <div className="flex flex-col items-center py-8 space-y-2 text-center">
+                    <CheckCircle2 className="h-8 w-8 text-green-500" />
+                    <p className="text-sm font-medium">Profile is already up to date</p>
+                    <p className="text-xs text-muted-foreground">The new information didn't contain anything that improves the existing profile.</p>
+                  </div>
+                ) : (
+                  <ScrollArea className="flex-1 max-h-[350px] pr-3">
+                    <div className="space-y-3">
+                      {enhanceResult.changes.map((change, idx) => (
+                        <Card key={idx} className={cn(
+                          "border-l-4",
+                          change.changeType === "updated" ? "border-l-amber-400" : "border-l-green-400"
+                        )}>
+                          <CardContent className="p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">{change.label}</span>
+                              <Badge variant="secondary" className={cn(
+                                "text-[10px]",
+                                change.changeType === "updated"
+                                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                                  : "bg-green-50 text-green-700 border-green-200"
+                              )}>
+                                {change.changeType === "updated" ? "Updated" : "New Data"}
+                              </Badge>
+                            </div>
+                            {change.previousValue && (
+                              <div className="text-xs text-red-600/80 line-through bg-red-50 p-2 rounded">
+                                {change.previousValue.length > 200 ? change.previousValue.slice(0, 200) + '...' : change.previousValue}
+                              </div>
+                            )}
+                            <div className="text-xs text-green-700 bg-green-50 p-2 rounded">
+                              {change.newValue.length > 200 ? change.newValue.slice(0, 200) + '...' : change.newValue}
+                            </div>
+                            {change.reason && change.reason !== "unchanged" && (
+                              <p className="text-[11px] text-muted-foreground italic flex items-center gap-1">
+                                <Sparkles className="h-3 w-3" /> {change.reason}
+                              </p>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              {enhanceState === "input" && (
+                <>
+                  <Button variant="ghost" onClick={() => setEnhanceDialogOpen(false)}>Cancel</Button>
+                  <Button
+                    onClick={handleEnhance}
+                    disabled={!enhanceContent.trim()}
+                    className="bg-gradient-to-r from-purple-600 to-primary"
+                  >
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Analyze & Merge
+                  </Button>
+                </>
+              )}
+              {enhanceState === "review" && (
+                <>
+                  <Button variant="ghost" onClick={() => { setEnhanceState("input"); setEnhanceResult(null); }}>
+                    Try Again
+                  </Button>
+                  {enhanceResult && enhanceResult.changes.length > 0 && (
+                    <Button onClick={handleApplyEnhancement} className="bg-gradient-to-r from-purple-600 to-primary">
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Apply {enhanceResult.changes.length} Change{enhanceResult.changes.length !== 1 ? 's' : ''}
+                    </Button>
+                  )}
+                </>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }

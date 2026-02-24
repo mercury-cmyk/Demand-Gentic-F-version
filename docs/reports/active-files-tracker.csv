@@ -1,40 +1,40 @@
 file_path,classification,review_status,owner,decision_date,action,notes
-_cleanup-qc.ts,manual_script,pending_review,,,,
-_diagnose-rc-deep.ts,manual_script,pending_review,,,,
-_diagnose-rc-leads.ts,manual_script,pending_review,,,,
-_reject-rc-bad-leads.ts,manual_script,pending_review,,,,
-_run-prod-migrations.ts,manual_script,pending_review,,,,
-.tmp-campaign-queue-columns.cjs,manual_script,pending_review,,,,
-.tmp-campaign-queue-statuses.cjs,manual_script,pending_review,,,,
-.tmp-check-campaign-status.cjs,manual_script,pending_review,,,,
-.tmp-check-pm-approve-ids.cjs,manual_script,pending_review,,,,
-.tmp-clear-stale-stall-reason.cjs,manual_script,pending_review,,,,
-.tmp-columns-check.cjs,manual_script,pending_review,,,,
-.tmp-contacts-columns.cjs,manual_script,pending_review,,,,
-.tmp-force-publish-27.cjs,manual_script,pending_review,,,,
-.tmp-pm-override-preview-27.cjs,manual_script,pending_review,,,,
-.tmp-pm-queue-check.cjs,manual_script,pending_review,,,,
-.tmp-ringcentral-stall-check.ts,manual_script,pending_review,,,,
-.tmp-ukef-attempt-evidence.cjs,manual_script,pending_review,,,,
-.tmp-ukef-attempt-summary.cjs,manual_script,pending_review,,,,
-.tmp-ukef-campaign-confirm.cjs,manual_script,pending_review,,,,
-.tmp-ukef-cleanup-dryrun.cjs,manual_script,pending_review,,,,
-.tmp-ukef-diagnostics.cjs,manual_script,pending_review,,,,
-.tmp-ukef-failed-starts.cjs,manual_script,pending_review,,,,
-.tmp-ukef-final-health.cjs,manual_script,pending_review,,,,
-.tmp-ukef-phone-quality.cjs,manual_script,pending_review,,,,
-.tmp-ukef-placeholder-cleanup.cjs,manual_script,pending_review,,,,
-.tmp-ukef-post-cleanup-health.cjs,manual_script,pending_review,,,,
-.tmp-ukef-queue-markers.cjs,manual_script,pending_review,,,,
-.tmp-ukef-queued-placeholder-check.cjs,manual_script,pending_review,,,,
-.tmp-ukef-runs.cjs,manual_script,pending_review,,,,
-.tmp-ukef-schema-safe-diagnostics.cjs,manual_script,pending_review,,,,
-.tmp-ukef-second-pass-cleanup.cjs,manual_script,pending_review,,,,
-.tmp-ukef-second-pass-dryrun.cjs,manual_script,pending_review,,,,
-.tmp-ukef-third-pass-cleanup.cjs,manual_script,pending_review,,,,
-.tmp-ukef-uk-whitelist-proof.cjs,manual_script,pending_review,,,,
-.tmp-ukef-whitelist-count.cjs,manual_script,pending_review,,,,
-.tmp-verify-published-27.cjs,manual_script,pending_review,,,,
+archive/manual_scripts/2026-02-24/_cleanup-qc.ts,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/_diagnose-rc-deep.ts,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/_diagnose-rc-leads.ts,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/_reject-rc-bad-leads.ts,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/_run-prod-migrations.ts,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-campaign-queue-columns.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-campaign-queue-statuses.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-check-campaign-status.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-check-pm-approve-ids.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-clear-stale-stall-reason.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-columns-check.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-contacts-columns.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-force-publish-27.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-pm-override-preview-27.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-pm-queue-check.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ringcentral-stall-check.ts,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-attempt-evidence.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-attempt-summary.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-campaign-confirm.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-cleanup-dryrun.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-diagnostics.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-failed-starts.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-final-health.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-phone-quality.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-placeholder-cleanup.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-post-cleanup-health.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-queue-markers.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-queued-placeholder-check.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-runs.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-schema-safe-diagnostics.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-second-pass-cleanup.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-second-pass-dryrun.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-third-pass-cleanup.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-uk-whitelist-proof.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-whitelist-count.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-verify-published-27.cjs,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
 add-approval-notes-migration.ts,manual_script,pending_review,,,,
 add-call-flow-tables-migration.ts,manual_script,pending_review,,,,
 add-callback-phone.ts,manual_script,pending_review,,,,
@@ -1798,3 +1798,8 @@ verify-fix.ts,manual_script,pending_review,,,,
 view-lead-transcripts.ts,manual_script,pending_review,,,,
 view-leads-with-transcripts.ts,manual_script,pending_review,,,,
 virtual-agent-creation-agent.ts,manual_script,pending_review,,,,
+archive/manual_scripts/2026-02-24/.tmp-b64-gen.txt,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-backfill-gcs-qa-result.json,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-placeholder-cleanup-result.json,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-second-pass-cleanup-result.json,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.
+archive/manual_scripts/2026-02-24/.tmp-ukef-third-pass-cleanup-result.json,manual_script,reviewed,code_cleanup,2026-02-24,archive_keep_history,Moved from repository root to archive/manual_scripts/2026-02-24; no deletion.

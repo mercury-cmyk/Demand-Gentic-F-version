@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { AccountIntelligenceView } from "@/components/ai-studio/account-intelligence/account-intelligence-view";
 import { ICPPositioningTab } from "@/components/ai-studio/org-intelligence/tabs/icp-positioning";
 import { MessagingProofTab } from "@/components/ai-studio/org-intelligence/tabs/messaging-proof";
@@ -21,7 +20,6 @@ export default function OrganizationIntelligencePage() {
             The foundation layer for all AI behavior - teaching the AI how your organization thinks and operates.
           </p>
         </div>
-        <Button>Update Knowledge Base</Button>
       </div>
 
       <OrganizationSelector selectedOrgId={selectedOrgId} onOrgChange={setSelectedOrgId} />
