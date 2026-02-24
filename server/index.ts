@@ -176,6 +176,9 @@ app.use((req, res, next) => {
     });
   });
 
+  // Redirect /favicon.ico to the logo
+  app.get('/favicon.ico', (_req, res) => res.redirect(301, '/demangent-logo.png'));
+
   // CRITICAL: Register routes IMMEDIATELY after listening so health check endpoint works
   // This must happen before any potentially slow initialization
   registerRoutes(app);

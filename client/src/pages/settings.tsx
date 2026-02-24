@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Settings, User, Bell, Shield, Mail, Phone, Database, Plus, Pencil, Trash2, Play, Clock, Link as LinkIcon, CheckCircle2, AlertCircle } from "lucide-react";
+import { Settings, User, Bell, Shield, Mail, Phone, Database, Plus, Pencil, Trash2, Play, Clock, Link as LinkIcon, CheckCircle2, AlertCircle, Globe, Loader2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -758,6 +758,8 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          <MailgunWebhooksCard />
         </TabsContent>
 
         <TabsContent value="security" className="space-y-4 mt-6">
@@ -977,6 +979,146 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// Mailgun Webhooks Management Component
+function MailgunWebhooksCard() {
+  const { toast } = useToast();
+
+  const { data: webhookData, isLoading, refetch } = useQuery<{
+    domain: string;
+    currentEnvUrl: string | null;
+    productionBaseUrl: string | null;
+    webhooks: Record<string, { urls: string[] } | string>;
+  }>({
+    queryKey: ['/api/admin/mailgun/webhooks'],
+    retry: false,
+  });
+
+  const switchModeMutation = useMutation({
+    mutationFn: async (mode: 'dev' | 'production') => {
+      const response = await apiRequest('POST', '/api/admin/mailgun/register-webhooks', { mode });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Webhook URL switched",
+        description: `Now using ${data.mode} URL: ${data.webhookUrl}`,
+      });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Switch failed",
+        description: error.message,
+      });
+    },
+  });
+
+  const currentMode = webhookData?.currentEnvUrl?.includes('ngrok') ? 'dev' : 'production';
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Mailgun Webhooks
+            </CardTitle>
+            <CardDescription>
+              Manage webhook URLs for email event tracking (delivered, opened, clicked, bounced, etc.)
+            </CardDescription>
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => refetch()} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : webhookData ? (
+          <>
+            {/* Current Mode & URL */}
+            <div className="flex items-center justify-between p-4 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <Globe className="h-8 w-8 text-muted-foreground" />
+                <div>
+                  <h4 className="font-medium">Domain: {webhookData.domain || 'Not configured'}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Active URL: {webhookData.currentEnvUrl || 'Not set'}
+                  </p>
+                </div>
+              </div>
+              <Badge variant={currentMode === 'dev' ? 'secondary' : 'default'}>
+                {currentMode === 'dev' ? 'Dev (ngrok)' : 'Production'}
+              </Badge>
+            </div>
+
+            {/* Switch Buttons */}
+            <div className="flex gap-2">
+              <Button
+                variant={currentMode === 'dev' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => switchModeMutation.mutate('dev')}
+                disabled={switchModeMutation.isPending || currentMode === 'dev'}
+              >
+                {switchModeMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+                Switch to Dev (ngrok)
+              </Button>
+              <Button
+                variant={currentMode === 'production' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => switchModeMutation.mutate('production')}
+                disabled={switchModeMutation.isPending || currentMode === 'production'}
+              >
+                {switchModeMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+                Switch to Production
+              </Button>
+            </div>
+
+            {/* Registered Webhooks */}
+            {webhookData.webhooks && typeof webhookData.webhooks === 'object' && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-muted-foreground">Registered Webhooks in Mailgun</h4>
+                <div className="border rounded-lg divide-y">
+                  {Object.entries(webhookData.webhooks).map(([event, config]) => {
+                    const urls = typeof config === 'object' && config !== null && 'urls' in config
+                      ? (config as { urls: string[] }).urls
+                      : [String(config)];
+                    return (
+                      <div key={event} className="flex items-center justify-between px-4 py-2 text-sm">
+                        <span className="font-mono">{event}</span>
+                        <div className="flex items-center gap-2">
+                          {urls.map((url: string, i: number) => (
+                            <Badge key={i} variant={url.includes('ngrok') ? 'secondary' : 'outline'} className="text-xs truncate max-w-[300px]">
+                              {url}
+                            </Badge>
+                          ))}
+                          {urls.length === 0 && (
+                            <span className="text-muted-foreground">Not configured</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-center py-6 text-muted-foreground">
+            <p>Unable to fetch Mailgun webhook configuration.</p>
+            <p className="text-xs mt-1">Check that MAILGUN_API_KEY and MAILGUN_DOMAIN are configured.</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
