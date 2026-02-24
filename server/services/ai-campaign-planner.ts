@@ -5,7 +5,7 @@
  * Uses Vertex AI reason() for deep strategic thinking.
  */
 
-import { reason } from "./vertex-ai/vertex-client";
+import { reason, generateJSON } from "./vertex-ai/vertex-client";
 import {
   wrapPromptWithOI,
   getSuperOrgOIContext,
@@ -384,12 +384,38 @@ Return ONLY a valid JSON object matching this exact schema (no markdown, no code
   }
 }`;
 
-  // 4. Wrap with OI and call reason() for deep thinking
+  // 4. Wrap with OI and call reason() for deep thinking, with fallback to generateJSON on rate limit
   const enrichedPrompt = await wrapPromptWithOI(planningPrompt);
-  const { thinking, answer } = await reason(enrichedPrompt, {
-    temperature: 0.4,
-    maxTokens: 16384,
-  });
+
+  let thinking = '';
+  let answer = '';
+  let modelUsed = 'gemini-3-pro-preview';
+
+  try {
+    const result = await reason(enrichedPrompt, {
+      temperature: 0.4,
+      maxTokens: 16384,
+    });
+    thinking = result.thinking;
+    answer = result.answer;
+  } catch (reasonError: any) {
+    // Fallback to generateJSON (gemini-flash) on rate limit / 429
+    const code = Number(reasonError?.code ?? reasonError?.status ?? reasonError?.statusCode ?? 0);
+    const msg = String(reasonError?.message || '').toLowerCase();
+    const isRateLimit = code === 429 || msg.includes('rate') || msg.includes('resource_exhausted') || msg.includes('quota');
+
+    if (isRateLimit) {
+      console.warn('[CampaignPlanner] reason() rate-limited, falling back to generateJSON (gemini-flash)');
+      const fallbackPlan = await generateJSON<CampaignPlanOutput>(enrichedPrompt, {
+        temperature: 0.4,
+        maxTokens: 16384,
+      });
+      modelUsed = 'gemini-2.0-flash-001 (fallback)';
+      const durationMs = Date.now() - startMs;
+      return { plan: fallbackPlan, thinking: '[fallback: rate-limited, used gemini-flash]', oiSummary, model: modelUsed, durationMs };
+    }
+    throw reasonError;
+  }
 
   // 5. Parse the JSON from the AI response
   let plan: CampaignPlanOutput;
@@ -416,7 +442,7 @@ Return ONLY a valid JSON object matching this exact schema (no markdown, no code
     plan,
     thinking,
     oiSummary,
-    model: 'gemini-3-pro-preview',
+    model: modelUsed,
     durationMs,
   };
 }

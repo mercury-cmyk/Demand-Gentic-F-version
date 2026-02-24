@@ -94,10 +94,14 @@ router.post('/generate-plan', async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid input', errors: error.errors });
     }
 
-    res.status(500).json({
+    const code = Number(error?.code ?? error?.status ?? error?.statusCode ?? 0);
+    const msg = String(error?.message || '').toLowerCase();
+    const isRateLimit = code === 429 || msg.includes('rate') || msg.includes('cooldown') || msg.includes('resource_exhausted');
+
+    res.status(isRateLimit ? 429 : 500).json({
       success: false,
-      message: error?.message?.includes('cooldown')
-        ? 'AI model is cooling down. Please try again in a moment.'
+      message: isRateLimit
+        ? 'AI model is temporarily rate-limited. Please wait a minute and try again.'
         : 'Failed to generate campaign plan. Please try again.',
     });
   }
