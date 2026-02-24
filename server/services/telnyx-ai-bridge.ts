@@ -23,11 +23,12 @@ import { dialerCallAttempts, contacts, accounts, leads } from "@shared/schema";
 import { eq } from "drizzle-orm";
 // Use dynamic import to avoid async module initialization issue with voice-dialer
 // import { setAmdResultForSession } from "./voice-dialer";
-import { TextToSpeechClient } from "@google-cloud/text-to-speech";
+import { synthesizeSpeechRateLimited } from "./tts-rate-limiter";
 import { normalizeToE164, isValidE164 } from "../lib/phone-utils";
 import { processDisposition, createFallbackLead } from "./disposition-engine";
 import { getGoogleVoiceConfig } from "./voice-constants";
 import { handleCallCompleted } from "./number-pool-integration";
+import { logger } from "./production-logger";
 
 
 export interface TelnyxCallEvent {
@@ -217,7 +218,7 @@ export class TelnyxAiBridge extends EventEmitter {
       throw new Error(`invalid_phone_e164:${phoneNumber}`);
     }
 
-    console.log(`[TelnyxAiBridge] Formatted phone: ${phoneNumber} -> ${formatted}`);
+    logger.debug(`[TelnyxAiBridge] Formatted phone: ${phoneNumber} -> ${formatted}`);
     return formatted;
   }
   
@@ -406,11 +407,11 @@ export class TelnyxAiBridge extends EventEmitter {
   // Also releases the phone number from per-number tracking
   private releaseSlot(callId: string, call: ActiveAiCall | undefined, reason: string): void {
     if (!call) {
-      console.log(`[TelnyxAiBridge] 🔓 Cannot release slot for ${callId} - call not found`);
+      logger.debug(`[TelnyxAiBridge] 🔓 Cannot release slot for ${callId} - call not found`);
       return;
     }
     if (call.slotReleased) {
-      console.log(`[TelnyxAiBridge] 🔓 Slot already released for ${callId}, skipping`);
+      logger.debug(`[TelnyxAiBridge] 🔓 Slot already released for ${callId}, skipping`);
       return;
     }
     call.slotReleased = true;
@@ -419,10 +420,10 @@ export class TelnyxAiBridge extends EventEmitter {
     // Release the phone number from per-number tracking
     if (call.dialedNumber) {
       this.activePhoneNumbers.delete(call.dialedNumber);
-      console.log(`[TelnyxAiBridge] 🔓 Released number ${call.dialedNumber} (${this.activePhoneNumbers.size} numbers still active)`);
+      logger.debug(`[TelnyxAiBridge] 🔓 Released number ${call.dialedNumber} (${this.activePhoneNumbers.size} numbers still active)`);
     }
     
-    console.log(`[TelnyxAiBridge] 🔓 Released slot (${reason}) for ${callId} - available: ${this.semaphore.available}`);
+    logger.debug(`[TelnyxAiBridge] 🔓 Released slot (${reason}) for ${callId} - available: ${this.semaphore.available}`);
   }
   
   // Release phone number tracking without releasing semaphore slot
@@ -430,7 +431,7 @@ export class TelnyxAiBridge extends EventEmitter {
   private releasePhoneNumber(phoneNumber: string, reason: string): void {
     if (this.activePhoneNumbers.has(phoneNumber)) {
       this.activePhoneNumbers.delete(phoneNumber);
-      console.log(`[TelnyxAiBridge] 🔓 Released number ${phoneNumber} (${reason}) - ${this.activePhoneNumbers.size} numbers still active`);
+      logger.debug(`[TelnyxAiBridge] 🔓 Released number ${phoneNumber} (${reason}) - ${this.activePhoneNumbers.size} numbers still active`);
     }
   }
 
@@ -526,7 +527,7 @@ export class TelnyxAiBridge extends EventEmitter {
     // This prevents calling the same number while a call is already in progress.
     // Important for: call quality, compliance, and avoiding customer frustration.
     if (this.activePhoneNumbers.has(normalizedPhoneNumber)) {
-      console.log(`[TelnyxAiBridge] 🚫 BLOCKED: Number ${normalizedPhoneNumber} already has an active call`);
+      logger.debug(`[TelnyxAiBridge] 🚫 BLOCKED: Number ${normalizedPhoneNumber} already has an active call`);
       throw new Error(`number_busy:${normalizedPhoneNumber} - This number already has an active call in progress`);
     }
 
@@ -535,26 +536,26 @@ export class TelnyxAiBridge extends EventEmitter {
     await this.semaphore.acquire();
     const waitedMs = Date.now() - waitStart;
     if (waitedMs > 0) {
-      console.log(`[TelnyxAiBridge] ⏳ Queued call for ${normalizedPhoneNumber} (${waitedMs}ms wait, max ${this.MAX_CONCURRENT_CALLS})`);
+      logger.debug(`[TelnyxAiBridge] ⏳ Queued call for ${normalizedPhoneNumber} (${waitedMs}ms wait, max ${this.MAX_CONCURRENT_CALLS})`);
     }
 
     // Re-check per-number lock after acquiring semaphore (another call may have started)
     if (this.activePhoneNumbers.has(normalizedPhoneNumber)) {
       this.semaphore.release();
-      console.log(`[TelnyxAiBridge] 🚫 BLOCKED (post-semaphore): Number ${normalizedPhoneNumber} already has an active call`);
+      logger.debug(`[TelnyxAiBridge] 🚫 BLOCKED (post-semaphore): Number ${normalizedPhoneNumber} already has an active call`);
       throw new Error(`number_busy:${normalizedPhoneNumber} - This number already has an active call in progress`);
     }
 
     // Mark this number as in-use BEFORE making the call
     this.activePhoneNumbers.add(normalizedPhoneNumber);
-    console.log(`[TelnyxAiBridge] 🔒 Locked number ${normalizedPhoneNumber} (${this.activePhoneNumbers.size} numbers active)`);
+    logger.debug(`[TelnyxAiBridge] 🔒 Locked number ${normalizedPhoneNumber} (${this.activePhoneNumbers.size} numbers active)`);
 
     try {
       // Use normalized phone numbers
       phoneNumber = normalizedPhoneNumber;
       fromNumber = normalizedFromNumber;
 
-      console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
+      logger.debug(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
       
       const contactFullName = [context.contactFirstName, context.contactLastName]
         .filter(Boolean)
@@ -919,7 +920,7 @@ export class TelnyxAiBridge extends EventEmitter {
 
     const callId = this.getCallIdByControlId(callControlId);
 
-    console.log(`[TelnyxAiBridge] Webhook event: ${event_type} for call ${callId}`);
+    logger.debug(`[TelnyxAiBridge] Webhook event: ${event_type} for call ${callId}`);
 
     switch (event_type) {
       case "call.initiated":
@@ -938,11 +939,11 @@ export class TelnyxAiBridge extends EventEmitter {
         break;
 
       case "streaming.started":
-        console.log(`[TelnyxAiBridge] Media streaming started for ${callId}`);
+        logger.debug(`[TelnyxAiBridge] Media streaming started for ${callId}`);
         break;
 
       case "streaming.stopped":
-        console.log(`[TelnyxAiBridge] Media streaming stopped for ${callId}`);
+        logger.debug(`[TelnyxAiBridge] Media streaming stopped for ${callId}`);
         break;
 
       case "call.transcription":
@@ -951,11 +952,11 @@ export class TelnyxAiBridge extends EventEmitter {
         break;
 
       case "call.transcription.stopped":
-        console.log(`[TelnyxAiBridge] Transcription stopped for ${callId}`);
+        logger.debug(`[TelnyxAiBridge] Transcription stopped for ${callId}`);
         break;
 
       default:
-        console.log(`[TelnyxAiBridge] Unhandled event type: ${event_type}`);
+        logger.debug(`[TelnyxAiBridge] Unhandled event type: ${event_type}`);
     }
   }
 
@@ -966,7 +967,7 @@ export class TelnyxAiBridge extends EventEmitter {
     const { transcript, is_final, confidence } = transcriptionData;
     if (!is_final || !transcript?.trim()) return;
 
-    console.log(`[TelnyxAiBridge] 📝 Telnyx transcription for ${callId}: "${transcript.substring(0, 50)}..." (confidence: ${(confidence * 100).toFixed(0)}%)`);
+    logger.sampled(`[TelnyxAiBridge]`, 10, `📝 Telnyx transcription for ${callId}: "${transcript.substring(0, 50)}..." (confidence: ${(confidence * 100).toFixed(0)}%)`);
 
     // Store in Telnyx transcription accumulator
     try {
@@ -1276,40 +1277,24 @@ export class TelnyxAiBridge extends EventEmitter {
     } catch (error: any) {
       // If call has ended, don't bother with fallbacks
       if (error?.message?.includes('90018') || error?.message?.includes('already ended')) {
-        console.log(`[TelnyxAiBridge] Call ${callControlId} ended during TTS - skipping fallbacks`);
+        logger.debug(`[TelnyxAiBridge] Call ${callControlId} ended during TTS - skipping fallbacks`);
         return;
       }
       console.warn(`[TelnyxAiBridge] Google TTS failed, falling back to Telnyx TTS (OpenAI disabled)...`, error);
     }
 
     // 2. Fallback to Telnyx basic TTS (Last Resort)
-    console.log(`[TelnyxAiBridge] Using Telnyx basic TTS (fallback)`);
+    logger.debug(`[TelnyxAiBridge] Using Telnyx basic TTS (fallback)`);
     await this.speakWithTelnyxTTS(callControlId, text, voice);
   }
 
   private async speakWithGoogle(callControlId: string, text: string, voice: string): Promise<void> {
-    const ttsClient = new TextToSpeechClient();
-    
     // Use centralized voice configuration for consistent mapping
     const voiceConfig = getGoogleVoiceConfig(voice);
     const googleVoice = voiceConfig.googleVoiceName;
 
-    console.log(`[TelnyxAiBridge] Generating natural speech with Google TTS (voice: ${googleVoice} from ${voice} - ${voiceConfig.description})`);
-    
-    const request = {
-      input: { text },
-      voice: { languageCode: "en-US", name: googleVoice },
-      audioConfig: { audioEncoding: "MP3" as const },
-    };
-
-    const [response] = await ttsClient.synthesizeSpeech(request);
-    
-    if (!response.audioContent) {
-        throw new Error("Google TTS produced no audio content");
-    }
-
-    // Google Cloud returns a Buffer or Uint8Array
-    const audioBuffer = Buffer.from(response.audioContent);
+    // Use rate-limited + cached TTS service (singleton client, request queue, backoff)
+    const audioBuffer = await synthesizeSpeechRateLimited(text, googleVoice, "en-US", "MP3");
     const audioId = `google-audio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.mp3`;
     const s3Key = `ai-call-audio/${audioId}`;
     
@@ -1317,8 +1302,7 @@ export class TelnyxAiBridge extends EventEmitter {
     
     // valid for 5 mins
     const audioUrl = await getPresignedDownloadUrl(s3Key, 300);
-    // Log simpler URL for cleanliness
-    console.log(`[TelnyxAiBridge] Playing Google TTS audio from S3: ${audioUrl.split("?")[0]}... (${audioBuffer.byteLength} bytes)`);
+    logger.debug(`[TelnyxAiBridge] Playing Google TTS audio from S3: ${audioUrl.split("?")[0]}... (${audioBuffer.byteLength} bytes)`);
 
     // Telnyx Playback
     const telnyxResponse = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/playback_start`, {

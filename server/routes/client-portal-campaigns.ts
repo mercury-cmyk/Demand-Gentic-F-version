@@ -1191,9 +1191,8 @@ router.post('/voice-preview', async (req: Request, res: Response) => {
       return res.send(Buffer.from(audioBuffer));
     }
 
-    // Default: Google Cloud TTS
-    const { TextToSpeechClient } = await import('@google-cloud/text-to-speech');
-    const client = new TextToSpeechClient();
+    // Default: Google Cloud TTS (via rate-limited service)
+    const { synthesizeSpeechRateLimited } = await import('../services/tts-rate-limiter');
 
     const voiceMap: Record<string, string> = {
       Puck: 'en-US-Neural2-A',
@@ -1214,23 +1213,11 @@ router.post('/voice-preview', async (req: Request, res: Response) => {
     };
 
     const targetVoice = voiceMap[String(voiceId)] || String(voiceId);
-    const isNeural = targetVoice.includes('Neural2');
 
-    const [ttsResponse] = await client.synthesizeSpeech({
-      input: { text: previewText },
-      voice: {
-        languageCode: isNeural
-          ? targetVoice.startsWith('en-GB')
-            ? 'en-GB'
-            : 'en-US'
-          : 'en-US',
-        name: targetVoice,
-      },
-      audioConfig: { audioEncoding: 'MP3' as const },
-    });
+    const audioBuffer = await synthesizeSpeechRateLimited(previewText, targetVoice, 'en-US', 'MP3');
 
     res.set('Content-Type', 'audio/mpeg');
-    res.send(ttsResponse.audioContent);
+    res.send(audioBuffer);
   } catch (error) {
     console.error('[CLIENT CAMPAIGNS] Voice preview error:', error);
     res.status(500).json({ message: 'Failed to generate voice preview' });

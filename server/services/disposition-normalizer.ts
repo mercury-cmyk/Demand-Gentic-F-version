@@ -89,7 +89,7 @@ export function normalizeDisposition(rawDisposition: string | null | undefined):
   // Invalid data - wrong/disconnected number
   if ([
     'wrong_number', 'invalid', 'invalid_data', 'disconnected', 'not_in_service',
-    'person_left_company', 'no_longer_there'
+    'person_left_company', 'no_longer_there', 'wrong_contact', 'wrong_person'
   ].includes(d)) {
     return 'invalid_data';
   }
@@ -112,7 +112,7 @@ export function normalizeDisposition(rawDisposition: string | null | undefined):
   // This includes: completed (without outcome), connected (disconnected early), hung_up (early), etc.
   if ([
     'completed', 'connected', 'hung_up', 'pitch',
-    'busy', 'no_answer', 'timeout', 'cleaned_up',
+    'busy', 'no_answer', 'no_answer_hangup', 'timeout', 'cleaned_up',
     'cleaned_up___stuck_connecting', 'stuck_connecting'
   ].includes(d)) {
     return 'no_answer';

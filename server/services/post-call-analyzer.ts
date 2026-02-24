@@ -513,6 +513,9 @@ export async function runPostCallAnalysis(
   const startTime = Date.now();
   console.log(`${LOG_PREFIX} ▶️ Starting post-call analysis for session ${callSessionId}`);
 
+  const transcriptionMetricId = options?.callAttemptId || callSessionId;
+  let transcriptionMetricSource: "realtime_native" | "fallback" | "none" | null = null;
+
   const result: PostCallAnalysisResult = {
     success: false,
     callSessionId,
@@ -595,6 +598,7 @@ export async function runPostCallAnalysis(
           text: options.geminiTranscript,
           utterances: normalizedUtterances,
         };
+        transcriptionMetricSource = "realtime_native";
       }
     }
 
@@ -726,6 +730,7 @@ export async function runPostCallAnalysis(
     if (!structuredTranscript || structuredTranscript.text.length < 10) {
       result.error = "No Deepgram post-call transcript available yet; recording may still be uploading. Will retry via background job.";
       console.warn(`${LOG_PREFIX} ${result.error}`);
+      recordTranscriptionResult(callSessionId, "none", transcriptionMetricId);
       return result;
     }
 
@@ -765,7 +770,10 @@ export async function runPostCallAnalysis(
         .where(eq(callSessions.id, callSessionId));
     });
 
-    recordTranscriptionResult(callSessionId, "fallback", options?.callAttemptId || callSessionId);
+    if (!transcriptionMetricSource) {
+      transcriptionMetricSource = "fallback";
+    }
+    recordTranscriptionResult(callSessionId, transcriptionMetricSource, transcriptionMetricId);
 
     // 7. Run conversation quality analysis
     try {
@@ -977,6 +985,9 @@ export async function runPostCallAnalysis(
   } catch (error: any) {
     result.error = error.message;
     console.error(`${LOG_PREFIX} ❌ Post-call analysis failed for ${callSessionId}:`, error);
+    if (!transcriptionMetricSource) {
+      recordTranscriptionResult(callSessionId, "none", transcriptionMetricId);
+    }
     return result;
   }
 }

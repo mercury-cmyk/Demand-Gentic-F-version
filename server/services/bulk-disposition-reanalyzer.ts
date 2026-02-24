@@ -775,7 +775,7 @@ async function applyDispositionChange(
       await db.insert(activityLog).values({
         entityType: "call_session",
         entityId: session.id,
-        eventType: "disposition_reanalysis" as any,
+        eventType: "disposition_saved",
         payload: {
           oldDisposition,
           newDisposition,
@@ -872,7 +872,7 @@ export async function overrideSingleDisposition(
       await db.insert(activityLog).values({
         entityType: "call_session",
         entityId: callSessionId,
-        eventType: "disposition_manual_override" as any,
+        eventType: "disposition_saved",
         payload: {
           oldDisposition,
           newDisposition,

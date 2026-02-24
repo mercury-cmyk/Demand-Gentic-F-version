@@ -11,9 +11,9 @@
  * - Unified mapping to Google Cloud TTS for high quality
  */
 
-import { TextToSpeechClient, protos } from '@google-cloud/text-to-speech';
 import OpenAI from 'openai';
 import { VOICE_MAPPING, getGoogleVoiceConfig } from './voice-constants';
+import { synthesizeSpeechRateLimited, getTTSClient } from './tts-rate-limiter';
 
 const LOG_PREFIX = '[VoiceDiscovery]';
 
@@ -72,15 +72,7 @@ const GEMINI_VOICES_FALLBACK: VoiceInfo[] = Object.entries(VOICE_MAPPING)
 let voiceCache: { voices: VoicesByProvider; timestamp: number } | null = null;
 
 // ==================== LAZY CLIENT INITIALIZATION ====================
-
-let ttsClient: TextToSpeechClient | null = null;
-
-function getTTSClient(): TextToSpeechClient {
-  if (!ttsClient) {
-    ttsClient = new TextToSpeechClient();
-  }
-  return ttsClient;
-}
+// TTS client is now managed by tts-rate-limiter.ts (singleton)
 
 // ==================== MAIN FUNCTIONS ====================
 
@@ -150,28 +142,12 @@ export async function generateTTSAudio(
   console.log(`${LOG_PREFIX} Voice mapping: ${voiceId} -> ${googleVoiceName} (${voiceConfig.displayName}, ${voiceConfig.gender})`);
 
   try {
-    const client = getTTSClient();
-    const [response] = await client.synthesizeSpeech({
-      input: { text },
-      voice: {
-        name: googleVoiceName,
-        languageCode: 'en-US',
-      },
-      audioConfig: {
-        audioEncoding: protos.google.cloud.texttospeech.v1.AudioEncoding.MP3,
-        speakingRate: 1.0,
-        pitch: 0,
-      },
-    });
-
-    if (!response.audioContent) {
-      throw new Error('No audio content returned from Google TTS');
-    }
-
-    console.log(`${LOG_PREFIX} Generated Google TTS audio: ${(response.audioContent as Buffer).length} bytes (Voice: ${googleVoiceName})`);
-    return Buffer.from(response.audioContent as Uint8Array);
+    // Use rate-limited + cached TTS service (prevents quota exceeded errors)
+    const buffer = await synthesizeSpeechRateLimited(text, googleVoiceName, 'en-US', 'MP3');
+    console.log(`${LOG_PREFIX} Generated TTS audio: ${buffer.length} bytes (Voice: ${googleVoiceName})`);
+    return buffer;
   } catch (error) {
-    console.error(`${LOG_PREFIX} Google TTS generation failed for ${voiceId}:`, error);
+    console.error(`${LOG_PREFIX} TTS generation failed for ${voiceId}:`, error);
     throw new Error(`Failed to generate TTS audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
@@ -200,9 +176,7 @@ export async function checkVoiceServiceHealth(): Promise<{
   let googleTTSHealthy = false;
   
   try {
-    // Lightweight check
-    // If getting full list is too heavy/slow, just assuming client instantiation is enough 
-    // or call a cheaper method if available. But listing voices is standard check.
+    // Lightweight check using singleton client from rate limiter
     const client = getTTSClient();
     await client.listVoices({ languageCode: 'en-US' });
     googleTTSHealthy = true;

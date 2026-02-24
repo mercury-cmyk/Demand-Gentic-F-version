@@ -13,7 +13,7 @@ import { db } from "../db";
 import { leads, activityLog, callSessions } from "@shared/schema";
 import { eq, and, isNotNull, lt, sql } from "drizzle-orm";
 import { SpeechClient, protos } from "@google-cloud/speech";
-import { getPresignedDownloadUrl, isS3Configured, BUCKET } from "../lib/storage";
+import { getPresignedDownloadUrl, isS3Configured, s3ObjectExists, BUCKET } from "../lib/storage";
 
 // Lazy initialization of Speech client
 let _speechClient: SpeechClient | null = null;
@@ -109,7 +109,68 @@ function resolveGcsUriForTranscription(
   audioUrl: string,
   options?: TranscriptionAudioSourceOptions
 ): string | null {
-  return toGcsUri(options?.recordingS3Key) || toGcsUri(audioUrl);
+  // Prefer the actual audio URL first. In retry scenarios this may already point
+  // to a corrected key, while options.recordingS3Key can be stale.
+  return toGcsUri(audioUrl) || toGcsUri(options?.recordingS3Key);
+}
+
+function toggleAudioExtension(key: string): string[] {
+  const trimmed = key.trim().replace(/^\/+/, "");
+  if (!trimmed) return [];
+  if (trimmed.toLowerCase().endsWith(".wav")) {
+    return [trimmed.slice(0, -4) + ".mp3"];
+  }
+  if (trimmed.toLowerCase().endsWith(".mp3")) {
+    return [trimmed.slice(0, -4) + ".wav"];
+  }
+  return [trimmed + ".mp3", trimmed + ".wav"];
+}
+
+function buildRecordingKeyCandidates(recordingS3Key: string | null | undefined): string[] {
+  if (!recordingS3Key) return [];
+  const base = recordingS3Key.trim().replace(/^\/+/, "");
+  if (!base) return [];
+
+  const candidates = new Set<string>();
+  const add = (value: string | null | undefined): void => {
+    const normalized = (value || "").trim().replace(/^\/+/, "");
+    if (!normalized) return;
+    candidates.add(normalized);
+    for (const variant of toggleAudioExtension(normalized)) {
+      candidates.add(variant);
+    }
+  };
+
+  add(base);
+
+  const lastSegment = base.split("/").pop() || base;
+  add(lastSegment);
+  add(`recordings/${lastSegment}`);
+
+  if (!base.startsWith("recordings/") && !base.startsWith("call-recordings/")) {
+    add(`recordings/${base}`);
+  }
+
+  return Array.from(candidates);
+}
+
+async function resolveExistingRecordingS3Key(
+  recordingS3Key: string | null | undefined
+): Promise<string | null> {
+  if (!recordingS3Key || !isS3Configured()) return recordingS3Key || null;
+
+  const candidates = buildRecordingKeyCandidates(recordingS3Key);
+  for (const candidate of candidates) {
+    try {
+      if (await s3ObjectExists(candidate)) {
+        return candidate;
+      }
+    } catch (error: any) {
+      console.warn(`[Transcription] Failed object-exists check for key ${candidate}: ${error?.message || error}`);
+    }
+  }
+
+  return null;
 }
 
 async function getPreferredTranscriptionAudioUrl(
@@ -117,10 +178,18 @@ async function getPreferredTranscriptionAudioUrl(
   recordingS3Key: string | null | undefined
 ): Promise<string | null> {
   if (recordingS3Key) {
-    try {
-      return await getPresignedDownloadUrl(recordingS3Key, TRANSCRIPTION_URL_TTL_SECONDS);
-    } catch (error: any) {
-      console.warn(`[Transcription] Failed to generate presigned URL from recordingS3Key ${recordingS3Key}: ${error?.message || error}`);
+    const resolvedKey = await resolveExistingRecordingS3Key(recordingS3Key);
+    if (resolvedKey) {
+      if (resolvedKey !== recordingS3Key) {
+        console.warn(`[Transcription] recordingS3Key not found, using fallback key: ${recordingS3Key} -> ${resolvedKey}`);
+      }
+      try {
+        return await getPresignedDownloadUrl(resolvedKey, TRANSCRIPTION_URL_TTL_SECONDS);
+      } catch (error: any) {
+        console.warn(`[Transcription] Failed to generate presigned URL from recordingS3Key ${resolvedKey}: ${error?.message || error}`);
+      }
+    } else {
+      console.warn(`[Transcription] recordingS3Key not found in bucket (and no fallback found): ${recordingS3Key}`);
     }
   }
 
@@ -195,24 +264,33 @@ async function downloadAudio(
     let response = await fetchAudio(audioUrl);
 
     // If this is an expired/signed URL, try to refresh via storage (preferred) or Telnyx call id.
-    if ((response.status === 401 || response.status === 403) && (options?.recordingS3Key || options?.telnyxCallId)) {
+    if ((response.status === 401 || response.status === 403 || response.status === 404) && (options?.recordingS3Key || options?.telnyxCallId)) {
       const safeUrl = redactUrlForLogs(audioUrl);
-      console.warn(`[Transcription] Audio download unauthorized (${response.status} ${response.statusText}) | url=${safeUrl}`);
+      console.warn(`[Transcription] Audio download failed (${response.status} ${response.statusText}) | url=${safeUrl}`);
 
       // 1) Prefer the permanent copy if we have it.
       if (options?.recordingS3Key && isS3Configured()) {
         try {
+          const resolvedKey = await resolveExistingRecordingS3Key(options.recordingS3Key);
+          if (!resolvedKey) {
+            console.warn(`[Transcription] No valid recording key found for fallback: ${options.recordingS3Key}`);
+          } else if (resolvedKey !== options.recordingS3Key) {
+            console.warn(`[Transcription] Using fallback recording key for download retry: ${options.recordingS3Key} -> ${resolvedKey}`);
+          }
+
           // Use 24-hour TTL for transcription URLs (jobs may queue/retry for hours)
           const TTL_24_HOURS = 24 * 60 * 60;
-          const presigned = await getPresignedDownloadUrl(options.recordingS3Key, TTL_24_HOURS);
-          // If signBlob is unavailable, presigned will be gcs-internal:// — read directly from GCS
-          if (presigned.startsWith('gcs-internal://')) {
-            const gcsResult = await downloadAudio(presigned, { throwOnError: true });
-            if (gcsResult) return gcsResult;
-          } else {
-            response = await fetchAudio(presigned);
-            if (response.ok) {
-              console.log(`[Transcription] Using refreshed GCS URL | key=${options.recordingS3Key}`);
+          if (resolvedKey) {
+            const presigned = await getPresignedDownloadUrl(resolvedKey, TTL_24_HOURS);
+            // If signBlob is unavailable, presigned will be gcs-internal:// — read directly from GCS
+            if (presigned.startsWith('gcs-internal://')) {
+              const gcsResult = await downloadAudio(presigned, { throwOnError: true });
+              if (gcsResult) return gcsResult;
+            } else {
+              response = await fetchAudio(presigned);
+              if (response.ok) {
+                console.log(`[Transcription] Using refreshed GCS URL | key=${resolvedKey}`);
+              }
             }
           }
         } catch (e) {

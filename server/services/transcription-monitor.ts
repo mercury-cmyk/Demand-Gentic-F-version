@@ -28,7 +28,7 @@ export interface TranscriptionMetrics {
 interface MetricsEntry {
   callId: string;
   callAttemptId?: string;
-  source: 'realtime' | 'fallback' | 'none';
+  source: 'realtime' | 'realtime_native' | 'fallback' | 'none';
   timestamp: number;
 }
 
@@ -40,15 +40,37 @@ const metricsWindow: MetricsEntry[] = [];
  */
 export function recordTranscriptionResult(
   callId: string,
-  source: 'realtime' | 'fallback' | 'none',
+  source: 'realtime' | 'realtime_native' | 'fallback' | 'none',
   callAttemptId?: string
 ): void {
-  metricsWindow.push({
-    callId,
-    callAttemptId,
-    source,
-    timestamp: Date.now(),
-  });
+  const timestamp = Date.now();
+  const existingIndex = metricsWindow.findIndex((entry) => entry.callId === callId);
+
+  if (existingIndex >= 0) {
+    const existing = metricsWindow[existingIndex];
+    const sourcePriority = (value: MetricsEntry["source"]): number => {
+      if (value === "none") return 0;
+      if (value === "fallback") return 1;
+      return 2; // realtime + realtime_native
+    };
+
+    // Keep the strongest available signal for a call and avoid duplicate counting.
+    if (sourcePriority(source) >= sourcePriority(existing.source)) {
+      metricsWindow[existingIndex] = {
+        callId,
+        callAttemptId: callAttemptId || existing.callAttemptId,
+        source,
+        timestamp,
+      };
+    }
+  } else {
+    metricsWindow.push({
+      callId,
+      callAttemptId,
+      source,
+      timestamp,
+    });
+  }
 
   // Keep window size bounded
   while (metricsWindow.length > WINDOW_SIZE) {
@@ -90,7 +112,7 @@ function checkAndAlert(): void {
  */
 export function getTranscriptionHealthMetrics(): TranscriptionMetrics {
   const total = metricsWindow.length;
-  const realtime = metricsWindow.filter((m) => m.source === 'realtime').length;
+  const realtime = metricsWindow.filter((m) => m.source === 'realtime' || m.source === 'realtime_native').length;
   const fallback = metricsWindow.filter((m) => m.source === 'fallback').length;
   const none = metricsWindow.filter((m) => m.source === 'none').length;
 

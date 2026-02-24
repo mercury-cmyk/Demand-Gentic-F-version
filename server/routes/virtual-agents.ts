@@ -387,9 +387,8 @@ router.get("/preview-voice", requireAuth, async (req, res) => {
       res.send(Buffer.from(audioBuffer));
 
     } else if (provider === 'google' || provider === 'gemini') {
-      // Google Cloud TTS
-      const { TextToSpeechClient } = await import('@google-cloud/text-to-speech');
-      const client = new TextToSpeechClient();
+      // Google Cloud TTS (via rate-limited service)
+      const { synthesizeSpeechRateLimited } = await import('../services/tts-rate-limiter');
 
       // Map Gemini Live voices to approx Neural2 voices for preview
       const voiceMap: Record<string, string> = {
@@ -413,19 +412,11 @@ router.get("/preview-voice", requireAuth, async (req, res) => {
       };
       
       const targetVoice = voiceMap[String(voice)] || String(voice);
-      const isNeural = targetVoice.includes('Neural2');
 
-      const [response] = await client.synthesizeSpeech({
-        input: { text: previewText },
-        voice: { 
-          languageCode: isNeural ? (targetVoice.startsWith('en-GB') ? 'en-GB' : 'en-US') : 'en-US',
-          name: targetVoice
-        },
-        audioConfig: { audioEncoding: 'MP3' },
-      });
+      const audioBuffer = await synthesizeSpeechRateLimited(previewText, targetVoice, 'en-US', 'MP3');
 
       res.set('Content-Type', 'audio/mpeg');
-      res.send(response.audioContent);
+      res.send(audioBuffer);
 
     } else {
       return res.status(400).json({ message: "Unsupported provider" });
