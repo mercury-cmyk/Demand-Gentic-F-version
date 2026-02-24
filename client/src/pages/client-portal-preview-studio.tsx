@@ -3,7 +3,7 @@
  * Allows client users to test voice and email experiences for their campaigns.
  * Uses client portal API endpoints for authentication.
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -100,6 +100,23 @@ interface Contact {
 interface Campaign {
   id: string;
   name: string;
+}
+
+function dedupeById<T extends { id?: string | number | null }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const item of items) {
+    const rawId = item?.id;
+    if (rawId === null || rawId === undefined) {
+      unique.push(item);
+      continue;
+    }
+    const id = String(rawId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(item);
+  }
+  return unique;
 }
 
 interface PhonePostCallResult {
@@ -227,7 +244,7 @@ export default function ClientPortalPreviewStudioPage() {
   }, [modeFromUrl]);
 
   // Fetch campaigns using CLIENT PORTAL endpoint
-  const { data: campaigns = [], isLoading: campaignsLoading } = useQuery<Campaign[]>({
+  const { data: campaignsRaw = [], isLoading: campaignsLoading } = useQuery<Campaign[]>({
     queryKey: ['/api/client-portal/campaigns'],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/campaigns', {
@@ -238,6 +255,7 @@ export default function ClientPortalPreviewStudioPage() {
       return Array.isArray(data) ? data : data.campaigns || [];
     },
   });
+  const campaigns = useMemo(() => dedupeById(campaignsRaw), [campaignsRaw]);
 
   // Fetch preview audience (accounts and contacts) for selected campaign
   const { data: audienceData, isLoading: audienceLoading } = useQuery<{
@@ -353,7 +371,7 @@ export default function ClientPortalPreviewStudioPage() {
   }, [selectedCampaignId, selectedAccountId]);
 
   // Transform accounts data
-  const accounts: Account[] = (audienceData?.accounts || []).map(a => ({
+  const accounts: Account[] = dedupeById(audienceData?.accounts || []).map(a => ({
     id: a.id,
     name: a.name,
     domain: a.website,
@@ -361,7 +379,7 @@ export default function ClientPortalPreviewStudioPage() {
   const accountsLoading = audienceLoading;
 
   // Transform and filter contacts by selected account
-  const allContacts = (audienceData?.contacts || []).map(c => ({
+  const allContacts = dedupeById(audienceData?.contacts || []).map(c => ({
     id: c.id,
     fullName: c.firstName && c.lastName ? `${c.firstName} ${c.lastName}` : c.firstName || c.lastName || null,
     jobTitle: c.title || null,
@@ -1983,4 +2001,3 @@ function PhoneTestSection({
     </div>
   );
 }
-

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // Sync
+import { useState, useEffect, useMemo } from 'react'; // Sync
 import { useLocation, useSearch } from 'wouter';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -282,6 +282,23 @@ const TAB_ALIASES: Record<string, string> = {
 function resolveTab(tab: string | null): string {
   if (!tab) return 'overview';
   return TAB_ALIASES[tab] || tab;
+}
+
+function dedupeById<T extends { id?: string | number | null }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const item of items) {
+    const rawId = item?.id;
+    if (rawId === null || rawId === undefined) {
+      unique.push(item);
+      continue;
+    }
+    const id = String(rawId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(item);
+  }
+  return unique;
 }
 
 export default function ClientPortalDashboard() {
@@ -681,7 +698,7 @@ export default function ClientPortalDashboard() {
   };
 
   // Queries
-  const { data: campaigns = [], isLoading: campaignsLoading, refetch: refetchCampaigns } = useQuery<Campaign[]>({
+  const { data: campaignsRaw = [], isLoading: campaignsLoading, refetch: refetchCampaigns } = useQuery<Campaign[]>({
     queryKey: ['client-portal-campaigns', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/campaigns', authHeaders);
@@ -690,6 +707,7 @@ export default function ClientPortalDashboard() {
     },
     enabled: !!user,
   });
+  const campaigns = useMemo(() => dedupeById(campaignsRaw), [campaignsRaw]);
 
   // Batch-stats for call/email metrics on campaign cards
   const PHONE_TYPES = ['call', 'telemarketing', 'sql', 'content_syndication', 'appointment_generation', 'appointment_setting',
@@ -1114,8 +1132,8 @@ export default function ClientPortalDashboard() {
   // Update preview audience state when data loads
   useEffect(() => {
     if (previewAudienceData) {
-      setPreviewAudienceAccounts(previewAudienceData.accounts || []);
-      setPreviewAudienceContacts(previewAudienceData.contacts || []);
+      setPreviewAudienceAccounts(dedupeById(previewAudienceData.accounts || []));
+      setPreviewAudienceContacts(dedupeById(previewAudienceData.contacts || []));
       // Reset selections when campaign changes
       setPreviewAccountId('');
       setPreviewContactId('');
@@ -1135,8 +1153,14 @@ export default function ClientPortalDashboard() {
   const hasFeature = (feature: string) => enabledFeatures.includes(feature);
 
   // Derived CRM data
-  const crmAccounts = crmAccountsData?.accounts || [];
-  const crmContacts = crmContactsData?.contacts || [];
+  const crmAccounts = useMemo(
+    () => dedupeById(crmAccountsData?.accounts || []),
+    [crmAccountsData]
+  );
+  const crmContacts = useMemo(
+    () => dedupeById(crmContactsData?.contacts || []),
+    [crmContactsData]
+  );
   const availableVoices = voicesData?.voices || [];
 
   // Mutations

@@ -106,6 +106,7 @@ import dataManagementRouter from './routes/data-management-routes';
 import telephonyProvidersRouter from './routes/telephony-providers';
 import telnyxWebhookRouter from './routes/telnyx-webhook-management';
 import transcriptionManagementRouter from './routes/transcription-management';
+import recordingsRouter from './routes/recordings';
 import clientAssignmentRouter from './routes/client-assignment';
 import documentExtractRouter from './routes/document-extract';
 import campaignOpsRouter from './routes/campaign-ops-routes';
@@ -15144,13 +15145,9 @@ Provide JSON response with:
     });
   });
 
-  // ==================== CALL RECORDINGS (DEACTIVATED) ====================
-  // Emergency shutdown: dashboard call recordings API disabled
-  app.use('/api/recordings', requireAuth, (_req, res) => {
-    res.status(410).json({
-      message: 'Call recordings endpoints are deactivated and removed from dashboard access.',
-    });
-  });
+  // ==================== CALL RECORDINGS ====================
+  // Active recordings API (GCS-first, presigned URL flow)
+  app.use('/api/recordings', requireAuth, recordingsRouter);
 
   // ==================== CALL INTELLIGENCE ====================
   app.use('/api/call-intelligence', callIntelligenceRouter);

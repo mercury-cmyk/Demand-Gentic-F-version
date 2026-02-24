@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -128,6 +128,39 @@ const CATEGORY_ICONS: Record<string, any> = {
 };
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
+function dedupeById<T extends { id?: string | number | null }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const item of items) {
+    const rawId = item?.id;
+    if (rawId === null || rawId === undefined) {
+      unique.push(item);
+      continue;
+    }
+    const id = String(rawId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(item);
+  }
+  return unique;
+}
+
+function dedupeCalls<T extends { id?: string | null; callSessionId?: string | null }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const item of items) {
+    const stableId = item.callSessionId || item.id || "";
+    if (!stableId) {
+      unique.push(item);
+      continue;
+    }
+    if (seen.has(stableId)) continue;
+    seen.add(stableId);
+    unique.push(item);
+  }
+  return unique;
+}
+
 // ============================================================================
 // Main Page Component
 // ============================================================================
@@ -229,6 +262,27 @@ export default function ShowcaseCallsPage() {
       return Array.isArray(data) ? data : data.campaigns || [];
     },
   });
+
+  const uniqueCampaigns = useMemo(
+    () => dedupeById(campaignsList || []),
+    [campaignsList]
+  );
+  const showcasedCalls = useMemo(
+    () => dedupeCalls(showcasedData?.calls || []),
+    [showcasedData]
+  );
+  const discoverCalls = useMemo(
+    () => dedupeCalls(discoverData?.candidates || []),
+    [discoverData]
+  );
+
+  const getFreshRecordingUrl = async (callId: string, fallbackUrl?: string | null, endpoint?: string | null) => {
+    if (fallbackUrl) return fallbackUrl;
+    const endpointPath = endpoint || `/api/recordings/${callId}/gcs-url`;
+    const res = await apiRequest('GET', endpointPath);
+    const data = await res.json();
+    return data?.url || null;
+  };
 
   // ---- Mutations ----
 
@@ -377,7 +431,7 @@ export default function ShowcaseCallsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Campaigns</SelectItem>
-                {campaignsList?.map((c) => (
+                {uniqueCampaigns.map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -439,7 +493,7 @@ export default function ShowcaseCallsPage() {
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : !showcasedData?.calls.length ? (
+            ) : !showcasedCalls.length ? (
               <Card>
                 <CardContent className="py-16 text-center">
                   <Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -451,9 +505,9 @@ export default function ShowcaseCallsPage() {
               </Card>
             ) : (
               <div className="space-y-3">
-                {showcasedData.calls.map((call) => (
+                {showcasedCalls.map((call) => (
                   <ShowcaseCallCard
-                    key={call.id}
+                    key={call.callSessionId || call.id}
                     call={call}
                     isPinned
                     onUnpin={handleUnpin}
@@ -504,7 +558,7 @@ export default function ShowcaseCallsPage() {
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : !discoverData?.candidates.length ? (
+            ) : !discoverCalls.length ? (
               <Card>
                 <CardContent className="py-16 text-center">
                   <Sparkles className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -517,11 +571,11 @@ export default function ShowcaseCallsPage() {
             ) : (
               <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Found {discoverData.candidates.length} candidates (threshold: {discoverData.threshold}+)
+                  Found {discoverCalls.length} candidates (threshold: {discoverData?.threshold}+)
                 </p>
-                {discoverData.candidates.map((call) => (
+                {discoverCalls.map((call) => (
                   <ShowcaseCallCard
-                    key={call.id}
+                    key={call.callSessionId || call.id}
                     call={call}
                     isPinned={false}
                     onPin={handlePin}
@@ -664,13 +718,16 @@ export default function ShowcaseCallsPage() {
                           className="gap-2"
                           onClick={async () => {
                             try {
-                              const res = await apiRequest('GET', `/api/recordings/${detailData.callSessionId}/gcs-url`);
-                              const data = await res.json();
-                              if (data.url) {
-                                window.open(data.url, '_blank', 'noopener,noreferrer');
-                              }
+                              const url = await getFreshRecordingUrl(
+                                detailData.callSessionId,
+                                detailData.playbackUrl || detailData.downloadUrl,
+                                detailData.gcsUrlEndpoint || undefined
+                              );
+                              if (!url) throw new Error('No recording URL available');
+                              window.open(url, '_blank', 'noopener,noreferrer');
                             } catch (err) {
                               console.error('Failed to get recording URL:', err);
+                              toast({ title: 'Recording unavailable', description: 'Could not resolve recording URL', variant: 'destructive' });
                             }
                           }}
                         >
@@ -682,16 +739,19 @@ export default function ShowcaseCallsPage() {
                           className="gap-2"
                           onClick={async () => {
                             try {
-                              const res = await apiRequest('GET', `/api/recordings/${detailData.callSessionId}/gcs-url`);
-                              const data = await res.json();
-                              if (data.url) {
-                                const a = document.createElement('a');
-                                a.href = data.url;
-                                a.download = `recording-${detailData.callSessionId}.mp3`;
-                                a.click();
-                              }
+                              const url = await getFreshRecordingUrl(
+                                detailData.callSessionId,
+                                detailData.downloadUrl || detailData.playbackUrl,
+                                detailData.gcsUrlEndpoint || undefined
+                              );
+                              if (!url) throw new Error('No recording URL available');
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `recording-${detailData.callSessionId}.mp3`;
+                              a.click();
                             } catch (err) {
                               console.error('Failed to download recording:', err);
+                              toast({ title: 'Download failed', description: 'Could not resolve recording URL', variant: 'destructive' });
                             }
                           }}
                         >
