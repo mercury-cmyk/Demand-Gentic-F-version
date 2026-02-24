@@ -311,15 +311,22 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Campaign Runner WS initialization failed (non-blocking):', err);
   }
 
-  // Autonomous AI Dialer — temporarily disabled while stabilizing orchestrator changes
-  // TODO: Re-enable once orchestrator phone priority changes are confirmed stable
-  // try {
-  //   const { initializeAutonomousDialer } = await import("./services/autonomous-ai-dialer");
-  //   initializeAutonomousDialer();
-  //   console.log('[STARTUP] ✓ Autonomous AI Dialer initialized');
-  // } catch (err) {
-  //   console.error('[STARTUP] Autonomous AI Dialer initialization failed (non-blocking):', err);
-  // }
+  // Autonomous AI Dialer fallback state.
+  // Primary path is BullMQ orchestrator; this fallback is used only when Redis/orchestrator
+  // cannot run so outbound AI calls do not stall completely.
+  let autonomousDialerFallbackActive = false;
+  const startAutonomousDialerFallback = async (reason: string) => {
+    if (autonomousDialerFallbackActive) return;
+    try {
+      const { initializeAutonomousDialer } = await import("./services/autonomous-ai-dialer");
+      initializeAutonomousDialer();
+      autonomousDialerFallbackActive = true;
+      process.env.AUTONOMOUS_DIALER_FALLBACK_ACTIVE = "true";
+      console.warn(`[STARTUP] Autonomous AI Dialer fallback activated: ${reason}`);
+    } catch (err) {
+      console.error('[STARTUP] Autonomous AI Dialer fallback failed:', err);
+    }
+  };
 
   // Initialize Log Streaming Service
   // Always create the service so WebSocket connections succeed.
@@ -565,27 +572,34 @@ app.use((req, res, next) => {
   // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
   const { initializeAiCampaignOrchestrator, getOrchestratorStatus } = await import("./lib/ai-campaign-orchestrator");
   if (hasRedis) {
-    await initializeAiCampaignOrchestrator();
+    try {
+      await initializeAiCampaignOrchestrator();
 
-    const configuredHealthcheckMs = Number(process.env.AI_ORCHESTRATOR_HEALTHCHECK_MS || 60000);
-    const orchestratorHealthcheckMs = Number.isFinite(configuredHealthcheckMs)
-      ? Math.max(30000, configuredHealthcheckMs)
-      : 60000;
+      const configuredHealthcheckMs = Number(process.env.AI_ORCHESTRATOR_HEALTHCHECK_MS || 60000);
+      const orchestratorHealthcheckMs = Number.isFinite(configuredHealthcheckMs)
+        ? Math.max(30000, configuredHealthcheckMs)
+        : 60000;
 
-    setInterval(async () => {
-      try {
-        const status = await getOrchestratorStatus();
-        if (!status.available) {
-          console.warn(
-            `[AI Orchestrator] Healthcheck detected unavailable orchestrator ` +
-            `(workerRunning=${status.workerRunning}, workerPaused=${status.workerPaused}, staleTick=${status.staleTick}, lastTickAgeMs=${status.lastTickAgeMs}) - attempting forced re-initialization`
-          );
-          await initializeAiCampaignOrchestrator({ forceReinitialize: true });
+      setInterval(async () => {
+        try {
+          const status = await getOrchestratorStatus();
+          if (!status.available) {
+            console.warn(
+              `[AI Orchestrator] Healthcheck detected unavailable orchestrator ` +
+              `(workerRunning=${status.workerRunning}, workerPaused=${status.workerPaused}, staleTick=${status.staleTick}, lastTickAgeMs=${status.lastTickAgeMs}) - attempting forced re-initialization`
+            );
+            await initializeAiCampaignOrchestrator({ forceReinitialize: true });
+          }
+        } catch (err) {
+          console.error('[AI Orchestrator] Healthcheck failed:', err);
         }
-      } catch (err) {
-        console.error('[AI Orchestrator] Healthcheck failed:', err);
-      }
-    }, orchestratorHealthcheckMs);
+      }, orchestratorHealthcheckMs);
+    } catch (err) {
+      console.error('[AI Orchestrator] Initialization failed, enabling fallback dialer:', err);
+      await startAutonomousDialerFallback('AI orchestrator failed to initialize');
+    }
+  } else {
+    await startAutonomousDialerFallback('Redis unavailable for BullMQ orchestrator');
   }
 
   // Initialize Vertex AI Agentic CRM Operator

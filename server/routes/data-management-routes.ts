@@ -19,7 +19,7 @@ import {
   dataQualityIssues,
   dataTemplates, insertDataTemplateSchema,
   dataQualityScans,
-  contacts, accounts,
+  contacts, accounts, segments, lists,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import multer from 'multer';
@@ -100,6 +100,339 @@ router.get('/overview', async (_req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[DataMgmt] Overview error:', error);
     res.status(500).json({ message: 'Failed to fetch overview', error: error.message });
+  }
+});
+
+/**
+ * GET /insights/summary
+ * Consolidated account/contact analysis for Data Management insights
+ */
+router.get('/insights/summary', async (_req: Request, res: Response) => {
+  try {
+    const [
+      totalsResult,
+      accountLinkageResult,
+      segmentByEntityResult,
+      listByEntityResult,
+      industryResult,
+      employeeSizeResult,
+      revenueResult,
+      accountTypeResult,
+      accountCountryResult,
+      seniorityResult,
+      departmentResult,
+      contactCountryResult,
+      contactStateResult,
+      contactCoverageResult,
+      accountCoverageResult,
+    ] = await Promise.all([
+      db.execute(sql`
+        SELECT
+          (SELECT count(*)::int FROM accounts) AS total_accounts,
+          (SELECT count(*)::int FROM contacts WHERE deleted_at IS NULL) AS total_contacts,
+          (SELECT count(*)::int FROM contacts WHERE deleted_at IS NULL AND account_id IS NOT NULL) AS contacts_with_account,
+          (SELECT count(*)::int FROM segments WHERE is_active = true) AS active_segments,
+          (SELECT count(*)::int FROM lists) AS total_lists
+      `),
+      db.execute(sql`
+        SELECT count(*)::int AS accounts_with_contacts
+        FROM accounts a
+        WHERE EXISTS (
+          SELECT 1
+          FROM contacts c
+          WHERE c.account_id = a.id
+            AND c.deleted_at IS NULL
+        )
+      `),
+      db.select({
+        value: segments.entityType,
+        count: sql<number>`count(*)::int`,
+      }).from(segments)
+        .where(eq(segments.isActive, true))
+        .groupBy(segments.entityType)
+        .orderBy(desc(sql`count(*)`)),
+      db.select({
+        value: lists.entityType,
+        count: sql<number>`count(*)::int`,
+      }).from(lists)
+        .groupBy(lists.entityType)
+        .orderBy(desc(sql`count(*)`)),
+      db.execute(sql`
+        SELECT industry_standardized AS value, count(*)::int AS count
+        FROM accounts
+        WHERE industry_standardized IS NOT NULL
+          AND btrim(industry_standardized) != ''
+        GROUP BY industry_standardized
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT employees_size_range::text AS value, count(*)::int AS count
+        FROM accounts
+        WHERE employees_size_range IS NOT NULL
+        GROUP BY employees_size_range
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT
+          COALESCE(
+            NULLIF(revenue_range::text, ''),
+            CASE
+              WHEN annual_revenue IS NULL THEN NULL
+              WHEN annual_revenue < 1000000 THEN '<$1M'
+              WHEN annual_revenue < 10000000 THEN '$1M-$10M'
+              WHEN annual_revenue < 50000000 THEN '$10M-$50M'
+              WHEN annual_revenue < 100000000 THEN '$50M-$100M'
+              WHEN annual_revenue < 500000000 THEN '$100M-$500M'
+              WHEN annual_revenue < 1000000000 THEN '$500M-$1B'
+              ELSE '$1B+'
+            END
+          ) AS value,
+          count(*)::int AS count
+        FROM accounts
+        WHERE revenue_range IS NOT NULL OR annual_revenue IS NOT NULL
+        GROUP BY 1
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT type_value AS value, count(*)::int AS count
+        FROM (
+          SELECT COALESCE(
+            NULLIF(btrim(custom_fields->>'accountType'), ''),
+            NULLIF(btrim(custom_fields->>'account_type'), ''),
+            NULLIF(btrim(list), ''),
+            NULLIF(btrim(source_system), '')
+          ) AS type_value
+          FROM accounts
+        ) t
+        WHERE type_value IS NOT NULL
+        GROUP BY type_value
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT hq_country AS value, count(*)::int AS count
+        FROM accounts
+        WHERE hq_country IS NOT NULL
+          AND btrim(hq_country) != ''
+        GROUP BY hq_country
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT seniority_level AS value, count(*)::int AS count
+        FROM contacts
+        WHERE deleted_at IS NULL
+          AND seniority_level IS NOT NULL
+          AND btrim(seniority_level) != ''
+        GROUP BY seniority_level
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT department AS value, count(*)::int AS count
+        FROM contacts
+        WHERE deleted_at IS NULL
+          AND department IS NOT NULL
+          AND btrim(department) != ''
+        GROUP BY department
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT country AS value, count(*)::int AS count
+        FROM contacts
+        WHERE deleted_at IS NULL
+          AND country IS NOT NULL
+          AND btrim(country) != ''
+        GROUP BY country
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT state AS value, count(*)::int AS count
+        FROM contacts
+        WHERE deleted_at IS NULL
+          AND state IS NOT NULL
+          AND btrim(state) != ''
+        GROUP BY state
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `),
+      db.execute(sql`
+        SELECT
+          count(*)::int AS total,
+          count(case when email IS NOT NULL AND btrim(email) != '' then 1 end)::int AS email,
+          count(case when (direct_phone IS NOT NULL AND btrim(direct_phone) != '') OR (mobile_phone IS NOT NULL AND btrim(mobile_phone) != '') then 1 end)::int AS phone,
+          count(case when job_title IS NOT NULL AND btrim(job_title) != '' then 1 end)::int AS job_title,
+          count(case when seniority_level IS NOT NULL AND btrim(seniority_level) != '' then 1 end)::int AS seniority,
+          count(case when department IS NOT NULL AND btrim(department) != '' then 1 end)::int AS department,
+          count(case when linkedin_url IS NOT NULL AND btrim(linkedin_url) != '' then 1 end)::int AS linkedin,
+          count(case when country IS NOT NULL AND btrim(country) != '' then 1 end)::int AS country,
+          count(case when state IS NOT NULL AND btrim(state) != '' then 1 end)::int AS state,
+          count(case when city IS NOT NULL AND btrim(city) != '' then 1 end)::int AS city,
+          count(case when account_id IS NOT NULL then 1 end)::int AS account_link
+        FROM contacts
+        WHERE deleted_at IS NULL
+      `),
+      db.execute(sql`
+        SELECT
+          count(*)::int AS total,
+          count(case when industry_standardized IS NOT NULL AND btrim(industry_standardized) != '' then 1 end)::int AS industry,
+          count(case when annual_revenue IS NOT NULL OR (revenue_range IS NOT NULL AND btrim(revenue_range::text) != '') then 1 end)::int AS revenue,
+          count(case when staff_count IS NOT NULL OR (employees_size_range IS NOT NULL AND btrim(employees_size_range::text) != '') then 1 end)::int AS employees,
+          count(case when domain IS NOT NULL AND btrim(domain) != '' then 1 end)::int AS domain,
+          count(case when hq_country IS NOT NULL AND btrim(hq_country) != '' then 1 end)::int AS hq_country,
+          count(case when main_phone IS NOT NULL AND btrim(main_phone) != '' then 1 end)::int AS main_phone,
+          count(case when linkedin_url IS NOT NULL AND btrim(linkedin_url) != '' then 1 end)::int AS linkedin,
+          count(case when source_system IS NOT NULL AND btrim(source_system) != '' then 1 end)::int AS source_system,
+          count(case when list IS NOT NULL AND btrim(list) != '' then 1 end)::int AS source_list
+        FROM accounts
+      `),
+    ]);
+
+    const totalsRow = ((totalsResult.rows || [])[0] || {}) as any;
+    const accountLinkageRow = ((accountLinkageResult.rows || [])[0] || {}) as any;
+    const contactCoverageRow = ((contactCoverageResult.rows || [])[0] || {}) as any;
+    const accountCoverageRow = ((accountCoverageResult.rows || [])[0] || {}) as any;
+
+    const totalAccounts = Number(totalsRow.total_accounts || 0);
+    const totalContacts = Number(totalsRow.total_contacts || 0);
+    const contactsWithAccount = Number(totalsRow.contacts_with_account || 0);
+    const accountsWithContacts = Number(accountLinkageRow.accounts_with_contacts || 0);
+    const orphanContacts = Math.max(totalContacts - contactsWithAccount, 0);
+    const accountsWithoutContacts = Math.max(totalAccounts - accountsWithContacts, 0);
+    const activeSegments = Number(totalsRow.active_segments || 0);
+    const totalLists = Number(totalsRow.total_lists || 0);
+
+    const percentage = (countValue: number, totalValue: number) =>
+      totalValue > 0 ? Math.round((countValue / totalValue) * 1000) / 10 : 0;
+
+    const mapDistribution = (rows: any[], totalValue: number, limit = 10) =>
+      (rows || []).slice(0, limit).map((row: any) => {
+        const countValue = Number(row.count || 0);
+        const rawValue = row.value === null || row.value === undefined ? 'Unknown' : String(row.value);
+        const value = rawValue.trim() || 'Unknown';
+        return {
+          value,
+          count: countValue,
+          percentage: percentage(countValue, totalValue),
+        };
+      });
+
+    const coverageRow = (field: string, populated: number, totalValue: number) => {
+      const safePopulated = Number(populated || 0);
+      const missing = Math.max(totalValue - safePopulated, 0);
+      return {
+        field,
+        total: totalValue,
+        populated: safePopulated,
+        missing,
+        coverage: percentage(safePopulated, totalValue),
+      };
+    };
+
+    const accountCoverage = [
+      coverageRow('Industry', Number(accountCoverageRow.industry || 0), totalAccounts),
+      coverageRow('Revenue', Number(accountCoverageRow.revenue || 0), totalAccounts),
+      coverageRow('Employee Size', Number(accountCoverageRow.employees || 0), totalAccounts),
+      coverageRow('Domain', Number(accountCoverageRow.domain || 0), totalAccounts),
+      coverageRow('HQ Country', Number(accountCoverageRow.hq_country || 0), totalAccounts),
+      coverageRow('Main Phone', Number(accountCoverageRow.main_phone || 0), totalAccounts),
+      coverageRow('LinkedIn URL', Number(accountCoverageRow.linkedin || 0), totalAccounts),
+      coverageRow('Source System', Number(accountCoverageRow.source_system || 0), totalAccounts),
+      coverageRow('Source List', Number(accountCoverageRow.source_list || 0), totalAccounts),
+    ];
+
+    const contactCoverage = [
+      coverageRow('Email', Number(contactCoverageRow.email || 0), totalContacts),
+      coverageRow('Phone', Number(contactCoverageRow.phone || 0), totalContacts),
+      coverageRow('Job Title', Number(contactCoverageRow.job_title || 0), totalContacts),
+      coverageRow('Seniority', Number(contactCoverageRow.seniority || 0), totalContacts),
+      coverageRow('Department', Number(contactCoverageRow.department || 0), totalContacts),
+      coverageRow('LinkedIn URL', Number(contactCoverageRow.linkedin || 0), totalContacts),
+      coverageRow('Country', Number(contactCoverageRow.country || 0), totalContacts),
+      coverageRow('State', Number(contactCoverageRow.state || 0), totalContacts),
+      coverageRow('City', Number(contactCoverageRow.city || 0), totalContacts),
+      coverageRow('Account Link', Number(contactCoverageRow.account_link || 0), totalContacts),
+    ];
+
+    const gapSuggestion = (recordType: 'account' | 'contact', field: string) => {
+      const key = `${recordType}:${field}`;
+      const map: Record<string, string> = {
+        'account:Industry': 'Run account industry normalization and enrichment.',
+        'account:Revenue': 'Prioritize revenue enrichment for target accounts.',
+        'account:Employee Size': 'Backfill company size from enrichment providers.',
+        'account:Domain': 'Resolve website/domain gaps from account names.',
+        'contact:Email': 'Prioritize email verification and enrichment jobs.',
+        'contact:Phone': 'Prioritize direct/mobile phone enrichment.',
+        'contact:Job Title': 'Backfill titles from LinkedIn/research workflows.',
+        'contact:Seniority': 'Auto-classify seniority from job titles.',
+        'contact:Department': 'Auto-classify departments from job titles.',
+        'contact:Account Link': 'Improve account matching to reduce orphan contacts.',
+      };
+      return map[key] || 'Prioritize enrichment for this field.';
+    };
+
+    const topMissingFields = [
+      ...accountCoverage.map((item) => ({ recordType: 'account' as const, ...item })),
+      ...contactCoverage.map((item) => ({ recordType: 'contact' as const, ...item })),
+    ]
+      .filter((item) => item.total > 0 && item.missing > 0)
+      .map((item) => ({
+        ...item,
+        missingRate: percentage(item.missing, item.total),
+        recommendation: gapSuggestion(item.recordType, item.field),
+      }))
+      .sort((a, b) => (b.missingRate - a.missingRate) || (b.missing - a.missing))
+      .slice(0, 8);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      totals: {
+        accounts: totalAccounts,
+        contacts: totalContacts,
+        contactsWithAccount,
+        orphanContacts,
+        accountsWithContacts,
+        accountsWithoutContacts,
+        activeSegments,
+        totalLists,
+        accountLinkRate: percentage(accountsWithContacts, totalAccounts),
+        contactLinkRate: percentage(contactsWithAccount, totalContacts),
+      },
+      segments: {
+        dynamicByEntity: mapDistribution(segmentByEntityResult as any[], activeSegments, 10),
+        staticByEntity: mapDistribution(listByEntityResult as any[], totalLists, 10),
+      },
+      accounts: {
+        firmographics: {
+          industry: mapDistribution((industryResult.rows || []) as any[], totalAccounts, 10),
+          employeeSize: mapDistribution((employeeSizeResult.rows || []) as any[], totalAccounts, 10),
+          revenue: mapDistribution((revenueResult.rows || []) as any[], totalAccounts, 10),
+          accountType: mapDistribution((accountTypeResult.rows || []) as any[], totalAccounts, 10),
+          hqCountry: mapDistribution((accountCountryResult.rows || []) as any[], totalAccounts, 10),
+        },
+        coverage: accountCoverage,
+      },
+      contacts: {
+        demographics: {
+          seniority: mapDistribution((seniorityResult.rows || []) as any[], totalContacts, 10),
+          department: mapDistribution((departmentResult.rows || []) as any[], totalContacts, 10),
+          country: mapDistribution((contactCountryResult.rows || []) as any[], totalContacts, 10),
+          state: mapDistribution((contactStateResult.rows || []) as any[], totalContacts, 10),
+        },
+        coverage: contactCoverage,
+      },
+      gaps: {
+        topMissingFields,
+      },
+    });
+  } catch (error: any) {
+    console.error('[DataMgmt] Insights summary error:', error);
+    res.status(500).json({ message: 'Failed to fetch insights summary', error: error.message });
   }
 });
 
@@ -976,7 +1309,7 @@ router.get('/enrichment/gaps', async (_req: Request, res: Response) => {
       missingDomain: sql<number>`count(case when domain IS NULL OR domain = '' then 1 end)::int`,
       missingCountry: sql<number>`count(case when hq_country IS NULL OR hq_country = '' then 1 end)::int`,
       missingPhone: sql<number>`count(case when main_phone IS NULL OR main_phone = '' then 1 end)::int`,
-      missingLinkedIn: sql<number>`count(case when linkedin_company_url IS NULL OR linkedin_company_url = '' then 1 end)::int`,
+      missingLinkedIn: sql<number>`count(case when linkedin_url IS NULL OR linkedin_url = '' then 1 end)::int`,
     }).from(accounts);
 
     // Build enrichment opportunities

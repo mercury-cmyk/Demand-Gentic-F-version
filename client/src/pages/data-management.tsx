@@ -4,12 +4,13 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
@@ -35,10 +36,7 @@ import {
   BarChart3,
   Plus,
   Loader2,
-  RefreshCw,
-  AlertTriangle,
   CheckCircle2,
-  Clock,
   XCircle,
   Play,
 } from "lucide-react";
@@ -46,7 +44,13 @@ import {
 // ==================== TYPES ====================
 
 interface OverviewData {
-  audience: { totalContacts: number; totalAccounts: number; [key: string]: any };
+  audience: {
+    totalContacts?: number;
+    totalAccounts?: number;
+    contacts?: { total?: number; [key: string]: any };
+    accounts?: { total?: number; [key: string]: any };
+    [key: string]: any;
+  };
   qualityScan: { id: string; overallScore: number; completedAt: string } | null;
   dataRequests: { total: number; pending: number; inProgress: number };
   uploads: { total: number; processing: number; completed: number };
@@ -104,6 +108,68 @@ interface DataTemplate {
   createdAt: string;
 }
 
+interface DistributionItem {
+  value: string;
+  count: number;
+  percentage: number;
+}
+
+interface CoverageItem {
+  field: string;
+  total: number;
+  populated: number;
+  missing: number;
+  coverage: number;
+}
+
+interface MissingFieldItem extends CoverageItem {
+  recordType: "account" | "contact";
+  missingRate: number;
+  recommendation: string;
+}
+
+interface InsightsSummaryData {
+  generatedAt: string;
+  totals: {
+    accounts: number;
+    contacts: number;
+    contactsWithAccount: number;
+    orphanContacts: number;
+    accountsWithContacts: number;
+    accountsWithoutContacts: number;
+    activeSegments: number;
+    totalLists: number;
+    accountLinkRate: number;
+    contactLinkRate: number;
+  };
+  segments: {
+    dynamicByEntity: DistributionItem[];
+    staticByEntity: DistributionItem[];
+  };
+  accounts: {
+    firmographics: {
+      industry: DistributionItem[];
+      employeeSize: DistributionItem[];
+      revenue: DistributionItem[];
+      accountType: DistributionItem[];
+      hqCountry: DistributionItem[];
+    };
+    coverage: CoverageItem[];
+  };
+  contacts: {
+    demographics: {
+      seniority: DistributionItem[];
+      department: DistributionItem[];
+      country: DistributionItem[];
+      state: DistributionItem[];
+    };
+    coverage: CoverageItem[];
+  };
+  gaps: {
+    topMissingFields: MissingFieldItem[];
+  };
+}
+
 // ==================== STATUS HELPERS ====================
 
 function statusBadge(status: string) {
@@ -137,7 +203,7 @@ function severityBadge(severity: string) {
 }
 
 function formatDate(dateStr: string | null) {
-  if (!dateStr) return "—";
+  if (!dateStr) return "-";
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
@@ -155,16 +221,18 @@ function OverviewTab() {
   if (isLoading) return <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
 
   const o = data;
+  const totalContacts = o?.audience?.totalContacts ?? o?.audience?.contacts?.total ?? 0;
+  const totalAccounts = o?.audience?.totalAccounts ?? o?.audience?.accounts?.total ?? 0;
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Total Contacts</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold">{(o?.audience?.totalContacts ?? 0).toLocaleString()}</p></CardContent>
+          <CardContent><p className="text-2xl font-bold">{totalContacts.toLocaleString()}</p></CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Total Accounts</CardTitle></CardHeader>
-          <CardContent><p className="text-2xl font-bold">{(o?.audience?.totalAccounts ?? 0).toLocaleString()}</p></CardContent>
+          <CardContent><p className="text-2xl font-bold">{totalAccounts.toLocaleString()}</p></CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Data Requests</CardTitle></CardHeader>
@@ -205,6 +273,209 @@ function OverviewTab() {
               </div>
             ) : (
               <p className="text-muted-foreground">No scans completed yet</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function formatCount(value: number | null | undefined) {
+  return (value ?? 0).toLocaleString();
+}
+
+function DistributionCard({ title, items }: { title: string; items: DistributionItem[] }) {
+  const rows = (items || []).slice(0, 8);
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No data available</p>
+        ) : (
+          rows.map((item) => (
+            <div key={`${title}-${item.value}`} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="truncate" title={item.value}>{item.value}</span>
+                <span className="text-muted-foreground whitespace-nowrap">
+                  {formatCount(item.count)} ({item.percentage}%)
+                </span>
+              </div>
+              <Progress value={Math.min(item.percentage, 100)} className="h-1.5" />
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CoverageCard({ title, items }: { title: string; items: CoverageItem[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {(items || []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No coverage data available</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Field</TableHead>
+                <TableHead>Coverage</TableHead>
+                <TableHead>Missing</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={`${title}-${item.field}`}>
+                  <TableCell className="font-medium">{item.field}</TableCell>
+                  <TableCell className="min-w-[220px]">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span>{item.coverage}%</span>
+                        <span className="text-muted-foreground">
+                          {formatCount(item.populated)}/{formatCount(item.total)}
+                        </span>
+                      </div>
+                      <Progress value={Math.min(item.coverage, 100)} className="h-1.5" />
+                    </div>
+                  </TableCell>
+                  <TableCell>{formatCount(item.missing)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ==================== INSIGHTS TAB ====================
+
+function InsightsTab() {
+  const { data, isLoading } = useQuery<InsightsSummaryData>({
+    queryKey: ["/api/data-management/insights/summary"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/data-management/insights/summary");
+      return res.json();
+    },
+  });
+
+  if (isLoading) return <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+  if (!data) return <p className="text-sm text-muted-foreground">No insights data available.</p>;
+
+  const totals = data.totals;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Total Accounts</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold">{formatCount(totals.accounts)}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Total Contacts</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold">{formatCount(totals.contacts)}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Contacts Linked To Accounts</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{totals.contactLinkRate}%</p>
+            <p className="text-xs text-muted-foreground">
+              {formatCount(totals.contactsWithAccount)} linked, {formatCount(totals.orphanContacts)} orphan
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Accounts With Contacts</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{totals.accountLinkRate}%</p>
+            <p className="text-xs text-muted-foreground">
+              {formatCount(totals.accountsWithContacts)} with contacts, {formatCount(totals.accountsWithoutContacts)} without
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Active Segments</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold">{formatCount(totals.activeSegments)}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Static Lists</CardTitle></CardHeader>
+          <CardContent><p className="text-2xl font-bold">{formatCount(totals.totalLists)}</p></CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-lg font-semibold">Segment Coverage</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DistributionCard title="Dynamic Segments by Entity" items={data.segments.dynamicByEntity} />
+          <DistributionCard title="Static Lists by Entity" items={data.segments.staticByEntity} />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-lg font-semibold">Account Firmographics</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          <DistributionCard title="Industry" items={data.accounts.firmographics.industry} />
+          <DistributionCard title="Employee Size" items={data.accounts.firmographics.employeeSize} />
+          <DistributionCard title="Revenue" items={data.accounts.firmographics.revenue} />
+          <DistributionCard title="Account Type" items={data.accounts.firmographics.accountType} />
+          <DistributionCard title="HQ Country" items={data.accounts.firmographics.hqCountry} />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-lg font-semibold">Contact Demographics</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
+          <DistributionCard title="Seniority" items={data.contacts.demographics.seniority} />
+          <DistributionCard title="Department" items={data.contacts.demographics.department} />
+          <DistributionCard title="Country" items={data.contacts.demographics.country} />
+          <DistributionCard title="State" items={data.contacts.demographics.state} />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-lg font-semibold">Completeness And Gaps</h3>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <CoverageCard title="Account Field Coverage" items={data.accounts.coverage} />
+          <CoverageCard title="Contact Field Coverage" items={data.contacts.coverage} />
+        </div>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Highest-Priority Missing Fields</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(data.gaps.topMissingFields || []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No major missing-field gaps detected.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Record Type</TableHead>
+                    <TableHead>Field</TableHead>
+                    <TableHead>Missing Rate</TableHead>
+                    <TableHead>Recommendation</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.gaps.topMissingFields.map((gap) => (
+                    <TableRow key={`${gap.recordType}-${gap.field}`}>
+                      <TableCell className="capitalize">{gap.recordType}</TableCell>
+                      <TableCell className="font-medium">{gap.field}</TableCell>
+                      <TableCell>{gap.missingRate}% ({formatCount(gap.missing)})</TableCell>
+                      <TableCell className="text-muted-foreground">{gap.recommendation}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
@@ -274,7 +545,7 @@ function DataRequestsTab() {
                   <TableCell>{r.dataType}</TableCell>
                   <TableCell>{statusBadge(r.status)}</TableCell>
                   <TableCell><Badge variant="outline">{r.priority}</Badge></TableCell>
-                  <TableCell>{r.volumeRequested?.toLocaleString() ?? "—"}</TableCell>
+                  <TableCell>{r.volumeRequested?.toLocaleString() ?? "-"}</TableCell>
                   <TableCell>{formatDate(r.createdAt)}</TableCell>
                 </TableRow>
               ))
@@ -415,9 +686,9 @@ function UploadsTab() {
                   <TableCell className="font-medium">{u.filename}</TableCell>
                   <TableCell>{u.fileType}</TableCell>
                   <TableCell>{statusBadge(u.status)}</TableCell>
-                  <TableCell>{u.totalRows?.toLocaleString() ?? "—"}</TableCell>
-                  <TableCell className="text-green-600">{u.validRows?.toLocaleString() ?? "—"}</TableCell>
-                  <TableCell className="text-red-600">{u.invalidRows?.toLocaleString() ?? "—"}</TableCell>
+                  <TableCell>{u.totalRows?.toLocaleString() ?? "-"}</TableCell>
+                  <TableCell className="text-green-600">{u.validRows?.toLocaleString() ?? "-"}</TableCell>
+                  <TableCell className="text-red-600">{u.invalidRows?.toLocaleString() ?? "-"}</TableCell>
                   <TableCell>{formatDate(u.createdAt)}</TableCell>
                 </TableRow>
               ))
@@ -499,7 +770,7 @@ function QualityTab() {
                 <div key={s.id} className="flex items-center justify-between text-sm border-b pb-2">
                   <div className="flex items-center gap-2">
                     {statusBadge(s.status)}
-                    <span>Score: <span className="font-bold">{s.overallScore ?? "—"}%</span></span>
+                    <span>Score: <span className="font-bold">{s.overallScore ?? "-"}%</span></span>
                   </div>
                   <div className="flex items-center gap-3 text-muted-foreground">
                     <span>{s.totalIssuesFound ?? 0} issues</span>
@@ -704,12 +975,13 @@ export default function DataManagementPage() {
           <Database className="h-6 w-6" />
           Data Management
         </h1>
-        <p className="text-muted-foreground mt-1">Manage data uploads, quality, templates, and procurement requests.</p>
+        <p className="text-muted-foreground mt-1">Manage data uploads, quality, templates, and full account/contact insights.</p>
       </div>
 
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview" className="flex items-center gap-1"><BarChart3 className="h-4 w-4" /> Overview</TabsTrigger>
+          <TabsTrigger value="insights" className="flex items-center gap-1"><BarChart3 className="h-4 w-4" /> Insights</TabsTrigger>
           <TabsTrigger value="requests" className="flex items-center gap-1"><FileText className="h-4 w-4" /> Requests</TabsTrigger>
           <TabsTrigger value="uploads" className="flex items-center gap-1"><Upload className="h-4 w-4" /> Uploads</TabsTrigger>
           <TabsTrigger value="quality" className="flex items-center gap-1"><ShieldCheck className="h-4 w-4" /> Quality</TabsTrigger>
@@ -717,6 +989,7 @@ export default function DataManagementPage() {
         </TabsList>
 
         <TabsContent value="overview"><OverviewTab /></TabsContent>
+        <TabsContent value="insights"><InsightsTab /></TabsContent>
         <TabsContent value="requests"><DataRequestsTab /></TabsContent>
         <TabsContent value="uploads"><UploadsTab /></TabsContent>
         <TabsContent value="quality"><QualityTab /></TabsContent>
