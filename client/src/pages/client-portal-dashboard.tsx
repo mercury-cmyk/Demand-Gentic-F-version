@@ -32,7 +32,7 @@ import {
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
   Filter, Search, RefreshCw, ExternalLink, Bot, X,
   Link as LinkIcon, Upload, Trash2, Mic, ShoppingCart, FileEdit, TestTube,
-  ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
+  ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
   Workflow, Shield, Puzzle, Pencil, Volume2, Crown, Cpu, Smile, Database,
   ArrowLeft, ArrowRight, Eye, Tag, Layers, AlertTriangle, Crosshair, MessageSquareText, List, FileBarChart2, ShieldCheck,
@@ -65,7 +65,7 @@ import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/
 import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
 import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/service-catalog-tab';
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
-import { CampaignManagerTab } from '@/components/client-campaign-manager';
+
 import { JourneyPipelineTab } from '@/components/client-journey-pipeline';
 
 interface ClientUser {
@@ -966,22 +966,6 @@ export default function ClientPortalDashboard() {
   });
   const ukefTranscriptQaEnabled = ukefTranscriptQaProbe?.enabled ?? false;
 
-  // AI Campaign Planner feature probe
-  const { data: campaignPlannerProbe } = useQuery<{ enabled: boolean }>({
-    queryKey: ['campaign-planner-feature-probe', user?.clientAccountId],
-    queryFn: async () => {
-      try {
-        const res = await fetch('/api/client-portal/campaign-planner/status', authHeaders);
-        if (!res.ok) return { enabled: false };
-        return await res.json();
-      } catch {
-        return { enabled: false };
-      }
-    },
-    enabled: !!user,
-    staleTime: 5 * 60 * 1000,
-  });
-  const campaignPlannerEnabled = campaignPlannerProbe?.enabled ?? false;
 
   // Lead Journey Pipeline feature probe
   const { data: journeyPipelineProbe } = useQuery<{ enabled: boolean }>({
@@ -1806,16 +1790,6 @@ export default function ClientPortalDashboard() {
     });
   }
 
-  // Conditionally add AI Campaign Planner tab
-  if (campaignPlannerEnabled) {
-    const billingIdx4 = navItems.findIndex(i => i.id === 'billing');
-    navItems.splice(billingIdx4 >= 0 ? billingIdx4 : navItems.length - 2, 0, {
-      id: 'campaign-planner',
-      label: 'Campaign Planner',
-      icon: Wand2,
-      color: 'from-indigo-500 to-violet-500',
-    });
-  }
 
   return (
     <ClientPortalLayout>
@@ -3096,12 +3070,6 @@ export default function ClientPortalDashboard() {
           </div>
         )}
 
-        {/* ==================== AI CAMPAIGN PLANNER TAB ==================== */}
-        {activeTab === 'campaign-planner' && campaignPlannerEnabled && (
-          <div className="space-y-6">
-            <CampaignManagerTab authHeaders={authHeaders} />
-          </div>
-        )}
 
         {/* ==================== LEAD JOURNEY PIPELINE TAB ==================== */}
         {activeTab === 'journey-pipeline' && journeyPipelineEnabled && (

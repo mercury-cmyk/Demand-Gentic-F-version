@@ -241,7 +241,7 @@ export default function CampaignsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (campaignId: number) => {
-      const response = await apiRequest("DELETE", `/api/campaigns/${campaignId}`);
+      const response = await apiRequest("DELETE", `/api/campaigns/${campaignId}`, undefined, { timeout: 120000 });
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.message || "Failed to delete campaign");

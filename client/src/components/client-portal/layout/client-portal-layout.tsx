@@ -67,8 +67,8 @@ import {
   Building2,
   Plus,
   Trophy,
-  Wand2,
   GitBranch,
+  Wand2,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';

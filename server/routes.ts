@@ -5983,6 +5983,42 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  const deleteCampaignWithDependencies = async (campaignId: string) => {
+    // Remove dependent rows from tables that do not use ON DELETE CASCADE,
+    // then delete the campaign (which cascades to 40+ other tables).
+    await db.transaction(async (tx) => {
+      await tx.delete(schema.qaConversationAnalysis)
+        .where(eq(schema.qaConversationAnalysis.campaignId, campaignId));
+      await tx.delete(schema.qaInteractionQuality)
+        .where(eq(schema.qaInteractionQuality.campaignId, campaignId));
+      await tx.delete(schema.qaTouchpointSequenceQuality)
+        .where(eq(schema.qaTouchpointSequenceQuality.campaignId, campaignId));
+      await tx.delete(schema.qaComplianceReview)
+        .where(eq(schema.qaComplianceReview.campaignId, campaignId));
+
+      await tx.delete(campaignAgentAssignments)
+        .where(eq(campaignAgentAssignments.campaignId, campaignId));
+
+      await tx.delete(agentQueue)
+        .where(eq(agentQueue.campaignId, campaignId));
+
+      await tx.delete(campaignQueue)
+        .where(eq(campaignQueue.campaignId, campaignId));
+
+      await tx.delete(campaignSuppressionContacts)
+        .where(eq(campaignSuppressionContacts.campaignId, campaignId));
+      await tx.delete(campaignSuppressionAccounts)
+        .where(eq(campaignSuppressionAccounts.campaignId, campaignId));
+      await tx.delete(campaignSuppressionEmails)
+        .where(eq(campaignSuppressionEmails.campaignId, campaignId));
+      await tx.delete(campaignSuppressionDomains)
+        .where(eq(campaignSuppressionDomains.campaignId, campaignId));
+
+      await tx.delete(campaigns)
+        .where(eq(campaigns.id, campaignId));
+    });
+  };
+
   app.delete("/api/campaigns/:id", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const campaignId = req.params.id;
@@ -5993,38 +6029,14 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Campaign not found" });
       }
 
-      // Delete related data first (cascading delete)
-      // 1. Release all agent assignments
-      await db.delete(campaignAgentAssignments)
-        .where(eq(campaignAgentAssignments.campaignId, campaignId));
-
-      // 2. Clear agent queues
-      await db.delete(agentQueue)
-        .where(eq(agentQueue.campaignId, campaignId));
-
-      // 3. Clear campaign queue
-      await db.delete(campaignQueue)
-        .where(eq(campaignQueue.campaignId, campaignId));
-
-      // 4. Delete campaign suppressions
-      await db.delete(campaignSuppressionContacts)
-        .where(eq(campaignSuppressionContacts.campaignId, campaignId));
-      await db.delete(campaignSuppressionAccounts)
-        .where(eq(campaignSuppressionAccounts.campaignId, campaignId));
-      await db.delete(campaignSuppressionEmails)
-        .where(eq(campaignSuppressionEmails.campaignId, campaignId));
-      await db.delete(campaignSuppressionDomains)
-        .where(eq(campaignSuppressionDomains.campaignId, campaignId));
-
-      // 5. Delete the campaign itself
-      await db.delete(campaigns)
-        .where(eq(campaigns.id, campaignId));
+      await deleteCampaignWithDependencies(campaignId);
 
       invalidateDashboardCache();
       res.status(204).send();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting campaign:', error);
-      res.status(500).json({ message: "Failed to delete campaign" });
+      const detail = error?.message || error?.detail || 'Unknown error';
+      res.status(500).json({ message: `Failed to delete campaign: ${detail}` });
     }
   });
 
@@ -9658,7 +9670,18 @@ export function registerRoutes(app: Express) {
       }
       
       if (qaStatus && qaStatus !== "") {
-        filtered = filtered.filter(l => l.qaStatus === qaStatus);
+        const normalizedQaStatus = String(qaStatus).trim();
+        if (normalizedQaStatus === 'approved') {
+          // Backward-compatible: include PM-pending approvals with approved leads.
+          filtered = filtered.filter(
+            l => l.qaStatus === 'approved' || l.qaStatus === 'pending_pm_review'
+          );
+        } else if (normalizedQaStatus === 'pending_review' || normalizedQaStatus === 'in_review') {
+          // Accept legacy query params from older dashboard filters.
+          filtered = filtered.filter(l => l.qaStatus === 'under_review');
+        } else {
+          filtered = filtered.filter(l => l.qaStatus === normalizedQaStatus);
+        }
       }
       
       if (deliveryStatus === "pending") {
@@ -10381,7 +10404,7 @@ export function registerRoutes(app: Express) {
 
       for (const lead of candidates) {
         const check = validateLeadQuality(lead);
-        const isStatusEligible = (lead.qaStatus === 'approved');
+        const isStatusEligible = (lead.qaStatus === 'approved' || lead.qaStatus === 'pending_pm_review');
         
         if (check.valid && isStatusEligible) {
           validIds.push(lead.id);
@@ -10878,11 +10901,11 @@ export function registerRoutes(app: Express) {
         details: [] as { leadId: string; contactName: string | null; status: string }[],
       };
 
-      // Step 1: If autoPublish, first publish all approved leads for this campaign
+      // Step 1: If autoPublish, first publish all QA-approved leads for this campaign
       if (autoPublish) {
         const whereAutoPublish = campaignId
-          ? and(eq(leads.campaignId, campaignId), eq(leads.qaStatus, 'approved'))
-          : and(inArray(leads.id, leadIds!), eq(leads.qaStatus, 'approved'));
+          ? and(eq(leads.campaignId, campaignId), inArray(leads.qaStatus, ['approved', 'pending_pm_review']))
+          : and(inArray(leads.id, leadIds!), inArray(leads.qaStatus, ['approved', 'pending_pm_review']));
 
         const publishedLeads = await db.update(leads)
           .set({
@@ -11682,19 +11705,10 @@ export function registerRoutes(app: Express) {
 
   app.get("/api/leads/export/approved", requireAuth, async (req, res) => {
     try {
-      // Get all approved leads with proper filter
-      const qaStatusFilter: FilterGroup = {
-        logic: 'AND',
-        combinator: 'and',
-        conditions: [{
-          id: 'qa-status-filter',
-          field: 'qaStatus',
-          operator: 'equals',
-          value: 'approved',
-          values: ['approved']
-        }]
-      };
-      const leadsData = await storage.getLeads(qaStatusFilter);
+      // Include both explicitly approved and PM-pending approved leads.
+      const leadsData = (await storage.getLeads()).filter(
+        (lead) => lead.qaStatus === 'approved' || lead.qaStatus === 'pending_pm_review'
+      );
       
       // Export signed GCS URLs (7-day expiry) for CSV download
       const csvData = await Promise.all(leadsData.map(async (lead) => {
@@ -15659,7 +15673,10 @@ Provide JSON response with:
   // Delete regular campaigns
   app.delete("/api/admin/data/campaigns", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
-      const result = await db.delete(campaigns);
+      const existingCampaigns = await db.select({ id: campaigns.id }).from(campaigns);
+      for (const { id } of existingCampaigns) {
+        await deleteCampaignWithDependencies(id);
+      }
 
       await storage.createActivityLog({
         entityType: 'campaign',
@@ -15669,7 +15686,7 @@ Provide JSON response with:
         createdBy: req.user!.userId,
       });
 
-      res.json({ message: "All campaigns deleted", deletedCount: result.rowCount || 0 });
+      res.json({ message: "All campaigns deleted", deletedCount: existingCampaigns.length });
     } catch (error) {
       console.error('Error deleting campaigns:', error);
       res.status(500).json({ message: "Failed to delete campaigns" });
@@ -15741,13 +15758,13 @@ Provide JSON response with:
     try {
       // Delete in order to respect foreign key constraints
       await db.delete(leads);
-      await db.delete(campaignQueue);
-      await db.delete(agentQueue);
-      await db.delete(campaignAgentAssignments);
+      const existingCampaigns = await db.select({ id: campaigns.id }).from(campaigns);
+      for (const { id } of existingCampaigns) {
+        await deleteCampaignWithDependencies(id);
+      }
       await db.delete(verificationLeadSubmissions);
       await db.delete(verificationContacts);
       await db.delete(verificationCampaigns);
-      await db.delete(campaigns);
       await db.delete(contacts);
       await db.delete(accounts);
 
