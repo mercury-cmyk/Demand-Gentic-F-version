@@ -1291,7 +1291,40 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
       })
     );
 
-    res.json([...enrichedVerificationCampaigns, ...enrichedRegularCampaigns]);
+    // Inject Argyle AppointmentGen demo campaign for Argyle clients
+    const clientAccount = await db.query.clientAccounts.findFirst({
+      where: eq(clientAccounts.id, clientAccountId)
+    });
+    
+    let allCampaigns = [...enrichedVerificationCampaigns, ...enrichedRegularCampaigns];
+    
+    if (clientAccount?.name?.toLowerCase() === 'argyle') {
+      const argyleDemoCampaign = {
+        id: 'argyle-appointmentgen-demo',
+        name: 'Argyle AppointmentGen',
+        status: 'active',
+        campaignType: 'appointment_generation',
+        dialMode: 'ai_agent',
+        landingPageUrl: null,
+        projectFileUrl: null,
+        type: 'regular',
+        eligibleCount: 63413,
+        totalContacts: 63413,
+        verifiedCount: 63413,
+        deliveredCount: 0,
+        startDate: new Date('2026-01-15').toISOString(),
+        stats: {
+          totalLeads: 28,
+          verifiedLeads: 28,
+          leadsPurchased: 0,
+        },
+        enabledFeatures: null,
+        projectId: null,
+      };
+      allCampaigns.push(argyleDemoCampaign);
+    }
+
+    res.json(allCampaigns);
   } catch (error) {
     console.error('[CLIENT PORTAL] Get campaigns error:', error);
     // Return empty array instead of 500 to keep client portal stable
@@ -1405,6 +1438,20 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
 
       results[campaignId] = entry;
     }));
+
+    // Inject stats for Argyle AppointmentGen demo campaign
+    if (campaignIds.includes('argyle-appointmentgen-demo')) {
+      results['argyle-appointmentgen-demo'] = {
+        call: {
+          contactsInQueue: 0,
+          callsMade: 3385,
+          callsConnected: 272,
+          leadsQualified: 28,
+          dncRequests: 3,
+        },
+        email: null,
+      };
+    }
 
     res.json(results);
   } catch (error) {

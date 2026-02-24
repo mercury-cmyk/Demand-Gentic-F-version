@@ -160,6 +160,12 @@ function normalizeVoiceName(preferred?: string) {
 const AUDIO_KEEPALIVE_INTERVAL = 15000; // 15 second silence frames to keep connection warm
 const AUDIO_TIMEOUT = 60000; // 60 second timeout for no audio activity
 const MAX_BUFFER_SIZE = 512 * 1024; // 512KB max buffer (reduced for faster backpressure response)
+
+// Telnyx outbound frame pacer constants (must match PSTN G.711 timing)
+const TELNYX_G711_FRAME_BYTES = 160;      // G.711 @ 8kHz: 20ms frame = 160 bytes
+const TELNYX_G711_FRAME_MS = 20;          // 20ms per frame (PSTN standard)
+const TELNYX_MAX_FRAMES_PER_TICK = 10;    // Max frames per tick (200ms catch-up)
+const TELNYX_MAX_OUTBOUND_BUFFER = 320000; // ~40 seconds of audio max buffer
 const RECONNECT_BASE_DELAY = 1000; // 1 second base reconnect delay
 const MAX_RECONNECT_DELAY = 30000; // 30 second max reconnect delay
 const MAX_RECONNECT_ATTEMPTS = 5; // Max reconnect attempts before giving up
@@ -786,6 +792,110 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   // Audio transcoding state (per-call isolation for noise reduction)
   const transcoderState = createTranscoderState();
 
+  // ==================== OUTBOUND FRAME PACER ====================
+  // Buffers G.711 audio and sends exact 160-byte (20ms) frames at regular intervals.
+  // Without this, entire Gemini audio chunks are sent as single bursts, causing
+  // choppy/breaking audio on the contact's end ("line's cutting out").
+  let telnyxOutboundBuffer = Buffer.alloc(0);
+  let telnyxOutboundPacer: NodeJS.Timeout | null = null;
+  let telnyxOutboundLastSendAt: number | null = null;
+  let telnyxOutboundFramesSent = 0;
+
+  function enqueueTelnyxAudio(g711Audio: Buffer): void {
+    if (!g711Audio?.length) return;
+    telnyxOutboundBuffer = telnyxOutboundBuffer.length
+      ? Buffer.concat([telnyxOutboundBuffer, g711Audio])
+      : g711Audio;
+
+    // Cap buffer to prevent unbounded growth; keep newest audio
+    if (telnyxOutboundBuffer.length > TELNYX_MAX_OUTBOUND_BUFFER) {
+      const dropped = telnyxOutboundBuffer.length - TELNYX_MAX_OUTBOUND_BUFFER;
+      telnyxOutboundBuffer = telnyxOutboundBuffer.subarray(dropped);
+      console.warn(`[Gemini Live] ⚠️ Outbound buffer capped (dropped ${dropped} bytes)`);
+    }
+  }
+
+  function flushTelnyxOutboundBuffer(): void {
+    telnyxOutboundBuffer = Buffer.alloc(0);
+    telnyxOutboundLastSendAt = null;
+  }
+
+  function stopTelnyxOutboundPacer(): void {
+    if (telnyxOutboundPacer) {
+      clearInterval(telnyxOutboundPacer);
+      telnyxOutboundPacer = null;
+    }
+    telnyxOutboundLastSendAt = null;
+  }
+
+  function ensureTelnyxOutboundPacer(): void {
+    if (telnyxOutboundPacer) return;
+
+    // Pre-build JSON template for fast per-frame construction
+    let cachedStreamSid = streamSid;
+    let jsonPrefix = cachedStreamSid
+      ? `{"event":"media","stream_id":"${cachedStreamSid}","media":{"payload":"`
+      : `{"event":"media","media":{"payload":"`;
+    const jsonSuffix = '"}}';
+
+    telnyxOutboundPacer = setInterval(() => {
+      try {
+        if (!streamSid || ws.readyState !== WebSocket.OPEN) return;
+        if (telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) return;
+
+        // Update cached prefix if stream_id changed
+        if (streamSid !== cachedStreamSid) {
+          cachedStreamSid = streamSid;
+          jsonPrefix = `{"event":"media","stream_id":"${cachedStreamSid}","media":{"payload":"`;
+        }
+
+        // Backpressure: skip if Telnyx WS write buffer is congested
+        const bufferedAmount = (ws as any).bufferedAmount || 0;
+        if (bufferedAmount > 64000) {
+          return;
+        }
+
+        const now = Date.now();
+        if (telnyxOutboundLastSendAt == null) {
+          telnyxOutboundLastSendAt = now - TELNYX_G711_FRAME_MS;
+        }
+
+        const elapsed = now - telnyxOutboundLastSendAt;
+        const framesDue = Math.floor(elapsed / TELNYX_G711_FRAME_MS);
+        if (framesDue <= 0) return;
+
+        const framesAvailable = Math.floor(telnyxOutboundBuffer.length / TELNYX_G711_FRAME_BYTES);
+        // Allow 2x drain rate when buffer pressure is high
+        const bufferPressure = telnyxOutboundBuffer.length / TELNYX_MAX_OUTBOUND_BUFFER;
+        const maxFrames = bufferPressure > 0.5 ? TELNYX_MAX_FRAMES_PER_TICK * 2 : TELNYX_MAX_FRAMES_PER_TICK;
+        const framesToSend = Math.min(framesDue, framesAvailable, maxFrames);
+        if (framesToSend <= 0) return;
+
+        for (let i = 0; i < framesToSend; i++) {
+          const frame = telnyxOutboundBuffer.subarray(0, TELNYX_G711_FRAME_BYTES);
+          telnyxOutboundBuffer = telnyxOutboundBuffer.subarray(TELNYX_G711_FRAME_BYTES);
+
+          try {
+            const msg = jsonPrefix + frame.toString('base64') + jsonSuffix;
+            ws.send(msg);
+
+            if (telnyxOutboundFramesSent === 0) {
+              console.log(`[Gemini Live] ✅ FIRST PACED FRAME to Telnyx! stream_id=${cachedStreamSid}`);
+            }
+          } catch (e) {
+            console.error(`[Gemini Live] ❌ Error sending paced frame to Telnyx`, e);
+          }
+
+          telnyxOutboundFramesSent++;
+        }
+
+        telnyxOutboundLastSendAt += framesToSend * TELNYX_G711_FRAME_MS;
+      } catch (err) {
+        console.error(`[Gemini Live] Telnyx outbound pacer error:`, err);
+      }
+    }, TELNYX_G711_FRAME_MS);
+  }
+
   // TRANSCRIPT ACCUMULATION: Capture both agent and contact speech
   // Uses Gemini's output_audio_transcription and input_audio_transcription features
   interface TranscriptTurn {
@@ -1081,6 +1191,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
 
   // Cleanup function for graceful shutdown
   function cleanup() {
+    stopTelnyxOutboundPacer();
     if (keepaliveInterval) clearInterval(keepaliveInterval);
     if (qualityCheckInterval) clearInterval(qualityCheckInterval);
     if (audioTimeoutTimer) clearTimeout(audioTimeoutTimer);
@@ -2022,6 +2133,7 @@ Instructions:
                   duration: finalMetrics.duration,
                   chunksSent: finalMetrics.audioChunksSent,
                   chunksReceived: finalMetrics.audioChunksReceived,
+                  pacedFramesSent: telnyxOutboundFramesSent,
                   backpressureEvents: finalMetrics.bufferBackpressureEvents,
                   connectionDrops: finalMetrics.connectionDrops,
                   audioTimeouts: finalMetrics.audioTimeouts,
@@ -2763,9 +2875,12 @@ Instructions:
                 if (cooldownFramesDropped === 1 || cooldownFramesDropped % 20 === 0) {
                   console.log(`[Gemini Live] ❄️ Dropping audio during post-greeting cooldown (${Math.round(greetingCooldownUntil - Date.now())}ms left, ${cooldownFramesDropped} frames dropped)`);
                 }
-                // On first frame dropped, send clear to flush any buffered audio in Telnyx
-                if (cooldownFramesDropped === 1 && streamSid && ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ event: 'clear', stream_id: streamSid }));
+                // On first frame dropped, flush pacer buffer and send clear to Telnyx
+                if (cooldownFramesDropped === 1) {
+                  flushTelnyxOutboundBuffer();
+                  if (streamSid && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ event: 'clear', stream_id: streamSid }));
+                  }
                 }
                 continue;
               } else if (cooldownFramesDropped > 0) {
@@ -2822,8 +2937,6 @@ Instructions:
                   g711Buffer = pcm24kToG711(pcmBuffer, g711Format, transcoderState);
                 }
 
-                const g711Base64 = g711Buffer.toString('base64');
-                
                 // 🎙️ RECORD OUTBOUND: Capture AI audio for call recording
                 // (No real-time transcription — post-call analysis uses the recording)
                 if (callId) {
@@ -2832,29 +2945,24 @@ Instructions:
 
                 // 🔊 TELNYX AUDIO DEBUG: Log audio quality metrics
                 // Calculate audio stats for debugging noise issues
-                let audioRms = 0;
-                let audioPeak = 0;
-                for (let i = 0; i < g711Buffer.length; i++) {
-                  const sample = g711Buffer[i];
-                  // For G.711, approximate linear value (rough estimate)
-                  const linearApprox = Math.abs(sample - 128) * 256;
-                  audioRms += linearApprox * linearApprox;
-                  if (linearApprox > audioPeak) audioPeak = linearApprox;
-                }
-                audioRms = Math.sqrt(audioRms / g711Buffer.length);
-
-                // Log every 50th chunk to avoid log spam, but always log first chunk
                 if (metrics.audioChunksReceived === 0 || metrics.audioChunksReceived % 50 === 0) {
-                  console.log(`[Gemini Live] 🔊 TELNYX DEBUG: chunk=${metrics.audioChunksReceived} | PCM=${pcmBuffer.length}B→G711=${g711Buffer.length}B | format=${g711Format} | RMS≈${audioRms.toFixed(0)} Peak≈${audioPeak.toFixed(0)}`);
+                  let audioRms = 0;
+                  let audioPeak = 0;
+                  for (let i = 0; i < g711Buffer.length; i++) {
+                    const sample = g711Buffer[i];
+                    const linearApprox = Math.abs(sample - 128) * 256;
+                    audioRms += linearApprox * linearApprox;
+                    if (linearApprox > audioPeak) audioPeak = linearApprox;
+                  }
+                  audioRms = Math.sqrt(audioRms / g711Buffer.length);
+                  console.log(`[Gemini Live] 🔊 TELNYX DEBUG: chunk=${metrics.audioChunksReceived} | PCM=${pcmBuffer.length}B→G711=${g711Buffer.length}B (~${Math.round(g711Buffer.length / TELNYX_G711_FRAME_BYTES)} frames) | format=${g711Format} | RMS≈${audioRms.toFixed(0)} Peak≈${audioPeak.toFixed(0)}`);
                 }
 
-                ws.send(JSON.stringify({
-                  event: 'media',
-                  stream_id: streamSid,
-                  media: {
-                    payload: g711Base64
-                  }
-                }));
+                // CRITICAL FIX: Buffer G.711 audio and send via frame pacer at 20ms intervals.
+                // Previously sent entire chunks as single bursts, causing choppy/breaking audio.
+                // The pacer ensures exact 160-byte (20ms) frames at regular PSTN timing.
+                enqueueTelnyxAudio(g711Buffer);
+                ensureTelnyxOutboundPacer();
 
                 // Track when agent audio playback started (for min-playback guard)
                 if (agentAudioStartedAt === null) {
@@ -3534,6 +3642,8 @@ Instructions:
             console.log(`[Gemini Live] ✋ Model interrupted by user (after ${playbackDuration === Infinity ? 'unknown' : playbackDuration + 'ms'} playback)`);
             aiTranscript = ""; // Clear any accumulated transcript
             agentAudioStartedAt = null; // Reset audio tracking
+            // Flush outbound buffer immediately so stale audio doesn't keep playing
+            flushTelnyxOutboundBuffer();
             // SPEED OPTIMIZATION: Send clear event to Telnyx immediately
             // This stops any buffered AI audio, making interruption feel instant
             if (streamSid && ws.readyState === WebSocket.OPEN) {
