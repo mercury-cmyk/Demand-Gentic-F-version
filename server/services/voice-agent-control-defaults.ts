@@ -21,7 +21,7 @@ This control layer must always run before and during any voice interaction, rega
 // It assumes you may NOT be speaking to the right person (gatekeeper-first design).
 
 export const CANONICAL_DEFAULT_OPENING_MESSAGE =
-  "Hello, this is {{agent.name}} from Harver. May I speak with {{contact.full_name}}, please?";
+  "Hello, this is {{agent.name}} calling on behalf of {{org.name}}. May I speak with {{contact.full_name}}, please?";
 
 // Required variables for the canonical opening - ALL must be validated before dialing
 export const CANONICAL_OPENING_REQUIRED_VARIABLES = [
@@ -105,6 +105,7 @@ export function interpolateCanonicalOpening(
 ): string {
   const fullName = contactData.fullName?.trim()
     || `${contactData.firstName?.trim() || ''} ${contactData.lastName?.trim() || ''}`.trim();
+  const orgName = accountData.name?.trim();
 
   let result = CANONICAL_DEFAULT_OPENING_MESSAGE;
 
@@ -114,6 +115,11 @@ export function interpolateCanonicalOpening(
   }
   if (agentName?.trim()) {
     result = result.replace('{{agent.name}}', agentName.trim());
+  }
+  if (orgName) {
+    result = result.replace('{{org.name}}', orgName);
+  } else {
+    result = result.replace(' calling on behalf of {{org.name}}', '');
   }
 
   return result;

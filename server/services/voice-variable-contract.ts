@@ -31,6 +31,7 @@ export const CANONICAL_VOICE_VARIABLE_KEYS = VOICE_VARIABLE_CONTRACT.map((item) 
 const VOICE_TEMPLATE_TOKEN_PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
 const VOICE_TEMPLATE_TOKEN_ALIASES: Record<string, string> = {
   "agent.full_name": "agent.name",
+  "agent.fullname": "agent.name",
   "agentfullname": "agent.name",
   "agent_full_name": "agent.name",
   "agent.name": "agent.name",

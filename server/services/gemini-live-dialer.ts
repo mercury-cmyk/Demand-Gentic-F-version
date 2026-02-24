@@ -173,8 +173,8 @@ const MAX_RECONNECT_ATTEMPTS = 5; // Max reconnect attempts before giving up
 // ==================== GLOBAL GEMINI LIVE SESSION LIMITER ====================
 // Prevents RESOURCE_EXHAUSTED / "rate exceeded" from Vertex AI by capping
 // the number of concurrent Gemini Live WebSocket sessions across all campaigns.
-// Default 10 matches typical Vertex AI quota for gemini-2.0-flash-live.
-const GEMINI_MAX_LIVE_SESSIONS = parseInt(process.env.GEMINI_MAX_LIVE_SESSIONS || '10', 10);
+// Default 20 concurrent sessions. Override via GEMINI_MAX_LIVE_SESSIONS env var.
+const GEMINI_MAX_LIVE_SESSIONS = parseInt(process.env.GEMINI_MAX_LIVE_SESSIONS || '20', 10);
 let _geminiActiveSessions = 0;
 
 /** Try to acquire a Gemini Live session slot. Returns true if acquired. */

@@ -62,8 +62,8 @@ let currentConfig: VertexAIConfig = defaultConfig;
 // Prevents 429 "Rate exceeded" from Google Cloud by throttling at the app layer.
 // Three defenses: concurrency semaphore, RPM sliding window, global cooldown.
 
-const VERTEX_MAX_CONCURRENT = parseInt(process.env.VERTEX_MAX_CONCURRENT || '3', 10);
-const VERTEX_MAX_RPM = parseInt(process.env.VERTEX_MAX_RPM || '5', 10);
+const VERTEX_MAX_CONCURRENT = parseInt(process.env.VERTEX_MAX_CONCURRENT || '30', 10);
+const VERTEX_MAX_RPM = parseInt(process.env.VERTEX_MAX_RPM || '200', 10);
 const VERTEX_SEMAPHORE_TIMEOUT_MS = parseInt(process.env.VERTEX_SEMAPHORE_TIMEOUT_MS || '60000', 10);
 
 // Concurrency semaphore

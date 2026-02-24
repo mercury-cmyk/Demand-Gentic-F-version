@@ -1000,6 +1000,12 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
       // OPENING MESSAGE ASSEMBLY WITH CANONICAL VARIABLE VALIDATION
       // =====================================================================
       let openingScript: string;
+      const canonicalOrgName = voiceTemplateValues["org.name"]?.trim()
+        || campaignConfig?.organizationName?.trim()
+        || null;
+      const canonicalAgentName = voiceTemplateValues["agent.name"]?.trim()
+        || agentConfig?.name?.trim()
+        || null;
       
       // Check if we have a custom first message override
       const customFirstMessage = session.firstMessageOverride?.trim()
@@ -1040,8 +1046,9 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
                 jobTitle: contactInfo?.jobTitle,
               },
               {
-                name: contactInfo?.companyName || contactInfo?.company,
-              }
+                name: canonicalOrgName,
+              },
+              canonicalAgentName
             );
 
             if (!validation.valid) {
@@ -1070,8 +1077,9 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
                 jobTitle: contactInfo?.jobTitle,
               },
               {
-                name: contactInfo?.companyName || contactInfo?.company,
-              }
+                name: canonicalOrgName,
+              },
+              canonicalAgentName
             );
             console.log(`${LOG_PREFIX} ✅ Canonical opening variables validated and interpolated`);
           }
@@ -1090,8 +1098,9 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
               jobTitle: contactInfo?.jobTitle,
             },
             {
-              name: contactInfo?.companyName || contactInfo?.company,
-            }
+              name: canonicalOrgName,
+            },
+            canonicalAgentName
           );
 
           if (!validation.valid) {
@@ -1118,8 +1127,9 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
               jobTitle: contactInfo?.jobTitle,
             },
             {
-              name: contactInfo?.companyName || contactInfo?.company,
-            }
+              name: canonicalOrgName,
+            },
+            canonicalAgentName
           );
           console.log(`${LOG_PREFIX} ✅ Using canonical gatekeeper-first opening`);
         }

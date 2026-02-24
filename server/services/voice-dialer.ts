@@ -2820,6 +2820,12 @@ openaiWs.on("open", async () => {
       // OPENING MESSAGE ASSEMBLY WITH CANONICAL VARIABLE VALIDATION
       // =====================================================================
       let openingScript: string;
+      const canonicalOrgName = voiceTemplateValues["org.name"]?.trim()
+        || campaignConfig?.organizationName?.trim()
+        || null;
+      const canonicalAgentName = voiceTemplateValues["agent.name"]?.trim()
+        || agentConfig?.name?.trim()
+        || null;
       
       // Check if we have a custom first message override
       const customFirstMessage = session.firstMessageOverride?.trim()
@@ -2860,8 +2866,9 @@ openaiWs.on("open", async () => {
                 jobTitle: contactInfo?.jobTitle,
               },
               {
-                name: contactInfo?.companyName || contactInfo?.company,
-              }
+                name: canonicalOrgName,
+              },
+              canonicalAgentName
             );
 
             if (!validation.valid) {
@@ -2886,8 +2893,9 @@ openaiWs.on("open", async () => {
                 jobTitle: contactInfo?.jobTitle,
               },
               {
-                name: contactInfo?.companyName || contactInfo?.company,
-              }
+                name: canonicalOrgName,
+              },
+              canonicalAgentName
             );
             console.log(`${LOG_PREFIX} ✅ Test session - forcing canonical gatekeeper-first opening: "${openingScript}"`);
           } else {
@@ -2900,8 +2908,9 @@ openaiWs.on("open", async () => {
                 jobTitle: contactInfo?.jobTitle,
               },
               {
-                name: contactInfo?.companyName || contactInfo?.company,
-              }
+                name: canonicalOrgName,
+              },
+              canonicalAgentName
             );
             console.log(`${LOG_PREFIX} ✅ Canonical opening variables validated and interpolated`);
           }
@@ -2921,8 +2930,9 @@ openaiWs.on("open", async () => {
             jobTitle: contactInfo?.jobTitle,
           },
           {
-            name: contactInfo?.companyName || contactInfo?.company,
-          }
+            name: canonicalOrgName,
+          },
+          canonicalAgentName
         );
 
         if (!validation.valid) {
@@ -2946,8 +2956,9 @@ openaiWs.on("open", async () => {
               jobTitle: contactInfo?.jobTitle,
             },
             {
-              name: contactInfo?.companyName || contactInfo?.company,
-            }
+              name: canonicalOrgName,
+            },
+            canonicalAgentName
           );
           console.log(`${LOG_PREFIX} ✅ Using canonical gatekeeper-first opening`);
         }
@@ -4769,6 +4780,12 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
     || agentConfig?.firstMessage
     || campaignConfig?.openingScript
     || campaignConfig?.script;
+  const canonicalOrgName = voiceTemplateValues["org.name"]?.trim()
+    || campaignConfig?.organizationName?.trim()
+    || null;
+  const canonicalAgentName = voiceTemplateValues["agent.name"]?.trim()
+    || agentConfig?.name?.trim()
+    || null;
 
   console.log(`${LOG_PREFIX} [Gemini Opening] Custom First Message Source:`, {
     hasOverride: !!session.firstMessageOverride?.trim(),
@@ -4791,24 +4808,25 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
 
     if (usesCanonicalOpeningTokens) {
       // Use canonical opening interpolation
-    const result = interpolateCanonicalOpening(
-      {
-        fullName: contactInfo?.fullName,
-        firstName: contactInfo?.firstName,
-        lastName: contactInfo?.lastName,
-        jobTitle: contactInfo?.jobTitle,
-      },
-      {
-        name: contactInfo?.companyName || contactInfo?.company,
+      const result = interpolateCanonicalOpening(
+        {
+          fullName: contactInfo?.fullName,
+          firstName: contactInfo?.firstName,
+          lastName: contactInfo?.lastName,
+          jobTitle: contactInfo?.jobTitle,
+        },
+        {
+          name: canonicalOrgName,
+        },
+        canonicalAgentName
+      );
+      console.log(`${LOG_PREFIX} [Gemini Opening] Canonical result: "${result}"`);
+      if (!result?.trim()) {
+        const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+        return `Hello, may I speak with ${fallbackName} please?`;
       }
-    );
-    console.log(`${LOG_PREFIX} [Gemini Opening] Canonical result: "${result}"`);
-    if (!result?.trim()) {
-      const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
-      return `Hello, may I speak with ${fallbackName} please?`;
+      return result;
     }
-    return result;
-  }
 
     // Custom message - interpolate both {{ }} and [ ] style tokens
     let result = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
