@@ -76,6 +76,7 @@ import { SimulationStudioPanel as CampaignSimulationPanel } from '../simulation-
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgentPanelProvider, useAgentPanelContextOptional } from '@/components/agent-panel';
 import { clearClientPortalSession } from '@/lib/client-portal-session';
+import { useToast } from '@/hooks/use-toast';
 
 interface ClientUser {
   id: string;
@@ -96,6 +97,8 @@ interface NavItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   highlighted?: boolean;
+  disabled?: boolean;
+  disabledBadge?: string;
 }
 
 interface NavGroup {
@@ -143,7 +146,7 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'The Agentic Council', href: '/client-portal/agents', icon: Bot, highlighted: true },
       { name: 'Organization Intelligence', href: '/client-portal/intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
-      { name: 'Campaign Planner', href: '/client-portal/dashboard?tab=campaign-planner', icon: Wand2 },
+      { name: 'Campaign Planner', href: '/client-portal/dashboard?tab=campaign-planner', icon: Wand2, disabled: true, disabledBadge: 'Coming soon' },
       { name: 'Creative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
     ],
@@ -230,6 +233,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const [simulationOpen, setSimulationOpen] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
+  const { toast } = useToast();
 
   const storedUser = localStorage.getItem('clientPortalUser');
   const user: ClientUser | null = storedUser ? JSON.parse(storedUser) : null;
@@ -487,33 +491,63 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-0.5 pb-2">
                   {group.items.map((item) => {
-                    const isActive = isItemActive(item, location, searchString);
+                    const isDisabled = !!item.disabled;
+                    const isActive = !isDisabled && isItemActive(item, location, searchString);
                     const isHighlighted = !!(item as any).highlighted;
+                    const content = (
+                      <span
+                        className={cn(
+                          'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors relative overflow-hidden',
+                          isDisabled
+                            ? 'text-slate-400 cursor-not-allowed'
+                            : isActive
+                            ? 'bg-primary/10 text-primary cursor-pointer'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer',
+                          isHighlighted && !isActive && !isDisabled && 'bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent text-violet-700 border border-violet-200/50 shadow-sm',
+                          isHighlighted && isActive && !isDisabled && 'bg-gradient-to-r from-violet-100 to-indigo-50 text-violet-800 border-violet-200 font-semibold'
+                        )}
+                        onClick={() => {
+                          if (isDisabled) {
+                            toast({
+                              title: "Campaign Planner",
+                              description: "Campaign Planner is under construction. We're working on it and it will be available soon.",
+                            });
+                            return;
+                          }
+                          setSidebarOpen(false);
+                        }}
+                        aria-disabled={isDisabled}
+                      >
+                        <item.icon className={cn("h-4 w-4", isDisabled ? "text-slate-400" : isHighlighted && "text-violet-600")} />
+                        <span className={cn(isHighlighted && !isDisabled && "font-semibold tracking-tight")}>{item.name}</span>
+
+                        {isDisabled && item.disabledBadge && (
+                          <Badge variant="secondary" className="ml-auto h-4 px-1.5 text-[9px] bg-slate-200 text-slate-600 border-0">
+                            {item.disabledBadge}
+                          </Badge>
+                        )}
+
+                        {!isDisabled && isHighlighted && (
+                          <Badge className="ml-auto h-4 px-1.5 text-[9px] bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-sm animate-pulse">
+                            HOT
+                          </Badge>
+                        )}
+
+                        {isActive && !isHighlighted && !isDisabled && <ChevronRight className="h-4 w-4 ml-auto" />}
+                      </span>
+                    );
+
+                    if (isDisabled) {
+                      return (
+                        <button key={item.name} type="button" className="w-full text-left">
+                          {content}
+                        </button>
+                      );
+                    }
 
                     return (
                       <Link key={item.name} href={item.href}>
-                        <span
-                          className={cn(
-                            'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors relative overflow-hidden',
-                            isActive
-                              ? 'bg-primary/10 text-primary'
-                              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                            isHighlighted && !isActive && 'bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent text-violet-700 border border-violet-200/50 shadow-sm',
-                            isHighlighted && isActive && 'bg-gradient-to-r from-violet-100 to-indigo-50 text-violet-800 border-violet-200 font-semibold'
-                          )}
-                          onClick={() => setSidebarOpen(false)}
-                        >
-                          <item.icon className={cn("h-4 w-4", isHighlighted && "text-violet-600")} />
-                          <span className={cn(isHighlighted && "font-semibold tracking-tight")}>{item.name}</span>
-                          
-                          {isHighlighted && (
-                             <Badge className="ml-auto h-4 px-1.5 text-[9px] bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-sm animate-pulse">
-                               HOT
-                             </Badge>
-                          )}
-                          
-                          {isActive && !isHighlighted && <ChevronRight className="h-4 w-4 ml-auto" />}
-                        </span>
+                        {content}
                       </Link>
                     );
                   })}
