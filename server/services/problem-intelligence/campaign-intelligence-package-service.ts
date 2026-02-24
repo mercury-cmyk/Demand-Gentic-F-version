@@ -147,6 +147,42 @@ Response: ${obj.response}${obj.proofPoint ? `\nProof point: ${obj.proofPoint}` :
     }
   }
 
+  // Department-specific intelligence
+  const deptIntel = problemIntelligence.departmentIntelligence;
+  if (deptIntel?.departments?.length > 0) {
+    sections.push(`## Department-Specific Intelligence`);
+    if (deptIntel.primaryDepartment) {
+      sections.push(`Primary Target Department: ${deptIntel.primaryDepartment}`);
+    }
+    for (const dept of deptIntel.departments.slice(0, 4)) {
+      const problemList = dept.detectedProblems
+        .map((p) => p.problemStatement)
+        .join("; ");
+      const serviceList = dept.relevantServices
+        .map((s) => s.serviceName)
+        .join(", ");
+      const painPointList = (dept.painPoints as any[])
+        .slice(0, 3)
+        .map((p) => (typeof p === "string" ? p : (p as any).painPoint || JSON.stringify(p)))
+        .join("; ");
+      const objectionList = (dept.commonObjections as any[])
+        .slice(0, 2)
+        .map((o) => (typeof o === "string" ? o : (o as any).objection || JSON.stringify(o)))
+        .join("; ");
+      sections.push(`### ${dept.department} (${Math.round(dept.confidence * 100)}% confidence)
+Problems: ${problemList || "General challenges"}
+Our Solutions: ${serviceList || "General platform"}
+Messaging Angle: ${dept.messagingAngle || "Exploratory"}
+Pain Points: ${painPointList || "Unknown"}
+Common Objections: ${objectionList || "None known"}`);
+    }
+    if (deptIntel.crossDepartmentAngles.length > 0) {
+      sections.push(
+        `Cross-Department Angles:\n${deptIntel.crossDepartmentAngles.map((a) => `- ${a}`).join("\n")}`
+      );
+    }
+  }
+
   // Confidence indicator
   sections.push(`## Intelligence Confidence
 Overall: ${Math.round(problemIntelligence.confidence * 100)}%
@@ -170,13 +206,16 @@ export function buildCondensedProblemIntelligenceSection(
     ? `${topProblem.problemStatement} (${Math.round(topProblem.confidence * 100)}%)`
     : "No specific problem detected";
 
+  const primaryDept = problemIntelligence.departmentIntelligence?.primaryDepartment;
+
   return `## Problem Intelligence [${account.name}]
 Industry: ${account.industry || "Unknown"} | Confidence: ${Math.round(problemIntelligence.confidence * 100)}%
 Primary Problem: ${problemSummary}
+${primaryDept ? `Target Dept: ${primaryDept}` : ""}
 Approach: ${formatApproach(os.recommendedApproach)}
 Lead with: ${mp.primaryAngle}
 First question: ${os.questionsToAsk[0] || "What's your current approach to [problem area]?"}
-Avoid: ${os.doNotMention.join(", ") || "None specified"}`;
+Avoid: ${os.doNotMention.join(", ") || "None specified"}`.trim();
 }
 
 // ==================== HELPERS ====================

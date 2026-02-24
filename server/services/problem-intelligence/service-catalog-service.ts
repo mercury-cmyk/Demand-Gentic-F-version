@@ -423,6 +423,7 @@ function parseServiceEntry(entry: OrganizationServiceCatalogEntry): ServiceDefin
     valuePropositions: (entry.valuePropositions as ValueProposition[]) || [],
     targetIndustries: entry.targetIndustries,
     targetPersonas: entry.targetPersonas,
+    targetDepartments: entry.targetDepartments || null,
     displayOrder: entry.displayOrder || 0,
     isActive: entry.isActive,
   };

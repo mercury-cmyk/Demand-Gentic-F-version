@@ -116,16 +116,34 @@ const SENIORITY_LEVELS: Record<string, string[]> = {
 };
 
 const DEPARTMENTS: Record<string, string[]> = {
-  'IT / Engineering': ['it', 'engineering', 'development', 'devops', 'infrastructure', 'software', 'technology'],
-  'Marketing': ['marketing', 'brand', 'content', 'digital marketing', 'demand gen', 'growth'],
-  'Sales': ['sales', 'business development', 'account executive', 'revenue', 'commercial'],
-  'Finance': ['finance', 'accounting', 'treasury', 'controller', 'financial'],
-  'Human Resources': ['hr', 'human resources', 'talent', 'recruiting', 'people'],
-  'Operations': ['operations', 'supply chain', 'logistics', 'procurement'],
-  'Legal': ['legal', 'compliance', 'regulatory', 'counsel'],
-  'Product': ['product', 'product management', 'product design'],
-  'Customer Success': ['customer success', 'customer service', 'support', 'client services'],
-  'Executive': ['executive', 'leadership', 'general management'],
+  'IT / Engineering': ['it', 'engineering', 'development', 'devops', 'infrastructure', 'software', 'technology', 'data engineer', 'cloud', 'systems', 'architect', 'developer', 'programmer', 'security', 'cyber', 'network', 'database', 'sre', 'platform'],
+  'Marketing': ['marketing', 'brand', 'content', 'digital marketing', 'demand gen', 'growth', 'communications', 'pr ', 'public relations', 'social media', 'seo', 'campaign', 'creative'],
+  'Sales': ['sales', 'business development', 'account executive', 'revenue', 'commercial', 'partnerships', 'channel', 'inside sales', 'field sales', 'sdr', 'bdr', 'quota'],
+  'Finance': ['finance', 'accounting', 'treasury', 'controller', 'financial', 'cfo', 'audit', 'tax', 'accounts payable', 'accounts receivable', 'fp&a', 'investor relations'],
+  'Human Resources': ['hr', 'human resources', 'talent', 'recruiting', 'people', 'workforce', 'compensation', 'benefits', 'organizational development', 'employee experience', 'dei', 'hris'],
+  'Operations': ['operations', 'supply chain', 'logistics', 'procurement', 'facilities', 'warehouse', 'manufacturing', 'process', 'quality assurance', 'continuous improvement'],
+  'Legal': ['legal', 'compliance', 'regulatory', 'counsel', 'attorney', 'lawyer', 'paralegal', 'privacy', 'governance', 'risk management', 'contracts'],
+  'Product': ['product', 'product management', 'product design', 'ux', 'user experience', 'ui design', 'product owner', 'scrum master'],
+  'Customer Success': ['customer success', 'customer service', 'support', 'client services', 'customer experience', 'onboarding', 'implementation', 'professional services', 'solutions engineer'],
+  'Executive': ['executive', 'leadership', 'general management', 'ceo', 'president', 'founder', 'co-founder', 'managing director', 'general manager', 'board'],
+};
+
+// Maps jobRoleTaxonomy.jobFunction → department name for taxonomy fallback
+export const JOB_FUNCTION_TO_DEPARTMENT: Record<string, string> = {
+  'IT': 'IT / Engineering',
+  'Engineering': 'IT / Engineering',
+  'Finance': 'Finance',
+  'HR': 'Human Resources',
+  'Marketing': 'Marketing',
+  'Operations': 'Operations',
+  'Sales': 'Sales',
+  'Legal': 'Legal',
+  'Product': 'Product',
+  'Customer Success': 'Customer Success',
+  'Support': 'Customer Success',
+  'Executive': 'Executive',
+  'Research': 'IT / Engineering',
+  'Procurement': 'Operations',
 };
 
 // ==================== CORE ENGINE ====================

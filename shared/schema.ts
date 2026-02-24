@@ -10724,6 +10724,10 @@ export const organizationServiceCatalog = pgTable('organization_service_catalog'
   targetIndustries: text('target_industries').array(),
   targetPersonas: text('target_personas').array(),
 
+  // Which departments this service targets (budget owners / pain owners)
+  // Values: 'IT', 'Finance', 'HR', 'Marketing', 'Operations', 'Sales', 'Legal', 'Executive'
+  targetDepartments: text('target_departments').array().default(sql`'{}'`),
+
   // Ordering and status
   displayOrder: integer('display_order').default(0),
   isActive: boolean('is_active').notNull().default(true),
@@ -10772,6 +10776,10 @@ export const problemDefinitions = pgTable('problem_definitions', {
   // Detection Rules (for automated matching against account data)
   // Structure: { industries: [], techStack: { required: [], absent: [] }, firmographics: { minRevenue, maxRevenue, minEmployees, maxEmployees, regions: [] }, intentSignals: [] }
   detectionRules: jsonb('detection_rules').notNull().default('{}'),
+
+  // Which departments typically own this problem
+  // Values: 'IT', 'Finance', 'HR', 'Marketing', 'Operations', 'Sales', 'Legal', 'Executive'
+  targetDepartments: text('target_departments').array().default(sql`'{}'`),
 
   // Status
   isActive: boolean('is_active').notNull().default(true),
@@ -10842,6 +10850,10 @@ export const campaignAccountProblems = pgTable('campaign_account_problems', {
   // Outreach Strategy
   // Structure: { recommendedApproach: "exploratory"|"consultative"|"direct"|"educational", talkingPoints: [], questionsToAsk: [], doNotMention: [] }
   outreachStrategy: jsonb('outreach_strategy').notNull().default('{}'),
+
+  // Department-level intelligence breakdown
+  // Structure: { departments: [{ department, detectedProblems, relevantServices, messagingAngle, recommendedApproach, painPoints, priorities, commonObjections, stakeholderTitles, confidence }], primaryDepartment, crossDepartmentAngles }
+  departmentIntelligence: jsonb('department_intelligence').default('{}'),
 
   // Generation Metadata
   generatedAt: timestamp('generated_at').notNull().defaultNow(),

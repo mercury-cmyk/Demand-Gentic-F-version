@@ -152,6 +152,7 @@ export async function matchProblemsToAccount(
         detectionSignals: matchResult.signals,
         relevantServices: problem.serviceIds || [],
         messagingAngles: problem.messagingAngles,
+        targetDepartments: problem.targetDepartments || [],
       });
     }
   }
@@ -773,6 +774,7 @@ function parseProblemDefinition(entry: ProblemDefinitionDB): ProblemDefinitionFu
     serviceIds: entry.serviceIds,
     messagingAngles: (entry.messagingAngles as MessagingAngle[]) || [],
     detectionRules: (entry.detectionRules as DetectionRules) || {},
+    targetDepartments: (entry.targetDepartments as string[]) || [],
     isActive: entry.isActive,
   };
 }

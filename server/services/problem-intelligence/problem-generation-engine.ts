@@ -12,10 +12,12 @@ import {
   campaignAccountProblems,
   accounts,
   campaigns,
+  industryDepartmentPainPoints,
+  industryTaxonomy,
   type CampaignAccountProblem,
   type InsertCampaignAccountProblem,
 } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { wrapPromptWithOI } from "../../lib/org-intelligence-helper";
 import type {
   CampaignAccountProblemIntelligence,
@@ -27,6 +29,8 @@ import type {
   ServiceDefinition,
   ObjectionPrep,
   BatchGenerateResult,
+  DepartmentIntelligence,
+  DepartmentProblemMapping,
 } from "@shared/types/problem-intelligence";
 import {
   detectAccountSignals,
@@ -97,6 +101,13 @@ export async function generateAccountProblemIntelligence(params: {
   // Analyze gaps
   const gapAnalysis = await analyzeCapabilityGaps(accountId, signals, serviceCatalog);
 
+  // Build department-level intelligence
+  const departmentIntelligence = await buildDepartmentIntelligence(
+    detectedProblems,
+    serviceCatalog,
+    signals.firmographic.industry
+  );
+
   // Synthesize messaging and strategy using AI
   const synthesis = await synthesizeProblemIntelligence({
     accountSignals: signals,
@@ -104,6 +115,7 @@ export async function generateAccountProblemIntelligence(params: {
     gapAnalysis,
     serviceCatalog,
     campaignContext: campaign,
+    departmentIntelligence,
   });
 
   // Prepare the intelligence record
@@ -114,6 +126,7 @@ export async function generateAccountProblemIntelligence(params: {
     gapAnalysis,
     messagingPackage: synthesis.messagingPackage,
     outreachStrategy: synthesis.outreachStrategy,
+    departmentIntelligence,
     generatedAt: new Date(),
     generationModel: SYNTHESIS_MODEL,
     sourceFingerprint,
@@ -129,6 +142,7 @@ export async function generateAccountProblemIntelligence(params: {
         gapAnalysis: intelligence.gapAnalysis,
         messagingPackage: intelligence.messagingPackage,
         outreachStrategy: intelligence.outreachStrategy,
+        departmentIntelligence: intelligence.departmentIntelligence,
         generatedAt: intelligence.generatedAt,
         generationModel: intelligence.generationModel,
         sourceFingerprint: intelligence.sourceFingerprint,
@@ -146,6 +160,7 @@ export async function generateAccountProblemIntelligence(params: {
       gapAnalysis: intelligence.gapAnalysis,
       messagingPackage: intelligence.messagingPackage,
       outreachStrategy: intelligence.outreachStrategy,
+      departmentIntelligence: intelligence.departmentIntelligence,
       generatedAt: intelligence.generatedAt,
       generationModel: intelligence.generationModel,
       sourceFingerprint: intelligence.sourceFingerprint,
@@ -234,12 +249,13 @@ async function synthesizeProblemIntelligence(params: {
   gapAnalysis: GapAnalysis;
   serviceCatalog: ServiceDefinition[];
   campaignContext: CampaignContext | null;
+  departmentIntelligence: DepartmentIntelligence;
 }): Promise<{
   messagingPackage: MessagingPackage;
   outreachStrategy: OutreachStrategy;
   confidence: number;
 }> {
-  const { accountSignals, detectedProblems, gapAnalysis, serviceCatalog, campaignContext } =
+  const { accountSignals, detectedProblems, gapAnalysis, serviceCatalog, campaignContext, departmentIntelligence } =
     params;
 
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -256,7 +272,8 @@ async function synthesizeProblemIntelligence(params: {
     detectedProblems,
     gapAnalysis,
     serviceCatalog,
-    campaignContext
+    campaignContext,
+    departmentIntelligence
   );
 
   try {
@@ -347,7 +364,8 @@ function buildSynthesisUserPrompt(
   problems: DetectedProblem[],
   gaps: GapAnalysis,
   services: ServiceDefinition[],
-  campaign: CampaignContext | null
+  campaign: CampaignContext | null,
+  deptIntelligence: DepartmentIntelligence
 ): string {
   const sections: string[] = [];
 
@@ -402,6 +420,24 @@ Engagement Level: ${signals.behavioralSignals.engagementLevel}`);
 Objective: ${campaign.objective || "General outreach"}
 Target Audience: ${campaign.targetAudience || "Not specified"}
 Talking Points: ${campaign.talkingPoints?.join("; ") || "Not specified"}`);
+  }
+
+  // Department-level intelligence
+  if (deptIntelligence.departments.length > 0) {
+    sections.push(`## Department-Level Intelligence`);
+    for (const dept of deptIntelligence.departments.slice(0, 4)) {
+      const deptProblems = dept.detectedProblems.map((p) => p.problemStatement).join("; ") || "None specific";
+      const deptServices = dept.relevantServices.map((s) => s.serviceName).join(", ") || "General";
+      const deptPainPoints = (dept.painPoints as any[]).slice(0, 3).map((p) => typeof p === "string" ? p : (p as any).painPoint || JSON.stringify(p)).join("; ") || "Unknown";
+      sections.push(`### ${dept.department}
+Problems: ${deptProblems}
+Solutions: ${deptServices}
+Industry Pain Points: ${deptPainPoints}
+Confidence: ${Math.round(dept.confidence * 100)}%`);
+    }
+    if (deptIntelligence.primaryDepartment) {
+      sections.push(`Primary target department: ${deptIntelligence.primaryDepartment}`);
+    }
   }
 
   return sections.join("\n\n");
@@ -477,6 +513,11 @@ function parseStoredIntelligence(
       questionsToAsk: [],
       doNotMention: [],
     },
+    departmentIntelligence: (record.departmentIntelligence as DepartmentIntelligence) || {
+      departments: [],
+      primaryDepartment: null,
+      crossDepartmentAngles: [],
+    },
     generatedAt: record.generatedAt,
     generationModel: record.generationModel || undefined,
     sourceFingerprint: record.sourceFingerprint || undefined,
@@ -505,6 +546,187 @@ function calculateConfidence(problems: DetectedProblem[], gaps: GapAnalysis): nu
       : 0.5;
 
   return (avgProblemConfidence * 0.6 + avgGapConfidence * 0.4);
+}
+
+// ==================== DEPARTMENT INTELLIGENCE ====================
+
+/**
+ * Build department-level intelligence by grouping detected problems and services
+ * by their target departments, then cross-referencing with industryDepartmentPainPoints
+ */
+async function buildDepartmentIntelligence(
+  detectedProblems: DetectedProblem[],
+  serviceCatalog: ServiceDefinition[],
+  accountIndustry: string | null
+): Promise<DepartmentIntelligence> {
+  // 1. Group detected problems by department
+  const deptProblems = new Map<string, DetectedProblem[]>();
+  for (const problem of detectedProblems) {
+    for (const dept of problem.targetDepartments || []) {
+      if (!deptProblems.has(dept)) deptProblems.set(dept, []);
+      deptProblems.get(dept)!.push(problem);
+    }
+  }
+
+  // 2. Group services by department
+  const deptServices = new Map<string, ServiceDefinition[]>();
+  for (const service of serviceCatalog) {
+    for (const dept of service.targetDepartments || []) {
+      if (!deptServices.has(dept)) deptServices.set(dept, []);
+      deptServices.get(dept)!.push(service);
+    }
+  }
+
+  // 3. Collect all referenced departments
+  const allDepts = new Set([...deptProblems.keys(), ...deptServices.keys()]);
+  if (allDepts.size === 0) {
+    return { departments: [], primaryDepartment: null, crossDepartmentAngles: [] };
+  }
+
+  // 4. Get industry pain points for relevant departments
+  const industryPainPoints = await loadIndustryDepartmentPainPoints(
+    accountIndustry,
+    [...allDepts]
+  );
+
+  // 5. Build per-department mappings
+  const departments: DepartmentProblemMapping[] = [];
+  for (const dept of allDepts) {
+    const problems = deptProblems.get(dept) || [];
+    const services = deptServices.get(dept) || [];
+    const painPointData = industryPainPoints.get(dept);
+
+    const avgConfidence =
+      problems.length > 0
+        ? problems.reduce((sum, p) => sum + p.confidence, 0) / problems.length
+        : 0.3;
+
+    // Extract stakeholder titles from service targetPersonas
+    const stakeholderTitles = [
+      ...new Set(
+        services.flatMap((s) => s.targetPersonas || [])
+      ),
+    ];
+
+    departments.push({
+      department: dept,
+      detectedProblems: problems.map((p) => ({
+        problemId: p.problemId,
+        problemStatement: p.problemStatement,
+        confidence: p.confidence,
+      })),
+      relevantServices: services.map((s) => ({
+        serviceId: s.id,
+        serviceName: s.serviceName,
+      })),
+      messagingAngle:
+        painPointData?.messagingAngles?.[0] ||
+        problems[0]?.messagingAngles?.[0]?.angle ||
+        "",
+      recommendedApproach: avgConfidence > 0.7 ? "consultative" : "exploratory",
+      painPoints: painPointData?.painPoints || [],
+      priorities: painPointData?.priorities || [],
+      commonObjections: painPointData?.commonObjections || [],
+      stakeholderTitles,
+      confidence: avgConfidence,
+    });
+  }
+
+  // 6. Sort by confidence descending
+  departments.sort((a, b) => b.confidence - a.confidence);
+
+  return {
+    departments,
+    primaryDepartment: departments[0]?.department || null,
+    crossDepartmentAngles: buildCrossDeptAngles(departments),
+  };
+}
+
+/**
+ * Load industry-department pain points from the database
+ * Matches account industry against industryTaxonomy and returns per-department data
+ */
+async function loadIndustryDepartmentPainPoints(
+  industry: string | null,
+  departments: string[]
+): Promise<Map<string, { painPoints: any[]; priorities: any[]; commonObjections: any[]; messagingAngles: any[] }>> {
+  const result = new Map<string, { painPoints: any[]; priorities: any[]; commonObjections: any[]; messagingAngles: any[] }>();
+
+  if (!industry || departments.length === 0) return result;
+
+  try {
+    const rows = await db
+      .select({
+        department: industryDepartmentPainPoints.department,
+        painPoints: industryDepartmentPainPoints.painPoints,
+        priorities: industryDepartmentPainPoints.priorities,
+        commonObjections: industryDepartmentPainPoints.commonObjections,
+        messagingAngles: industryDepartmentPainPoints.messagingAngles,
+      })
+      .from(industryDepartmentPainPoints)
+      .innerJoin(
+        industryTaxonomy,
+        eq(industryDepartmentPainPoints.industryId, industryTaxonomy.id)
+      )
+      .where(
+        and(
+          sql`LOWER(${industryTaxonomy.industryName}) LIKE LOWER(${"%" + industry + "%"})`,
+          inArray(industryDepartmentPainPoints.department, departments),
+          eq(industryDepartmentPainPoints.isActive, true)
+        )
+      );
+
+    for (const row of rows) {
+      result.set(row.department, {
+        painPoints: (row.painPoints as any[]) || [],
+        priorities: (row.priorities as any[]) || [],
+        commonObjections: (row.commonObjections as any[]) || [],
+        messagingAngles: (row.messagingAngles as any[]) || [],
+      });
+    }
+  } catch (error) {
+    console.error("[ProblemGenEngine] Error loading industry department pain points:", error);
+  }
+
+  return result;
+}
+
+/**
+ * Build messaging angles that span multiple departments
+ */
+function buildCrossDeptAngles(departments: DepartmentProblemMapping[]): string[] {
+  if (departments.length < 2) return [];
+
+  const angles: string[] = [];
+
+  // Find problems that appear in multiple departments
+  const problemDeptCount = new Map<string, string[]>();
+  for (const dept of departments) {
+    for (const p of dept.detectedProblems) {
+      if (!problemDeptCount.has(p.problemStatement)) {
+        problemDeptCount.set(p.problemStatement, []);
+      }
+      problemDeptCount.get(p.problemStatement)!.push(dept.department);
+    }
+  }
+
+  for (const [problem, depts] of problemDeptCount) {
+    if (depts.length > 1) {
+      angles.push(
+        `"${problem}" impacts ${depts.join(" and ")} — use as cross-functional conversation starter`
+      );
+    }
+  }
+
+  // If we have both budget-owner and pain-owner departments, note the multi-stakeholder angle
+  if (departments.length >= 2) {
+    const topTwo = departments.slice(0, 2);
+    angles.push(
+      `Multi-stakeholder opportunity: align ${topTwo[0].department} and ${topTwo[1].department} around shared objectives`
+    );
+  }
+
+  return angles.slice(0, 3);
 }
 
 function buildFallbackSynthesis(

@@ -73,6 +73,7 @@ export interface ServiceDefinition {
   valuePropositions: ValueProposition[];
   targetIndustries: string[] | null;
   targetPersonas: string[] | null;
+  targetDepartments: string[] | null; // Departments this service targets
   displayOrder: number;
   isActive: boolean;
 }
@@ -122,6 +123,7 @@ export interface ProblemDefinitionFull {
   serviceIds: number[] | null;
   messagingAngles: MessagingAngle[];
   detectionRules: DetectionRules;
+  targetDepartments: string[]; // Which departments typically own this problem
   isActive: boolean;
   createdAt?: Date | null;
   updatedAt?: Date | null;
@@ -176,6 +178,7 @@ export interface DetectedProblem {
   detectionSignals: DetectionSignal[];
   relevantServices: number[]; // IDs of services that address this problem
   messagingAngles: MessagingAngle[];
+  targetDepartments: string[]; // Departments that own this problem
 }
 
 // ==================== GAP ANALYSIS TYPES ====================
@@ -232,6 +235,40 @@ export interface OutreachStrategy {
   doNotMention: string[];
 }
 
+// ==================== DEPARTMENT INTELLIGENCE TYPES ====================
+
+/**
+ * Per-department problem-to-solution mapping for a target account
+ */
+export interface DepartmentProblemMapping {
+  department: string; // 'IT' | 'Finance' | 'HR' | 'Marketing' | 'Operations' | 'Sales' | 'Legal' | 'Executive'
+  detectedProblems: Array<{
+    problemId: number;
+    problemStatement: string;
+    confidence: number;
+  }>;
+  relevantServices: Array<{
+    serviceId: number;
+    serviceName: string;
+  }>;
+  messagingAngle: string;
+  recommendedApproach: string;
+  painPoints: string[];       // from industryDepartmentPainPoints
+  priorities: string[];       // from industryDepartmentPainPoints
+  commonObjections: string[]; // from industryDepartmentPainPoints
+  stakeholderTitles: string[]; // persona titles mapped to this dept
+  confidence: number;
+}
+
+/**
+ * Department-level intelligence for a target account
+ */
+export interface DepartmentIntelligence {
+  departments: DepartmentProblemMapping[];
+  primaryDepartment: string | null;  // highest confidence / most problems
+  crossDepartmentAngles: string[];   // messaging angles that span multiple depts
+}
+
 // ==================== CAMPAIGN ACCOUNT PROBLEM INTELLIGENCE ====================
 
 /**
@@ -244,6 +281,7 @@ export interface CampaignAccountProblemIntelligence {
   gapAnalysis: GapAnalysis;
   messagingPackage: MessagingPackage;
   outreachStrategy: OutreachStrategy;
+  departmentIntelligence: DepartmentIntelligence;
   generatedAt: Date;
   generationModel?: string;
   sourceFingerprint?: string;

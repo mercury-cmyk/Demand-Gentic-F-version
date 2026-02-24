@@ -13,6 +13,7 @@ import { requireAuth, requireRole } from "../auth";
 import { db } from "../db";
 import {
   problemDefinitions,
+  campaignAccountProblems,
   insertProblemDefinitionSchema,
   type InsertProblemDefinition,
 } from "@shared/schema";
@@ -302,7 +303,7 @@ router.get("/service-catalog/:id", requireAuth, async (req: Request, res: Respon
  */
 router.post("/service-catalog", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { organizationId, serviceName, serviceCategory, serviceDescription, targetIndustries, targetPersonas } =
+    const { organizationId, serviceName, serviceCategory, serviceDescription, targetIndustries, targetPersonas, targetDepartments } =
       req.body;
 
     if (!serviceName) {
@@ -321,6 +322,7 @@ router.post("/service-catalog", requireAuth, async (req: Request, res: Response)
         serviceDescription,
         targetIndustries: targetIndustries || null,
         targetPersonas: targetPersonas || null,
+        targetDepartments: targetDepartments || [],
         problemsSolved: [],
         differentiators: [],
         valuePropositions: [],
@@ -605,6 +607,7 @@ router.post("/problem-definitions", requireAuth, async (req: Request, res: Respo
       serviceIds,
       messagingAngles,
       detectionRules,
+      targetDepartments,
     } = req.body;
 
     if (!problemStatement) {
@@ -626,6 +629,7 @@ router.post("/problem-definitions", requireAuth, async (req: Request, res: Respo
         serviceIds: serviceIds || null,
         messagingAngles: messagingAngles || [],
         detectionRules: detectionRules || {},
+        targetDepartments: targetDepartments || [],
         createdBy: (req.user as any)?.id,
       })
       .returning();
@@ -935,6 +939,141 @@ router.delete(
     } catch (error) {
       console.error("[CampaignServiceCustom] Error removing customization:", error);
       res.status(500).json({ error: "Failed to remove service customization" });
+    }
+  }
+);
+
+// ==================== DEPARTMENT INTELLIGENCE ROUTE ====================
+
+/**
+ * GET /api/campaigns/:id/accounts/:accountId/department-intelligence
+ * Get department-level intelligence breakdown for an account in a campaign
+ */
+router.get(
+  "/campaigns/:id/accounts/:accountId/department-intelligence",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { id: campaignId, accountId } = req.params;
+
+      const [record] = await db
+        .select({
+          departmentIntelligence: campaignAccountProblems.departmentIntelligence,
+          confidence: campaignAccountProblems.confidence,
+          generatedAt: campaignAccountProblems.generatedAt,
+        })
+        .from(campaignAccountProblems)
+        .where(
+          and(
+            eq(campaignAccountProblems.campaignId, campaignId),
+            eq(campaignAccountProblems.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      if (!record) {
+        return res.status(404).json({
+          error: "No problem intelligence found for this account. Generate it first.",
+        });
+      }
+
+      const deptIntelligence = record.departmentIntelligence || {
+        departments: [],
+        primaryDepartment: null,
+        crossDepartmentAngles: [],
+      };
+
+      res.json({
+        departmentIntelligence: deptIntelligence,
+        confidence: record.confidence,
+        generatedAt: record.generatedAt,
+      });
+    } catch (error) {
+      console.error("[DepartmentIntelligence] Error getting department intelligence:", error);
+      res.status(500).json({ error: "Failed to get department intelligence" });
+    }
+  }
+);
+
+// ==================== DEPARTMENT SEGMENTS ====================
+
+import {
+  seedDepartmentSegments,
+  autoClassifyContacts,
+  refreshSegmentCounts,
+  getDepartmentSegments,
+} from "../services/department-segmentation-service";
+
+/**
+ * POST /api/department-segments/seed
+ * Creates one dynamic segment per department (idempotent)
+ */
+router.post(
+  "/department-segments/seed",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const result = await seedDepartmentSegments(userId);
+      res.json({
+        message: `Seeded department segments: ${result.created.length} created, ${result.existing.length} already existed`,
+        created: result.created,
+        existing: result.existing,
+        segments: result.segments,
+      });
+    } catch (error) {
+      console.error("[DepartmentSegments] Error seeding segments:", error);
+      res.status(500).json({ error: "Failed to seed department segments" });
+    }
+  }
+);
+
+/**
+ * POST /api/department-segments/auto-classify
+ * Classifies contacts into departments based on job titles
+ */
+router.post(
+  "/department-segments/auto-classify",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const stats = await autoClassifyContacts({
+        batchSize: req.body?.batchSize ?? 500,
+      });
+
+      // Refresh segment counts after classification
+      const segmentCounts = await refreshSegmentCounts();
+
+      res.json({
+        message: `Auto-classified ${stats.classified} contacts into departments`,
+        ...stats,
+        segmentCounts,
+      });
+    } catch (error) {
+      console.error("[DepartmentSegments] Error auto-classifying:", error);
+      res.status(500).json({ error: "Failed to auto-classify contacts" });
+    }
+  }
+);
+
+/**
+ * GET /api/department-segments
+ * Returns all department segments with member counts
+ */
+router.get(
+  "/department-segments",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const deptSegments = await getDepartmentSegments();
+      res.json(deptSegments);
+    } catch (error) {
+      console.error("[DepartmentSegments] Error getting segments:", error);
+      res.status(500).json({ error: "Failed to get department segments" });
     }
   }
 );
