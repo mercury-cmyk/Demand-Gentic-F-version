@@ -105,6 +105,10 @@ export interface PostCallAnalysisResult {
   intelligenceRecordId?: string;
   /** Error message if analysis partially failed */
   error?: string;
+  /** Whether analysis was skipped (e.g., call too short) */
+  skipped?: boolean;
+  /** Reason why analysis was skipped */
+  skipReason?: string;
 }
 
 // ---- Helper functions ------------------------------------------------------
@@ -552,6 +556,16 @@ export async function runPostCallAnalysis(
     const contactId = options?.contactId || session.contactId || undefined;
     const disposition = options?.disposition || session.aiDisposition || null;
     const callDurationSec = options?.callDurationSec || session.durationSec || 0;
+
+    // ⚡ PERFORMANCE: Skip analysis for very short calls to reduce API usage
+    const MINIMUM_ANALYSIS_DURATION = 20; // seconds
+    if (callDurationSec < MINIMUM_ANALYSIS_DURATION) {
+      console.log(`${LOG_PREFIX} ⏭️ Skipping post-call analysis for session ${callSessionId}: duration ${callDurationSec}s < ${MINIMUM_ANALYSIS_DURATION}s minimum`);
+      result.success = true;
+      result.skipped = true;
+      result.skipReason = `Call too short (${callDurationSec}s) - below ${MINIMUM_ANALYSIS_DURATION}s minimum for analysis`;
+      return result;
+    }
 
     // 🔥 CRITICAL: For live Gemini calls, use native transcript — skip Deepgram entirely
     // Gemini Live provides built-in speaker attribution, no post-call processing needed

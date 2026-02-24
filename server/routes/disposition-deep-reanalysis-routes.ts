@@ -81,7 +81,7 @@ router.post("/deep-preview", requireAuth, async (req: Request, res: Response) =>
       dispositions: req.body.dispositions,
       dateFrom: req.body.dateFrom,
       dateTo: req.body.dateTo,
-      minDurationSec: req.body.minDurationSec,
+      minDurationSec: req.body.minDurationSec ?? 20, // Default to 20s minimum to reduce API load
       maxDurationSec: req.body.maxDurationSec,
       hasTranscript: req.body.hasTranscript ?? true,
       hasRecording: req.body.hasRecording,
@@ -110,7 +110,7 @@ router.post("/deep-apply", requireAuth, async (req: Request, res: Response) => {
       dispositions: req.body.dispositions,
       dateFrom: req.body.dateFrom,
       dateTo: req.body.dateTo,
-      minDurationSec: req.body.minDurationSec,
+      minDurationSec: req.body.minDurationSec ?? 20, // Default to 20s minimum to reduce API load
       maxDurationSec: req.body.maxDurationSec,
       hasTranscript: req.body.hasTranscript ?? true,
       hasRecording: req.body.hasRecording,
