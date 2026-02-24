@@ -1,6 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
+import fs from "node:fs";
+import path from "node:path";
 import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
@@ -15460,6 +15462,100 @@ Provide JSON response with:
 
   // ==================== EMAIL BUILDER (DRAG & DROP) ====================
   app.use('/api/email-builder', emailBuilderRouter);
+
+  // ==================== ADMIN MAILGUN WEBHOOK MANAGEMENT ====================
+
+  // Get current Mailgun webhook configuration
+  app.get("/api/admin/mailgun/webhooks", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const mailgunApiKey = process.env.MAILGUN_API_KEY;
+      const mailgunDomain = process.env.MAILGUN_DOMAIN;
+      if (!mailgunApiKey || !mailgunDomain) {
+        return res.status(400).json({ message: "MAILGUN_API_KEY or MAILGUN_DOMAIN not configured" });
+      }
+
+      const https = await import('https');
+      const auth = Buffer.from(`api:${mailgunApiKey}`).toString('base64');
+
+      const webhooks: any = await new Promise((resolve, reject) => {
+        const req = https.default.get({
+          hostname: 'api.mailgun.net',
+          path: `/v3/domains/${mailgunDomain}/webhooks`,
+          headers: { 'Authorization': `Basic ${auth}` },
+        }, (res) => {
+          let data = '';
+          res.on('data', (chunk: string) => data += chunk);
+          res.on('end', () => {
+            try { resolve(JSON.parse(data)); } catch { resolve({ error: data }); }
+          });
+        });
+        req.on('error', reject);
+      });
+
+      res.json({
+        domain: mailgunDomain,
+        currentEnvUrl: process.env.MAILGUN_WEBHOOK_URL || null,
+        productionBaseUrl: process.env.MAILGUN_WEBHOOK_BASE_URL || null,
+        webhooks: webhooks.webhooks || webhooks,
+      });
+    } catch (error: any) {
+      console.error("[Mailgun Admin] Failed to fetch webhooks:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch Mailgun webhooks" });
+    }
+  });
+
+  // Switch Mailgun webhook URL mode (updates env only — both URLs stay registered in Mailgun)
+  app.post("/api/admin/mailgun/register-webhooks", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const { mode } = req.body as { mode?: 'dev' | 'production' };
+      if (!mode || !['dev', 'production'].includes(mode)) {
+        return res.status(400).json({ message: "mode must be 'dev' or 'production'" });
+      }
+
+      let newUrl: string;
+      if (mode === 'dev') {
+        const ngrokUrl = process.env.MAILGUN_WEBHOOK_URL || process.env.PUBLIC_WEBHOOK_HOST;
+        if (!ngrokUrl) {
+          return res.status(400).json({ message: "No ngrok webhook URL available. Start the dev server with ngrok first." });
+        }
+        // If it's just a host (no protocol), build the full URL
+        newUrl = ngrokUrl.startsWith('http')
+          ? ngrokUrl
+          : `https://${ngrokUrl}/api/mailgun/webhooks`;
+      } else {
+        const baseUrl = process.env.MAILGUN_WEBHOOK_BASE_URL;
+        if (!baseUrl) {
+          return res.status(400).json({ message: "MAILGUN_WEBHOOK_BASE_URL not configured in .env" });
+        }
+        newUrl = `${baseUrl.replace(/\/$/, '')}/api/mailgun/webhooks`;
+      }
+
+      // Update in-memory env
+      process.env.MAILGUN_WEBHOOK_URL = newUrl;
+
+      // Update .env file
+      const envPath = path.join(process.cwd(), '.env');
+      if (fs.existsSync(envPath)) {
+        let envContent = fs.readFileSync(envPath, 'utf-8');
+        if (envContent.includes('MAILGUN_WEBHOOK_URL=')) {
+          envContent = envContent.replace(/MAILGUN_WEBHOOK_URL=.*/, `MAILGUN_WEBHOOK_URL="${newUrl}"`);
+        } else {
+          envContent += `\nMAILGUN_WEBHOOK_URL="${newUrl}"\n`;
+        }
+        fs.writeFileSync(envPath, envContent, 'utf-8');
+      }
+
+      console.log(`[Mailgun Admin] Switched webhook URL to ${mode}: ${newUrl}`);
+      res.json({
+        mode,
+        webhookUrl: newUrl,
+        message: `Switched to ${mode} webhook URL. .env updated.`,
+      });
+    } catch (error: any) {
+      console.error("[Mailgun Admin] Failed to switch webhook URL:", error);
+      res.status(500).json({ message: error.message || "Failed to switch Mailgun webhook URL" });
+    }
+  });
 
   // ==================== ADMIN DATA MANAGEMENT ====================
 

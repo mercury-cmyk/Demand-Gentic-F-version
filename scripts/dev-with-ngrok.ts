@@ -1,5 +1,6 @@
 import { spawn, execSync } from 'child_process';
 import http from 'http';
+import https from 'https';
 import fs from 'fs';
 import path from 'path';
 
@@ -179,6 +180,82 @@ const pollInterval = setInterval(async () => {
     }
 }, 500);
 
+// ============ Mailgun Webhook Registration ============
+
+const MAILGUN_EVENT_TYPES = [
+  'delivered', 'opened', 'clicked', 'permanent_fail', 'temporary_fail', 'complained', 'unsubscribed'
+];
+
+async function registerMailgunWebhooks(webhookUrl: string, apiKey: string, domain: string): Promise<void> {
+  console.log(`\n📧 Registering Mailgun webhooks for ${domain}...`);
+  console.log(`   Target URL: ${webhookUrl}`);
+
+  for (const eventType of MAILGUN_EVENT_TYPES) {
+    try {
+      // Try PUT first (update existing), fall back to POST (create new)
+      const success = await mailgunWebhookRequest('PUT', eventType, webhookUrl, apiKey, domain);
+      if (!success) {
+        await mailgunWebhookRequest('POST', eventType, webhookUrl, apiKey, domain);
+      }
+      console.log(`   ✅ ${eventType}`);
+    } catch (err: any) {
+      console.warn(`   ⚠️  ${eventType}: ${err.message || err}`);
+    }
+  }
+
+  console.log(`📧 Mailgun webhook registration complete.\n`);
+}
+
+function mailgunWebhookRequest(
+  method: 'PUT' | 'POST',
+  eventType: string,
+  webhookUrl: string,
+  apiKey: string,
+  domain: string
+): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const urlPath = method === 'PUT'
+      ? `/v3/domains/${domain}/webhooks/${eventType}`
+      : `/v3/domains/${domain}/webhooks`;
+
+    const body = method === 'PUT'
+      ? `url=${encodeURIComponent(webhookUrl)}`
+      : `id=${eventType}&url=${encodeURIComponent(webhookUrl)}`;
+
+    const auth = Buffer.from(`api:${apiKey}`).toString('base64');
+
+    const options = {
+      hostname: 'api.mailgun.net',
+      path: urlPath,
+      method,
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(true);
+        } else if (res.statusCode === 404 && method === 'PUT') {
+          // Webhook doesn't exist yet — caller should POST
+          resolve(false);
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 function startDevServer() {
   const localWsUrl = `ws://localhost:${PORT}/voice-dialer`;
 
@@ -201,6 +278,24 @@ function startDevServer() {
     console.log(`🔗 PUBLIC_WEBHOOK_HOST=${publicWebhookHost}`);
     console.log(`🔗 TELNYX_WEBHOOK_URL=${telnyxWebhookUrl}`);
   }
+  // Register Mailgun webhooks with ngrok URL
+  let mailgunWebhookUrl = '';
+  if (tunnelUrl) {
+      mailgunWebhookUrl = `https://${publicWebhookHost}/api/mailgun/webhooks`;
+      console.log(`🔗 MAILGUN_WEBHOOK_URL=${mailgunWebhookUrl}`);
+
+      const mailgunApiKey = resolveEnv('MAILGUN_API_KEY');
+      const mailgunDomain = resolveEnv('MAILGUN_DOMAIN');
+      if (mailgunApiKey && mailgunDomain) {
+          // Non-blocking — register in background, don't delay server start
+          registerMailgunWebhooks(mailgunWebhookUrl, mailgunApiKey, mailgunDomain).catch(err => {
+            console.warn(`⚠️  Mailgun webhook registration failed: ${err.message}`);
+          });
+      } else {
+          console.warn('⚠️  MAILGUN_API_KEY or MAILGUN_DOMAIN not set — skipping Mailgun webhook registration');
+      }
+  }
+
   if (tunnelUrl) {
       console.log(`✅ Using ngrok tunnel for PUBLIC_WEBSOCKET_URL (ignoring env placeholder)`);
   } else {
@@ -227,6 +322,7 @@ function startDevServer() {
       PUBLIC_WEBSOCKET_URL: publicWsUrl,
       PUBLIC_WEBHOOK_HOST: publicWebhookHost,
       TELNYX_WEBHOOK_URL: telnyxWebhookUrl,
+      MAILGUN_WEBHOOK_URL: mailgunWebhookUrl || resolveEnv('MAILGUN_WEBHOOK_BASE_URL') || '',
       NODE_ENV: 'development',
       STRICT_ENV_ISOLATION: 'true',
       ALLOW_SHARED_REDIS_IN_DEV: resolveEnv('ALLOW_SHARED_REDIS_IN_DEV') || 'false',
