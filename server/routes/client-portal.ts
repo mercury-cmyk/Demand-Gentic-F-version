@@ -60,6 +60,7 @@ import { UKEF_CLIENT_ACCOUNT_ID } from '../integrations/ukef_reports/types';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
 import clientCampaignPlannerRouter from './client-campaign-planner-routes';
+import clientJourneyPipelineRouter from './client-journey-pipeline-routes';
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
 import { getRecordingUrl } from '../services/recording-storage';
 import { getPlayableRecordingLink } from '../services/recording-link-resolver';
@@ -652,6 +653,9 @@ router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
 
 // AI Campaign Planner (full-funnel multi-channel planning from OI)
 router.use('/campaign-planner', requireClientAuth, clientCampaignPlannerRouter);
+
+// Lead Journey Pipeline (follow-up management for campaign leads)
+router.use('/journey-pipeline', requireClientAuth, clientJourneyPipelineRouter);
 
 // Campaigns (Client wizard and management)
 /**

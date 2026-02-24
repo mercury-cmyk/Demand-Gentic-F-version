@@ -7607,6 +7607,31 @@ async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<boolea
   }
 }
 
+async function isCallLikelyStillActive(session: OpenAIRealtimeSession): Promise<boolean> {
+  if (session.isActive) return true;
+
+  try {
+    const persisted = await getCallSession(session.callId);
+    if (persisted && persisted.status !== 'ended') {
+      return true;
+    }
+  } catch {
+    // Best-effort signal only; ignore lookup failures.
+  }
+
+  try {
+    const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
+    const bridge = getTelnyxAiBridge();
+    const activeCall =
+      bridge.getActiveCall(session.callId)
+      || (session.callAttemptId ? bridge.getActiveCall(session.callAttemptId) : null);
+    return !!activeCall;
+  } catch {
+    // If bridge lookup fails, fall back to conservative assumption from session state.
+    return session.isActive;
+  }
+}
+
 /**
  * Retry version of forceTelnyxHangup - attempts multiple times with delay.
  * Used as a safety net when the primary endCall might have failed to hang up.
@@ -7644,7 +7669,11 @@ async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRet
         await new Promise(r => setTimeout(r, attempt * 2000));
         continue;
       }
-      console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries exhausted for call ${session.callId} - could not resolve callControlId`);
+      if (await isCallLikelyStillActive(session)) {
+        console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries exhausted for call ${session.callId} - could not resolve callControlId`);
+      } else {
+        console.warn(`${LOG_PREFIX} Hangup retries exhausted for ${session.callId}, but call already appears inactive (no active bridge/session state).`);
+      }
       return;
     }
 
@@ -7668,7 +7697,11 @@ async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRet
       await new Promise(r => setTimeout(r, attempt * 2000));
     }
   }
-  console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries failed for call ${session.callId}`);
+  if (await isCallLikelyStillActive(session)) {
+    console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries failed for call ${session.callId}`);
+  } else {
+    console.warn(`${LOG_PREFIX} Hangup retries failed for ${session.callId}, but call already appears inactive (no active bridge/session state).`);
+  }
 }
 
 async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voicemail' | 'error'): Promise<void> {

@@ -1,0 +1,799 @@
+/**
+ * Lead Detail Panel — Slide-out panel showing full lead context, activity timeline,
+ * AI-generated follow-up context, and action scheduling.
+ */
+
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Phone,
+  Mail,
+  MessageSquare,
+  StickyNote,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  SkipForward,
+  ArrowRight,
+  Sparkles,
+  User,
+  Building2,
+  Briefcase,
+  AlertTriangle,
+  CalendarDays,
+  FileText,
+  Loader2,
+} from "lucide-react";
+import { PriorityBadge, type PipelineStage, type JourneyLead, type JourneyAction } from "./journey-pipeline-tab";
+import { ScheduleActionDialog } from "./schedule-action-dialog";
+
+interface LeadDetailPanelProps {
+  leadId: string;
+  pipeline: {
+    id: string;
+    stages: PipelineStage[];
+  };
+  authHeaders: { headers: { Authorization: string } };
+  onClose: () => void;
+  onRefresh: () => void;
+}
+
+export function LeadDetailPanel({
+  leadId,
+  pipeline,
+  authHeaders,
+  onClose,
+  onRefresh,
+}: LeadDetailPanelProps) {
+  const queryClient = useQueryClient();
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleType, setScheduleType] = useState<"callback" | "email" | "note">("callback");
+  const [activeTab, setActiveTab] = useState("timeline");
+  const [notes, setNotes] = useState("");
+  const [notesEdited, setNotesEdited] = useState(false);
+
+  const stages = (pipeline.stages as PipelineStage[]) || [];
+
+  // ─── Fetch lead detail ───
+  const { data: leadData, isLoading } = useQuery<{
+    lead: JourneyLead;
+    actions: JourneyAction[];
+  }>({
+    queryKey: ["journey-lead-detail", leadId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/leads/${leadId}`,
+        authHeaders
+      );
+      if (!res.ok) throw new Error("Failed to fetch lead");
+      return res.json();
+    },
+    enabled: !!leadId,
+  });
+
+  const lead = leadData?.lead;
+  const actions = leadData?.actions || [];
+
+  // Initialize notes when lead loads
+  if (lead && !notesEdited && notes !== (lead.notes || "")) {
+    setNotes(lead.notes || "");
+  }
+
+  // ─── AI Follow-up Generation ───
+  const generateFollowUp = useMutation({
+    mutationFn: async (type: "callback" | "email") => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/leads/${leadId}/generate-followup`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders.headers },
+          body: JSON.stringify({ type }),
+        }
+      );
+      if (!res.ok) throw new Error("Failed to generate");
+      return res.json();
+    },
+  });
+
+  // ─── AI Recommendation ───
+  const getRecommendation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/leads/${leadId}/recommend-action`,
+        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders.headers } }
+      );
+      if (!res.ok) throw new Error("Failed to get recommendation");
+      return res.json();
+    },
+  });
+
+  // ─── Update Lead ───
+  const updateLead = useMutation({
+    mutationFn: async (data: Record<string, any>) => {
+      const res = await fetch(`/api/client-portal/journey-pipeline/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders.headers },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journey-lead-detail", leadId] });
+      queryClient.invalidateQueries({ queryKey: ["journey-pipeline-leads"] });
+      onRefresh();
+    },
+  });
+
+  // ─── Complete Action ───
+  const completeAction = useMutation({
+    mutationFn: async ({ actionId, outcome }: { actionId: string; outcome: string }) => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/actions/${actionId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...authHeaders.headers },
+          body: JSON.stringify({ status: "completed", outcome }),
+        }
+      );
+      if (!res.ok) throw new Error("Failed to update action");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journey-lead-detail", leadId] });
+    },
+  });
+
+  const skipAction = useMutation({
+    mutationFn: async (actionId: string) => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/actions/${actionId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...authHeaders.headers },
+          body: JSON.stringify({ status: "skipped" }),
+        }
+      );
+      if (!res.ok) throw new Error("Failed to skip action");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journey-lead-detail", leadId] });
+    },
+  });
+
+  const currentStage = stages.find((s) => s.id === lead?.currentStageId);
+
+  return (
+    <Sheet open={true} onOpenChange={() => onClose()}>
+      <SheetContent className="w-full sm:max-w-[560px] overflow-y-auto">
+        {isLoading || !lead ? (
+          <div className="space-y-4 pt-6">
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-[300px] w-full" />
+          </div>
+        ) : (
+          <>
+            <SheetHeader className="pb-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <SheetTitle className="text-lg">
+                    {lead.contactName || "Unknown Contact"}
+                  </SheetTitle>
+                  <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                    {lead.jobTitle && (
+                      <span className="flex items-center gap-1">
+                        <Briefcase className="h-3 w-3" />
+                        {lead.jobTitle}
+                      </span>
+                    )}
+                    {lead.companyName && (
+                      <span className="flex items-center gap-1">
+                        <Building2 className="h-3 w-3" />
+                        {lead.companyName}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <PriorityBadge priority={lead.priority} />
+              </div>
+
+              {/* Contact details */}
+              <div className="flex flex-wrap gap-2 mt-2">
+                {lead.contactPhone && (
+                  <Badge variant="outline" className="gap-1 text-xs">
+                    <Phone className="h-3 w-3" />
+                    {lead.contactPhone}
+                  </Badge>
+                )}
+                {lead.contactEmail && (
+                  <Badge variant="outline" className="gap-1 text-xs">
+                    <Mail className="h-3 w-3" />
+                    {lead.contactEmail}
+                  </Badge>
+                )}
+              </div>
+
+              {/* Stage selector */}
+              <div className="flex items-center gap-2 mt-3">
+                <span className="text-sm font-medium">Stage:</span>
+                <Select
+                  value={lead.currentStageId}
+                  onValueChange={(stageId) => updateLead.mutate({ currentStageId: stageId })}
+                >
+                  <SelectTrigger className="w-[200px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stages.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: s.color || "#6b7280" }}
+                          />
+                          {s.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={String(lead.priority)}
+                  onValueChange={(v) => updateLead.mutate({ priority: parseInt(v) })}
+                >
+                  <SelectTrigger className="w-[120px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[5, 4, 3, 2, 1].map((p) => (
+                      <SelectItem key={p} value={String(p)}>
+                        Priority {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </SheetHeader>
+
+            <Separator />
+
+            {/* Quick Actions */}
+            <div className="flex flex-wrap gap-2 py-3">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => {
+                  setScheduleType("callback");
+                  setShowSchedule(true);
+                }}
+              >
+                <Phone className="h-3.5 w-3.5" />
+                Schedule Callback
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => {
+                  setScheduleType("email");
+                  setShowSchedule(true);
+                }}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                Send Email
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => {
+                  setScheduleType("note");
+                  setShowSchedule(true);
+                }}
+              >
+                <StickyNote className="h-3.5 w-3.5" />
+                Add Note
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="gap-1"
+                onClick={() => getRecommendation.mutate()}
+                disabled={getRecommendation.isPending}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {getRecommendation.isPending ? "Thinking..." : "AI Recommend"}
+              </Button>
+            </div>
+
+            {/* AI Recommendation Result */}
+            {getRecommendation.data?.recommendation && (
+              <Card className="mb-3 border-primary/30 bg-primary/5">
+                <CardContent className="p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    AI Recommendation
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-medium capitalize">
+                      {getRecommendation.data.recommendation.actionType}
+                    </span>{" "}
+                    — {getRecommendation.data.recommendation.timing}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {getRecommendation.data.recommendation.reasoning}
+                  </p>
+                  <Button
+                    size="sm"
+                    className="gap-1"
+                    onClick={() => {
+                      setScheduleType(
+                        getRecommendation.data.recommendation.actionType === "email"
+                          ? "email"
+                          : "callback"
+                      );
+                      setShowSchedule(true);
+                    }}
+                  >
+                    Schedule {getRecommendation.data.recommendation.actionType}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Tabs: Timeline / Source Context / Notes */}
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="w-full">
+                <TabsTrigger value="timeline" className="flex-1">
+                  Timeline
+                </TabsTrigger>
+                <TabsTrigger value="context" className="flex-1">
+                  Source Context
+                </TabsTrigger>
+                <TabsTrigger value="notes" className="flex-1">
+                  Notes
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ─── Timeline Tab ─── */}
+              <TabsContent value="timeline" className="space-y-2 mt-3">
+                {actions.length === 0 ? (
+                  <div className="text-center py-8 text-sm text-muted-foreground">
+                    No actions yet. Schedule a callback or email to get started.
+                  </div>
+                ) : (
+                  actions.map((action) => (
+                    <ActionTimelineItem
+                      key={action.id}
+                      action={action}
+                      onComplete={(outcome) =>
+                        completeAction.mutate({ actionId: action.id, outcome })
+                      }
+                      onSkip={() => skipAction.mutate(action.id)}
+                    />
+                  ))
+                )}
+              </TabsContent>
+
+              {/* ─── Source Context Tab ─── */}
+              <TabsContent value="context" className="space-y-3 mt-3">
+                {lead.sourceDisposition && (
+                  <div>
+                    <div className="text-xs font-medium text-muted-foreground mb-1">
+                      Source Disposition
+                    </div>
+                    <Badge variant="outline" className="capitalize">
+                      {lead.sourceDisposition.replace(/_/g, " ")}
+                    </Badge>
+                  </div>
+                )}
+
+                {lead.sourceCallSummary && (
+                  <div>
+                    <div className="text-xs font-medium text-muted-foreground mb-1">
+                      Call Summary
+                    </div>
+                    <Card>
+                      <CardContent className="p-3 text-sm">
+                        {lead.sourceCallSummary}
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {lead.sourceAiAnalysis && typeof lead.sourceAiAnalysis === "object" && (
+                  <div>
+                    <div className="text-xs font-medium text-muted-foreground mb-1">
+                      AI Analysis
+                    </div>
+                    <Card>
+                      <CardContent className="p-3 text-sm space-y-2">
+                        {(lead.sourceAiAnalysis as any).keyTopicsDiscussed && (
+                          <div>
+                            <span className="font-medium">Topics: </span>
+                            {Array.isArray((lead.sourceAiAnalysis as any).keyTopicsDiscussed)
+                              ? (lead.sourceAiAnalysis as any).keyTopicsDiscussed.join(", ")
+                              : String((lead.sourceAiAnalysis as any).keyTopicsDiscussed)}
+                          </div>
+                        )}
+                        {(lead.sourceAiAnalysis as any).objections && (
+                          <div>
+                            <span className="font-medium">Objections: </span>
+                            {Array.isArray((lead.sourceAiAnalysis as any).objections)
+                              ? (lead.sourceAiAnalysis as any).objections.join(", ")
+                              : String((lead.sourceAiAnalysis as any).objections)}
+                          </div>
+                        )}
+                        {(lead.sourceAiAnalysis as any).interestLevel && (
+                          <div>
+                            <span className="font-medium">Interest: </span>
+                            {(lead.sourceAiAnalysis as any).interestLevel}
+                          </div>
+                        )}
+                        {(lead.sourceAiAnalysis as any).nextSteps && (
+                          <div>
+                            <span className="font-medium">Suggested Next Steps: </span>
+                            {(lead.sourceAiAnalysis as any).nextSteps}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {/* AI Follow-Up Generation */}
+                <div className="pt-2">
+                  <div className="text-xs font-medium text-muted-foreground mb-2">
+                    AI-Generated Follow-Up Context
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="gap-1"
+                      onClick={() => generateFollowUp.mutate("callback")}
+                      disabled={generateFollowUp.isPending}
+                    >
+                      {generateFollowUp.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Phone className="h-3.5 w-3.5" />
+                      )}
+                      Generate Call Script
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="gap-1"
+                      onClick={() => generateFollowUp.mutate("email")}
+                      disabled={generateFollowUp.isPending}
+                    >
+                      {generateFollowUp.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Mail className="h-3.5 w-3.5" />
+                      )}
+                      Generate Email Draft
+                    </Button>
+                  </div>
+                </div>
+
+                {/* AI Generated Content */}
+                {generateFollowUp.data?.success && generateFollowUp.data.type === "callback" && (
+                  <Card className="border-primary/30">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        AI Call Script
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      <div>
+                        <div className="font-medium mb-1">Opening Line</div>
+                        <p className="text-muted-foreground italic">
+                          "{generateFollowUp.data.context.openingLine}"
+                        </p>
+                      </div>
+                      <div>
+                        <div className="font-medium mb-1">Talking Points</div>
+                        <ul className="list-disc pl-4 space-y-1 text-muted-foreground">
+                          {generateFollowUp.data.context.talkingPoints?.map(
+                            (tp: string, i: number) => (
+                              <li key={i}>{tp}</li>
+                            )
+                          )}
+                        </ul>
+                      </div>
+                      {generateFollowUp.data.context.objectionResponses?.length > 0 && (
+                        <div>
+                          <div className="font-medium mb-1">Objection Responses</div>
+                          {generateFollowUp.data.context.objectionResponses.map(
+                            (or: any, i: number) => (
+                              <div key={i} className="mb-2">
+                                <div className="text-xs font-medium">"{or.objection}"</div>
+                                <div className="text-xs text-muted-foreground pl-2">
+                                  {or.response}
+                                </div>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-medium mb-1">Approach</div>
+                        <p className="text-muted-foreground">
+                          {generateFollowUp.data.context.recommendedApproach}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {generateFollowUp.data?.success && generateFollowUp.data.type === "email" && (
+                  <Card className="border-primary/30">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        AI Email Draft
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div>
+                        <div className="font-medium">Subject</div>
+                        <p className="text-muted-foreground">
+                          {generateFollowUp.data.email.subject}
+                        </p>
+                      </div>
+                      <Separator />
+                      <div
+                        className="text-muted-foreground prose prose-sm max-w-none"
+                        dangerouslySetInnerHTML={{
+                          __html: generateFollowUp.data.email.bodyHtml,
+                        }}
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+
+                {generateFollowUp.isError && (
+                  <div className="text-sm text-destructive">
+                    Failed to generate follow-up content. Please try again.
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ─── Notes Tab ─── */}
+              <TabsContent value="notes" className="space-y-3 mt-3">
+                <Textarea
+                  value={notes}
+                  onChange={(e) => {
+                    setNotes(e.target.value);
+                    setNotesEdited(true);
+                  }}
+                  placeholder="Add notes about this lead..."
+                  className="min-h-[120px]"
+                />
+                {notesEdited && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      updateLead.mutate({ notes });
+                      setNotesEdited(false);
+                    }}
+                    disabled={updateLead.isPending}
+                  >
+                    Save Notes
+                  </Button>
+                )}
+              </TabsContent>
+            </Tabs>
+
+            {/* Status controls */}
+            <Separator className="my-3" />
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Status:</span>
+              {(["active", "paused", "completed", "lost"] as const).map((status) => (
+                <Button
+                  key={status}
+                  size="sm"
+                  variant={lead.status === status ? "default" : "outline"}
+                  className="h-7 text-xs capitalize"
+                  onClick={() => updateLead.mutate({ status })}
+                >
+                  {status}
+                </Button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Schedule Action Dialog */}
+        <ScheduleActionDialog
+          open={showSchedule}
+          onOpenChange={setShowSchedule}
+          leadId={leadId}
+          actionType={scheduleType}
+          authHeaders={authHeaders}
+          onCreated={() => {
+            queryClient.invalidateQueries({ queryKey: ["journey-lead-detail", leadId] });
+            queryClient.invalidateQueries({ queryKey: ["journey-pipeline-leads"] });
+            setShowSchedule(false);
+          }}
+        />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── Action Timeline Item ───
+
+function ActionTimelineItem({
+  action,
+  onComplete,
+  onSkip,
+}: {
+  action: JourneyAction;
+  onComplete: (outcome: string) => void;
+  onSkip: () => void;
+}) {
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [outcome, setOutcome] = useState("");
+
+  const isOverdue =
+    action.status === "scheduled" &&
+    action.scheduledAt &&
+    new Date(action.scheduledAt) < new Date();
+
+  const iconMap: Record<string, any> = {
+    callback: Phone,
+    email: Mail,
+    sms: MessageSquare,
+    note: StickyNote,
+    stage_change: ArrowRight,
+  };
+
+  const statusIconMap: Record<string, any> = {
+    completed: CheckCircle2,
+    skipped: SkipForward,
+    failed: XCircle,
+    scheduled: Clock,
+    in_progress: Clock,
+  };
+
+  const ActionIcon = iconMap[action.actionType] || FileText;
+  const StatusIcon = statusIconMap[action.status] || Clock;
+
+  return (
+    <Card className={isOverdue ? "border-destructive/50" : ""}>
+      <CardContent className="p-3">
+        <div className="flex items-start gap-3">
+          <div
+            className={`mt-0.5 p-1.5 rounded-full ${
+              action.status === "completed"
+                ? "bg-green-100 text-green-600"
+                : action.status === "skipped"
+                  ? "bg-gray-100 text-gray-400"
+                  : isOverdue
+                    ? "bg-destructive/10 text-destructive"
+                    : "bg-primary/10 text-primary"
+            }`}
+          >
+            <ActionIcon className="h-3.5 w-3.5" />
+          </div>
+
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-sm capitalize">{action.actionType}</span>
+                <Badge
+                  variant={
+                    action.status === "completed"
+                      ? "default"
+                      : action.status === "skipped"
+                        ? "secondary"
+                        : "outline"
+                  }
+                  className="text-xs"
+                >
+                  <StatusIcon className="h-3 w-3 mr-1" />
+                  {action.status}
+                </Badge>
+                {isOverdue && (
+                  <Badge variant="destructive" className="text-xs gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    Overdue
+                  </Badge>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {action.scheduledAt
+                  ? new Date(action.scheduledAt).toLocaleDateString()
+                  : new Date(action.createdAt).toLocaleDateString()}
+              </span>
+            </div>
+
+            {action.title && <div className="text-sm">{action.title}</div>}
+            {action.description && (
+              <div className="text-sm text-muted-foreground">{action.description}</div>
+            )}
+            {action.outcome && (
+              <div className="text-sm">
+                <span className="font-medium">Outcome: </span>
+                {action.outcome}
+              </div>
+            )}
+
+            {/* AI Context badge */}
+            {action.aiGeneratedContext && (
+              <Badge variant="secondary" className="text-xs gap-1">
+                <Sparkles className="h-3 w-3" />
+                AI-assisted
+              </Badge>
+            )}
+
+            {/* Action buttons for scheduled items */}
+            {action.status === "scheduled" && (
+              <div className="flex gap-2 pt-1">
+                {!showOutcome ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => setShowOutcome(true)}
+                    >
+                      <CheckCircle2 className="h-3 w-3" />
+                      Complete
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs gap-1 text-muted-foreground"
+                      onClick={onSkip}
+                    >
+                      <SkipForward className="h-3 w-3" />
+                      Skip
+                    </Button>
+                  </>
+                ) : (
+                  <div className="flex gap-2 w-full">
+                    <input
+                      type="text"
+                      value={outcome}
+                      onChange={(e) => setOutcome(e.target.value)}
+                      placeholder="Outcome (e.g. Left voicemail, Scheduled meeting)"
+                      className="flex-1 h-7 text-xs border rounded px-2"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        onComplete(outcome || "Completed");
+                        setShowOutcome(false);
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
