@@ -40,6 +40,13 @@ interface ChatTabProps {
   organizationId?: string;
 }
 
+// Handles both { value: "..." } (admin-analyzed) and flat string (client-portal-analyzed)
+function iv(field: any): string {
+  if (!field) return "";
+  if (typeof field === "string") return field;
+  return field.value || "";
+}
+
 export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -246,16 +253,16 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
                       Select an organization to start.
                     </div>
                   )}
-                  {orgIntelligence?.identity?.legalName?.value && (
+                  {iv(orgIntelligence?.identity?.legalName) && (
                     <p className="text-xs text-emerald-600">
-                      Powered by OI for {orgIntelligence.identity.legalName.value}
+                      Powered by OI for {iv(orgIntelligence?.identity?.legalName)}
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2 justify-center mt-2">
-                    {orgIntelligence?.identity?.legalName?.value ? [
-                      `Plan a blog series for ${orgIntelligence.identity.legalName.value}`,
-                      `What makes a high-converting landing page for ${orgIntelligence.icp?.personas?.value || 'our target audience'}?`,
-                      `Email subject lines for our ${orgIntelligence.offerings?.coreProducts?.value || 'product'} launch`,
+                    {iv(orgIntelligence?.identity?.legalName) ? [
+                      `Plan a blog series for ${iv(orgIntelligence?.identity?.legalName)}`,
+                      `What makes a high-converting landing page for ${iv(orgIntelligence?.icp?.personas) || 'our target audience'}?`,
+                      `Email subject lines for our ${iv(orgIntelligence?.offerings?.coreProducts) || 'product'} launch`,
                     ].map((suggestion) => (
                       <Badge
                         key={suggestion}

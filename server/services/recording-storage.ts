@@ -6,13 +6,36 @@
  * Supports both leads and call_sessions tables
  */
 
-import { uploadToS3, getPresignedDownloadUrl, s3ObjectExists, isS3Configured, BUCKET } from '../lib/storage';
+import { uploadToS3, getPresignedDownloadUrl, s3ObjectExists, isS3Configured } from '../lib/storage';
 import { db } from '../db';
 import { leads, callSessions } from '../../shared/schema';
 import { eq } from 'drizzle-orm';
 
 const RECORDING_PREFIX = 'recordings';
 const CALL_SESSION_RECORDING_PREFIX = 'call-recordings'; // Separate prefix for call sessions
+
+function isPresignedGcsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes('storage.googleapis.com')) return false;
+    return (
+      parsed.searchParams.has('X-Goog-Signature') ||
+      parsed.searchParams.has('GoogleAccessId') ||
+      parsed.searchParams.has('X-Goog-Credential')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function requirePresignedGcsUrl(url: string, context: string): string | null {
+  if (!isPresignedGcsUrl(url)) {
+    console.warn(`[RecordingStorage] ${context}: rejecting non-presigned/non-GCS URL`);
+    return null;
+  }
+  return url;
+}
 
 /**
  * Generate S3 key for a lead recording (legacy)
@@ -132,7 +155,8 @@ export async function getRecordingUrl(
   fallbackUrl?: string | null
 ): Promise<{ url: string; source: 'local' | 'telnyx' | null }> {
   if (!isS3Configured()) {
-    return { url: fallbackUrl || '', source: fallbackUrl ? 'telnyx' : null };
+    console.warn('[RecordingStorage] getRecordingUrl: S3/GCS not configured - refusing non-presigned fallback URL');
+    return { url: '', source: null };
   }
 
   try {
@@ -142,13 +166,19 @@ export async function getRecordingUrl(
     
     if (await s3ObjectExists(mp3Key)) {
       // Generate 7-day presigned URL
-      const url = await getPresignedDownloadUrl(mp3Key, 7 * 24 * 60 * 60);
-      return { url, source: 'local' };
+      const url = requirePresignedGcsUrl(
+        await getPresignedDownloadUrl(mp3Key, 7 * 24 * 60 * 60),
+        `getRecordingUrl(mp3:${leadId})`
+      );
+      if (url) return { url, source: 'local' };
     }
     
     if (await s3ObjectExists(wavKey)) {
-      const url = await getPresignedDownloadUrl(wavKey, 7 * 24 * 60 * 60);
-      return { url, source: 'local' };
+      const url = requirePresignedGcsUrl(
+        await getPresignedDownloadUrl(wavKey, 7 * 24 * 60 * 60),
+        `getRecordingUrl(wav:${leadId})`
+      );
+      if (url) return { url, source: 'local' };
     }
     
     // Recording not in S3, try to fetch from Telnyx and store it
@@ -157,7 +187,11 @@ export async function getRecordingUrl(
       const s3Key = await downloadAndStoreRecording(fallbackUrl, leadId);
       
       if (s3Key) {
-        const url = await getPresignedDownloadUrl(s3Key, 7 * 24 * 60 * 60);
+        const url = requirePresignedGcsUrl(
+          await getPresignedDownloadUrl(s3Key, 7 * 24 * 60 * 60),
+          `getRecordingUrl(stored:${leadId})`
+        );
+        if (!url) return { url: '', source: null };
         
         // Update lead with S3 key for future reference
         await db.update(leads)
@@ -168,11 +202,11 @@ export async function getRecordingUrl(
       }
     }
     
-    // Fallback to original URL
-    return { url: fallbackUrl || '', source: fallbackUrl ? 'telnyx' : null };
+    // Strict policy: never return non-GCS/non-presigned recording URLs.
+    return { url: '', source: null };
   } catch (error) {
     console.error(`[RecordingStorage] Error getting recording URL for lead ${leadId}:`, error);
-    return { url: fallbackUrl || '', source: fallbackUrl ? 'telnyx' : null };
+    return { url: '', source: null };
   }
 }
 
@@ -366,7 +400,8 @@ export async function getCallSessionRecordingUrl(
   fallbackUrl?: string | null
 ): Promise<{ url: string; source: 'local' | 'telnyx' | null }> {
   if (!isS3Configured()) {
-    return { url: fallbackUrl || '', source: fallbackUrl ? 'telnyx' : null };
+    console.warn('[RecordingStorage] getCallSessionRecordingUrl: S3/GCS not configured - refusing non-presigned fallback URL');
+    return { url: '', source: null };
   }
 
   try {
@@ -380,14 +415,17 @@ export async function getCallSessionRecordingUrl(
       .where(eq(callSessions.id, callSessionId));
     
     if (!session) {
-      return { url: fallbackUrl || '', source: fallbackUrl ? 'telnyx' : null };
+      return { url: '', source: null };
     }
 
     // If we have an S3 key, generate presigned URL
     if (session.recordingS3Key) {
       if (await s3ObjectExists(session.recordingS3Key)) {
-        const url = await getPresignedDownloadUrl(session.recordingS3Key, 7 * 24 * 60 * 60);
-        return { url, source: 'local' };
+        const url = requirePresignedGcsUrl(
+          await getPresignedDownloadUrl(session.recordingS3Key, 7 * 24 * 60 * 60),
+          `getCallSessionRecordingUrl(existing:${callSessionId})`
+        );
+        if (url) return { url, source: 'local' };
       }
     }
     
@@ -396,7 +434,11 @@ export async function getCallSessionRecordingUrl(
     const wavKey = getCallSessionRecordingS3Key(callSessionId, session.campaignId, 'wav');
     
     if (await s3ObjectExists(mp3Key)) {
-      const url = await getPresignedDownloadUrl(mp3Key, 7 * 24 * 60 * 60);
+      const url = requirePresignedGcsUrl(
+        await getPresignedDownloadUrl(mp3Key, 7 * 24 * 60 * 60),
+        `getCallSessionRecordingUrl(mp3:${callSessionId})`
+      );
+      if (!url) return { url: '', source: null };
       
       // Update DB with the key we found
       await db.update(callSessions)
@@ -407,7 +449,11 @@ export async function getCallSessionRecordingUrl(
     }
     
     if (await s3ObjectExists(wavKey)) {
-      const url = await getPresignedDownloadUrl(wavKey, 7 * 24 * 60 * 60);
+      const url = requirePresignedGcsUrl(
+        await getPresignedDownloadUrl(wavKey, 7 * 24 * 60 * 60),
+        `getCallSessionRecordingUrl(wav:${callSessionId})`
+      );
+      if (!url) return { url: '', source: null };
       
       await db.update(callSessions)
         .set({ recordingS3Key: wavKey, recordingStatus: 'stored', recordingFormat: 'wav' })
@@ -419,7 +465,11 @@ export async function getCallSessionRecordingUrl(
     // Try hard to find it in GCS using standard naming patterns if key is missing
     const standardKey = `call-recordings/${session.campaignId || 'unknown'}/${callSessionId}.mp3`;
     if (await s3ObjectExists(standardKey)) {
-       const url = await getPresignedDownloadUrl(standardKey, 7 * 24 * 60 * 60);
+       const url = requirePresignedGcsUrl(
+         await getPresignedDownloadUrl(standardKey, 7 * 24 * 60 * 60),
+         `getCallSessionRecordingUrl(standard:${callSessionId})`
+       );
+       if (!url) return { url: '', source: null };
        await db.update(callSessions)
         .set({ recordingS3Key: standardKey, recordingStatus: 'stored', recordingFormat: 'mp3' })
         .where(eq(callSessions.id, callSessionId));
@@ -433,17 +483,20 @@ export async function getCallSessionRecordingUrl(
       const s3Key = await storeCallSessionRecording(callSessionId, sourceUrl);
       
       if (s3Key) {
-        const url = await getPresignedDownloadUrl(s3Key, 7 * 24 * 60 * 60);
+        const url = requirePresignedGcsUrl(
+          await getPresignedDownloadUrl(s3Key, 7 * 24 * 60 * 60),
+          `getCallSessionRecordingUrl(stored:${callSessionId})`
+        );
+        if (!url) return { url: '', source: null };
         return { url, source: 'local' };
       }
     }
     
-    // Fallback to original URL
-    const finalUrl = fallbackUrl || session.recordingUrl || '';
-    return { url: finalUrl, source: finalUrl ? 'telnyx' : null };
+    // Strict policy: never return non-GCS/non-presigned recording URLs.
+    return { url: '', source: null };
   } catch (error) {
     console.error(`[RecordingStorage] Error getting recording URL for call session ${callSessionId}:`, error);
-    return { url: fallbackUrl || '', source: fallbackUrl ? 'telnyx' : null };
+    return { url: '', source: null };
   }
 }
 

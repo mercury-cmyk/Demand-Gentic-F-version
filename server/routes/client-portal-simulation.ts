@@ -1728,8 +1728,9 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       agent_name: unifiedContext.agentName,
       organization_name: unifiedContext.organizationName,
       provider: unifiedContext.provider,
-      system_prompt: unifiedContext.systemPrompt || undefined,
-      agent_settings: unifiedContext.agentSettings || undefined,
+      // system_prompt intentionally omitted — voice-dialer builds the full prompt
+      // from campaign config at call time (same as production queue calls).
+      // Storing a simplified prompt here would short-circuit the canonical prompt pipeline.
       test_contact: {
         name: unifiedContext.contactName,
         company: unifiedContext.accountName,

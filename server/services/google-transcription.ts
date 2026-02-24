@@ -11,9 +11,9 @@
 
 import { db } from "../db";
 import { leads, activityLog, callSessions } from "@shared/schema";
-import { eq, and, or, isNotNull, lt, sql } from "drizzle-orm";
+import { eq, and, isNotNull, lt, sql } from "drizzle-orm";
 import { SpeechClient, protos } from "@google-cloud/speech";
-import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
+import { getPresignedDownloadUrl, isS3Configured, BUCKET } from "../lib/storage";
 
 // Lazy initialization of Speech client
 let _speechClient: SpeechClient | null = null;
@@ -41,6 +41,90 @@ export interface TranscriptionAudioSourceOptions {
   telnyxCallId?: string | null;
   recordingS3Key?: string | null;
   throwOnError?: boolean;
+}
+
+const TRANSCRIPTION_URL_TTL_SECONDS = 24 * 60 * 60;
+
+function decodeObjectPath(rawPath: string): string {
+  return rawPath
+    .split('/')
+    .filter((segment) => segment.length > 0)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join('/');
+}
+
+function toGcsUri(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('gs://')) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('gcs-internal://')) {
+    const withoutScheme = trimmed.slice('gcs-internal://'.length).replace(/^\/+/, '');
+    return withoutScheme ? `gs://${withoutScheme}` : null;
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      const host = parsed.hostname.toLowerCase();
+      const path = parsed.pathname.replace(/^\/+/, '');
+      if (!path) return null;
+
+      if (host === 'storage.googleapis.com') {
+        const firstSlash = path.indexOf('/');
+        if (firstSlash <= 0) return null;
+        const bucket = path.slice(0, firstSlash);
+        const key = decodeObjectPath(path.slice(firstSlash + 1));
+        return key ? `gs://${bucket}/${key}` : null;
+      }
+
+      if (host.endsWith('.storage.googleapis.com')) {
+        const bucket = host.replace(/\.storage\.googleapis\.com$/, '');
+        const key = decodeObjectPath(path);
+        return key ? `gs://${bucket}/${key}` : null;
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
+  const key = decodeObjectPath(trimmed.replace(/^\/+/, ''));
+  return key ? `gs://${BUCKET}/${key}` : null;
+}
+
+function resolveGcsUriForTranscription(
+  audioUrl: string,
+  options?: TranscriptionAudioSourceOptions
+): string | null {
+  return toGcsUri(options?.recordingS3Key) || toGcsUri(audioUrl);
+}
+
+async function getPreferredTranscriptionAudioUrl(
+  recordingUrl: string | null | undefined,
+  recordingS3Key: string | null | undefined
+): Promise<string | null> {
+  if (recordingS3Key) {
+    try {
+      return await getPresignedDownloadUrl(recordingS3Key, TRANSCRIPTION_URL_TTL_SECONDS);
+    } catch (error: any) {
+      console.warn(`[Transcription] Failed to generate presigned URL from recordingS3Key ${recordingS3Key}: ${error?.message || error}`);
+    }
+  }
+
+  return recordingUrl || null;
 }
 
 function redactUrlForLogs(rawUrl: string): string {
@@ -246,6 +330,60 @@ export async function submitTranscription(
   try {
     const client = getSpeechClient();
 
+    const gcsUri = resolveGcsUriForTranscription(audioUrl, options);
+    if (!gcsUri) {
+      console.error('[Transcription] Rejecting non-GCS recording URL (GCS presigned/recordingS3Key required)');
+      return null;
+    }
+
+    // Prefer GCS URI for strict, non-expiring recording access.
+    if (gcsUri) {
+      try {
+        const config: RecognitionConfig = {
+          model: 'telephony',
+          languageCode: 'en-US',
+          alternativeLanguageCodes: ['en-GB'],
+          enableAutomaticPunctuation: true,
+          enableWordConfidence: true,
+          diarizationConfig: {
+            enableSpeakerDiarization: true,
+            minSpeakerCount: 2,
+            maxSpeakerCount: 2,
+          },
+          useEnhanced: true,
+          profanityFilter: false,
+        };
+
+        const audio: RecognitionAudio = { uri: gcsUri };
+        console.log(`[Transcription] Using long-running recognition (GCS URI) | ${gcsUri}`);
+        const [operation] = await client.longRunningRecognize({ config, audio });
+        const [response] = await operation.promise();
+
+        if (response.results && response.results.length > 0) {
+          const transcriptText = response.results
+            .map(result => result.alternatives?.[0]?.transcript || '')
+            .join(' ')
+            .trim();
+
+          if (transcriptText) {
+            const confidences = response.results
+              .map(result => result.alternatives?.[0]?.confidence || 0)
+              .filter(c => c > 0);
+            const confidence = confidences.length > 0
+              ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+              : 0;
+
+            console.log(`[Transcription] âœ… Google STT completed | Confidence: ${(confidence * 100).toFixed(1)}% | Length: ${transcriptText.length} chars`);
+            return transcriptText;
+          }
+        }
+
+        console.warn('[Transcription] GCS URI transcription returned no transcript; trying download fallback');
+      } catch (uriError: any) {
+        console.warn(`[Transcription] GCS URI transcription failed; trying download fallback: ${uriError?.message || uriError}`);
+      }
+    }
+
     // Download audio file
     const audioData = await downloadAudio(audioUrl, options);
     if (!audioData) {
@@ -379,8 +517,9 @@ export async function transcribeFromRecording(
   recordingUrl: string,
   options?: TranscriptionAudioSourceOptions
 ): Promise<{ transcript: string; wordCount: number } | null> {
+  const gcsUri = resolveGcsUriForTranscription(recordingUrl, options);
   // If we have a direct GCS URI, use long-running recognition with URI to bypass inline limits.
-  if (recordingUrl.startsWith('gs://')) {
+  if (gcsUri) {
     try {
       const client = getSpeechClient();
       const config: RecognitionConfig = {
@@ -396,7 +535,7 @@ export async function transcribeFromRecording(
         },
         useEnhanced: true,
       };
-      const audio: RecognitionAudio = { uri: recordingUrl };
+      const audio: RecognitionAudio = { uri: gcsUri };
       const [operation] = await client.longRunningRecognize({ config, audio });
       const [response] = await operation.promise();
       if (!response.results || response.results.length === 0) return null;
@@ -537,12 +676,12 @@ export async function transcribeLeadCall(leadId: string): Promise<boolean> {
     // Get lead data
     const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
 
-    if (!lead || (!lead.recordingUrl && !lead.recordingS3Key)) {
-      console.log('[Transcription] ⚠️ No recording URL for lead:', leadId);
+    if (!lead || !lead.recordingS3Key) {
+      console.log('[Transcription] ⚠️ Missing recordingS3Key for lead (GCS presigned URL required):', leadId);
       return false;
     }
 
-    const audioUrl = lead.recordingUrl || (lead.recordingS3Key ? await getPresignedDownloadUrl(lead.recordingS3Key, 24 * 60 * 60) : null);
+    const audioUrl = await getPreferredTranscriptionAudioUrl(lead.recordingUrl, lead.recordingS3Key);
     if (!audioUrl) {
       console.log('[Transcription] No usable audio URL for lead:', leadId);
       return false;
@@ -687,10 +826,7 @@ export async function processPendingTranscriptions(): Promise<void> {
       .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'pending'),
-        or(
-          isNotNull(leads.recordingUrl),
-          isNotNull(leads.recordingS3Key)
-        )
+        isNotNull(leads.recordingS3Key)
       ))
       .limit(10);
 
@@ -700,10 +836,7 @@ export async function processPendingTranscriptions(): Promise<void> {
       .where(and(
         eq(leads.transcriptionStatus, 'failed'),
         lt(leads.updatedAt, sql`NOW() - INTERVAL '10 minutes'`),
-        or(
-          isNotNull(leads.recordingUrl),
-          isNotNull(leads.recordingS3Key)
-        )
+        isNotNull(leads.recordingS3Key)
       ))
       .limit(3);
 
@@ -743,7 +876,12 @@ export async function submitStructuredTranscription(
     const client = getSpeechClient();
 
     // If we have a direct GCS URI, avoid downloading and use long-running with URI to bypass inline size limits
-    const isGcsUri = audioUrl.startsWith('gs://');
+    const gcsUri = resolveGcsUriForTranscription(audioUrl, options);
+    const isGcsUri = !!gcsUri;
+    if (!isGcsUri) {
+      console.error('[Transcription] Rejecting non-GCS audio for structured transcription (recordingS3Key required)');
+      return null;
+    }
 
     let audioData: { base64: string; mimeType: string } | null = null;
     let wavChannels: number | null = null;
@@ -751,7 +889,7 @@ export async function submitStructuredTranscription(
     let audio: RecognitionAudio;
 
     if (isGcsUri) {
-      console.log(`[Transcription] 🎤 Using GCS URI for structured transcription: ${audioUrl}`);
+      console.log(`[Transcription] 🎤 Using GCS URI for structured transcription: ${gcsUri}`);
       config = {
         model: 'telephony',
         languageCode: 'en-US',
@@ -765,7 +903,7 @@ export async function submitStructuredTranscription(
         },
         useEnhanced: true,
       };
-      audio = { uri: audioUrl };
+      audio = { uri: gcsUri! };
     } else {
       // Download audio file
       audioData = await downloadAudio(audioUrl, options);
@@ -931,12 +1069,12 @@ export async function transcribeCallSession(callSessionId: string): Promise<bool
     // Get call data
     const [call] = await db.select().from(callSessions).where(eq(callSessions.id, callSessionId)).limit(1);
 
-    if (!call || (!call.recordingUrl && !call.recordingS3Key)) {
-      console.log('[Transcription] ⚠️ No recording URL for call session:', callSessionId);
+    if (!call || !call.recordingS3Key) {
+      console.log('[Transcription] ⚠️ Missing recordingS3Key for call session (GCS presigned URL required):', callSessionId);
       return false;
     }
 
-    const audioUrl = call.recordingUrl || (call.recordingS3Key ? await getPresignedDownloadUrl(call.recordingS3Key, 24 * 60 * 60) : null);
+    const audioUrl = await getPreferredTranscriptionAudioUrl(call.recordingUrl, call.recordingS3Key);
     if (!audioUrl) {
       console.log('[Transcription] No usable audio URL for call session:', callSessionId);
       return false;

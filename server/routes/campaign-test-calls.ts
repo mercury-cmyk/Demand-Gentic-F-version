@@ -307,9 +307,9 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         await storeCallSession(ctx);
 
         // Generate client state params
-        // NOTE: system_prompt and agent_settings are stored in Redis (via storeCallSession above)
-        // and retrieved by voice-dialer from call-session-store. Keeping them OUT of the URL
-        // prevents the TeXML URL from exceeding length limits that break Telnyx fetching.
+        // NOTE: system_prompt is intentionally NOT stored in Redis — the voice-dialer builds
+        // the full canonical prompt from campaign config at call time (same as production).
+        // Session metadata (contact info, campaign context, voice, etc.) IS stored in Redis.
         const customParams = contextToClientStateParams(ctx);
 
         const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');

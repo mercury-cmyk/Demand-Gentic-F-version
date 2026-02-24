@@ -1327,7 +1327,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       first_message: firstMessage,
     };
 
-    // Store large fields (system_prompt, agent_settings) in Redis for voice-dialer retrieval
+    // Store session metadata in Redis for voice-dialer retrieval
     try {
       const { callSessionStore } = await import('../services/call-session-store');
       await callSessionStore.setSession(callId, {
@@ -1340,8 +1340,9 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
         voice,
         agent_name: settingsOverride?.persona?.agentName || settingsOverride?.persona?.name || '',
         organization_name: campaignOrgName,
-        system_prompt: systemPrompt,
-        agent_settings: settingsOverride,
+        // system_prompt intentionally omitted — voice-dialer builds the full prompt
+        // from campaign config at call time (same as production queue calls).
+        // Storing a simplified prompt here would short-circuit the canonical prompt pipeline.
         provider: 'google',
         contact_name: contactName,
         contact_first_name: contactFirstName,

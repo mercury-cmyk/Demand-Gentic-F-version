@@ -121,7 +121,9 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
 
   // Auto-select: prioritize super org, then isDefault, then first org.
   // Also triggers when the current selectedOrgId doesn't match any org in the list.
+  // Skip when disabled (e.g. client portal mode — org is set externally).
   useEffect(() => {
+    if (disabled) return;
     if (!orgsData?.organizations || orgsData.organizations.length === 0) return;
 
     // If current selection is valid (exists in the list), keep it
@@ -139,7 +141,7 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
         onOrgChange(orgsData.organizations[0].id);
       }
     }
-  }, [orgsData?.organizations, selectedOrgId, onOrgChange]);
+  }, [orgsData?.organizations, selectedOrgId, onOrgChange, disabled]);
 
   const organizations = orgsData?.organizations || [];
   const selectedOrg = organizations.find((o) => o.id === selectedOrgId);

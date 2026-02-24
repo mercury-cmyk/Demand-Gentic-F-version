@@ -1232,13 +1232,15 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
       for (const [nextTimeISO, ids] of updateGroups) {
         if (ids.length > 0) {
-          await db.execute(sql`
-            UPDATE campaign_queue
-            SET next_attempt_at = ${new Date(nextTimeISO)},
-                updated_at = NOW()
-            WHERE id = ANY(${ids})
-              AND status = 'queued'
-          `);
+          await db.update(campaignQueue)
+            .set({
+              nextAttemptAt: new Date(nextTimeISO),
+              updatedAt: new Date(),
+            })
+            .where(and(
+              inArray(campaignQueue.id, ids),
+              eq(campaignQueue.status, 'queued')
+            ));
         }
       }
       console.log(`[AI Orchestrator] 📅 Deferred ${outsideHoursUpdates.length} out-of-hours contacts (set next_attempt_at to their business hours)`);
@@ -1920,14 +1922,16 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       const remainingItems = eligibleItems.slice(i + PARALLEL_CALL_BATCH_SIZE);
       if (remainingItems.length > 0) {
         const remainingIds = remainingItems.map(item => item.id);
-        await db.execute(sql`
-          UPDATE campaign_queue
-          SET status = 'queued',
-              next_attempt_at = DATE_TRUNC('hour', NOW()) + INTERVAL '1 hour',
-              updated_at = NOW()
-          WHERE id = ANY(${remainingIds})
-            AND status = 'in_progress'
-        `);
+        await db.update(campaignQueue)
+          .set({
+            status: 'queued',
+            nextAttemptAt: sql`DATE_TRUNC('hour', NOW()) + INTERVAL '1 hour'`,
+            updatedAt: new Date(),
+          })
+          .where(and(
+            inArray(campaignQueue.id, remainingIds),
+            eq(campaignQueue.status, 'in_progress')
+          ));
         console.log(`[AI Orchestrator] Reset ${remainingItems.length} remaining items to retry next hour`);
       }
       await setOrchestratorStallReason(campaignId, 'Hourly call limit reached on all numbers. Calls will resume next hour.');

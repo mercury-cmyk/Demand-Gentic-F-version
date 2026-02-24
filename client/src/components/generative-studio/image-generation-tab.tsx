@@ -296,7 +296,7 @@ export default function ImageGenerationTab({
             <Brain className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
             <div className="min-w-0">
               <p className="text-[11px] font-medium text-emerald-700 leading-tight">
-                OI Active: {orgIntelligence.identity.legalName.value}
+                OI Active: {typeof orgIntelligence.identity.legalName === 'string' ? orgIntelligence.identity.legalName : orgIntelligence.identity.legalName.value}
               </p>
             </div>
           </div>

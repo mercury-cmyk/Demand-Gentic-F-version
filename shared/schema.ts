@@ -14753,3 +14753,56 @@ export const dataQualityScans = pgTable("data_quality_scans", {
 export const insertDataQualityScanSchema = createInsertSchema(dataQualityScans);
 export type DataQualityScan = typeof dataQualityScans.$inferSelect;
 export type InsertDataQualityScan = typeof dataQualityScans.$inferInsert;
+
+// ─── Client Campaign Plans (AI-powered Campaign Planner for Client Portal) ────
+
+export const clientCampaignPlanStatusEnum = pgEnum('client_campaign_plan_status', [
+  'generating',
+  'generated',
+  'approved',
+  'active',
+  'completed',
+  'archived',
+]);
+
+export const clientCampaignPlans = pgTable("client_campaign_plans", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id", { length: 36 }).notNull(),
+  createdByUserId: varchar("created_by_user_id", { length: 36 }).notNull(),
+  name: text("name").notNull(),
+  status: clientCampaignPlanStatusEnum("status").notNull().default('generating'),
+
+  // User inputs (minimal — OI-driven)
+  campaignGoal: text("campaign_goal"),
+  targetBudget: text("target_budget"),
+  preferredChannels: jsonb("preferred_channels"), // string[]
+  campaignDuration: text("campaign_duration"),
+  additionalContext: text("additional_context"),
+
+  // AI output
+  generatedPlan: jsonb("generated_plan"), // CampaignPlanOutput JSON
+  oiSnapshotSummary: text("oi_snapshot_summary"),
+
+  // Denormalized for list views
+  funnelStageCount: integer("funnel_stage_count"),
+  channelCount: integer("channel_count"),
+  estimatedLeadVolume: text("estimated_lead_volume"),
+
+  // AI tracking
+  aiModel: text("ai_model"),
+  thinkingContent: text("thinking_content"),
+  generationDurationMs: integer("generation_duration_ms"),
+
+  // Timestamps
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("ccp_client_account_idx").on(table.clientAccountId),
+  statusIdx: index("ccp_status_idx").on(table.status),
+  createdAtIdx: index("ccp_created_at_idx").on(table.createdAt),
+}));
+
+export const insertClientCampaignPlanSchema = createInsertSchema(clientCampaignPlans);
+export type ClientCampaignPlan = typeof clientCampaignPlans.$inferSelect;
+export type InsertClientCampaignPlan = typeof clientCampaignPlans.$inferInsert;

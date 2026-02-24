@@ -23,6 +23,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
   Image as ImageIcon,
+  Building2,
   Globe,
   Mail,
   MessageSquare,
@@ -199,14 +200,26 @@ export default function GenerativeStudioPage() {
 
   const [activeModule, setActiveModule] = useState("image");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(SUPER_ORG_ID);
+  // Client Portal: default to null (will be set from API); Admin: default to Pivotal B2B super org
+  const clientPortalToken = localStorage.getItem("clientPortalToken");
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(clientPortalToken ? null : SUPER_ORG_ID);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Client Portal Integration
-  const clientPortalToken = localStorage.getItem("clientPortalToken");
-  const { data: clientOrgData } = useQuery<{
-    organization: { id: string; name: string } | null;
+  const { data: clientOrgData, isLoading: clientOrgLoading } = useQuery<{
+    organization: {
+      id: string;
+      name: string;
+      identity?: any;
+      offerings?: any;
+      icp?: any;
+      positioning?: any;
+      outreach?: any;
+      events?: any;
+      forums?: any;
+      compiledOrgContext?: string;
+    } | null;
   }>({
     queryKey: ["client-portal-org-simple"],
     queryFn: async () => {
@@ -236,14 +249,14 @@ export default function GenerativeStudioPage() {
 
   const brandKits = (brandKitsData as any)?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
 
-  // Restore org from localStorage, always falling back to super org
+  // Restore org from localStorage (admin only — client portal gets its org from the API)
   useEffect(() => {
-    if (projectIdFromUrl) return;
+    if (projectIdFromUrl || clientPortalToken) return;
     const storedOrgId = localStorage.getItem("generativeStudioOrgId");
     if (storedOrgId) {
       setSelectedOrgId(storedOrgId);
     }
-    // SUPER_ORG_ID is already the default initial state — no need to set it again
+    // SUPER_ORG_ID is already the default initial state for admin — no need to set it again
   }, []);
 
   useEffect(() => {
@@ -357,11 +370,26 @@ export default function GenerativeStudioPage() {
       `/api/org-intelligence/profile?organizationId=${selectedOrgId || ""}`,
     ],
     staleTime: 5 * 60 * 1000,
-    enabled: !!selectedOrgId,
+    // Skip admin OI fetch in client portal mode — OI comes from clientOrgData instead
+    enabled: !!selectedOrgId && !clientPortalToken,
   });
 
-  const orgProfile = orgIntelData?.profile || null;
-  const hasOrgIntel = !!orgProfile?.identity?.legalName?.value;
+  // In client portal mode, derive OI profile from the client org data
+  const orgProfile: OrgIntelligenceProfile | null = clientPortalToken
+    ? (clientOrgData?.organization
+        ? {
+            identity: clientOrgData.organization.identity,
+            offerings: clientOrgData.organization.offerings,
+            icp: clientOrgData.organization.icp,
+            positioning: clientOrgData.organization.positioning,
+            outreach: clientOrgData.organization.outreach,
+            events: clientOrgData.organization.events,
+            forums: clientOrgData.organization.forums,
+          } as OrgIntelligenceProfile
+        : null)
+    : (orgIntelData?.profile || null);
+  // getIntelValue handles both { value: "..." } (admin-analyzed) and flat string (client-portal-analyzed)
+  const hasOrgIntel = !!getIntelValue(orgProfile?.identity?.legalName);
   const needsOrgSelection = !selectedOrgId;
 
   const orgSummary = orgProfile
@@ -382,7 +410,8 @@ export default function GenerativeStudioPage() {
 
   const hasScope = !!selectedOrgId;
   // OI is mandatory — generation is blocked without it
-  const oiMissing = !hasOrgIntel && !!selectedOrgId && !orgIntelLoading;
+  const effectiveOiLoading = clientPortalToken ? clientOrgLoading : orgIntelLoading;
+  const oiMissing = !hasOrgIntel && !!selectedOrgId && !effectiveOiLoading;
 
   const currentModule = MODULES.find((m) => m.id === activeModule) || MODULES[0];
 
@@ -403,11 +432,20 @@ export default function GenerativeStudioPage() {
         <div className="flex items-center gap-2">
           {/* Org/Project Context - Compact */}
           <div className="flex items-center gap-2 mr-1">
-            <OrganizationSelector
-              selectedOrgId={selectedOrgId}
-              onOrgChange={setSelectedOrgId}
-              disabled={!!clientPortalToken}
-            />
+            {clientPortalToken ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border bg-muted/50">
+                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs font-medium">
+                  {clientOrgData?.organization?.name || "Loading..."}
+                </span>
+                <Badge variant="outline" className="text-[10px] h-4">Client</Badge>
+              </div>
+            ) : (
+              <OrganizationSelector
+                selectedOrgId={selectedOrgId}
+                onOrgChange={setSelectedOrgId}
+              />
+            )}
             <Select
               value={selectedProjectId || ""}
               onValueChange={(value) => setSelectedProjectId(value || null)}
@@ -456,7 +494,7 @@ export default function GenerativeStudioPage() {
                 >
                   {needsOrgSelection ? (
                     <AlertCircle className="w-3 h-3" />
-                  ) : orgIntelLoading ? (
+                  ) : effectiveOiLoading ? (
                     <Brain className="w-3 h-3 animate-pulse" />
                   ) : hasOrgIntel ? (
                     <CheckCircle2 className="w-3 h-3" />
@@ -466,7 +504,7 @@ export default function GenerativeStudioPage() {
                   <span className="hidden xl:inline">
                     {needsOrgSelection
                       ? "Select Org"
-                      : orgIntelLoading
+                      : effectiveOiLoading
                       ? "Loading..."
                       : hasOrgIntel
                       ? "OI Active"

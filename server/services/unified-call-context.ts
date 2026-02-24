@@ -445,8 +445,9 @@ export function contextToClientStateParams(ctx: UnifiedCallContext): Record<stri
     agent_name: ctx.agentName,
     voice: ctx.voice,
     first_message: ctx.firstMessage,
-    // system_prompt and agent_settings stored in Redis (via storeCallSession),
-    // not in URL, to avoid length issues that break Telnyx TeXML URL fetching
+    // system_prompt intentionally NOT included — voice-dialer builds the full
+    // canonical prompt from campaign config at call time (same as production).
+    // agent_settings also omitted — voice-dialer resolves from campaign/agent config.
 
     // Contact information - both underscore and dot notation for compatibility
     contact_name: ctx.contactName,
@@ -493,6 +494,15 @@ export function contextToClientStateParams(ctx: UnifiedCallContext): Record<stri
 export async function storeCallSession(ctx: UnifiedCallContext): Promise<void> {
   const { callSessionStore } = await import('./call-session-store');
 
+  // CRITICAL: Do NOT store system_prompt or agent_settings in Redis.
+  // The voice-dialer MUST build the full system prompt from campaign config
+  // at call time using buildSystemPrompt(), which includes the canonical
+  // foundational prompt with full behavioral framework (identity confirmation,
+  // gatekeeper handling, turn-taking, conversation discipline, etc.).
+  // Storing a simplified prompt here causes the voice-dialer to short-circuit
+  // its normal prompt building pipeline (PATH 1 override vs PATH 3 canonical),
+  // resulting in weaker agent behavior during test calls vs production calls.
+  // Production calls (via telnyx-ai-bridge.ts) never store system_prompt in Redis.
   await callSessionStore.setSession(ctx.callId, {
     call_id: ctx.callId,
     run_id: ctx.runId,
@@ -511,8 +521,8 @@ export async function storeCallSession(ctx: UnifiedCallContext): Promise<void> {
     voice: ctx.voice,
     agent_name: ctx.agentName,
     organization_name: ctx.organizationName,
-    system_prompt: ctx.systemPrompt ?? undefined,
-    agent_settings: ctx.agentSettings ?? undefined,
+    // system_prompt intentionally omitted — voice-dialer builds it from campaign config
+    // agent_settings intentionally omitted — voice-dialer resolves from campaign/agent config
     provider: ctx.provider,
     test_contact: ctx.isTestCall ? {
       name: ctx.contactName,

@@ -34,6 +34,7 @@ export interface RecordingLinkResult {
 
 export interface RecordingLinkOptions {
   skipCached?: boolean;
+  gcsOnly?: boolean;
 }
 
 function normalizePhoneCandidates(...rawValues: Array<string | null | undefined>): string[] {
@@ -270,6 +271,9 @@ export async function getPlayableRecordingLink(
   conversationId: string,
   options: RecordingLinkOptions = {},
 ): Promise<RecordingLinkResult | null> {
+  const gcsOnly = options.gcsOnly !== false;
+  const skipCached = options.skipCached || gcsOnly;
+
   // ── 1. call_sessions ──────────────────────────────────────────────
   const [session] = await db
     .select({
@@ -286,10 +290,10 @@ export async function getPlayableRecordingLink(
 
   if (session) {
     // Priority 1: GCS
-    if (session.recordingS3Key) {
+    if (session.recordingS3Key || gcsOnly) {
       try {
-        const result = await getCallSessionRecordingUrl(conversationId);
-        if (result.url) {
+        const result = await getCallSessionRecordingUrl(conversationId, session.recordingUrl || null);
+        if (result.url && result.source === 'local') {
           // Keep gcs-internal:// URLs as-is — server-side stream endpoints
           // (recordings, showcase-calls) handle them directly via readFromGCS().
           // Converting to /api/recordings/... breaks server-side fetch() calls.
@@ -307,7 +311,7 @@ export async function getPlayableRecordingLink(
     }
 
     // Priority 2: Telnyx Recording ID
-    if (session.telnyxRecordingId) {
+    if (!gcsOnly && session.telnyxRecordingId) {
       const result = await fetchUrlByTelnyxRecordingId(session.telnyxRecordingId);
       if (result) {
         return {
@@ -321,7 +325,7 @@ export async function getPlayableRecordingLink(
     }
 
     // Priority 3: Telnyx Call Control ID search
-    if (session.telnyxCallId) {
+    if (!gcsOnly && session.telnyxCallId) {
       const result = await fetchUrlByTelnyxCallId(session.telnyxCallId);
       if (result) {
         if (result.discoveredRecordingId) {
@@ -338,7 +342,7 @@ export async function getPlayableRecordingLink(
     }
 
     // Priority 4: Cached URL
-    if (session.recordingUrl && !options.skipCached) {
+    if (session.recordingUrl && !skipCached) {
       return {
         url: session.recordingUrl,
         source: 'cached',
@@ -363,7 +367,7 @@ export async function getPlayableRecordingLink(
       .limit(5);
 
     for (const attempt of attemptsBySession) {
-      if (attempt.telnyxRecordingId) {
+      if (!gcsOnly && attempt.telnyxRecordingId) {
         const result = await fetchUrlByTelnyxRecordingId(attempt.telnyxRecordingId);
         if (result) {
           backfillRecordingId(conversationId, attempt.telnyxRecordingId, 'call_sessions');
@@ -377,7 +381,7 @@ export async function getPlayableRecordingLink(
         }
       }
 
-      if (attempt.telnyxCallId) {
+      if (!gcsOnly && attempt.telnyxCallId) {
         const result = await fetchUrlByTelnyxCallId(attempt.telnyxCallId);
         if (result) {
           if (result.discoveredRecordingId) {
@@ -394,7 +398,7 @@ export async function getPlayableRecordingLink(
         }
       }
 
-      if (attempt.recordingUrl && !options.skipCached) {
+      if (attempt.recordingUrl && !skipCached) {
         return {
           url: attempt.recordingUrl,
           source: 'cached',
@@ -403,7 +407,7 @@ export async function getPlayableRecordingLink(
         };
       }
 
-      if (attempt.callStartedAt || session.startedAt) {
+      if (!gcsOnly && (attempt.callStartedAt || session.startedAt)) {
         const phoneCandidates = normalizePhoneCandidates(
           attempt.phoneDialed,
           session.toNumberE164,
@@ -422,7 +426,7 @@ export async function getPlayableRecordingLink(
     }
 
     // Priority 6: Search Telnyx by dialed phone number + time range
-    if (session.startedAt) {
+    if (!gcsOnly && session.startedAt) {
       const phoneCandidates = normalizePhoneCandidates(session.toNumberE164, session.fromNumber);
       const result = await searchByPhoneAndTime(phoneCandidates, session.startedAt, conversationId);
       if (result) {
@@ -443,10 +447,10 @@ export async function getPlayableRecordingLink(
     .where(eq(leads.id, conversationId));
 
   if (lead) {
-    if (lead.recordingS3Key) {
+    if (lead.recordingS3Key || gcsOnly) {
       try {
-        const result = await getRecordingUrl(conversationId);
-        if (result.url) {
+        const result = await getRecordingUrl(conversationId, lead.recordingUrl || null);
+        if (result.url && result.source === 'local') {
           return {
             url: result.url,
             source: 'gcs',
@@ -460,7 +464,7 @@ export async function getPlayableRecordingLink(
       }
     }
 
-    if (lead.telnyxRecordingId) {
+    if (!gcsOnly && lead.telnyxRecordingId) {
       const result = await fetchUrlByTelnyxRecordingId(lead.telnyxRecordingId);
       if (result) {
         return {
@@ -473,7 +477,7 @@ export async function getPlayableRecordingLink(
       }
     }
 
-    if (lead.telnyxCallId) {
+    if (!gcsOnly && lead.telnyxCallId) {
       const result = await fetchUrlByTelnyxCallId(lead.telnyxCallId);
       if (result) {
         if (result.discoveredRecordingId) {
@@ -489,7 +493,7 @@ export async function getPlayableRecordingLink(
       }
     }
 
-    if (lead.recordingUrl && !options.skipCached) {
+    if (lead.recordingUrl && !skipCached) {
       return {
         url: lead.recordingUrl,
         source: 'cached',
@@ -510,7 +514,7 @@ export async function getPlayableRecordingLink(
     .where(eq(dialerCallAttempts.id, conversationId));
 
   if (attempt) {
-    if (attempt.telnyxRecordingId) {
+    if (!gcsOnly && attempt.telnyxRecordingId) {
       const result = await fetchUrlByTelnyxRecordingId(attempt.telnyxRecordingId);
       if (result) {
         return {
@@ -523,7 +527,7 @@ export async function getPlayableRecordingLink(
       }
     }
 
-    if (attempt.telnyxCallId) {
+    if (!gcsOnly && attempt.telnyxCallId) {
       const result = await fetchUrlByTelnyxCallId(attempt.telnyxCallId);
       if (result) {
         if (result.discoveredRecordingId) {
@@ -539,7 +543,7 @@ export async function getPlayableRecordingLink(
       }
     }
 
-    if (attempt.recordingUrl && !options.skipCached) {
+    if (attempt.recordingUrl && !skipCached) {
       return {
         url: attempt.recordingUrl,
         source: 'cached',
@@ -550,15 +554,17 @@ export async function getPlayableRecordingLink(
   }
 
   // ── 4. Try conversationId as a direct Telnyx recording ID ─────────
-  const directResult = await fetchUrlByTelnyxRecordingId(conversationId);
-  if (directResult) {
-    return {
-      url: directResult.url,
-      source: 'telnyx_recording_id',
-      expiresInSeconds: 600,
-      mimeType: directResult.mimeType,
-      telnyxRecordingId: conversationId,
-    };
+  if (!gcsOnly) {
+    const directResult = await fetchUrlByTelnyxRecordingId(conversationId);
+    if (directResult) {
+      return {
+        url: directResult.url,
+        source: 'telnyx_recording_id',
+        expiresInSeconds: 600,
+        mimeType: directResult.mimeType,
+        telnyxRecordingId: conversationId,
+      };
+    }
   }
 
   return null;

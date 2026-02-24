@@ -59,6 +59,7 @@ import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 import { UKEF_CLIENT_ACCOUNT_ID } from '../integrations/ukef_reports/types';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
+import clientCampaignPlannerRouter from './client-campaign-planner-routes';
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
 import { getRecordingUrl } from '../services/recording-storage';
 import { getPlayableRecordingLink } from '../services/recording-link-resolver';
@@ -648,6 +649,9 @@ router.use('/ukef-reports', requireClientAuth, ukefReportsRouter);
 
 // UKEF transcript quality + disposition validation (feature-flagged, client-gated)
 router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
+
+// AI Campaign Planner (full-funnel multi-channel planning from OI)
+router.use('/campaign-planner', requireClientAuth, clientCampaignPlannerRouter);
 
 // Campaigns (Client wizard and management)
 /**

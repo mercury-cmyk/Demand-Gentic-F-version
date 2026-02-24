@@ -36,6 +36,21 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function isPresignedGcsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("storage.googleapis.com")) return false;
+    return (
+      parsed.searchParams.has("X-Goog-Signature") ||
+      parsed.searchParams.has("GoogleAccessId") ||
+      parsed.searchParams.has("X-Goog-Credential")
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * CRITICAL FIX: Map speaker to "agent" or "contact" using channel information
  * 
@@ -115,7 +130,16 @@ async function getRefreshedUrlFromS3(recordingS3Key: string | null | undefined):
   try {
     // Use 24-hour TTL for transcription URLs (Deepgram jobs may queue for hours)
     const TTL_24_HOURS = 24 * 60 * 60;
-    return await getPresignedDownloadUrl(recordingS3Key, TTL_24_HOURS);
+    const presignedUrl = await getPresignedDownloadUrl(recordingS3Key, TTL_24_HOURS);
+    if (presignedUrl.startsWith("gcs-internal://")) {
+      console.warn(`${LOG_PREFIX} Rejecting non-presigned internal URL for Deepgram: ${recordingS3Key}`);
+      return null;
+    }
+    if (!isPresignedGcsUrl(presignedUrl)) {
+      console.warn(`${LOG_PREFIX} Rejecting non-presigned/non-GCS URL for Deepgram: ${recordingS3Key}`);
+      return null;
+    }
+    return presignedUrl;
   } catch (error) {
     console.warn(`${LOG_PREFIX} Failed to refresh audio URL from S3 key ${recordingS3Key}: ${getErrorMessage(error)}`);
     return null;
@@ -216,19 +240,27 @@ export async function submitStructuredTranscription(
   const attempts: string[] = [];
 
   const inferredS3Key = options?.recordingS3Key || extractStorageKeyFromUrl(audioUrl);
+  if (!inferredS3Key) {
+    const message = `${LOG_PREFIX} Missing recordingS3Key - GCS presigned URL is required`;
+    if (options?.throwOnError) {
+      throw new Error(message);
+    }
+    console.error(message);
+    return null;
+  }
 
   const s3RefreshedUrl = await getRefreshedUrlFromS3(inferredS3Key);
   if (s3RefreshedUrl && !attempts.includes(s3RefreshedUrl)) {
     attempts.push(s3RefreshedUrl);
   }
 
-  if (audioUrl && !attempts.includes(audioUrl)) {
-    attempts.push(audioUrl);
-  }
-
-  const telnyxRefreshedUrl = await getRefreshedUrlFromTelnyx(options?.telnyxCallId);
-  if (telnyxRefreshedUrl && !attempts.includes(telnyxRefreshedUrl)) {
-    attempts.push(telnyxRefreshedUrl);
+  if (attempts.length === 0) {
+    const message = `${LOG_PREFIX} Unable to resolve GCS presigned URL for key ${inferredS3Key}`;
+    if (options?.throwOnError) {
+      throw new Error(message);
+    }
+    console.error(message);
+    return null;
   }
 
   for (const candidateUrl of attempts) {

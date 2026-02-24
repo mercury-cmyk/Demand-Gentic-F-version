@@ -67,6 +67,7 @@ import {
   Building2,
   Plus,
   Trophy,
+  Wand2,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -140,6 +141,7 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'The Agentic Council', href: '/client-portal/agents', icon: Bot, highlighted: true },
       { name: 'Organization Intelligence', href: '/client-portal/intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
+      { name: 'Campaign Planner', href: '/client-portal/dashboard?tab=campaign-planner', icon: Wand2 },
       { name: 'Creative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
     ],
