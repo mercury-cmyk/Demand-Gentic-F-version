@@ -160,7 +160,9 @@ const MAX_TRANSCRIPTS = 200;
 const MAX_STATE_HISTORY = 50;
 const MAX_AUDIO_PATTERNS = 100;
 const MAX_RESPONSE_LATENCIES = 100;
-const VOICEMAIL_EARLY_WINDOW_MS = 6000;
+// Keep the fast-abort window wide enough to catch longer voicemail greetings
+// before the AI completes a full opening pitch.
+const VOICEMAIL_EARLY_WINDOW_MS = 12000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
 const HARD_MAX_CALL_DURATION_SECONDS = 300;
 
@@ -906,9 +908,17 @@ function shouldFastAbortForEarlyVoicemail(session: OpenAIRealtimeSession, transc
   if (session.conversationState.currentState === 'GATEKEEPER') return false;
   if (session.conversationState.stateHistory.includes('GATEKEEPER')) return false;
 
-  // If there have been multiple back-and-forth turns, this is a live conversation, not voicemail
-  const userTurns = session.transcripts.filter(t => t.role === 'user').length;
-  if (userTurns >= 2) return false;
+  // Only suppress fast abort after a real back-and-forth began.
+  // Multiple voicemail transcript fragments can arrive quickly on the same line,
+  // so user turn count alone is not enough to declare a live conversation.
+  const assistantTurns = session.transcripts.filter((t) => t.role === "assistant");
+  if (assistantTurns.length > 0) {
+    const lastAssistantAt = assistantTurns[assistantTurns.length - 1].timestamp.getTime();
+    const userTurnsAfterAssistant = session.transcripts.filter(
+      (t) => t.role === "user" && t.timestamp.getTime() > lastAssistantAt
+    ).length;
+    if (userTurnsAfterAssistant >= 2) return false;
+  }
 
   const now = Date.now();
   const baseline =
@@ -1040,6 +1050,37 @@ export function setAmdResultForSession(callControlId: string, result: string, co
       amdResultsByCallControlId.delete(ctrlId);
     }
   }
+}
+
+function clearClosingGraceTimer(session: OpenAIRealtimeSession, source: string): void {
+  const timer = (session as any).closingGraceTimer as ReturnType<typeof setTimeout> | null;
+  if (!timer) return;
+
+  clearTimeout(timer);
+  (session as any).closingGraceTimer = null;
+  (session as any).closingGraceStartedAt = null;
+  console.log(`${LOG_PREFIX} [CloseGuard] Cleared closing grace timer (${source}) for call: ${session.callId}`);
+}
+
+function scheduleClosingGraceAutoEnd(session: OpenAIRealtimeSession, delayMs = 4000): void {
+  if (!session.isActive || session.isEnding) return;
+
+  const existing = (session as any).closingGraceTimer as ReturnType<typeof setTimeout> | null;
+  if (existing) return;
+
+  (session as any).closingGraceStartedAt = new Date();
+  (session as any).closingGraceTimer = setTimeout(() => {
+    (session as any).closingGraceTimer = null;
+    (session as any).closingGraceStartedAt = null;
+
+    if (!session.isActive || session.isEnding) return;
+    console.log(`${LOG_PREFIX} [CloseGuard] Auto-ending call after closing grace period: ${session.callId}`);
+    endCall(session.callId, session.detectedDisposition === "voicemail" ? "voicemail" : "completed").catch((err) => {
+      console.error(`${LOG_PREFIX} [CloseGuard] Failed to auto-end after closing grace for ${session.callId}:`, err);
+    });
+  }, delayMs);
+
+  console.log(`${LOG_PREFIX} [CloseGuard] Started closing grace timer (${delayMs}ms) for call: ${session.callId}`);
 }
 
 /**
@@ -3359,6 +3400,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     provider.on('transcript:user', async (event: any) => {
       if (!event.isFinal) return;
       if (session.isEnding) return; // Don't accept transcripts after endCall starts
+      clearClosingGraceTimer(session, "gemini_transcript_user");
 
       if (shouldFastAbortForEarlyVoicemail(session, event.text)) {
         console.log(`${LOG_PREFIX} [AudioGuard] Gemini early voicemail cue detected - ending call`);
@@ -3382,11 +3424,31 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       // Previously only set for OpenAI speech events, leaving Gemini calls with null
       // which caused silence detection to be completely bypassed
       session.lastUserSpeechTime = new Date();
+      const lowerTranscript = event.text.toLowerCase();
+      const isScreenerPrompt = isAutomatedCallScreenerTranscript(lowerTranscript);
+      const isVerbalGatekeeperPrompt = isAutomatedVerbalGatekeeperPrompt(event.text);
+
+      // Deterministic opening send: once we have confirmed live human speech,
+      // send the canonical opening immediately if Gemini has not started speaking yet.
+      if (
+        audioType.type === "human" &&
+        !session.audioDetection.hasGreetingSent &&
+        !session.timingMetrics.firstAgentAudioAt &&
+        !isScreenerPrompt &&
+        !isVerbalGatekeeperPrompt
+      ) {
+        session.audioDetection.hasGreetingSent = true;
+        session.openingPromptSentAt = new Date();
+        queueSessionEvent(session, "opening.identity_prompt_sent_at", {
+          eventTs: session.openingPromptSentAt,
+          metadata: { provider: "google", variant: session.voiceLiftVariant || "control", trigger: "first_human_transcript" },
+          once: true,
+        });
+        console.log(`${LOG_PREFIX} [OpenGuard] Sending deterministic opening on first human transcript`);
+        provider.sendOpeningMessage(openingScript);
+      }
 
       if (audioType.type !== 'human') {
-        const lowerTranscript = event.text.toLowerCase();
-        const isScreenerPrompt = isAutomatedCallScreenerTranscript(lowerTranscript);
-
         // VOICEMAIL DETECTION - Check FIRST (highest priority), same as OpenAI path
         // Must run before we decide to ignore IVR audio
         if (audioType.type === 'ivr' && !isScreenerPrompt) {
@@ -3680,6 +3742,23 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     provider.on('transcript:agent', (event: any) => {
       if (session.isEnding) return; // Don't accept transcripts after endCall starts
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
+        const elapsedMs = Date.now() - session.startTime.getTime();
+        const recentUserVoicemailCue = session.transcripts
+          .slice(-6)
+          .some((turn) => turn.role === "user" && isVoicemailCueTranscript(turn.text));
+        if (!session.detectedDisposition && elapsedMs <= 20000 && recentUserVoicemailCue) {
+          console.log(`${LOG_PREFIX} [AudioGuard] Agent transcript suppressed due to recent voicemail cue - ending call`);
+          session.detectedDisposition = "voicemail";
+          session.callOutcome = "voicemail";
+          recordVoicemailDetectedEvent(session, "gemini_agent_transcript_guard");
+          setImmediate(() => {
+            endCall(session.callId, "voicemail").catch((err) => {
+              console.error(`${LOG_PREFIX} Failed to end call after gemini agent voicemail guard:`, err);
+            });
+          });
+          return;
+        }
+
         console.log(`${LOG_PREFIX} [Transcript] AI: "${event.text}"`);
 
         // Accumulate consecutive assistant transcripts instead of creating new entries
@@ -3792,9 +3871,13 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       const result = await handleGeminiFunctionCall(session, event.name, event.args, event.callId);
 
       // Track consecutive failures per function name
-      if (result && result.success === false) {
+      const shouldCountFailure = result && result.success === false && result.countAsFailure !== false;
+      if (shouldCountFailure) {
         session.functionCallFailures.set(event.name, failureCount + 1);
         console.warn(`${LOG_PREFIX} ⚠️ ${event.name} failure #${failureCount + 1}/${MAX_CONSECUTIVE_FAILURES} before circuit breaker triggers`);
+      } else if (result && result.success === false && result.countAsFailure === false) {
+        session.functionCallFailures.set(event.name, 0);
+        console.log(`${LOG_PREFIX} [Gemini] ${event.name} blocked by policy guard (not counting as tool failure)`);
       } else {
         // Reset failure count on success
         session.functionCallFailures.set(event.name, 0);
@@ -3929,7 +4012,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       (session as any).fallbackGreetingTimer = timer;
     };
 
-    scheduleFallbackGreetingCheck(6500);
+    scheduleFallbackGreetingCheck(4500);
 
     // SAFETY NET: If greeting was sent/queued but Gemini produces no audio within 10s,
     // retry the opening ONCE. Increased from 5s to 10s to avoid racing with Gemini's
@@ -4054,7 +4137,8 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
         // Return error to force AI to continue the conversation
         return {
           success: false,
-          error: 'INVALID DISPOSITION: You cannot use no_answer when the prospect IS responding. The prospect said: ' + userResponses.join(', ') + '. This indicates audio issues - they cannot hear you clearly. Say "I apologize, can you hear me?" and continue the conversation. Only use no_answer after 60+ seconds of COMPLETE silence.'
+          error: 'INVALID DISPOSITION: You cannot use no_answer when the prospect IS responding. The prospect said: ' + userResponses.join(', ') + '. This indicates audio issues - they cannot hear you clearly. Say "I apologize, can you hear me?" and continue the conversation. Only use no_answer after 60+ seconds of COMPLETE silence.',
+          countAsFailure: false,
         };
       }
 
@@ -4113,7 +4197,8 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
 2. Propose specific meeting times (say "Would [Tuesday/Thursday] at [time] work?")
 3. Get confirmation and say goodbye (say "Perfect! You'll receive a calendar invite. Thank you for your time!")
 
-Only AFTER completing these steps, submit qualified_lead with a reason like: "Meeting scheduled for [date/time], email confirmed at [email], calendar invite to be sent."`
+Only AFTER completing these steps, submit qualified_lead with a reason like: "Meeting scheduled for [date/time], email confirmed at [email], calendar invite to be sent."`,
+                countAsFailure: false,
               };
             }
           }
@@ -4267,7 +4352,8 @@ DO THIS NOW:
 1. "Great — what's the best email to send it to?" (or confirm it by spelling it out)
 2. After they confirm, say "Perfect — I’ll send it over right now. Thank you for your time today!"
 
-Only AFTER completing these steps can you submit the disposition.`
+Only AFTER completing these steps can you submit the disposition.`,
+            countAsFailure: false,
           };
         }
         console.log(`${LOG_PREFIX} ✅ [Gemini] qualified_lead validation passed: agentTurns=${agentTranscripts.length}, words=${agentWordCount}, emailConfirmed=${hasEmailConfirmation}, timeProposed=${agentProposedTime}, goodbye=${hasGoodbye}, campaignType=${campaignType || 'unknown'}`);
@@ -4354,7 +4440,8 @@ Only AFTER completing these steps can you submit the disposition.`
         console.warn(`${LOG_PREFIX} [Gemini] 💡 Instructing AI to ask "Can you hear me?" and continue conversation`);
         return {
           success: false,
-          error: 'AUDIO ISSUE DETECTED: The prospect IS responding (saying hello). This indicates they cannot hear you clearly. DO NOT end the call. Instead: (1) Say "I apologize, can you hear me?" (2) Wait for their response (3) If they confirm, restart your greeting. Only end after 60+ seconds of COMPLETE silence with zero response.'
+          error: 'AUDIO ISSUE DETECTED: The prospect IS responding (saying hello). This indicates they cannot hear you clearly. DO NOT end the call. Instead: (1) Say "I apologize, can you hear me?" (2) Wait for their response (3) If they confirm, restart your greeting. Only end after 60+ seconds of COMPLETE silence with zero response.',
+          countAsFailure: false,
         };
       }
 
@@ -4375,7 +4462,8 @@ Only AFTER completing these steps can you submit the disposition.`
         console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Value proposition NOT delivered yet! Identity confirmed but agent only said ${agentWordCount} words.`);
         return {
           success: false,
-          error: 'STOP — you have NOT delivered your value proposition yet. The prospect confirmed their identity but you haven\'t explained why you\'re calling. Before ending, you MUST deliver your pitch based on the campaign objective and talking points. Only AFTER the prospect responds can you end the call.'
+          error: 'STOP — you have NOT delivered your value proposition yet. The prospect confirmed their identity but you haven\'t explained why you\'re calling. Before ending, you MUST deliver your pitch based on the campaign objective and talking points. Only AFTER the prospect responds can you end the call.',
+          countAsFailure: false,
         };
       }
 
@@ -4404,6 +4492,7 @@ Only AFTER completing these steps can you submit the disposition.`
         return {
           success: false,
           error: 'STOP — your opening was incomplete. You confirmed the prospect\'s identity but never delivered your intro and purpose. Say this now: "Hi [First Name], this is [Agent Name] calling on behalf of [Organization] — [single-sentence purpose]. Would that be worth a quick conversation?" Wait for their response before continuing.',
+          countAsFailure: false,
         };
       }
 
@@ -4443,7 +4532,8 @@ Only AFTER completing these steps can you submit the disposition.`
         console.warn(`${LOG_PREFIX} [Gemini] Last agent statement: "${lastAgentText.substring(0, 100)}..."`);
         return {
           success: false,
-          error: 'STOP — you have NOT said a proper farewell yet. Before ending the call, you MUST: (1) Confirm the appointment/outcome details, (2) Say "Thank you so much for your time today! Have a great day!", (3) WAIT for the prospect to respond with their goodbye, (4) ONLY THEN call end_call. NEVER hang up immediately after confirming appointment details or email.'
+          error: 'STOP — you have NOT said a proper farewell yet. Before ending the call, you MUST: (1) Confirm the appointment/outcome details, (2) Say "Thank you so much for your time today! Have a great day!", (3) WAIT for the prospect to respond with their goodbye, (4) ONLY THEN call end_call. NEVER hang up immediately after confirming appointment details or email.',
+          countAsFailure: false,
         };
       }
 
@@ -4455,11 +4545,13 @@ Only AFTER completing these steps can you submit the disposition.`
         const lastTranscript = allTranscripts.length > 0 ? allTranscripts[allTranscripts.length - 1] : null;
         const lastTurnIsAgent = lastTranscript?.role === 'assistant';
         if (lastTurnIsAgent) {
-          console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Agent said farewell but prospect hasn't responded yet. Waiting for prospect-led disconnect.`);
+          console.warn(`${LOG_PREFIX} [Gemini] [CloseGuard] Farewell sent; waiting briefly before auto-end if prospect stays silent.`);
           console.warn(`${LOG_PREFIX} [Gemini] Last agent: "${lastAgentText.substring(0, 80)}" | Last user: "${lastUserText.substring(0, 80)}"`);
+          scheduleClosingGraceAutoEnd(session, 4000);
           return {
-            success: false,
-            error: 'WAIT — you said your farewell but the prospect has not responded yet. You MUST wait for them to say "bye", "thank you", "take care" or similar before ending. Pause and listen for 3-5 seconds. Call termination must be prospect-led, not agent-triggered.'
+            success: true,
+            message: 'Farewell acknowledged. Waiting briefly for prospect response; call will auto-end if no response.',
+            countAsFailure: false,
           };
         }
       }
@@ -4468,7 +4560,11 @@ Only AFTER completing these steps can you submit the disposition.`
         console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING PREMATURE END_CALL: duration=${callDurationSeconds}s, userTurns=${userTranscriptCount}, reason="${reason}"`);
         console.warn(`${LOG_PREFIX} [Gemini] ⏳ AI incorrectly assumed hang-up. Continuing conversation - prospect may still be listening.`);
         // Return success to prevent AI from spamming end_call, but don't actually end the call
-        return { success: false, error: 'Call cannot be ended yet - continue the conversation. The prospect may still be listening. Only end the call after they explicitly say goodbye or after 30+ seconds of confirmed silence.' };
+        return {
+          success: false,
+          error: 'Call cannot be ended yet - continue the conversation. The prospect may still be listening. Only end the call after they explicitly say goodbye or after 30+ seconds of confirmed silence.',
+          countAsFailure: false,
+        };
       }
 
       console.log(`${LOG_PREFIX} [Gemini] AI requested end_call: ${args.reason || 'Call ended by AI'} (duration: ${callDurationSeconds}s, userTurns: ${userTranscriptCount})`);
@@ -4547,6 +4643,13 @@ Only AFTER completing these steps can you submit the disposition.`
         }
       }
       
+      clearClosingGraceTimer(session, "end_call_tool_accepted");
+      if (session.conversationState.currentState !== 'CLOSE') {
+        session.conversationState.currentState = 'CLOSE';
+        session.conversationState.stateHistory.push('CLOSE');
+        trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
+      }
+
       const outcome = session.detectedDisposition === 'voicemail' ? 'voicemail' : 'completed';
       await endCall(session.callId, outcome);
       return { success: true };
@@ -4562,7 +4665,8 @@ Only AFTER completing these steps can you submit the disposition.`
         });
         return {
           success: false,
-          error: 'Missing required fields. You MUST confirm: (1) meeting_date, (2) meeting_time, (3) attendee_email, (4) attendee_name. Please ask the prospect to confirm these details.'
+          error: 'Missing required fields. You MUST confirm: (1) meeting_date, (2) meeting_time, (3) attendee_email, (4) attendee_name. Please ask the prospect to confirm these details.',
+          countAsFailure: false,
         };
       }
 
@@ -5082,6 +5186,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
     case "conversation.item.input_audio_transcription.completed":
       if (message.transcript && allowTranscripts && settings.advanced.clientEvents.userTranscript) {
+        clearClosingGraceTimer(session, "openai_input_transcript");
         console.log(`${LOG_PREFIX} User: ${message.transcript}`);
 
         // FAST VOICEMAIL ABORT: If voicemail cues appear in the first 2-3 seconds,
@@ -7110,6 +7215,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                 trimArray(session.transcripts, MAX_TRANSCRIPTS);
                 maybeRecordPurposeStart(session, segment.text);
               } else if (segment.speaker === 'contact') {
+                clearClosingGraceTimer(session, "deepgram_contact_transcript");
                 if (shouldFastAbortForEarlyVoicemail(session, segment.text)) {
                   console.log(`${LOG_PREFIX} [AudioGuard] Deepgram early voicemail cue detected - ending call`);
                   session.detectedDisposition = 'voicemail';
@@ -7505,6 +7611,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     clearTimeout((session as any).purposePivotGuardTimer);
     (session as any).purposePivotGuardTimer = null;
   }
+  clearClosingGraceTimer(session, "end_call_cleanup");
 
   stopTelnyxOutboundPacer(session);
   session.telnyxOutboundBuffer = Buffer.alloc(0);
@@ -10553,6 +10660,8 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
     console.warn(`${LOG_PREFIX} Cannot feed transcript - Gemini provider not ready for ${callId}`);
     return;
   }
+
+  clearClosingGraceTimer(session, `${source}_transcript_feed`);
 
   if (shouldFastAbortForEarlyVoicemail(session, transcript)) {
     console.log(`${LOG_PREFIX} [AudioGuard] ${source} early voicemail cue detected - ending call`);

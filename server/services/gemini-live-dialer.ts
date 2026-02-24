@@ -37,6 +37,7 @@ import { ensureTranscript, checkTranscriptStatus, markForBackgroundTranscription
 import { recordTranscriptionResult } from "./transcription-monitor";
 // POST-CALL ANALYSIS: Real-time Deepgram is disabled — transcription runs after call ends
 import { schedulePostCallAnalysis } from "./post-call-analyzer";
+import { emitCallSessionEvents, type CallSessionEventInput } from "./call-session-events";
 import { releaseProspectLock } from "./active-call-tracker";
 import { handleCallCompleted } from "./number-pool-integration";
 
@@ -208,9 +209,18 @@ const EARLY_AI_SCREENER_PATTERNS: RegExp[] = [
   /call assist/i,
 ];
 
-// EARLY AUDIO QUALITY GATE - DISABLED
-// Was causing false-positive disconnects ~6s after answer due to connection_drop
-// issues during Gemini voice negotiation being counted against quality score.
+// EARLY AUDIO QUALITY GATE — re-enabled with warmup grace period (Feb 2026)
+// Previously disabled because connection_drop events during Gemini voice negotiation
+// were counted against quality score, causing false-positive disconnects ~6s after answer.
+// FIX: AudioQualityMonitor now has a warmup phase that resets the score after setup completes,
+// so negotiation events no longer contaminate the post-warmup quality assessment.
+const QUALITY_GATE_CHECK_DELAY_MS = 12000;       // 12s after call answer (setup ~3-6s + 6s of real data)
+const QUALITY_GATE_MINIMUM_SCORE = 30;             // Below 30 = truly broken audio
+const QUALITY_GATE_MIN_CHUNKS_REQUIRED = 20;       // Need sufficient data to judge quality
+
+// DEAD EXCHANGE DETECTION: Abort if no meaningful audio exchange after greeting
+const DEAD_EXCHANGE_CHECK_DELAY_MS = 20000;        // 20s after opening message
+const DEAD_EXCHANGE_MIN_RECEIVED_CHUNKS = 10;      // Min Gemini audio response chunks expected
 
 // ==================== PLACEHOLDER SUBSTITUTION ====================
 
@@ -942,8 +952,12 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     connectionDrops: 0,
   };
 
+  // Pending quality telemetry events (buffered until callSessionId is available)
+  const pendingQualityEvents: CallSessionEventInput[] = [];
+
   // Keepalive and reconnection state
   let keepaliveInterval: NodeJS.Timeout | null = null;
+  let qualityCheckInterval: NodeJS.Timeout | null = null;
   let audioTimeoutTimer: NodeJS.Timeout | null = null;
   let maxCallDurationTimer: NodeJS.Timeout | null = null;
   let absoluteSafetyTimer: NodeJS.Timeout | null = null;
@@ -1068,6 +1082,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   // Cleanup function for graceful shutdown
   function cleanup() {
     if (keepaliveInterval) clearInterval(keepaliveInterval);
+    if (qualityCheckInterval) clearInterval(qualityCheckInterval);
     if (audioTimeoutTimer) clearTimeout(audioTimeoutTimer);
     if (maxCallDurationTimer) clearTimeout(maxCallDurationTimer);
     if (absoluteSafetyTimer) clearTimeout(absoluteSafetyTimer);
@@ -1309,6 +1324,52 @@ Instructions:
         console.error(`[Gemini Live] 🚨 This explains why the agent appears silent despite the call being answered.`);
       }
     }, 10000);
+
+    // DEAD EXCHANGE DETECTION: If Gemini never responded with meaningful audio
+    // after 20s, the audio pipeline is broken — abort to prevent burning minutes.
+    setTimeout(() => {
+      if (voicemailDetected || endCallRequested) return;
+
+      const chunksReceived = metrics.audioChunksReceived;
+      const callDurationSec = Math.round((Date.now() - metrics.startTime) / 1000);
+
+      if (chunksReceived < DEAD_EXCHANGE_MIN_RECEIVED_CHUNKS) {
+        console.error(`[Gemini Live] DEAD EXCHANGE DETECTED: Only ${chunksReceived} audio chunks received from Gemini after ${callDurationSec}s`);
+        console.error(`[Gemini Live] Aborting call to prevent burning minutes on broken audio pipeline`);
+
+        pendingQualityEvents.push({
+          eventKey: 'audio.dead_exchange_abort',
+          valueNum: chunksReceived,
+          metadata: {
+            callDurationSec,
+            chunksSent: metrics.audioChunksSent,
+            openingMessageSent,
+            setupComplete,
+          },
+        });
+
+        if (callControlId) {
+          fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+            },
+            body: JSON.stringify({ call_control_id: callControlId }),
+          }).catch(err => console.error('[Gemini Live] Dead exchange hangup failed:', err));
+        }
+
+        if (callContext.callAttemptId && !dispositionProcessed) {
+          processDisposition(callContext.callAttemptId, 'no_answer', 'dead_exchange_abort')
+            .then(() => { dispositionProcessed = true; })
+            .catch(err => console.error('[Gemini Live] Dead exchange disposition error:', err));
+        }
+
+        cleanup();
+      } else {
+        console.log(`[Gemini Live] Exchange health OK: ${chunksReceived} chunks received from Gemini in ${callDurationSec}s`);
+      }
+    }, DEAD_EXCHANGE_CHECK_DELAY_MS);
   }
 
   // 1. Handle messages from Telnyx (Inbound from PSTN)
@@ -1551,6 +1612,59 @@ Instructions:
               console.log(`[Gemini Live] 📝 Real-time transcription DISABLED — post-call analysis will run after call ends`);
             }
 
+            // EARLY AUDIO QUALITY GATE: Check audio quality after warmup grace period.
+            // AudioQualityMonitor resets score when Gemini setup completes (warmup), so
+            // negotiation-phase connection events no longer cause false positives.
+            if (callId) {
+              setTimeout(() => {
+                if (!callId || voicemailDetected || endCallRequested) return;
+
+                const snapshot = audioQualityMonitor.getQualitySnapshot(callId);
+                if (!snapshot) return;
+
+                // Only gate if we have enough data to judge
+                const currentMetrics = audioQualityMonitor.getMetrics(callId);
+                if (!currentMetrics || currentMetrics.audioChunksSent < QUALITY_GATE_MIN_CHUNKS_REQUIRED) {
+                  console.log(`[Gemini Live] Quality gate: insufficient data (${currentMetrics?.audioChunksSent || 0} chunks) - skipping`);
+                  return;
+                }
+
+                if (snapshot.score < QUALITY_GATE_MINIMUM_SCORE) {
+                  console.error(`[Gemini Live] QUALITY GATE FAILED: score=${snapshot.score}, rating=${snapshot.rating}, issues=${snapshot.issues.join(',')}`);
+                  console.error(`[Gemini Live] Audio quality too poor for conversation - aborting call to save minutes`);
+
+                  pendingQualityEvents.push({
+                    eventKey: 'audio.quality_gate_failed',
+                    valueNum: snapshot.score,
+                    valueText: snapshot.rating,
+                    metadata: { issues: snapshot.issues, durationSeconds: snapshot.durationSeconds },
+                  });
+
+                  // Hangup via Telnyx
+                  if (callControlId) {
+                    fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+                      },
+                      body: JSON.stringify({ call_control_id: callControlId }),
+                    }).catch(err => console.error('[Gemini Live] Quality gate hangup failed:', err));
+                  }
+
+                  if (callContext.callAttemptId && !dispositionProcessed) {
+                    processDisposition(callContext.callAttemptId, 'no_answer', 'quality_gate_failure')
+                      .then(() => { dispositionProcessed = true; })
+                      .catch(err => console.error('[Gemini Live] Quality gate disposition error:', err));
+                  }
+
+                  cleanup();
+                } else {
+                  console.log(`[Gemini Live] Quality gate PASSED: score=${snapshot.score}, rating=${snapshot.rating}`);
+                }
+              }, QUALITY_GATE_CHECK_DELAY_MS);
+            }
+
             // CRITICAL: Wait for AMD (Answering Machine Detection) result before speaking
             // This prevents the AI from speaking to voicemail, IVR, or automated systems
             // SKIP for test calls - they are verified humans, no need to wait
@@ -1709,6 +1823,10 @@ Instructions:
             // Record in monitor
             if (callId) {
               audioQualityMonitor.recordAudioSent(callId, msg.media.payload?.length || 0);
+              // Sample send timestamp for latency measurement (every 50th chunk)
+              if (metrics.audioChunksSent % 50 === 0) {
+                audioQualityMonitor.recordAudioSentTimestamp(callId);
+              }
             }
 
             // Check buffer backpressure
@@ -1818,6 +1936,14 @@ Instructions:
               let callSessionId: string | null = attemptDetails?.callSessionId || null;
               const callDurationSec = Math.round((Date.now() - metrics.startTime) / 1000);
 
+              // Flush pending quality events if session already exists
+              if (callSessionId && pendingQualityEvents.length > 0) {
+                emitCallSessionEvents(callSessionId, pendingQualityEvents).catch(
+                  err => console.error('[Gemini Live] Failed to flush quality events:', err)
+                );
+                pendingQualityEvents.length = 0;
+              }
+
               // ✅ CRITICAL: If no call session exists, CREATE one now (with FK safety)
               if (!callSessionId && attemptDetails) {
                 try {
@@ -1846,6 +1972,14 @@ Instructions:
                       .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
 
                     console.log(`[Gemini Live] ✅ Created new call session ${callSessionId}`);
+
+                    // Flush pending quality telemetry events now that we have a session ID
+                    if (pendingQualityEvents.length > 0) {
+                      emitCallSessionEvents(callSessionId, pendingQualityEvents).catch(
+                        err => console.error('[Gemini Live] Failed to flush quality events:', err)
+                      );
+                      pendingQualityEvents.length = 0;
+                    }
                   } else {
                     console.error(`[Gemini Live] ❌ Failed to create call session - factory returned null`);
                   }
@@ -1878,6 +2012,24 @@ Instructions:
             if (finalMetrics) {
               const alert = audioQualityMonitor.checkAndAlert(callId);
               if (alert) console.warn(alert);
+
+              // Emit final quality report telemetry event
+              pendingQualityEvents.push({
+                eventKey: 'audio.quality_final',
+                valueNum: finalMetrics.qualityScore,
+                valueText: finalMetrics.qualityRating,
+                metadata: {
+                  duration: finalMetrics.duration,
+                  chunksSent: finalMetrics.audioChunksSent,
+                  chunksReceived: finalMetrics.audioChunksReceived,
+                  backpressureEvents: finalMetrics.bufferBackpressureEvents,
+                  connectionDrops: finalMetrics.connectionDrops,
+                  audioTimeouts: finalMetrics.audioTimeouts,
+                  roundTripTimeMs: finalMetrics.roundTripTimeMs,
+                  interruptionCount: finalMetrics.interruptionCount,
+                  issues: finalMetrics.issues,
+                },
+              });
             }
           }
 
@@ -2072,6 +2224,29 @@ Instructions:
           }
         }
       }, AUDIO_KEEPALIVE_INTERVAL);
+
+      // Periodic audio quality snapshot (every 30 seconds)
+      if (qualityCheckInterval) clearInterval(qualityCheckInterval);
+      qualityCheckInterval = setInterval(() => {
+        if (!callId) return;
+        const snapshot = audioQualityMonitor.getQualitySnapshot(callId);
+        if (!snapshot) return;
+
+        // Emit quality degradation event if score drops below fair
+        if (snapshot.score < 60 && snapshot.durationSeconds > 15) {
+          console.warn(`[Gemini Live] Audio quality degraded: score=${snapshot.score}, issues=${snapshot.issues.join(',')}`);
+          pendingQualityEvents.push({
+            eventKey: 'audio.quality_degraded',
+            valueNum: snapshot.score,
+            valueText: snapshot.rating,
+            metadata: {
+              issues: snapshot.issues,
+              durationSeconds: snapshot.durationSeconds,
+              latencyMs: audioQualityMonitor.getMetrics(callId)?.roundTripTimeMs || 0,
+            },
+          });
+        }
+      }, 30000);
 
       // Send Setup Message - use camelCase for Vertex AI, snake_case for Google AI Studio
       const modelName = getModelName();
@@ -2315,6 +2490,13 @@ Instructions:
           }
           console.log('[Gemini Live] ✅ Setup complete - Gemini is ready');
 
+          // Signal warmup complete to audio quality monitor.
+          // Resets quality score so connection events during Gemini negotiation
+          // don't contaminate the post-warmup quality assessment.
+          if (callId) {
+            audioQualityMonitor.completeWarmup(callId);
+          }
+
           // CRITICAL: Try to send opening message
           // Will only actually send if call is also answered (has received audio)
           trySendOpeningMessage();
@@ -2337,6 +2519,8 @@ Instructions:
                 audioQualityMonitor.recordAudioReceived(callId, audioBytes);
               }
             }
+            // Record receive timestamp for latency measurement
+            audioQualityMonitor.recordAudioReceivedTimestamp(callId);
           }
         }
 
@@ -3357,6 +3541,25 @@ Instructions:
                 event: 'clear',
                 stream_id: streamSid
               }));
+            }
+
+            // Track interruption in quality monitor for pattern detection
+            if (callId) {
+              audioQualityMonitor.recordInterruption(callId);
+
+              // Check for excessive interruption pattern (echo/feedback)
+              const interruptionRate = audioQualityMonitor.getInterruptionRate(callId);
+              if (interruptionRate?.isExcessive) {
+                console.warn(`[Gemini Live] ECHO/FEEDBACK SUSPECTED: ${interruptionRate.recentCount} interruptions in 30s`);
+                pendingQualityEvents.push({
+                  eventKey: 'audio.excessive_interruptions',
+                  valueNum: interruptionRate.recentCount,
+                  metadata: {
+                    callDurationSeconds: Math.round((Date.now() - metrics.startTime) / 1000),
+                    totalInterruptions: audioQualityMonitor.getMetrics(callId)?.interruptionCount || 0,
+                  },
+                });
+              }
             }
           }
         }

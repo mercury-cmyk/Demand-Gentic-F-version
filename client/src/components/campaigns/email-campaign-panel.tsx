@@ -71,7 +71,7 @@ export function EmailCampaignPanel({
   // Launch mutation
   const launchMutation = useMutation({
     mutationFn: async (id: string) => {
-      return await apiRequest('POST', `/api/campaigns/${id}/launch`);
+      return await apiRequest('POST', `/api/campaigns/${id}/launch`, undefined, { timeout: 120000 });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/campaigns'] });

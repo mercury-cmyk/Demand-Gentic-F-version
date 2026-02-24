@@ -25,7 +25,12 @@ export type RealtimeTelemetryEvent =
   | "guard.duplicate_llm_dropped"
   | "guard.repeat_utterance_blocked"
   | "watchdog.dead_air_recovery_prompted"
-  | "watchdog.dead_air_hangup";
+  | "watchdog.dead_air_hangup"
+  | "audio.quality_gate_failed"
+  | "audio.quality_degraded"
+  | "audio.excessive_interruptions"
+  | "audio.dead_exchange_abort"
+  | "audio.quality_final";
 
 export interface RealtimeTelemetryEnvelope {
   ts: string;
