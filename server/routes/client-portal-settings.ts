@@ -346,6 +346,8 @@ router.get('/organization-intelligence', async (req: Request, res: Response) => 
     let icp = organization.icp;
     let positioning = organization.positioning;
     let outreach = organization.outreach;
+    let events = (organization as any).events;
+    let forums = (organization as any).forums;
 
     if (organization.domain && isEmptyObj(identity) && isEmptyObj(offerings)) {
       // Org record has no intelligence — fallback to accountIntelligence table (admin-analyzed data)
@@ -390,6 +392,8 @@ router.get('/organization-intelligence', async (req: Request, res: Response) => 
         icp,
         positioning,
         outreach,
+        events: events || {},
+        forums: forums || {},
         branding: (organization as any).branding || {},
         compiledOrgContext: organization.compiledOrgContext,
         updatedAt: organization.updatedAt,
