@@ -14818,3 +14818,145 @@ export const clientCampaignPlans = pgTable("client_campaign_plans", {
 export const insertClientCampaignPlanSchema = createInsertSchema(clientCampaignPlans);
 export type ClientCampaignPlan = typeof clientCampaignPlans.$inferSelect;
 export type InsertClientCampaignPlan = typeof clientCampaignPlans.$inferInsert;
+
+// ── Client Journey Pipeline Management ──────────────────────────────────
+
+export const clientJourneyPipelineStatusEnum = pgEnum('client_journey_pipeline_status', [
+  'active',
+  'paused',
+  'archived',
+]);
+
+export const clientJourneyLeadStatusEnum = pgEnum('client_journey_lead_status', [
+  'active',
+  'paused',
+  'completed',
+  'lost',
+]);
+
+export const clientJourneyActionTypeEnum = pgEnum('client_journey_action_type', [
+  'callback',
+  'email',
+  'sms',
+  'note',
+  'stage_change',
+]);
+
+export const clientJourneyActionStatusEnum = pgEnum('client_journey_action_status', [
+  'scheduled',
+  'in_progress',
+  'completed',
+  'skipped',
+  'failed',
+]);
+
+export const clientJourneyPipelines = pgTable("client_journey_pipelines", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id", { length: 36 }).notNull(),
+  campaignId: varchar("campaign_id", { length: 36 }),
+  name: text("name").notNull(),
+  description: text("description"),
+  stages: jsonb("stages").notNull(), // [{ id, name, order, color, defaultActionType }]
+  autoEnrollDispositions: jsonb("auto_enroll_dispositions"), // string[] of disposition labels
+  status: clientJourneyPipelineStatusEnum("status").notNull().default('active'),
+  leadCount: integer("lead_count").notNull().default(0),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("cjp_client_account_idx").on(table.clientAccountId),
+  statusIdx: index("cjp_status_idx").on(table.status),
+  campaignIdx: index("cjp_campaign_idx").on(table.campaignId),
+}));
+
+export const clientJourneyLeads = pgTable("client_journey_leads", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  pipelineId: varchar("pipeline_id", { length: 36 }).notNull(),
+  contactId: varchar("contact_id", { length: 36 }),
+  contactName: text("contact_name"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  companyName: text("company_name"),
+  jobTitle: text("job_title"),
+
+  // Source context — the call/interaction that triggered enrollment
+  sourceCallSessionId: varchar("source_call_session_id", { length: 36 }),
+  sourceCampaignId: varchar("source_campaign_id", { length: 36 }),
+  sourceDisposition: text("source_disposition"),
+  sourceCallSummary: text("source_call_summary"),
+  sourceAiAnalysis: jsonb("source_ai_analysis"),
+
+  // Pipeline state
+  currentStageId: text("current_stage_id").notNull(),
+  currentStageEnteredAt: timestamp("current_stage_entered_at", { withTimezone: true }).notNull().defaultNow(),
+  status: clientJourneyLeadStatusEnum("status").notNull().default('active'),
+  priority: integer("priority").notNull().default(3), // 1-5, 5=highest
+
+  // Next action tracking
+  nextActionType: text("next_action_type"),
+  nextActionAt: timestamp("next_action_at", { withTimezone: true }),
+
+  // Activity tracking
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  totalActions: integer("total_actions").notNull().default(0),
+  notes: text("notes"),
+  metadata: jsonb("metadata"),
+
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pipelineIdx: index("cjl_pipeline_idx").on(table.pipelineId),
+  contactIdx: index("cjl_contact_idx").on(table.contactId),
+  statusIdx: index("cjl_status_idx").on(table.status),
+  stageIdx: index("cjl_stage_idx").on(table.currentStageId),
+  nextActionIdx: index("cjl_next_action_idx").on(table.nextActionAt),
+  priorityIdx: index("cjl_priority_idx").on(table.priority),
+}));
+
+export const clientJourneyActions = pgTable("client_journey_actions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  journeyLeadId: varchar("journey_lead_id", { length: 36 }).notNull(),
+  pipelineId: varchar("pipeline_id", { length: 36 }).notNull(),
+  actionType: clientJourneyActionTypeEnum("action_type").notNull(),
+  status: clientJourneyActionStatusEnum("status").notNull().default('scheduled'),
+
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+
+  title: text("title"),
+  description: text("description"),
+
+  // AI-generated context for this action
+  aiGeneratedContext: jsonb("ai_generated_context"), // { talkingPoints, objectionResponses, approach }
+  previousActivitySummary: text("previous_activity_summary"),
+
+  // Outcome tracking
+  outcome: text("outcome"),
+  outcomeDetails: jsonb("outcome_details"),
+  resultDisposition: text("result_disposition"),
+  triggeredNextAction: boolean("triggered_next_action").default(false),
+
+  createdBy: varchar("created_by", { length: 36 }),
+  completedBy: varchar("completed_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  journeyLeadIdx: index("cja_journey_lead_idx").on(table.journeyLeadId),
+  pipelineIdx: index("cja_pipeline_idx").on(table.pipelineId),
+  statusIdx: index("cja_status_idx").on(table.status),
+  scheduledAtIdx: index("cja_scheduled_at_idx").on(table.scheduledAt),
+  actionTypeIdx: index("cja_action_type_idx").on(table.actionType),
+}));
+
+export const insertClientJourneyPipelineSchema = createInsertSchema(clientJourneyPipelines);
+export type ClientJourneyPipeline = typeof clientJourneyPipelines.$inferSelect;
+export type InsertClientJourneyPipeline = typeof clientJourneyPipelines.$inferInsert;
+
+export const insertClientJourneyLeadSchema = createInsertSchema(clientJourneyLeads);
+export type ClientJourneyLead = typeof clientJourneyLeads.$inferSelect;
+export type InsertClientJourneyLead = typeof clientJourneyLeads.$inferInsert;
+
+export const insertClientJourneyActionSchema = createInsertSchema(clientJourneyActions);
+export type ClientJourneyAction = typeof clientJourneyActions.$inferSelect;
+export type InsertClientJourneyAction = typeof clientJourneyActions.$inferInsert;

@@ -29,9 +29,14 @@ router.get('/status', async (_req: Request, res: Response) => {
 
 // ─── GET /oi-summary — OI summary for display in the UI ───
 
-router.get('/oi-summary', async (_req: Request, res: Response) => {
+router.get('/oi-summary', async (req: Request, res: Response) => {
   try {
-    const summary = await getOISummaryForClient();
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const summary = await getOISummaryForClient(clientAccountId);
     res.json({ success: true, ...summary });
   } catch (error) {
     console.error('[CampaignPlanner] Failed to fetch OI summary:', error);
@@ -59,7 +64,7 @@ router.post('/generate-plan', async (req: Request, res: Response) => {
 
     const input = generatePlanSchema.parse(req.body);
 
-    const result = await generateCampaignPlan(input);
+    const result = await generateCampaignPlan(input, clientAccountId);
 
     // Auto-save the generated plan
     const [plan] = await db.insert(clientCampaignPlans).values({

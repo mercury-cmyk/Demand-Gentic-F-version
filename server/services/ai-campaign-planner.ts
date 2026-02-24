@@ -6,15 +6,179 @@
  */
 
 import { reason, generateJSON } from "./vertex-ai/vertex-client";
+import { db } from "../db";
+import { accountIntelligence, campaignOrganizations, clientOrganizationLinks } from "@shared/schema";
+import { desc, eq } from "drizzle-orm";
 import {
-  wrapPromptWithOI,
-  getSuperOrgOIContext,
-  getOrganizationProfile,
   getOrganizationLearningSummary,
   type OrganizationProfile,
 } from "../lib/org-intelligence-helper";
 
 // ─── OI Extract Utilities (reused from campaign-manager pattern) ───
+
+function resolveFieldValue(field: any): string {
+  if (!field) return "";
+  if (typeof field === "string") return field.trim();
+  if (Array.isArray(field)) {
+    return field
+      .map((item) => (typeof item === "string" ? item.trim() : String(item ?? "").trim()))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof field === "object" && field.value) return String(field.value).trim();
+  return "";
+}
+
+function isEmptyObject(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return true;
+  return Object.keys(value as Record<string, unknown>).length === 0;
+}
+
+function buildPromptWithOI(existingPrompt: string, oiContext: string): string {
+  if (!oiContext.trim()) return existingPrompt;
+  return `## Organization Intelligence (Mandatory Context)
+All outputs must be aligned with this organizational context. Do not produce generic content.
+${oiContext}
+
+---
+
+${existingPrompt}`;
+}
+
+function buildOIContextFromProfile(
+  profile: OrganizationProfile | null,
+  compiledOrgContext: string | null
+): string {
+  const parts: string[] = [];
+
+  if (compiledOrgContext?.trim()) {
+    parts.push(compiledOrgContext.trim());
+  }
+
+  if (!profile) return parts.join("\n").trim();
+
+  const identity = (profile.identity || {}) as any;
+  const offerings = (profile.offerings || {}) as any;
+  const icp = (profile.icp || {}) as any;
+  const positioning = (profile.positioning || {}) as any;
+  const outreach = (profile.outreach || {}) as any;
+
+  if (profile.domain) parts.push(`Domain: ${profile.domain}`);
+
+  const desc = resolveFieldValue(identity.description);
+  if (desc) parts.push(`Description: ${desc}`);
+  const legalName = resolveFieldValue(identity.legalName);
+  if (legalName) parts.push(`Organization: ${legalName}`);
+  const regions = resolveFieldValue(identity.regions);
+  if (regions) parts.push(`Regions: ${regions}`);
+
+  const coreProducts = resolveFieldValue(offerings.coreProducts);
+  if (coreProducts) parts.push(`Core Products/Services: ${coreProducts}`);
+  const useCases = resolveFieldValue(offerings.useCases);
+  if (useCases) parts.push(`Key Use Cases: ${useCases}`);
+  const problemsSolved = resolveFieldValue(offerings.problemsSolved);
+  if (problemsSolved) parts.push(`Problems Solved: ${problemsSolved}`);
+  const differentiators = resolveFieldValue(offerings.differentiators);
+  if (differentiators) parts.push(`Differentiators: ${differentiators}`);
+
+  const personas = resolveFieldValue(icp.personas);
+  if (personas) parts.push(`Target Personas: ${personas}`);
+  const industries = resolveFieldValue(icp.industries);
+  if (industries) parts.push(`Target Industries: ${industries}`);
+  const objections = resolveFieldValue(icp.objections);
+  if (objections) parts.push(`Common Objections: ${objections}`);
+
+  const oneLiner = resolveFieldValue(positioning.oneLiner);
+  if (oneLiner) parts.push(`Positioning: ${oneLiner}`);
+  const valueProposition = resolveFieldValue(positioning.valueProposition);
+  if (valueProposition) parts.push(`Value Proposition: ${valueProposition}`);
+  const competitors = resolveFieldValue(positioning.competitors);
+  if (competitors) parts.push(`Competitive Landscape: ${competitors}`);
+
+  const emailAngles = resolveFieldValue(outreach.emailAngles);
+  if (emailAngles) parts.push(`Email Messaging Angles: ${emailAngles}`);
+  const callOpeners = resolveFieldValue(outreach.callOpeners);
+  if (callOpeners) parts.push(`Call Openers: ${callOpeners}`);
+
+  return parts.join("\n").trim();
+}
+
+async function getClientScopedOrganizationProfile(clientAccountId: string): Promise<{
+  profile: OrganizationProfile | null;
+  organizationId: string | null;
+  compiledOrgContext: string | null;
+}> {
+  const [orgLink] = await db
+    .select({
+      organizationId: clientOrganizationLinks.campaignOrganizationId,
+    })
+    .from(clientOrganizationLinks)
+    .where(eq(clientOrganizationLinks.clientAccountId, clientAccountId))
+    .orderBy(
+      desc(clientOrganizationLinks.isPrimary),
+      desc(clientOrganizationLinks.updatedAt),
+      desc(clientOrganizationLinks.createdAt)
+    )
+    .limit(1);
+
+  if (!orgLink) {
+    return {
+      profile: null,
+      organizationId: null,
+      compiledOrgContext: null,
+    };
+  }
+
+  const [organization] = await db
+    .select()
+    .from(campaignOrganizations)
+    .where(eq(campaignOrganizations.id, orgLink.organizationId))
+    .limit(1);
+
+  if (!organization) {
+    return {
+      profile: null,
+      organizationId: orgLink.organizationId,
+      compiledOrgContext: null,
+    };
+  }
+
+  let identity = organization.identity;
+  let offerings = organization.offerings;
+  let icp = organization.icp;
+  let positioning = organization.positioning;
+  let outreach = organization.outreach;
+
+  if (organization.domain && isEmptyObject(identity) && isEmptyObject(offerings)) {
+    const [aiProfile] = await db
+      .select()
+      .from(accountIntelligence)
+      .where(eq(accountIntelligence.domain, organization.domain))
+      .orderBy(desc(accountIntelligence.createdAt))
+      .limit(1);
+
+    if (aiProfile) {
+      identity = aiProfile.identity || identity;
+      offerings = aiProfile.offerings || offerings;
+      icp = aiProfile.icp || icp;
+      positioning = aiProfile.positioning || positioning;
+      outreach = aiProfile.outreach || outreach;
+    }
+  }
+
+  return {
+    profile: {
+      domain: organization.domain || "",
+      identity: identity || {},
+      offerings: offerings || {},
+      icp: icp || {},
+      positioning: positioning || {},
+      outreach: outreach || {},
+    },
+    organizationId: organization.id,
+    compiledOrgContext: organization.compiledOrgContext || null,
+  };
+}
 
 function extractOrgIdentityName(profile: OrganizationProfile | null): string | null {
   if (!profile?.identity) return null;
@@ -206,7 +370,10 @@ export interface GeneratePlanInput {
 
 // ─── Main AI Plan Generation ───
 
-export async function generateCampaignPlan(input: GeneratePlanInput): Promise<{
+export async function generateCampaignPlan(
+  input: GeneratePlanInput,
+  clientAccountId: string
+): Promise<{
   plan: CampaignPlanOutput;
   thinking: string;
   oiSummary: string;
@@ -215,16 +382,18 @@ export async function generateCampaignPlan(input: GeneratePlanInput): Promise<{
 }> {
   const startMs = Date.now();
 
-  // 1. Gather all OI context
-  const [oiContext, profile, learningSummary] = await Promise.all([
-    getSuperOrgOIContext(),
-    getOrganizationProfile(),
+  // 1. Gather client-scoped OI context
+  const [{ profile, organizationId, compiledOrgContext }, learningSummary] = await Promise.all([
+    getClientScopedOrganizationProfile(clientAccountId),
     getOrganizationLearningSummary(),
   ]);
+  const oiContext = buildOIContextFromProfile(profile, compiledOrgContext);
 
   // 2. Build a human-readable OI summary for audit
-  const orgName = extractOrgIdentityName(profile) || 'Unknown Organization';
-  const oiSummary = `Organization: ${orgName} | Products: ${extractOfferingProducts(profile).join(', ') || 'N/A'} | ICP: ${extractIcpPersonas(profile).map(p => p.title).join(', ') || 'N/A'} | Differentiators: ${extractOfferingDifferentiators(profile).join(', ') || 'N/A'}`;
+  const orgName = extractOrgIdentityName(profile) || "Unknown Organization";
+  const oiSummary = profile
+    ? `Organization: ${orgName} | Org ID: ${organizationId || "N/A"} | Products: ${extractOfferingProducts(profile).join(", ") || "N/A"} | ICP: ${extractIcpPersonas(profile).map((p) => p.title).join(", ") || "N/A"} | Differentiators: ${extractOfferingDifferentiators(profile).join(", ") || "N/A"}`
+    : `Organization intelligence not configured for client account ${clientAccountId}.`;
 
   // 3. Build the comprehensive campaign planning prompt
   const channelsStr = input.preferredChannels?.length
@@ -384,8 +553,8 @@ Return ONLY a valid JSON object matching this exact schema (no markdown, no code
   }
 }`;
 
-  // 4. Wrap with OI and call reason() for deep thinking, with fallback to generateJSON on rate limit
-  const enrichedPrompt = await wrapPromptWithOI(planningPrompt);
+  // 4. Inject client-scoped OI and call reason() for deep thinking, with fallback to generateJSON on rate limit
+  const enrichedPrompt = buildPromptWithOI(planningPrompt, oiContext);
 
   let thinking = '';
   let answer = '';
@@ -449,7 +618,7 @@ Return ONLY a valid JSON object matching this exact schema (no markdown, no code
 
 // ─── OI Summary for Client Display ───
 
-export async function getOISummaryForClient(): Promise<{
+export async function getOISummaryForClient(clientAccountId: string): Promise<{
   hasOI: boolean;
   orgName: string | null;
   orgDescription: string | null;
@@ -463,8 +632,8 @@ export async function getOISummaryForClient(): Promise<{
   callOpeners: string[];
   learningSummary: string | null;
 }> {
-  const [profile, learningSummary] = await Promise.all([
-    getOrganizationProfile(),
+  const [{ profile }, learningSummary] = await Promise.all([
+    getClientScopedOrganizationProfile(clientAccountId),
     getOrganizationLearningSummary(),
   ]);
 

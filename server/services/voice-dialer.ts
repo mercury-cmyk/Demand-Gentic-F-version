@@ -2135,7 +2135,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           // This solves "invalid call control ID" in production with multiple instances
           await setCallSession({
             callId: sessionId!,
-            callControlId: sessionId!, // Will be updated when webhook provides actual control ID
+            // Persist real call control ID when available; otherwise keep callId placeholder.
+            callControlId: telnyxCallControlId || sessionId!,
             runId: runId || '',
             campaignId: campaignId || '',
             queueItemId: queueItemId || '',
@@ -7464,28 +7465,109 @@ function flushAudioBuffer(session: OpenAIRealtimeSession): void {
 }
 
 async function resolveTelnyxCallControlId(session: OpenAIRealtimeSession): Promise<string | null> {
-  if (session.telnyxCallControlId && session.telnyxCallControlId.trim().length > 0) {
-    return session.telnyxCallControlId;
+  const cached = session.telnyxCallControlId?.trim();
+  if (cached) return cached;
+
+  const isLikelyControlId = (value: string | null | undefined): value is string => {
+    if (!value) return false;
+    const id = value.trim();
+    if (!id) return false;
+    // Reject local placeholders frequently used before we know the real Telnyx control ID.
+    if (id === session.callId || id === session.callAttemptId) return false;
+    if (id.startsWith('ai-call-') || id.startsWith('attempt-') || id.startsWith('test-attempt-')) return false;
+    return true;
+  };
+
+  // Persistent cross-instance store fallback (survives bridge races/cleanup).
+  try {
+    const persisted = await getCallSession(session.callId);
+    if (isLikelyControlId(persisted?.callControlId)) {
+      session.telnyxCallControlId = persisted!.callControlId;
+      return persisted!.callControlId;
+    }
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to load persisted call session for ${session.callId}:`, error);
   }
 
   try {
     const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
     const bridge = getTelnyxAiBridge();
-    const callState =
-      bridge.getClientStateByControlId(session.callId)
-      || bridge.getActiveCall(session.callId)
-      || bridge.getClientStateByControlId(session.callAttemptId)
-      || bridge.getActiveCall(session.callAttemptId);
+    const activeByCallId = bridge.getActiveCall(session.callId);
+    const activeByAttemptId = session.callAttemptId ? bridge.getActiveCall(session.callAttemptId) : null;
+    const stateByCallId = bridge.getClientStateByControlId(session.callId);
+    const stateByAttemptId = session.callAttemptId ? bridge.getClientStateByControlId(session.callAttemptId) : null;
+    const controlId =
+      activeByCallId?.callControlId
+      || activeByAttemptId?.callControlId
+      || stateByCallId?.callControlId
+      || stateByCallId?.call_control_id
+      || stateByAttemptId?.callControlId
+      || stateByAttemptId?.call_control_id
+      || null;
 
-    const controlId = callState?.callControlId || null;
-    if (controlId) {
+    if (isLikelyControlId(controlId)) {
       session.telnyxCallControlId = controlId;
+      return controlId;
     }
-    return controlId;
   } catch (error) {
     console.warn(`${LOG_PREFIX} Failed to resolve Telnyx call control ID for ${session.callId}:`, error);
-    return null;
   }
+
+  // DB fallback via dialer call attempt linkage.
+  const attemptId = session.callAttemptId?.trim();
+  if (attemptId) {
+    try {
+      const [attempt] = await db
+        .select({ telnyxCallId: dialerCallAttempts.telnyxCallId })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, attemptId))
+        .limit(1);
+
+      if (isLikelyControlId(attempt?.telnyxCallId)) {
+        session.telnyxCallControlId = attempt!.telnyxCallId!;
+        return attempt!.telnyxCallId!;
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Failed DB call_attempt lookup for ${session.callId} (${attemptId}):`, error);
+    }
+
+    // Test-call fallback (callAttemptId format: test-attempt-{campaign_test_calls.id}).
+    if (attemptId.startsWith('test-attempt-')) {
+      const testCallId = attemptId.replace(/^test-attempt-/, '');
+      try {
+        const [testCall] = await db
+          .select({ callControlId: campaignTestCalls.callControlId })
+          .from(campaignTestCalls)
+          .where(eq(campaignTestCalls.id, testCallId))
+          .limit(1);
+
+        if (isLikelyControlId(testCall?.callControlId)) {
+          session.telnyxCallControlId = testCall!.callControlId!;
+          return testCall!.callControlId!;
+        }
+      } catch (error) {
+        console.warn(`${LOG_PREFIX} Failed test-call lookup for ${session.callId} (${testCallId}):`, error);
+      }
+    }
+
+    // Secondary DB fallback via call_sessions table.
+    try {
+      const [cs] = await db
+        .select({ telnyxCallId: callSessions.telnyxCallId })
+        .from(callSessions)
+        .where(eq(callSessions.callAttemptId, attemptId))
+        .limit(1);
+
+      if (isLikelyControlId(cs?.telnyxCallId)) {
+        session.telnyxCallControlId = cs!.telnyxCallId!;
+        return cs!.telnyxCallId!;
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Failed call_sessions lookup for ${session.callId} (${attemptId}):`, error);
+    }
+  }
+
+  return null;
 }
 
 async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<boolean> {
@@ -10915,7 +10997,7 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
         endCall(session.callId, 'completed');
         // Defense-in-depth: backup Telnyx hangup in case endCall's hangup failed
         setTimeout(async () => {
-          try { await forceTelnyxHangupWithRetry(session, 2); } catch (_) {}
+          try { await forceTelnyxHangupWithRetry(session, 3); } catch (_) {}
         }, 3000);
         return;
       }
@@ -11115,7 +11197,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       endCall(session.callId, outcome);
       // Defense-in-depth: backup Telnyx hangup in case endCall's hangup failed
       setTimeout(async () => {
-        try { await forceTelnyxHangupWithRetry(session, 2); } catch (_) {}
+        try { await forceTelnyxHangupWithRetry(session, 3); } catch (_) {}
       }, 3000);
       return;
     }
