@@ -52,6 +52,7 @@ import {
   isCountryEnabled,
   getContactCallPriority,
 } from '../utils/country-utils';
+import { getGeminiSessionStats } from './gemini-live-dialer';
 
 const LOG_PREFIX = '[AutonomousAIDialer]';
 const POLL_INTERVAL_MS = 10_000;          // 10 seconds between polling sweeps
@@ -233,8 +234,17 @@ class AutonomousAIDialerService {
 
         if (slotsAvailable <= 0) continue;
 
-        // 3. Pull queue items and place calls
-        await this.fillSlots(campaign.id, slotsAvailable, campaign.fromNumber || '');
+        // Guard: check global Gemini Live session limit to prevent rate exceeded errors
+        const sessionStats = getGeminiSessionStats();
+        if (sessionStats.active >= sessionStats.max) {
+          console.warn(`${LOG_PREFIX} Skipping campaign ${campaign.id}: Gemini session limit reached (${sessionStats.active}/${sessionStats.max})`);
+          continue;
+        }
+
+        // 3. Pull queue items and place calls (cap by global session availability)
+        const globalSlotsLeft = sessionStats.max - sessionStats.active;
+        const effectiveSlots = Math.min(slotsAvailable, globalSlotsLeft);
+        await this.fillSlots(campaign.id, effectiveSlots, campaign.fromNumber || '');
       }
 
       // Clean up tracking for campaigns that are no longer active

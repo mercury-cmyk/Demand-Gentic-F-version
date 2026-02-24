@@ -170,6 +170,35 @@ const RECONNECT_BASE_DELAY = 1000; // 1 second base reconnect delay
 const MAX_RECONNECT_DELAY = 30000; // 30 second max reconnect delay
 const MAX_RECONNECT_ATTEMPTS = 5; // Max reconnect attempts before giving up
 
+// ==================== GLOBAL GEMINI LIVE SESSION LIMITER ====================
+// Prevents RESOURCE_EXHAUSTED / "rate exceeded" from Vertex AI by capping
+// the number of concurrent Gemini Live WebSocket sessions across all campaigns.
+// Default 10 matches typical Vertex AI quota for gemini-2.0-flash-live.
+const GEMINI_MAX_LIVE_SESSIONS = parseInt(process.env.GEMINI_MAX_LIVE_SESSIONS || '10', 10);
+let _geminiActiveSessions = 0;
+
+/** Try to acquire a Gemini Live session slot. Returns true if acquired. */
+export function acquireGeminiSession(): boolean {
+  if (_geminiActiveSessions >= GEMINI_MAX_LIVE_SESSIONS) {
+    console.warn(`[Gemini Live] ⚠️ Session limit reached (${_geminiActiveSessions}/${GEMINI_MAX_LIVE_SESSIONS}). Rejecting new connection.`);
+    return false;
+  }
+  _geminiActiveSessions++;
+  console.log(`[Gemini Live] 📞 Session acquired (${_geminiActiveSessions}/${GEMINI_MAX_LIVE_SESSIONS})`);
+  return true;
+}
+
+/** Release a Gemini Live session slot. */
+export function releaseGeminiSession(): void {
+  _geminiActiveSessions = Math.max(0, _geminiActiveSessions - 1);
+  console.log(`[Gemini Live] 📞 Session released (${_geminiActiveSessions}/${GEMINI_MAX_LIVE_SESSIONS})`);
+}
+
+/** Get current session usage for monitoring. */
+export function getGeminiSessionStats() {
+  return { active: _geminiActiveSessions, max: GEMINI_MAX_LIVE_SESSIONS };
+}
+
 // ABSOLUTE SAFETY TIMEOUT: Kill any call that's been alive longer than this, regardless of state.
 // Prevents zombie calls (e.g., 131min "No Answer" calls) when Telnyx streams stay open
 // but no audio arrives and maxCallDuration timer never starts.
@@ -746,6 +775,22 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     ws.close(1011, 'Gemini API Key missing');
     return;
   }
+
+  // Guard: enforce global session limit to prevent Vertex AI "rate exceeded" errors
+  if (!acquireGeminiSession()) {
+    console.error('[Gemini Live] ❌ Rate limit: max concurrent Gemini Live sessions reached. Closing connection.');
+    ws.close(1013, 'Rate limit: max Gemini sessions reached');
+    return;
+  }
+  let sessionSlotReleased = false;
+  function releaseSessionSlot() {
+    if (!sessionSlotReleased) {
+      sessionSlotReleased = true;
+      releaseGeminiSession();
+    }
+  }
+  // Ensure slot is always released when WebSocket closes
+  ws.on('close', releaseSessionSlot);
 
   // CRITICAL: Extract client_state from URL query parameters
   // TeXML passes client_state as a URL query param, not in WebSocket message payload
@@ -3713,8 +3758,21 @@ Instructions:
         firstContactSpeechAt: firstContactSpeechAt ? new Date(firstContactSpeechAt).toISOString() : null,
       });
 
+      // Detect rate limit / quota errors — do NOT reconnect, end the call gracefully
+      const lowerReason = reasonText.toLowerCase();
+      const isRateLimited = code === 1013 ||
+        lowerReason.includes('resource_exhausted') ||
+        lowerReason.includes('rate') ||
+        lowerReason.includes('quota');
+      if (isRateLimited) {
+        console.error(`[Gemini Live] ❌ Rate-limited by Gemini API (code=${code}). Ending call — will not reconnect.`);
+        ws.close(1013, 'Gemini rate limit');
+        cleanup();
+        return;
+      }
+
       // If the voice was rejected by the model, move to the next available voice and retry from scratch
-      const voiceUnavailable = code === 1007 || reasonText.toLowerCase().includes('voice');
+      const voiceUnavailable = code === 1007 || lowerReason.includes('voice');
       if (voiceUnavailable) {
         const switched = promoteFallbackVoice(reasonText);
         if (switched) {
