@@ -11,7 +11,7 @@
 
 import { db } from "../db";
 import { leads, activityLog, callSessions } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, or, isNotNull, lt, sql } from "drizzle-orm";
 import { SpeechClient, protos } from "@google-cloud/speech";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
 
@@ -682,16 +682,38 @@ export async function transcribeLeadCall(leadId: string): Promise<boolean> {
  */
 export async function processPendingTranscriptions(): Promise<void> {
   try {
+    // Only process leads that actually have a recording URL or S3 key
     const pendingLeads = await db.select()
       .from(leads)
-      .where(eq(leads.transcriptionStatus, 'pending'))
+      .where(and(
+        eq(leads.transcriptionStatus, 'pending'),
+        or(
+          isNotNull(leads.recordingUrl),
+          isNotNull(leads.recordingS3Key)
+        )
+      ))
       .limit(10);
 
-    if (pendingLeads.length > 0) {
-      console.log(`[Transcription] Processing ${pendingLeads.length} pending transcriptions with Google Speech-to-Text`);
+    // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
+    const failedLeads = await db.select()
+      .from(leads)
+      .where(and(
+        eq(leads.transcriptionStatus, 'failed'),
+        lt(leads.updatedAt, sql`NOW() - INTERVAL '10 minutes'`),
+        or(
+          isNotNull(leads.recordingUrl),
+          isNotNull(leads.recordingS3Key)
+        )
+      ))
+      .limit(3);
+
+    const allLeads = [...pendingLeads, ...failedLeads];
+
+    if (allLeads.length > 0) {
+      console.log(`[Transcription] Processing ${pendingLeads.length} pending + ${failedLeads.length} retrying transcriptions`);
     }
 
-    for (const lead of pendingLeads) {
+    for (const lead of allLeads) {
       await transcribeLeadCall(lead.id);
     }
   } catch (error) {

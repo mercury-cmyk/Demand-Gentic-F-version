@@ -1939,6 +1939,8 @@ export async function getContactsByDisposition(
     search?: string;
     transcriptText?: string;
     accuracy?: 'accurate' | 'mismatch';
+    expectedDisposition?: string;
+    currentDisposition?: string;
   }
 ): Promise<{
   contacts: DispositionContactDetail[];
@@ -2205,6 +2207,25 @@ export async function getContactsByDisposition(
         return false;
       }
       return filters.accuracy === 'accurate' ? qa.dispositionAccurate === true : qa.dispositionAccurate === false;
+    });
+  }
+
+  // Apply expected disposition filter (from QA records)
+  if (filters.expectedDisposition) {
+    const expected = filters.expectedDisposition.toLowerCase();
+    filteredSessions = filteredSessions.filter(s => {
+      const qa = qaMap.get(s.id);
+      return qa?.expectedDisposition?.toLowerCase() === expected;
+    });
+  }
+
+  // Apply current disposition filter (assignedDisposition from QA records or aiDisposition)
+  if (filters.currentDisposition) {
+    const current = filters.currentDisposition.toLowerCase();
+    filteredSessions = filteredSessions.filter(s => {
+      const qa = qaMap.get(s.id);
+      const assignedDisp = qa?.assignedDisposition?.toLowerCase() || s.aiDisposition?.toLowerCase();
+      return assignedDisp === current;
     });
   }
 

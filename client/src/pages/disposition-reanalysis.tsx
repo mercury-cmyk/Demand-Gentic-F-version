@@ -413,6 +413,8 @@ export default function DispositionReanalysisPage() {
   const [contactsDateFrom, setContactsDateFrom] = useState('');
   const [contactsDateTo, setContactsDateTo] = useState('');
   const [contactsAccuracy, setContactsAccuracy] = useState<'all' | 'accurate' | 'mismatch'>('all');
+  const [contactsExpectedDisposition, setContactsExpectedDisposition] = useState('');
+  const [contactsCurrentDisposition, setContactsCurrentDisposition] = useState('');
   const [contactsFiltersExpanded, setContactsFiltersExpanded] = useState(false);
 
   // Client sample validation state
@@ -448,7 +450,7 @@ export default function DispositionReanalysisPage() {
 
   // Contacts by disposition query
   const { data: contactsByDisp, isLoading: contactsLoading, refetch: refetchContacts } = useQuery<ContactsByDispositionResponse>({
-    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, contactsDateFrom, contactsDateTo, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsTranscriptText, contactsAccuracy, contactsPage, contactsSearch],
+    queryKey: ['/api/disposition-reanalysis/contacts-by-disposition', contactsDisposition, campaignId, contactsDateFrom, contactsDateTo, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsTranscriptText, contactsAccuracy, contactsExpectedDisposition, contactsCurrentDisposition, contactsPage, contactsSearch],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (campaignId) params.set('campaignId', campaignId);
@@ -460,6 +462,8 @@ export default function DispositionReanalysisPage() {
       if (contactsMaxTurns) params.set('maxTurns', contactsMaxTurns);
       if (contactsTranscriptText) params.set('transcriptText', contactsTranscriptText);
       if (contactsAccuracy !== 'all') params.set('accuracy', contactsAccuracy);
+      if (contactsExpectedDisposition) params.set('expectedDisposition', contactsExpectedDisposition);
+      if (contactsCurrentDisposition) params.set('currentDisposition', contactsCurrentDisposition);
       params.set('limit', '50');
       params.set('offset', String(contactsPage * 50));
       if (contactsSearch) params.set('search', contactsSearch);
@@ -912,8 +916,10 @@ export default function DispositionReanalysisPage() {
     if (contactsDateTo) count++;
     if (contactsTranscriptText) count++;
     if (contactsAccuracy !== 'all') count++;
+    if (contactsExpectedDisposition) count++;
+    if (contactsCurrentDisposition) count++;
     return count;
-  }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo, contactsTranscriptText, contactsAccuracy]);
+  }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo, contactsTranscriptText, contactsAccuracy, contactsExpectedDisposition, contactsCurrentDisposition]);
 
   const clearContactsFilters = useCallback(() => {
     setContactsMinDuration('');
@@ -924,6 +930,8 @@ export default function DispositionReanalysisPage() {
     setContactsDateTo('');
     setContactsTranscriptText('');
     setContactsAccuracy('all');
+    setContactsExpectedDisposition('');
+    setContactsCurrentDisposition('');
     setContactsPage(0);
   }, []);
 
@@ -1683,6 +1691,50 @@ export default function DispositionReanalysisPage() {
                             </SelectContent>
                           </Select>
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Expected Disposition</Label>
+                          <Select value={contactsExpectedDisposition || '_all'} onValueChange={(v) => { setContactsExpectedDisposition(v === '_all' ? '' : v); setContactsPage(0); }}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="_all">All</SelectItem>
+                              <SelectItem value="qualified_lead">Qualified Lead</SelectItem>
+                              <SelectItem value="not_interested">Not Interested</SelectItem>
+                              <SelectItem value="do_not_call">Do Not Call</SelectItem>
+                              <SelectItem value="voicemail">Voicemail</SelectItem>
+                              <SelectItem value="no_answer">No Answer</SelectItem>
+                              <SelectItem value="invalid_data">Invalid Data</SelectItem>
+                              <SelectItem value="needs_review">Needs Review</SelectItem>
+                              <SelectItem value="callback_requested">Callback Requested</SelectItem>
+                              <SelectItem value="unknown">Unknown</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Current Disposition</Label>
+                          <Select value={contactsCurrentDisposition || '_all'} onValueChange={(v) => { setContactsCurrentDisposition(v === '_all' ? '' : v); setContactsPage(0); }}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="_all">All</SelectItem>
+                              <SelectItem value="qualified_lead">Qualified Lead</SelectItem>
+                              <SelectItem value="not_interested">Not Interested</SelectItem>
+                              <SelectItem value="do_not_call">Do Not Call</SelectItem>
+                              <SelectItem value="voicemail">Voicemail</SelectItem>
+                              <SelectItem value="no_answer">No Answer</SelectItem>
+                              <SelectItem value="invalid_data">Invalid Data</SelectItem>
+                              <SelectItem value="needs_review">Needs Review</SelectItem>
+                              <SelectItem value="callback_requested">Callback Requested</SelectItem>
+                              <SelectItem value="unknown">Unknown</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div />
                       </div>
 
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

@@ -14576,6 +14576,71 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // Process all unanalyzed leads across ALL campaigns (global trigger)
+  app.post("/api/leads/process-unanalyzed", requireAuth, requireRole('admin', 'campaign_manager', 'quality_analyst'), async (req, res) => {
+    try {
+      const { limit: maxLeads = 200 } = req.body as { limit?: number };
+      const safeLimit = Math.min(maxLeads, 500);
+
+      console.log(`[API] Starting global unanalyzed leads processing (limit: ${safeLimit})`);
+
+      const { analyzeLeadQualification } = await import('./services/ai-qa-analyzer');
+
+      // Fetch all unanalyzed leads with completed transcription
+      const unanalyzedLeads = await db.select({ id: leads.id, campaignId: leads.campaignId })
+        .from(leads)
+        .where(and(
+          eq(leads.transcriptionStatus, 'completed'),
+          isNull(leads.aiScore),
+          isNotNull(leads.transcript)
+        ))
+        .limit(safeLimit);
+
+      if (unanalyzedLeads.length === 0) {
+        return res.json({
+          message: "No unanalyzed leads found",
+          total: 0,
+          processed: 0,
+          failed: 0,
+        });
+      }
+
+      // Return immediately — process in background
+      res.status(202).json({
+        message: `Processing ${unanalyzedLeads.length} unanalyzed leads in background`,
+        total: unanalyzedLeads.length,
+        note: "Refresh the leads page in a few minutes to see updated results",
+      });
+
+      // Background processing
+      (async () => {
+        let processed = 0;
+        let failed = 0;
+        for (const lead of unanalyzedLeads) {
+          try {
+            const result = await analyzeLeadQualification(lead.id);
+            if (result) {
+              processed++;
+              console.log(`[GlobalProcess] ✓ Lead ${lead.id} scored ${result.score} (${processed}/${unanalyzedLeads.length})`);
+            } else {
+              failed++;
+            }
+          } catch (error) {
+            failed++;
+            console.error(`[GlobalProcess] ✗ Lead ${lead.id} failed:`, error instanceof Error ? error.message : error);
+          }
+        }
+        console.log(`[GlobalProcess] Complete: ${processed} processed, ${failed} failed out of ${unanalyzedLeads.length}`);
+      })();
+    } catch (error) {
+      console.error('Global unanalyzed processing error:', error);
+      res.status(500).json({
+        message: "Failed to start processing",
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   // Validate companies via Companies House for a campaign
   app.post("/api/campaigns/:id/validate-companies", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {

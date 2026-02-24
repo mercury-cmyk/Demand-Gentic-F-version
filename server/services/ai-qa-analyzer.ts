@@ -1,6 +1,6 @@
 import { workerDb as db } from "../db";
 import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull, inArray, isNotNull } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { deepAnalyze } from "./ai-analysis-router";
@@ -741,9 +741,8 @@ export async function processUnanalyzedLeads(): Promise<void> {
     const QUERY_TIMEOUT_MS = 30000;
     const ANALYSIS_TIMEOUT_MS = 60000; // Longer for AI analysis
 
-    // CRITICAL: Query with hard limit to prevent connection pool exhaustion
-    // Process only 3 leads per cycle to keep worker pool connections available
-    const BATCH_SIZE = 3;
+    // Process 10 leads per cycle (safe with aiScore IS NULL filter)
+    const BATCH_SIZE = 10;
 
     let unanalyzedLeads: any[] = [];
     try {
@@ -751,7 +750,10 @@ export async function processUnanalyzedLeads(): Promise<void> {
       unanalyzedLeads = await withConnectionRetry(async () => {
         const queryPromise = db.select()
           .from(leads)
-          .where(eq(leads.transcriptionStatus, 'completed'))
+          .where(and(
+            eq(leads.transcriptionStatus, 'completed'),
+            isNull(leads.aiScore)
+          ))
           .limit(BATCH_SIZE);
 
         // Wrap query with timeout
@@ -827,18 +829,16 @@ export async function reEvaluateCampaignLeads(campaignId: string): Promise<{
   try {
     console.log(`[AI-QA] Starting bulk re-evaluation for campaign ${campaignId}`);
 
-    // Find all QA pending leads (new or under_review) with transcripts
-    const qaLeads = await db.select()
+    // Find all QA pending leads (new or under_review) with completed transcripts
+    const pendingLeads = await db.select()
       .from(leads)
-      .where(eq(leads.campaignId, campaignId))
-      .limit(1000); // Process up to 1000 leads at a time
-
-    // Filter for leads in QA with transcripts
-    const pendingLeads = qaLeads.filter(lead => 
-      (lead.qaStatus === 'new' || lead.qaStatus === 'under_review') && 
-      lead.transcript && 
-      lead.transcriptionStatus === 'completed'
-    );
+      .where(and(
+        eq(leads.campaignId, campaignId),
+        inArray(leads.qaStatus, ['new', 'under_review']),
+        eq(leads.transcriptionStatus, 'completed'),
+        isNotNull(leads.transcript)
+      ))
+      .limit(1000);
 
     console.log(`[AI-QA] Found ${pendingLeads.length} QA pending leads with transcripts`);
 

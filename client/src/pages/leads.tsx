@@ -888,6 +888,29 @@ export default function LeadsPage() {
     },
   });
 
+  const processAllUnanalyzedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/leads/process-unanalyzed', { limit: 200 });
+      return await res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Processing Started",
+        description: data.message || "Processing unanalyzed leads in background. Refresh in a few minutes.",
+      });
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      }, 30000);
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Processing Failed",
+        description: error.message || "Failed to start processing",
+      });
+    },
+  });
+
   const validateCompanyMutation = useMutation({
     mutationFn: async (leadId: string) => {
       return await apiRequest('POST', `/api/leads/${leadId}/validate-company`, {});
@@ -2172,6 +2195,24 @@ export default function LeadsPage() {
                     <>
                       <RefreshCw className="mr-2 h-4 w-4" />
                       Re-evaluate Only
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => processAllUnanalyzedMutation.mutate()}
+                  disabled={processAllUnanalyzedMutation.isPending}
+                  data-testid="button-score-all-unanalyzed"
+                >
+                  {processAllUnanalyzedMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Scoring...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Score All Unanalyzed
                     </>
                   )}
                 </Button>

@@ -611,6 +611,418 @@ router.delete('/templates/:id', requireRole('admin'), async (req: Request, res: 
   }
 });
 
+// ==================== HYGIENE & NORMALIZATION ====================
+
+/**
+ * GET /hygiene/duplicates
+ * Find potential duplicate contacts by email
+ */
+router.get('/hygiene/duplicates', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 50;
+    const duplicates = await db.execute(sql`
+      SELECT email, count(*)::int as duplicate_count,
+        json_agg(json_build_object(
+          'id', id, 'fullName', full_name, 'jobTitle', job_title,
+          'directPhone', direct_phone, 'createdAt', created_at
+        ) ORDER BY created_at DESC) as records
+      FROM contacts
+      WHERE email IS NOT NULL AND email != '' AND deleted_at IS NULL
+      GROUP BY email
+      HAVING count(*) > 1
+      ORDER BY count(*) DESC
+      LIMIT ${limit}
+    `);
+    
+    const totalDuplicateGroups = await db.execute(sql`
+      SELECT count(*)::int as total FROM (
+        SELECT email FROM contacts
+        WHERE email IS NOT NULL AND email != '' AND deleted_at IS NULL
+        GROUP BY email HAVING count(*) > 1
+      ) sub
+    `);
+
+    res.json({
+      duplicateGroups: duplicates.rows || [],
+      totalGroups: (totalDuplicateGroups.rows?.[0] as any)?.total || 0,
+    });
+  } catch (error: any) {
+    console.error('[DataMgmt] Duplicate detection error:', error);
+    res.status(500).json({ message: 'Failed to detect duplicates', error: error.message });
+  }
+});
+
+/**
+ * GET /hygiene/normalization-preview
+ * Preview what normalization would do for industries and titles
+ */
+router.get('/hygiene/normalization-preview', async (_req: Request, res: Response) => {
+  try {
+    // Unnormalized industries (raw != standardized or standardized is null)
+    const rawIndustries = await db.execute(sql`
+      SELECT industry_raw as raw, industry_standardized as standardized, count(*)::int as record_count
+      FROM accounts
+      WHERE industry_raw IS NOT NULL AND industry_raw != ''
+        AND (industry_standardized IS NULL OR industry_standardized = '' OR industry_raw != industry_standardized)
+      GROUP BY industry_raw, industry_standardized
+      ORDER BY count(*) DESC
+      LIMIT 50
+    `);
+
+    // Contacts without seniority classification
+    const unclassifiedTitles = await db.execute(sql`
+      SELECT job_title, count(*)::int as record_count
+      FROM contacts
+      WHERE job_title IS NOT NULL AND job_title != '' 
+        AND (seniority_level IS NULL OR seniority_level = '')
+        AND deleted_at IS NULL
+      GROUP BY job_title
+      ORDER BY count(*) DESC
+      LIMIT 50
+    `);
+
+    // Contacts without department
+    const unclassifiedDepts = await db.execute(sql`
+      SELECT job_title, count(*)::int as record_count
+      FROM contacts
+      WHERE job_title IS NOT NULL AND job_title != ''
+        AND (department IS NULL OR department = '')
+        AND deleted_at IS NULL
+      GROUP BY job_title
+      ORDER BY count(*) DESC
+      LIMIT 50
+    `);
+
+    // Phone normalization opportunities (phones not in E.164)
+    const unnormalizedPhones = await db.execute(sql`
+      SELECT count(*)::int as total
+      FROM contacts
+      WHERE deleted_at IS NULL
+        AND (
+          (direct_phone IS NOT NULL AND direct_phone != '' AND (direct_phone_e164 IS NULL OR direct_phone_e164 = ''))
+          OR (mobile_phone IS NOT NULL AND mobile_phone != '' AND (mobile_phone_e164 IS NULL OR mobile_phone_e164 = ''))
+        )
+    `);
+
+    // Email normalization opportunities
+    const unnormalizedEmails = await db.execute(sql`
+      SELECT count(*)::int as total
+      FROM contacts
+      WHERE email IS NOT NULL AND email != ''
+        AND (email_normalized IS NULL OR email_normalized = '')
+        AND deleted_at IS NULL
+    `);
+
+    res.json({
+      industries: { items: rawIndustries.rows || [], total: (rawIndustries.rows || []).length },
+      titles: { items: unclassifiedTitles.rows || [], total: (unclassifiedTitles.rows || []).length },
+      departments: { items: unclassifiedDepts.rows || [], total: (unclassifiedDepts.rows || []).length },
+      phones: { total: (unnormalizedPhones.rows?.[0] as any)?.total || 0 },
+      emails: { total: (unnormalizedEmails.rows?.[0] as any)?.total || 0 },
+    });
+  } catch (error: any) {
+    console.error('[DataMgmt] Normalization preview error:', error);
+    res.status(500).json({ message: 'Failed to preview normalization', error: error.message });
+  }
+});
+
+/**
+ * POST /hygiene/normalize-industries
+ * Run batch industry normalization using the classification engine
+ */
+router.post('/hygiene/normalize-industries', async (_req: Request, res: Response) => {
+  try {
+    const rawRows = await db.execute(sql`
+      SELECT id, industry_raw FROM accounts
+      WHERE industry_raw IS NOT NULL AND industry_raw != ''
+        AND (industry_standardized IS NULL OR industry_standardized = '')
+      LIMIT 500
+    `);
+
+    let normalized = 0;
+    for (const row of (rawRows.rows || []) as any[]) {
+      const classified = classifyIndustry(row.industry_raw);
+      if (classified) {
+        await db.execute(sql`
+          UPDATE accounts SET industry_standardized = ${classified}, updated_at = NOW()
+          WHERE id = ${row.id}
+        `);
+        normalized++;
+      }
+    }
+
+    res.json({ message: 'Industry normalization complete', processed: (rawRows.rows || []).length, normalized });
+  } catch (error: any) {
+    console.error('[DataMgmt] Industry normalization error:', error);
+    res.status(500).json({ message: 'Normalization failed', error: error.message });
+  }
+});
+
+/**
+ * POST /hygiene/normalize-titles
+ * Run batch title normalization (seniority + department classification)
+ */
+router.post('/hygiene/normalize-titles', async (_req: Request, res: Response) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT id, job_title FROM contacts
+      WHERE job_title IS NOT NULL AND job_title != ''
+        AND (seniority_level IS NULL OR seniority_level = '' OR department IS NULL OR department = '')
+        AND deleted_at IS NULL
+      LIMIT 500
+    `);
+
+    let seniorityUpdated = 0, deptUpdated = 0;
+    for (const row of (rows.rows || []) as any[]) {
+      const updates: string[] = [];
+      const seniority = classifySeniority(row.job_title);
+      const department = classifyDepartment(row.job_title);
+
+      if (seniority) {
+        await db.execute(sql`UPDATE contacts SET seniority_level = ${seniority} WHERE id = ${row.id} AND (seniority_level IS NULL OR seniority_level = '')`);
+        seniorityUpdated++;
+      }
+      if (department) {
+        await db.execute(sql`UPDATE contacts SET department = ${department} WHERE id = ${row.id} AND (department IS NULL OR department = '')`);
+        deptUpdated++;
+      }
+    }
+
+    res.json({ message: 'Title normalization complete', processed: (rows.rows || []).length, seniorityUpdated, departmentUpdated: deptUpdated });
+  } catch (error: any) {
+    console.error('[DataMgmt] Title normalization error:', error);
+    res.status(500).json({ message: 'Normalization failed', error: error.message });
+  }
+});
+
+/**
+ * POST /hygiene/normalize-emails
+ * Normalize email addresses (lowercase, trim)
+ */
+router.post('/hygiene/normalize-emails', async (_req: Request, res: Response) => {
+  try {
+    const result = await db.execute(sql`
+      UPDATE contacts
+      SET email_normalized = lower(trim(email)), updated_at = NOW()
+      WHERE email IS NOT NULL AND email != ''
+        AND (email_normalized IS NULL OR email_normalized = '')
+        AND deleted_at IS NULL
+    `);
+
+    res.json({ message: 'Email normalization complete', normalized: result.rowCount || 0 });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Email normalization failed', error: error.message });
+  }
+});
+
+/**
+ * POST /hygiene/merge-duplicates
+ * Merge duplicate contacts (keep newest, soft-delete older)
+ */
+router.post('/hygiene/merge-duplicates', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'email is required' });
+
+    // Find all contacts with this email
+    const dupes = await db.execute(sql`
+      SELECT id, full_name, email, job_title, direct_phone, created_at
+      FROM contacts
+      WHERE lower(trim(email)) = lower(trim(${email})) AND deleted_at IS NULL
+      ORDER BY created_at DESC
+    `);
+
+    const rows = (dupes.rows || []) as any[];
+    if (rows.length <= 1) return res.json({ message: 'No duplicates to merge', merged: 0 });
+
+    // Keep the newest (first), soft-delete the rest
+    const keep = rows[0];
+    const toDelete = rows.slice(1).map((r: any) => r.id);
+
+    const result = await db.execute(sql`
+      UPDATE contacts SET deleted_at = NOW()
+      WHERE id = ANY(${toDelete})
+    `);
+
+    res.json({ message: 'Duplicates merged', kept: keep.id, merged: result.rowCount || 0 });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Merge failed', error: error.message });
+  }
+});
+
+// ==================== SEGMENTATION ====================
+
+/**
+ * GET /segmentation/distribution
+ * Get distribution of a specific field for segmentation
+ */
+router.get('/segmentation/distribution', async (req: Request, res: Response) => {
+  try {
+    const field = req.query.field as string;
+    const recordType = (req.query.recordType as string) || 'contacts';
+    
+    const allowedContactFields = ['seniority_level', 'department', 'country', 'state', 'city'];
+    const allowedAccountFields = ['industry_standardized', 'employees_size_range', 'hq_country', 'hq_state'];
+    
+    const allowed = recordType === 'accounts' ? allowedAccountFields : allowedContactFields;
+    if (!field || !allowed.includes(field)) {
+      return res.status(400).json({ message: `field must be one of: ${allowed.join(', ')}` });
+    }
+
+    const table = recordType === 'accounts' ? 'accounts' : 'contacts';
+    const deletedFilter = recordType === 'contacts' ? sql`AND deleted_at IS NULL` : sql``;
+
+    const dist = await db.execute(sql.raw(`
+      SELECT ${field} as value, count(*)::int as count
+      FROM ${table}
+      WHERE ${field} IS NOT NULL AND ${field} != '' ${recordType === 'contacts' ? 'AND deleted_at IS NULL' : ''}
+      GROUP BY ${field}
+      ORDER BY count(*) DESC
+      LIMIT 50
+    `));
+
+    res.json({ field, recordType, distribution: dist.rows || [] });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Failed to get distribution', error: error.message });
+  }
+});
+
+/**
+ * GET /segmentation/summary
+ * Get comprehensive segmentation summary across all dimensions
+ */
+router.get('/segmentation/summary', async (_req: Request, res: Response) => {
+  try {
+    // Seniority breakdown
+    const seniority = await db.select({
+      value: contacts.seniorityLevel,
+      count: sql<number>`count(*)::int`,
+    }).from(contacts)
+      .where(and(isNotNull(contacts.seniorityLevel), isNull(contacts.deletedAt)))
+      .groupBy(contacts.seniorityLevel)
+      .orderBy(desc(sql`count(*)`));
+
+    // Department breakdown
+    const department = await db.select({
+      value: contacts.department,
+      count: sql<number>`count(*)::int`,
+    }).from(contacts)
+      .where(and(isNotNull(contacts.department), isNull(contacts.deletedAt)))
+      .groupBy(contacts.department)
+      .orderBy(desc(sql`count(*)`));
+
+    // Industry breakdown
+    const industry = await db.select({
+      value: accounts.industryStandardized,
+      count: sql<number>`count(*)::int`,
+    }).from(accounts)
+      .where(isNotNull(accounts.industryStandardized))
+      .groupBy(accounts.industryStandardized)
+      .orderBy(desc(sql`count(*)`));
+
+    // Geography (country)
+    const geography = await db.select({
+      value: contacts.country,
+      count: sql<number>`count(*)::int`,
+    }).from(contacts)
+      .where(and(isNotNull(contacts.country), isNull(contacts.deletedAt)))
+      .groupBy(contacts.country)
+      .orderBy(desc(sql`count(*)`))
+      .limit(20);
+
+    // Company size
+    const companySize = await db.select({
+      value: accounts.employeesSizeRange,
+      count: sql<number>`count(*)::int`,
+    }).from(accounts)
+      .where(isNotNull(accounts.employeesSizeRange))
+      .groupBy(accounts.employeesSizeRange)
+      .orderBy(desc(sql`count(*)`));
+
+    res.json({ seniority, department, industry, geography, companySize });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Failed to get segmentation summary', error: error.message });
+  }
+});
+
+// ==================== ENRICHMENT ====================
+
+/**
+ * GET /enrichment/gaps
+ * Identify field-level data gaps and enrichment opportunities
+ */
+router.get('/enrichment/gaps', async (_req: Request, res: Response) => {
+  try {
+    const [contactStats] = await db.select({
+      total: sql<number>`count(*)::int`,
+      missingEmail: sql<number>`count(case when email IS NULL OR email = '' then 1 end)::int`,
+      missingPhone: sql<number>`count(case when direct_phone IS NULL OR direct_phone = '' then 1 end)::int`,
+      missingMobile: sql<number>`count(case when mobile_phone IS NULL OR mobile_phone = '' then 1 end)::int`,
+      missingTitle: sql<number>`count(case when job_title IS NULL OR job_title = '' then 1 end)::int`,
+      missingSeniority: sql<number>`count(case when seniority_level IS NULL OR seniority_level = '' then 1 end)::int`,
+      missingDepartment: sql<number>`count(case when department IS NULL OR department = '' then 1 end)::int`,
+      missingLinkedIn: sql<number>`count(case when linkedin_url IS NULL OR linkedin_url = '' then 1 end)::int`,
+      missingCountry: sql<number>`count(case when country IS NULL OR country = '' then 1 end)::int`,
+      missingState: sql<number>`count(case when state IS NULL OR state = '' then 1 end)::int`,
+      missingCity: sql<number>`count(case when city IS NULL OR city = '' then 1 end)::int`,
+      missingAccount: sql<number>`count(case when account_id IS NULL then 1 end)::int`,
+    }).from(contacts).where(isNull(contacts.deletedAt));
+
+    const [accountStats] = await db.select({
+      total: sql<number>`count(*)::int`,
+      missingIndustry: sql<number>`count(case when industry_standardized IS NULL OR industry_standardized = '' then 1 end)::int`,
+      missingRevenue: sql<number>`count(case when annual_revenue IS NULL then 1 end)::int`,
+      missingEmployees: sql<number>`count(case when staff_count IS NULL AND (employees_size_range IS NULL OR employees_size_range = '') then 1 end)::int`,
+      missingDomain: sql<number>`count(case when domain IS NULL OR domain = '' then 1 end)::int`,
+      missingCountry: sql<number>`count(case when hq_country IS NULL OR hq_country = '' then 1 end)::int`,
+      missingPhone: sql<number>`count(case when main_phone IS NULL OR main_phone = '' then 1 end)::int`,
+      missingLinkedIn: sql<number>`count(case when linkedin_company_url IS NULL OR linkedin_company_url = '' then 1 end)::int`,
+    }).from(accounts);
+
+    // Build enrichment opportunities
+    const contactGaps = [
+      { field: 'Email', missing: contactStats.missingEmail, total: contactStats.total, priority: 'critical' as const, automatable: false },
+      { field: 'Direct Phone', missing: contactStats.missingPhone, total: contactStats.total, priority: 'high' as const, automatable: false },
+      { field: 'Job Title', missing: contactStats.missingTitle, total: contactStats.total, priority: 'high' as const, automatable: false },
+      { field: 'Seniority Level', missing: contactStats.missingSeniority, total: contactStats.total, priority: 'medium' as const, automatable: true },
+      { field: 'Department', missing: contactStats.missingDepartment, total: contactStats.total, priority: 'medium' as const, automatable: true },
+      { field: 'LinkedIn URL', missing: contactStats.missingLinkedIn, total: contactStats.total, priority: 'medium' as const, automatable: false },
+      { field: 'Country', missing: contactStats.missingCountry, total: contactStats.total, priority: 'low' as const, automatable: false },
+      { field: 'State', missing: contactStats.missingState, total: contactStats.total, priority: 'low' as const, automatable: false },
+      { field: 'City', missing: contactStats.missingCity, total: contactStats.total, priority: 'low' as const, automatable: false },
+      { field: 'Account Link', missing: contactStats.missingAccount, total: contactStats.total, priority: 'high' as const, automatable: false },
+    ];
+
+    const accountGaps = [
+      { field: 'Industry', missing: accountStats.missingIndustry, total: accountStats.total, priority: 'high' as const, automatable: true },
+      { field: 'Revenue', missing: accountStats.missingRevenue, total: accountStats.total, priority: 'medium' as const, automatable: false },
+      { field: 'Employee Count', missing: accountStats.missingEmployees, total: accountStats.total, priority: 'medium' as const, automatable: false },
+      { field: 'Domain', missing: accountStats.missingDomain, total: accountStats.total, priority: 'high' as const, automatable: false },
+      { field: 'HQ Country', missing: accountStats.missingCountry, total: accountStats.total, priority: 'low' as const, automatable: false },
+      { field: 'Phone', missing: accountStats.missingPhone, total: accountStats.total, priority: 'low' as const, automatable: false },
+      { field: 'LinkedIn', missing: accountStats.missingLinkedIn, total: accountStats.total, priority: 'low' as const, automatable: false },
+    ];
+
+    // Overall enrichment score
+    const contactTotal = contactGaps.reduce((sum, g) => sum + g.total, 0);
+    const contactMissing = contactGaps.reduce((sum, g) => sum + g.missing, 0);
+    const accountTotal = accountGaps.reduce((sum, g) => sum + g.total, 0);
+    const accountMissing = accountGaps.reduce((sum, g) => sum + g.missing, 0);
+    const overallCoverage = contactTotal + accountTotal > 0
+      ? Math.round(((1 - (contactMissing + accountMissing) / (contactTotal + accountTotal)) * 100))
+      : 0;
+
+    res.json({
+      overallCoverage,
+      contacts: { stats: contactStats, gaps: contactGaps },
+      accounts: { stats: accountStats, gaps: accountGaps },
+    });
+  } catch (error: any) {
+    console.error('[DataMgmt] Enrichment gaps error:', error);
+    res.status(500).json({ message: 'Failed to analyze enrichment gaps', error: error.message });
+  }
+});
+
 // ==================== ANALYTICS ====================
 
 /**
