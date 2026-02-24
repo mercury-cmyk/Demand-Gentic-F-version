@@ -15,7 +15,6 @@ export const NAVIGATION_DOMAINS = {
   ANALYTICS: 'analytics',
   OPERATIONS: 'operations',
   IAM: 'iam',
-  UNLICENSED: 'unlicensed',
   SETTINGS: 'settings',
 } as const;
 
@@ -360,15 +359,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'Database',
         roles: [...DATA_ROLES, USER_ROLES.QUALITY_ANALYST],
         description: 'Lead and contact verification workflows',
-      },
-      {
-        id: 'unlicensed-departments',
-        title: 'Unlicensed Departments',
-        url: '/unlicensed-departments',
-        icon: 'Building',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST],
-        description: 'Conversation quality and lead quality departments',
-        badge: { text: 'New', variant: 'new' as BadgeVariant },
       },
     ],
   },

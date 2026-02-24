@@ -72,7 +72,6 @@ const CallReportsPage = lazy(() => import("@/pages/call-reports"));
 const DispositionIntelligenceHubPage = lazy(() => import("@/pages/unified-intelligence"));
 const PotentialLeadsPage = lazy(() => import("@/pages/potential-leads"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
-import UnlicensedDepartmentsPage from "@/pages/unlicensed-departments";
 const EngagementAnalyticsPage = lazy(() => import("@/pages/engagement-analytics"));
 import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
@@ -402,7 +401,6 @@ function AuthenticatedApp() {
               <Route path="/conversation-quality">
                 <Redirect to="/disposition-intelligence?tab=conversation-quality" />
               </Route>
-              <Route path="/unlicensed-departments" component={UnlicensedDepartmentsPage} />
 
               {/* Content & Marketing */}
               <Route path="/content-studio" component={ContentStudioPage} />

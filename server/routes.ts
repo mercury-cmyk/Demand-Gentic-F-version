@@ -70,8 +70,6 @@ import clientPortalRouter from './routes/client-portal';
 import clientPortalQualifiedLeadsRouter from './routes/client-portal-qualified-leads';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
-import unlicensedConvQualityRouter from './routes/unlicensed-conversation-quality-routes';
-import unlicensedLeadQualityRouter from './routes/unlicensed-lead-quality-routes';
 import virtualAgentsRouter from './routes/virtual-agents';
 import cloudLogsRouter from './routes/cloud-logs-routes';
 import numberPoolRouter from './routes/number-pool';
@@ -15473,10 +15471,6 @@ Provide JSON response with:
   app.use('/api/disposition-reanalysis', dispositionReanalysisRouter);
   app.use('/api/disposition-deep-reanalysis', dispositionDeepReanalysisRouter);
   app.use(queueIntelligenceRouter);
-
-  // ==================== UNLICENSED DEPARTMENTS ====================
-  app.use('/api/unlicensed', unlicensedConvQualityRouter);
-  app.use('/api/unlicensed', unlicensedLeadQualityRouter);
 
   // AI Project Creation
   app.use('/api/ai', aiProjectRouter);
