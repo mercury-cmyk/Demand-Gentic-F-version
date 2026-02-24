@@ -171,6 +171,77 @@ function trimArray<T>(arr: T[], maxLen: number): void {
   if (arr.length > maxLen) arr.splice(0, arr.length - maxLen);
 }
 
+const APPOINTMENT_CAMPAIGN_TYPES = new Set([
+  "appointment_setting",
+  "appointment_generation",
+  "sql",
+  "telemarketing",
+  "demo_request",
+  "lead_qualification",
+  "bant_qualification",
+  "bant_leads",
+]);
+
+const CONTENT_CAMPAIGN_TYPES = new Set([
+  "content_syndication",
+  "high_quality_leads",
+]);
+
+function isAppointmentCampaignType(campaignType: string | null | undefined): boolean {
+  return APPOINTMENT_CAMPAIGN_TYPES.has((campaignType || "").toLowerCase());
+}
+
+function isContentCampaignType(campaignType: string | null | undefined): boolean {
+  return CONTENT_CAMPAIGN_TYPES.has((campaignType || "").toLowerCase());
+}
+
+function hasAppointmentBookingEvidence(
+  session: OpenAIRealtimeSession,
+  extraText?: string
+): boolean {
+  const bookedMeeting = (session as any).bookedMeeting as
+    | { date?: string; time?: string; attendeeEmail?: string }
+    | undefined;
+
+  if (bookedMeeting?.date && bookedMeeting?.time && bookedMeeting?.attendeeEmail) {
+    return true;
+  }
+
+  const transcriptText = session.transcripts
+    .map((t) => t.text || "")
+    .join(" ")
+    .toLowerCase();
+  const combinedText = `${transcriptText} ${String(extraText || "").toLowerCase()}`;
+
+  const hasEmailSignal =
+    combinedText.includes("@") ||
+    combinedText.includes("email confirmed") ||
+    combinedText.includes("confirmed email") ||
+    combinedText.includes("confirm email");
+
+  const hasBookingSignal =
+    combinedText.includes("calendar invite") ||
+    combinedText.includes("meeting booked") ||
+    combinedText.includes("meeting scheduled") ||
+    combinedText.includes("meeting confirmed") ||
+    combinedText.includes("booked") ||
+    combinedText.includes("scheduled");
+
+  const hasTimeSignal =
+    combinedText.includes("monday") ||
+    combinedText.includes("tuesday") ||
+    combinedText.includes("wednesday") ||
+    combinedText.includes("thursday") ||
+    combinedText.includes("friday") ||
+    combinedText.includes("next week") ||
+    combinedText.includes("tomorrow") ||
+    combinedText.includes("morning") ||
+    combinedText.includes("afternoon") ||
+    /\b\d{1,2}(:\d{2})?\s?(am|pm)\b/.test(combinedText);
+
+  return hasEmailSignal && hasBookingSignal && hasTimeSignal;
+}
+
 interface OpenAIRealtimeSession {
   callId: string;
   runId: string;
@@ -4267,18 +4338,27 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
 
         // Determine campaign type (affects what "qualified" means).
         const campaignType = session.campaignType || '';
-        const isAppointmentCampaign =
-          campaignType === 'appointment_setting' ||
-          campaignType === 'appointment_generation' ||
-          campaignType === 'sql' ||
-          campaignType === 'telemarketing' ||
-          campaignType === 'demo_request' ||
-          campaignType === 'lead_qualification' ||
-          campaignType === 'bant_qualification' ||
-          campaignType === 'bant_leads';
-        const isContentCampaign =
-          campaignType === 'content_syndication' ||
-          campaignType === 'high_quality_leads';
+        const isAppointmentCampaign = isAppointmentCampaignType(campaignType);
+        const isContentCampaign = isContentCampaignType(campaignType);
+        const hasBookedMeetingEvidence = hasAppointmentBookingEvidence(session, reasonLower);
+        const reasonHasTimeSignal =
+          reasonLower.includes('monday') ||
+          reasonLower.includes('tuesday') ||
+          reasonLower.includes('wednesday') ||
+          reasonLower.includes('thursday') ||
+          reasonLower.includes('friday') ||
+          reasonLower.includes('next week') ||
+          reasonLower.includes('tomorrow') ||
+          reasonLower.includes('morning') ||
+          reasonLower.includes('afternoon') ||
+          /\b\d{1,2}(:\d{2})?\s?(am|pm)\b/.test(reasonLower);
+        const reasonHasBookingOutcome =
+          reasonLower.includes('calendar invite') ||
+          reasonLower.includes('meeting booked') ||
+          reasonLower.includes('meeting scheduled') ||
+          reasonLower.includes('meeting confirmed') ||
+          reasonLower.includes('booked') ||
+          reasonLower.includes('scheduled');
 
         // Build list of missing requirements
         const missingSteps: string[] = [];
@@ -4289,14 +4369,16 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
           missingSteps.push('have a conversation with the prospect (minimum 2 agent turns)');
         }
 
-        // For appointment campaigns, email confirmation is important but time proposal is advisory
+        // Appointment campaigns require explicit booking evidence.
         if (isAppointmentCampaign) {
-          if (!hasEmailConfirmation && !reasonLower.includes('email') && !reasonLower.includes('meeting') && !reasonLower.includes('booked') && !reasonLower.includes('scheduled')) {
-            missingSteps.push('confirm their email address or mention booking details in the reason');
+          if (!hasEmailConfirmation && !hasBookedMeetingEvidence) {
+            missingSteps.push('confirm their email address');
           }
-          // Time proposal is advisory — log but don't block
-          if (!agentProposedTime) {
-            console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: Agent didn't propose specific times, but AI says qualified. Allowing.`);
+          if (!agentProposedTime && !reasonHasTimeSignal && !hasBookedMeetingEvidence) {
+            missingSteps.push('propose and confirm a specific meeting date/time');
+          }
+          if (!reasonHasBookingOutcome && !hasBookedMeetingEvidence) {
+            missingSteps.push('confirm that the meeting was booked/scheduled');
           }
         }
         // For content/asset campaigns, email confirmation OR mention in reason is enough
@@ -4586,6 +4668,10 @@ Only AFTER completing these steps can you submit the disposition.`,
         const hasUserTranscripts = session.transcripts.some(
           (t: { role: string; text: string }) => t.role === 'user' && t.text.trim().length > 0
         );
+        const campaignType = session.campaignType || '';
+        const isAppointmentCampaign = isAppointmentCampaignType(campaignType);
+        const isContentCampaign = isContentCampaignType(campaignType);
+        const hasBookedMeetingEvidence = hasAppointmentBookingEvidence(session, reason);
         
         // If prospect hung up after speaking, they're not interested (not "no answer")
         if (reason.includes('hung up') && hasUserTranscripts) {
@@ -4607,6 +4693,7 @@ Only AFTER completing these steps can you submit the disposition.`,
         // Trust the AI's judgment — it was in the conversation.
         else if (
           userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
+          (!isAppointmentCampaign || hasBookedMeetingEvidence) &&
           (reason.includes('calendar invite') ||
            reason.includes('booked') || reason.includes('scheduled') ||
            (reason.includes('meeting') && (reason.includes('confirmed') || reason.includes('booked') || reason.includes('scheduled'))) ||
@@ -4625,23 +4712,12 @@ Only AFTER completing these steps can you submit the disposition.`,
            reason.includes('accepted') || reason.includes('agreed') ||
            reason.includes('email confirmed') || reason.includes('confirmed email'))
         ) {
-          // Check campaign type to determine if this is qualified or needs_review
-          const campaignType = session.campaignType || '';
-          const isContentCampaign = campaignType === 'content_syndication' || campaignType === 'high_quality_leads';
-
-          if (isContentCampaign || reason.includes('email confirmed') || reason.includes('confirmed email')) {
+          if (isContentCampaign && (reason.includes('email confirmed') || reason.includes('confirmed email') || reason.includes('send') || reason.includes('whitepaper') || reason.includes('content'))) {
             session.detectedDisposition = 'qualified_lead';
-            console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (content accepted/email confirmed for ${campaignType || 'unknown'} campaign: "${reason}")`);
+            console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: qualified_lead (content accepted/email confirmed for ${campaignType || 'unknown'} campaign: "${reason}")`);
           } else {
-            // For non-content campaigns, "send me info" with email confirmed is still qualified
-            // Only route to callback_requested if there's no email/action confirmation
-            if (reason.includes('email') || reason.includes('send')) {
-              session.detectedDisposition = 'qualified_lead';
-              console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (prospect accepted follow-up with action: "${reason}")`);
-            } else {
-              session.detectedDisposition = 'callback_requested';
-              console.log(`${LOG_PREFIX} [Gemini] 📞 Inferred disposition: callback_requested (soft interest, follow-up path agreed: "${reason}")`);
-            }
+            session.detectedDisposition = 'callback_requested';
+            console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: callback_requested (follow-up path agreed: "${reason}")`);
           }
         }
         // Polite goodbye after a real conversation with engagement → callback_requested (not needs_review)
@@ -7993,7 +8069,16 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           if (smartResult.positiveSignals.length > 0) {
             console.log(`${LOG_PREFIX}   Positive signals: ${smartResult.positiveSignals.join(', ')}`);
           }
-          disposition = smartResult.suggestedDisposition;
+          if (
+            smartResult.suggestedDisposition === 'qualified_lead' &&
+            isAppointmentCampaignType(session.campaignType) &&
+            !hasAppointmentBookingEvidence(session)
+          ) {
+            disposition = 'callback_requested';
+            console.log(`${LOG_PREFIX} Appointment campaign guard: smart override to qualified_lead blocked (no booking evidence). Using callback_requested.`);
+          } else {
+            disposition = smartResult.suggestedDisposition;
+          }
         } else {
           console.log(`${LOG_PREFIX} Smart disposition agrees with current: ${disposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
         }
@@ -8638,6 +8723,8 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
           // Check if we actually confirmed identity with the target prospect
           const identityConfirmed = session.conversationState?.identityConfirmed === true;
+          const isAppointmentCampaign = isAppointmentCampaignType(session.campaignType);
+          const hasBookedMeetingEvidence = hasAppointmentBookingEvidence(session);
           
           // If identity was never confirmed, this might be a gatekeeper interaction
           // or early hangup - use no_answer to allow retry
@@ -8704,6 +8791,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           // This catches cases where AI didn't call submit_disposition but prospect showed clear interest
           // Must be checked BEFORE the generic not_interested fallback
           if (hasUserTranscripts && identityConfirmed && hasInterestSignals(session.transcripts)) {
+            if (isAppointmentCampaign && !hasBookedMeetingEvidence) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' has interest signals but no confirmed booking evidence for appointment campaign - marking as callback_requested`);
+              return 'callback_requested';
+            }
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with INTEREST SIGNALS detected and identity confirmed - marking as qualified_lead`);
             return 'qualified_lead';
           }
@@ -8722,6 +8813,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
           // Check for interest signals even without identity confirmation (still valuable lead)
           if (hasUserTranscripts && hasInterestSignals(session.transcripts)) {
+            if (isAppointmentCampaign && !hasBookedMeetingEvidence) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' has interest signals but no confirmed booking evidence for appointment campaign - marking as callback_requested`);
+              return 'callback_requested';
+            }
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with INTEREST SIGNALS detected (identity not confirmed) - marking as qualified_lead`);
             return 'qualified_lead';
           }
@@ -11448,5 +11543,4 @@ export {
   createOutOfBandResponse,
   handleUserInterruption,
 };
-
 

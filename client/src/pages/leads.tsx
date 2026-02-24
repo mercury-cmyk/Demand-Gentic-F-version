@@ -931,11 +931,15 @@ export default function LeadsPage() {
     },
   });
 
+  const isQaApprovedStatus = (status: string | null | undefined) =>
+    status === 'approved' || status === 'pending_pm_review';
+
   const getStatusBadge = (status: string) => {
     const config: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
       new: { variant: "secondary", label: "New" },
       under_review: { variant: "default", label: "Under Review" },
       approved: { variant: "outline", label: "Approved" },
+      pending_pm_review: { variant: "outline", label: "Approved (PM)" },
       rejected: { variant: "destructive", label: "Rejected" },
       published: { variant: "outline", label: "Published" },
     };
@@ -952,7 +956,7 @@ export default function LeadsPage() {
         </Badge>
       );
     }
-    if (lead.qaStatus === 'approved' || lead.qaStatus === 'published') {
+    if (isQaApprovedStatus(lead.qaStatus) || lead.qaStatus === 'published') {
       return (
         <Badge variant="secondary" data-testid={`badge-pending-delivery-${lead.id}`}>
           Pending Delivery
@@ -981,7 +985,7 @@ export default function LeadsPage() {
       );
     }
     // Show "Pending Publish" for approved leads (not yet published)
-    if (lead.qaStatus === 'approved' && !lead.submittedToClient) {
+    if (isQaApprovedStatus(lead.qaStatus) && !lead.submittedToClient) {
       return (
         <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20" data-testid={`badge-pending-publish-${lead.id}`}>
           Pending Publish
@@ -1056,7 +1060,15 @@ export default function LeadsPage() {
     // Only apply agent filter for non-agent-only users (backend already filtered for agents)
     if (!isAgentOnly && filterAgent && l.agentId !== filterAgent) return false;
     if (filterCampaign && l.campaignId !== filterCampaign) return false;
-    if (filterQAStatus && l.qaStatus !== filterQAStatus) return false;
+    if (filterQAStatus) {
+      if (filterQAStatus === 'approved') {
+        if (!isQaApprovedStatus(l.qaStatus)) return false;
+      } else if (filterQAStatus === 'pending_review' || filterQAStatus === 'in_review') {
+        if (l.qaStatus !== 'under_review') return false;
+      } else if (l.qaStatus !== filterQAStatus) {
+        return false;
+      }
+    }
     if (filterDeliveryStatus === 'pending' && l.deliveredAt) return false;
     if (filterDeliveryStatus === 'submitted' && !l.deliveredAt) return false;
     if (filterIndustry && l.accountIndustry !== filterIndustry) return false;
@@ -1071,8 +1083,8 @@ export default function LeadsPage() {
   });
 
   const pendingLeads = filteredLeads.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review');
-  const approvedLeads = filteredLeads.filter(l => l.qaStatus === 'approved' || l.qaStatus === 'published');
-  const pmReviewLeads = filteredLeads.filter(l => l.qaStatus === 'approved' || l.qaStatus === 'pending_pm_review');
+  const approvedLeads = filteredLeads.filter(l => isQaApprovedStatus(l.qaStatus) || l.qaStatus === 'published');
+  const pmReviewLeads = filteredLeads.filter(l => isQaApprovedStatus(l.qaStatus));
   const rejectedLeads = filteredLeads.filter(l => l.qaStatus === 'rejected');
 
   const handleBulkExport = async () => {
@@ -1521,7 +1533,7 @@ export default function LeadsPage() {
                           Details
                         </Button>
                         {/* Publish button - for approved leads that aren't published yet */}
-                        {lead.qaStatus === 'approved' && (
+                        {isQaApprovedStatus(lead.qaStatus) && (
                           <Button
                             size="sm"
                             variant="default"
@@ -1546,7 +1558,7 @@ export default function LeadsPage() {
                           </Button>
                         )}
                         {/* Push to Client Dashboard - for approved/published leads not yet on dashboard */}
-                        {(lead.qaStatus === 'approved' || lead.qaStatus === 'published') && !lead.submittedToClient && (
+                        {(isQaApprovedStatus(lead.qaStatus) || lead.qaStatus === 'published') && !lead.submittedToClient && (
                           <Button
                             size="sm"
                             variant="default"
@@ -1570,7 +1582,7 @@ export default function LeadsPage() {
                             Mark Delivered
                           </Button>
                         )}
-                        {!isAgentOnly && (lead.qaStatus === 'approved' || lead.qaStatus === 'published') && (
+                        {!isAgentOnly && (isQaApprovedStatus(lead.qaStatus) || lead.qaStatus === 'published') && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -1790,6 +1802,7 @@ export default function LeadsPage() {
                 <SelectItem value="new">New</SelectItem>
                 <SelectItem value="under_review">Under Review</SelectItem>
                 <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="pending_pm_review">Approved (PM Review)</SelectItem>
                 <SelectItem value="rejected">Rejected</SelectItem>
                 <SelectItem value="published">Published</SelectItem>
               </SelectContent>
@@ -2533,8 +2546,12 @@ export default function LeadsPage() {
                         </TableCell>
                         <TableCell>{lead.campaignName || '-'}</TableCell>
                         <TableCell>
-                          <Badge variant={lead.qaStatus === 'approved' ? 'default' : 'secondary'}>
-                            {lead.qaStatus === 'approved' ? 'QA Approved' : 'Pending PM'}
+                          <Badge variant={isQaApprovedStatus(lead.qaStatus) ? 'default' : 'secondary'}>
+                            {lead.qaStatus === 'approved'
+                              ? 'QA Approved'
+                              : lead.qaStatus === 'pending_pm_review'
+                                ? 'QA Approved (Awaiting PM)'
+                                : 'Pending PM'}
                           </Badge>
                         </TableCell>
                         <TableCell>
@@ -3586,6 +3603,7 @@ export default function LeadsPage() {
                   <SelectItem value="new">New</SelectItem>
                   <SelectItem value="under_review">Under Review</SelectItem>
                   <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="pending_pm_review">Approved (PM Review)</SelectItem>
                   <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
               </Select>

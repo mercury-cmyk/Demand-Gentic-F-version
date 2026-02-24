@@ -34,6 +34,7 @@ import {
   ShieldCheck,
   FileText,
   BarChart3,
+  Brain,
   Plus,
   Loader2,
   CheckCircle2,
@@ -170,6 +171,54 @@ interface InsightsSummaryData {
   };
 }
 
+interface IntelligenceDepartmentRow {
+  department: string;
+  confidence: number;
+  problemCount: number;
+  solutionCount: number;
+}
+
+interface IntelligenceCampaignMapping {
+  campaignId: string;
+  campaignName: string | null;
+  primaryDepartment: string | null;
+  confidence: number;
+  departments: IntelligenceDepartmentRow[];
+}
+
+interface IntelligenceResultRow {
+  accountId: string;
+  accountName: string | null;
+  status: "success" | "partial" | "failed";
+  accountIntelligence: {
+    version: number;
+    confidence: number | null;
+    createdAt: string | null;
+  } | null;
+  campaignMappings: IntelligenceCampaignMapping[];
+  errors: string[];
+}
+
+interface IntelligenceGatherResponse {
+  message: string;
+  departments: string[];
+  resolved: {
+    totalAccounts: number;
+    explicitAccountIds: number;
+    fromLists: number;
+    fromCampaigns: number;
+  };
+  processed: {
+    totalAccounts: number;
+    success: number;
+    partial: number;
+    failed: number;
+    accountIntelBuilt: number;
+    problemMappingsBuilt: number;
+  };
+  results: IntelligenceResultRow[];
+}
+
 // ==================== STATUS HELPERS ====================
 
 function statusBadge(status: string) {
@@ -205,6 +254,17 @@ function severityBadge(severity: string) {
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "-";
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function parseIdInput(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    )
+  );
 }
 
 // ==================== OVERVIEW TAB ====================
@@ -480,6 +540,255 @@ function InsightsTab() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+// ==================== INTELLIGENCE TAB ====================
+
+function IntelligenceTab() {
+  const { toast } = useToast();
+  const [listIdsInput, setListIdsInput] = useState("");
+  const [campaignIdsInput, setCampaignIdsInput] = useState("");
+  const [accountIdsInput, setAccountIdsInput] = useState("");
+  const [mappingCampaignId, setMappingCampaignId] = useState("");
+  const [concurrency, setConcurrency] = useState("3");
+  const [forceRefresh, setForceRefresh] = useState(false);
+  const [includeAccountIntelligence, setIncludeAccountIntelligence] = useState(true);
+  const [includeProblemMapping, setIncludeProblemMapping] = useState(true);
+
+  const gatherMutation = useMutation<IntelligenceGatherResponse>({
+    mutationFn: async () => {
+      const payload = {
+        listIds: parseIdInput(listIdsInput),
+        campaignIds: parseIdInput(campaignIdsInput),
+        accountIds: parseIdInput(accountIdsInput),
+        mappingCampaignId: mappingCampaignId.trim() || undefined,
+        concurrency: Math.max(1, Math.min(Number(concurrency) || 3, 10)),
+        forceRefresh,
+        includeAccountIntelligence,
+        includeProblemMapping,
+      };
+
+      const res = await apiRequest("POST", "/api/data-management/intelligence/gather", payload);
+      return res.json();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Intelligence Gather Failed",
+        description: error?.message || "Failed to run intelligence gathering",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const hasSelectors =
+    parseIdInput(listIdsInput).length > 0 ||
+    parseIdInput(campaignIdsInput).length > 0 ||
+    parseIdInput(accountIdsInput).length > 0;
+
+  const data = gatherMutation.data;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Account Intelligence Gathering</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Run account intelligence from Data Management using specific list IDs and/or campaign IDs, then align problem-solution mapping to 7 departments.
+          </p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>List IDs (comma-separated)</Label>
+              <Textarea
+                value={listIdsInput}
+                onChange={(e) => setListIdsInput(e.target.value)}
+                rows={2}
+                placeholder="e.g. 5f8a..., a7b9..."
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Campaign IDs (comma-separated)</Label>
+              <Textarea
+                value={campaignIdsInput}
+                onChange={(e) => setCampaignIdsInput(e.target.value)}
+                rows={2}
+                placeholder="e.g. 2ab1..., 9df0..."
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Explicit Account IDs (optional)</Label>
+              <Textarea
+                value={accountIdsInput}
+                onChange={(e) => setAccountIdsInput(e.target.value)}
+                rows={2}
+                placeholder="e.g. 8cc3..., 44de..."
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Mapping Campaign ID (optional)</Label>
+              <Input
+                value={mappingCampaignId}
+                onChange={(e) => setMappingCampaignId(e.target.value)}
+                placeholder="Campaign context for list-driven mappings"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={includeAccountIntelligence ? "default" : "outline"}
+              onClick={() => setIncludeAccountIntelligence((prev) => !prev)}
+            >
+              Account Intelligence
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={includeProblemMapping ? "default" : "outline"}
+              onClick={() => setIncludeProblemMapping((prev) => !prev)}
+            >
+              Problem/Solution Mapping
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={forceRefresh ? "default" : "outline"}
+              onClick={() => setForceRefresh((prev) => !prev)}
+            >
+              Force Refresh
+            </Button>
+            <div className="flex items-center gap-2 ml-auto">
+              <Label htmlFor="intelligence-concurrency">Concurrency</Label>
+              <Input
+                id="intelligence-concurrency"
+                type="number"
+                min={1}
+                max={10}
+                className="w-20"
+                value={concurrency}
+                onChange={(e) => setConcurrency(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              onClick={() => gatherMutation.mutate()}
+              disabled={!hasSelectors || gatherMutation.isPending}
+            >
+              {gatherMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Run Intelligence Gathering
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {data && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Resolved Accounts</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-bold">{data.processed.totalAccounts.toLocaleString()}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Success</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-bold text-green-600">{data.processed.success.toLocaleString()}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Partial</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-bold text-amber-600">{data.processed.partial.toLocaleString()}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Failed</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-bold text-red-600">{data.processed.failed.toLocaleString()}</p></CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Execution Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              <p>{data.message}</p>
+              <p className="mt-2">
+                Built account intelligence for <span className="font-medium text-foreground">{data.processed.accountIntelBuilt}</span> accounts and
+                generated <span className="font-medium text-foreground"> {data.processed.problemMappingsBuilt}</span> campaign-level mappings across departments:
+                <span className="font-medium text-foreground"> {data.departments.join(", ")}</span>.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Account Results</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Intel Version</TableHead>
+                    <TableHead>Campaign Mapping</TableHead>
+                    <TableHead>Primary Dept</TableHead>
+                    <TableHead>Errors</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.results.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">No account-level results returned</TableCell>
+                    </TableRow>
+                  ) : (
+                    data.results.slice(0, 100).map((row) => {
+                      const firstMapping = row.campaignMappings[0];
+                      const activeDepartments = (firstMapping?.departments || []).filter((d) => d.problemCount > 0 || d.solutionCount > 0);
+                      return (
+                        <TableRow key={row.accountId}>
+                          <TableCell className="font-medium">
+                            {row.accountName || row.accountId}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={row.status === "success" ? "secondary" : row.status === "partial" ? "outline" : "destructive"}>
+                              {row.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{row.accountIntelligence?.version ?? "-"}</TableCell>
+                          <TableCell>{row.campaignMappings.length}</TableCell>
+                          <TableCell>
+                            {firstMapping?.primaryDepartment || "-"}
+                            {activeDepartments.length > 0 && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {activeDepartments.slice(0, 2).map((d) => `${d.department} (${d.problemCount}/${d.solutionCount})`).join(", ")}
+                              </p>
+                            )}
+                          </TableCell>
+                          <TableCell className="max-w-[320px]">
+                            {row.errors.length > 0
+                              ? row.errors.slice(0, 2).join(" | ")
+                              : "-"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+              {data.results.length > 100 && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Showing first 100 results out of {data.results.length.toLocaleString()}.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
@@ -982,6 +1291,7 @@ export default function DataManagementPage() {
         <TabsList>
           <TabsTrigger value="overview" className="flex items-center gap-1"><BarChart3 className="h-4 w-4" /> Overview</TabsTrigger>
           <TabsTrigger value="insights" className="flex items-center gap-1"><BarChart3 className="h-4 w-4" /> Insights</TabsTrigger>
+          <TabsTrigger value="intelligence" className="flex items-center gap-1"><Brain className="h-4 w-4" /> Intelligence</TabsTrigger>
           <TabsTrigger value="requests" className="flex items-center gap-1"><FileText className="h-4 w-4" /> Requests</TabsTrigger>
           <TabsTrigger value="uploads" className="flex items-center gap-1"><Upload className="h-4 w-4" /> Uploads</TabsTrigger>
           <TabsTrigger value="quality" className="flex items-center gap-1"><ShieldCheck className="h-4 w-4" /> Quality</TabsTrigger>
@@ -990,6 +1300,7 @@ export default function DataManagementPage() {
 
         <TabsContent value="overview"><OverviewTab /></TabsContent>
         <TabsContent value="insights"><InsightsTab /></TabsContent>
+        <TabsContent value="intelligence"><IntelligenceTab /></TabsContent>
         <TabsContent value="requests"><DataRequestsTab /></TabsContent>
         <TabsContent value="uploads"><UploadsTab /></TabsContent>
         <TabsContent value="quality"><QualityTab /></TabsContent>

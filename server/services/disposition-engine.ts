@@ -1128,6 +1128,62 @@ async function processCallbackRequested(
 
   console.log(`[DispositionEngine] 📞 CALLBACK REQUESTED: Contact ${callAttempt.contactId} | Duration: ${callDuration}s | Campaign: ${callAttempt.campaignId}`);
 
+  // Appointment campaigns: callback requests are follow-up tasks, not qualified leads.
+  // Re-queue for human follow-up to avoid inflating QA/Leads with non-booked outcomes.
+  const [campaign] = await db
+    .select({ type: campaigns.type })
+    .from(campaigns)
+    .where(eq(campaigns.id, callAttempt.campaignId))
+    .limit(1);
+  const campaignType = String(campaign?.type || '').toLowerCase();
+  const isAppointmentCampaign =
+    campaignType === 'appointment_setting' ||
+    campaignType === 'appointment_generation' ||
+    campaignType === 'demo_request' ||
+    campaignType === 'sql' ||
+    campaignType === 'telemarketing';
+
+  if (isAppointmentCampaign) {
+    const minDays = Math.max(1, rules.needsReviewRetryWindowDaysMin);
+    const maxDays = Math.max(minDays, rules.needsReviewRetryWindowDaysMax);
+    const retryDays = minDays + Math.floor(Math.random() * (maxDays - minDays + 1));
+    const nextAttemptAt = new Date();
+    nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
+
+    if (callAttempt.queueItemId) {
+      await db
+        .update(campaignQueue)
+        .set({
+          status: 'queued',
+          nextAttemptAt,
+          targetAgentType: 'human',
+          agentId: null,
+          virtualAgentId: null,
+          lockExpiresAt: null,
+          updatedAt: new Date()
+        })
+        .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    }
+
+    await db.insert(recycleJobs).values({
+      campaignId: callAttempt.campaignId,
+      contactId: callAttempt.contactId,
+      originalCallSessionId: callAttempt.callSessionId,
+      status: 'scheduled',
+      attemptNumber: callAttempt.attemptNumber + 1,
+      maxAttempts: rules.maxAttemptsPerContact,
+      scheduledAt: new Date(),
+      eligibleAt: nextAttemptAt,
+      targetAgentType: 'human',
+      notes: 'Callback requested in appointment campaign - requeued for follow-up without lead creation'
+    });
+
+    result.actions.push(`Appointment campaign callback requeued for ${nextAttemptAt.toISOString()} (no lead created)`);
+    result.nextAttemptAt = nextAttemptAt;
+    result.queueState = 'waiting_retry';
+    return;
+  }
+
   // DURATION GUARD: Block lead creation for impossibly short "callback" calls
   // Production analysis 2026-02-23: AI submits callback_requested for 3-4s calls where
   // "This number is not in service" or IVR/voicemail plays. These are NOT real callbacks.

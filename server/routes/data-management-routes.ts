@@ -12,17 +12,18 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, desc, sql, and, count, isNull, isNotNull, asc } from 'drizzle-orm';
+import { eq, desc, sql, and, count, isNull, isNotNull, asc, inArray } from 'drizzle-orm';
 import {
   dataRequests, insertDataRequestSchema,
   dataUploads, insertDataUploadSchema,
   dataQualityIssues,
   dataTemplates, insertDataTemplateSchema,
   dataQualityScans,
-  contacts, accounts, segments, lists,
+  contacts, accounts, segments, lists, campaigns, campaignQueue,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import multer from 'multer';
+import { buildFilterQuery } from '../filter-builder';
 import {
   runFullQualityScan,
   validateUploadData,
@@ -31,6 +32,10 @@ import {
   classifySeniority,
   classifyDepartment,
 } from '../services/data-quality-engine';
+import { getOrBuildAccountIntelligence } from '../services/account-messaging-service';
+import { generateAccountProblemIntelligence } from '../services/problem-intelligence';
+import type { FilterGroup } from '@shared/filter-types';
+import type { DepartmentProblemMapping } from '@shared/types/problem-intelligence';
 
 const router = Router();
 
@@ -1488,7 +1493,656 @@ router.post('/classify/title', (req: Request, res: Response) => {
   }
 });
 
+// ==================== ACCOUNT INTELLIGENCE GATHERING ====================
+
+const INTELLIGENCE_DEPARTMENTS = ['IT', 'Finance', 'HR', 'Marketing', 'Operations', 'Sales', 'Legal'] as const;
+type IntelligenceDepartment = typeof INTELLIGENCE_DEPARTMENTS[number];
+
+const DEPARTMENT_ALIASES: Record<IntelligenceDepartment, string[]> = {
+  IT: ['it', 'information technology', 'engineering', 'devops', 'security', 'infrastructure', 'technology', 'product'],
+  Finance: ['finance', 'accounting', 'treasury', 'procurement'],
+  HR: ['hr', 'human resources', 'people', 'people ops', 'talent', 'talent acquisition'],
+  Marketing: ['marketing', 'brand', 'content', 'demand gen', 'growth marketing', 'communications'],
+  Operations: ['operations', 'ops', 'supply chain', 'logistics', 'manufacturing', 'fulfillment'],
+  Sales: ['sales', 'revenue', 'business development', 'account management', 'go-to-market'],
+  Legal: ['legal', 'compliance', 'regulatory', 'privacy', 'risk'],
+};
+
+type SevenDeptMapping = {
+  department: IntelligenceDepartment;
+  confidence: number;
+  recommendedApproach: string;
+  messagingAngle: string;
+  painPoints: string[];
+  priorities: string[];
+  commonObjections: string[];
+  problems: Array<{
+    problemId: number;
+    problemStatement: string;
+    confidence: number;
+  }>;
+  solutions: Array<{
+    serviceId: number;
+    serviceName: string;
+  }>;
+  problemCount: number;
+  solutionCount: number;
+};
+
+/**
+ * POST /intelligence/gather
+ * Generate account intelligence and 7-department problem/solution mappings
+ * for account selectors from specific lists and/or campaigns.
+ */
+router.post('/intelligence/gather', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const listIds = uniqueStrings(body.listIds);
+    const campaignIds = uniqueStrings(body.campaignIds);
+    const explicitAccountIds = uniqueStrings(body.accountIds);
+    const mappingCampaignId = typeof body.mappingCampaignId === 'string' ? body.mappingCampaignId.trim() : '';
+    const includeAccountIntelligence = body.includeAccountIntelligence !== false;
+    const includeProblemMapping = body.includeProblemMapping !== false;
+    const forceRefresh = body.forceRefresh === true;
+    const concurrency = Math.max(1, Math.min(Number(body.concurrency) || 3, 10));
+
+    if (listIds.length === 0 && campaignIds.length === 0 && explicitAccountIds.length === 0) {
+      return res.status(400).json({
+        message: 'At least one selector is required: listIds, campaignIds, or accountIds',
+      });
+    }
+
+    const resolvedAccountIds = new Set<string>(explicitAccountIds);
+    const resolutionSummary = {
+      explicitAccountIds: explicitAccountIds.length,
+      fromLists: 0,
+      fromCampaigns: 0,
+      listBreakdown: [] as Array<{ listId: string; listName: string; entityType: string; resolvedAccounts: number }>,
+      campaignBreakdown: [] as Array<{
+        campaignId: string;
+        campaignName: string | null;
+        resolvedAccounts: number;
+        sources: {
+          queue: number;
+          directRefs: number;
+          audienceLists: number;
+          audienceSegments: number;
+          audienceFilter: number;
+        };
+      }>,
+    };
+
+    // Resolve from list selectors
+    if (listIds.length > 0) {
+      const listResolution = await resolveAccountIdsFromLists(listIds);
+      for (const accountId of listResolution.accountIds) resolvedAccountIds.add(accountId);
+      resolutionSummary.fromLists = listResolution.accountIds.length;
+      resolutionSummary.listBreakdown = listResolution.breakdown;
+    }
+
+    // Resolve from campaign selectors
+    const campaignNameMap = new Map<string, string>();
+    if (campaignIds.length > 0) {
+      for (const campaignId of campaignIds) {
+        const campaignResolution = await resolveAccountIdsFromCampaign(campaignId);
+        for (const accountId of campaignResolution.accountIds) resolvedAccountIds.add(accountId);
+        if (campaignResolution.campaignName) {
+          campaignNameMap.set(campaignId, campaignResolution.campaignName);
+        }
+        resolutionSummary.fromCampaigns += campaignResolution.accountIds.length;
+        resolutionSummary.campaignBreakdown.push({
+          campaignId,
+          campaignName: campaignResolution.campaignName,
+          resolvedAccounts: campaignResolution.accountIds.length,
+          sources: campaignResolution.sources,
+        });
+      }
+    }
+
+    const accountIds = Array.from(resolvedAccountIds);
+    if (accountIds.length === 0) {
+      return res.json({
+        message: 'No accounts matched the provided selectors',
+        selectors: { listIds, campaignIds, accountIds: explicitAccountIds },
+        resolved: resolutionSummary,
+        processed: { totalAccounts: 0, success: 0, partial: 0, failed: 0 },
+        departments: INTELLIGENCE_DEPARTMENTS,
+        results: [],
+      });
+    }
+
+    const mappingCampaignIds = includeProblemMapping
+      ? uniqueStrings(mappingCampaignId ? [...campaignIds, mappingCampaignId] : campaignIds)
+      : [];
+
+    // Backfill campaign names for mapping-only campaign id
+    const missingCampaignNames = mappingCampaignIds.filter((id) => !campaignNameMap.has(id));
+    if (missingCampaignNames.length > 0) {
+      const rows = await db
+        .select({ id: campaigns.id, name: campaigns.name })
+        .from(campaigns)
+        .where(inArray(campaigns.id, missingCampaignNames));
+      for (const row of rows) campaignNameMap.set(row.id, row.name);
+    }
+
+    const accountNameMap = await getAccountNameMap(accountIds);
+
+    let success = 0;
+    let partial = 0;
+    let failed = 0;
+    let accountIntelBuilt = 0;
+    let problemMappingsBuilt = 0;
+
+    const results: Array<{
+      accountId: string;
+      accountName: string | null;
+      status: 'success' | 'partial' | 'failed';
+      accountIntelligence: {
+        version: number;
+        confidence: number | null;
+        createdAt: Date | null;
+      } | null;
+      campaignMappings: Array<{
+        campaignId: string;
+        campaignName: string | null;
+        confidence: number;
+        primaryDepartment: IntelligenceDepartment | null;
+        crossDepartmentAngles: string[];
+        departments: SevenDeptMapping[];
+      }>;
+      errors: string[];
+    }> = [];
+
+    for (let i = 0; i < accountIds.length; i += concurrency) {
+      const batch = accountIds.slice(i, i + concurrency);
+
+      const batchResults = await Promise.all(
+        batch.map(async (accountId) => {
+          const accountName = accountNameMap.get(accountId) || null;
+          const errors: string[] = [];
+          const campaignMappings: Array<{
+            campaignId: string;
+            campaignName: string | null;
+            confidence: number;
+            primaryDepartment: IntelligenceDepartment | null;
+            crossDepartmentAngles: string[];
+            departments: SevenDeptMapping[];
+          }> = [];
+
+          let accountIntelligence: {
+            version: number;
+            confidence: number | null;
+            createdAt: Date | null;
+          } | null = null;
+
+          if (includeAccountIntelligence) {
+            try {
+              const intel = await getOrBuildAccountIntelligence(accountId);
+              accountIntelligence = {
+                version: intel.version,
+                confidence: intel.confidence ?? null,
+                createdAt: intel.createdAt ?? null,
+              };
+              accountIntelBuilt++;
+            } catch (error: any) {
+              errors.push(`Account intelligence failed: ${error?.message || String(error)}`);
+            }
+          }
+
+          if (mappingCampaignIds.length > 0) {
+            for (const campaignId of mappingCampaignIds) {
+              try {
+                const problemIntel = await generateAccountProblemIntelligence({
+                  campaignId,
+                  accountId,
+                  forceRefresh,
+                });
+
+                if (!problemIntel) {
+                  errors.push(`Problem mapping returned no data for campaign ${campaignId}`);
+                  continue;
+                }
+
+                const aligned = alignToSevenDepartments(
+                  (problemIntel.departmentIntelligence?.departments || []) as DepartmentProblemMapping[]
+                );
+
+                campaignMappings.push({
+                  campaignId,
+                  campaignName: campaignNameMap.get(campaignId) || null,
+                  confidence: Number(problemIntel.confidence || 0),
+                  primaryDepartment: derivePrimaryDepartment(aligned),
+                  crossDepartmentAngles: Array.isArray(problemIntel.departmentIntelligence?.crossDepartmentAngles)
+                    ? problemIntel.departmentIntelligence!.crossDepartmentAngles.slice(0, 5)
+                    : [],
+                  departments: aligned,
+                });
+                problemMappingsBuilt++;
+              } catch (error: any) {
+                errors.push(`Problem mapping failed for campaign ${campaignId}: ${error?.message || String(error)}`);
+              }
+            }
+          }
+
+          const hasOutput = Boolean(accountIntelligence) || campaignMappings.length > 0;
+          const status: 'success' | 'partial' | 'failed' = errors.length === 0
+            ? 'success'
+            : hasOutput
+              ? 'partial'
+              : 'failed';
+
+          return {
+            accountId,
+            accountName,
+            status,
+            accountIntelligence,
+            campaignMappings,
+            errors,
+          };
+        })
+      );
+
+      for (const row of batchResults) {
+        if (row.status === 'success') success++;
+        else if (row.status === 'partial') partial++;
+        else failed++;
+        results.push(row);
+      }
+    }
+
+    res.json({
+      message: 'Account intelligence gathering complete',
+      selectors: {
+        listIds,
+        campaignIds,
+        accountIds: explicitAccountIds,
+        mappingCampaignIds,
+      },
+      options: {
+        includeAccountIntelligence,
+        includeProblemMapping,
+        forceRefresh,
+        concurrency,
+      },
+      resolved: {
+        ...resolutionSummary,
+        totalAccounts: accountIds.length,
+      },
+      processed: {
+        totalAccounts: accountIds.length,
+        success,
+        partial,
+        failed,
+        accountIntelBuilt,
+        problemMappingsBuilt,
+      },
+      departments: INTELLIGENCE_DEPARTMENTS,
+      results,
+    });
+  } catch (error: any) {
+    console.error('[DataMgmt] Intelligence gather error:', error);
+    res.status(500).json({ message: 'Failed to gather account intelligence', error: error.message });
+  }
+});
+
 // ==================== HELPERS ====================
+
+function uniqueStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const cleaned = value
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter((v) => v.length > 0);
+  return Array.from(new Set(cleaned));
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function dedupeBy<T>(items: T[], getKey: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const key = getKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function normalizeDepartment(value: string | null | undefined): IntelligenceDepartment | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  for (const dept of INTELLIGENCE_DEPARTMENTS) {
+    if (normalized === dept.toLowerCase()) return dept;
+    if (DEPARTMENT_ALIASES[dept].some((alias) => normalized.includes(alias))) {
+      return dept;
+    }
+  }
+  return null;
+}
+
+function emptyDeptMapping(department: IntelligenceDepartment): SevenDeptMapping {
+  return {
+    department,
+    confidence: 0,
+    recommendedApproach: 'exploratory',
+    messagingAngle: '',
+    painPoints: [],
+    priorities: [],
+    commonObjections: [],
+    problems: [],
+    solutions: [],
+    problemCount: 0,
+    solutionCount: 0,
+  };
+}
+
+function alignToSevenDepartments(mappings: DepartmentProblemMapping[]): SevenDeptMapping[] {
+  const buckets = new Map<IntelligenceDepartment, SevenDeptMapping>();
+  for (const dept of INTELLIGENCE_DEPARTMENTS) {
+    buckets.set(dept, emptyDeptMapping(dept));
+  }
+
+  for (const mapping of mappings || []) {
+    const normalizedDept = normalizeDepartment(mapping.department);
+    if (!normalizedDept) continue;
+
+    const current = buckets.get(normalizedDept)!;
+    const incomingProblems = Array.isArray(mapping.detectedProblems) ? mapping.detectedProblems : [];
+    const incomingSolutions = Array.isArray(mapping.relevantServices) ? mapping.relevantServices : [];
+
+    current.problems = dedupeBy(
+      [...current.problems, ...incomingProblems.map((p) => ({
+        problemId: Number(p.problemId),
+        problemStatement: String(p.problemStatement || ''),
+        confidence: Number(p.confidence || 0),
+      }))],
+      (p) => `${p.problemId}:${p.problemStatement}`
+    );
+
+    current.solutions = dedupeBy(
+      [...current.solutions, ...incomingSolutions.map((s) => ({
+        serviceId: Number(s.serviceId),
+        serviceName: String(s.serviceName || ''),
+      }))],
+      (s) => `${s.serviceId}:${s.serviceName}`
+    );
+
+    current.painPoints = Array.from(new Set([...(current.painPoints || []), ...((mapping.painPoints || []) as string[])]));
+    current.priorities = Array.from(new Set([...(current.priorities || []), ...((mapping.priorities || []) as string[])]));
+    current.commonObjections = Array.from(new Set([...(current.commonObjections || []), ...((mapping.commonObjections || []) as string[])]));
+
+    if (!current.messagingAngle && mapping.messagingAngle) {
+      current.messagingAngle = mapping.messagingAngle;
+    }
+    if (current.recommendedApproach === 'exploratory' && mapping.recommendedApproach) {
+      current.recommendedApproach = mapping.recommendedApproach;
+    }
+    current.confidence = Math.max(current.confidence, Number(mapping.confidence || 0));
+    current.problemCount = current.problems.length;
+    current.solutionCount = current.solutions.length;
+  }
+
+  return INTELLIGENCE_DEPARTMENTS.map((dept) => buckets.get(dept)!);
+}
+
+function derivePrimaryDepartment(mappings: SevenDeptMapping[]): IntelligenceDepartment | null {
+  const ranked = [...(mappings || [])]
+    .filter((row) => row.problemCount > 0 || row.solutionCount > 0)
+    .sort((a, b) => {
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+      if (b.problemCount !== a.problemCount) return b.problemCount - a.problemCount;
+      return b.solutionCount - a.solutionCount;
+    });
+  return ranked[0]?.department || null;
+}
+
+async function getAccountNameMap(accountIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (accountIds.length === 0) return map;
+
+  for (const chunk of chunkArray(accountIds, 500)) {
+    const rows = await db
+      .select({ id: accounts.id, name: accounts.name })
+      .from(accounts)
+      .where(inArray(accounts.id, chunk));
+    for (const row of rows) {
+      map.set(row.id, row.name);
+    }
+  }
+
+  return map;
+}
+
+async function resolveAccountIdsFromLists(listIds: string[]): Promise<{
+  accountIds: string[];
+  breakdown: Array<{ listId: string; listName: string; entityType: string; resolvedAccounts: number }>;
+}> {
+  const accountIds = new Set<string>();
+  const breakdown: Array<{ listId: string; listName: string; entityType: string; resolvedAccounts: number }> = [];
+
+  if (listIds.length === 0) return { accountIds: [], breakdown };
+
+  const listRows = await db
+    .select({
+      id: lists.id,
+      name: lists.name,
+      entityType: lists.entityType,
+      recordIds: lists.recordIds,
+    })
+    .from(lists)
+    .where(inArray(lists.id, listIds));
+
+  for (const row of listRows) {
+    const ids = Array.isArray(row.recordIds) ? row.recordIds.filter((id): id is string => typeof id === 'string' && id.length > 0) : [];
+    let resolvedCount = 0;
+
+    if (row.entityType === 'account') {
+      for (const id of ids) accountIds.add(id);
+      resolvedCount = ids.length;
+    } else if (row.entityType === 'contact' && ids.length > 0) {
+      const resolved = new Set<string>();
+      for (const chunk of chunkArray(ids, 500)) {
+        const contactsWithAccount = await db
+          .select({ accountId: contacts.accountId })
+          .from(contacts)
+          .where(
+            and(
+              inArray(contacts.id, chunk),
+              isNotNull(contacts.accountId),
+              isNull(contacts.deletedAt)
+            )
+          );
+        for (const c of contactsWithAccount) {
+          if (c.accountId) resolved.add(c.accountId);
+        }
+      }
+      for (const id of resolved) accountIds.add(id);
+      resolvedCount = resolved.size;
+    }
+
+    breakdown.push({
+      listId: row.id,
+      listName: row.name || row.id,
+      entityType: row.entityType,
+      resolvedAccounts: resolvedCount,
+    });
+  }
+
+  return {
+    accountIds: Array.from(accountIds),
+    breakdown,
+  };
+}
+
+async function resolveAccountIdsFromCampaign(campaignId: string): Promise<{
+  campaignName: string | null;
+  accountIds: string[];
+  sources: {
+    queue: number;
+    directRefs: number;
+    audienceLists: number;
+    audienceSegments: number;
+    audienceFilter: number;
+  };
+}> {
+  const accountIds = new Set<string>();
+  const sources = {
+    queue: 0,
+    directRefs: 0,
+    audienceLists: 0,
+    audienceSegments: 0,
+    audienceFilter: 0,
+  };
+
+  const [campaign] = await db
+    .select({
+      id: campaigns.id,
+      name: campaigns.name,
+      audienceRefs: campaigns.audienceRefs,
+    })
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+
+  if (!campaign) {
+    return {
+      campaignName: null,
+      accountIds: [],
+      sources,
+    };
+  }
+
+  // 1) Existing queue entries
+  const queued = await db
+    .selectDistinct({ accountId: campaignQueue.accountId })
+    .from(campaignQueue)
+    .where(
+      and(
+        eq(campaignQueue.campaignId, campaignId),
+        isNotNull(campaignQueue.accountId)
+      )
+    );
+
+  for (const row of queued) {
+    if (row.accountId) accountIds.add(row.accountId);
+  }
+  sources.queue = queued.length;
+
+  const refs = (campaign.audienceRefs || {}) as any;
+
+  // 2) Direct account refs in audience payload
+  const directRefs = uniqueStrings([...(Array.isArray(refs?.accounts) ? refs.accounts : []), ...(Array.isArray(refs?.accountIds) ? refs.accountIds : []), ...(Array.isArray(refs?.selectedAccounts) ? refs.selectedAccounts : [])]);
+  for (const id of directRefs) accountIds.add(id);
+  sources.directRefs = directRefs.length;
+
+  // 3) List refs in campaign audience
+  const audienceListIds = uniqueStrings([...(Array.isArray(refs?.lists) ? refs.lists : []), ...(Array.isArray(refs?.selectedLists) ? refs.selectedLists : [])]);
+  if (audienceListIds.length > 0) {
+    const fromLists = await resolveAccountIdsFromLists(audienceListIds);
+    for (const id of fromLists.accountIds) accountIds.add(id);
+    sources.audienceLists = fromLists.accountIds.length;
+  }
+
+  // 4) Segment refs in campaign audience
+  const segmentIds = uniqueStrings([...(Array.isArray(refs?.segments) ? refs.segments : []), ...(Array.isArray(refs?.selectedSegments) ? refs.selectedSegments : [])]);
+  if (segmentIds.length > 0) {
+    const segmentRows = await db
+      .select({
+        id: segments.id,
+        entityType: segments.entityType,
+        definitionJson: segments.definitionJson,
+      })
+      .from(segments)
+      .where(inArray(segments.id, segmentIds));
+
+    for (const segment of segmentRows) {
+      try {
+        const definition = (segment.definitionJson || {}) as FilterGroup;
+        const table = segment.entityType === 'account' ? accounts : contacts;
+        const filterSql = buildFilterQuery(definition, table as any);
+        if (!filterSql) continue;
+
+        if (segment.entityType === 'account') {
+          const rows = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(filterSql);
+          for (const row of rows) accountIds.add(row.id);
+          sources.audienceSegments += rows.length;
+        } else {
+          const rows = await db
+            .selectDistinct({ accountId: contacts.accountId })
+            .from(contacts)
+            .where(
+              and(
+                filterSql,
+                isNotNull(contacts.accountId),
+                isNull(contacts.deletedAt)
+              )
+            );
+          for (const row of rows) {
+            if (row.accountId) accountIds.add(row.accountId);
+          }
+          sources.audienceSegments += rows.length;
+        }
+      } catch (error) {
+        console.warn(`[DataMgmt] Failed to resolve segment ${segment.id} for campaign ${campaignId}:`, error);
+      }
+    }
+  }
+
+  // 5) Filter-group refs in campaign audience
+  if (refs?.filterGroup) {
+    try {
+      const filterSql = buildFilterQuery(refs.filterGroup as FilterGroup, contacts as any);
+      if (filterSql) {
+        const rows = await db
+          .selectDistinct({ accountId: contacts.accountId })
+          .from(contacts)
+          .where(
+            and(
+              filterSql,
+              isNotNull(contacts.accountId),
+              isNull(contacts.deletedAt)
+            )
+          );
+        for (const row of rows) {
+          if (row.accountId) accountIds.add(row.accountId);
+        }
+        sources.audienceFilter += rows.length;
+      }
+    } catch (error) {
+      console.warn(`[DataMgmt] Failed to resolve filterGroup for campaign ${campaignId}:`, error);
+    }
+  }
+
+  // 6) Explicit all-contacts mode
+  if (refs?.allContacts === true) {
+    const rows = await db
+      .selectDistinct({ accountId: contacts.accountId })
+      .from(contacts)
+      .where(and(isNotNull(contacts.accountId), isNull(contacts.deletedAt)));
+    for (const row of rows) {
+      if (row.accountId) accountIds.add(row.accountId);
+    }
+    sources.audienceFilter += rows.length;
+  }
+
+  return {
+    campaignName: campaign.name,
+    accountIds: Array.from(accountIds),
+    sources,
+  };
+}
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];

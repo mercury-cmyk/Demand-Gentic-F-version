@@ -191,52 +191,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         ],
       },
       {
-        id: 'accounts',
-        title: 'Accounts',
-        icon: 'Building2',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-        items: [
-          {
-            id: 'all-accounts',
-            title: 'All Accounts',
-            url: '/accounts',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'target-accounts',
-            title: 'Target Accounts (TAL)',
-            url: '/domain-sets',
-            roles: [USER_ROLES.ADMIN, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'account-segments',
-            title: 'Account Segments & Lists',
-            url: '/segments?entity=account',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-        ],
-      },
-      {
-        id: 'contacts',
-        title: 'Contacts',
-        icon: 'Users',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-        items: [
-          {
-            id: 'all-contacts',
-            title: 'All Contacts',
-            url: '/contacts',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'contact-segments',
-            title: 'Contact Segments & Lists',
-            url: '/segments?entity=contact',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-        ],
-      },
-      {
         id: 'revenue-pipeline',
         title: 'Revenue & Pipeline',
         icon: 'KanbanSquare',
@@ -456,10 +410,48 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
       {
         id: 'data-management',
         title: 'Data Management',
-        url: '/data-management',
         icon: 'Database',
         roles: [USER_ROLES.ADMIN],
-        description: 'Manage data uploads, quality, templates, and requests',
+        description: 'Accounts, contacts, segments, and data operations',
+        items: [
+          {
+            id: 'data-management-hub',
+            title: 'Data Hub',
+            url: '/data-management',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Manage data uploads, quality, templates, and requests',
+          },
+          {
+            id: 'all-accounts',
+            title: 'Accounts',
+            url: '/accounts',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
+          },
+          {
+            id: 'target-accounts',
+            title: 'Target Accounts (TAL)',
+            url: '/domain-sets',
+            roles: [USER_ROLES.ADMIN, USER_ROLES.DATA_OPS],
+          },
+          {
+            id: 'account-segments',
+            title: 'Account Segments & Lists',
+            url: '/segments?entity=account',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
+          },
+          {
+            id: 'all-contacts',
+            title: 'Contacts',
+            url: '/contacts',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
+          },
+          {
+            id: 'contact-segments',
+            title: 'Contact Segments & Lists',
+            url: '/segments?entity=contact',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
+          },
+        ],
       },
     ],
   },
