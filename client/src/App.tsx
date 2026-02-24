@@ -127,6 +127,7 @@ import ClientPortalCampaignCreate from "@/pages/client-portal/campaign-create";
 const ClientPortalIntelligence = lazy(() => import("@/pages/client-portal-intelligence"));
 const ClientPortalGenerativeStudio = lazy(() => import("@/pages/client-portal-generative-studio"));
 import ClientPortalCampaignQueue from "@/pages/client-portal-campaign-queue";
+import ClientPortalCampaignPlannerPage from "@/pages/client-portal-campaign-planner";
 const ClientPortalCallReports = lazy(() => import("@/pages/client-portal-call-reports"));
 const ClientPortalAnalytics = lazy(() => import("@/pages/client-portal-analytics"));
 const ClientPortalConversationQuality = lazy(() => import("@/pages/client-portal-conversation-quality"));
@@ -787,6 +788,11 @@ function Router() {
       <Route path="/client-portal/create-campaign">
         <ClientPortalProtectedRoute>
           <ClientPortalCampaignCreate />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/campaign-planner">
+        <ClientPortalProtectedRoute>
+          <ClientPortalCampaignPlannerPage />
         </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/services">
