@@ -290,6 +290,10 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
 
   console.log(`[sendCampaignEmails] Resolved ${uniqueContacts.length} unique contacts from audience`);
 
+  if (uniqueContacts.length === 0) {
+    throw new Error("Campaign audience resolved to 0 contacts");
+  }
+
   const recipients: BulkEmailRecipient[] = uniqueContacts
     .filter(c => c.email)
     .map(contact => ({
@@ -335,6 +339,10 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
         'account.employees': contact.accountEmployees != null ? String(contact.accountEmployees) : '',
       },
     }));
+
+  if (recipients.length === 0) {
+    throw new Error("Campaign audience has no contacts with email addresses");
+  }
 
   // Resolve sender profile for proper from/replyTo
   let fromEmail = process.env.DEFAULT_FROM_EMAIL || 'noreply@example.com';

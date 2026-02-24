@@ -5729,7 +5729,7 @@ export function registerRoutes(app: Express) {
         console.log(`[Campaign Update] Synced persona.voice to first assigned voice: "${firstVoice.id}" (${firstVoice.name}), total assigned: ${updateData.assignedVoices.length}`);
       }
       
-      const campaign = await storage.updateCampaign(req.params.id, updateData);
+      let campaign = await storage.updateCampaign(req.params.id, updateData);
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found' });
       }
@@ -5737,6 +5737,7 @@ export function registerRoutes(app: Express) {
       // === AUTO-POPULATE QUEUE WHEN AUDIENCE/STATUS CHANGES (all campaign types) ===
       const audienceChanged = 'audienceRefs' in updateData;
       const statusChangedToActive = updateData.status === 'active';
+      const transitionedToActive = statusChangedToActive && existingCampaign.status !== 'active';
 
       if (campaign.audienceRefs && (audienceChanged || statusChangedToActive)) {
         try {
@@ -5915,6 +5916,54 @@ export function registerRoutes(app: Express) {
           }
         } catch (queueErr) {
           console.error(`[Campaign Update] Queue auto-populate error (non-fatal):`, queueErr);
+        }
+      }
+
+      // Email campaigns resumed from paused state might have never been launched.
+      // If there are no send records yet, bootstrap first send on transition to active.
+      if (campaign.type === 'email' && transitionedToActive) {
+        const [sendStats] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.emailSends)
+          .where(eq(schema.emailSends.campaignId, req.params.id));
+
+        const existingSendCount = sendStats?.count || 0;
+        const neverLaunched = !existingCampaign.launchedAt;
+
+        if (neverLaunched && existingSendCount === 0) {
+          try {
+            console.log(`[Campaign Update] First activation for paused email campaign ${req.params.id}; triggering send`);
+            const { sendCampaignEmails } = await import("./services/bulk-email-service");
+            const sendResult = await sendCampaignEmails(req.params.id);
+
+            if (sendResult.sent === 0) {
+              throw new Error("No deliverable recipients found for this campaign audience");
+            }
+
+            const nextStatus = sendResult.failed === 0 && sendResult.sent > 0 ? 'completed' : 'active';
+            const [updatedAfterSend] = await db
+              .update(campaigns)
+              .set({
+                launchedAt: new Date(),
+                status: nextStatus,
+                updatedAt: new Date(),
+              })
+              .where(eq(campaigns.id, req.params.id))
+              .returning();
+
+            if (updatedAfterSend) {
+              campaign = updatedAfterSend as any;
+            }
+          } catch (sendError) {
+            console.error(`[Campaign Update] Failed to bootstrap email send for ${req.params.id}:`, sendError);
+            await db
+              .update(campaigns)
+              .set({ status: 'paused', updatedAt: new Date() })
+              .where(eq(campaigns.id, req.params.id));
+            return res.status(400).json({
+              message: sendError instanceof Error ? sendError.message : "Failed to send campaign",
+            });
+          }
         }
       }
 
@@ -6345,6 +6394,10 @@ export function registerRoutes(app: Express) {
           const sendResult = await sendCampaignEmails(req.params.id);
           console.log(`[LAUNCH CAMPAIGN] Email send result: ${sendResult.sent} sent, ${sendResult.failed} failed, ${sendResult.suppressed} suppressed`);
 
+          if (sendResult.sent === 0) {
+            throw new Error("No deliverable recipients found for this campaign audience");
+          }
+
           // Mark as completed if all sent successfully
           if (sendResult.failed === 0 && sendResult.sent > 0) {
             await db
@@ -6353,7 +6406,14 @@ export function registerRoutes(app: Express) {
               .where(eq(campaigns.id, req.params.id));
           }
         } catch (sendErr) {
-          console.error(`[LAUNCH CAMPAIGN] Email send error (non-fatal, campaign is active):`, sendErr);
+          console.error(`[LAUNCH CAMPAIGN] Email send error:`, sendErr);
+          await db
+            .update(campaigns)
+            .set({ status: 'draft', launchedAt: null, updatedAt: new Date() })
+            .where(eq(campaigns.id, req.params.id));
+          return res.status(400).json({
+            message: sendErr instanceof Error ? sendErr.message : "Failed to send campaign",
+          });
         }
       }
 
