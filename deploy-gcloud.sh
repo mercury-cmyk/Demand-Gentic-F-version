@@ -60,7 +60,7 @@ gcloud run deploy ${SERVICE_NAME} \
     --min-instances 1 \
     --max-instances 10 \
     --port 8080 \
-    --concurrency 500 \
+    --concurrency 80 \
     --startup-cpu-boost \
     --vpc-connector pivotal-connector \
     --vpc-egress private-ranges-only \

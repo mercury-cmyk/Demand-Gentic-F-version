@@ -392,6 +392,10 @@ app.use((req, res, next) => {
     if (pathname === '/voice-dialer') {
       console.log('[WebSocket Upgrade] Handling Voice Dialer connection');
 
+      // Optimize socket for real-time audio streaming
+      (socket as any).setNoDelay?.(true);
+      (socket as any).setKeepAlive?.(true, 30000);
+
       // CRITICAL FIX: Check if socket is writable before attempting upgrade
       if (!socket.writable) {
         console.error('[WebSocket Upgrade] ❌ Socket not writable - cannot upgrade. This may be a tunnel issue.');
@@ -438,8 +442,10 @@ app.use((req, res, next) => {
       }
 
       // CRITICAL: Set socket options to keep connection alive
-      socket.setNoDelay(true);
-      socket.setKeepAlive(true, 30000);
+      (socket as any).setNoDelay?.(true);
+      (socket as any).setKeepAlive?.(true, 30000);
+      // Increase buffer size for high-throughput audio streaming
+      (socket as any)._writableState.highWaterMark = 64 * 1024;
 
       // Log socket state and attempt immediate upgrade
       // Don't defer - ngrok might be timing out the connection
@@ -469,6 +475,10 @@ app.use((req, res, next) => {
       }
     } else if (pathname === '/ai-media-stream') {
       console.log('[WebSocket Upgrade] Handling AI Media Stream connection');
+
+      // Optimize socket for real-time audio streaming
+      (socket as any).setNoDelay?.(true);
+      (socket as any).setKeepAlive?.(true, 30000);
 
       if (!mediaWss) {
         console.warn('[WebSocket Upgrade] AI Media Stream not initialized');

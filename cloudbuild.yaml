@@ -51,7 +51,7 @@ steps:
       - '--port'
       - '8080'
       - '--concurrency'
-      - '500'
+      - '80'
       - '--startup-cpu-boost'
       - '--vpc-connector'
       - 'pivotal-connector'
