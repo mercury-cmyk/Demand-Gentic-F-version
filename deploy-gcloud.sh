@@ -1,95 +1,81 @@
 #!/bin/bash
-# Google Cloud Run Deployment Script
+# Direct Google Cloud Run Deployment (bypasses GitHub Actions)
+# Usage: bash deploy-gcloud.sh
 
 set -e
 
 # Configuration
-PROJECT_ID="${GCP_PROJECT_ID:-your-project-id}"
-REGION="${GCP_REGION:-us-central1}"
+PROJECT_ID="pivotalb2b-2026"
+REGION="us-central1"
 SERVICE_NAME="demandgentic-api"
-IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
+REPOSITORY="pivotalcrm-repo"
+IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE_NAME}"
+TAG=$(git rev-parse --short HEAD 2>/dev/null || echo "manual")
 
-echo "🚀 Deploying DemandGentic.ai By Pivotal B2B to Google Cloud Run"
-echo "Project: ${PROJECT_ID}"
-echo "Region: ${REGION}"
-echo "Service: ${SERVICE_NAME}"
+echo "=========================================="
+echo " Deploying DemandGentic.ai to Cloud Run"
+echo "=========================================="
+echo "Project:  ${PROJECT_ID}"
+echo "Region:   ${REGION}"
+echo "Service:  ${SERVICE_NAME}"
+echo "Image:    ${IMAGE}:${TAG}"
+echo "=========================================="
 
-# Check if gcloud is installed
+# Check gcloud
 if ! command -v gcloud &> /dev/null; then
-    echo "❌ gcloud CLI is not installed. Please install it first."
-    echo "   Visit: https://cloud.google.com/sdk/docs/install"
+    echo "ERROR: gcloud CLI not installed. Visit: https://cloud.google.com/sdk/docs/install"
     exit 1
 fi
 
-# Authenticate (if not already)
-echo "📝 Checking authentication..."
-gcloud auth print-access-token > /dev/null 2>&1 || gcloud auth login
-
 # Set project
-echo "📁 Setting project..."
-gcloud config set project ${PROJECT_ID}
+gcloud config set project ${PROJECT_ID} --quiet
 
-# Enable required APIs
-echo "🔧 Enabling required APIs..."
-gcloud services enable \
-    cloudbuild.googleapis.com \
-    run.googleapis.com \
-    containerregistry.googleapis.com \
-    secretmanager.googleapis.com \
-    --quiet
+# Configure Docker auth for Artifact Registry
+gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 
-# Create secrets if they don't exist
-echo "🔐 Setting up secrets..."
-if ! gcloud secrets describe DATABASE_URL --quiet 2>/dev/null; then
-    echo "Creating DATABASE_URL secret..."
-    echo -n "Enter your DATABASE_URL: "
-    read -s DATABASE_URL
-    echo
-    echo -n "${DATABASE_URL}" | gcloud secrets create DATABASE_URL --data-file=-
-fi
+# Build and push via Cloud Build (uses E2_HIGHCPU_8 machine)
+echo ""
+echo "[1/3] Building Docker image via Cloud Build..."
+gcloud builds submit \
+    --tag "${IMAGE}:${TAG}" \
+    --machine-type=e2-highcpu-8 \
+    --timeout=1200s \
+    .
 
-if ! gcloud secrets describe JWT_SECRET --quiet 2>/dev/null; then
-    echo "Creating JWT_SECRET secret..."
-    JWT_SECRET=$(openssl rand -base64 32)
-    echo -n "${JWT_SECRET}" | gcloud secrets create JWT_SECRET --data-file=-
-    echo "JWT_SECRET generated and stored."
-fi
-
-if ! gcloud secrets describe OPENAI_API_KEY --quiet 2>/dev/null; then
-    echo "Creating OPENAI_API_KEY secret..."
-    echo -n "Enter your OPENAI_API_KEY: "
-    read -s OPENAI_API_KEY
-    echo
-    echo -n "${OPENAI_API_KEY}" | gcloud secrets create OPENAI_API_KEY --data-file=-
-fi
-
-# Build the image
-echo "🏗️  Building Docker image..."
-gcloud builds submit --tag ${IMAGE_NAME}:latest .
+# Also tag as latest
+echo ""
+echo "[2/3] Tagging as latest..."
+gcloud artifacts docker tags add "${IMAGE}:${TAG}" "${IMAGE}:latest" 2>/dev/null || true
 
 # Deploy to Cloud Run
-echo "🚀 Deploying to Cloud Run..."
+echo ""
+echo "[3/3] Deploying to Cloud Run..."
 gcloud run deploy ${SERVICE_NAME} \
-    --image ${IMAGE_NAME}:latest \
+    --image "${IMAGE}:${TAG}" \
     --platform managed \
     --region ${REGION} \
     --allow-unauthenticated \
-    --memory 1Gi \
-    --cpu 1 \
-    --min-instances 0 \
+    --memory 4Gi \
+    --cpu 4 \
+    --min-instances 1 \
     --max-instances 10 \
     --port 8080 \
-    --set-env-vars "NODE_ENV=production" \
-    --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,SESSION_SECRET=SESSION_SECRET:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,AI_INTEGRATIONS_OPENAI_API_KEY=AI_INTEGRATIONS_OPENAI_API_KEY:latest,AI_INTEGRATIONS_OPENAI_BASE_URL=AI_INTEGRATIONS_OPENAI_BASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,AI_INTEGRATIONS_GEMINI_API_KEY=AI_INTEGRATIONS_GEMINI_API_KEY:latest,AI_INTEGRATIONS_GEMINI_BASE_URL=AI_INTEGRATIONS_GEMINI_BASE_URL:latest,BRAVE_SEARCH_API_KEY=BRAVE_SEARCH_API_KEY:latest,EMAIL_LIST_VERIFY_API_KEY=EMAIL_LIST_VERIFY_API_KEY:latest,PSE_GOOGLE=PSE_GOOGLE:latest,GOOGLE_SEARCH_ENGINE_ID=GOOGLE_SEARCH_ENGINE_ID:latest,GOOGLE_SEARCH_API_KEY=GOOGLE_SEARCH_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,MICROSOFT_CLIENT_ID=MICROSOFT_CLIENT_ID:latest,MICROSOFT_CLIENT_SECRET=MICROSOFT_CLIENT_SECRET:latest,MICROSOFT_TENANT_ID=MICROSOFT_TENANT_ID:latest,COMPANIES_HOUSE_API_KEY=COMPANIES_HOUSE_API_KEY:latest,GOOGLE_AUTH_CLIENT_ID=GOOGLE_AUTH_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,TELNYX_SIP_CONNECTION_ID=TELNYX_SIP_CONNECTION_ID:latest,TELNYX_SIP_PASSWORD=TELNYX_SIP_PASSWORD:latest,TELNYX_SIP_USERNAME=TELNYX_SIP_USERNAME:latest,TELNYX_API_KEY=TELNYX_API_KEY:latest,TELNYX_CALL_CONTROL_APP_ID=TELNYX_CALL_CONTROL_APP_ID:latest,TELNYX_FROM_NUMBER=TELNYX_FROM_NUMBER:latest,TELNYX_WEBHOOK_URL=TELNYX_WEBHOOK_URL:latest,PUBLIC_WEBSOCKET_URL=PUBLIC_WEBSOCKET_URL:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ELEVENLABS_WEBHOOK_SECRET=ELEVENLABS_WEBHOOK_SECRET:latest,REDIS_URL=REDIS_URL:latest,MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,ORG_INTELLIGENCE_OPENAI_MODEL=ORG_INTELLIGENCE_OPENAI_MODEL:latest"
+    --concurrency 500 \
+    --startup-cpu-boost \
+    --vpc-connector pivotal-connector \
+    --vpc-egress private-ranges-only \
+    --set-env-vars "NODE_ENV=production,TELNYX_NUMBER_POOL_ENABLED=true,TELNYX_TEXML_APP_ID=2870970047591876264,VOICE_PROVIDER=google,VOICE_PROVIDER_FALLBACK=true,VOICE_PROVIDER_FALLBACK_TARGET=openai,GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio,USE_VERTEX_AI=true,GOOGLE_CLOUD_PROJECT=pivotalb2b-2026,GCP_PROJECT_ID=pivotalb2b-2026,GCS_PROJECT_ID=pivotalb2b-2026,GCS_BUCKET=demandgentic-storage,BASE_URL=https://demandgentic.ai,PUBLIC_TEXML_HOST=demandgentic.ai,DEEPGRAM_MODEL=nova-2-phonecall,DEEPGRAM_LANGUAGE=en-US,CONVERSATION_QUALITY_MODEL=deepseek-chat,CALL_EXECUTION_ENABLED=true,GLOBAL_MAX_CONCURRENT_CALLS=100,MAX_CONCURRENT_CALLS=100,ENABLE_LOG_STREAMING=true,APP_GIT_SHA=${TAG}" \
+    --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,SESSION_SECRET=SESSION_SECRET:latest,SECRET_MANAGER_MASTER_KEY=SECRET_MANAGER_MASTER_KEY:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,OPENAI_WEBHOOK_SECRET=OPENAI_WEBHOOK_SECRET:latest,AI_INTEGRATIONS_OPENAI_API_KEY=AI_INTEGRATIONS_OPENAI_API_KEY:latest,AI_INTEGRATIONS_OPENAI_BASE_URL=AI_INTEGRATIONS_OPENAI_BASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,AI_INTEGRATIONS_GEMINI_API_KEY=AI_INTEGRATIONS_GEMINI_API_KEY:latest,AI_INTEGRATIONS_GEMINI_BASE_URL=AI_INTEGRATIONS_GEMINI_BASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,BRAVE_SEARCH_API_KEY=BRAVE_SEARCH_API_KEY:latest,EMAIL_LIST_VERIFY_API_KEY=EMAIL_LIST_VERIFY_API_KEY:latest,PSE_GOOGLE=PSE_GOOGLE:latest,GOOGLE_SEARCH_ENGINE_ID=GOOGLE_SEARCH_ENGINE_ID:latest,GOOGLE_SEARCH_API_KEY=GOOGLE_SEARCH_API_KEY:latest,MICROSOFT_CLIENT_ID=MICROSOFT_CLIENT_ID:latest,MICROSOFT_CLIENT_SECRET=MICROSOFT_CLIENT_SECRET:latest,MICROSOFT_TENANT_ID=MICROSOFT_TENANT_ID:latest,COMPANIES_HOUSE_API_KEY=COMPANIES_HOUSE_API_KEY:latest,GOOGLE_AUTH_CLIENT_ID=GOOGLE_AUTH_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,TELNYX_API_KEY=TELNYX_API_KEY:latest,TELNYX_CONNECTION_ID=TELNYX_CONNECTION_ID:latest,TELNYX_CALL_CONTROL_APP_ID=TELNYX_CALL_CONTROL_APP_ID:latest,TELNYX_FROM_NUMBER=TELNYX_FROM_NUMBER:latest,TELNYX_SIP_CONNECTION_ID=TELNYX_SIP_CONNECTION_ID:latest,TELNYX_SIP_PASSWORD=TELNYX_SIP_PASSWORD:latest,TELNYX_SIP_USERNAME=TELNYX_SIP_USERNAME:latest,TELNYX_WEBHOOK_URL=TELNYX_WEBHOOK_URL:latest,PUBLIC_WEBSOCKET_URL=PUBLIC_WEBSOCKET_URL:latest,PUBLIC_WEBHOOK_HOST=PUBLIC_WEBHOOK_HOST:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ELEVENLABS_WEBHOOK_SECRET=ELEVENLABS_WEBHOOK_SECRET:latest,REDIS_URL=REDIS_URL:latest,MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,DEEPGRAM_API_KEY=DEEPGRAM_API_KEY:latest,ORG_INTELLIGENCE_OPENAI_MODEL=ORG_INTELLIGENCE_OPENAI_MODEL:latest,PGDATABASE=PGDATABASE:latest,PGHOST=PGHOST:latest,PGPORT=PGPORT:latest,PGUSER=PGUSER:latest,PGPASSWORD=PGPASSWORD:latest"
 
-# Get the service URL
+# Verify
 SERVICE_URL=$(gcloud run services describe ${SERVICE_NAME} --region ${REGION} --format 'value(status.url)')
 
 echo ""
-echo "✅ Deployment complete!"
-echo "🌐 Service URL: ${SERVICE_URL}"
+echo "=========================================="
+echo " Deployment complete!"
+echo "=========================================="
+echo "Service URL: ${SERVICE_URL}"
 echo ""
-echo "📋 Next steps:"
-echo "   1. Update your DNS to point to this URL"
-echo "   2. Set up a custom domain: gcloud run domain-mappings create --service ${SERVICE_NAME} --domain your-domain.com --region ${REGION}"
-echo "   3. Configure additional environment variables as needed"
+echo "Health check:"
+echo "  curl -s ${SERVICE_URL}/api/health | head -c 200"
+echo ""
