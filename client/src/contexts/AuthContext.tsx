@@ -12,6 +12,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AUTH_VALIDATION_TIMEOUT_MS = 8000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Omit<User, 'password'> | null>(null);
@@ -21,38 +22,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Load auth state from localStorage on mount and validate token
   useEffect(() => {
     const validateAndLoadAuth = async () => {
-      const storedToken = localStorage.getItem('authToken');
-      const storedUser = localStorage.getItem('authUser');
-      
-      if (storedToken && storedUser) {
-        // First set the state immediately
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
-        
-        // Then validate the token in the background
-        try {
-          const response = await fetch('/api/dashboard/stats', {
-            headers: {
-              'Authorization': `Bearer ${storedToken}`
-            }
-          });
-          
-          if (!response.ok && (response.status === 401 || response.status === 403)) {
-            // Only clear if we get a definite auth failure
-            console.log('[AUTH] Token validation failed, clearing auth state');
-            setToken(null);
-            setUser(null);
+      try {
+        const storedToken = localStorage.getItem('authToken');
+        const storedUser = localStorage.getItem('authUser');
+
+        if (storedToken && storedUser) {
+          let parsedUser: Omit<User, 'password'> | null = null;
+          try {
+            parsedUser = JSON.parse(storedUser);
+          } catch (parseError) {
+            console.warn('[AUTH] Corrupted authUser payload in localStorage, clearing auth state:', parseError);
             localStorage.removeItem('authToken');
             localStorage.removeItem('authUser');
           }
-          // If we get other errors (500, network issues, etc.), keep the token
-        } catch (error) {
-          // On network errors, keep the user logged in
-          console.warn('[AUTH] Token validation error (keeping user logged in):', error);
+
+          if (parsedUser) {
+            // Set auth state immediately so UI can render even if validation endpoint is slow.
+            setToken(storedToken);
+            setUser(parsedUser);
+
+            // Validate token with a hard timeout so startup never hangs forever.
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => {
+              controller.abort();
+            }, AUTH_VALIDATION_TIMEOUT_MS);
+
+            try {
+              const response = await fetch('/api/auth/session', {
+                headers: {
+                  'Authorization': `Bearer ${storedToken}`
+                },
+                signal: controller.signal,
+              });
+
+              if (!response.ok && (response.status === 401 || response.status === 403)) {
+                // Only clear if we get a definite auth failure.
+                console.log('[AUTH] Token validation failed, clearing auth state');
+                setToken(null);
+                setUser(null);
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('authUser');
+              }
+              // If we get other errors (500, network issues, etc.), keep the token.
+            } catch (error) {
+              // On network errors/timeouts, keep the user logged in.
+              console.warn('[AUTH] Token validation error (keeping user logged in):', error);
+            } finally {
+              window.clearTimeout(timeoutId);
+            }
+          }
         }
+      } finally {
+        // Always release loading state, even if validation hangs/errors.
+        setIsLoading(false);
       }
-      
-      setIsLoading(false);
     };
     
     validateAndLoadAuth();

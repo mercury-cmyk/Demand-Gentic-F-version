@@ -2,6 +2,7 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const FRIENDLY_RATE_LIMIT_MESSAGE =
   "429: The AI service is temporarily rate-limited. Please wait a moment and try again.";
+const DEFAULT_QUERY_TIMEOUT_MS = 12000;
 
 function extractErrorMessage(rawText: string): string {
   const text = (rawText || "").trim();
@@ -151,10 +152,24 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const url = queryKey.join("/") as string;
-    const res = await fetch(url, {
-      headers: getAuthHeaders(url),
-      credentials: "include",
-    });
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), DEFAULT_QUERY_TIMEOUT_MS);
+    let res: Response;
+
+    try {
+      res = await fetch(url, {
+        headers: getAuthHeaders(url),
+        credentials: "include",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`Request timed out after ${DEFAULT_QUERY_TIMEOUT_MS}ms`);
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
 
     // Handle 401 Unauthorized
     if (res.status === 401) {

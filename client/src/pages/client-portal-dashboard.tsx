@@ -966,8 +966,6 @@ export default function ClientPortalDashboard() {
   });
   const ukefTranscriptQaEnabled = ukefTranscriptQaProbe?.enabled ?? false;
 
-<<<<<<< HEAD
-
   // Lead Journey Pipeline feature probe
   const { data: journeyPipelineProbe } = useQuery<{ enabled: boolean }>({
     queryKey: ['journey-pipeline-feature-probe', user?.clientAccountId],

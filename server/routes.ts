@@ -1261,6 +1261,25 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // Lightweight auth probe for frontend bootstrap.
+  // Uses JWT middleware only (no expensive dashboard queries).
+  app.get("/api/auth/session", requireAuth, async (req, res) => {
+    const roles = Array.isArray(req.user?.roles) && req.user.roles.length > 0
+      ? req.user.roles
+      : [req.user?.role || "agent"];
+
+    res.json({
+      authenticated: true,
+      user: {
+        userId: req.user?.userId,
+        username: req.user?.username,
+        email: req.user?.email,
+        role: req.user?.role || roles[0],
+        roles,
+      },
+    });
+  });
+
   app.post("/api/auth/change-password", requireAuth, async (req, res) => {
     try {
       const userId = req.user!.userId;
