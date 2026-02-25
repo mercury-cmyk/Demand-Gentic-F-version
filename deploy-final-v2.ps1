@@ -96,6 +96,11 @@ $secrets = @(
     "MAILGUN_API_KEY=MAILGUN_API_KEY:latest",
     "MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest",
 
+    # LiveKit (SIP Bridge)
+    "LIVEKIT_URL=LIVEKIT_URL:latest",
+    "LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest",
+    "LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest",
+
     # Infrastructure
     "REDIS_URL=REDIS_URL:latest",
 
@@ -168,6 +173,12 @@ $env_vars = @(
     "OPENAI_SIP_SIDEBAND=true",
     "OPENAI_SIP_SIDEBAND_UPDATE=true",
     "OPENAI_SIP_LOG_EVENTS=false"
+    "OPENAI_SIP_LOG_EVENTS=false",
+
+    # LiveKit Configuration
+    "LIVEKIT_URL=wss://demandgentic-wmczsvyo.livekit.cloud",
+    "LIVEKIT_API_KEY=APIrrxH8abxypDR",
+    "LIVEKIT_API_SECRET=IcnJqDNrrl74YSb1Kwrfl0r5L0sfhfeFbdtxtAFYq7TA"
 ) -join ","
 
 Write-Host "============================================"

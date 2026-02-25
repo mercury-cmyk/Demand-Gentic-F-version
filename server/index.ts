@@ -360,6 +360,17 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Operations Hub WebSocket initialization failed (non-blocking):', err);
   }
   
+  // Initialize LiveKit Worker if configured (SIP/WebRTC Bridge)
+  if (process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
+    try {
+      console.log('[STARTUP] 🚀 Initializing LiveKit Agent Worker...');
+      const { startLiveKitWorker } = await import("./services/livekit/worker");
+      startLiveKitWorker();
+    } catch (err) {
+      console.error('[STARTUP] LiveKit Worker initialization failed:', err);
+    }
+  }
+
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
   server.on('upgrade', (req, socket, head) => {
     const pathname = new URL(req.url || '', `ws://${req.headers.host}`).pathname;
