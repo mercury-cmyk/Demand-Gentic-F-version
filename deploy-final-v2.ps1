@@ -194,6 +194,7 @@ gcloud run deploy demandgentic-api `
   --source . `
   --region us-central1 `
   --allow-unauthenticated `
+  --clear-base-image `
   --vpc-connector pivotal-connector `
   --vpc-egress private-ranges-only `
   --min-instances 1 `
