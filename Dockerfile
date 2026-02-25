@@ -5,6 +5,10 @@
 # --------------------
 FROM node:20-alpine AS builder
 
+# Accept build arg for Node.js memory limit (GitHub Actions runners need this)
+ARG NODE_OPTIONS="--max-old-space-size=4096"
+ENV NODE_OPTIONS=${NODE_OPTIONS}
+
 WORKDIR /app
 
 # Copy package files
@@ -24,6 +28,9 @@ RUN npm run build
 # --------------------
 FROM node:20-alpine AS production
 
+# Expand libuv thread pool for concurrent DB/Redis/DNS at startup (default 4 is too few)
+ENV UV_THREADPOOL_SIZE=128
+
 WORKDIR /app
 
 # Install dumb-init for proper signal handling and curl for healthcheck
@@ -37,7 +44,7 @@ RUN addgroup -g 1001 -S nodejs && \
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist

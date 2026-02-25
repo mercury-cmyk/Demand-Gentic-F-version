@@ -1,3 +1,7 @@
+// Increase thread pool size for heavy concurrent I/O (DNS, FS, Crypto/SSL)
+// Must be set before any libuv operations to be effective
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '128';
+
 // Suppress noisy warnings FIRST (before any other imports)
 import "./suppress-warnings";
 
@@ -9,10 +13,10 @@ import "./env";
 import http from "http";
 import https from "https";
 
-http.globalAgent.maxSockets = 200;
-https.globalAgent.maxSockets = 200;
-http.globalAgent.maxFreeSockets = 50;
-https.globalAgent.maxFreeSockets = 50;
+http.globalAgent.maxSockets = Infinity;
+https.globalAgent.maxSockets = Infinity;
+http.globalAgent.maxFreeSockets = 256;
+https.globalAgent.maxFreeSockets = 256;
 
 // Global Error Handlers - catch unhandled exceptions to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
