@@ -555,6 +555,42 @@ export class TelnyxAiBridge extends EventEmitter {
       phoneNumber = normalizedPhoneNumber;
       fromNumber = normalizedFromNumber;
 
+      // CHECK FOR LIVEKIT SWITCH (UI Setting or Global Env)
+      // This allows safe migration to the new stack without changing the orchestrator
+      const useLiveKit = (settings as any).voiceProvider === 'livekit' || process.env.VOICE_PROVIDER === 'livekit';
+
+      if (useLiveKit) {
+        logger.debug(`[TelnyxAiBridge] 🔀 Switching to LiveKit for call to ${normalizedPhoneNumber}`);
+        try {
+          // Dynamic import to avoid circular dependencies
+          const { startOutboundCall } = await import('./livekit/outbound-service');
+          
+          const result = await startOutboundCall({
+            contactId: context.contactId!,
+            campaignId: context.campaignId!,
+            queueItemId: context.queueItemId,
+            overridePhoneNumber: normalizedPhoneNumber,
+            existingCallAttemptId: context.callAttemptId
+          });
+
+          // Release locks immediately as we don't track LiveKit calls in this bridge's activeCalls map
+          // (LiveKit calls are stateless/handled by the worker)
+          this.releasePhoneNumber(normalizedPhoneNumber, 'livekit_handoff');
+          this.semaphore.release();
+
+          return {
+            callId: result.attemptId, // Use attempt ID as internal reference
+            callControlId: result.callId // Telnyx Call Control ID
+          };
+        } catch (err) {
+          console.error('[TelnyxAiBridge] LiveKit call failed:', err);
+          // Release locks on failure
+          this.releasePhoneNumber(normalizedPhoneNumber, 'livekit_failure');
+          this.semaphore.release();
+          throw err;
+        }
+      }
+
       logger.debug(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
       
       const contactFullName = [context.contactFirstName, context.contactLastName]

@@ -392,13 +392,43 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     setLocation(path);
   };
 
+  const currentPageLabel = React.useMemo(() => {
+    if (location === '/client-portal/dashboard') {
+      const tab = new URLSearchParams(searchString).get('tab') || 'overview';
+      const tabLabels: Record<string, string> = {
+        overview: 'Overview',
+        campaigns: 'All Campaigns',
+        leads: 'Leads',
+        'journey-pipeline': 'Lead Pipeline',
+        'work-orders': 'Work Orders',
+        bookings: 'Bookings',
+        'target-markets': 'Target Markets',
+        'campaign-planner': 'Campaign Planner',
+        settings: 'Settings',
+        billing: 'Billing',
+        support: 'Support',
+      };
+      return tabLabels[tab] || 'Dashboard';
+    }
+    if (location.startsWith('/client-portal/preview-studio')) return 'Preview Studio';
+    if (location.startsWith('/client-portal/generative-studio')) return 'Creative Studio';
+    if (location.startsWith('/client-portal/intelligence')) return 'Organization Intelligence';
+    if (location.startsWith('/client-portal/analytics')) return 'Analytics';
+    if (location.startsWith('/client-portal/conversation-quality')) return 'Conversation Quality';
+    if (location.startsWith('/client-portal/showcase-calls')) return 'Showcase Calls';
+    if (location.startsWith('/client-portal/agents')) return 'The Agentic Council';
+    if (location.startsWith('/client-portal/create-campaign')) return 'Create Campaign';
+    if (location.startsWith('/client-portal/argyle-events')) return 'Upcoming Events';
+    return 'Client Workspace';
+  }, [location, searchString]);
+
   return (
     <AgentPanelProvider userRole="client" isClientPortal={true}>
       <div className="min-h-screen bg-background agentx-shell">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] lg:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         )}
@@ -406,19 +436,23 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-64 bg-card border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 flex flex-col',
+          'fixed inset-y-0 left-0 z-50 w-72 bg-gradient-to-b from-slate-50 via-white to-white dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 border-r border-slate-200/80 dark:border-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 flex flex-col shadow-xl shadow-slate-900/5',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        <div className="flex h-16 items-center justify-between px-4 border-b">
-          <div className="flex items-center gap-2">
+        <div className="flex h-20 items-center justify-between px-4 border-b border-slate-200/80 dark:border-slate-800">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-md">
+              <Layers className="h-5 w-5 text-white" />
+            </div>
             <Link href="/client-portal/dashboard?tab=overview">
-              <span className="text-lg font-semibold text-primary cursor-pointer">
-                Client Portal
+              <span className="text-base font-semibold text-slate-900 dark:text-slate-100 cursor-pointer truncate block">
+                DemandGentic Client
+                <span className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">Portal Workspace</span>
               </span>
             </Link>
             {user?.isOwner && (
-              <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 gap-1">
+              <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 gap-1 shrink-0">
                 <Crown className="h-3 w-3" />
                 Owner
               </Badge>
@@ -434,9 +468,9 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           </Button>
         </div>
 
-        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {/* AGENTIC OPERATOR - Centralized AI Entry Point */}
-          <div className="px-2 mb-4">
+          <div className="px-1 mb-4">
             <Link href="/client-portal/dashboard?tab=overview">
               <button
                 onClick={() => {
@@ -444,14 +478,14 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                   // handleOpenAssistant(); 
                 }}
                 className={cn(
-                  'w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold cursor-pointer transition-all',
-                  'bg-gradient-to-r from-primary/20 via-primary/10 to-transparent',
-                  'border border-primary/20 hover:border-primary/40',
-                  'text-primary hover:shadow-md hover:scale-[1.02]',
+                  'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all',
+                  'bg-gradient-to-r from-indigo-600/15 via-violet-500/10 to-transparent',
+                  'border border-indigo-300/40 dark:border-indigo-700/60 hover:border-indigo-400/60',
+                  'text-indigo-700 dark:text-indigo-300 hover:shadow-md hover:scale-[1.01]',
                   'group'
                 )}
               >
-                <div className="p-1.5 rounded-md bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 group-hover:bg-indigo-200/70 dark:group-hover:bg-indigo-900/70 transition-colors">
                   <agenticOperator.icon className="h-5 w-5" />
                 </div>
                 <div className="flex-1 text-left">
@@ -461,14 +495,14 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                   </span>
                   <span className="text-xs font-normal text-muted-foreground">{agenticOperator.description}</span>
                 </div>
-                <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 whitespace-nowrap">
+                <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 whitespace-nowrap shadow-sm">
                   {agenticOperator.badge}
                 </Badge>
               </button>
             </Link>
           </div>
 
-          <Separator className="my-3 mx-2" />
+          <Separator className="my-3 mx-1 bg-slate-200 dark:bg-slate-800" />
 
           {/* Grouped Navigation */}
           {navigationGroups.map((group) => {
@@ -479,8 +513,8 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
               <Collapsible key={group.id} defaultOpen={isGroupActive || group.id === 'dashboard' || isAiStudioGroup}>
                 <CollapsibleTrigger asChild>
                   <button className={cn(
-                    "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors group/trigger",
-                    isAiStudioGroup && "text-violet-600 dark:text-violet-400 font-bold bg-violet-50/50 dark:bg-violet-900/10 rounded-sm mb-1 mt-1"
+                    "w-full flex items-center justify-between px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-[0.08em] hover:text-slate-700 dark:hover:text-slate-200 transition-colors group/trigger",
+                    isAiStudioGroup && "text-violet-700 dark:text-violet-300 font-bold bg-violet-50/70 dark:bg-violet-900/20 rounded-lg mb-1 mt-1"
                   )}>
                     <span className="flex items-center gap-2">
                        {group.label}
@@ -497,14 +531,14 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                     const content = (
                       <span
                         className={cn(
-                          'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors relative overflow-hidden',
+                          'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all relative overflow-hidden border border-transparent',
                           isDisabled
-                            ? 'text-slate-400 cursor-not-allowed'
+                            ? 'text-slate-400 cursor-not-allowed opacity-80'
                             : isActive
-                            ? 'bg-primary/10 text-primary cursor-pointer'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer',
-                          isHighlighted && !isActive && !isDisabled && 'bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent text-violet-700 border border-violet-200/50 shadow-sm',
-                          isHighlighted && isActive && !isDisabled && 'bg-gradient-to-r from-violet-100 to-indigo-50 text-violet-800 border-violet-200 font-semibold'
+                            ? 'bg-indigo-50 dark:bg-indigo-900/25 text-indigo-700 dark:text-indigo-300 cursor-pointer border-indigo-200/70 dark:border-indigo-700/60 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer',
+                          isHighlighted && !isActive && !isDisabled && 'bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent text-violet-700 dark:text-violet-300 border border-violet-200/50 dark:border-violet-700/40 shadow-sm',
+                          isHighlighted && isActive && !isDisabled && 'bg-gradient-to-r from-violet-100 to-indigo-50 dark:from-violet-900/30 dark:to-indigo-900/20 text-violet-800 dark:text-violet-200 border-violet-200 dark:border-violet-700 font-semibold'
                         )}
                         onClick={() => {
                           if (isDisabled) {
@@ -518,7 +552,19 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                         }}
                         aria-disabled={isDisabled}
                       >
-                        <item.icon className={cn("h-4 w-4", isDisabled ? "text-slate-400" : isHighlighted && "text-violet-600")} />
+                        <span
+                          className={cn(
+                            "h-7 w-7 rounded-md shrink-0 flex items-center justify-center transition-colors",
+                            isDisabled
+                              ? "bg-slate-100 dark:bg-slate-800"
+                              : isActive
+                              ? "bg-indigo-100 dark:bg-indigo-900/40"
+                              : "bg-slate-100 dark:bg-slate-800/80",
+                            isHighlighted && !isDisabled && "bg-violet-100 dark:bg-violet-900/40",
+                          )}
+                        >
+                          <item.icon className={cn("h-4 w-4", isDisabled ? "text-slate-400" : isHighlighted ? "text-violet-600 dark:text-violet-300" : isActive ? "text-indigo-600 dark:text-indigo-300" : "text-slate-600 dark:text-slate-300")} />
+                        </span>
                         <span className={cn(isHighlighted && !isDisabled && "font-semibold tracking-tight")}>{item.name}</span>
 
                         {isDisabled && item.disabledBadge && (
@@ -533,7 +579,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                           </Badge>
                         )}
 
-                        {isActive && !isHighlighted && !isDisabled && <ChevronRight className="h-4 w-4 ml-auto" />}
+                        {isActive && !isHighlighted && !isDisabled && <ChevronRight className="h-4 w-4 ml-auto text-indigo-500" />}
                       </span>
                     );
 
@@ -559,10 +605,10 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
         {/* Owner: Back to Admin Dashboard */}
         {user?.isOwner && (
-          <div className="px-2 pb-2">
+          <div className="px-3 pb-2">
             <Link href="/">
               <span
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30 border border-amber-200/60 dark:border-amber-800/60"
                 onClick={() => setSidebarOpen(false)}
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -574,17 +620,29 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
         {/* Account info at bottom */}
         {user && (
-          <div className="border-t p-4">
-            <div className="text-xs text-muted-foreground mb-1">Organization</div>
-            <div className="text-sm font-medium truncate">{user.clientAccountName}</div>
+          <div className="border-t border-slate-200/80 dark:border-slate-800 p-4">
+            <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 p-3">
+              <div className="text-[11px] uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 mb-2">Organization</div>
+              <div className="flex items-center gap-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="text-[11px] bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                    {getInitials()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{user.clientAccountName}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </aside>
 
       {/* Main content area */}
-      <div className="lg:pl-64">
+      <div className="lg:pl-72">
         {/* Header */}
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6">
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-950/80 backdrop-blur supports-[backdrop-filter]:bg-white/70 px-4 lg:px-6">
           <Button
             variant="ghost"
             size="icon"
@@ -594,7 +652,10 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
             <Menu className="h-5 w-5" />
           </Button>
 
-          <div className="flex-1" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Client Dashboard</div>
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{currentPageLabel}</div>
+          </div>
 
           {/* AgentX Button in Header - REMOVED (Replaced by Dashboard Action)
           <ClientPortalAgentToggleButton />

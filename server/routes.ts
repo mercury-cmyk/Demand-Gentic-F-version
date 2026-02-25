@@ -12,6 +12,8 @@ import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAu
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
 import webhooksRouter from "./routes/webhooks";
+import livekitWebhookRouter from "./routes/livekit-webhook";
+import voiceEngineRouter from "./routes/voice-engine-routes";
 import queueRouter from "./routes/queue-routes";
 import filterOptionsRouter from "./routes/filter-options-routes";
 import reportingRoutes from './routes/reporting-routes';
@@ -13957,6 +13959,9 @@ export function registerRoutes(app: Express) {
   // Alias for Telnyx AI voice webhooks without auth (Call Control can post here)
   app.use("/api/telemarketing/webhooks", webhooksRouter);
 
+  // ==================== LIVEKIT WEBHOOKS (Room & Participant Lifecycle) ====================
+  app.use("/webhook", livekitWebhookRouter);
+
   // ==================== CAMPAIGN CONTENT LINKS (Resources Centre Integration) ====================
 
   // Get linked content for a campaign
@@ -15199,6 +15204,7 @@ Provide JSON response with:
   app.use("/api/agent-panel", agentPanelRouter);
   app.use("/api/agent-panel/orders", agentPanelOrdersRouter); // Mount order flow routes
   app.use("/api/agent-defaults", agentDefaultsRouter);
+  app.use("/api/voice-engine", voiceEngineRouter);
 
   // ==================== KNOWLEDGE BLOCKS ====================
 

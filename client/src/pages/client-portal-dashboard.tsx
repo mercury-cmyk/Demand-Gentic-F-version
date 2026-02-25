@@ -27,7 +27,7 @@ import {
 import {
   Building2, LogOut, Package, Plus, FileText, Users, Calendar, CalendarDays, ChevronRight,
   LayoutDashboard, Target, BarChart3, Download, CreditCard, MessageSquare,
-  Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingDown, Brain,
+  Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingDown, TrendingUp, Brain,
   FileDown, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
   Filter, Search, RefreshCw, ExternalLink, Bot, X,
@@ -1632,18 +1632,35 @@ export default function ClientPortalDashboard() {
   // Calculate metrics
   const totalLeadsDelivered = campaigns.reduce((sum, c) => sum + (c.deliveredCount || 0), 0);
   const totalEligible = campaigns.reduce((sum, c) => sum + (c.eligibleCount || 0), 0);
-  const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
-  const pendingOrders = orders.filter(o => o.status === 'submitted' || o.status === 'approved').length;
   const totalSpent = costSummary?.totalCost || 0;
   const unpaidInvoices = invoices.filter(i => i.status !== 'paid').reduce((sum, i) => sum + i.totalAmount - i.amountPaid, 0);
-  
-  // MTD Metrics (Mock - would calculate from actual data)
-  const leadsDeliveredMTD = Math.floor(totalLeadsDelivered * 0.3); // Mock: 30% delivered this month
-  const acceptanceRate = totalLeadsDelivered > 0 ? Math.round((totalLeadsDelivered / totalEligible) * 100) : 0;
+
+  // Client-facing core performance KPIs
+  const totalAudience = totalEligible;
+  const totalImpressions = campaigns.reduce(
+    (sum, c) =>
+      sum +
+      Number(
+        c.stats?.impressions ??
+        c.stats?.attempts ??
+        c.callReport?.callsMade ??
+        0,
+      ),
+    0,
+  );
+  const totalLeads = totalLeadsDelivered;
+  const impressionToLeadRate = totalImpressions > 0
+    ? Number(((totalLeads / totalImpressions) * 100).toFixed(1))
+    : 0;
+  const totalOrderedLeads = orders.reduce(
+    (sum, o) => sum + (o.approvedQuantity ?? o.requestedQuantity ?? 0),
+    0,
+  );
+  const remainingOrderedLeads = Math.max(
+    totalOrderedLeads - orders.reduce((sum, o) => sum + (o.deliveredQuantity || 0), 0),
+    0,
+  );
   const averageCPL = totalLeadsDelivered > 0 ? Math.round(totalSpent / totalLeadsDelivered) : 0;
-  
-  // Next invoice date (Mock - first day of next month)
-  const nextInvoiceDate = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1);
   
   // Filter campaigns
   // Filter campaigns
@@ -2266,104 +2283,78 @@ export default function ClientPortalDashboard() {
 
             {/* Enterprise KPI Tiles - Refreshed */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
-              {/* Leads Delivered MTD */}
+              {/* Total Audience */}
                 <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
                      <div className="h-10 w-10 rounded-xl bg-emerald-100/70 dark:bg-emerald-900/30 text-emerald-600 flex items-center justify-center">
-                         <UserCheck className="h-4 w-4" />
+                         <Users className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
-                        <ArrowUpRight className="h-3 w-3" />
-                         12.5%
-                      </span>
                    </div>
                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Leads MTD</p>
-                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{leadsDeliveredMTD.toLocaleString()}</h3>
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Total Audience</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{totalAudience.toLocaleString()}</h3>
                    </div>
                 </CardContent>
               </Card>
 
-              {/* Acceptance Rate */}
+              {/* Impressions */}
                 <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
                      <div className="h-10 w-10 rounded-xl bg-blue-100/70 dark:bg-blue-900/30 text-blue-600 flex items-center justify-center">
-                         <Target className="h-4 w-4" />
+                         <MousePointerClick className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium text-slate-500 flex items-center mt-1">
-                        Avg 78%
-                      </span>
                    </div>
-                   <div className="space-y-2">
-                       <div className="flex justify-between items-end">
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Accept Rate</p>
-                            <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{acceptanceRate}%</h3>
-                          </div>
-                      </div>
-                      <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${acceptanceRate}%` }} />
-                      </div>
+                   <div className="space-y-1">
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Impressions</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{totalImpressions.toLocaleString()}</h3>
                    </div>
                 </CardContent>
               </Card>
 
-              {/* CPL */}
+              {/* Leads */}
                 <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
                      <div className="h-10 w-10 rounded-xl bg-purple-100/70 dark:bg-purple-900/30 text-purple-600 flex items-center justify-center">
-                         <DollarSign className="h-4 w-4" />
+                         <UserCheck className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 flex items-center gap-1">
-                        <TrendingDown className="h-3 w-3" />
-                         23%
-                      </span>
                    </div>
                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Avg Cost Per Lead</p>
-                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{formatCurrency(averageCPL)}</h3>
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Leads</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{totalLeads.toLocaleString()}</h3>
                    </div>
                 </CardContent>
               </Card>
 
-              {/* Active Campaigns */}
+              {/* Impression -> Lead Conversion */}
                 <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
                      <div className="h-10 w-10 rounded-xl bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-600 flex items-center justify-center">
-                         <Package className="h-4 w-4" />
+                         <TrendingUp className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400">
-                        {pendingOrders} pending
-                      </span>
                    </div>
                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Active Campaigns</p>
-                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{activeCampaigns}</h3>
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Impression to Lead CVR</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{impressionToLeadRate}%</h3>
                    </div>
                 </CardContent>
               </Card>
 
-              {/* Next Invoice */}
-                <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
+              {/* Remaining Ordered Leads */}
+              <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
-                   <div className="flex justify-between items-start mb-4">
-                     <div className="h-10 w-10 rounded-xl bg-amber-100/70 dark:bg-amber-900/30 text-amber-600 flex items-center justify-center">
-                         <Calendar className="h-4 w-4" />
-                      </div>
-                      <span className="text-xs font-medium text-slate-500 mt-1">
-                         Next Bill
-                      </span>
-                   </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{nextInvoiceDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-                      <h3 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white">
-                        {unpaidInvoices > 0 ? formatCurrency(unpaidInvoices) : 'Paid'}
-                      </h3>
-                   </div>
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="h-10 w-10 rounded-xl bg-amber-100/70 dark:bg-amber-900/30 text-amber-600 flex items-center justify-center">
+                      <ClipboardList className="h-4 w-4" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Remaining</p>
+                    <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{remainingOrderedLeads.toLocaleString()}</h3>
+                  </div>
                 </CardContent>
               </Card>
             </div>

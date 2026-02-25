@@ -96,10 +96,8 @@ $secrets = @(
     "MAILGUN_API_KEY=MAILGUN_API_KEY:latest",
     "MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest",
 
-    # LiveKit (SIP Bridge)
-    "LIVEKIT_URL=LIVEKIT_URL:latest",
-    "LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest",
-    "LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest",
+    # LiveKit Webhooks
+    "LIVEKIT_WEBHOOK_SECRET=LIVEKIT_WEBHOOK_SECRET:latest",
 
     # Infrastructure
     "REDIS_URL=REDIS_URL:latest",
@@ -172,13 +170,16 @@ $env_vars = @(
     "OPENAI_SIP_INSTRUCTIONS=You are a professional voice assistant.",
     "OPENAI_SIP_SIDEBAND=true",
     "OPENAI_SIP_SIDEBAND_UPDATE=true",
-    "OPENAI_SIP_LOG_EVENTS=false"
     "OPENAI_SIP_LOG_EVENTS=false",
 
     # LiveKit Configuration
     "LIVEKIT_URL=wss://demandgentic-wmczsvyo.livekit.cloud",
     "LIVEKIT_API_KEY=APIrrxH8abxypDR",
-    "LIVEKIT_API_SECRET=IcnJqDNrrl74YSb1Kwrfl0r5L0sfhfeFbdtxtAFYq7TA"
+    "LIVEKIT_API_SECRET=IcnJqDNrrl74YSb1Kwrfl0r5L0sfhfeFbdtxtAFYq7TA",
+    "LIVEKIT_SIP_URI=sip:demandgentic-wmczsvyo.sip.livekit.cloud",
+    "LIVEKIT_SIP_CONNECTION_ID=2903106223836497802",
+    "LIVEKIT_SIP_USERNAME=dglivekitsip",
+    "LIVEKIT_SIP_PASSWORD=LKsip2026DmndG99"
 ) -join ","
 
 Write-Host "============================================"

@@ -485,7 +485,12 @@ router.get('/', async (req: Request, res: Response) => {
           count: sql<number>`count(*)::int`,
         })
         .from(leads)
-        .where(inArray(leads.campaignId, campaignIdList))
+        .where(
+          and(
+            inArray(leads.campaignId, campaignIdList),
+            inArray(leads.qaStatus, ['approved', 'published']),
+          ),
+        )
         .groupBy(leads.campaignId),
       db
         .select({
@@ -551,7 +556,7 @@ router.get('/', async (req: Request, res: Response) => {
         ...c,
         eligibleCount: totalQueue,
         verifiedCount: leadCount,
-        deliveredCount: attempts,
+        deliveredCount: leadCount,
         totalContacts: totalQueue,
         callReport,
         stats: {
@@ -835,7 +840,17 @@ router.post('/create', async (req: Request, res: Response) => {
         campaignConfig: campaignConfig,
         submittedAt: new Date(),
       })
-      .returning();
+      .returning({
+        id: workOrders.id,
+        orderNumber: workOrders.orderNumber,
+        title: workOrders.title,
+        description: workOrders.description,
+        status: workOrders.status,
+        priority: workOrders.priority,
+        orderType: workOrders.orderType,
+        targetLeadCount: workOrders.targetLeadCount,
+        estimatedBudget: workOrders.estimatedBudget,
+      });
 
     try {
       const [clientAccount] = await db
@@ -1289,7 +1304,6 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
 
     if (!projectId) {
       // Auto-create a project from campaign info
-      const { clientProjects } = await import('@shared/schema');
       const [newProject] = await db
         .insert(clientProjects)
         .values({
@@ -1300,7 +1314,7 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
           requestedLeadCount: data.targetLeadCount || null,
           budgetAmount: data.budget ? data.budget.toString() : null,
         })
-        .returning();
+        .returning({ id: clientProjects.id, name: clientProjects.name });
 
       projectId = newProject.id;
 
@@ -1318,7 +1332,6 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
       }
     } else {
       // Verify client owns the referenced project
-      const { clientProjects } = await import('@shared/schema');
       const [existingProject] = await db
         .select({ id: clientProjects.id, status: clientProjects.status })
         .from(clientProjects)
@@ -1419,7 +1432,12 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         campaignConfig,
         submittedAt: new Date(),
       })
-      .returning();
+      .returning({
+        id: workOrders.id,
+        orderNumber: workOrders.orderNumber,
+        title: workOrders.title,
+        status: workOrders.status,
+      });
 
     // --- Step 3: Log activity ---
     try {
@@ -1456,12 +1474,18 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         requiresApproval: true,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: 'Validation failed', errors: error.errors });
     }
-    console.error('[CLIENT CAMPAIGNS] Quick-create error:', error);
-    res.status(500).json({ message: 'Failed to create campaign' });
+    const errMsg = error?.message || String(error);
+    const errDetail = error?.detail || error?.code || '';
+    console.error('[CLIENT CAMPAIGNS] Quick-create error:', errMsg, errDetail);
+    console.error('[CLIENT CAMPAIGNS] Full error:', error);
+    res.status(500).json({
+      message: 'Failed to create campaign',
+      error: process.env.NODE_ENV !== 'production' ? errMsg : undefined,
+    });
   }
 });
 

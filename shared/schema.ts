@@ -2449,6 +2449,8 @@ export const agentDefaults = pgTable("agent_defaults", {
   // Global concurrent call limits
   defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(100), // Per-campaign default
   globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(100),   // System-wide cap
+  // Call engine: 'texml' (Telnyx TeXML + Gemini WebSocket) or 'livekit' (LiveKit SIP bridge)
+  defaultCallEngine: text("default_call_engine").notNull().default('texml'),
   updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -207,6 +207,34 @@ export default defineAgent({
       }
     }
 
+    // 1b. Create call session with room name for webhook correlation
+    if (callContext.callAttemptId) {
+      try {
+        const session = await createCallSessionSafely({
+          toNumberE164: callContext.phoneNumber || 'unknown',
+          startedAt: new Date(),
+          status: 'connecting',
+          agentType: 'ai',
+          aiAgentId: 'livekit-gemini',
+          aiConversationId: ctx.room.name,
+          campaignId: callContext.campaignId || null,
+          contactId: callContext.contactId || null,
+          queueItemId: callContext.queueItemId || null,
+          validateCampaignId: true,
+          validateContactId: true,
+        });
+
+        if (session) {
+          await db.update(dialerCallAttempts)
+            .set({ callSessionId: session.id })
+            .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
+          console.log(`[LiveKit Worker] ✅ Created call session ${session.id} for room ${ctx.room.name}`);
+        }
+      } catch (err) {
+        console.error('[LiveKit Worker] Failed to create call session:', err);
+      }
+    }
+
     // 2. Define Tools
     const fncCtx = new llm.FunctionContext();
 

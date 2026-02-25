@@ -33,14 +33,9 @@ process.on('uncaughtException', (err) => {
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import compression from "compression";
-import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
 import { log } from "./log";
-import { initializeDatabase } from "./db-init";
-import { autoDialerService } from "./services/auto-dialer";
 import { LogStreamingService } from "./services/log-streaming-service";
 import {
-  apiLimiter,
   securityHeaders,
   captureClientIP,
   sanitizeBody,
@@ -183,8 +178,27 @@ app.use((req, res, next) => {
   // Redirect /favicon.ico to the logo
   app.get('/favicon.ico', (_req, res) => res.redirect(301, '/demangent-logo.png'));
 
+  // LiveKit Webhook Handler (Signed with LIVEKIT_WEBHOOK_SECRET or LIVEKIT_API_SECRET)
+  app.post('/webhook', async (req, res) => {
+    const { livekitWebhookHandler } = await import("./services/livekit/webhook");
+    return livekitWebhookHandler(req, res);
+  });
+
+  // Telnyx Webhook Handler for LiveKit Outbound Calls
+  app.post('/api/webhooks/telnyx-livekit', async (req, res) => {
+    try {
+      const { handleTelnyxEvent } = await import("./services/livekit/outbound-service");
+      await handleTelnyxEvent(req.body);
+      res.status(200).send('ok');
+    } catch (err) {
+      console.error('[Telnyx Webhook Error]', err);
+      res.status(500).send('error');
+    }
+  });
+
   // CRITICAL: Register routes IMMEDIATELY after listening so health check endpoint works
   // This must happen before any potentially slow initialization
+  const { registerRoutes } = await import("./routes");
   registerRoutes(app);
 
   // Add error handler after routes
@@ -204,6 +218,7 @@ app.use((req, res, next) => {
   // background startup tasks are still initializing.
   if (!isDevelopment) {
     log("Serving static files from production build");
+    const { serveStatic } = await import("./static");
     serveStatic(app);
   }
 
@@ -212,6 +227,7 @@ app.use((req, res, next) => {
 
   // Initialize database with default admin if needed
   try {
+    const { initializeDatabase } = await import("./db-init");
     await initializeDatabase();
   } catch (err) {
     console.error('[STARTUP] Database initialization failed (non-blocking):', err);

@@ -156,6 +156,7 @@ import SettingsIndexPage from "@/pages/settings/index";
 import ProfileSettingsPage from "@/pages/settings/profile";
 import UsersSettingsPage from "@/pages/settings/users";
 import TelephonySettingsPage from "@/pages/settings/telephony";
+import VoiceEngineControlCenter from "@/pages/settings/voice-engine";
 import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
 import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
@@ -484,6 +485,7 @@ function AuthenticatedApp() {
               <Route path="/settings/profile" component={ProfileSettingsPage} />
               <Route path="/settings/users" component={UsersSettingsPage} />
               <Route path="/settings/telephony" component={TelephonySettingsPage} />
+              <Route path="/settings/voice-engine" component={VoiceEngineControlCenter} />
               <Route path="/settings/custom-fields" component={SettingsPage} />
               <Route path="/settings/notifications" component={SettingsPage} />
               <Route path="/settings/security" component={SettingsPage} />

@@ -2,6 +2,8 @@ import { Router } from "express";
 import { requireAuth, requireRole } from "../auth";
 import { storage } from "../storage";
 import { getTelnyxAiBridge, TelnyxCallEvent } from "../services/telnyx-ai-bridge";
+import { startOutboundCall as startLiveKitCall } from "../services/livekit/outbound-service";
+import { agentDefaults } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { isVoiceVariablePreflightError } from "../services/voice-variable-contract";
 import { validatePreflight, generatePreflightErrorResponse } from "../services/preflight-validator";
@@ -339,29 +341,53 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         callerNumberDecisionId,
       };
 
+    // Determine call engine from agent defaults
+    const [defaults] = await db.select({ defaultCallEngine: agentDefaults.defaultCallEngine }).from(agentDefaults).limit(1);
+    const callEngine = defaults?.defaultCallEngine || 'texml';
+
     const bridge = getTelnyxAiBridge();
-    
+
     // PRE-LOCK if queueItemId is present
     if (queueItemId && queueItemId !== 'test-queue-item') {
       await db.execute(sql`
-        UPDATE campaign_queue 
+        UPDATE campaign_queue
         SET status = 'in_progress', updated_at = NOW()
         WHERE id = ${queueItemId}
       `);
     }
 
     try {
-      const { callId, callControlId } = await bridge.initiateAiCall(
-        phoneNumber,
-        fromNumber,
-        aiSettings,
-        context
-      );
+      let callId: string;
+      let callControlId: string | undefined;
+
+      if (callEngine === 'livekit') {
+        // LiveKit SIP path: Telnyx Call Control → SIP bridge → LiveKit room
+        console.log(`[AI Calls] Using LiveKit SIP engine for call to ${phoneNumber}`);
+        const result = await startLiveKitCall({
+          contactId: contactId!,
+          campaignId,
+          queueItemId,
+          overridePhoneNumber: phoneNumber,
+        });
+        callId = result.callId;
+        callControlId = result.callId;
+      } else {
+        // TeXML path (default): Telnyx TeXML → Gemini Live WebSocket
+        const result = await bridge.initiateAiCall(
+          phoneNumber,
+          fromNumber,
+          aiSettings,
+          context
+        );
+        callId = result.callId;
+        callControlId = result.callControlId;
+      }
 
       res.json({
         success: true,
         callId,
         callControlId,
+        engine: callEngine,
         message: "AI call initiated successfully",
       });
     } catch (error) {

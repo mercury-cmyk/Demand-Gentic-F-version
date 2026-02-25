@@ -117,6 +117,14 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     category: 'infrastructure',
   },
   {
+    id: 'voice-engine',
+    label: 'Voice Engine',
+    href: ROUTES.SETTINGS_VOICE_ENGINE,
+    icon: GitBranch,
+    description: 'Call engine switching',
+    category: 'infrastructure',
+  },
+  {
     id: 'integrations',
     label: 'Integrations',
     href: ROUTES.SETTINGS_INTEGRATIONS,

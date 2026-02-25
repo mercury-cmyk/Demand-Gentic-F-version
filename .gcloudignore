@@ -1,5 +1,10 @@
 #!include:.gitignore
 
+# Force Cloud Build to use Buildpacks instead of Dockerfile
+Dockerfile
+Dockerfile.*
+.dockerignore
+
 # Dependencies
 node_modules/
 **/node_modules/
