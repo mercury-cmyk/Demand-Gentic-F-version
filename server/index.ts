@@ -194,6 +194,14 @@ app.use((req, res, next) => {
   });
 
   log('Routes registered - health check available at /api/health');
+  const isDevelopment = process.env.NODE_ENV === "development";
+
+  // Register static file serving immediately in production so `/` responds even while
+  // background startup tasks are still initializing.
+  if (!isDevelopment) {
+    log("Serving static files from production build");
+    serveStatic(app);
+  }
 
   // Now initialize everything else (after server is listening and health check is available)
   // This ensures health checks pass even if initialization is slow
@@ -726,15 +734,12 @@ app.use((req, res, next) => {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "development") {
+  if (isDevelopment) {
     log("Setting up Vite development server...");
     const modulePath = "./vite";
     const { setupVite } = await import(modulePath);
     await setupVite(app, server);
     log("Vite development server ready");
-  } else {
-    log("Serving static files from production build");
-    serveStatic(app);
   }
 
   // Server is already listening (started at the beginning)
