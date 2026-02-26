@@ -12,7 +12,7 @@ env:
   PROJECT_ID: pivotalb2b-2026
   REGION: us-central1
   SERVICE: demandgentic-api
-  REPOSITORY: pivotalcrm-repo
+  REPOSITORY: cloud-run-source-deploy
 
 jobs:
   deploy:
@@ -29,21 +29,61 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Validate GCP credentials
+      - name: Validate and normalize GCP credentials
+        id: prep-creds
         run: |
-          if [[ -z "${{ secrets.GCP_SA_KEY }}" ]]; then
-            echo "ERROR: GCP_SA_KEY secret is not configured in GitHub!"
+          set -euo pipefail
+
+          RAW_JSON='${{ secrets.GCP_SA_KEY_JSON }}'
+          FALLBACK='${{ secrets.GCP_SA_KEY }}'
+          CREDENTIALS="${RAW_JSON:-$FALLBACK}"
+
+          if [[ -z "$CREDENTIALS" ]]; then
+            echo "ERROR: No GCP credentials secret configured."
             echo "To fix this:"
             echo "1. Go to Settings > Secrets and variables > Actions"
-            echo "2. Create a new secret named 'GCP_SA_KEY'"
-            echo "3. Paste the base64-encoded service account JSON"
+            echo "2. Add either 'GCP_SA_KEY_JSON' (raw JSON) or 'GCP_SA_KEY' (raw JSON or base64 JSON)"
             exit 1
           fi
+
+          if [[ "${CREDENTIALS:0:1}" == "{" ]]; then
+            printf '%s' "$CREDENTIALS" > "$RUNNER_TEMP/gcp-key.json"
+          else
+            printf '%s' "$CREDENTIALS" | base64 --decode > "$RUNNER_TEMP/gcp-key.json"
+          fi
+
+          python - <<'PY'
+          import json, os
+          path = os.path.join(os.environ["RUNNER_TEMP"], "gcp-key.json")
+          with open(path, "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          required = ["type", "project_id", "client_email", "private_key"]
+          missing = [k for k in required if not data.get(k)]
+          if missing:
+              raise SystemExit(f"Missing required key fields: {', '.join(missing)}")
+
+          if data["type"] != "service_account":
+              raise SystemExit("Credentials are not a service_account JSON key")
+
+          expected_project = os.environ["PROJECT_ID"]
+          if data["project_id"] != expected_project:
+              raise SystemExit(
+                  f"Service account project_id ({data['project_id']}) does not match PROJECT_ID ({expected_project})"
+              )
+          print("GCP credentials validated")
+          PY
+
+          {
+            echo "credentials_json<<EOF"
+            cat "$RUNNER_TEMP/gcp-key.json"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ steps.prep-creds.outputs.credentials_json }}
       
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -51,6 +91,12 @@ jobs:
       - name: Configure Docker authentication
         run: |
           gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Validate Artifact Registry repository
+        run: |
+          gcloud artifacts repositories describe ${{ env.REPOSITORY }} \
+            --location=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }}
       
       - name: Build Docker image
         run: |

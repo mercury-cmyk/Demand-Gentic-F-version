@@ -405,17 +405,23 @@ router.post("/telnyx", async (req, res) => {
 
         // TeXML calls handle voice via Gemini Live native audio through /voice-dialer WebSocket
         // No TTS greeting needed here - the <Stream> verb auto-connects to Gemini
-        await bridge.handleSimpleWebhookEvent('answered', payload);
+        void bridge.handleSimpleWebhookEvent('answered', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for answered (${payload.call_control_id}):`, err);
+        });
         return res.json({ status: "ok", event_type: eventType });
 
       case 'call.speak.ended':
         console.log(`[Telnyx Webhook] Speak ended: ${payload.call_control_id}`);
-        await bridge.handleSimpleWebhookEvent('speak_ended', payload);
+        void bridge.handleSimpleWebhookEvent('speak_ended', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for speak_ended (${payload.call_control_id}):`, err);
+        });
         return res.json({ status: "ok", event_type: eventType });
 
       case 'call.gather.ended':
         console.log(`[Telnyx Webhook] Gather ended: ${payload.call_control_id}, speech: ${payload.speech?.result}`);
-        await bridge.handleSimpleWebhookEvent('gather_ended', payload);
+        void bridge.handleSimpleWebhookEvent('gather_ended', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for gather_ended (${payload.call_control_id}):`, err);
+        });
         return res.json({ status: "ok", event_type: eventType });
 
       case 'call.hangup': {
@@ -470,7 +476,9 @@ router.post("/telnyx", async (req, res) => {
           }
         }
 
-        await bridge.handleSimpleWebhookEvent('hangup', payload);
+        void bridge.handleSimpleWebhookEvent('hangup', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for hangup (${payload.call_control_id}):`, err);
+        });
 
         return res.json({ status: "ok", event_type: eventType });
       }

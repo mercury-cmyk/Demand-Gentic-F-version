@@ -376,8 +376,10 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Operations Hub WebSocket initialization failed (non-blocking):', err);
   }
   
-  // Initialize LiveKit Worker if configured (SIP/WebRTC Bridge)
-  if (process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
+  // Initialize LiveKit Worker if explicitly enabled (SIP/WebRTC Bridge)
+  // Requires LIVEKIT_WORKER_ENABLED=true because the @livekit/rtc-node native module
+  // is not available on Alpine Linux (Cloud Run) and causes unhandled rejections on import.
+  if (process.env.LIVEKIT_WORKER_ENABLED === 'true' && process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
     (async () => {
       try {
         console.log('[STARTUP] 🚀 Initializing LiveKit Agent Worker...');
@@ -387,6 +389,8 @@ app.use((req, res, next) => {
         console.error('[STARTUP] ❌ LiveKit Worker initialization failed:', err);
       }
     })();
+  } else if (process.env.LIVEKIT_URL && !process.env.LIVEKIT_WORKER_ENABLED) {
+    console.log('[STARTUP] ℹ️ LiveKit configured but worker disabled (set LIVEKIT_WORKER_ENABLED=true to enable)');
   }
 
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
