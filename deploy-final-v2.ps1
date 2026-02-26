@@ -198,10 +198,10 @@ gcloud run deploy demandgentic-api `
   --vpc-connector pivotal-connector `
   --vpc-egress private-ranges-only `
   --min-instances 1 `
-  --max-instances 15 `
+  --max-instances 50 `
   --cpu 4 `
   --memory 4Gi `
-  --concurrency 120 `
+  --concurrency 20 `
   --timeout 900 `
   --set-secrets=$secrets `
   --set-env-vars=$env_vars

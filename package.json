@@ -175,6 +175,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@jest/globals": "^30.2.0",
     "@playwright/test": "^1.58.2",
     "@replit/vite-plugin-cartographer": "^0.4.1",
     "@replit/vite-plugin-dev-banner": "^0.1.1",
