@@ -174,6 +174,34 @@ const trendIcons: Record<string, React.ReactNode> = {
   stable: <Minus className="h-3.5 w-3.5 text-gray-400" />,
 };
 
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function getAgentCardProgress(agent: any): number {
+  if (typeof agent?.trackingProgress === "number") {
+    return clampPercent(agent.trackingProgress);
+  }
+
+  if (typeof agent?.overallPerformanceScore === "number" && agent.overallPerformanceScore > 0) {
+    return clampPercent(agent.overallPerformanceScore);
+  }
+
+  if (Array.isArray(agent?.capabilityScores) && agent.capabilityScores.length > 0) {
+    const avg =
+      agent.capabilityScores.reduce((sum: number, cap: any) => sum + (cap?.score || 0), 0) /
+      agent.capabilityScores.length;
+    return clampPercent(avg);
+  }
+
+  if ((agent?.totalPromptSections || 0) > 0) {
+    return clampPercent(((agent?.activePromptSections || 0) / agent.totalPromptSections) * 100);
+  }
+
+  return 0;
+}
+
 // ==================== MAIN COMPONENT ====================
 
 export default function UnifiedAgentArchitectureDashboard() {
@@ -364,6 +392,9 @@ function SystemOverview({ onSelectAgent }: { onSelectAgent: (type: string) => vo
         {/* Agent cards grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {summary.agents?.map((agent: any) => (
+            (() => {
+              const progress = getAgentCardProgress(agent);
+              return (
             <Card
               key={agent.agentType}
               className="cursor-pointer hover:border-primary/50 transition-colors"
@@ -383,21 +414,19 @@ function SystemOverview({ onSelectAgent }: { onSelectAgent: (type: string) => vo
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {/* Performance score */}
+                  {/* Progress score */}
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Performance</span>
-                    <span className="font-medium">
-                      {agent.overallPerformanceScore ?? 0}%
-                    </span>
+                    <span className="text-muted-foreground">Progress</span>
+                    <span className="font-medium">{progress}%</span>
                   </div>
                   <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                     <div
                       className={cn(
                         "h-full rounded-full transition-all",
-                        (agent.overallPerformanceScore ?? 0) >= 70 ? "bg-green-500" :
-                        (agent.overallPerformanceScore ?? 0) >= 40 ? "bg-yellow-500" : "bg-red-500"
+                        progress >= 70 ? "bg-green-500" :
+                        progress >= 40 ? "bg-yellow-500" : "bg-red-500"
                       )}
-                      style={{ width: `${agent.overallPerformanceScore ?? 0}%` }}
+                      style={{ width: `${progress}%` }}
                     />
                   </div>
 
@@ -405,6 +434,7 @@ function SystemOverview({ onSelectAgent }: { onSelectAgent: (type: string) => vo
                   <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
                     <span>{agent.activePromptSections}/{agent.totalPromptSections} sections</span>
                     <span>{agent.totalCapabilities} capabilities</span>
+                    <span>{agent.overallPerformanceScore ?? 0}% perf</span>
                     {agent.pendingRecommendations > 0 && (
                       <Badge variant="outline" className="text-[10px] text-yellow-400 border-yellow-500/30">
                         {agent.pendingRecommendations} recs
@@ -414,6 +444,8 @@ function SystemOverview({ onSelectAgent }: { onSelectAgent: (type: string) => vo
                 </div>
               </CardContent>
             </Card>
+              );
+            })()
           ))}
         </div>
 
@@ -587,9 +619,59 @@ function AgentDetailView({
 // ==================== OVERVIEW TAB ====================
 
 function AgentOverviewTab({ detail }: { detail: any }) {
+  const tracking = detail.trackingMetrics;
+
   return (
     <ScrollArea className="h-full">
       <div className="p-6 space-y-6">
+        {/* Tracking overview */}
+        {tracking && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Tracking Readiness</CardTitle>
+              <CardDescription className="text-xs">
+                Progress computed from sections, capabilities, mappings, learning inputs, and configuration completeness
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Overall Progress</span>
+                  <span className="font-medium">{tracking.progress}%</span>
+                </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      tracking.progress >= 70 ? "bg-green-500" : tracking.progress >= 40 ? "bg-yellow-500" : "bg-red-500"
+                    )}
+                    style={{ width: `${tracking.progress}%` }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div className="p-2 rounded-md bg-muted/40">
+                    <div className="text-muted-foreground">Sections</div>
+                    <div className="font-medium">{tracking.activePromptSections}/{tracking.totalPromptSections}</div>
+                  </div>
+                  <div className="p-2 rounded-md bg-muted/40">
+                    <div className="text-muted-foreground">Capabilities</div>
+                    <div className="font-medium">{tracking.activeCapabilities}/{tracking.totalCapabilities}</div>
+                  </div>
+                  <div className="p-2 rounded-md bg-muted/40">
+                    <div className="text-muted-foreground">Mapping Coverage</div>
+                    <div className="font-medium">{tracking.mappingCoverage}%</div>
+                  </div>
+                  <div className="p-2 rounded-md bg-muted/40">
+                    <div className="text-muted-foreground">Learning Coverage</div>
+                    <div className="font-medium">{tracking.learningCoverage}%</div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Performance overview */}
         <Card>
           <CardHeader className="pb-2">

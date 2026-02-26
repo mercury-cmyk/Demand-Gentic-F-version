@@ -41,6 +41,106 @@ class UnifiedAgentRegistry {
 
   private initialized = false;
 
+  private clampPercent(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  private getComputedPerformanceScore(agent: IUnifiedAgent & UnifiedBaseAgent): number {
+    const snapshotScore = agent.performanceSnapshot?.overallScore ?? 0;
+    if (snapshotScore > 0) {
+      return this.clampPercent(snapshotScore);
+    }
+
+    const activeCapabilities = agent.capabilities.filter(c => c.isActive !== false);
+    if (activeCapabilities.length === 0) {
+      return this.clampPercent(snapshotScore);
+    }
+
+    const weightedTotal = activeCapabilities.reduce((sum, cap) => {
+      const weight = cap.optimizationWeight && cap.optimizationWeight > 0 ? cap.optimizationWeight : 1;
+      return sum + (cap.performanceScore || 0) * weight;
+    }, 0);
+
+    const totalWeight = activeCapabilities.reduce((sum, cap) => {
+      const weight = cap.optimizationWeight && cap.optimizationWeight > 0 ? cap.optimizationWeight : 1;
+      return sum + weight;
+    }, 0);
+
+    const computed = totalWeight > 0 ? weightedTotal / totalWeight : 0;
+
+    // Keep snapshot synchronized so all downstream consumers see accurate values.
+    agent.performanceSnapshot.overallScore = this.clampPercent(computed);
+    agent.performanceSnapshot.capabilityScores = Object.fromEntries(
+      activeCapabilities.map(cap => [cap.id, cap.performanceScore || 0])
+    );
+    agent.performanceSnapshot.lastUpdated = new Date();
+
+    return agent.performanceSnapshot.overallScore;
+  }
+
+  private getTrackingMetrics(agent: IUnifiedAgent & UnifiedBaseAgent): {
+    progress: number;
+    activePromptSections: number;
+    totalPromptSections: number;
+    activeCapabilities: number;
+    totalCapabilities: number;
+    mappedCapabilities: number;
+    mappingCoverage: number;
+    learningCoverage: number;
+    configCompleteness: number;
+  } {
+    const totalPromptSections = agent.promptSections.length;
+    const activePromptSections = agent.promptSections.filter(s => s.isActive).length;
+    const sectionCoverage = totalPromptSections > 0 ? (activePromptSections / totalPromptSections) * 100 : 0;
+
+    const totalCapabilities = agent.capabilities.length;
+    const activeCapabilities = agent.capabilities.filter(c => c.isActive !== false).length;
+    const capabilityCoverage = totalCapabilities > 0 ? (activeCapabilities / totalCapabilities) * 100 : 0;
+
+    const mappedCapabilityIds = new Set(
+      agent.capabilityMappings
+        .filter(m => !!agent.capabilities.find(c => c.id === m.capabilityId))
+        .map(m => m.capabilityId)
+    );
+    const mappedCapabilities = mappedCapabilityIds.size;
+    const mappingCoverage = totalCapabilities > 0 ? (mappedCapabilities / totalCapabilities) * 100 : 0;
+
+    const capabilitiesWithLearning = agent.capabilities.filter(
+      c => c.isActive !== false && (c.learningInputSources?.some(src => src.isActive) ?? false)
+    ).length;
+    const learningCoverage = activeCapabilities > 0 ? (capabilitiesWithLearning / activeCapabilities) * 100 : 0;
+
+    const configChecks = [
+      !!agent.configuration?.toneAndPersona,
+      !!agent.configuration?.performanceTuning,
+      !!agent.configuration?.stateMachine,
+      !!agent.configuration?.complianceSettings,
+      !!agent.configuration?.retryAndEscalation,
+      !!agent.configuration?.knowledgeConfig,
+    ];
+    const configCompleteness = (configChecks.filter(Boolean).length / configChecks.length) * 100;
+
+    const progress =
+      sectionCoverage * 0.35 +
+      capabilityCoverage * 0.35 +
+      mappingCoverage * 0.15 +
+      learningCoverage * 0.10 +
+      configCompleteness * 0.05;
+
+    return {
+      progress: this.clampPercent(progress),
+      activePromptSections,
+      totalPromptSections,
+      activeCapabilities,
+      totalCapabilities,
+      mappedCapabilities,
+      mappingCoverage: this.clampPercent(mappingCoverage),
+      learningCoverage: this.clampPercent(learningCoverage),
+      configCompleteness: this.clampPercent(configCompleteness),
+    };
+  }
+
   private constructor() {
     this.pipeline = learningPipeline;
   }
@@ -152,6 +252,8 @@ class UnifiedAgentRegistry {
       const agent = reg.agent;
       const pipelineState = this.pipeline.getPipelineState(agentType);
       const pendingRecs = this.pipeline.getRecommendations(agentType, { status: 'pending' });
+      const tracking = this.getTrackingMetrics(agent);
+      const overallPerformanceScore = this.getComputedPerformanceScore(agent);
 
       agentSummaries.push({
         agentType,
@@ -160,16 +262,17 @@ class UnifiedAgentRegistry {
         status: agent.status,
         version: agent.versionControl.currentVersion,
         promptVersion: agent.promptVersion,
-        totalPromptSections: agent.promptSections.length,
-        activePromptSections: agent.promptSections.filter(s => s.isActive).length,
+        totalPromptSections: tracking.totalPromptSections,
+        activePromptSections: tracking.activePromptSections,
         totalCapabilities: agent.capabilities.length,
-        overallPerformanceScore: agent.performanceSnapshot.overallScore,
+        overallPerformanceScore,
         capabilityScores: agent.capabilities.map(c => ({
           id: c.id,
           name: c.name,
           score: c.performanceScore,
           trend: c.trend,
         })),
+        trackingProgress: tracking.progress,
         pendingRecommendations: pendingRecs.length,
         pipelineStatus: pipelineState?.status || 'unknown',
         registeredAt: reg.registeredAt,
@@ -196,6 +299,8 @@ class UnifiedAgentRegistry {
     const pipelineState = this.pipeline.getPipelineState(agentType);
     const recommendations = this.pipeline.getRecommendations(agentType);
     const analysisHistory = this.pipeline.getAnalysisHistory(agentType);
+    const tracking = this.getTrackingMetrics(agent);
+    const overallPerformanceScore = this.getComputedPerformanceScore(agent);
 
     return {
       // Identity
@@ -237,7 +342,13 @@ class UnifiedAgentRegistry {
       versionControl: agent.versionControl,
 
       // Performance
-      performanceSnapshot: agent.performanceSnapshot,
+      performanceSnapshot: {
+        ...agent.performanceSnapshot,
+        overallScore: overallPerformanceScore,
+      },
+
+      // Tracking Progress
+      trackingMetrics: tracking,
 
       // Learning Pipeline
       learningPipeline: {
@@ -436,6 +547,7 @@ export interface AgentTypeSummary {
   totalCapabilities: number;
   overallPerformanceScore: number;
   capabilityScores: { id: string; name: string; score: number; trend: string }[];
+  trackingProgress: number;
   pendingRecommendations: number;
   pipelineStatus: string;
   registeredAt: Date;
@@ -455,6 +567,17 @@ export interface AgentDetailView {
   configuration: any;
   versionControl: any;
   performanceSnapshot: any;
+  trackingMetrics: {
+    progress: number;
+    activePromptSections: number;
+    totalPromptSections: number;
+    activeCapabilities: number;
+    totalCapabilities: number;
+    mappedCapabilities: number;
+    mappingCoverage: number;
+    learningCoverage: number;
+    configCompleteness: number;
+  };
   learningPipeline: any;
   capabilityPromptMap: any[];
 }
