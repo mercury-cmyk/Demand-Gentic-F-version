@@ -6,7 +6,7 @@
  * Creates a project (pending) + work order in one step.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
@@ -100,6 +100,33 @@ interface FormData {
   landingPageUrl: string;
 }
 
+interface ArgylePrefillResponse {
+  draftId: string;
+  status: string;
+  workOrderId?: string | null;
+  alreadyExists: boolean;
+  prefill: {
+    channel: 'email';
+    name?: string;
+    objective?: string;
+    description?: string;
+    landingPageUrl?: string;
+    targetAudience?: string;
+    targetTitles?: string[];
+    targetIndustries?: string[];
+    targetRegions?: string[];
+    startDate?: string;
+    targetLeadCount?: number;
+    eventSummary?: {
+      title?: string | null;
+      type?: string | null;
+      date?: string | null;
+      location?: string | null;
+      sourceUrl?: string | null;
+    };
+  };
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -147,9 +174,15 @@ export default function ClientPortalCampaignCreate() {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const searchParams = new URLSearchParams(window.location.search);
+  const argyleFlow = searchParams.get('argyleFlow') === '1';
+  const argyleEventId = searchParams.get('argyleEventId');
+  const initialArgyleDraftId = searchParams.get('argyleDraftId');
 
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormData>({ ...DEFAULT_FORM });
+  const [argyleDraftId, setArgyleDraftId] = useState<string>(initialArgyleDraftId || '');
+  const [argylePrefillApplied, setArgylePrefillApplied] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [createdCampaign, setCreatedCampaign] = useState<any>(null);
   const [industryInput, setIndustryInput] = useState('');
@@ -158,6 +191,56 @@ export default function ClientPortalCampaignCreate() {
   const [urlInput, setUrlInput] = useState('');
   const [orgInteligenceLoading, setOrgIntelligenceLoading] = useState(false);
   const [showOrgIntelligenceOptions, setShowOrgIntelligenceOptions] = useState(false);
+
+  // For Argyle event flow, ensure one idempotent draft exists and get prefill values.
+  const { data: argylePrefill, isLoading: argylePrefillLoading, error: argylePrefillError } = useQuery<ArgylePrefillResponse | null>({
+    queryKey: ['argyle-campaign-prefill', argyleEventId, argyleDraftId],
+    queryFn: async () => {
+      if (!argyleFlow || !argyleEventId) return null;
+      const res = await fetch(`/api/client-portal/argyle-events/events/${argyleEventId}/draft`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to load event draft' }));
+        throw new Error(err.error || 'Failed to load event draft');
+      }
+      return res.json();
+    },
+    enabled: argyleFlow && !!argyleEventId,
+  });
+
+  useEffect(() => {
+    if (!argyleFlow || argylePrefillApplied || !argylePrefill?.prefill) return;
+
+    const prefill = argylePrefill.prefill;
+    setArgyleDraftId((prev) => argylePrefill.draftId || prev);
+    setForm((prev) => ({
+      ...prev,
+      channel: 'email',
+      name: prefill.name || prev.name,
+      objective: prefill.objective || prev.objective,
+      description: prefill.description || prev.description,
+      landingPageUrl: prefill.landingPageUrl || prev.landingPageUrl,
+      targetAudience: prefill.targetAudience || prev.targetAudience,
+      targetTitles: prefill.targetTitles?.length ? prefill.targetTitles : prev.targetTitles,
+      targetIndustries: prefill.targetIndustries?.length ? prefill.targetIndustries : prev.targetIndustries,
+      targetRegions: prefill.targetRegions?.length ? prefill.targetRegions : prev.targetRegions,
+      startDate: prefill.startDate || prev.startDate,
+      targetLeadCount: prefill.targetLeadCount ?? prev.targetLeadCount,
+    }));
+    setArgylePrefillApplied(true);
+  }, [argyleFlow, argylePrefill, argylePrefillApplied]);
+
+  useEffect(() => {
+    if (argyleFlow && argylePrefillError) {
+      toast({
+        title: 'Unable to load event draft',
+        description: (argylePrefillError as Error).message || 'Please retry from Upcoming Events.',
+        variant: 'destructive',
+      });
+    }
+  }, [argyleFlow, argylePrefillError, toast]);
 
   // Fetch organization intelligence data
   const { data: organizationIntelligence } = useQuery<any>({
@@ -248,6 +331,11 @@ export default function ClientPortalCampaignCreate() {
       if (data.projectId) payload.projectId = data.projectId;
       if (data.landingPageUrl) payload.landingPageUrl = data.landingPageUrl;
       if (data.referenceUrls.length) payload.referenceUrls = data.referenceUrls;
+      if (argyleFlow) {
+        payload.argyleFlow = true;
+        if (argyleEventId) payload.externalEventId = argyleEventId;
+        if (argyleDraftId) payload.argyleDraftId = argyleDraftId;
+      }
 
       // Build multipart form with files attached
       const body = new globalThis.FormData();
@@ -291,7 +379,7 @@ export default function ClientPortalCampaignCreate() {
     switch (s) {
       case 0: return form.channel !== '';
       case 1: return form.name.trim().length > 0 && form.objective.trim().length > 0;
-      case 2: return true; // Details are all optional
+      case 2: return argyleFlow ? !!form.targetLeadCount && form.targetLeadCount > 0 : true;
       case 3: return true;
       default: return true;
     }
@@ -495,7 +583,13 @@ export default function ClientPortalCampaignCreate() {
 
       <RadioGroup
         value={form.channel}
-        onValueChange={(v) => setForm({ ...form, channel: v as FormData['channel'] })}
+        onValueChange={(v) => {
+          if (argyleFlow) {
+            setForm((prev) => ({ ...prev, channel: 'email' }));
+            return;
+          }
+          setForm({ ...form, channel: v as FormData['channel'] });
+        }}
         className="grid grid-cols-1 md:grid-cols-3 gap-4"
       >
         {/* Phone / Voice */}
@@ -505,7 +599,8 @@ export default function ClientPortalCampaignCreate() {
             'flex flex-col items-center gap-3 rounded-xl border-2 p-6 cursor-pointer transition-all hover:shadow-md',
             form.channel === 'voice'
               ? 'border-primary bg-primary/5 shadow-sm'
-              : 'border-muted hover:border-primary/30'
+              : 'border-muted hover:border-primary/30',
+            argyleFlow && 'opacity-50 pointer-events-none'
           )}
         >
           <RadioGroupItem value="voice" id="channel-voice" className="sr-only" />
@@ -561,7 +656,8 @@ export default function ClientPortalCampaignCreate() {
             'flex flex-col items-center gap-3 rounded-xl border-2 p-6 cursor-pointer transition-all hover:shadow-md',
             form.channel === 'combo'
               ? 'border-primary bg-primary/5 shadow-sm'
-              : 'border-muted hover:border-primary/30'
+              : 'border-muted hover:border-primary/30',
+            argyleFlow && 'opacity-50 pointer-events-none'
           )}
         >
           <RadioGroupItem value="combo" id="channel-combo" className="sr-only" />
@@ -582,6 +678,11 @@ export default function ClientPortalCampaignCreate() {
           )}
         </Label>
       </RadioGroup>
+      {argyleFlow && (
+        <p className="text-xs text-muted-foreground">
+          This event-driven flow is locked to <strong>Email</strong>.
+        </p>
+      )}
     </div>
   );
 
@@ -819,6 +920,7 @@ export default function ClientPortalCampaignCreate() {
           <div className="space-y-2">
             <Label htmlFor="targetLeadCount" className="font-medium flex items-center gap-1.5">
               <Target className="h-3.5 w-3.5" /> Target Lead Count
+              {argyleFlow && <span className="text-red-500">*</span>}
             </Label>
             <Input
               id="targetLeadCount"
@@ -827,6 +929,9 @@ export default function ClientPortalCampaignCreate() {
               value={form.targetLeadCount ?? ''}
               onChange={(e) => setForm({ ...form, targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined })}
             />
+            {argyleFlow && (
+              <p className="text-xs text-muted-foreground">Required for event campaign launch.</p>
+            )}
           </div>
 
           {/* Industries (tag input) */}
@@ -1448,6 +1553,21 @@ export default function ClientPortalCampaignCreate() {
 
   // ── Main Layout ────────────────────────────
 
+  if (argyleFlow && argylePrefillLoading) {
+    return (
+      <ClientPortalLayout>
+        <div className="max-w-4xl mx-auto px-4 py-12">
+          <Card>
+            <CardContent className="flex items-center justify-center gap-3 py-12">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Loading event campaign draft...</span>
+            </CardContent>
+          </Card>
+        </div>
+      </ClientPortalLayout>
+    );
+  }
+
   return (
     <ClientPortalLayout>
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -1456,20 +1576,35 @@ export default function ClientPortalCampaignCreate() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
               <Sparkles className="h-6 w-6 text-primary" />
-              Create Campaign
+              {argyleFlow ? 'Create Event Email Campaign' : 'Create Campaign'}
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Launch a new email or phone campaign with simplified setup
+              {argyleFlow
+                ? 'Prefilled from your upcoming event. Review, edit, set lead volume, and submit for approval.'
+                : 'Launch a new email or phone campaign with simplified setup'}
             </p>
           </div>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate('/client-portal/dashboard?tab=campaigns')}
+            onClick={() => navigate(argyleFlow ? '/client-portal/dashboard?tab=argyle-events' : '/client-portal/dashboard?tab=campaigns')}
           >
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
           </Button>
         </div>
+
+        {argyleFlow && argylePrefill?.prefill?.eventSummary && (
+          <Card className="border-dashed">
+            <CardContent className="p-4 text-sm">
+              <p className="font-medium">{argylePrefill.prefill.eventSummary.title || 'Upcoming Event'}</p>
+              <p className="text-muted-foreground">
+                {[argylePrefill.prefill.eventSummary.type, argylePrefill.prefill.eventSummary.date, argylePrefill.prefill.eventSummary.location]
+                  .filter(Boolean)
+                  .join(' • ') || 'Event metadata'}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Step Progress */}
         <div className="space-y-3">
@@ -1534,7 +1669,13 @@ export default function ClientPortalCampaignCreate() {
             ) : (
               <Button
                 onClick={() => createMutation.mutate(form)}
-                disabled={createMutation.isPending || !form.name || !form.channel || !form.objective}
+                disabled={
+                  createMutation.isPending ||
+                  !form.name ||
+                  !form.channel ||
+                  !form.objective ||
+                  (argyleFlow && (!form.targetLeadCount || form.targetLeadCount <= 0))
+                }
               >
                 {createMutation.isPending ? (
                   <>
@@ -1559,7 +1700,7 @@ export default function ClientPortalCampaignCreate() {
             <p className="font-medium text-foreground mb-1">How it works</p>
             <ul className="space-y-1 text-xs">
               <li>1. Fill in campaign name, channel, and objective (required)</li>
-              <li>2. Add targeting details if you have them (optional — our team can do this)</li>
+              <li>2. Add targeting details if you have them ({argyleFlow ? 'target lead volume is required' : 'optional — our team can do this'})</li>
               <li>3. Submit — a project is created and sent for approval</li>
               <li>4. Once approved, our team activates your campaign</li>
             </ul>

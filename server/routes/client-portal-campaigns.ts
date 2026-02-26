@@ -27,6 +27,8 @@ import {
   clientCampaigns as clientPortalCampaigns,
   contacts,
   accounts,
+  externalEvents,
+  workOrderDrafts,
 } from '@shared/schema';
 import { z } from 'zod';
 import { isFeatureEnabled } from '../feature-flags';
@@ -1295,12 +1297,213 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
       // URLs (optional)
       referenceUrls: z.array(z.string()).optional(),
       landingPageUrl: z.string().optional(),
+
+      // Argyle event linkage (optional)
+      externalEventId: z.string().optional(),
+      argyleDraftId: z.string().optional(),
+      argyleFlow: z.boolean().optional(),
     });
 
     const data = quickCreateSchema.parse(rawPayload);
 
+    if (data.argyleFlow && (!data.targetLeadCount || data.targetLeadCount <= 0)) {
+      return res.status(400).json({ message: 'Target lead count is required for event campaign drafts' });
+    }
+    if (data.argyleFlow && !data.externalEventId && !data.argyleDraftId) {
+      return res.status(400).json({ message: 'Event linkage is required for Argyle draft campaigns' });
+    }
+
+    // Optional Argyle linkage context and idempotency.
+    let linkedEvent: {
+      id: string;
+      externalId: string;
+      title: string;
+      sourceUrl: string;
+      location: string | null;
+      eventType: string | null;
+      community: string | null;
+      startAtHuman: string | null;
+      startAtIso: Date | null;
+      overviewExcerpt: string | null;
+      agendaExcerpt: string | null;
+      speakersExcerpt: string | null;
+    } | null = null;
+    let linkedDraft: {
+      id: string;
+      status: string;
+      workOrderId: string | null;
+      externalEventId: string | null;
+      draftFields: Record<string, unknown> | null;
+      sourceFields: Record<string, unknown> | null;
+      leadCount: number | null;
+    } | null = null;
+
+    if (data.externalEventId || data.argyleDraftId || data.argyleFlow) {
+      if (data.externalEventId) {
+        const [event] = await db
+          .select({
+            id: externalEvents.id,
+            externalId: externalEvents.externalId,
+            title: externalEvents.title,
+            sourceUrl: externalEvents.sourceUrl,
+            location: externalEvents.location,
+            eventType: externalEvents.eventType,
+            community: externalEvents.community,
+            startAtHuman: externalEvents.startAtHuman,
+            startAtIso: externalEvents.startAtIso,
+            overviewExcerpt: externalEvents.overviewExcerpt,
+            agendaExcerpt: externalEvents.agendaExcerpt,
+            speakersExcerpt: externalEvents.speakersExcerpt,
+          })
+          .from(externalEvents)
+          .where(
+            and(
+              eq(externalEvents.id, data.externalEventId),
+              eq(externalEvents.clientId, clientAccountId),
+            )
+          )
+          .limit(1);
+
+        if (!event) {
+          return res.status(404).json({ message: 'Argyle event not found' });
+        }
+        linkedEvent = event;
+      }
+
+      if (data.argyleDraftId) {
+        const [draft] = await db
+          .select({
+            id: workOrderDrafts.id,
+            status: workOrderDrafts.status,
+            workOrderId: workOrderDrafts.workOrderId,
+            externalEventId: workOrderDrafts.externalEventId,
+            draftFields: workOrderDrafts.draftFields,
+            sourceFields: workOrderDrafts.sourceFields,
+            leadCount: workOrderDrafts.leadCount,
+          })
+          .from(workOrderDrafts)
+          .where(
+            and(
+              eq(workOrderDrafts.id, data.argyleDraftId),
+              eq(workOrderDrafts.clientAccountId, clientAccountId),
+            )
+          )
+          .limit(1);
+
+        if (!draft) {
+          return res.status(404).json({ message: 'Argyle draft not found' });
+        }
+        linkedDraft = draft;
+      }
+
+      if (!linkedDraft && data.externalEventId) {
+        const [draftByEvent] = await db
+          .select({
+            id: workOrderDrafts.id,
+            status: workOrderDrafts.status,
+            workOrderId: workOrderDrafts.workOrderId,
+            externalEventId: workOrderDrafts.externalEventId,
+            draftFields: workOrderDrafts.draftFields,
+            sourceFields: workOrderDrafts.sourceFields,
+            leadCount: workOrderDrafts.leadCount,
+          })
+          .from(workOrderDrafts)
+          .where(
+            and(
+              eq(workOrderDrafts.clientAccountId, clientAccountId),
+              eq(workOrderDrafts.externalEventId, data.externalEventId),
+            )
+          )
+          .limit(1);
+        linkedDraft = draftByEvent || null;
+      }
+
+      if (!linkedDraft && linkedEvent) {
+        const { generateSourceFields } = await import('../integrations/argyle_events/draft-generator');
+        const sourceFields = generateSourceFields({
+          externalId: linkedEvent.externalId,
+          sourceUrl: linkedEvent.sourceUrl,
+          title: linkedEvent.title,
+          community: linkedEvent.community || undefined,
+          eventType: linkedEvent.eventType || undefined,
+          location: linkedEvent.location || undefined,
+          dateHuman: linkedEvent.startAtHuman || undefined,
+          dateIso: linkedEvent.startAtIso ? linkedEvent.startAtIso.toISOString() : null,
+          overviewExcerpt: linkedEvent.overviewExcerpt || undefined,
+          agendaExcerpt: linkedEvent.agendaExcerpt || undefined,
+          speakersExcerpt: linkedEvent.speakersExcerpt || undefined,
+        });
+        const [createdDraft] = await db
+          .insert(workOrderDrafts)
+          .values({
+            clientAccountId,
+            clientUserId,
+            externalEventId: linkedEvent.id,
+            status: 'draft',
+            sourceFields: sourceFields as any,
+            draftFields: sourceFields as any,
+            editedFields: [],
+          })
+          .returning({
+            id: workOrderDrafts.id,
+            status: workOrderDrafts.status,
+            workOrderId: workOrderDrafts.workOrderId,
+            externalEventId: workOrderDrafts.externalEventId,
+            draftFields: workOrderDrafts.draftFields,
+            sourceFields: workOrderDrafts.sourceFields,
+            leadCount: workOrderDrafts.leadCount,
+          });
+        linkedDraft = createdDraft;
+      }
+
+      if (linkedDraft?.externalEventId && linkedEvent && linkedDraft.externalEventId !== linkedEvent.id) {
+        return res.status(400).json({ message: 'Draft does not belong to the selected event' });
+      }
+
+      if (linkedDraft?.status === 'submitted' && linkedDraft.workOrderId) {
+        const [existingOrder] = await db
+          .select({
+            id: workOrders.id,
+            orderNumber: workOrders.orderNumber,
+            title: workOrders.title,
+            status: workOrders.status,
+            campaignConfig: workOrders.campaignConfig,
+            projectId: workOrders.projectId,
+          })
+          .from(workOrders)
+          .where(
+            and(
+              eq(workOrders.id, linkedDraft.workOrderId),
+              eq(workOrders.clientAccountId, clientAccountId),
+            )
+          )
+          .limit(1);
+
+        if (existingOrder) {
+          return res.status(200).json({
+            success: true,
+            existing: true,
+            message: 'Campaign draft already submitted for this event',
+            campaign: {
+              id: existingOrder.id,
+              orderNumber: existingOrder.orderNumber,
+              name: existingOrder.title,
+              status: existingOrder.status,
+              channel: (existingOrder.campaignConfig as any)?.channel || 'email',
+              type: (existingOrder.campaignConfig as any)?.campaignType || 'email',
+              projectId: existingOrder.projectId || null,
+              requiresApproval: true,
+            },
+          });
+        }
+      }
+    }
+
     // --- Step 1: Create or link project (pending approval) ---
     let projectId = data.projectId;
+    const projectTypeForRequest: 'email_campaign' | 'call_campaign' | 'combo' =
+      data.channel === 'email' ? 'email_campaign' : data.channel === 'voice' ? 'call_campaign' : 'combo';
+    const linkedEventId = linkedEvent?.id || linkedDraft?.externalEventId || data.externalEventId || null;
 
     if (!projectId) {
       // Auto-create a project from campaign info
@@ -1313,6 +1516,9 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
           status: 'pending',
           requestedLeadCount: data.targetLeadCount || null,
           budgetAmount: data.budget ? data.budget.toString() : null,
+          landingPageUrl: data.landingPageUrl || null,
+          projectType: projectTypeForRequest,
+          externalEventId: linkedEventId,
         })
         .returning({ id: clientProjects.id, name: clientProjects.name });
 
@@ -1333,7 +1539,7 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
     } else {
       // Verify client owns the referenced project
       const [existingProject] = await db
-        .select({ id: clientProjects.id, status: clientProjects.status })
+        .select({ id: clientProjects.id, status: clientProjects.status, externalEventId: clientProjects.externalEventId })
         .from(clientProjects)
         .where(
           and(
@@ -1351,6 +1557,22 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
       // If still pending, the work order is created but won't be processed until approval
       if (existingProject.status === 'rejected') {
         return res.status(400).json({ message: 'Cannot create campaign under a rejected project' });
+      }
+
+      if (linkedEventId && existingProject.externalEventId && existingProject.externalEventId !== linkedEventId) {
+        return res.status(400).json({ message: 'Project is linked to a different event' });
+      }
+
+      if (linkedEventId && !existingProject.externalEventId) {
+        await db
+          .update(clientProjects)
+          .set({
+            externalEventId: linkedEventId,
+            projectType: projectTypeForRequest,
+            landingPageUrl: data.landingPageUrl || null,
+            updatedAt: new Date(),
+          })
+          .where(eq(clientProjects.id, projectId));
       }
     }
 
@@ -1439,6 +1661,30 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         status: workOrders.status,
       });
 
+    if (linkedDraft) {
+      const existingDraftFields = (linkedDraft.draftFields || {}) as Record<string, unknown>;
+      await db
+        .update(workOrderDrafts)
+        .set({
+          status: 'submitted',
+          workOrderId: newOrder.id,
+          submittedAt: new Date(),
+          leadCount: data.targetLeadCount || linkedDraft.leadCount || null,
+          draftFields: {
+            ...existingDraftFields,
+            title: data.name,
+            description: data.description || existingDraftFields.description || '',
+            objective: data.objective,
+            targetAudience: data.targetTitles?.length ? data.targetTitles : existingDraftFields.targetAudience,
+            targetIndustries: data.targetIndustries?.length ? data.targetIndustries : existingDraftFields.targetIndustries,
+            sourceUrl: data.landingPageUrl || linkedEvent?.sourceUrl || existingDraftFields.sourceUrl || '',
+            eventLocation: linkedEvent?.location || existingDraftFields.eventLocation || '',
+          } as any,
+          updatedAt: new Date(),
+        })
+        .where(eq(workOrderDrafts.id, linkedDraft.id));
+    }
+
     // --- Step 3: Log activity ---
     try {
       const { clientPortalActivityLogs } = await import('@shared/schema');
@@ -1454,6 +1700,8 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
           projectId,
           orderNumber,
           requiresApproval: true,
+          externalEventId: linkedEventId,
+          argyleDraftId: linkedDraft?.id || null,
         },
       });
     } catch (logErr) {
@@ -1472,6 +1720,8 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         type: data.campaignType || defaultCampaignType,
         projectId,
         requiresApproval: true,
+        externalEventId: linkedEventId,
+        argyleDraftId: linkedDraft?.id || null,
       },
     });
   } catch (error: any) {

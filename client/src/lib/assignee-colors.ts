@@ -70,9 +70,9 @@ export function getAssigneeColorTheme(assigneeName?: string | null): AssigneeCol
 
   if (normalizedLower.includes("tabasum")) {
     return {
-      cardClass: "border-l-pink-500 bg-pink-50/50",
-      badgeClass: "bg-pink-100 text-pink-800 border-pink-300",
-      accentClass: "text-pink-700",
+      cardClass: "border-l-pink-300 bg-pink-50/60",
+      badgeClass: "bg-pink-50 text-pink-600 border-pink-200",
+      accentClass: "text-pink-500",
     };
   }
 
