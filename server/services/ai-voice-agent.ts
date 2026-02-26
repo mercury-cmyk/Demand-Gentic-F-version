@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { ensureVoiceAgentControlLayer } from "./voice-agent-control-defaults";
+import type { VoiceAgentBridgeResult } from "./agents/unified/voice-agent-bridge";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { chat as vertexChat, generateText as vertexGenerateText } from "./vertex-ai/vertex-client";
 import {
@@ -219,10 +220,10 @@ export class AiVoiceAgent extends EventEmitter {
 
   private async buildSystemPrompt(): Promise<string> {
     const { accountId, contactId } = this.context;
-    
-    // Initialize context sections
-    let accountContextSection = null;
-    let callPlanContextSection = null;
+
+    // ---- Layer 4: Account & Contact Context (fetch regardless of UA availability) ----
+    let accountContextSection: string | null = null;
+    let callPlanContextSection: string | null = null;
 
     // Only fetch intelligence if we have the required IDs
     if (!accountId || !contactId) {
@@ -266,6 +267,129 @@ export class AiVoiceAgent extends EventEmitter {
       });
     }
 
+    // ---- Layer 1: Try Unified Agent Architecture foundational prompt ----
+    const useUA = process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE === 'true';
+    let uaResult: VoiceAgentBridgeResult | null = null;
+
+    if (useUA) {
+      try {
+        const { getVoiceAgentFoundationalPrompt } = await import('./agents/unified/voice-agent-bridge');
+        uaResult = await getVoiceAgentFoundationalPrompt();
+      } catch (err) {
+        console.warn('[AiVoiceAgent] Failed to load UA bridge, using fallback:', err);
+      }
+    }
+
+    if (uaResult?.foundationalPrompt && uaResult.source === 'unified_agent') {
+      // ---- SUCCESS PATH: UA-sourced prompt ----
+      console.log(JSON.stringify({
+        event: 'voice_agent_prompt_assembled',
+        source: 'unified_agent',
+        agentVersion: uaResult.agentVersion,
+        versionHash: uaResult.versionHash,
+        sectionCount: uaResult.sectionCount,
+        hasKnowledgeHubSupplement: uaResult.hasKnowledgeHubSupplement,
+        callId: this.callId,
+        campaignId: this.context.campaignId,
+        timestamp: new Date().toISOString(),
+      }));
+
+      // Layer 1: UA foundational prompt (all active sections from unified architecture)
+      let prompt = uaResult.foundationalPrompt;
+
+      // Layer 2: Campaign persona override (name, company, role from campaign settings)
+      const personaOverride = this.buildPersonaOverride();
+      prompt += `\n\n---\n\n${personaOverride}`;
+
+      // Layer 3: Campaign script overrides (if campaign has specific scripts)
+      const scriptOverride = this.buildScriptOverride();
+      if (scriptOverride) {
+        prompt += `\n\n---\n\n${scriptOverride}`;
+      }
+
+      // Layer 4: Account & Contact context
+      if (accountContextSection) {
+        prompt += `\n\n---\n\n${accountContextSection}`;
+      }
+      if (callPlanContextSection) {
+        prompt += `\n\n---\n\n${callPlanContextSection}`;
+      }
+
+      // Layer 5: Voice control layer (canonical rules, output format)
+      return ensureVoiceAgentControlLayer(prompt);
+    }
+
+    // ---- FALLBACK PATH: Existing hardcoded behavior (zero-risk) ----
+    if (useUA) {
+      console.warn(JSON.stringify({
+        event: 'voice_agent_prompt_assembled',
+        source: 'fallback',
+        callId: this.callId,
+        campaignId: this.context.campaignId,
+        timestamp: new Date().toISOString(),
+      }));
+    }
+
+    return this.buildLegacySystemPrompt(accountContextSection, callPlanContextSection);
+  }
+
+  /**
+   * Campaign persona override for UA path.
+   * Provides the campaign-specific identity that overrides the UA's generic
+   * identity section with the actual agent name, company, and role.
+   */
+  private buildPersonaOverride(): string {
+    return `## Campaign Persona
+You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}.
+You are making an outbound call to ${this.context.contactFirstName} ${this.context.contactLastName} at ${this.context.companyName}.
+Your job is to be crystal clear about why you're calling, avoid vague phrases, and always connect your reason for calling to a concrete benefit for their team.`;
+  }
+
+  /**
+   * Campaign script overrides for UA path.
+   * If the campaign has specific scripts configured, they are injected as
+   * overrides on top of the UA's generic opening/gatekeeper/objection sections.
+   */
+  private buildScriptOverride(): string | null {
+    const scripts = this.settings.scripts;
+    if (!scripts?.opening && !scripts?.gatekeeper && !scripts?.pitch) return null;
+
+    const parts: string[] = ['## Campaign Script Overrides'];
+
+    if (scripts.opening) {
+      parts.push(`Opening: ${this.interpolateScript(scripts.opening)}`);
+    }
+    if (scripts.gatekeeper) {
+      parts.push(`Gatekeeper Response: ${this.interpolateScript(scripts.gatekeeper)}`);
+    }
+    if (scripts.pitch) {
+      parts.push(`Main Pitch: ${this.interpolateScript(scripts.pitch)}`);
+    }
+    if (scripts.closing) {
+      parts.push(`Closing: ${this.interpolateScript(scripts.closing)}`);
+    }
+    if (scripts.objections) {
+      parts.push(`Objection Handling: ${this.interpolateScript(scripts.objections)}`);
+    }
+
+    const maxGatekeeperAttempts = this.settings.gatekeeperLogic?.maxAttempts || 3;
+    parts.push(`Max gatekeeper attempts: ${maxGatekeeperAttempts}`);
+
+    if (this.settings.handoff?.enabled && this.settings.handoff?.triggers?.length) {
+      parts.push(`\nHandoff Triggers:\n${this.settings.handoff.triggers.map((t) => `- ${t}`).join("\n")}`);
+    }
+
+    return parts.join('\n\n');
+  }
+
+  /**
+   * Legacy prompt builder — the exact existing behavior before the UA integration.
+   * Used as the fallback path when the UA bridge is disabled or unavailable.
+   */
+  private buildLegacySystemPrompt(
+    accountContextSection: string | null,
+    callPlanContextSection: string | null,
+  ): string {
     const personaIntro = `You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}.
   You are making an outbound sales call to ${this.context.contactFirstName} ${this.context.contactLastName} at ${this.context.companyName}.
 
@@ -343,37 +467,10 @@ IMPORTANT:
 - Be truthful and don't make claims you can't back up
 - If you don't understand something, ask for clarification
 - Log any key information the prospect shares for follow-up`;
+
     return ensureVoiceAgentControlLayer(
       `${prompt}\n\n---\n\n${accountContextSection}\n\n---\n\n${callPlanContextSection}`
     );
-
-    // Build complete prompt with organization context from database
-    const basePrompt = `${personaIntro}
-
-  VOICE & TONE:
-  - Speak naturally and conversationally
-  - Be professional but warm and friendly
-  - Listen carefully and respond appropriately
-  - Keep responses concise (1-3 sentences typically)
-  - Don't be pushy or aggressive
-  - If the prospect says they're not interested, respect that gracefully
-
-  ${gatekeeperInstructions}
-
-  ${pitchInstructions}
-
-  ${objectionHandling}
-
-  ${handoffInstructions}
-
-  IMPORTANT:
-  - Always identify yourself at the start
-  - Be truthful and don't make claims you can't back up
-  - If you don't understand something, ask for clarification
-  - Log any key information the prospect shares for follow-up`;
-
-    // Wrap with organization context from database (includes compliance, policies, voice defaults)
-    return await buildAgentSystemPrompt(basePrompt);
   }
 
   async startConversation(): Promise<void> {

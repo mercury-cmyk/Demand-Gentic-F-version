@@ -20,6 +20,36 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+// Helper to parse .env file simple
+function parseEnv(filePath: string) {
+    if (!fs.existsSync(filePath)) return {};
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const env: Record<string, string> = {};
+    content.split('\n').forEach(line => {
+        const cleanLine = line.replace(/\r$/, ''); // Strip Windows line endings
+        const match = cleanLine.match(/^([^=]+)=(.*)$/);
+        if (match) {
+            let value = match[2].trim();
+            if (value.startsWith('"') && value.endsWith('"')) {
+                value = value.slice(1, -1);
+            }
+            env[match[1].trim()] = value;
+        }
+    });
+    return env;
+}
+
+// Load envs with explicit development precedence:
+// .env -> .env.development -> .env.local -> .env.development.local
+const envDefault = parseEnv(path.join(process.cwd(), '.env'));
+const envDevelopment = parseEnv(path.join(process.cwd(), '.env.development'));
+const envLocal = parseEnv(path.join(process.cwd(), '.env.local'));
+const envDevLocal = parseEnv(path.join(process.cwd(), '.env.development.local'));
+
+function resolveEnv(key: string): string | undefined {
+    return process.env[key] || envDevLocal[key] || envLocal[key] || envDevelopment[key] || envDefault[key];
+}
+
 const BASE_URL = 'http://localhost:5000';
 const TESTS = {
   server: '✅ Server Health',
@@ -56,7 +86,7 @@ function log(level, msg) {
 async function checkServer() {
   log('TEST', 'Checking server health...');
   try {
-    const response = await axios.get(`${BASE_URL}/health`, { timeout: 5000 });
+    const response = await axios.get(`${BASE_URL}/api/health`, { timeout: 5000 });
     log('PASS', 'Server is running on http://localhost:5000');
     results.server = { status: 'pass', details: response.data };
     return true;
@@ -72,15 +102,15 @@ async function checkConfiguration() {
   log('TEST', 'Checking configuration...');
   
   const required = {
-    'TELNYX_API_KEY': process.env.TELNYX_API_KEY ? 'SET' : 'MISSING',
-    'OPENAI_API_KEY': process.env.OPENAI_API_KEY ? 'SET' : 'MISSING',
-    'DATABASE_URL': process.env.DATABASE_URL ? 'SET' : 'MISSING',
-    'TELNYX_PUBLIC_KEY': process.env.TELNYX_PUBLIC_KEY ? 'SET' : 'MISSING',
+    'TELNYX_API_KEY': resolveEnv('TELNYX_API_KEY') ? 'SET' : 'MISSING',
+    'OPENAI_API_KEY': resolveEnv('OPENAI_API_KEY') ? 'SET' : 'MISSING',
+    'DATABASE_URL': resolveEnv('DATABASE_URL') ? 'SET' : 'MISSING',
+    'TELNYX_PUBLIC_KEY': resolveEnv('TELNYX_PUBLIC_KEY') ? 'SET' : 'MISSING',
   };
   
   const optional = {
-    'PUBLIC_WEBSOCKET_URL': process.env.PUBLIC_WEBSOCKET_URL || 'NOT SET (will use request host)',
-    'VOICE_PROVIDER': process.env.VOICE_PROVIDER || 'openai_realtime (default)',
+    'PUBLIC_WEBSOCKET_URL': resolveEnv('PUBLIC_WEBSOCKET_URL') || 'NOT SET (will use request host)',
+    'VOICE_PROVIDER': resolveEnv('VOICE_PROVIDER') || 'openai_realtime (default)',
   };
 
   let missing = [];
@@ -104,9 +134,9 @@ async function checkConfiguration() {
 async function checkWebSocketURL() {
   log('TEST', 'Checking WebSocket URL configuration...');
   
-  if (process.env.PUBLIC_WEBSOCKET_URL) {
-    log('PASS', `PUBLIC_WEBSOCKET_URL is set: ${process.env.PUBLIC_WEBSOCKET_URL}`);
-    results.websocket = { status: 'pass', url: process.env.PUBLIC_WEBSOCKET_URL };
+  if (resolveEnv('PUBLIC_WEBSOCKET_URL')) {
+    log('PASS', `PUBLIC_WEBSOCKET_URL is set: ${resolveEnv('PUBLIC_WEBSOCKET_URL')}`);
+    results.websocket = { status: 'pass', url: resolveEnv('PUBLIC_WEBSOCKET_URL') };
   } else {
     log('WARN', 'PUBLIC_WEBSOCKET_URL not set - will use request host header');
     log('WARN', 'This means WebSocket URL = ws://localhost:5000/openai-realtime-dialer');
@@ -162,9 +192,9 @@ async function testAudioTransmission() {
       },
       {
         headers: {
-          'Authorization': `Bearer ${process.env.AUTH_TOKEN || 'test-token'}`,
-          'X-Public-Host': process.env.PUBLIC_WEBSOCKET_URL ? 
-            new URL(process.env.PUBLIC_WEBSOCKET_URL).host : 
+          'Authorization': `Bearer ${resolveEnv('AUTH_TOKEN') || 'test-token'}`,
+          'X-Public-Host': resolveEnv('PUBLIC_WEBSOCKET_URL') ? 
+            new URL(resolveEnv('PUBLIC_WEBSOCKET_URL')).host : 
             'localhost:5000'
         },
         timeout: 10000

@@ -286,6 +286,14 @@ class UnifiedAgentRegistry {
     const agent = this.getAgent(agentType);
     if (!agent) throw new Error(`Agent not found: ${agentType}`);
     agent.updatePromptSection(sectionId, newContent, updatedBy, reason);
+
+    // Invalidate bridge cache so production picks up changes immediately
+    if (agentType === 'voice') {
+      try {
+        const { invalidateVoiceAgentBridgeCache } = require('./voice-agent-bridge');
+        invalidateVoiceAgentBridgeCache();
+      } catch { /* bridge not loaded yet — safe to ignore */ }
+    }
   }
 
   /**
@@ -314,6 +322,14 @@ class UnifiedAgentRegistry {
 
     // Track in pipeline
     this.pipeline.recordApplicationResult(agentType, recommendationId, rec.impact.expectedImprovement);
+
+    // Invalidate bridge cache so production picks up changes immediately
+    if (agentType === 'voice') {
+      try {
+        const { invalidateVoiceAgentBridgeCache } = require('./voice-agent-bridge');
+        invalidateVoiceAgentBridgeCache();
+      } catch { /* bridge not loaded yet — safe to ignore */ }
+    }
   }
 
   /**

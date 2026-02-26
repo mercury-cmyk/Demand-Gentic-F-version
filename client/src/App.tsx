@@ -40,9 +40,8 @@ import SegmentDetailPage from "@/pages/segment-detail";
 import ListDetailPage from "@/pages/list-detail";
 import DomainSetsPage from "@/pages/domain-sets";
 import AccountsListDetail from "@/pages/accounts-list-detail";
-import CampaignsPage from "@/pages/campaigns";
+import CampaignsHub from "@/pages/campaign-hub";
 import CampaignCreatePage from "@/pages/campaign-create";
-import EmailCampaignsPage from "@/pages/email-campaigns";
 import EmailCampaignCreatePage from "@/pages/email-campaign-create";
 import SimpleEmailCampaignCreatePage from "@/pages/simple-email-campaign-create";
 import SimpleEmailCampaignEditPage from "@/pages/simple-email-campaign-edit";
@@ -340,7 +339,7 @@ function AuthenticatedApp() {
               <Route path="/domain-sets/:id" component={AccountsListDetail} />
               
               {/* Campaigns - Unified Hub */}
-              <Route path="/campaigns" component={CampaignsPage} />
+              <Route path="/campaigns" component={CampaignsHub} />
               <Route path="/campaign-manager">
                 <Redirect to="/ai-studio/campaign-manager" />
               </Route>
@@ -351,13 +350,14 @@ function AuthenticatedApp() {
               <Route path="/campaigns/:id/queue" component={CampaignQueuePage} />
               
               {/* Email Campaigns - support both old /campaigns/email and new /email-campaigns paths */}
-              <Route path="/campaigns/email" component={EmailCampaignsPage} />
               <Route path="/campaigns/email/create" component={SimpleEmailCampaignCreatePage} />
               <Route path="/campaigns/email/create-legacy" component={EmailCampaignCreatePage} />
               <Route path="/campaigns/email/:id/edit" component={SimpleEmailCampaignEditPage} />
               <Route path="/campaigns/email/:id/reports" component={EmailCampaignReportsPage} />
               <Route path="/campaigns/email-templates" component={EmailTemplatesPage} />
-              <Route path="/email-campaigns" component={EmailCampaignsPage} />
+              <Route path="/email-campaigns">
+                <Redirect to="/campaigns?tab=email" />
+              </Route>
               <Route path="/email-campaigns/create" component={EmailCampaignCreatePage} />
               <Route path="/simple-email-campaigns/create" component={SimpleEmailCampaignCreatePage} />
               <Route path="/simple-email-campaigns/:id/edit" component={SimpleEmailCampaignEditPage} />
@@ -366,27 +366,17 @@ function AuthenticatedApp() {
               <Route path="/email-sequences" component={EmailSequencesPage} />
               
               {/* Phone Campaigns - redirects to main campaigns page */}
-              <Route path="/phone-campaigns">
-                {() => { window.location.href = '/campaigns'; return null; }}
-              </Route>
               <Route path="/phone-campaigns/create" component={TelemarketingCreatePage} />
               {/* Use the full wizard for editing phone campaigns (with voice selection) */}
               <Route path="/phone-campaigns/:id/edit" component={TelemarketingCreatePage} />
               {/* Unified 12-step wizard for creating AND editing telemarketing campaigns */}
               <Route path="/campaigns/telemarketing/:id/edit" component={TelemarketingCreatePage} />
               {/* Legacy redirects for /campaigns/telemarketing */}
-              <Route path="/campaigns/telemarketing">
-                {() => { window.location.href = '/campaigns'; return null; }}
-              </Route>
               <Route path="/campaigns/telemarketing/create">
                 {() => { window.location.href = '/campaigns'; return null; }}
               </Route>
               {/* Intelligent Campaign Creation with AI */}
               <Route path="/campaigns/create/intelligent" component={IntelligentCampaignCreatePage} />
-              {/* Added explicit routes for /campaigns/phone path used in navigations */}
-              <Route path="/campaigns/phone">
-                {() => { window.location.href = '/campaigns'; return null; }}
-              </Route>
               {/* Use the full wizard for editing phone campaigns (with voice selection) */}
               <Route path="/campaigns/phone/:id/edit" component={TelemarketingCreatePage} />
               <Route path="/campaigns/phone/:id/queue" component={CampaignQueuePage} />

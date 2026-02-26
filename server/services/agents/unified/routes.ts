@@ -446,6 +446,14 @@ router.post('/:agentType/rollback/:version', (req: Request, res: Response) => {
     const rolledBackBy = getUserId(req);
     agent.rollbackToVersion(req.params.version, rolledBackBy);
 
+    // Invalidate bridge cache so production picks up the rollback immediately
+    if (agentType === 'voice') {
+      try {
+        const { invalidateVoiceAgentBridgeCache } = require('./voice-agent-bridge');
+        invalidateVoiceAgentBridgeCache();
+      } catch { /* bridge not loaded yet — safe to ignore */ }
+    }
+
     res.json({
       success: true,
       message: `Rolled back to version ${req.params.version}`,
@@ -608,6 +616,80 @@ router.get('/:agentType/assembled-prompt-with-oi', async (req: Request, res: Res
       assembledPrompt: result.prompt,
       sectionCount: result.sectionCount,
       hasOrgIntelligence: result.hasOrgIntelligence,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== PRODUCTION PROMPT PREVIEW ====================
+
+/**
+ * GET /api/unified-agents/voice/production-prompt-preview
+ *
+ * Shows what the production voice agent would receive when the UA bridge
+ * is active.  Includes layer breakdown, section list, token estimate,
+ * version info, and Knowledge Hub supplement status.
+ *
+ * Use this before flipping VOICE_AGENT_USE_UNIFIED_ARCHITECTURE=true
+ * to verify the assembled prompt is correct.
+ */
+router.get('/voice/production-prompt-preview', async (req: Request, res: Response) => {
+  try {
+    const { getVoiceAgentFoundationalPrompt, invalidateVoiceAgentBridgeCache } = await import('./voice-agent-bridge');
+
+    // Force fresh fetch (bypass cache) for preview accuracy
+    invalidateVoiceAgentBridgeCache();
+    const result = await getVoiceAgentFoundationalPrompt();
+
+    const agent = unifiedAgentRegistry.getAgent('voice' as any);
+    const sections = agent
+      ? agent.promptSections.filter(s => s.isActive).map(s => ({
+          id: s.id,
+          name: s.name,
+          sectionNumber: s.sectionNumber,
+          category: s.category,
+          versionHash: s.versionHash,
+          contentLength: s.content.length,
+        }))
+      : [];
+
+    // Rough token estimate (~4 chars per token for English text)
+    const estimatedTokens = result.foundationalPrompt
+      ? Math.ceil(result.foundationalPrompt.length / 4)
+      : 0;
+
+    const featureFlagEnabled = process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE === 'true';
+
+    res.json({
+      featureFlag: {
+        name: 'VOICE_AGENT_USE_UNIFIED_ARCHITECTURE',
+        enabled: featureFlagEnabled,
+        note: featureFlagEnabled
+          ? 'UA path is ACTIVE — production calls use this prompt'
+          : 'UA path is DISABLED — production calls use legacy hardcoded prompt',
+      },
+      bridge: {
+        source: result.source,
+        agentVersion: result.agentVersion,
+        versionHash: result.versionHash,
+        sectionCount: result.sectionCount,
+        hasKnowledgeHubSupplement: result.hasKnowledgeHubSupplement,
+      },
+      prompt: {
+        assembledPrompt: result.foundationalPrompt,
+        estimatedTokens,
+        characterCount: result.foundationalPrompt?.length ?? 0,
+      },
+      sections,
+      layers: [
+        'Layer 1: UA Foundational Prompt (sections ordered by section_number)',
+        'Layer 2: Knowledge Hub supplement (non-overlapping categories)',
+        'Layer 3: Campaign Persona Override (injected at call time)',
+        'Layer 4: Campaign Script Overrides (injected at call time)',
+        'Layer 5: Account & Contact Context (injected at call time)',
+        'Layer 6: Voice Control Layer — ensureVoiceAgentControlLayer() (injected at call time)',
+      ],
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

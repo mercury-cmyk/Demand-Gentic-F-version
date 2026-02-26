@@ -24,6 +24,13 @@ export { UnifiedPipelineAgent, unifiedPipelineAgent } from './unified-pipeline-a
 // ==================== LEARNING PIPELINE ====================
 export { LearningPipelineService, learningPipeline } from './learning-pipeline';
 
+// ==================== VOICE AGENT BRIDGE ====================
+export {
+  getVoiceAgentFoundationalPrompt,
+  invalidateVoiceAgentBridgeCache,
+  type VoiceAgentBridgeResult,
+} from './voice-agent-bridge';
+
 // ==================== REGISTRY ====================
 export {
   UnifiedAgentRegistry,
