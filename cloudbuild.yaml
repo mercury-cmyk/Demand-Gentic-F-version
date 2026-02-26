@@ -52,7 +52,7 @@ steps:
       - '8080'
       - '--concurrency'
       - '80'
-      - '--startup-cpu-boost'
+      - '--cpu-boost'
       - '--vpc-connector'
       - 'pivotal-connector'
       - '--vpc-egress'

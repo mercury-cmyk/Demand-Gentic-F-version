@@ -29,6 +29,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Validate GCP credentials
+        run: |
+          if [[ -z "${{ secrets.GCP_SA_KEY }}" ]]; then
+            echo "ERROR: GCP_SA_KEY secret is not configured in GitHub!"
+            echo "To fix this:"
+            echo "1. Go to Settings > Secrets and variables > Actions"
+            echo "2. Create a new secret named 'GCP_SA_KEY'"
+            echo "3. Paste the base64-encoded service account JSON"
+            exit 1
+          fi
+      
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
