@@ -162,10 +162,9 @@ export default function AdminProjectRequests() {
 
   // Reject project mutation
   const rejectMutation = useMutation({
-    mutationFn: async (data: { projectId: string; reason: string }) => {
-      return apiRequest('POST', `/api/admin/project-requests/${data.projectId}/reject`, {
-        reason: data.reason,
-      });
+    mutationFn: async (data: { projectId: string; reason?: string }) => {
+      const payload = data.reason ? { reason: data.reason } : {};
+      return apiRequest('POST', `/api/admin/project-requests/${data.projectId}/reject`, payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/admin/project-requests'] });
@@ -224,9 +223,10 @@ export default function AdminProjectRequests() {
 
   const handleReject = () => {
     if (!selectedProject) return;
+    const trimmedReason = rejectionReason.trim();
     rejectMutation.mutate({
       projectId: selectedProject.id,
-      reason: rejectionReason,
+      reason: trimmedReason.length > 0 ? trimmedReason : undefined,
     });
   };
 
@@ -805,17 +805,17 @@ export default function AdminProjectRequests() {
               Reject Project
             </DialogTitle>
             <DialogDescription>
-              Provide a reason for rejecting this project. The client will be notified.
+              Optionally provide a reason for rejecting this project. The client will be notified.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Rejection Reason</Label>
+              <Label>Rejection Reason (optional)</Label>
               <Textarea
                 value={rejectionReason}
                 onChange={(e) => setRejectionReason(e.target.value)}
-                placeholder="Please provide a reason for rejection..."
+                placeholder="Share context for revision (optional)..."
                 rows={4}
               />
             </div>
@@ -828,7 +828,7 @@ export default function AdminProjectRequests() {
             <Button
               variant="destructive"
               onClick={handleReject}
-              disabled={rejectMutation.isPending || !rejectionReason.trim()}
+              disabled={rejectMutation.isPending}
             >
               {rejectMutation.isPending ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

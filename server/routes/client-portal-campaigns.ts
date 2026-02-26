@@ -1345,6 +1345,12 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
       sourceFields: Record<string, unknown> | null;
       leadCount: number | null;
     } | null = null;
+    let reusableRejectedOrder: {
+      id: string;
+      status: string;
+      projectId: string | null;
+    } | null = null;
+    let reusableRejectedProjectId: string | null = null;
 
     if (data.externalEventId || data.argyleDraftId || data.argyleFlow) {
       if (data.externalEventId) {
@@ -1502,6 +1508,75 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         return res.status(400).json({ message: 'Draft does not belong to the selected event' });
       }
 
+      if (linkedDraft?.workOrderId) {
+        const [linkedOrder] = await db
+          .select({
+            id: workOrders.id,
+            status: workOrders.status,
+            projectId: workOrders.projectId,
+          })
+          .from(workOrders)
+          .where(
+            and(
+              eq(workOrders.id, linkedDraft.workOrderId),
+              eq(workOrders.clientAccountId, clientAccountId),
+            )
+          )
+          .limit(1);
+        if (linkedOrder) {
+          if (linkedOrder.status === 'rejected') {
+            reusableRejectedOrder = linkedOrder;
+          }
+
+          if (linkedOrder.projectId) {
+            const [linkedProject] = await db
+              .select({
+                id: clientProjects.id,
+                status: clientProjects.status,
+              })
+              .from(clientProjects)
+              .where(
+                and(
+                  eq(clientProjects.id, linkedOrder.projectId),
+                  eq(clientProjects.clientAccountId, clientAccountId),
+                )
+              )
+              .limit(1);
+
+            if (linkedProject?.status === 'rejected') {
+              reusableRejectedProjectId = linkedProject.id;
+              reusableRejectedOrder = {
+                id: linkedOrder.id,
+                status: linkedOrder.status,
+                projectId: linkedProject.id,
+              };
+            }
+          }
+        }
+      }
+
+      const eventIdForProjectLookup = linkedEvent?.id || linkedDraft?.externalEventId || data.externalEventId;
+      if (!reusableRejectedProjectId && eventIdForProjectLookup) {
+        const [eventLinkedProject] = await db
+          .select({
+            id: clientProjects.id,
+            status: clientProjects.status,
+          })
+          .from(clientProjects)
+          .where(
+            and(
+              eq(clientProjects.clientAccountId, clientAccountId),
+              eq(clientProjects.externalEventId, eventIdForProjectLookup),
+            )
+          )
+          .orderBy(desc(clientProjects.updatedAt))
+          .limit(1);
+
+        if (eventLinkedProject?.status === 'rejected') {
+          reusableRejectedProjectId = eventLinkedProject.id;
+        }
+      }
+
       if (linkedDraft?.status === 'submitted' && linkedDraft.workOrderId) {
         const [existingOrder] = await db
           .select({
@@ -1521,7 +1596,36 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
           )
           .limit(1);
 
-        if (existingOrder) {
+        let hasActiveProjectForExistingOrder = false;
+        if (existingOrder?.projectId && !reusableRejectedProjectId) {
+          const [existingOrderProject] = await db
+            .select({
+              id: clientProjects.id,
+              status: clientProjects.status,
+            })
+            .from(clientProjects)
+            .where(
+              and(
+                eq(clientProjects.id, existingOrder.projectId),
+                eq(clientProjects.clientAccountId, clientAccountId),
+              )
+            )
+            .limit(1);
+
+          if (existingOrderProject) {
+            hasActiveProjectForExistingOrder = true;
+            if (existingOrderProject.status === 'rejected') {
+              reusableRejectedProjectId = existingOrderProject.id;
+            }
+          }
+        }
+
+        if (
+          existingOrder &&
+          existingOrder.status !== 'rejected' &&
+          !reusableRejectedProjectId &&
+          hasActiveProjectForExistingOrder
+        ) {
           return res.status(200).json({
             success: true,
             existing: true,
@@ -1538,14 +1642,50 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
             },
           });
         }
+
+        if (existingOrder) {
+          reusableRejectedOrder = {
+            id: existingOrder.id,
+            status: existingOrder.status,
+            projectId: existingOrder.projectId || reusableRejectedProjectId || null,
+          };
+        }
       }
     }
 
     // --- Step 1: Create or link project (pending approval) ---
-    let projectId = data.projectId;
+    let projectId = data.projectId || reusableRejectedProjectId || reusableRejectedOrder?.projectId || '';
     const projectTypeForRequest: 'email_campaign' | 'call_campaign' | 'combo' =
       data.channel === 'email' ? 'email_campaign' : data.channel === 'voice' ? 'call_campaign' : 'combo';
     const linkedEventId = linkedEvent?.id || linkedDraft?.externalEventId || data.externalEventId || null;
+
+    if (!data.projectId && (reusableRejectedProjectId || reusableRejectedOrder?.projectId)) {
+      const projectIdToReopen = reusableRejectedProjectId || reusableRejectedOrder?.projectId;
+      await db
+        .update(clientProjects)
+        .set({
+          status: 'pending',
+          rejectionReason: null,
+          approvedBy: null,
+          approvedAt: null,
+          name: data.name,
+          description: projectDescription,
+          requestedLeadCount: data.targetLeadCount || null,
+          budgetAmount: data.budget ? data.budget.toString() : null,
+          landingPageUrl: data.landingPageUrl || null,
+          projectType: projectTypeForRequest,
+          externalEventId: linkedEventId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(clientProjects.id, projectIdToReopen!),
+            eq(clientProjects.clientAccountId, clientAccountId),
+          )
+        );
+
+      projectId = projectIdToReopen || projectId;
+    }
 
     if (!projectId) {
       // Auto-create a project from campaign info
@@ -1673,35 +1813,80 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
       }));
     }
 
-    const [newOrder] = await db
-      .insert(workOrders)
-      .values({
-        orderNumber,
-        clientAccountId,
-        clientUserId,
-        title: data.name,
-        description: workOrderDescription,
-        orderType: mapChannelToOrderType(data.channel, data.campaignType || defaultCampaignType),
-        priority: data.priority,
-        status: 'submitted',
-        projectId,
-        targetIndustries: data.targetIndustries?.length ? data.targetIndustries : null,
-        targetTitles: data.targetTitles?.length ? data.targetTitles : null,
-        targetCompanySize: data.targetCompanySize || null,
-        targetRegions: data.targetRegions?.length ? data.targetRegions : null,
-        targetLeadCount: data.targetLeadCount || null,
-        requestedStartDate: data.startDate || null,
-        requestedEndDate: data.endDate || null,
-        estimatedBudget: data.budget ? data.budget.toString() : null,
-        campaignConfig,
-        submittedAt: new Date(),
-      })
-      .returning({
-        id: workOrders.id,
-        orderNumber: workOrders.orderNumber,
-        title: workOrders.title,
-        status: workOrders.status,
-      });
+    let newOrder: {
+      id: string;
+      orderNumber: string;
+      title: string;
+      status: string;
+    };
+
+    if (reusableRejectedOrder) {
+      const [updatedOrder] = await db
+        .update(workOrders)
+        .set({
+          title: data.name,
+          description: workOrderDescription,
+          orderType: mapChannelToOrderType(data.channel, data.campaignType || defaultCampaignType),
+          priority: data.priority,
+          status: 'submitted',
+          projectId,
+          targetIndustries: data.targetIndustries?.length ? data.targetIndustries : null,
+          targetTitles: data.targetTitles?.length ? data.targetTitles : null,
+          targetCompanySize: data.targetCompanySize || null,
+          targetRegions: data.targetRegions?.length ? data.targetRegions : null,
+          targetLeadCount: data.targetLeadCount || null,
+          requestedStartDate: data.startDate || null,
+          requestedEndDate: data.endDate || null,
+          estimatedBudget: data.budget ? data.budget.toString() : null,
+          campaignConfig,
+          rejectionReason: null,
+          rejectedAt: null,
+          rejectedBy: null,
+          submittedAt: new Date(),
+          reviewedBy: null,
+          reviewedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(workOrders.id, reusableRejectedOrder.id))
+        .returning({
+          id: workOrders.id,
+          orderNumber: workOrders.orderNumber,
+          title: workOrders.title,
+          status: workOrders.status,
+        });
+      newOrder = updatedOrder;
+    } else {
+      const [insertedOrder] = await db
+        .insert(workOrders)
+        .values({
+          orderNumber,
+          clientAccountId,
+          clientUserId,
+          title: data.name,
+          description: workOrderDescription,
+          orderType: mapChannelToOrderType(data.channel, data.campaignType || defaultCampaignType),
+          priority: data.priority,
+          status: 'submitted',
+          projectId,
+          targetIndustries: data.targetIndustries?.length ? data.targetIndustries : null,
+          targetTitles: data.targetTitles?.length ? data.targetTitles : null,
+          targetCompanySize: data.targetCompanySize || null,
+          targetRegions: data.targetRegions?.length ? data.targetRegions : null,
+          targetLeadCount: data.targetLeadCount || null,
+          requestedStartDate: data.startDate || null,
+          requestedEndDate: data.endDate || null,
+          estimatedBudget: data.budget ? data.budget.toString() : null,
+          campaignConfig,
+          submittedAt: new Date(),
+        })
+        .returning({
+          id: workOrders.id,
+          orderNumber: workOrders.orderNumber,
+          title: workOrders.title,
+          status: workOrders.status,
+        });
+      newOrder = insertedOrder;
+    }
 
     if (linkedDraft) {
       const existingDraftFields = (linkedDraft.draftFields || {}) as Record<string, unknown>;
@@ -1740,7 +1925,7 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
           name: data.name,
           channel: data.channel,
           projectId,
-          orderNumber,
+          orderNumber: newOrder.orderNumber,
           requiresApproval: true,
           externalEventId: linkedEventId,
           argyleDraftId: linkedDraft?.id || null,
