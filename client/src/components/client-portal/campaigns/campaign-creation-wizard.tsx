@@ -58,6 +58,8 @@ import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCampaignTypesForChannel, type CampaignType } from '@/lib/campaign-types';
 import { apiRequest } from '@/lib/queryClient'; // Import apiRequest
+import { SidebarFilters } from '@/components/filters/sidebar-filters';
+import type { FilterGroup } from '@shared/filter-types';
 import { parsePhoneNumber } from 'libphonenumber-js'; // Import phone parser
 import { ALL_VOICES as AI_VOICES } from '@/lib/voice-constants'; // Import voice constants
 
@@ -193,6 +195,7 @@ interface FormData {
   selectedSegments: string[];
   selectedAccounts: string[];
   selectedContacts: string[];
+  filterGroup?: FilterGroup;
   targetIndustries: string[];
   targetTitles: string[];
   targetRegions: string[];
@@ -596,6 +599,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
           segments: formData.selectedSegments,
           accounts: formData.selectedAccounts,
           contacts: formData.selectedContacts,
+          ...(formData.filterGroup?.conditions?.length ? { filterGroup: formData.filterGroup } : {}),
+          source: formData.audienceSource === 'advanced_filters' ? 'filters' : 'list',
         },
         targetIndustries: formData.targetIndustries,
         targetTitles: formData.targetTitles,
@@ -2421,190 +2426,53 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                           exit={{ opacity: 0, height: 0 }}
                           className="overflow-hidden"
                         >
-                          <div className="border rounded-lg p-5 bg-muted/10 space-y-6 mt-6">
+                          <div className="border rounded-lg p-5 bg-muted/10 space-y-4 mt-6">
                              <div className="flex items-center gap-2 mb-2 border-b pb-4">
                                <Target className="h-5 w-5 text-primary" />
                                <div>
-                                 <h3 className="font-semibold text-base">Unified Filter Configuration</h3>
-                                 <p className="text-xs text-muted-foreground">Apply filters across selected lists & segments</p>
+                                 <h3 className="font-semibold text-base">Refine Audience with Filters</h3>
+                                 <p className="text-xs text-muted-foreground">
+                                   Apply filters to narrow down contacts within your selected lists & segments
+                                 </p>
                                </div>
                              </div>
 
-                            {/* Target Industries */}
+                            <SidebarFilters
+                              entityType="contact"
+                              onApplyFilter={(fg) => setFormData(prev => ({ ...prev, filterGroup: fg || undefined }))}
+                              initialFilter={formData.filterGroup}
+                              audienceScope={
+                                formData.selectedLists.length > 0
+                                  ? { listIds: formData.selectedLists }
+                                  : formData.selectedSegments.length > 0
+                                    ? { segmentIds: formData.selectedSegments }
+                                    : undefined
+                              }
+                            />
+
+                            {formData.filterGroup && formData.filterGroup.conditions?.length > 0 && (
+                              <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                                <Filter className="w-4 h-4 text-primary flex-shrink-0" />
+                                <p className="text-sm">
+                                  <span className="font-medium">{formData.filterGroup.conditions.length}</span> filter
+                                  {formData.filterGroup.conditions.length !== 1 ? 's' : ''} applied
+                                  {(formData.selectedLists.length > 0 || formData.selectedSegments.length > 0) &&
+                                    ' to narrow down selected audience'}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* Target Lead Count */}
                             <div className="space-y-2">
-                              <Label>Target Industries</Label>
-                              <div className="flex gap-2">
-                                <Input
-                                  placeholder="Add industry (press Enter)"
-                                  value={industryInput}
-                                  onChange={(e) => setIndustryInput(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleAddArrayItem('targetIndustries', industryInput);
-                                      setIndustryInput('');
-                                    }
-                                  }}
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => {
-                                    handleAddArrayItem('targetIndustries', industryInput);
-                                    setIndustryInput('');
-                                  }}
-                                >
-                                  Add
-                                </Button>
-                              </div>
-                              <div className="flex flex-wrap gap-2 mt-2">
-                                {formData.targetIndustries.map((industry, idx) => (
-                                  <Badge key={idx} variant="secondary" className="gap-1 py-1">
-                                    {industry}
-                                    <button
-                                      onClick={() => handleRemoveArrayItem('targetIndustries', idx)}
-                                      className="ml-1 hover:text-destructive"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Target Job Titles */}
-                            <div className="space-y-2">
-                              <Label>Target Job Titles</Label>
-                              <div className="flex gap-2">
-                                <Input
-                                  placeholder="Add job title (press Enter)"
-                                  value={titleInput}
-                                  onChange={(e) => setTitleInput(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleAddArrayItem('targetTitles', titleInput);
-                                      setTitleInput('');
-                                    }
-                                  }}
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => {
-                                    handleAddArrayItem('targetTitles', titleInput);
-                                    setTitleInput('');
-                                  }}
-                                >
-                                  Add
-                                </Button>
-                              </div>
-                              <div className="flex flex-wrap gap-2 mt-2">
-                                {formData.targetTitles.map((title, idx) => (
-                                  <Badge key={idx} variant="secondary" className="gap-1 py-1">
-                                    {title}
-                                    <button
-                                      onClick={() => handleRemoveArrayItem('targetTitles', idx)}
-                                      className="ml-1 hover:text-destructive"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Target Regions */}
-                            <div className="space-y-2">
-                              <Label>Target Regions</Label>
-                              <div className="flex gap-2">
-                                <Input
-                                  placeholder="Add region (press Enter)"
-                                  value={regionInput}
-                                  onChange={(e) => setRegionInput(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleAddArrayItem('targetRegions', regionInput);
-                                      setRegionInput('');
-                                    }
-                                  }}
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => {
-                                    handleAddArrayItem('targetRegions', regionInput);
-                                    setRegionInput('');
-                                  }}
-                                >
-                                  Add
-                                </Button>
-                              </div>
-                              <div className="flex flex-wrap gap-2 mt-2">
-                                {formData.targetRegions.map((region, idx) => (
-                                  <Badge key={idx} variant="secondary" className="gap-1 py-1">
-                                    {region}
-                                    <button
-                                      onClick={() => handleRemoveArrayItem('targetRegions', idx)}
-                                      className="ml-1 hover:text-destructive"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Company Size and Lead Count */}
-                            <div className="grid md:grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label>Company Size</Label>
-                                <Select
-                                  value={formData.targetCompanySize}
-                                  onValueChange={(value) => setFormData(prev => ({ ...prev, targetCompanySize: value }))}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select size range" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="1-10">1-10 employees</SelectItem>
-                                    <SelectItem value="11-50">11-50 employees</SelectItem>
-                                    <SelectItem value="51-200">51-200 employees</SelectItem>
-                                    <SelectItem value="201-500">201-500 employees</SelectItem>
-                                    <SelectItem value="501-1000">501-1000 employees</SelectItem>
-                                    <SelectItem value="1001-5000">1001-5000 employees</SelectItem>
-                                    <SelectItem value="5001+">5001+ employees</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              <div className="space-y-2">
-                                <Label>Target Lead Count</Label>
-                                <Input
-                                  type="number"
-                                  placeholder="e.g., 500"
-                                  value={formData.targetLeadCount || ''}
-                                  onChange={(e) => setFormData(prev => ({
-                                    ...prev,
-                                    targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined
-                                  }))}
-                                />
-                              </div>
-                            </div>
-
-                            {/* Use Project Documents Toggle */}
-                            <div className="flex items-center justify-between p-4 border rounded-lg bg-card">
-                              <div className="flex items-center gap-3">
-                                <FileText className="h-5 w-5 text-primary" />
-                                <div>
-                                  <p className="font-medium text-sm">Use Project Documents</p>
-                                  <p className="text-xs text-muted-foreground">Auto-populate filters from uploaded project context</p>
-                                </div>
-                              </div>
-                              <Switch
-                                checked={formData.useProjectDocuments}
-                                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, useProjectDocuments: checked }))}
+                              <Label>Target Lead Count</Label>
+                              <Input
+                                type="number"
+                                placeholder="e.g., 500"
+                                value={formData.targetLeadCount || ''}
+                                onChange={(e) => setFormData(prev => ({
+                                  ...prev,
+                                  targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined
+                                }))}
                               />
                             </div>
                           </div>

@@ -33,6 +33,11 @@ interface SidebarFiltersProps {
   embedded?: boolean;
   campaignId?: string;
   includeRelatedEntities?: boolean;
+  /** Scope filter count to specific lists/segments (intersection filtering) */
+  audienceScope?: {
+    listIds?: string[];
+    segmentIds?: string[];
+  };
 }
 
 /**
@@ -53,6 +58,7 @@ export function SidebarFilters({
   embedded = false,
   campaignId,
   includeRelatedEntities = true,
+  audienceScope,
 }: SidebarFiltersProps) {
   const [filterGroup, setFilterGroup] = useState<FilterGroup>(
     initialFilter || {
@@ -137,15 +143,15 @@ export function SidebarFilters({
     }
   }, [initialFilter]);
 
-  // Fetch filter count in real-time
+  // Fetch filter count in real-time (with optional audience scope for intersection filtering)
   const { data: countData, isLoading: isCountLoading } = useQuery<{
     count?: number;
     campaign_audience_count?: number;
     filter_match_count?: number;
   }>({
-    queryKey: campaignId 
+    queryKey: campaignId
       ? ['/api/campaigns', campaignId, 'queues/filter-count', JSON.stringify(filterGroup)]
-      : [`/api/filters/count/${entityType}`, JSON.stringify(filterGroup)],
+      : [`/api/filters/count/${entityType}`, JSON.stringify(filterGroup), JSON.stringify(audienceScope)],
     queryFn: async () => {
       if (campaignId) {
         const response = await apiRequest(
@@ -158,10 +164,14 @@ export function SidebarFilters({
         if (filterGroup.conditions.length === 0) {
           return { count: 0 };
         }
+        const body: any = { filterGroup };
+        if (audienceScope && (audienceScope.listIds?.length || audienceScope.segmentIds?.length)) {
+          body.audienceScope = audienceScope;
+        }
         const response = await apiRequest(
           "POST",
           `/api/filters/count/${entityType}`,
-          { filterGroup }
+          body
         );
         return response.json();
       }
