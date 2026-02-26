@@ -708,14 +708,19 @@ DO NOT CALL (DNC) HANDLING:
     'voice_escalation',
     'Escalation & Retry Logic',
     10,
-    `ESCALATION TRIGGERS:
-- Prospect requests to speak with a manager or supervisor
-- Technical question beyond agent knowledge
-- Complaint or negative sentiment detected
+    `ESCALATION TRIGGERS (Transfer to human ONLY for these):
+- Prospect explicitly requests to speak with a manager, supervisor, or human
+- Complaint or negative sentiment detected (angry, frustrated, threatening)
 - Compliance concern identified
 - Prospect mentions legal action
 
-ESCALATION PROCEDURE:
+CRITICAL: Do NOT escalate for these — handle them yourself:
+- Questions about pricing, cost, or budget → These are BUYING SIGNALS. Answer directly using campaign context.
+- Technical questions about the product/service → Answer concisely from your campaign knowledge, then bridge to next step.
+- Questions about call purpose ("What is this about?") → Deliver your value proposition directly. You ARE the representative.
+- Complex objections ("We tried that before") → Handle with empathy-based reframing, not transfer.
+
+ESCALATION PROCEDURE (only when truly needed):
 1. Acknowledge: "I understand this is important to you."
 2. Confirm: "Let me connect you with someone who can help with this specifically."
 3. Transfer: Warm transfer with context to supervisor/specialist

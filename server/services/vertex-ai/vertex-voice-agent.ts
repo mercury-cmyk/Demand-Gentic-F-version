@@ -296,9 +296,12 @@ ${this.interpolateScript(this.settings.scripts.objections)}`
     const handoffInstructions = this.settings.handoff.enabled
       ? `
 HANDOFF TRIGGERS:
-Transfer the call to a human agent using the transfer_to_human function if any of these occur:
+Transfer the call to a human agent using the transfer_to_human function ONLY if the prospect EXPLICITLY requests to speak with a human, or if any of these specific triggers occur:
 ${this.settings.handoff.triggers.map((t) => `- ${t}`).join("\n")}
-Say: "That's a great point. Let me connect you with one of our specialists who can better assist you."`
+
+CRITICAL: Do NOT transfer for questions about the call purpose, the product/service, or "what is this about?" — YOU are the representative. Answer directly using your campaign context and talking points. Only transfer when the prospect clearly and explicitly asks for a human.
+
+If transfer is needed, say: "Absolutely, let me connect you with someone who can help with that specifically."`
       : "";
 
     const basePrompt = `${personaIntro}
@@ -428,7 +431,7 @@ IMPORTANT:
       this.currentPhase = "handoff";
       this.emit("conversation:phase", "handoff");
       this.emit("handoff:triggered", shouldHandoff);
-      return `That's a great point about ${shouldHandoff}. Let me connect you with one of our specialists who can better assist you with that.`;
+      return `I understand. Let me connect you with someone who can help with that. Just a moment please.`;
     }
 
     try {
@@ -538,6 +541,9 @@ IMPORTANT:
 
     const lowerText = text.toLowerCase();
 
+    // CRITICAL: Only trigger handoff for EXPLICIT human requests and escalations.
+    // Questions about pricing, technical details, or complex situations are BUYING SIGNALS —
+    // the agent should answer directly using campaign context, NOT deflect to a human.
     const triggerPatterns: Record<string, string[]> = {
       explicit_request: [
         "speak to a person",
@@ -548,37 +554,18 @@ IMPORTANT:
         "speak to a manager",
         "supervisor",
       ],
-      complex_objection: [
-        "that's not how we do things",
-        "we tried that before",
-        "our situation is different",
-        "it's complicated",
-      ],
-      pricing_discussion: [
-        "how much",
-        "what's the cost",
-        "pricing",
-        "budget",
-        "quote",
-        "discount",
-        "negotiate",
-      ],
-      technical_question: [
-        "technical specifications",
-        "integration",
-        "api",
-        "compatibility",
-        "requirements",
-        "implementation",
-      ],
+      // REMOVED: complex_objection — agent should handle these directly with empathy-based reframing
+      complex_objection: [],
+      // REMOVED: pricing_discussion — these are HIGH-INTENT buying signals, not transfer triggers
+      pricing_discussion: [],
+      // REMOVED: technical_question — these indicate engagement, not need for transfer
+      technical_question: [],
       angry_prospect: [
         "stop calling",
         "this is ridiculous",
         "waste of time",
         "harassment",
         "do not call",
-        "annoyed",
-        "frustrated",
       ],
     };
 

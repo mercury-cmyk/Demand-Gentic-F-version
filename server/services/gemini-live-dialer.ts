@@ -3483,7 +3483,14 @@ Instructions:
                   // ✅ CRITICAL: Store disposition in callContext for call_sessions creation
                   callContext.disposition = canonicalDisposition;
 
-                  await processDisposition(callContext.callAttemptId, canonicalDisposition, 'gemini_live_ai');
+                  await processDisposition(
+                    callContext.callAttemptId,
+                    canonicalDisposition,
+                    'gemini_live_ai',
+                    {
+                      callbackDate: submittedDisposition?.callbackDate || null,
+                    }
+                  );
                   dispositionProcessed = true;
                   console.log(`[Gemini Live] ✅ Disposition processed successfully`);
 

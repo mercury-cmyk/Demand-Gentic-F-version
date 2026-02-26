@@ -286,10 +286,14 @@ export default function ClientPortalPreviewStudioPage() {
   // Intelligence status check
   const { data: intelligenceStatus, isLoading: intelligenceLoading } = useQuery<{
     ready: boolean;
+    fullyEnriched?: boolean;
     accountIntelligence: { available: boolean; confidence?: number };
     organizationIntelligence: { available: boolean };
     solutionMapping: { available: boolean };
+    problemIntelligence: { available: boolean; confidence?: number; detectedProblemsCount?: number };
     missingComponents: string[];
+    missingRequiredComponents?: string[];
+    missingOptionalComponents?: string[];
     message: string;
   }>({
     queryKey: ['/api/client-portal/simulation/intelligence-status', selectedCampaignId, selectedAccountId],
@@ -894,21 +898,26 @@ export default function ClientPortalPreviewStudioPage() {
                   </div>
                 ) : (() => {
                   const isResearching = generateIntelligenceMutation.isPending || intelligencePhase === 'researching';
-                  const acctDone = intelligenceStatus?.accountIntelligence?.available || (intelligenceReady);
-                  const orgDone = intelligenceStatus?.organizationIntelligence?.available || (intelligenceReady);
-                  const solnDone = intelligenceStatus?.solutionMapping?.available || (intelligenceReady);
-                  const allDone = acctDone && orgDone && solnDone;
+                  const acctDone = intelligenceStatus?.accountIntelligence?.available || false;
+                  const orgDone = intelligenceStatus?.organizationIntelligence?.available || false;
+                  const solnDone = intelligenceStatus?.solutionMapping?.available || false;
+                  const probDone = intelligenceStatus?.problemIntelligence?.available || false;
+                  // Core intelligence = auto-generatable (Account + Problem). These are required.
+                  // Org Intelligence + Solution Mapping are optional enhancements.
+                  const coreReady = intelligenceReady; // ready now means core components only
+                  const allDone = acctDone && orgDone && solnDone && probDone;
 
                   const stepItems = [
-                    { key: 'acct', label: 'Account Intelligence', description: 'Prospect company research', icon: Brain, done: acctDone, confidence: intelligenceStatus?.accountIntelligence?.confidence },
-                    { key: 'org', label: 'Organization Intelligence', description: 'Your company profile', icon: Building2, done: orgDone },
-                    { key: 'soln', label: 'Solution Mapping', description: 'Product-problem alignment', icon: Target, done: solnDone },
+                    { key: 'acct', label: 'Account Intelligence', description: 'Prospect company research', icon: Brain, done: acctDone, confidence: intelligenceStatus?.accountIntelligence?.confidence, required: true },
+                    { key: 'prob', label: 'Problem Intelligence', description: 'Problem detection & messaging', icon: Zap, done: probDone, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: true },
+                    { key: 'org', label: 'Organization Intelligence', description: 'Your company profile (optional)', icon: Building2, done: orgDone, required: false },
+                    { key: 'soln', label: 'Solution Mapping', description: 'Product-problem alignment (optional)', icon: Target, done: solnDone, required: false },
                   ];
 
                   return (
                     <div className={cn(
                       "p-4 transition-colors duration-500",
-                      allDone
+                      coreReady
                         ? "bg-gradient-to-r from-green-500/10 to-emerald-500/10"
                         : isResearching
                           ? "bg-gradient-to-r from-blue-500/10 to-purple-500/10"
@@ -916,7 +925,7 @@ export default function ClientPortalPreviewStudioPage() {
                     )}>
                       {/* Header */}
                       <div className="flex items-center gap-2 text-sm mb-4">
-                        {allDone ? (
+                        {coreReady ? (
                           <><ShieldCheck className="h-4 w-4 text-green-400" /><span className="text-green-400 font-medium">Ready to Preview</span></>
                         ) : isResearching ? (
                           <><Loader2 className="h-4 w-4 text-blue-400 animate-spin" /><span className="text-blue-400 font-medium">Researching Intelligence...</span></>
@@ -965,9 +974,12 @@ export default function ClientPortalPreviewStudioPage() {
                               {/* Status badge */}
                               <span className={cn(
                                 "text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-md shrink-0",
-                                step.done ? "text-green-400 bg-green-500/15" : showSpinner ? "text-blue-400 bg-blue-500/15" : "text-white/25 bg-white/5"
+                                step.done ? "text-green-400 bg-green-500/15"
+                                  : showSpinner ? "text-blue-400 bg-blue-500/15"
+                                  : !step.required ? "text-white/30 bg-white/5"
+                                  : "text-amber-400 bg-amber-500/10"
                               )}>
-                                {step.done ? 'Done' : showSpinner ? 'Researching' : 'Pending'}
+                                {step.done ? 'Done' : showSpinner ? 'Researching' : !step.required ? 'Optional' : 'Required'}
                               </span>
                             </div>
                           );
@@ -975,10 +987,10 @@ export default function ClientPortalPreviewStudioPage() {
                       </div>
 
                       {/* Footer message */}
-                      {allDone ? (
+                      {coreReady ? (
                         <p className="text-xs text-green-400/70 mt-3 flex items-center gap-1.5">
                           <Sparkles className="h-3 w-3" />
-                          All intelligence ready — start the preview.
+                          {allDone ? 'All intelligence ready' : 'Core intelligence ready'} — start the preview.
                         </p>
                       ) : isResearching ? (
                         <p className="text-xs text-blue-400/60 mt-3">

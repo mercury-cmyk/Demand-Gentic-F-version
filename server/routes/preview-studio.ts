@@ -463,7 +463,7 @@ router.get("/intelligence-status", requireAuth, async (req, res) => {
 
 /**
  * POST /api/preview-studio/intelligence-generate
- * Auto-generate missing account intelligence for a preview target.
+ * Auto-generate missing account intelligence + problem intelligence for a preview target.
  * Org intelligence and solution mapping must be pre-configured.
  */
 router.post("/intelligence-generate", requireAuth, async (req, res) => {

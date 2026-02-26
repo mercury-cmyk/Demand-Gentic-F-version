@@ -2,7 +2,7 @@
 import { Server as HttpServer } from "http";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking, campaignOrganizations, agentDefaults } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking, campaignOrganizations, agentDefaults, campaignAccountProblems } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { processDisposition, updateContactSuppression } from "./disposition-engine";
 import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
@@ -9968,23 +9968,30 @@ If someone else answers (receptionist, assistant, automated system):
 
 If transferred to a new voice, re-verify identity: "Hi, just to confirm â€” am I speaking with [Contact Name]?"
 
-### Phase 3: Introduction & Value Hook (ZERO-GAP TRANSITION â€” CRITICAL)
-Once identity is confirmed ("Yes" / "Speaking" / "That's me"), you have a 3-SECOND WINDOW before the prospect disengages. Execute this in ONE continuous breath:
-1. "Hi [First Name], this is [Agent Name] calling on behalf of [Organization Name] â€” [ONE sentence value proposition/reason for calling]."
-2. Follow IMMEDIATELY with the ask â€” do NOT ask "do you have a moment?" first.
+### Phase 3: Introduction & Value Hook (ZERO-GAP TRANSITION — CRITICAL)
+Once identity is confirmed (“Yes” / “Speaking” / “That's me”), you have a 3-SECOND WINDOW before the prospect disengages. Execute this in ONE continuous breath:
+1. Name + Organization + PRE-FRAME + VALUE: “Hi [First Name], this is [Agent Name] calling on behalf of [Organization Name] — the reason I'm reaching out is that we've been working with [role/industry] teams on [challenge], and [specific metric or outcome].”
+2. Follow IMMEDIATELY with the ask using outcome language — do NOT ask “do you have a moment?” first.
 3. STOP and wait for their response.
 
+**PRE-FRAMING RULES (Critical for Persuasion):**
+- ALWAYS connect to their role/industry BEFORE the value statement — “working with [role] teams” not “our company does”
+- ALWAYS include ONE specific number when available — “reducing [metric] by 40%” not “improving results”
+- ALWAYS use outcome language — “helping teams achieve [outcome]” not “we offer [product]”
+- The prospect should feel this call was specifically FOR THEM, not a mass dial
+
 **CRITICAL TIMING RULES:**
-- Do NOT insert filler phrases like "Great!", "Wonderful!", "Thanks for confirming!" before your intro. These waste the engagement window.
+- Do NOT insert filler phrases like “Great!”, “Wonderful!”, “Thanks for confirming!” before your intro. These waste the engagement window.
 - Do NOT pause between your name and the value proposition. Combine them in ONE flowing sentence.
-- Do NOT ask "How are you?" or "Do you have a moment?" â€” these trigger disengagement.
-- The MAXIMUM gap between hearing "Yes" and stating your purpose is 3 seconds.
-- Be warm, kind, and respectful throughout â€” but be CONCISE.
+- Do NOT ask “How are you?” or “Do you have a moment?” — these trigger disengagement.
+- The MAXIMUM gap between hearing “Yes” and stating your purpose is 3 seconds.
+- Be warm, kind, and respectful throughout — but be CONCISE.
 
-**WRONG:** "Great, thanks for taking the call! So, I'm calling from Harver, and... the reason for my call is..."
-**RIGHT:** "Hi John, this is Sarah calling on behalf of Harver â€” we're helping companies like yours reduce time-to-hire by 40%. Would that be worth a quick conversation?"
+**WRONG:** “Great, thanks for taking the call! So, I'm calling from Harver, and... the reason for my call is...”
+**WRONG:** “Hi John, this is Sarah from Acme Solutions — we help companies with their hiring.”
+**RIGHT:** “Hi John, this is Sarah calling on behalf of Harver — we've been helping VP Talent leaders reduce time-to-hire by 40%. I thought that might be relevant given your role — would that be worth a quick look?”
 
-If the prospect says "hello?" THREE or more times in a row with no acknowledgment of your words, they likely cannot hear you. Only then say: "I apologize for the connection â€” can you hear me now?" Do NOT use an audio check after a single "hello?" â€” that is normal call behavior, not an audio issue.
+If the prospect says “hello?” THREE or more times in a row with no acknowledgment of your words, they likely cannot hear you. Only then say: “I apologize for the connection — can you hear me now?” Do NOT use an audio check after a single “hello?” — that is normal call behavior, not an audio issue.
 
 Keep the organization name confidential until identity is confirmed.
 
@@ -10152,19 +10159,30 @@ You: [call can now end â€” prospect said farewell]
  */
 function buildBuyingSignalSection(): string {
   return `
-### BUYING SIGNAL RECOGNITION (CRITICAL â€” NEVER IGNORE INTEREST)
-When the prospect shows interest or asks questions like "How do you do that?", "Tell me more", or says "Yes":
-- **STOP your current sentence immediately** â€” do NOT finish a pre-planned thought
-- **Directly answer THEIR question** in 1-2 concise sentences
-- **Then ask a qualifying follow-up** to deepen the conversation
+### BUYING SIGNAL RECOGNITION (CRITICAL — NEVER IGNORE INTEREST)
+When the prospect shows interest, STOP your planned response and respond to THEIR signal. Your pitch is LESS valuable than their questions. When they engage, MATCH their energy and respond to what THEY asked.
 
-Buying signals you MUST respond to:
-- "How do you do that?" â†’ Answer specifically, then ask about their current process
-- "Tell me more" / "That sounds interesting" â†’ Engage deeper, ask what aspect interests them
-- "Yes" / "We're looking at that" â†’ Acknowledge and ask a deeper qualifying question
-- "What does that cost?" / "How long does it take?" â†’ Answer, then qualify their timeline
+**Tier 1: HIGH-INTENT Signals (Respond with specifics + propose next step)**
+- “How do you do that?” → Answer specifically with a proof point, then ask about their current process
+- “What does that cost?” / “What’s the investment?” → Share range/framework, then qualify timeline: “What’s your timeline for addressing this?”
+- “Can you send me a proposal?” / “Send me details” → Confirm scope: “Absolutely — to make sure I send the right thing, is it [Topic A] or [Topic B] that’s more relevant?”
+- “Who else are you working with in [industry]?” → Share peer examples, reinforce social proof, then bridge to next step
+- “We were just discussing this internally” → Validate urgency: “That’s exactly why the timing felt right to reach out. What specifically has been coming up for your team?”
+- “Can I involve my [colleague/boss]?” → Authority signal — “That would be great. Would it make sense to set up a quick group call so everyone hears the same thing?”
 
-**Your pitch is LESS valuable than their questions. When they engage, MATCH their energy and respond to what THEY asked.**
+**Tier 2: MEDIUM-INTENT Signals (Deepen the conversation)**
+- “Tell me more” / “That sounds interesting” → Ask what aspect interests them, then go deeper with specifics
+- “Yes” / “We’re looking at that” → Acknowledge warmly and ask an implication question: “What’s been the biggest challenge with that so far?”
+- “How long does implementation take?” / “How does onboarding work?” → Answer concisely, then explore their timeline and readiness
+- “What makes you different from [competitor]?” → Differentiate with specific proof points, then ask: “What’s most important to you in evaluating this?”
+
+**Tier 3: SUBTLE Signals (Validate and nurture)**
+- Prospect asks ANY specific question about your offering → They are engaged, not just listening — match their interest level
+- Prospect shares internal context unprompted (“Our team has been...”) → They trust you; deepen with: “That’s really helpful context. And how has that been impacting [related area]?”
+- Prospect’s tone shifts from guarded to curious → Mirror their energy shift, lean into the engagement naturally
+- Reflective silence after your value point (not dismissive) → They are processing; let it land for 2-3 seconds, then ask: “What’s your initial reaction to that?”
+
+**MOMENTUM RULE**: When they engage, respond to what THEY asked, then bridge to the next commitment level. Never break momentum by returning to your script.
 `;
 }
 
@@ -10309,6 +10327,90 @@ async function buildSystemPrompt(
   const accountId = contactInfo?.accountId;
   let accountContextSection: string | null = null;
   let callPlanContextSection: string | null = null;
+  let problemIntelligenceSection: string | null = null;
+
+  // Load Problem Intelligence (detected problems, messaging package, outreach strategy)
+  // This is independent of campaign intelligence settings — always load if available
+  if (accountId && campaignConfig?.id) {
+    try {
+      const [problemRecord] = await db
+        .select()
+        .from(campaignAccountProblems)
+        .where(
+          and(
+            eq(campaignAccountProblems.campaignId, campaignConfig.id),
+            eq(campaignAccountProblems.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      if (problemRecord) {
+        const sections: string[] = [];
+        sections.push('## Problem Intelligence\n');
+
+        // Detected problems with messaging angles
+        const detectedProblems = (problemRecord.detectedProblems as any[]) || [];
+        if (detectedProblems.length > 0) {
+          sections.push('**Detected Problems for This Account:**');
+          detectedProblems.slice(0, 3).forEach((p: any, i: number) => {
+            sections.push(`${i + 1}. ${p.problemStatement} (confidence: ${Math.round((p.confidence || 0) * 100)}%)`);
+            if (p.messagingAngles?.length > 0) {
+              const angle = p.messagingAngles[0];
+              sections.push(`   - Messaging angle: ${angle.angle || angle.openingLine || ''}`);
+            }
+          });
+          sections.push('');
+        }
+
+        // Messaging package
+        const messagingPackage = problemRecord.messagingPackage as any;
+        if (messagingPackage?.primaryAngle) {
+          sections.push('**Messaging Package:**');
+          sections.push(`- Primary Angle: ${messagingPackage.primaryAngle}`);
+          if (messagingPackage.proofPoints?.length > 0) {
+            sections.push(`- Proof Points: ${messagingPackage.proofPoints.slice(0, 3).join('; ')}`);
+          }
+          if (messagingPackage.openingLines?.length > 0) {
+            sections.push(`- Suggested Opening: ${messagingPackage.openingLines[0]}`);
+          }
+          sections.push('');
+        }
+
+        // Objection prep
+        if (messagingPackage?.objectionPrep?.length > 0) {
+          sections.push('**Objection Handling:**');
+          messagingPackage.objectionPrep.slice(0, 3).forEach((obj: any) => {
+            sections.push(`- If they say: "${obj.objection}" → Respond: "${obj.response}"`);
+          });
+          sections.push('');
+        }
+
+        // Outreach strategy
+        const outreachStrategy = problemRecord.outreachStrategy as any;
+        if (outreachStrategy?.recommendedApproach) {
+          sections.push('**Outreach Strategy:**');
+          sections.push(`- Approach: ${outreachStrategy.recommendedApproach}`);
+          if (outreachStrategy.talkingPoints?.length > 0) {
+            sections.push(`- Key Talking Points: ${outreachStrategy.talkingPoints.slice(0, 3).join('; ')}`);
+          }
+          if (outreachStrategy.questionsToAsk?.length > 0) {
+            sections.push(`- Discovery Questions: ${outreachStrategy.questionsToAsk.slice(0, 2).join('; ')}`);
+          }
+          if (outreachStrategy.doNotMention?.length > 0) {
+            sections.push(`- Do NOT Mention: ${outreachStrategy.doNotMention.join(', ')}`);
+          }
+          sections.push('');
+        }
+
+        if (sections.length > 1) {
+          problemIntelligenceSection = sections.join('\n');
+          console.log(`${LOG_PREFIX} Loaded Problem Intelligence: ${detectedProblems.length} problems, messaging=${!!messagingPackage?.primaryAngle}, outreach=${!!outreachStrategy?.recommendedApproach}`);
+        }
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Failed to load problem intelligence:`, error);
+    }
+  }
 
   // Check if campaign requires account intelligence (default: false for backward compatibility)
   const requireIntelligence = campaignConfig?.requireAccountIntelligence ?? false;
@@ -10450,6 +10552,9 @@ async function buildSystemPrompt(
     if (callPlanContextSection) {
       prompt += `\n\n---\n\n${callPlanContextSection}`;
     }
+    if (problemIntelligenceSection) {
+      prompt += `\n\n---\n\n${problemIntelligenceSection}`;
+    }
 
     // Layer contact context
     const contactContextSection = buildContactContextSection(contactInfo);
@@ -10520,6 +10625,11 @@ async function buildSystemPrompt(
     // Add call plan context
     if (callPlanContextSection) {
       prompt += `\n\n---\n\n${callPlanContextSection}`;
+    }
+
+    // Add problem intelligence context (messaging package, objection handling, outreach strategy)
+    if (problemIntelligenceSection) {
+      prompt += `\n\n---\n\n${problemIntelligenceSection}`;
     }
 
     // Add contact context (per-call personalization)
@@ -10953,9 +11063,18 @@ Call this when prospect requests a specific callback time.
 Before calling: confirm the date/time with the prospect.
 
 ## transfer_to_human
-Call this when prospect explicitly asks to speak with a human OR when the situation requires human intervention.
+Call this ONLY when the prospect explicitly asks to speak with a human/real person OR when the prospect is angry/frustrated and the situation requires human intervention.
 
-IMPORTANT: Capture comprehensive context for smooth handoff:
+CRITICAL — Do NOT transfer for these (handle them yourself):
+- Questions about call purpose ("What is this about?") → Deliver your value proposition directly
+- Questions about pricing/cost → Answer using campaign context — this is a BUYING SIGNAL
+- Technical questions about the product/service → Answer concisely from your knowledge
+- Complex objections ("We tried that", "Our situation is different") → Handle with empathy-based reframing
+- ANY question the prospect asks about what you're offering → YOU are the representative. Answer directly.
+
+You are the PRIMARY SPEAKER on every call. Your job is to deliver value and secure the campaign objective — not to pass the prospect to someone else.
+
+IMPORTANT: When transfer IS needed, capture comprehensive context for smooth handoff:
 - rationale_for_transfer: Why this transfer is needed
 - conversation_summary: Brief summary of what's been discussed and any info collected
 - prospect_sentiment: Their emotional state (positive, neutral, guarded, frustrated, angry)
@@ -11008,6 +11127,9 @@ Before calling: say "I understand. Let me connect you with someone who can help.
   }
   if (callPlanContextSection) {
     prompt += `\n\n---\n\n${callPlanContextSection}`;
+  }
+  if (problemIntelligenceSection) {
+    prompt += `\n\n---\n\n${problemIntelligenceSection}`;
   }
 
   // Add contact context (per-call personalization)

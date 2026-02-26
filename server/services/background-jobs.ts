@@ -9,6 +9,7 @@ import { startEmailValidationJob } from '../jobs/email-validation-job';
 import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';
 import { processMissingTranscripts } from './transcription-reliability';
 import { syncTelnyxRecordingsToDatabase } from './telnyx-sync-service';
+import { executeDueJourneyActions } from './client-journey-automation';
 import { db } from '../db';
 import { agentQueue, campaignQueue } from '@shared/schema';
 import { eq, lt, and, inArray, sql } from 'drizzle-orm';
@@ -22,6 +23,7 @@ const TRANSCRIPTION_JOB_INTERVAL = 120000; // Every 120 seconds (was 60s)
 const AI_ANALYSIS_JOB_INTERVAL = 120000; // Every 120 seconds (was 90s)
 const LOCK_SWEEPER_INTERVAL = 600000; // Every 10 minutes (was 5 min)
 const TELNYX_RECORDING_SYNC_INTERVAL = 300000; // Every 5 minutes - auto-fetch last 24h recordings
+const JOURNEY_ACTION_INTERVAL = 60000; // Every 60 seconds
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -38,12 +40,14 @@ let transcriptionInterval: NodeJS.Timeout | null = null;
 let analysisInterval: NodeJS.Timeout | null = null;
 let lockSweeperInterval: NodeJS.Timeout | null = null;
 let telnyxSyncInterval: NodeJS.Timeout | null = null;
+let journeyActionInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
 let isAnalysisRunning = false;
 let isLockSweeperRunning = false;
 let isTelnyxSyncRunning = false;
+let isJourneyActionRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -51,6 +55,7 @@ const ENABLE_TRANSCRIPTION = process.env.ENABLE_TRANSCRIPTION_JOB !== 'false';
 const ENABLE_AI_ANALYSIS = process.env.ENABLE_AI_ANALYSIS_JOB !== 'false';
 const ENABLE_LOCK_SWEEPER = process.env.ENABLE_LOCK_SWEEPER !== 'false';
 const ENABLE_TELNYX_RECORDING_SYNC = process.env.ENABLE_TELNYX_RECORDING_SYNC !== 'false'; // ENABLED by default
+const ENABLE_JOURNEY_AUTOMATION = process.env.ENABLE_JOURNEY_AUTOMATION !== 'false'; // ENABLED by default
 
 /**
  * Lock Sweeper - Release expired locks and stuck queue entries
@@ -125,6 +130,7 @@ export function startBackgroundJobs() {
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   • Journey Automation: ${ENABLE_JOURNEY_AUTOMATION ? 'ENABLED (every 60s)' : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] ON-DEMAND JOBS (Manual Trigger):');
   console.log(`[Background Jobs]   • Email Validation: ${ENABLE_EMAIL_VALIDATION ? 'AUTO-RUN ENABLED' : 'MANUAL ONLY (use API)'}`);
@@ -246,6 +252,29 @@ export function startBackgroundJobs() {
     }, TELNYX_RECORDING_SYNC_INTERVAL);
   }
 
+  // Client journey automation executor (callbacks/emails)
+  if (ENABLE_JOURNEY_AUTOMATION) {
+    journeyActionInterval = setInterval(async () => {
+      if (isJourneyActionRunning) {
+        return;
+      }
+
+      isJourneyActionRunning = true;
+      try {
+        const result = await withJobTimeout('Journey Automation', () => executeDueJourneyActions(30));
+        if (result.processed > 0) {
+          console.log(
+            `[Background Jobs] Journey automation: processed=${result.processed}, completed=${result.completed}, failed=${result.failed}`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Journey automation error:', error);
+      } finally {
+        isJourneyActionRunning = false;
+      }
+    }, JOURNEY_ACTION_INTERVAL);
+  }
+
   // Email validation job (cron-based) - Only start if enabled
   if (ENABLE_EMAIL_VALIDATION) {
     startEmailValidationJob();
@@ -301,6 +330,11 @@ export function stopBackgroundJobs() {
   if (telnyxSyncInterval) {
     clearInterval(telnyxSyncInterval);
     telnyxSyncInterval = null;
+  }
+
+  if (journeyActionInterval) {
+    clearInterval(journeyActionInterval);
+    journeyActionInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');
