@@ -40,7 +40,7 @@ const DEEP_ANALYSIS_CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
 const DEEP_ANALYSIS_CACHE_MAX_ENTRIES = 5000;
 const DEEP_ANALYSIS_PROMPT_VERSION = "v2-phase2";
 
-type DeepAnalysisOutput = {
+export type DeepAnalysisOutput = {
   agentBehavior: AgentBehaviorScore;
   callQuality: CallQualityAssessment;
   dispositionAssessment: {
@@ -275,7 +275,7 @@ function decodeDeepBatchCursor(raw?: string): DeepBatchCursor | null {
   return null;
 }
 
-function getDispositionConfidenceThreshold(disposition: string): number {
+export function getDispositionConfidenceThreshold(disposition: string): number {
   switch (disposition) {
     case "qualified_lead":
       return 0.8;
@@ -296,7 +296,7 @@ function getDispositionConfidenceThreshold(disposition: string): number {
   }
 }
 
-function hasDispositionEvidence(
+export function hasDispositionEvidence(
   suggestedDisposition: string,
   positiveSignals: string[],
   negativeSignals: string[],
@@ -311,7 +311,7 @@ function hasDispositionEvidence(
   return positiveSignals.length + negativeSignals.length > 0 || reasoning.trim().length >= 24;
 }
 
-function shouldAutoApplyDispositionChange(assessment: {
+export function shouldAutoApplyDispositionChange(assessment: {
   suggestedDisposition: string;
   confidence: number;
   reasoning: string;
@@ -340,7 +340,7 @@ function shouldAutoApplyDispositionChange(assessment: {
  * Transcripts are stored as plain text "Agent: ...\nContact: ..." lines,
  * but may also be JSON arrays from older formats.
  */
-function parseTranscriptToTurns(transcript: any): { role: string; text: string }[] {
+export function parseTranscriptToTurns(transcript: any): { role: string; text: string }[] {
   if (!transcript) return [];
 
   const raw = typeof transcript === "string" ? transcript : JSON.stringify(transcript);
@@ -392,7 +392,7 @@ function parseTranscriptToTurns(transcript: any): { role: string; text: string }
 /**
  * Compute conversation metrics from parsed turns
  */
-function computeConversationMetrics(turns: { role: string; text: string }[]) {
+export function computeConversationMetrics(turns: { role: string; text: string }[]) {
   const agentTurns = turns.filter(t => t.role === "agent");
   const contactTurns = turns.filter(t => t.role === "contact");
   const totalWords = turns.reduce((sum, t) => sum + t.text.split(/\s+/).length, 0);
@@ -417,7 +417,7 @@ function computeConversationMetrics(turns: { role: string; text: string }[]) {
   };
 }
 
-function runLightweightDispositionTriage(
+export function runLightweightDispositionTriage(
   transcript: any,
   currentDisposition: string,
   durationSec: number
@@ -531,7 +531,7 @@ function runLightweightDispositionTriage(
 /**
  * Run AI-powered deep transcript analysis for a single call
  */
-async function runDeepAIAnalysis(
+export async function runDeepAIAnalysis(
   transcript: any,
   campaignContext: CampaignQualificationContext | null,
   campaignId: string | null,

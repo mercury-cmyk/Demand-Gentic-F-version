@@ -15,13 +15,20 @@ import { db } from "../db";
 import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, type CanonicalDisposition } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./deepgram-postcall-transcription";
-import { analyzeConversationQuality, type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
+import { type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
 import { logCallIntelligence } from "./call-intelligence-logger";
 import { overrideSingleDisposition } from "./bulk-disposition-reanalyzer";
 import { recordTranscriptionResult } from "./transcription-monitor";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
 import { getFreshAudioUrl } from "./recording-link-resolver";
 import { buildPostCallTranscriptWithSummary } from "./post-call-transcript-summary";
+import {
+  runLightweightDispositionTriage,
+  runDeepAIAnalysis,
+  shouldAutoApplyDispositionChange,
+  type DeepAnalysisOutput,
+} from "./disposition-deep-reanalyzer";
+import { loadCampaignQualificationContext } from "./smart-disposition-analyzer";
 
 const LOG_PREFIX = "[PostCallAnalyzer]";
 
@@ -482,11 +489,239 @@ CRITICAL RULES:
   }
 }
 
+// ---- Deep Analysis → Existing Format Mappers --------------------------------
+
+/**
+ * Map DeepAnalysisOutput to ConversationQualityAnalysis format.
+ * This allows logCallIntelligence() to work unchanged while using deep analysis data.
+ */
+function mapDeepAnalysisToQualityAnalysis(
+  deep: DeepAnalysisOutput,
+  disposition: string | null,
+  callDurationSec: number
+): ConversationQualityAnalysis {
+  const { agentBehavior, callQuality, dispositionAssessment } = deep;
+
+  // Map key moments to breakdowns format
+  const breakdowns = (callQuality.keyMoments || []).map((km) => ({
+    type: km.impact === "negative" ? "Issue" : km.impact === "positive" ? "Strength" : "Observation",
+    description: km.description,
+    moment: km.timestamp,
+    recommendation: undefined,
+  }));
+
+  // Map weaknesses to issues format
+  const issues = (agentBehavior.weaknesses || []).map((w) => ({
+    type: "Performance Gap",
+    severity: "medium" as const,
+    description: w,
+    evidence: undefined,
+    recommendation: undefined,
+  }));
+
+  // Map strengths to recommendations format (reinforcement)
+  const recommendations = (agentBehavior.weaknesses || []).map((w) => ({
+    category: "other" as const,
+    currentBehavior: w,
+    suggestedChange: agentBehavior.coachingNotes || "Review coaching notes for improvement",
+    expectedImpact: "Improved call quality and conversion rates",
+  }));
+
+  // Derive sentiment from sentimentProgression
+  const sentimentMap: Record<string, "positive" | "neutral" | "negative"> = {
+    positive: "positive",
+    negative: "negative",
+    neutral: "neutral",
+    mixed: "neutral",
+  };
+
+  // Derive engagement level from engagement score
+  const engagementLevel = agentBehavior.engagementScore >= 70 ? "high"
+    : agentBehavior.engagementScore >= 40 ? "medium" : "low";
+
+  // Build summary from deep analysis reasoning + key moments
+  const summaryParts: string[] = [];
+  if (dispositionAssessment.reasoning) summaryParts.push(dispositionAssessment.reasoning);
+  if (agentBehavior.coachingNotes) summaryParts.push(`Coaching: ${agentBehavior.coachingNotes}`);
+  const summary = summaryParts.join(" ") || "Analysis completed via unified deep analysis.";
+
+  return {
+    status: "ok",
+    overallScore: agentBehavior.overallScore,
+    summary,
+    qualityDimensions: {
+      engagement: agentBehavior.engagementScore,
+      clarity: agentBehavior.scriptAdherenceScore, // closest match
+      empathy: agentBehavior.empathyScore,
+      objectionHandling: agentBehavior.objectionHandlingScore,
+      qualification: agentBehavior.qualificationScore,
+      closing: agentBehavior.closingScore,
+    },
+    campaignAlignment: {
+      objectiveAdherence: callQuality.campaignAlignmentScore,
+      contextUsage: Math.round(callQuality.campaignAlignmentScore * 0.85), // derive from alignment
+      talkingPointsCoverage: callQuality.talkingPointsCoverage,
+      missedTalkingPoints: callQuality.missedTalkingPoints || [],
+      notes: dispositionAssessment.positiveSignals.length > 0
+        ? [`Positive signals: ${dispositionAssessment.positiveSignals.join(", ")}`]
+        : [],
+    },
+    flowCompliance: {
+      score: agentBehavior.scriptAdherenceScore,
+      missedSteps: [],
+      deviations: [],
+    },
+    dispositionReview: {
+      assignedDisposition: disposition || undefined,
+      expectedDisposition: dispositionAssessment.suggestedDisposition,
+      isAccurate: !dispositionAssessment.shouldOverride,
+      notes: [dispositionAssessment.reasoning].filter(Boolean),
+    },
+    qualificationAssessment: {
+      metCriteria: callQuality.qualificationMet,
+      successIndicators: dispositionAssessment.positiveSignals || [],
+      missingIndicators: dispositionAssessment.negativeSignals || [],
+      deviations: [],
+    },
+    breakdowns,
+    issues,
+    performanceGaps: agentBehavior.weaknesses || [],
+    recommendations,
+    promptUpdates: [],
+    nextBestActions: agentBehavior.coachingNotes ? [agentBehavior.coachingNotes] : [],
+    learningSignals: {
+      sentiment: sentimentMap[callQuality.sentimentProgression] || "neutral",
+      engagementLevel,
+      timePressure: false,
+      outcome: dispositionAssessment.suggestedDisposition,
+    },
+    metadata: {
+      model: "deep-analysis-unified",
+      analyzedAt: new Date().toISOString(),
+      interactionType: "live_call",
+      analysisStage: "post_call",
+      transcriptLength: 0, // will be updated when transcript is available
+      truncated: false,
+    },
+  };
+}
+
+/**
+ * Build minimal ConversationQualityAnalysis for triage-only cases (voicemail, no_answer, etc.).
+ * No AI call needed — just sensible defaults.
+ */
+function buildMinimalQualityFromTriage(
+  triageResult: {
+    suggestedDisposition: string;
+    confidence: number;
+    reasoning: string;
+    positiveSignals: string[];
+    negativeSignals: string[];
+    shouldOverride: boolean;
+  } | null,
+  disposition: string | null,
+  callDurationSec: number
+): ConversationQualityAnalysis {
+  const suggested = triageResult?.suggestedDisposition || disposition || "needs_review";
+  return {
+    status: "ok",
+    overallScore: 0,
+    summary: triageResult?.reasoning || `Call classified as ${suggested} via lightweight triage (no AI analysis needed).`,
+    qualityDimensions: {
+      engagement: 0,
+      clarity: 0,
+      empathy: 0,
+      objectionHandling: 0,
+      qualification: 0,
+      closing: 0,
+    },
+    campaignAlignment: {
+      objectiveAdherence: 0,
+      contextUsage: 0,
+      talkingPointsCoverage: 0,
+      missedTalkingPoints: [],
+      notes: [`Triage: ${triageResult?.reasoning || "No real conversation"}`],
+    },
+    flowCompliance: { score: 0, missedSteps: [], deviations: [] },
+    dispositionReview: {
+      assignedDisposition: disposition || undefined,
+      expectedDisposition: suggested,
+      isAccurate: !triageResult?.shouldOverride,
+      notes: triageResult ? [triageResult.reasoning] : [],
+    },
+    qualificationAssessment: {
+      metCriteria: false,
+      successIndicators: [],
+      missingIndicators: [],
+      deviations: [],
+    },
+    breakdowns: [],
+    issues: [],
+    performanceGaps: [],
+    recommendations: [],
+    promptUpdates: [],
+    nextBestActions: [],
+    learningSignals: {
+      sentiment: "neutral",
+      engagementLevel: "low",
+      timePressure: false,
+      outcome: suggested,
+    },
+    metadata: {
+      model: "lightweight-triage",
+      analyzedAt: new Date().toISOString(),
+      interactionType: "live_call",
+      analysisStage: "post_call",
+      transcriptLength: 0,
+      truncated: false,
+    },
+  };
+}
+
+/**
+ * Map DeepAnalysisOutput to CampaignOutcomeEvaluation format.
+ * Preserves backward compatibility with aiAnalysis payload consumers.
+ */
+function mapDeepAnalysisToCampaignOutcome(
+  deep: DeepAnalysisOutput,
+  campaignName?: string,
+  campaignObjective?: string,
+): CampaignOutcomeEvaluation {
+  const { callQuality, dispositionAssessment } = deep;
+
+  return {
+    campaignName: campaignName || "Unknown",
+    campaignObjective: campaignObjective || "Not specified",
+    objectiveAchieved: callQuality.qualificationMet,
+    alignmentScore: callQuality.campaignAlignmentScore,
+    coveredTalkingPoints: [], // deep analysis doesn't enumerate covered points — only missed
+    missedTalkingPoints: callQuality.missedTalkingPoints || [],
+    successCriteriaMet: callQuality.qualificationMet,
+    qualificationResult: callQuality.qualificationMet
+      ? "qualified"
+      : dispositionAssessment.suggestedDisposition === "needs_review"
+        ? "partial"
+        : "not_qualified",
+    criteriaChecks: [],
+    recommendedDisposition: dispositionAssessment.suggestedDisposition,
+    dispositionAccurate: !dispositionAssessment.shouldOverride,
+    notes: [
+      dispositionAssessment.reasoning,
+      ...(dispositionAssessment.positiveSignals.length > 0
+        ? [`Positive: ${dispositionAssessment.positiveSignals.join("; ")}`]
+        : []),
+      ...(dispositionAssessment.negativeSignals.length > 0
+        ? [`Negative: ${dispositionAssessment.negativeSignals.join("; ")}`]
+        : []),
+    ].filter(Boolean),
+  };
+}
+
 // ---- Main entry point ------------------------------------------------------
 
 /**
  * Run complete post-call analysis for a finished call.
- * 
+ *
  * Sequence:
  * 1. Obtain the recording URL from the call session
  * 2. Transcribe with Deepgram (structured, speaker-diarized)
@@ -775,81 +1010,116 @@ export async function runPostCallAnalysis(
     }
     recordTranscriptionResult(callSessionId, transcriptionMetricSource, transcriptionMetricId);
 
-    // 7. Run conversation quality analysis
-    try {
-      result.qualityAnalysis = await analyzeConversationQuality({
-        transcript: plainTranscript,
-        interactionType: "live_call",
-        analysisStage: "post_call",
-        callDurationSeconds: callDurationSec,
-        disposition: disposition || undefined,
-        campaignId: campaignId,
-      });
-      console.log(`${LOG_PREFIX} ✅ Quality analysis completed, score: ${result.qualityAnalysis.overallScore}`);
-    } catch (qaError: any) {
-      console.error(`${LOG_PREFIX} Quality analysis failed: ${qaError.message}`);
-    }
+    // =========================================================================
+    // 7. UNIFIED DEEP ANALYSIS (replaces 4 separate AI calls)
+    //    - Lightweight triage catches obvious cases (voicemail, screener, DNC) → 0 AI cost
+    //    - Deep analysis (1 AI call) replaces: analyzeConversationQuality + evaluateCampaignOutcome
+    //      + analyzeConversationQualityDepartment + analyzeLeadQualityDepartment
+    // =========================================================================
+    let deepAnalysis: DeepAnalysisOutput | null = null;
+    let triageResult: ReturnType<typeof runLightweightDispositionTriage> = null;
+    let triageOnly = false;
 
-    // 8. Evaluate outcome against campaign criteria
+    // 7a. Load rich campaign context (used by both triage and deep analysis)
+    let campaignContext: Awaited<ReturnType<typeof loadCampaignQualificationContext>> | null = null;
+    let campaignData: { name: string; objective: string | null; qaParameters: any; talkingPoints: any; objections: any } | null = null;
+
     if (campaignId) {
       try {
-        result.campaignOutcome = await evaluateCampaignOutcome(
-          plainTranscript,
-          result.turns,
-          result.metrics,
-          callDurationSec,
-          disposition,
-          campaignId
-        );
-        if (result.campaignOutcome) {
-          console.log(`${LOG_PREFIX} ✅ Campaign outcome: objective=${result.campaignOutcome.objectiveAchieved}, alignment=${result.campaignOutcome.alignmentScore}, qualification=${result.campaignOutcome.qualificationResult}`);
+        campaignContext = await loadCampaignQualificationContext(campaignId);
+
+        // Also fetch raw campaign data for the deep analysis prompt
+        const [campaign] = await db
+          .select({
+            name: campaigns.name,
+            objective: campaigns.campaignObjective,
+            qaParameters: campaigns.qaParameters,
+            talkingPoints: campaigns.talkingPoints,
+            aiAgentSettings: campaigns.aiAgentSettings,
+          })
+          .from(campaigns)
+          .where(eq(campaigns.id, campaignId))
+          .limit(1);
+
+        if (campaign) {
+          // Extract objections from aiAgentSettings if available
+          const aiSettings = campaign.aiAgentSettings as Record<string, any> | null;
+          campaignData = {
+            name: campaign.name,
+            objective: campaign.objective,
+            qaParameters: campaign.qaParameters,
+            talkingPoints: campaign.talkingPoints,
+            objections: aiSettings?.objections || aiSettings?.commonObjections || null,
+          };
         }
-      } catch (outcomeError: any) {
-        console.error(`${LOG_PREFIX} Campaign outcome evaluation failed: ${outcomeError.message}`);
+      } catch (ctxError: any) {
+        console.warn(`${LOG_PREFIX} Failed to load campaign context: ${ctxError.message}`);
       }
     }
 
-    // 8b. Run Unlicensed Department analyses in parallel (independent of each other)
+    // 7b. Run lightweight triage FIRST — catches obvious cases with ZERO AI cost
     try {
-      const [{ analyzeConversationQualityDepartment }, { analyzeLeadQualityDepartment }] =
-        await Promise.all([
-          import("./ai-conversation-quality-department"),
-          import("./ai-lead-quality-department"),
-        ]);
+      triageResult = runLightweightDispositionTriage(
+        plainTranscript,
+        disposition || "needs_review",
+        callDurationSec
+      );
 
-      const departmentInput = {
-        transcript: plainTranscript,
-        callSessionId,
-        campaignId: campaignId || undefined,
-        contactId: contactId || undefined,
-        dialerCallAttemptId: options?.callAttemptId,
-        disposition: disposition || undefined,
-        callDurationSec,
-      };
-
-      const [convQualityResult, leadQualityResult] = await Promise.allSettled([
-        analyzeConversationQualityDepartment(departmentInput),
-        analyzeLeadQualityDepartment(departmentInput),
-      ]);
-
-      if (convQualityResult.status === "fulfilled" && convQualityResult.value.success) {
-        console.log(`${LOG_PREFIX} ✅ Conversation Quality Dept: CQS=${convQualityResult.value.conversationQualityScore}`);
-      } else {
-        const reason = convQualityResult.status === "rejected" ? convQualityResult.reason?.message : "Analysis returned failure";
-        console.warn(`${LOG_PREFIX} ⚠️ Conversation Quality Dept failed: ${reason}`);
+      if (triageResult && triageResult.confidence >= 0.85) {
+        triageOnly = true;
+        console.log(`${LOG_PREFIX} ⚡ Lightweight triage: ${triageResult.suggestedDisposition} (confidence: ${triageResult.confidence.toFixed(2)}) — skipping AI analysis`);
+      } else if (triageResult) {
+        console.log(`${LOG_PREFIX} 🔍 Lightweight triage suggestion: ${triageResult.suggestedDisposition} (confidence: ${triageResult.confidence.toFixed(2)}) — proceeding to deep analysis`);
       }
-
-      if (leadQualityResult.status === "fulfilled" && leadQualityResult.value.success) {
-        console.log(`${LOG_PREFIX} ✅ Lead Quality Dept: Score=${leadQualityResult.value.leadQualificationScore}, Intent=${leadQualityResult.value.intentStrength}`);
-      } else {
-        const reason = leadQualityResult.status === "rejected" ? leadQualityResult.reason?.message : "Analysis returned failure";
-        console.warn(`${LOG_PREFIX} ⚠️ Lead Quality Dept failed: ${reason}`);
-      }
-    } catch (deptError: any) {
-      console.error(`${LOG_PREFIX} Unlicensed department analyses failed: ${deptError.message}`);
+    } catch (triageError: any) {
+      console.warn(`${LOG_PREFIX} Lightweight triage failed: ${triageError.message}`);
     }
 
-    // 9. Persist full analysis to call session
+    // 7c. Run unified deep analysis (1 AI call replaces 4 separate calls)
+    if (!triageOnly) {
+      try {
+        const { output } = await runDeepAIAnalysis(
+          plainTranscript,
+          campaignContext,
+          campaignId || null,
+          disposition || "needs_review",
+          callDurationSec,
+          campaignData?.objective || null,
+          campaignData?.qaParameters || null,
+          campaignData?.talkingPoints || null,
+          campaignData?.objections || null
+        );
+        deepAnalysis = output;
+        console.log(`${LOG_PREFIX} ✅ Unified deep analysis completed: agent=${deepAnalysis.agentBehavior.overallScore}, quality=${deepAnalysis.callQuality.campaignAlignmentScore}, disposition=${deepAnalysis.dispositionAssessment.suggestedDisposition} (confidence: ${deepAnalysis.dispositionAssessment.confidence.toFixed(2)})`);
+      } catch (deepError: any) {
+        console.error(`${LOG_PREFIX} Unified deep analysis failed: ${deepError.message}`);
+      }
+    }
+
+    // 7d. Build ConversationQualityAnalysis from deep analysis output
+    //     (maintains backward compatibility with logCallIntelligence → callQualityRecords)
+    if (deepAnalysis) {
+      result.qualityAnalysis = mapDeepAnalysisToQualityAnalysis(deepAnalysis, disposition, callDurationSec);
+      // Set transcript length in metadata
+      result.qualityAnalysis.metadata.transcriptLength = plainTranscript.length;
+    } else {
+      result.qualityAnalysis = buildMinimalQualityFromTriage(triageResult, disposition, callDurationSec);
+      result.qualityAnalysis.metadata.transcriptLength = plainTranscript.length;
+    }
+    console.log(`${LOG_PREFIX} ✅ Quality analysis: score=${result.qualityAnalysis.overallScore}, method=${triageOnly ? "triage" : "deep-analysis"}`);
+
+    // 7e. Build CampaignOutcomeEvaluation from deep analysis output
+    //     (maintains backward compatibility with aiAnalysis payload)
+    if (deepAnalysis && campaignId) {
+      result.campaignOutcome = mapDeepAnalysisToCampaignOutcome(
+        deepAnalysis,
+        campaignData?.name,
+        campaignData?.objective || undefined,
+      );
+      console.log(`${LOG_PREFIX} ✅ Campaign outcome: objective=${result.campaignOutcome.objectiveAchieved}, alignment=${result.campaignOutcome.alignmentScore}, qualification=${result.campaignOutcome.qualificationResult}`);
+    }
+
+    // 9. Persist full analysis to call session (enhanced payload with deep analysis data)
     const analysisPayload: Record<string, unknown> = {
       postCallAnalysis: {
         analyzedAt: new Date().toISOString(),
@@ -857,6 +1127,11 @@ export async function runPostCallAnalysis(
         turns: result.turns,
         metrics: result.metrics,
         campaignOutcome: result.campaignOutcome,
+        // Deep analysis data (new — agent behavior scores, call quality, disposition confidence)
+        agentBehavior: deepAnalysis?.agentBehavior || null,
+        callQualityAssessment: deepAnalysis?.callQuality || null,
+        dispositionAssessment: deepAnalysis?.dispositionAssessment || null,
+        analysisMethod: triageOnly ? "lightweight_triage" : "deep_analysis",
       },
     };
 
@@ -903,74 +1178,75 @@ export async function runPostCallAnalysis(
       }
     }
 
-    // 11. AUTO-CORRECT MISMATCHED DISPOSITIONS
-    // When post-call analysis detects the assigned disposition doesn't match what the
-    // transcript evidence suggests, automatically apply the correction. This eliminates
-    // the manual review step shown in Disposition Intelligence ("X calls have mismatched dispositions").
-    // Sources of truth (in priority order):
-    //   1. Campaign outcome evaluation's recommendedDisposition (evaluated against campaign criteria)
-    //   2. Quality analysis's dispositionReview.expectedDisposition (conversation-level assessment)
+    // 11. AUTO-CORRECT MISMATCHED DISPOSITIONS (confidence-based from deep reanalyzer)
+    //     Uses per-disposition confidence thresholds + evidence checking instead of simple compare
     const { normalizeDisposition } = await import("./disposition-normalizer");
-    const VALID_AUTO_CORRECT_DISPOSITIONS: CanonicalDisposition[] = [
-      "qualified_lead", "not_interested", "do_not_call", "voicemail",
-      "no_answer", "invalid_data", "needs_review", "callback_requested",
-    ];
     try {
-      let correctedDisposition: CanonicalDisposition | null = null;
-      let correctionSource = "";
+      if (deepAnalysis) {
+        // Deep analysis confidence-based auto-correction
+        const assessment = deepAnalysis.dispositionAssessment;
+        if (shouldAutoApplyDispositionChange(assessment, disposition || "needs_review")) {
+          const correctedDisposition = normalizeDisposition(assessment.suggestedDisposition);
+          if (correctedDisposition && correctedDisposition !== disposition) {
+            console.log(`${LOG_PREFIX} 🔄 AUTO-CORRECTING disposition for ${callSessionId}: "${disposition}" → "${correctedDisposition}" (deep analysis, confidence: ${assessment.confidence.toFixed(2)})`);
 
-      // Check campaign outcome evaluation first (higher priority — uses campaign criteria)
-      if (result.campaignOutcome && !result.campaignOutcome.dispositionAccurate) {
-        const recommended = normalizeDisposition(result.campaignOutcome.recommendedDisposition);
-        if (recommended && recommended !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(recommended)) {
-          correctedDisposition = recommended;
-          correctionSource = "campaign_outcome_evaluation";
-          console.log(`${LOG_PREFIX} 🔍 Campaign outcome suggests: ${result.campaignOutcome.recommendedDisposition} → normalized to: ${recommended}`);
-        }
-      }
+            const overrideResult = await overrideSingleDisposition(
+              callSessionId,
+              correctedDisposition,
+              "system:post-call-deep-analysis",
+              `Deep analysis auto-correction (confidence: ${assessment.confidence.toFixed(2)}). ${assessment.reasoning}. Original: ${disposition}`
+            );
 
-      // Fall back to quality analysis disposition review
-      if (!correctedDisposition && result.qualityAnalysis?.dispositionReview) {
-        const review = result.qualityAnalysis.dispositionReview;
-        if (!review.isAccurate && review.expectedDisposition) {
-          const expected = normalizeDisposition(review.expectedDisposition);
-          if (expected !== disposition && VALID_AUTO_CORRECT_DISPOSITIONS.includes(expected)) {
-            correctedDisposition = expected;
-            correctionSource = "quality_analysis_review";
-            console.log(`${LOG_PREFIX} 🔍 Quality review suggests: ${review.expectedDisposition} → normalized to: ${expected}`);
+            if (overrideResult.success) {
+              console.log(`${LOG_PREFIX} ✅ Disposition auto-corrected: ${disposition} → ${correctedDisposition} | Action: ${overrideResult.action}`);
+              if (result.intelligenceRecordId) {
+                await db.update(callQualityRecords)
+                  .set({
+                    dispositionAccurate: true,
+                    assignedDisposition: correctedDisposition,
+                    dispositionNotes: [
+                      ...(result.qualityAnalysis?.dispositionReview?.notes || []),
+                      `[Deep analysis auto-corrected] ${disposition} → ${correctedDisposition} (confidence: ${assessment.confidence.toFixed(2)})`,
+                    ],
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(callQualityRecords.id, result.intelligenceRecordId));
+              }
+            } else {
+              console.warn(`${LOG_PREFIX} ⚠️ Disposition auto-correction failed for ${callSessionId}: ${overrideResult.error}`);
+            }
           }
         }
-      }
+      } else if (triageResult && triageResult.shouldOverride) {
+        // Triage-based correction for obvious cases
+        const correctedDisposition = normalizeDisposition(triageResult.suggestedDisposition);
+        if (correctedDisposition && correctedDisposition !== disposition) {
+          console.log(`${LOG_PREFIX} 🔄 TRIAGE-CORRECTING disposition for ${callSessionId}: "${disposition}" → "${correctedDisposition}" (triage, confidence: ${triageResult.confidence.toFixed(2)})`);
 
-      if (correctedDisposition) {
-        console.log(`${LOG_PREFIX} 🔄 AUTO-CORRECTING disposition for ${callSessionId}: "${disposition}" → "${correctedDisposition}" (source: ${correctionSource})`);
+          const overrideResult = await overrideSingleDisposition(
+            callSessionId,
+            correctedDisposition,
+            "system:post-call-triage",
+            `Lightweight triage correction (confidence: ${triageResult.confidence.toFixed(2)}). ${triageResult.reasoning}. Original: ${disposition}`
+          );
 
-        const overrideResult = await overrideSingleDisposition(
-          callSessionId,
-          correctedDisposition,
-          "system:post-call-auto-correct",
-          `Auto-corrected by post-call analysis (${correctionSource}). Original: ${disposition}, Evidence-based: ${correctedDisposition}`
-        );
-
-        if (overrideResult.success) {
-          console.log(`${LOG_PREFIX} ✅ Disposition auto-corrected: ${disposition} → ${correctedDisposition} | Action: ${overrideResult.action}`);
-
-          // Update the quality record to mark disposition as now accurate (since we fixed it)
-          if (result.intelligenceRecordId) {
-            await db.update(callQualityRecords)
-              .set({
-                dispositionAccurate: true,
-                assignedDisposition: correctedDisposition,
-                dispositionNotes: [
-                  ...(result.qualityAnalysis?.dispositionReview?.notes || []),
-                  `[Auto-corrected] ${disposition} → ${correctedDisposition} (${correctionSource})`,
-                ],
-                updatedAt: new Date(),
-              })
-              .where(eq(callQualityRecords.id, result.intelligenceRecordId));
+          if (overrideResult.success) {
+            console.log(`${LOG_PREFIX} ✅ Disposition triage-corrected: ${disposition} → ${correctedDisposition} | Action: ${overrideResult.action}`);
+            if (result.intelligenceRecordId) {
+              await db.update(callQualityRecords)
+                .set({
+                  dispositionAccurate: true,
+                  assignedDisposition: correctedDisposition,
+                  dispositionNotes: [
+                    `[Triage auto-corrected] ${disposition} → ${correctedDisposition} (confidence: ${triageResult.confidence.toFixed(2)})`,
+                  ],
+                  updatedAt: new Date(),
+                })
+                .where(eq(callQualityRecords.id, result.intelligenceRecordId));
+            }
+          } else {
+            console.warn(`${LOG_PREFIX} ⚠️ Triage disposition correction failed for ${callSessionId}: ${overrideResult.error}`);
           }
-        } else {
-          console.warn(`${LOG_PREFIX} ⚠️ Disposition auto-correction failed for ${callSessionId}: ${overrideResult.error}`);
         }
       }
     } catch (autoCorrectError: any) {
