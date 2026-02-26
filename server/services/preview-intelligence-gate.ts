@@ -1,12 +1,19 @@
 /**
  * Unified Preview Intelligence Gate
- * 
- * Ensures NO preview or test (voice call or email) can run without:
+ *
+ * Checks intelligence readiness before previews/tests. Components are split into:
+ *
+ * REQUIRED (auto-generatable — gate blocks if missing):
  * 1. Account Intelligence (problem hypothesis, recommended angle, tone)
- * 2. Organization Intelligence (org profile with offerings, ICP, positioning)
- * 3. Solution Mapping (problem-to-solution mapping for the campaign)
- * 
- * This is the single source of truth for preview readiness across the entire platform.
+ * 2. Problem Intelligence (detected problems, messaging package, outreach strategy)
+ *
+ * OPTIONAL (pre-configured — enhance quality but don't block):
+ * 3. Organization Intelligence (org profile with offerings, ICP, positioning)
+ * 4. Solution Mapping (problem-to-solution mapping for the campaign)
+ *
+ * This matches production campaign calls which don't check the gate at all.
+ * Required components are auto-generated if missing. Optional components are
+ * reported in status but never block previews or test calls.
  */
 
 import { db } from '../db';
@@ -15,6 +22,7 @@ import {
   accountIntelligenceRecords,
   campaigns,
   campaignOrganizations,
+  campaignAccountProblems,
   organizationServiceCatalog,
   problemDefinitions,
 } from '@shared/schema';
@@ -22,11 +30,15 @@ import {
   getOrBuildAccountIntelligence,
   type AccountIntelligencePayload,
 } from './account-messaging-service';
+import {
+  generateAccountProblemIntelligence,
+} from './problem-intelligence/problem-generation-engine';
 
 // ==================== TYPES ====================
 
 export interface IntelligenceStatus {
-  ready: boolean;
+  ready: boolean;              // True when core (auto-generatable) intelligence is available
+  fullyEnriched: boolean;      // True when ALL components including optional are available
   accountIntelligence: {
     available: boolean;
     confidence: number | null;
@@ -47,7 +59,17 @@ export interface IntelligenceStatus {
     hasProblemDefinitions: boolean;
     hasServiceCatalog: boolean;
   };
-  missingComponents: string[];
+  problemIntelligence: {
+    available: boolean;
+    confidence: number | null;
+    detectedProblemsCount: number;
+    hasMesagingPackage: boolean;
+    hasOutreachStrategy: boolean;
+    lastUpdated: Date | null;
+  };
+  missingComponents: string[];          // All missing (required + optional)
+  missingRequiredComponents: string[];   // Only auto-generatable components that are missing
+  missingOptionalComponents: string[];   // Pre-configured components that are missing (don't block)
   message: string;
 }
 
@@ -224,37 +246,115 @@ export async function checkPreviewIntelligence(params: {
     missingComponents.push('Solution Mapping');
   }
 
-  const ready = missingComponents.length === 0;
-  const message = ready
-    ? 'All intelligence components ready. Preview will use full account intelligence, organization intelligence, and solution mapping.'
-    : `Missing: ${missingComponents.join(', ')}. Preview requires all intelligence components to ensure quality output.`;
+  // 4. Check Problem Intelligence (campaign-account problem detection, messaging, outreach)
+  let problemIntel = {
+    available: false,
+    confidence: null as number | null,
+    detectedProblemsCount: 0,
+    hasMesagingPackage: false,
+    hasOutreachStrategy: false,
+    lastUpdated: null as Date | null,
+  };
+
+  try {
+    const [problemRecord] = await db
+      .select()
+      .from(campaignAccountProblems)
+      .where(
+        and(
+          eq(campaignAccountProblems.campaignId, campaignId),
+          eq(campaignAccountProblems.accountId, accountId)
+        )
+      )
+      .limit(1);
+
+    if (problemRecord) {
+      const detectedProblems = (problemRecord.detectedProblems as any[]) || [];
+      const messagingPackage = problemRecord.messagingPackage as any;
+      const outreachStrategy = problemRecord.outreachStrategy as any;
+
+      const hasDetectedProblems = detectedProblems.length > 0;
+      const hasMessaging = !!(messagingPackage && messagingPackage.primaryAngle);
+      const hasOutreach = !!(outreachStrategy && outreachStrategy.recommendedApproach);
+
+      problemIntel = {
+        available: hasDetectedProblems || hasMessaging,
+        confidence: problemRecord.confidence || null,
+        detectedProblemsCount: detectedProblems.length,
+        hasMesagingPackage: hasMessaging,
+        hasOutreachStrategy: hasOutreach,
+        lastUpdated: problemRecord.generatedAt || problemRecord.createdAt || null,
+      };
+
+      if (!problemIntel.available) {
+        missingComponents.push('Problem Intelligence');
+      }
+    } else {
+      missingComponents.push('Problem Intelligence');
+    }
+  } catch (e) {
+    console.warn('[Preview Intelligence Gate] Error checking problem intelligence:', e);
+    missingComponents.push('Problem Intelligence');
+  }
+
+  // Separate required (auto-generatable) from optional (pre-configured) components.
+  // Required: Account Intelligence, Problem Intelligence — these can be auto-generated
+  // Optional: Organization Intelligence, Solution Mapping — these need manual configuration
+  // Production campaign calls don't check the gate at all, so we only require
+  // what we can auto-generate. Optional components enhance quality but don't block.
+  const requiredComponents = ['Account Intelligence', 'Problem Intelligence'];
+  const missingRequiredComponents = missingComponents.filter(c => requiredComponents.includes(c));
+  const missingOptionalComponents = missingComponents.filter(c => !requiredComponents.includes(c));
+
+  const ready = missingRequiredComponents.length === 0;
+  const fullyEnriched = missingComponents.length === 0;
+
+  let message: string;
+  if (fullyEnriched) {
+    message = 'All intelligence components ready. Preview will use full account intelligence, organization intelligence, solution mapping, and problem intelligence.';
+  } else if (ready) {
+    message = `Core intelligence ready. Optional enhancements missing: ${missingOptionalComponents.join(', ')}. Preview will proceed with available intelligence.`;
+  } else {
+    message = `Required intelligence missing: ${missingRequiredComponents.join(', ')}. These will be auto-generated before preview starts.`;
+  }
 
   return {
     ready,
+    fullyEnriched,
     accountIntelligence: accountIntel,
     organizationIntelligence: orgIntel,
     solutionMapping: solutionMap,
+    problemIntelligence: problemIntel,
     missingComponents,
+    missingRequiredComponents,
+    missingOptionalComponents,
     message,
   };
 }
 
 /**
- * Full intelligence gate — checks readiness and auto-generates missing account intelligence.
- * Used before any preview/test action to ensure intelligence is present.
- * 
- * If account intelligence is missing but can be generated, it will be auto-generated.
- * Organization intelligence and solution mapping must be pre-configured.
+ * Full intelligence gate — checks readiness and auto-generates missing intelligence.
+ * Used before any preview/test action to ensure core intelligence is present.
+ *
+ * Auto-generates (if missing and autoGenerate=true):
+ * - Account Intelligence (problem hypothesis, recommended angle, tone)
+ * - Problem Intelligence (detected problems, messaging package, outreach strategy)
+ *
+ * Gate passes when auto-generatable components are available.
+ * Organization Intelligence and Solution Mapping enhance quality but do NOT block,
+ * matching the behavior of production campaign calls which skip the gate entirely.
  */
 export async function enforcePreviewIntelligence(params: {
   accountId: string;
   campaignId: string;
-  autoGenerate?: boolean; // If true, auto-generates account intelligence if missing
+  autoGenerate?: boolean; // If true, auto-generates account + problem intelligence if missing
 }): Promise<IntelligenceGateResult> {
   const { accountId, campaignId, autoGenerate = true } = params;
 
   // First check current state
   let status = await checkPreviewIntelligence({ accountId, campaignId });
+
+  let generatedAnything = false;
 
   // Auto-generate account intelligence if missing and allowed
   if (!status.accountIntelligence.available && autoGenerate) {
@@ -262,12 +362,29 @@ export async function enforcePreviewIntelligence(params: {
       console.log(`[Preview Intelligence Gate] Auto-generating account intelligence for: ${accountId}`);
       const intelligenceRecord = await getOrBuildAccountIntelligence(accountId);
       if (intelligenceRecord?.payloadJson) {
-        // Re-check status after generation
-        status = await checkPreviewIntelligence({ accountId, campaignId });
+        generatedAnything = true;
       }
     } catch (e) {
       console.error('[Preview Intelligence Gate] Failed to auto-generate account intelligence:', e);
     }
+  }
+
+  // Auto-generate problem intelligence if missing and allowed
+  if (!status.problemIntelligence.available && autoGenerate) {
+    try {
+      console.log(`[Preview Intelligence Gate] Auto-generating problem intelligence for account ${accountId} in campaign ${campaignId}`);
+      const problemIntel = await generateAccountProblemIntelligence({ campaignId, accountId });
+      if (problemIntel) {
+        generatedAnything = true;
+      }
+    } catch (e) {
+      console.error('[Preview Intelligence Gate] Failed to auto-generate problem intelligence:', e);
+    }
+  }
+
+  // Re-check status after any generation
+  if (generatedAnything) {
+    status = await checkPreviewIntelligence({ accountId, campaignId });
   }
 
   // Get the account intelligence payload for use downstream
@@ -295,13 +412,15 @@ export function intelligenceGateErrorResponse(status: IntelligenceStatus) {
   return {
     error: 'Intelligence gate failed',
     message: status.message,
-    missingComponents: status.missingComponents,
+    missingComponents: status.missingRequiredComponents,
+    missingOptionalComponents: status.missingOptionalComponents,
     intelligenceStatus: {
       accountIntelligence: status.accountIntelligence.available,
       organizationIntelligence: status.organizationIntelligence.available,
       solutionMapping: status.solutionMapping.available,
+      problemIntelligence: status.problemIntelligence.available,
     },
-    resolution: status.missingComponents.map(component => {
+    resolution: status.missingRequiredComponents.map(component => {
       switch (component) {
         case 'Account Intelligence':
           return 'Account intelligence will be auto-generated. If this persists, ensure the account has sufficient data (name, domain, industry).';
@@ -309,6 +428,8 @@ export function intelligenceGateErrorResponse(status: IntelligenceStatus) {
           return 'Configure organization intelligence in Settings > Organization Intelligence. This requires a domain scan or manual setup.';
         case 'Solution Mapping':
           return 'Add product/service information to the campaign, or configure problem definitions and service catalog in organization settings.';
+        case 'Problem Intelligence':
+          return 'Problem intelligence will be auto-generated. If this persists, ensure account signals are available (industry, tech stack, etc.) and problem definitions are configured.';
         default:
           return `Configure ${component} before running previews.`;
       }

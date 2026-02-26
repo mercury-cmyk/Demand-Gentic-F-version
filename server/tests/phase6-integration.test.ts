@@ -1,10 +1,10 @@
 // File: server/tests/phase6-integration.test.ts
 // Phase 6 Integration Tests
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 // Mock API endpoints for testing
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = 'http://localhost:8080/api';
 
 describe('Phase 6 - Advanced Features Integration Tests', () => {
   let campaignId: string;

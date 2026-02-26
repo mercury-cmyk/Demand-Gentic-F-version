@@ -2169,15 +2169,50 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                             : 'Choose from approved contact segments and account lists'}
                         </p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                        className={cn(showAdvancedFilters && "bg-primary/10 border-primary/50 text-primary")}
-                      >
-                        <Filter className="h-4 w-4 mr-2" />
-                        Advanced Unified Filter
-                      </Button>
+                      <div className="flex gap-2">
+                        {orgIntelData?.id && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-violet-500/30 text-violet-600 hover:bg-violet-500/10"
+                            onClick={async () => {
+                              setShowAdvancedFilters(true);
+                              try {
+                                const res = await apiRequest("POST", "/api/ai/generate-audience-filters", {
+                                  organizationId: orgIntelData.id,
+                                  campaignName: formData.name,
+                                  campaignObjective: formData.objective,
+                                  targetAudienceDescription: formData.targetAudience,
+                                });
+                                const data = await res.json();
+                                setFormData(prev => ({ ...prev, filterGroup: data.filterGroup }));
+                                toast({
+                                  title: "AI Filters Generated",
+                                  description: `${data.filterGroup.conditions.length} filter conditions created (${Math.round(data.confidence * 100)}% confidence)`,
+                                });
+                              } catch (error: any) {
+                                toast({
+                                  title: "AI Generation Failed",
+                                  description: error?.message || "Failed to generate filters with AI",
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
+                          >
+                            <Sparkles className="h-4 w-4 mr-2" />
+                            AI Filters
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                          className={cn(showAdvancedFilters && "bg-primary/10 border-primary/50 text-primary")}
+                        >
+                          <Filter className="h-4 w-4 mr-2" />
+                          Advanced Unified Filter
+                        </Button>
+                      </div>
                     </div>
 
                     {/* Always Show List Selection */}

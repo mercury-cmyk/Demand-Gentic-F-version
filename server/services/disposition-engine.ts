@@ -39,6 +39,7 @@ import { analyzeLeadQualification } from "./ai-qa-analyzer";
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recording-storage";
 import callQualityTracker from "./call-quality-tracker";
 import { telnyxNumbers } from "@shared/number-pool-schema";
+import { autoEnrollJourneyLeadFromDisposition } from "./client-journey-automation";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -190,6 +191,30 @@ export interface DispositionCallData {
   transcript?: string;
   recordingUrl?: string;
   structuredTranscript?: any;
+  callbackDate?: string | Date | null;
+}
+
+function parseRequestedCallbackAt(input: string | Date | null | undefined): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) {
+    return Number.isNaN(input.getTime()) ? null : input;
+  }
+
+  const raw = String(input).trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function resolveCallbackAtForDisposition(callData?: DispositionCallData): Date {
+  const requested = parseRequestedCallbackAt(callData?.callbackDate);
+  if (requested) {
+    return requested;
+  }
+  return new Date(Date.now() + 60 * 60 * 1000);
 }
 
 /**
@@ -311,7 +336,7 @@ export async function processDisposition(
         await processNeedsReview(callAttempt, rules, result);
         break;
       case 'callback_requested':
-        await processCallbackRequested(callAttempt, rules, result);
+        await processCallbackRequested(callAttempt, rules, result, callData);
         break;
       default:
         result.errors.push(`Unknown disposition: ${disposition}`);
@@ -1122,9 +1147,11 @@ async function processNeedsReview(
 async function processCallbackRequested(
   callAttempt: typeof dialerCallAttempts.$inferSelect,
   rules: CampaignRules,
-  result: DispositionResult
+  result: DispositionResult,
+  callData?: DispositionCallData
 ): Promise<void> {
   const callDuration = callAttempt.callDurationSeconds || 0;
+  const requestedCallbackAt = resolveCallbackAtForDisposition(callData);
 
   console.log(`[DispositionEngine] 📞 CALLBACK REQUESTED: Contact ${callAttempt.contactId} | Duration: ${callDuration}s | Campaign: ${callAttempt.campaignId}`);
 
@@ -1144,11 +1171,7 @@ async function processCallbackRequested(
     campaignType === 'telemarketing';
 
   if (isAppointmentCampaign) {
-    const minDays = Math.max(1, rules.needsReviewRetryWindowDaysMin);
-    const maxDays = Math.max(minDays, rules.needsReviewRetryWindowDaysMax);
-    const retryDays = minDays + Math.floor(Math.random() * (maxDays - minDays + 1));
-    const nextAttemptAt = new Date();
-    nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
+    const nextAttemptAt = requestedCallbackAt;
 
     if (callAttempt.queueItemId) {
       await db
@@ -1156,7 +1179,7 @@ async function processCallbackRequested(
         .set({
           status: 'queued',
           nextAttemptAt,
-          targetAgentType: 'human',
+          targetAgentType: 'ai',
           agentId: null,
           virtualAgentId: null,
           lockExpiresAt: null,
@@ -1174,8 +1197,37 @@ async function processCallbackRequested(
       maxAttempts: rules.maxAttemptsPerContact,
       scheduledAt: new Date(),
       eligibleAt: nextAttemptAt,
-      targetAgentType: 'human',
-      notes: 'Callback requested in appointment campaign - requeued for follow-up without lead creation'
+      targetAgentType: 'ai',
+      notes: 'Callback requested in appointment campaign - requeued for AI callback follow-up without lead creation'
+    });
+
+    setImmediate(async () => {
+      try {
+        const enrollResult = await autoEnrollJourneyLeadFromDisposition({
+          campaignId: callAttempt.campaignId,
+          contactId: callAttempt.contactId,
+          sourceCallSessionId: callAttempt.callSessionId,
+          sourceDisposition: 'callback_requested',
+          sourceCallSummary: callAttempt.notes || null,
+          sourceAiAnalysis: {
+            callAttemptId: callAttempt.id,
+            agentType: callAttempt.agentType,
+            callDurationSeconds: callDuration,
+            queueState: 'waiting_retry',
+            requeuedAt: nextAttemptAt.toISOString(),
+            callbackRequestedAt: nextAttemptAt.toISOString(),
+          },
+          callbackAt: nextAttemptAt,
+        });
+
+        if (enrollResult.enrolled) {
+          console.log(
+            `[DispositionEngine] ✅ Auto-enrolled callback into journey pipeline: pipeline=${enrollResult.pipelineId} lead=${enrollResult.leadId}`
+          );
+        }
+      } catch (automationError) {
+        console.error('[DispositionEngine] Journey auto-enrollment failed for appointment callback:', automationError);
+      }
     });
 
     result.actions.push(`Appointment campaign callback requeued for ${nextAttemptAt.toISOString()} (no lead created)`);
@@ -1289,6 +1341,35 @@ async function processCallbackRequested(
     priority: -1 // High priority - callbacks need immediate attention
   });
   result.actions.push('Added to QC queue (high priority - callback requested)');
+
+  setImmediate(async () => {
+    try {
+      const enrollResult = await autoEnrollJourneyLeadFromDisposition({
+        campaignId: callAttempt.campaignId,
+        contactId: callAttempt.contactId,
+        sourceCallSessionId: callAttempt.callSessionId,
+        sourceDisposition: 'callback_requested',
+        sourceCallSummary: callAttempt.notes || null,
+        sourceAiAnalysis: {
+          callAttemptId: callAttempt.id,
+          leadId: result.leadId || null,
+          agentType: callAttempt.agentType,
+          callDurationSeconds: callDuration,
+          queueState: 'qualified',
+          callbackRequestedAt: requestedCallbackAt.toISOString(),
+        },
+        callbackAt: requestedCallbackAt,
+      });
+
+      if (enrollResult.enrolled) {
+        console.log(
+          `[DispositionEngine] ✅ Auto-enrolled callback lead into journey pipeline: pipeline=${enrollResult.pipelineId} lead=${enrollResult.leadId}`
+        );
+      }
+    } catch (automationError) {
+      console.error('[DispositionEngine] Journey auto-enrollment failed for callback lead:', automationError);
+    }
+  });
 
   result.queueState = 'qualified';
 }

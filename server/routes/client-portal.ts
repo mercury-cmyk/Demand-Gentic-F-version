@@ -26,6 +26,7 @@ import {
   leadComments,
   campaigns,
   campaignQueue,
+  callAttempts,
   contacts,
   accounts,
   lists,
@@ -98,6 +99,7 @@ const PORTAL_BASE_URL =
   process.env.APP_BASE_URL ||
   process.env.MSFT_OAUTH_APP_URL ||
   "";
+const ENABLE_ARGYLE_DEMO_CAMPAIGN = process.env.ENABLE_ARGYLE_DEMO_CAMPAIGN === 'true';
 
 export function isUkefCampaignName(name: string | null | undefined): boolean {
   const value = String(name || '').toLowerCase();
@@ -1302,7 +1304,7 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
     
     let allCampaigns = [...enrichedVerificationCampaigns, ...enrichedRegularCampaigns];
     
-    if (clientAccount?.name?.toLowerCase() === 'argyle') {
+    if (ENABLE_ARGYLE_DEMO_CAMPAIGN && clientAccount?.name?.toLowerCase() === 'argyle') {
       const argyleDemoCampaign = {
         id: 'argyle-appointmentgen-demo',
         name: 'Argyle AppointmentGen',
@@ -1345,28 +1347,123 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
     };
     if (!campaignIds?.length) return res.json({});
 
-    // Verify client has access to all requested campaigns
     const clientAccountId = req.clientUser!.clientAccountId;
 
-    // Bulk leads qualified query
-    const leadsQualifiedRows = await db
+    // Allow only campaigns the client can actually access.
+    const uniqueRequestedCampaignIds = Array.from(new Set(campaignIds));
+    const requestedRealCampaignIds = uniqueRequestedCampaignIds.filter((id) => id !== 'argyle-appointmentgen-demo');
+
+    const [accessRows, workOrderRows, intakeRows, directRows, clientCreatedRows] = await Promise.all([
+      db
+        .select({ campaignId: clientCampaignAccess.regularCampaignId })
+        .from(clientCampaignAccess)
+        .where(
+          and(
+            eq(clientCampaignAccess.clientAccountId, clientAccountId),
+            isNotNull(clientCampaignAccess.regularCampaignId)
+          )
+        ),
+      db
+        .select({ campaignId: workOrders.campaignId })
+        .from(workOrders)
+        .where(
+          and(
+            eq(workOrders.clientAccountId, clientAccountId),
+            isNotNull(workOrders.campaignId)
+          )
+        ),
+      db
+        .select({ campaignId: campaignIntakeRequests.campaignId })
+        .from(campaignIntakeRequests)
+        .where(
+          and(
+            eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+            isNotNull(campaignIntakeRequests.campaignId)
+          )
+        ),
+      db
+        .select({ campaignId: campaigns.id })
+        .from(campaigns)
+        .where(eq(campaigns.clientAccountId, clientAccountId)),
+      db
+        .select({ campaignId: clientCampaigns.id })
+        .from(clientCampaigns)
+        .where(eq(clientCampaigns.clientAccountId, clientAccountId)),
+    ]);
+
+    const accessibleCampaignIds = new Set<string>([
+      ...accessRows.map((r) => r.campaignId).filter((id): id is string => Boolean(id)),
+      ...workOrderRows.map((r) => r.campaignId).filter((id): id is string => Boolean(id)),
+      ...intakeRows.map((r) => r.campaignId).filter((id): id is string => Boolean(id)),
+      ...directRows.map((r) => r.campaignId).filter((id): id is string => Boolean(id)),
+      ...clientCreatedRows.map((r) => r.campaignId).filter((id): id is string => Boolean(id)),
+    ]);
+
+    const allowedCampaignIds = requestedRealCampaignIds.filter((id) => accessibleCampaignIds.has(id));
+
+    // Bulk qualified leads query (align with campaign cards/reports semantics).
+    const leadsQualifiedRows = allowedCampaignIds.length === 0
+      ? []
+      : await db
       .select({
         campaignId: leads.campaignId,
         count: sql<number>`COUNT(*)::int`,
       })
       .from(leads)
-      .where(and(
-        inArray(leads.campaignId, campaignIds),
-        inArray(leads.qaStatus, ['new', 'under_review', 'approved', 'pending_pm_review', 'published'])
-      ))
+      .where(
+        and(
+          inArray(leads.campaignId, allowedCampaignIds),
+          inArray(leads.qaStatus, ['approved', 'published'])
+        )
+      )
       .groupBy(leads.campaignId);
+
+    const queueRows = allowedCampaignIds.length === 0
+      ? []
+      : await db
+          .select({
+            campaignId: campaignQueue.campaignId,
+            contactsInQueue: sql<number>`COUNT(CASE WHEN ${campaignQueue.status} IN ('queued', 'pending') THEN 1 END)::int`,
+          })
+          .from(campaignQueue)
+          .where(inArray(campaignQueue.campaignId, allowedCampaignIds))
+          .groupBy(campaignQueue.campaignId);
+
+    const attemptRows = allowedCampaignIds.length === 0
+      ? []
+      : await db
+          .select({
+            campaignId: callAttempts.campaignId,
+            callsMade: sql<number>`COUNT(*)::int`,
+          })
+          .from(callAttempts)
+          .where(inArray(callAttempts.campaignId, allowedCampaignIds))
+          .groupBy(callAttempts.campaignId);
+
+    const dialerRows = allowedCampaignIds.length === 0
+      ? []
+      : await db
+          .select({
+            campaignId: dialerCallAttempts.campaignId,
+            callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
+            dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} IN ('dnc-request', 'do_not_call', 'dnc_added') THEN 1 END)::int`,
+          })
+          .from(dialerCallAttempts)
+          .where(inArray(dialerCallAttempts.campaignId, allowedCampaignIds))
+          .groupBy(dialerCallAttempts.campaignId);
+
+    const queueByCampaign = new Map(queueRows.map((r) => [r.campaignId, r.contactsInQueue]));
+    const attemptsByCampaign = new Map(attemptRows.map((r) => [r.campaignId, r.callsMade]));
+    const connectedByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.callsConnected]));
+    const dncByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.dncRequests]));
+
     const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
       leadsQualifiedRows.map((r) => [r.campaignId, r.count])
     );
 
     const results: Record<string, any> = {};
 
-    await Promise.all(campaignIds.map(async (campaignId) => {
+    await Promise.all(allowedCampaignIds.map(async (campaignId) => {
       const entry: any = { call: null, email: null };
       const info = types?.[campaignId] || { isCall: false, isEmail: false };
 
@@ -1398,42 +1495,12 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
         }
 
         if (info.isCall) {
-          // Queue stats via direct query
-          const [queueResult] = await db
-            .select({ count: sql<number>`COUNT(CASE WHEN status = 'queued' THEN 1 END)::int` })
-            .from(campaignQueue)
-            .where(eq(campaignQueue.campaignId, campaignId));
-          const contactsInQueue = queueResult?.count || 0;
-
-          const connectedDispositions = [
-            'connected', 'qualified', 'callback-requested', 'not_interested',
-            'dnc-request', 'meeting_booked', 'interested', 'do_not_call', 'wrong_number'
-          ];
-          const [humanCallStats] = await db
-            .select({
-              callsMade: sql<number>`COUNT(*)::int`,
-              callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition}::text IN (${sql.join(connectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
-              dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition}::text = 'dnc-request' THEN 1 END)::int`,
-            })
-            .from(dialerCallAttempts)
-            .where(eq(dialerCallAttempts.campaignId, campaignId));
-
-          const aiConnectedDispositions = ['qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review'];
-          const [aiCallStats] = await db
-            .select({
-              callsMade: sql<number>`COUNT(*)::int`,
-              callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(aiConnectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
-              dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'do_not_call' THEN 1 END)::int`,
-            })
-            .from(callSessions)
-            .where(eq(callSessions.campaignId, campaignId));
-
           entry.call = {
-            contactsInQueue,
-            callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
-            callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
+            contactsInQueue: Number(queueByCampaign.get(campaignId) || 0),
+            callsMade: Number(attemptsByCampaign.get(campaignId) || 0),
+            callsConnected: Number(connectedByCampaign.get(campaignId) || 0),
             leadsQualified: leadsQualifiedByCampaign[campaignId] || 0,
-            dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
+            dncRequests: Number(dncByCampaign.get(campaignId) || 0),
           };
         }
       } catch (err) {
@@ -1443,8 +1510,8 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
       results[campaignId] = entry;
     }));
 
-    // Inject stats for Argyle AppointmentGen demo campaign
-    if (campaignIds.includes('argyle-appointmentgen-demo')) {
+    // Optional demo campaign stats injection (disabled unless explicitly enabled).
+    if (ENABLE_ARGYLE_DEMO_CAMPAIGN && campaignIds.includes('argyle-appointmentgen-demo')) {
       results['argyle-appointmentgen-demo'] = {
         call: {
           contactsInQueue: 0,
@@ -4069,9 +4136,110 @@ router.post('/admin/clients/:clientId/campaigns', requireAuth, requireRole('admi
 
 router.delete('/admin/clients/:clientId/campaigns/:accessId', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
+    const { clientId, accessId } = req.params;
+
+    const [accessRecord] = await db
+      .select({
+        id: clientCampaignAccess.id,
+        clientAccountId: clientCampaignAccess.clientAccountId,
+        regularCampaignId: clientCampaignAccess.regularCampaignId,
+      })
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.id, accessId),
+          eq(clientCampaignAccess.clientAccountId, clientId)
+        )
+      )
+      .limit(1);
+
+    if (!accessRecord) {
+      return res.status(404).json({ message: "Campaign access not found for this client" });
+    }
+
     await db
       .delete(clientCampaignAccess)
-      .where(eq(clientCampaignAccess.id, req.params.accessId));
+      .where(
+        and(
+          eq(clientCampaignAccess.id, accessId),
+          eq(clientCampaignAccess.clientAccountId, clientId)
+        )
+      );
+
+    // If this was regular campaign access and ownership was auto-linked to this client,
+    // detach ownership when no other active access path exists for that client/campaign.
+    if (accessRecord.regularCampaignId) {
+      const campaignId = accessRecord.regularCampaignId;
+
+      const [campaignRow] = await db
+        .select({
+          id: campaigns.id,
+          clientAccountId: campaigns.clientAccountId,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+
+      if (campaignRow?.clientAccountId === clientId) {
+        const [remainingAccess] = await db
+          .select({ id: clientCampaignAccess.id })
+          .from(clientCampaignAccess)
+          .where(
+            and(
+              eq(clientCampaignAccess.clientAccountId, clientId),
+              eq(clientCampaignAccess.regularCampaignId, campaignId)
+            )
+          )
+          .limit(1);
+
+        const [workOrderLink] = await db
+          .select({ id: workOrders.id })
+          .from(workOrders)
+          .where(
+            and(
+              eq(workOrders.clientAccountId, clientId),
+              eq(workOrders.campaignId, campaignId)
+            )
+          )
+          .limit(1);
+
+        const [intakeLink] = await db
+          .select({ id: campaignIntakeRequests.id })
+          .from(campaignIntakeRequests)
+          .where(
+            and(
+              eq(campaignIntakeRequests.clientAccountId, clientId),
+              eq(campaignIntakeRequests.campaignId, campaignId)
+            )
+          )
+          .limit(1);
+
+        const [clientCreatedLink] = await db
+          .select({ id: clientCampaigns.id })
+          .from(clientCampaigns)
+          .where(
+            and(
+              eq(clientCampaigns.clientAccountId, clientId),
+              eq(clientCampaigns.id, campaignId)
+            )
+          )
+          .limit(1);
+
+        const hasAnyRemainingPath = Boolean(
+          remainingAccess || workOrderLink || intakeLink || clientCreatedLink
+        );
+
+        if (!hasAnyRemainingPath) {
+          await db
+            .update(campaigns)
+            .set({
+              clientAccountId: null,
+              updatedAt: new Date(),
+            })
+            .where(eq(campaigns.id, campaignId));
+        }
+      }
+    }
 
     res.status(204).send();
   } catch (error) {

@@ -119,6 +119,7 @@ import superOrgRouter from './routes/super-organization-routes';
 import organizationManagerRouter from './routes/organization-manager-routes';
 import opsManagementRouter from './routes/ops-management';
 import unifiedAgentArchitectureRouter from './routes/unified-agent-architecture';
+import aiAudienceFilterRouter from './routes/ai-audience-filter-routes';
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
 import {
@@ -15607,6 +15608,9 @@ Provide JSON response with:
 
   // AI Project Creation
   app.use('/api/ai', aiProjectRouter);
+
+  // AI Audience Filter Generation
+  app.use(aiAudienceFilterRouter);
 
   // ==================== EMAIL INBOX ====================
   app.use('/api/inbox', inboxRouter);

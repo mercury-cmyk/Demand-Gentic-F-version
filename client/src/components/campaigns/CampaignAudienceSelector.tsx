@@ -2,14 +2,15 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Users, Filter, List, Globe, Eye, Save, X, Loader2, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import { Users, Filter, List, Globe, Eye, Save, X, Loader2, ChevronDown, ChevronUp, SlidersHorizontal, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { FilterGroup } from "@shared/filter-types";
 import type { Segment, List as ListType, DomainSet } from "@shared/schema";
 
@@ -29,14 +30,45 @@ interface CampaignAudienceSelectorProps {
   onChange: (value: AudienceSelection) => void;
   // Optional flag to hide the summary card if the parent wants to display it differently
   hideSummary?: boolean;
+  // Organization ID for AI-powered filter generation from Organization Intelligence
+  organizationId?: string;
 }
 
-export function CampaignAudienceSelector({ value, onChange, hideSummary = false }: CampaignAudienceSelectorProps) {
+export function CampaignAudienceSelector({ value, onChange, hideSummary = false, organizationId }: CampaignAudienceSelectorProps) {
 
   // Local state
   const [searchQuery, setSearchQuery] = useState("");
   const [showExclusions, setShowExclusions] = useState(false);
   const [showRefineFilters, setShowRefineFilters] = useState(false);
+  const [aiReasoning, setAiReasoning] = useState<string | null>(null);
+
+  const { toast } = useToast();
+
+  // AI audience filter generation mutation
+  const aiGenerateMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/ai/generate-audience-filters", {
+        organizationId,
+      });
+      return res.json();
+    },
+    onSuccess: (data: { filterGroup: FilterGroup; reasoning: string; confidence: number }) => {
+      onChange({ ...value, filterGroup: data.filterGroup });
+      setAiReasoning(data.reasoning);
+      toast({
+        title: "AI Filters Generated",
+        description: `${data.filterGroup.conditions.length} filter conditions created (${Math.round(data.confidence * 100)}% confidence)`,
+      });
+    },
+    onError: (error: any) => {
+      const message = error?.message || "Failed to generate filters with AI";
+      toast({
+        title: "AI Generation Failed",
+        description: message,
+        variant: "destructive",
+      });
+    },
+  });
 
   // Convenience getters for current value
   const audienceSource = value.source || "filters";
@@ -329,6 +361,44 @@ export function CampaignAudienceSelector({ value, onChange, hideSummary = false 
 
             {/* Advanced Filters Tab */}
             <TabsContent value="filters" className="space-y-3 mt-0">
+              {organizationId && (
+                <div className="flex items-center gap-2 p-3 bg-gradient-to-r from-violet-500/5 to-indigo-500/5 border border-violet-500/20 rounded-lg">
+                  <Sparkles className="w-4 h-4 text-violet-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">AI-Powered Targeting</p>
+                    <p className="text-xs text-muted-foreground">
+                      Auto-generate filters from your Organization Intelligence ICP data
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-violet-500/30 text-violet-600 hover:bg-violet-500/10"
+                    onClick={() => aiGenerateMutation.mutate()}
+                    disabled={aiGenerateMutation.isPending}
+                  >
+                    {aiGenerateMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    {aiGenerateMutation.isPending ? "Generating..." : "Generate with AI"}
+                  </Button>
+                </div>
+              )}
+
+              {aiReasoning && filterGroup && filterGroup.conditions.length > 0 && (
+                <div className="flex items-start gap-2 p-3 bg-violet-500/5 border border-violet-500/15 rounded-lg">
+                  <Sparkles className="w-3.5 h-3.5 text-violet-500 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-muted-foreground">{aiReasoning}</p>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setAiReasoning(null)}>
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              )}
+
               <SidebarFilters
                 entityType="contact"
                 onApplyFilter={handleApplyFilter}
@@ -454,14 +524,35 @@ export function CampaignAudienceSelector({ value, onChange, hideSummary = false 
                   Apply filters to narrow down contacts within your selected {audienceSource === 'list' ? 'lists' : 'segments'}
                 </CardDescription>
               </div>
-              <Button
-                variant={showRefineFilters ? "default" : "outline"}
-                size="sm"
-                onClick={() => setShowRefineFilters(!showRefineFilters)}
-              >
-                <Filter className="w-3.5 h-3.5 mr-1.5" />
-                {showRefineFilters ? 'Hide Filters' : 'Add Filters'}
-              </Button>
+              <div className="flex gap-2">
+                {organizationId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-violet-500/30 text-violet-600 hover:bg-violet-500/10"
+                    onClick={() => {
+                      setShowRefineFilters(true);
+                      aiGenerateMutation.mutate();
+                    }}
+                    disabled={aiGenerateMutation.isPending}
+                  >
+                    {aiGenerateMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    {aiGenerateMutation.isPending ? "Generating..." : "AI Filters"}
+                  </Button>
+                )}
+                <Button
+                  variant={showRefineFilters ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setShowRefineFilters(!showRefineFilters)}
+                >
+                  <Filter className="w-3.5 h-3.5 mr-1.5" />
+                  {showRefineFilters ? 'Hide Filters' : 'Add Filters'}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           {showRefineFilters && (

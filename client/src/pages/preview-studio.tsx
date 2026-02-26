@@ -266,13 +266,17 @@ export default function PreviewStudioPage() {
     }
   };
 
-  // Intelligence status check — gate ALL previews on account + org + solution intelligence
+  // Intelligence status check — core intelligence (Account + Problem) required; Org + Solution optional enhancements
   const { data: intelligenceStatus, isLoading: intelligenceLoading, refetch: refetchIntelligence } = useQuery<{
     ready: boolean;
+    fullyEnriched?: boolean;
     accountIntelligence: { available: boolean; confidence: number | null; problemHypothesis: string | null; recommendedAngle: string | null };
     organizationIntelligence: { available: boolean; hasOfferings: boolean; hasIcp: boolean; hasPositioning: boolean; orgName: string | null };
     solutionMapping: { available: boolean; hasProductInfo: boolean; hasProblemDefinitions: boolean; hasServiceCatalog: boolean };
+    problemIntelligence: { available: boolean; confidence: number | null; detectedProblemsCount: number; hasMesagingPackage: boolean; hasOutreachStrategy: boolean; lastUpdated: string | null };
     missingComponents: string[];
+    missingRequiredComponents?: string[];
+    missingOptionalComponents?: string[];
     message: string;
   }>({
     queryKey: ['/api/preview-studio/intelligence-status', selectedCampaignId, selectedAccountId],
@@ -462,24 +466,23 @@ export default function PreviewStudioPage() {
                 <div className="p-3 bg-gradient-to-r from-green-500/10 to-emerald-500/10">
                   <div className="flex items-center gap-2 text-green-400 text-sm">
                     <ShieldCheck className="h-4 w-4" />
-                    <span>Intelligence Ready</span>
+                    <span>{intelligenceStatus?.fullyEnriched ? 'Intelligence Ready' : 'Core Intelligence Ready'}</span>
                   </div>
                   <div className="mt-1.5 space-y-1">
-                    <div className="flex items-center gap-1.5 text-xs text-green-300/70">
-                      <Brain className="h-3 w-3" />
-                      <span>Account Intelligence</span>
-                      {intelligenceStatus?.accountIntelligence?.confidence && (
-                        <span className="text-green-400 ml-auto">{Math.round(intelligenceStatus.accountIntelligence.confidence * 100)}%</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs text-green-300/70">
-                      <Building2 className="h-3 w-3" />
-                      <span>Org Intelligence</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs text-green-300/70">
-                      <Target className="h-3 w-3" />
-                      <span>Solution Mapping</span>
-                    </div>
+                    {[
+                      { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain, confidence: intelligenceStatus?.accountIntelligence?.confidence, required: true },
+                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: true },
+                      { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2, required: false },
+                      { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target, required: false },
+                    ].map(item => (
+                      <div key={item.key} className={cn("flex items-center gap-1.5 text-xs", item.available ? "text-green-300/70" : "text-white/30")}>
+                        {item.available ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <AlertCircle className="h-3 w-3 text-white/25" />}
+                        <span>{item.key}{!item.available && !item.required ? ' (optional)' : ''}</span>
+                        {item.available && item.confidence ? (
+                          <span className="text-green-400 ml-auto">{Math.round(item.confidence * 100)}%</span>
+                        ) : null}
+                      </div>
+                    ))}
                   </div>
                   <p className="text-xs text-white/40 mt-1.5 truncate">
                     {selectedAccount?.name} {selectedContact && `• ${selectedContact.fullName}`}
@@ -493,17 +496,18 @@ export default function PreviewStudioPage() {
                   </div>
                   <div className="mt-1.5 space-y-1">
                     {[
-                      { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain },
-                      { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2 },
-                      { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target },
+                      { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain, required: true },
+                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, required: true },
+                      { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2, required: false },
+                      { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target, required: false },
                     ].map(item => (
-                      <div key={item.key} className={cn("flex items-center gap-1.5 text-xs", item.available ? "text-green-300/70" : "text-amber-300/70")}>
-                        {item.available ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <AlertCircle className="h-3 w-3 text-amber-400" />}
-                        <span>{item.key}</span>
+                      <div key={item.key} className={cn("flex items-center gap-1.5 text-xs", item.available ? "text-green-300/70" : item.required ? "text-amber-300/70" : "text-white/30")}>
+                        {item.available ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : item.required ? <AlertCircle className="h-3 w-3 text-amber-400" /> : <AlertCircle className="h-3 w-3 text-white/20" />}
+                        <span>{item.key}{!item.available && !item.required ? ' (optional)' : ''}</span>
                       </div>
                     ))}
                   </div>
-                  {intelligenceStatus?.missingComponents?.includes('Account Intelligence') && (
+                  {(intelligenceStatus?.missingRequiredComponents?.length || intelligenceStatus?.missingComponents?.includes('Account Intelligence') || intelligenceStatus?.missingComponents?.includes('Problem Intelligence')) && (
                     <Button
                       size="sm"
                       onClick={() => generateIntelligenceMutation.mutate()}
@@ -511,14 +515,14 @@ export default function PreviewStudioPage() {
                       className="w-full mt-2 h-7 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30"
                     >
                       {generateIntelligenceMutation.isPending ? (
-                        <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Generating...</>
+                        <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Generating Intelligence...</>
                       ) : (
-                        <><Brain className="h-3 w-3 mr-1" />Generate Account Intelligence</>
+                        <><Brain className="h-3 w-3 mr-1" />Generate Missing Intelligence</>
                       )}
                     </Button>
                   )}
                   <p className="text-xs text-amber-200/50 mt-1.5">
-                    All intelligence components must be available before running any preview or test.
+                    Account & Problem intelligence required. Org & Solution Mapping are optional enhancements.
                   </p>
                 </div>
               )}

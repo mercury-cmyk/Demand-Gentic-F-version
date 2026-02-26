@@ -164,9 +164,10 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
         </CardContent>
       </Card>
 
-      <CampaignAudienceSelector 
-        value={audienceData} 
-        onChange={setAudienceData} 
+      <CampaignAudienceSelector
+        value={audienceData}
+        onChange={setAudienceData}
+        organizationId={selectedOrgId || undefined}
       />
 
       {/* Next Button */}
