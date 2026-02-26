@@ -1305,6 +1305,14 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
     });
 
     const data = quickCreateSchema.parse(rawPayload);
+    const projectDescription =
+      data.argyleFlow
+        ? [data.objective, data.description].filter(Boolean).join('\n\n')
+        : (data.description || data.objective);
+    const workOrderDescription =
+      data.argyleFlow
+        ? [data.objective, data.description].filter(Boolean).join('\n\n')
+        : (data.description || data.objective);
 
     if (data.argyleFlow && (!data.targetLeadCount || data.targetLeadCount <= 0)) {
       return res.status(400).json({ message: 'Target lead count is required for event campaign drafts' });
@@ -1418,6 +1426,40 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         linkedDraft = draftByEvent || null;
       }
 
+      // Secondary idempotency key: same client + same event URL.
+      if (!linkedDraft && linkedEvent?.sourceUrl) {
+        const [draftByUrl] = await db
+          .select({
+            id: workOrderDrafts.id,
+            status: workOrderDrafts.status,
+            workOrderId: workOrderDrafts.workOrderId,
+            externalEventId: workOrderDrafts.externalEventId,
+            draftFields: workOrderDrafts.draftFields,
+            sourceFields: workOrderDrafts.sourceFields,
+            leadCount: workOrderDrafts.leadCount,
+          })
+          .from(workOrderDrafts)
+          .innerJoin(externalEvents, eq(workOrderDrafts.externalEventId, externalEvents.id))
+          .where(
+            and(
+              eq(workOrderDrafts.clientAccountId, clientAccountId),
+              eq(externalEvents.sourceUrl, linkedEvent.sourceUrl),
+            )
+          )
+          .limit(1);
+        linkedDraft = draftByUrl || null;
+
+        if (linkedDraft && linkedDraft.externalEventId !== linkedEvent.id) {
+          await db
+            .update(workOrderDrafts)
+            .set({
+              externalEventId: linkedEvent.id,
+              updatedAt: new Date(),
+            })
+            .where(eq(workOrderDrafts.id, linkedDraft.id));
+        }
+      }
+
       if (!linkedDraft && linkedEvent) {
         const { generateSourceFields } = await import('../integrations/argyle_events/draft-generator');
         const sourceFields = generateSourceFields({
@@ -1512,7 +1554,7 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         .values({
           clientAccountId,
           name: data.name,
-          description: data.description || data.objective,
+          description: projectDescription,
           status: 'pending',
           requestedLeadCount: data.targetLeadCount || null,
           budgetAmount: data.budget ? data.budget.toString() : null,
@@ -1638,7 +1680,7 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
         clientAccountId,
         clientUserId,
         title: data.name,
-        description: data.description || data.objective,
+        description: workOrderDescription,
         orderType: mapChannelToOrderType(data.channel, data.campaignType || defaultCampaignType),
         priority: data.priority,
         status: 'submitted',
@@ -1673,7 +1715,7 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
           draftFields: {
             ...existingDraftFields,
             title: data.name,
-            description: data.description || existingDraftFields.description || '',
+            description: workOrderDescription || existingDraftFields.description || '',
             objective: data.objective,
             targetAudience: data.targetTitles?.length ? data.targetTitles : existingDraftFields.targetAudience,
             targetIndustries: data.targetIndustries?.length ? data.targetIndustries : existingDraftFields.targetIndustries,
