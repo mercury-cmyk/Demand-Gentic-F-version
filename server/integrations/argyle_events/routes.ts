@@ -25,6 +25,85 @@ import { requireAuth, requireRole } from '../../auth';
 
 const router = Router();
 
+function toStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (item && typeof item === 'object') {
+        const candidate = (item as any).value || (item as any).label;
+        return typeof candidate === 'string' ? candidate.trim() : '';
+      }
+      return '';
+    })
+    .filter(Boolean);
+}
+
+function toIsoDate(input: unknown): string {
+  if (!input) return '';
+  const d = input instanceof Date ? input : new Date(String(input));
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function buildArgylePrefillPayload(event: any, draft: any) {
+  const sourceFields = (draft?.sourceFields || {}) as Record<string, any>;
+  const draftFields = (draft?.draftFields || {}) as Record<string, any>;
+  const eventTitle = String(event?.title || 'Argyle Event').trim();
+  const eventType = event?.eventType ? String(event.eventType) : '';
+  const eventDate = event?.startAtHuman || toIsoDate(event?.startAtIso);
+  const eventLocation = event?.location ? String(event.location) : '';
+  const overview = event?.overviewExcerpt ? String(event.overviewExcerpt).trim() : '';
+
+  const objective =
+    (draftFields.objective && String(draftFields.objective).trim()) ||
+    (sourceFields.objective && String(sourceFields.objective).trim()) ||
+    `Generate qualified leads for ${eventTitle} attendees, sponsors, and partners.`;
+
+  const descriptionParts = [
+    overview ? `Overview: ${overview}` : '',
+    eventType ? `Type: ${eventType}` : '',
+    eventDate ? `Date: ${eventDate}` : '',
+    eventLocation ? `Location: ${eventLocation}` : '',
+  ].filter(Boolean);
+
+  const draftAudienceTitles = toStringArray(draftFields.targetAudience);
+  const sourceAudienceTitles = toStringArray(sourceFields.targetAudience);
+  const targetTitles = draftAudienceTitles.length > 0 ? draftAudienceTitles : sourceAudienceTitles;
+
+  const draftIndustryValues = toStringArray(draftFields.targetIndustries);
+  const sourceIndustryValues = toStringArray(sourceFields.targetIndustries);
+  const targetIndustries = draftIndustryValues.length > 0 ? draftIndustryValues : sourceIndustryValues;
+
+  return {
+    channel: 'email',
+    name:
+      (draftFields.title && String(draftFields.title).trim()) ||
+      `${eventTitle} - Email Outreach`,
+    objective,
+    description:
+      (draftFields.description && String(draftFields.description).trim()) ||
+      descriptionParts.join('\n'),
+    landingPageUrl: event?.sourceUrl || '',
+    targetAudience:
+      (Array.isArray(targetTitles) && targetTitles.length > 0)
+        ? targetTitles.join(', ')
+        : '',
+    targetTitles: targetTitles || [],
+    targetIndustries: targetIndustries || [],
+    targetRegions: eventLocation ? [eventLocation] : [],
+    startDate: toIsoDate(event?.startAtIso),
+    targetLeadCount: draft?.leadCount || undefined,
+    eventSummary: {
+      title: eventTitle,
+      type: eventType || null,
+      date: eventDate || null,
+      location: eventLocation || null,
+      sourceUrl: event?.sourceUrl || null,
+    },
+  };
+}
+
 /**
  * Middleware: Require Argyle client gate.
  * Checks that the authenticated client portal user belongs to the Argyle account.
@@ -132,46 +211,86 @@ router.get('/events',
   }
 );
 
-/**
- * POST /events/:eventId/create-draft — Create a draft for an event
- */
-router.post('/events/:eventId/create-draft',
-  requireFeatureFlag('argyle_event_drafts'),
-  requireArgyleClient,
-  async (req: Request, res: Response) => {
-    try {
-      const clientAccountId = (req as any).clientUser.clientAccountId;
-      const clientUserId = (req as any).clientUser.clientUserId;
-      const { eventId } = req.params;
+async function accessDraftForEvent(req: Request, res: Response) {
+  try {
+    const clientAccountId = (req as any).clientUser.clientAccountId;
+    const clientUserId = (req as any).clientUser.clientUserId;
+    const { eventId } = req.params;
 
-      // Verify event belongs to this client
-      const [event] = await db
-        .select()
-        .from(externalEvents)
+    // Verify event belongs to this client
+    const [event] = await db
+      .select()
+      .from(externalEvents)
+      .where(
+        and(
+          eq(externalEvents.id, eventId),
+          eq(externalEvents.clientId, clientAccountId),
+        )
+      )
+      .limit(1);
+
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    // Primary idempotency key: (clientAccountId, externalEventId)
+    let [draft] = await db
+      .select({
+        id: workOrderDrafts.id,
+        status: workOrderDrafts.status,
+        workOrderId: workOrderDrafts.workOrderId,
+        leadCount: workOrderDrafts.leadCount,
+        sourceFields: workOrderDrafts.sourceFields,
+        draftFields: workOrderDrafts.draftFields,
+        externalEventId: workOrderDrafts.externalEventId,
+      })
+      .from(workOrderDrafts)
+      .where(
+        and(
+          eq(workOrderDrafts.clientAccountId, clientAccountId),
+          eq(workOrderDrafts.externalEventId, eventId),
+        )
+      )
+      .limit(1);
+
+    // Secondary key fallback: same client + event source URL
+    if (!draft) {
+      const [urlMatched] = await db
+        .select({
+          id: workOrderDrafts.id,
+          status: workOrderDrafts.status,
+          workOrderId: workOrderDrafts.workOrderId,
+          leadCount: workOrderDrafts.leadCount,
+          sourceFields: workOrderDrafts.sourceFields,
+          draftFields: workOrderDrafts.draftFields,
+          externalEventId: workOrderDrafts.externalEventId,
+        })
+        .from(workOrderDrafts)
+        .innerJoin(externalEvents, eq(workOrderDrafts.externalEventId, externalEvents.id))
         .where(
           and(
-            eq(externalEvents.id, eventId),
-            eq(externalEvents.clientId, clientAccountId),
+            eq(workOrderDrafts.clientAccountId, clientAccountId),
+            eq(externalEvents.sourceUrl, event.sourceUrl),
           )
         )
         .limit(1);
 
-      if (!event) {
-        return res.status(404).json({ error: 'Event not found' });
+      draft = urlMatched;
+
+      if (draft && draft.externalEventId !== eventId) {
+        await db
+          .update(workOrderDrafts)
+          .set({
+            externalEventId: eventId,
+            updatedAt: new Date(),
+          })
+          .where(eq(workOrderDrafts.id, draft.id));
       }
+    }
 
-      // Check if draft already exists
-      const [existing] = await db
-        .select({ id: workOrderDrafts.id })
-        .from(workOrderDrafts)
-        .where(eq(workOrderDrafts.externalEventId, eventId))
-        .limit(1);
+    const hadExistingDraft = !!draft;
 
-      if (existing) {
-        return res.json({ draftId: existing.id, alreadyExists: true });
-      }
-
-      // Generate source fields
+    if (!draft) {
       const { generateSourceFields } = await import('./draft-generator');
       const sourceFields = generateSourceFields({
         externalId: event.externalId,
@@ -187,7 +306,7 @@ router.post('/events/:eventId/create-draft',
         speakersExcerpt: event.speakersExcerpt || undefined,
       });
 
-      const [draft] = await db
+      [draft] = await db
         .insert(workOrderDrafts)
         .values({
           clientAccountId,
@@ -198,14 +317,46 @@ router.post('/events/:eventId/create-draft',
           draftFields: sourceFields as any,
           editedFields: [],
         })
-        .returning({ id: workOrderDrafts.id });
-
-      res.json({ draftId: draft.id, alreadyExists: false });
-    } catch (error: any) {
-      console.error('[ArgyleEventsRoutes] Error creating draft:', error);
-      res.status(500).json({ error: 'Failed to create draft' });
+        .returning({
+          id: workOrderDrafts.id,
+          status: workOrderDrafts.status,
+          workOrderId: workOrderDrafts.workOrderId,
+          leadCount: workOrderDrafts.leadCount,
+          sourceFields: workOrderDrafts.sourceFields,
+          draftFields: workOrderDrafts.draftFields,
+          externalEventId: workOrderDrafts.externalEventId,
+        });
     }
+
+    return res.json({
+      draftId: draft.id,
+      status: draft.status,
+      workOrderId: draft.workOrderId || null,
+      alreadyExists: hadExistingDraft,
+      prefill: buildArgylePrefillPayload(event, draft),
+    });
+  } catch (error: any) {
+    console.error('[ArgyleEventsRoutes] Error accessing draft:', error);
+    return res.status(500).json({ error: 'Failed to access draft' });
   }
+}
+
+/**
+ * POST /events/:eventId/draft — Get existing draft or create one idempotently.
+ */
+router.post('/events/:eventId/draft',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  accessDraftForEvent
+);
+
+/**
+ * Backward-compatible alias of /events/:eventId/draft
+ */
+router.post('/events/:eventId/create-draft',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  accessDraftForEvent
 );
 
 /**

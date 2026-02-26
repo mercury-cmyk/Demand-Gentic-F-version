@@ -627,10 +627,16 @@ export default function AdminProjectRequests() {
                     </Button>
                     <Button
                       className="w-full"
-                      onClick={() => setLocation(`/campaigns/create?clientId=${selectedProject.clientAccountId}&projectId=${selectedProject.id}`)}
+                      onClick={() =>
+                        setLocation(
+                          selectedProject.projectType === 'email_campaign'
+                            ? `/email-campaigns/create?clientId=${selectedProject.clientAccountId}&projectId=${selectedProject.id}`
+                            : `/campaigns/create?clientId=${selectedProject.clientAccountId}&projectId=${selectedProject.id}`
+                        )
+                      }
                     >
                       <Rocket className="h-4 w-4 mr-2" />
-                      Create Campaign
+                      {selectedProject.projectType === 'email_campaign' ? 'Open Email Setup' : 'Create Campaign'}
                     </Button>
                   </div>
                 )}

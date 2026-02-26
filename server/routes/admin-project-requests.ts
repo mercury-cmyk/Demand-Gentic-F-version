@@ -52,6 +52,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         budgetAmount: clientProjects.budgetAmount,
         budgetCurrency: clientProjects.budgetCurrency,
         requestedLeadCount: clientProjects.requestedLeadCount,
+        projectType: clientProjects.projectType,
         landingPageUrl: clientProjects.landingPageUrl,
         projectFileUrl: clientProjects.projectFileUrl,
         startDate: clientProjects.startDate,
@@ -121,6 +122,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
         budgetAmount: clientProjects.budgetAmount,
         budgetCurrency: clientProjects.budgetCurrency,
         requestedLeadCount: clientProjects.requestedLeadCount,
+        projectType: clientProjects.projectType,
         landingPageUrl: clientProjects.landingPageUrl,
         projectFileUrl: clientProjects.projectFileUrl,
         startDate: clientProjects.startDate,
@@ -229,8 +231,14 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
     // Auto-create campaign if requested
     if (parsed.autoCreateCampaign) {
       try {
-        // Use Intake Request data if available
-        const effectiveCampaignType = intakeRequestData?.campaignType || parsed.campaignType;
+        // Use intake request data when available; otherwise infer from project type.
+        const inferredCampaignTypeFromProject =
+          updatedProject.projectType === 'email_campaign'
+            ? 'email'
+            : updatedProject.projectType === 'call_campaign'
+              ? 'lead_qualification'
+              : parsed.campaignType;
+        const effectiveCampaignType = intakeRequestData?.campaignType || inferredCampaignTypeFromProject;
         
         // Generate campaign configuration using AI
         const campaignConfig = await generateCampaignConfig(project, effectiveCampaignType, intakeRequestData);

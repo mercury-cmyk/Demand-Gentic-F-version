@@ -13,6 +13,7 @@
  */
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -37,8 +38,6 @@ import {
   Send,
 } from 'lucide-react';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
-import { WorkOrderForm } from '@/components/client-portal/work-orders/work-order-form';
-import { useDirectAgenticOrderModal } from '@/hooks/use-direct-agentic-order-modal';
 
 const getToken = () => localStorage.getItem('clientPortalToken');
 
@@ -98,12 +97,10 @@ export default function ArgyleEventsPage() {
  * or as a standalone page. No layout wrapper.
  */
 export function ArgyleEventsContent() {
+  const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [hasSynced, setHasSynced] = useState(false);
-
-  // Shared Direct Agentic Order modal (same form as Work Orders tab)
-  const { openModal, modalProps } = useDirectAgenticOrderModal();
 
   // Check feature status
   const { data: featureStatus } = useQuery<{ enabled: boolean; reason?: string }>({
@@ -191,8 +188,8 @@ export function ArgyleEventsContent() {
     enabled: !!selectedDraftId,
   });
 
-  // Create draft mutation
-  const createDraftMutation = useMutation({
+  // Access draft mutation (idempotent: opens existing or creates once)
+  const accessDraftMutation = useMutation({
     mutationFn: async (eventId: string) => {
       const res = await fetch(`/api/client-portal/argyle-events/events/${eventId}/draft`, {
         method: 'POST',
@@ -201,11 +198,15 @@ export function ArgyleEventsContent() {
       if (!res.ok) throw new Error('Failed to create draft');
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: (data, eventId) => {
       queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
-      setSelectedDraftId(data.draftId || data.id);
-      setShowDraftDialog(true);
-      toast({ title: 'Draft created', description: 'Campaign draft initialized.' });
+      const draftId = data.draftId || data.id;
+      const params = new URLSearchParams({
+        argyleFlow: '1',
+        argyleEventId: eventId,
+        argyleDraftId: String(draftId),
+      });
+      navigate(`/client-portal/create-campaign?${params.toString()}`);
     },
     onError: (error: Error) => {
       toast({ title: 'Failed to create draft', description: error.message, variant: 'destructive' });
@@ -260,35 +261,6 @@ export function ArgyleEventsContent() {
 
 
 
-
-  // Use unified work order form for all event interactions
-  const handleEventAction = (event: any, mode: 'create' | 'edit' = 'create') => {
-    const eventContext = {
-      externalEventId: event.id,
-      eventTitle: event.title,
-      eventDate: event.startAtHuman || event.startAtIso || '',
-      eventType: event.eventType || 'event',
-      eventLocation: event.location || '',
-      eventCommunity: event.community || '',
-      eventSourceUrl: event.sourceUrl || '',
-      leadCount: event.draftLeadCount || undefined,
-    };
-
-    const initialValues = mode === 'edit' && event.draftId ? {
-      title: event.title,
-      description: `Generate qualified leads for ${event.title}`,
-      targetLeadCount: event.draftLeadCount || undefined,
-      targetRegions: event.location ? [event.location] : [],
-      eventSource: 'argyle_event',
-      externalEventId: event.id,
-      eventSourceUrl: event.sourceUrl,
-    } : undefined;
-
-    openModal({
-      eventContext,
-      initialValues,
-    });
-  };
 
   if (featureStatus && !featureStatus.enabled) {
     return (
@@ -429,15 +401,15 @@ export function ArgyleEventsContent() {
                           <Button
                             className="w-full bg-primary/5 text-primary hover:bg-primary/10 border-primary/20 shadow-none hover:shadow-sm"
                             variant="outline"
-                            onClick={() => createDraftMutation.mutate(event.id)}
-                            disabled={createDraftMutation.isPending}
+                            onClick={() => accessDraftMutation.mutate(event.id)}
+                            disabled={accessDraftMutation.isPending}
                           >
-                            {createDraftMutation.isPending ? (
+                            {accessDraftMutation.isPending ? (
                               <Loader2 className="h-4 w-4 animate-spin mr-2" />
                             ) : (
                               <Target className="h-4 w-4 mr-2" />
                             )}
-                            Initialize Campaign
+                            Access Campaign Draft
                           </Button>
                        ) : event.draftStatus === 'submitted' ? (
                           <Button className="w-full bg-green-50 text-green-700 border-green-200 hover:bg-green-100" variant="outline" disabled>
@@ -447,13 +419,10 @@ export function ArgyleEventsContent() {
                        ) : (
                           <Button
                             className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md hover:shadow-lg transition-all border-0"
-                            onClick={() => {
-                              setSelectedDraftId(event.draftId);
-                              setShowDraftDialog(true);
-                            }}
+                            onClick={() => accessDraftMutation.mutate(event.id)}
                           >
                             <Target className="h-4 w-4 mr-2" />
-                            {event.draftLeadCount ? `Ordered (${event.draftLeadCount})` : 'Access Campaign Draft'}
+                            Access Campaign Draft
                           </Button>
                        )}
                     </div>
@@ -488,9 +457,6 @@ export function ArgyleEventsContent() {
         isSaving={updateDraftMutation.isPending}
         isSubmitting={submitDraftMutation.isPending}
       />
-
-      {/* Shared Direct Agentic Order Modal */}
-      <WorkOrderForm {...modalProps} />
     </>
   );
 }
