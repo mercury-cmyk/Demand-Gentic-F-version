@@ -73,6 +73,30 @@ function normalizeClientCriteria(clientCriteria: QAParameters['client_criteria']
   return normalized;
 }
 
+function normalizeQaParameters(rawQaParams?: Partial<QAParameters> | null): QAParameters {
+  const defaults = getDefaultQAParameters();
+  const criteria = normalizeClientCriteria((rawQaParams?.client_criteria as QAParameters['client_criteria']) || {});
+
+  return {
+    required_info: Array.isArray(rawQaParams?.required_info)
+      ? rawQaParams!.required_info as string[]
+      : defaults.required_info,
+    scoring_weights: {
+      content_interest: Number(rawQaParams?.scoring_weights?.content_interest ?? defaults.scoring_weights.content_interest),
+      permission_given: Number(rawQaParams?.scoring_weights?.permission_given ?? defaults.scoring_weights.permission_given),
+      compliance_consent: Number(rawQaParams?.scoring_weights?.compliance_consent ?? defaults.scoring_weights.compliance_consent),
+      qualification_answers: Number(rawQaParams?.scoring_weights?.qualification_answers ?? defaults.scoring_weights.qualification_answers),
+      data_accuracy: Number(rawQaParams?.scoring_weights?.data_accuracy ?? defaults.scoring_weights.data_accuracy),
+      email_deliverable: Number(rawQaParams?.scoring_weights?.email_deliverable ?? defaults.scoring_weights.email_deliverable),
+    },
+    min_score: Number(rawQaParams?.min_score ?? defaults.min_score),
+    client_criteria: criteria,
+    qualification_questions: Array.isArray(rawQaParams?.qualification_questions)
+      ? rawQaParams!.qualification_questions
+      : undefined,
+  };
+}
+
 /**
  * Analyze lead using AI based on transcript, contact data, account data, and QA parameters
  * CRITICAL: Optimized to batch queries and prevent connection pool exhaustion
@@ -143,11 +167,7 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
     }
 
     // Get QA parameters from campaign and normalize client criteria
-    const rawQaParams = (campaign?.qaParameters as QAParameters) || getDefaultQAParameters();
-    const qaParams: QAParameters = {
-      ...rawQaParams,
-      client_criteria: normalizeClientCriteria(rawQaParams.client_criteria || {}),
-    };
+    const qaParams = normalizeQaParameters(campaign?.qaParameters as Partial<QAParameters> | null);
 
     // Check if campaign has custom QA rules or fields
     const customQaFields = (campaign?.customQaFields as any[]) || [];
