@@ -81,7 +81,7 @@ export default function LandingPage() {
               Client Login
             </Button>
             <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
-              Book a Demo
+              Book a Live Strategy Session
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
@@ -123,21 +123,131 @@ export default function LandingPage() {
 
             {/* Trust Line */}
             <p className="text-sm text-muted-foreground mb-10 italic">
-              Built for CMOs, VP Demand, RevOps, Sales Leaders, and ABM teams running precision pipeline motions.
+              Built for CMOs, VP Demand, RevOps, Sales Leaders, and ABM teams focused on predictable pipeline quality.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
-                Book a Demo
+                Book a Live Strategy Session
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2" onClick={() => {
                 document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
               }}>
                 <Play className="mr-2 h-5 w-5" />
-                See How It Works
+                See Platform Walkthrough
               </Button>
             </div>
+
+            <div className="mt-6 flex flex-wrap gap-3 justify-center">
+              {[
+                "Enterprise-ready governance",
+                "Voice + email + workflow orchestration",
+                "Reasoning-first AI with full audit trail",
+              ].map((pill, i) => (
+                <Badge key={i} variant="outline" className="bg-white/60 backdrop-blur-sm">
+                  {pill}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── FEATURED INTELLIGENCE SYSTEMS ─────────────────────────── */}
+      <section className="py-24 px-6 bg-white" id="featured-intelligence">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-14">
+            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
+              <CircleDot className="h-3.5 w-3.5 mr-2" />
+              Featured Intelligence Systems
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-5">
+              The Systems That Power
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent"> Revenue-Grade Execution</span>
+            </h2>
+            <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
+              These are the platform intelligence systems we recommend showcasing in demos, proposals, and buyer conversations—including Queue Scoring with AI and your Organization-Exclusive AI layer.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[
+              {
+                icon: Brain,
+                title: "Problem Intelligence Layer",
+                description: "Maps account-level context and buying-committee signals before outreach begins.",
+                proof: "Show account context changing messaging direction before first touchpoint.",
+                color: "violet",
+              },
+              {
+                icon: Phone,
+                title: "Real-Time AI Voice System",
+                description: "Runs live conversational calls with function-driven actions and structured disposition capture.",
+                proof: "Show one call lifecycle from initiation to disposition logged.",
+                color: "amber",
+              },
+              {
+                icon: LayoutDashboard,
+                title: "Queue Scoring with AI",
+                description: "Prioritizes queue items using account, contact, and intent-quality signals for smarter call and outreach sequencing.",
+                proof: "Show queue rank changes based on scoring signals and campaign rules.",
+                scoringFactors: [
+                  { label: "ICP fit", weight: "35%" },
+                  { label: "Intent/engagement", weight: "25%" },
+                  { label: "Data quality", weight: "20%" },
+                  { label: "Timing/readiness", weight: "20%" },
+                ],
+                color: "indigo",
+              },
+              {
+                icon: Shield,
+                title: "Compliance & Suppression Intelligence",
+                description: "Applies policy-aware gating for calls and emails to reduce legal and brand risk.",
+                proof: "Show a suppressed target blocked automatically.",
+                color: "emerald",
+              },
+              {
+                icon: TrendingUp,
+                title: "QA + Revenue Intelligence Loop",
+                description: "Combines quality scoring, disposition quality, and pipeline signals for continuous optimization.",
+                proof: "Show quality signal to optimization feedback in one campaign cycle.",
+                color: "blue",
+              },
+              {
+                icon: Wand2,
+                title: "Organization-Exclusive AI Studio",
+                description: "Generates and refines campaign assets on an organization-specific intelligence layer with brand constraints and approval-aware workflows.",
+                proof: "Show org-specific draft → refine → publish-ready output in one pass.",
+                color: "rose",
+              },
+            ].map((item, i) => (
+              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
+                <CardContent className="p-6">
+                  <div className={`h-12 w-12 rounded-xl bg-${item.color}-100 flex items-center justify-center mb-4`}>
+                    <item.icon className={`h-6 w-6 text-${item.color}-600`} />
+                  </div>
+                  <h3 className="text-lg font-bold mb-2">{item.title}</h3>
+                  <p className="text-sm text-muted-foreground mb-4">{item.description}</p>
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <p className="text-xs font-medium text-slate-700">Demo proof: {item.proof}</p>
+                  </div>
+                  {item.title === "Queue Scoring with AI" && (
+                    <div className="mt-3 p-3 rounded-lg bg-indigo-50 border border-indigo-200">
+                      <p className="text-xs font-semibold text-indigo-700 mb-2 uppercase tracking-wide">Example scoring factors</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(item as any).scoringFactors?.map((factor: { label: string; weight: string }, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between text-xs bg-white border border-indigo-100 rounded px-2 py-1.5">
+                            <span className="text-slate-700">{factor.label}</span>
+                            <span className="font-semibold text-indigo-700">{factor.weight}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
       </section>
@@ -792,7 +902,127 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ─── MID-PAGE CTA ───────────────────────────────────────────── */}
+      <section className="py-16 px-6 bg-white border-y">
+        <div className="max-w-5xl mx-auto text-center">
+          <h3 className="text-3xl md:text-4xl font-bold mb-3">
+            Ready to operationalize agentic ABM in your current GTM stack?
+          </h3>
+          <p className="text-muted-foreground text-lg max-w-3xl mx-auto mb-8">
+            Get a practical walkthrough of how DemandGentic fits your workflow, governance model, and pipeline goals.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-12 px-7 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
+              Book a Live Strategy Session
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+            <Button size="lg" variant="outline" className="text-base h-12 px-7" onClick={() => setLocation("/proposal-request")}>
+              Request a Proposal
+            </Button>
+          </div>
+        </div>
+      </section>
 
+      {/* ─── ENTERPRISE READINESS / PROOF ───────────────────────────── */}
+      <section className="py-24 px-6 bg-slate-50" id="enterprise-proof">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-14">
+            <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
+              <ClipboardCheck className="h-3.5 w-3.5 mr-2" />
+              Enterprise Readiness
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-5">
+              Built for Complex B2B Revenue Environments
+            </h2>
+            <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
+              Deploy agentic ABM with practical controls for multi-stakeholder teams, governed execution, and measurable rollout.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <Card className="border-2 bg-white">
+              <CardContent className="p-7">
+                <div className="flex items-center gap-2 mb-3">
+                  <Users className="h-5 w-5 text-violet-600" />
+                  <h3 className="font-bold text-lg">Who It's For</h3>
+                </div>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  {[
+                    "B2B vendors with multi-thread buying journeys",
+                    "Demand Gen + RevOps teams managing complex funnels",
+                    "Sales organizations requiring quality-controlled pipeline",
+                    "Leaders needing enterprise governance and auditability",
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-violet-500 mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+
+            <Card className="border-2 bg-white">
+              <CardContent className="p-7">
+                <div className="flex items-center gap-2 mb-3">
+                  <Target className="h-5 w-5 text-indigo-600" />
+                  <h3 className="font-bold text-lg">High-Impact Use Cases</h3>
+                </div>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  {[
+                    "Launch net-new ABM programs with faster signal-to-meeting cycles",
+                    "Recover underperforming outbound through reasoning-first sequencing",
+                    "Improve pipeline quality with role-aware, account-level orchestration",
+                    "Scale top-of-funnel without sacrificing compliance or brand control",
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-indigo-500 mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+
+            <Card className="border-2 bg-white">
+              <CardContent className="p-7">
+                <div className="flex items-center gap-2 mb-3">
+                  <Shield className="h-5 w-5 text-emerald-600" />
+                  <h3 className="font-bold text-lg">Security, Compliance, Governance</h3>
+                </div>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  {[
+                    "Suppression-aware execution and policy-aligned outreach",
+                    "Approval controls for sensitive messaging and campaigns",
+                    "Full interaction traceability with audit-ready records",
+                    "Quality scoring loops to improve campaign integrity over time",
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+
+            <Card className="border-2 bg-white">
+              <CardContent className="p-7">
+                <div className="flex items-center gap-2 mb-3">
+                  <ChevronRight className="h-5 w-5 text-blue-600" />
+                  <h3 className="font-bold text-lg">Implementation Path</h3>
+                </div>
+                <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
+                  <li>Align ICP, success criteria, and governance controls.</li>
+                  <li>Activate agentic voice/email workflows with human oversight.</li>
+                  <li>Run in-market, score quality, and tune continuously.</li>
+                  <li>Scale proven motions across teams and regions.</li>
+                </ol>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
 
       {/* ─── PHILOSOPHY / PRINCIPLES ──────────────────────────────────── */}
       <section className="py-24 px-6 relative overflow-hidden">
@@ -1001,13 +1231,16 @@ export default function LandingPage() {
 
         <div className="max-w-4xl mx-auto text-center relative">
           <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            Ready to run precision ABM with reasoning-first agents?
+            Ready to launch reasoning-first ABM with measurable pipeline outcomes?
           </h2>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
             <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-white text-violet-700 hover:bg-white/90 shadow-lg">
-              Book a Demo
+              Book a Live Strategy Session
               <ArrowRight className="ml-2 h-5 w-5" />
+            </Button>
+            <Button size="lg" variant="outline" onClick={() => setLocation("/proposal-request")} className="text-base h-14 px-8 border-white/50 text-white hover:bg-white/10">
+              Request a Proposal
             </Button>
           </div>
         </div>

@@ -718,9 +718,9 @@ export const PUBLIC_PAGES_MESSAGING = {
   /** Secondary headline */
   subHeadline: 'The Era of Agentic Reasoning.',
   /** Category positioning statement */
-  category: 'Agentic Account-Based Marketing for B2B Vendors',
+  category: 'Enterprise Agentic Account-Based Marketing',
   /** Core positioning tagline for public pages */
-  tagline: 'Human-led ABM strategy. Reasoning-first AI execution. Compliance-governed, pipeline-ready demand.',
+  tagline: 'Human-led ABM strategy. Reasoning-first AI execution. Governed, measurable pipeline outcomes.',
   /** Main value proposition paragraph */
   valueProposition: 'DemandGentic transforms your ABM strategy into coordinated, multi-channel execution across conversational voice, intelligent email, and pipeline workflows\u2014delivering qualified pipeline from target accounts without compromising compliance, data accuracy, or brand integrity.',
   /** Pipeline protection messaging */
@@ -747,7 +747,7 @@ export const PUBLIC_PAGES_MESSAGING = {
   /** Closing statement */
   closingStatement: {
     contrast: 'Algorithmic noise created the illusion of scale.',
-    assertion: 'Agentic reasoning creates revenue.',
+    assertion: 'Agentic reasoning creates accountable revenue outcomes.',
   },
 } as const;
 
