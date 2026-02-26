@@ -65,6 +65,13 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private currentResponseId: string | null = null;
   private pendingFunctionCalls: Map<string, { name: string; args: any }> = new Map();
 
+  // WebSocket keepalive — prevents silent connection drops from proxies/LBs/firewalls
+  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+  private lastPongReceived: number = 0;
+  private missedPongs: number = 0;
+  private readonly KEEPALIVE_INTERVAL_MS = 25000; // 25 seconds (well under typical 60s proxy timeout)
+  private readonly MAX_MISSED_PONGS = 2; // 2 missed pongs = ~50s unresponsive → reconnect
+
   // Audio tracking
   private audioBytesSent: number = 0;
   private audioPlaybackMs: number = 0;
@@ -205,12 +212,20 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         this.ws.on("open", () => {
           clearTimeout(this.connectionTimeout!);
           console.log(`${LOG_PREFIX} Connected to Gemini Live API`);
+          // Start WebSocket keepalive to prevent silent connection drops
+          this.startKeepalive();
           // Don't emit connected yet - wait for setup_complete
           resolve();
         });
 
         this.ws.on("message", (data) => {
           this.handleMessage(data.toString());
+        });
+
+        // Handle pong responses for keepalive health monitoring
+        this.ws.on("pong", () => {
+          this.lastPongReceived = Date.now();
+          this.missedPongs = 0;
         });
 
         this.ws.on("close", (code, reason) => {
@@ -220,9 +235,16 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             console.error(`${LOG_PREFIX} ❌ WebSocket closed BEFORE setup_complete! This means the setup message was likely rejected.`);
             console.error(`${LOG_PREFIX} 💡 Common causes: unsupported fields in setup, auth failure, model not available, quota exceeded`);
           }
+          this.stopKeepalive();
           this.setConnected(false);
           this.setupComplete = false;
           this.ws = null;
+
+          // Attempt automatic reconnection if the close was unexpected (mid-call)
+          if (this._isConnected || this.setupComplete) {
+            console.warn(`${LOG_PREFIX} ⚡ Unexpected close during active session — attempting reconnection...`);
+            this.attemptReconnection();
+          }
         });
 
         this.ws.on("error", (error: any) => {
@@ -289,13 +311,139 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     throw lastError || new Error('Gemini connection failed after retries');
   }
 
+  // ==================== KEEPALIVE & RECONNECTION ====================
+
+  /**
+   * Start WebSocket ping/pong keepalive.
+   * Prevents silent connection drops from proxies, load balancers, and firewalls
+   * that kill idle WebSocket connections after 30-60 seconds of inactivity.
+   */
+  private startKeepalive(): void {
+    this.stopKeepalive(); // Clear any existing interval
+    this.lastPongReceived = Date.now();
+    this.missedPongs = 0;
+
+    this.keepaliveInterval = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.stopKeepalive();
+        return;
+      }
+
+      // Check if pongs are being received
+      const timeSinceLastPong = Date.now() - this.lastPongReceived;
+      if (timeSinceLastPong > this.KEEPALIVE_INTERVAL_MS * 2) {
+        this.missedPongs++;
+        console.warn(`${LOG_PREFIX} ⚠️ Keepalive: missed pong #${this.missedPongs} (last pong ${Math.round(timeSinceLastPong / 1000)}s ago)`);
+
+        if (this.missedPongs >= this.MAX_MISSED_PONGS) {
+          console.error(`${LOG_PREFIX} ❌ Keepalive: ${this.MAX_MISSED_PONGS} missed pongs — connection is dead, forcing close`);
+          this.stopKeepalive();
+          try { this.ws.terminate(); } catch (_) {} // Force-kill (faster than close())
+          return;
+        }
+      }
+
+      // Send ping frame
+      try {
+        this.ws.ping();
+      } catch (err) {
+        console.warn(`${LOG_PREFIX} ⚠️ Keepalive ping failed:`, err);
+        this.stopKeepalive();
+      }
+    }, this.KEEPALIVE_INTERVAL_MS);
+
+    if (DEBUG) console.log(`${LOG_PREFIX} Keepalive started (interval: ${this.KEEPALIVE_INTERVAL_MS / 1000}s)`);
+  }
+
+  /**
+   * Stop the keepalive interval.
+   */
+  private stopKeepalive(): void {
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
+    }
+    this.missedPongs = 0;
+  }
+
+  // Reconnection state
+  private reconnectAttempts: number = 0;
+  private readonly MAX_RECONNECT_ATTEMPTS = 3;
+  private isReconnecting: boolean = false;
+
+  /**
+   * Attempt automatic reconnection with exponential backoff.
+   * Called when the WebSocket closes unexpectedly during an active session.
+   */
+  private async attemptReconnection(): Promise<void> {
+    if (this.isReconnecting) {
+      if (DEBUG) console.log(`${LOG_PREFIX} Reconnection already in progress, skipping`);
+      return;
+    }
+
+    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      console.error(`${LOG_PREFIX} ❌ Max reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached — giving up`);
+      this.emitError('connection_error', 'Connection lost after max reconnection attempts', false);
+      this.reconnectAttempts = 0;
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+
+    const backoffMs = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 8000); // 1s, 2s, 4s (max 8s)
+    console.log(`${LOG_PREFIX} 🔄 Reconnection attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS} in ${backoffMs}ms...`);
+
+    await new Promise(resolve => setTimeout(resolve, backoffMs));
+
+    try {
+      // Force re-authentication
+      if (this.auth) {
+        this.auth = null;
+      }
+
+      // Clean up stale state
+      if (this.ws) {
+        try { this.ws.close(); } catch (_) {}
+        this.ws = null;
+      }
+      this.setupComplete = false;
+
+      await this.connect();
+
+      // Re-configure if we have a stored config
+      if (this.config) {
+        await this.configure(this.config);
+        console.log(`${LOG_PREFIX} ✅ Reconnected and reconfigured successfully (attempt ${this.reconnectAttempts})`);
+      } else {
+        console.log(`${LOG_PREFIX} ✅ Reconnected successfully (attempt ${this.reconnectAttempts}), no config to restore`);
+      }
+
+      this.reconnectAttempts = 0;
+      this.isReconnecting = false;
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX} ❌ Reconnection attempt ${this.reconnectAttempts} failed:`, error.message);
+      this.isReconnecting = false;
+
+      // Retry recursively
+      this.attemptReconnection();
+    }
+  }
+
   async disconnect(): Promise<void> {
     // Log audio quality stats at disconnect
     if (this.backpressureDroppedFrames > 0) {
       console.warn(`${LOG_PREFIX} ⚠️ Audio quality: ${this.backpressureDroppedFrames} frames dropped due to backpressure during session (bytes sent: ${this.audioBytesSent})`);
     }
 
-    // Stop Speech-to-Text first
+    // Prevent reconnection during intentional disconnect
+    this.isReconnecting = false;
+    this.reconnectAttempts = this.MAX_RECONNECT_ATTEMPTS; // Block any pending reconnection attempts
+
+    // Stop keepalive first
+    this.stopKeepalive();
+
+    // Stop Speech-to-Text
     this.stopSpeechToText();
 
     if (this.connectionTimeout) {
@@ -304,6 +452,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     if (this.ws) {
+      // Remove close listener to prevent reconnection trigger on intentional close
+      this.ws.removeAllListeners('close');
       this.ws.close();
       this.ws = null;
     }
@@ -315,6 +465,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     this.lastEmittedUserTimestamp = 0;
     this.lastEmittedAgentText = '';
     this.lastEmittedAgentTimestamp = 0;
+    // Reset reconnection state
+    this.reconnectAttempts = 0;
     this.setConnected(false);
   }
 
@@ -333,7 +485,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // This ensures the 'connected' event fires AFTER configure() returns
     return new Promise((resolve, reject) => {
       let settled = false;
-      const SETUP_TIMEOUT_MS = 20000; // 20 seconds - Vertex AI can be slow on cold starts
+      const SETUP_TIMEOUT_MS = 35000; // 35 seconds - Vertex AI cold starts can take 15-25s under load
 
       const timeout = setTimeout(() => {
         if (!settled) {
@@ -537,17 +689,31 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
-    // Check for backpressure before sending (rate-limit the warning)
+    // Check for backpressure before sending
+    // Lower threshold (1MB) to detect congestion earlier — better to drop sooner and
+    // notify than accumulate a huge buffer that causes delayed/garbled audio
     const bufferSize = this.ws.bufferedAmount;
-    const MAX_BUFFER_SIZE = 2 * 1024 * 1024; // 2MB (increased from 1MB to absorb network jitter)
+    const MAX_BUFFER_SIZE = 1 * 1024 * 1024; // 1MB (~62s of audio — if we're this far behind, audio is stale)
+    const WARN_BUFFER_SIZE = 512 * 1024; // 512KB — warn early
     if (bufferSize > MAX_BUFFER_SIZE) {
       this.backpressureDroppedFrames++;
       const now = Date.now();
       if (now - this.lastBackpressureWarnAt > 2000) {
         console.warn(`${LOG_PREFIX} ⚠️ Gemini WS backpressure: ${bufferSize}B buffered, dropping frame (total dropped: ${this.backpressureDroppedFrames})`);
         this.lastBackpressureWarnAt = now;
+        // Emit event so upper layers can react (e.g. log call quality issue)
+        this.emit('audio:backpressure', {
+          bufferedBytes: bufferSize,
+          droppedFrames: this.backpressureDroppedFrames,
+        });
       }
       return;
+    } else if (bufferSize > WARN_BUFFER_SIZE) {
+      const now = Date.now();
+      if (now - this.lastBackpressureWarnAt > 5000) {
+        console.warn(`${LOG_PREFIX} ⚠️ Gemini WS buffer building up: ${bufferSize}B — potential network congestion`);
+        this.lastBackpressureWarnAt = now;
+      }
     }
 
     // Transcode G.711 to PCM 16kHz for Gemini
@@ -877,21 +1043,17 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   }
 
   /**
-   * Send opening message to start the conversation
+   * Send opening message to start the conversation.
    *
    * CRITICAL: The model must ONLY say the exact greeting and then STOP.
    * It must NOT predict, assume, or continue with any follow-up like "okay, great".
    * The model must wait for the actual human to respond before saying anything else.
    *
-   * FIX (Feb 2026): Using turn_complete: false to prevent Gemini from treating this
-   * as a complete conversation turn. The greeting is just a prompt to speak, and
-   * then Gemini should listen for actual audio input from the caller.
-   *
-   * CRITICAL FIX (Feb 2026): The issue was that sending turn_complete: true after
-   * the greeting instruction caused Gemini to think the "user" was done talking,
-   * and then Gemini would respond AND assume what the caller said. By NOT marking
-   * turn_complete, we tell Gemini "the caller is still talking" so it will listen
-   * to the actual audio stream for their real response.
+   * Implementation: We send turnComplete: true so Gemini knows it is NOW its turn to
+   * speak. After Gemini finishes its response (turn_complete from server), it enters
+   * listening mode and the VAD (automatic_activity_detection) handles detecting caller
+   * speech from the audio stream. The trigger text is kept minimal to prevent Gemini
+   * from monologuing multiple consecutive turns.
    */
   sendOpeningMessage(text: string): void {
     if (DEBUG) console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
@@ -1172,65 +1334,68 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
         this.lastEmittedAgentTimestamp = now;
 
         // ANTI-REPETITION CHECK: Detect if this is a repeated phrase
+        // Only check for repetitions on substantial text (short phrases like
+        // "I understand", "I see", "okay" are normal conversational fillers)
         const normalizedText = trimmedAgentText.toLowerCase().replace(/[^\w\s]/g, '');
-        const isRepetition = this.recentPhrases.some(phrase => {
-          const similarity = this.calculateSimilarity(normalizedText, phrase);
-          return similarity > 0.85; // 85% similar = likely repetition
-        });
+        const wordCount = normalizedText.split(/\s+/).filter(w => w.length > 0).length;
+        let isRepetition = false;
+
+        // Only run repetition detection on phrases with 6+ words
+        // Short phrases are natural conversational responses and should never be flagged
+        if (wordCount >= 6) {
+          isRepetition = this.recentPhrases.some(phrase => {
+            const similarity = this.calculateSimilarity(normalizedText, phrase);
+            return similarity > 0.92; // 92% similar = very likely true repetition (was 85% — too aggressive)
+          });
+        }
 
         if (isRepetition) {
           this.consecutiveRepetitions++;
-          console.warn(`${LOG_PREFIX} ⚠️ REPETITION DETECTED (${this.consecutiveRepetitions}x) - suppressing: "${text.substring(0, 50)}..."`);
+          console.warn(`${LOG_PREFIX} ⚠️ REPETITION DETECTED (${this.consecutiveRepetitions}x): "${trimmedAgentText.substring(0, 50)}..."`);
 
-          // Escalating recovery: each level is more aggressive
-          if (this.consecutiveRepetitions === 1) {
-            // Level 1: Suppress output AND cancel audio to stop repeated phrases
-            console.warn(`${LOG_PREFIX} Level 1: Suppressing repeated output + cancelling audio`);
-            this.cancelResponse();
-          } else if (this.consecutiveRepetitions === 2) {
-            // Level 2: Cancel + gentle redirect
-            console.warn(`${LOG_PREFIX} Level 2: Cancel + redirect`);
-            this.cancelResponse();
-            setTimeout(() => {
-              this.sendTextMessage(
-                "[SYSTEM UPDATE: The prospect didn't respond clearly to your last message. " +
-                "Do NOT repeat what you just said. Try a different approach - " +
-                "introduce yourself differently or ask a different opening question.]"
-              );
-            }, 200);
-          } else if (this.consecutiveRepetitions >= 3 && this.consecutiveRepetitions < 5) {
-            // Level 3: Aggressive redirect
-            console.warn(`${LOG_PREFIX} Level 3: Aggressive redirect (${this.consecutiveRepetitions}x)`);
+          // Reduced escalation — only intervene on true loops (3+ consecutive)
+          if (this.consecutiveRepetitions < 3) {
+            // Level 1-2: Just log it and still emit — a couple repetitions can be normal
+            console.warn(`${LOG_PREFIX} Level 1: Logging repetition (not suppressing yet)`);
+            this.recentPhrases.push(normalizedText);
+            if (this.recentPhrases.length > this.MAX_RECENT_PHRASES) {
+              this.recentPhrases.shift();
+            }
+            this.emit('transcript:agent', {
+              text: trimmedAgentText,
+              isFinal: true,
+              timestamp: new Date(),
+            });
+          } else if (this.consecutiveRepetitions < 5) {
+            // Level 2: Cancel + gentle redirect (was Level 3 before)
+            console.warn(`${LOG_PREFIX} Level 2: Cancel + redirect (${this.consecutiveRepetitions}x)`);
             this.cancelResponse();
             setTimeout(() => {
               this.sendTextMessage(
-                "[SYSTEM UPDATE: STOP. You are repeating yourself in a loop. " +
-                "Your previous message was NOT heard. Do NOT say it again. " +
-                "Instead, pause briefly and then say something completely different. " +
-                "Try: 'I hope I'm not catching you at a bad time' or simply wait for the prospect to speak first.]"
+                "[SYSTEM: You are repeating yourself. Try a different approach or wait for the prospect to speak.]"
               );
             }, 200);
-          } else if (this.consecutiveRepetitions >= 5) {
-            // Level 4: Nuclear option - reset detection + strong redirect
-            console.warn(`${LOG_PREFIX} Level 4: Nuclear reset (${this.consecutiveRepetitions}x)`);
+          } else {
+            // Level 3: Nuclear — reset and wait (was Level 4 at 5x before)
+            console.warn(`${LOG_PREFIX} Level 3: Nuclear reset (${this.consecutiveRepetitions}x)`);
             this.cancelResponse();
             this.recentPhrases = [];
             this.consecutiveRepetitions = 0;
             setTimeout(() => {
               this.sendTextMessage(
-                "[SYSTEM UPDATE: CRITICAL - You have been stuck repeating the same greeting. " +
-                "The conversation must move forward. Stay SILENT for a moment and wait " +
-                "for the other person to speak. When they do, respond to what they actually say. " +
-                "Do NOT introduce yourself again.]"
+                "[SYSTEM: STOP repeating. Stay silent and wait for the other person to speak. " +
+                "When they do, respond to what they actually say.]"
               );
             }, 200);
           }
         } else {
           this.consecutiveRepetitions = 0;
-          // Track this phrase for future comparison
-          this.recentPhrases.push(normalizedText);
-          if (this.recentPhrases.length > this.MAX_RECENT_PHRASES) {
-            this.recentPhrases.shift(); // Remove oldest
+          // Track this phrase for future comparison (only substantial ones)
+          if (wordCount >= 6) {
+            this.recentPhrases.push(normalizedText);
+            if (this.recentPhrases.length > this.MAX_RECENT_PHRASES) {
+              this.recentPhrases.shift(); // Remove oldest
+            }
           }
 
           if (DEBUG) console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${trimmedAgentText}"`);
