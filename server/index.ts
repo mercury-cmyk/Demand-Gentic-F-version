@@ -33,6 +33,7 @@ process.on('uncaughtException', (err) => {
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import compression from "compression";
+import { pathToFileURL } from "url";
 import { log } from "./log";
 import { LogStreamingService } from "./services/log-streaming-service";
 import {
@@ -153,7 +154,19 @@ app.use((req, res, next) => {
 });
 
 // This will be null if the module is imported, and non-null if run directly.
-if (require.main === module) {
+const isMainModule = (() => {
+  // CommonJS execution path (local scripts/tests that transpile to CJS)
+  if (typeof require !== 'undefined' && typeof module !== 'undefined') {
+    return require.main === module;
+  }
+
+  // ESM execution path (Cloud Run production build uses ESM output)
+  const entryPoint = process.argv[1];
+  if (!entryPoint) return false;
+  return import.meta.url === pathToFileURL(entryPoint).href;
+})();
+
+if (isMainModule) {
   (async () => {
     // Create server with Express app as the default handler
     // WebSocket upgrades will be handled separately via server.on('upgrade')
