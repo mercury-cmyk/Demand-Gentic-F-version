@@ -1,4 +1,4 @@
-import { type JobContext, WorkerOptions, Cli, defineAgent, llm, MultimodalAgent } from '@livekit/agents';
+import { type JobContext, defineAgent, llm } from '@livekit/agents';
 import * as google from '@livekit/agents-plugin-google';
 import { z } from 'zod';
 import { db } from "../../db";
@@ -6,8 +6,6 @@ import { contacts, campaigns, campaignQueue, dialerCallAttempts, callSessions, t
 import { eq, or } from "drizzle-orm";
 import { processDisposition } from "../disposition-engine";
 import { createCallSessionSafely } from '../../lib/call-session-factory';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
 // --- Types & Interfaces (Ported from gemini-live-dialer.ts) ---
 
@@ -173,8 +171,14 @@ export default defineAgent({
     console.log('[LiveKit Worker] 👤 Participant connected:', participant.identity);
     console.log('[LiveKit Worker] 📋 Participant attributes:', participant.attributes);
 
-    // Try to parse client_state from attributes (passed via SIP X-Client-State header)
-    const clientStateB64 = participant.attributes?.['client_state'] || participant.attributes?.['X-Client-State'];
+    // Try to parse client_state from SIP headers
+    // LiveKit exposes SIP X-headers as attributes with "sip.h." prefix (lowercased)
+    // e.g. SIP header "X-Client-State" → attribute "sip.h.x-client-state"
+    console.log('[LiveKit Worker] 📋 All participant attributes:', JSON.stringify(participant.attributes));
+    const clientStateB64 = participant.attributes?.['sip.h.x-client-state']
+      || participant.attributes?.['client_state']
+      || participant.attributes?.['X-Client-State']
+      || participant.attributes?.['sip.h.x-livekit-client-state'];
     
     if (clientStateB64) {
       try {
@@ -397,25 +401,21 @@ export default defineAgent({
 
 // Export a runner function for server/index.ts
 export async function startLiveKitWorker() {
-    // This runs the worker in the same process
-    // We need to construct the CLI or Worker manually if not using the CLI entry point
-    // However, @livekit/agents usually expects to be the main entry point.
-    // For embedded usage, we can use the Worker class directly.
-    
-    const { Worker } = await import('@livekit/agents');
+    const { initializeLogger, AgentServer, ServerOptions } = await import('@livekit/agents');
     const { fileURLToPath } = await import('url');
-    
-    // We need to point to this file as the agent definition
-    // Or pass the agent definition directly if supported (depends on SDK version)
-    // The SDK typically loads the agent from a file path.
-    
-    const worker = new Worker({
+
+    // Logger MUST be initialized before AgentServer (it calls log() at class field init time)
+    initializeLogger({ pretty: true, level: 'info' });
+
+    const opts = new ServerOptions({
         agent: fileURLToPath(import.meta.url),
-        workerType: 'process', // or 'thread'
         wsURL: process.env.LIVEKIT_URL,
         apiKey: process.env.LIVEKIT_API_KEY,
         apiSecret: process.env.LIVEKIT_API_SECRET,
+        port: 0, // let OS pick a free port (avoid conflict with main server)
     });
 
-    worker.run();
+    const server = new AgentServer(opts);
+    await server.run();
+    console.log('[LiveKit Worker] ✅ Agent worker connected to LiveKit Cloud');
 }

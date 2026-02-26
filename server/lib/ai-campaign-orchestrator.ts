@@ -10,6 +10,7 @@ import { Queue, Worker, Job } from 'bullmq';
 import { createQueue, createWorker, isQueueAvailable, getRedisConnection } from './queue';
 import { storage } from '../storage';
 import { getTelnyxAiBridge } from '../services/telnyx-ai-bridge';
+import { startOutboundCall as startLiveKitCall } from '../services/livekit/outbound-service';
 import * as sipDialer from '../services/sip';
 import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
@@ -1315,10 +1316,13 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   }
 
   // Initiate calls in parallel batches
-  // Use SIP dialer if enabled AND initialized, otherwise fall back to Telnyx API bridge
-  // FORCE_DISABLE_SIP: User requested complete removal of SIP from AI calls
-  const useSip = false; // sipDialer.isReady();
-  const bridge = getTelnyxAiBridge();
+  // Determine call engine from agent_defaults (same logic as ai-calls.ts)
+  const [engineDefaults] = await db.select({ defaultCallEngine: agentDefaults.defaultCallEngine }).from(agentDefaults).limit(1);
+  const callEngine = engineDefaults?.defaultCallEngine || 'texml';
+  console.log(`[AI Orchestrator] Call engine from DB: "${engineDefaults?.defaultCallEngine}" → using: "${callEngine}"`);
+
+  const useSip = false; // legacy SIP path disabled
+  const bridge = callEngine === 'texml' ? getTelnyxAiBridge() : null;
 
   if (useSip) {
     console.log(`[AI Orchestrator] Using SIP-based calling for campaign ${campaignId}`);
@@ -1674,16 +1678,28 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         let callResult: any;
         let conversationId: string;
 
-        if (useSip) {
-          // Use SIP-based calling
+        if (callEngine === 'livekit') {
+          // LiveKit SIP path: Telnyx Call Control → SIP bridge → LiveKit room → Gemini
+          console.log(`[AI Orchestrator] Using LiveKit SIP engine for call to ${phoneNumber}`);
+          const lkResult = await startLiveKitCall({
+            contactId: contactId || '',
+            campaignId,
+            queueItemId: item.id,
+            overridePhoneNumber: phoneNumber,
+            existingCallAttemptId: callAttemptId || undefined,
+          });
+
+          callResult = lkResult;
+          callInitiated = true;
+          conversationId = lkResult.callId || '';
+        } else if (useSip) {
+          // Legacy SIP path (disabled)
           const sipResult = await sipDialer.initiateAiCall({
             toNumber: phoneNumber,
             fromNumber,
             campaignId,
             contactId: contactId || '',
             queueItemId: item.id,
-            // Use configured voice from persona settings, NOT the agent/persona name
-            // Gemini only supports: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr
             voiceName: aiSettings.persona?.voice || 'Puck',
             contactName: `${item.contact_first_name || ''} ${item.contact_last_name || ''}`.trim() || 'there',
             contactFirstName: item.contact_first_name || 'there',
@@ -1699,7 +1715,6 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
               if (!Number.isFinite(raw) || raw <= 0) return undefined;
               return Math.min(raw, 300);
             })(),
-            // Number pool tracking
             callerNumberId: callerIdResult.numberId,
             callerNumberDecisionId: callerIdResult.decisionId,
           });
@@ -1712,7 +1727,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           callInitiated = true;
           conversationId = sipResult.callId || '';
         } else {
-          // Use Telnyx API-based calling (legacy)
+          // Telnyx TeXML path (default)
           callResult = await bridge!.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
           callInitiated = true;
           conversationId = callResult?.callControlId || callResult?.callId || '';

@@ -378,13 +378,15 @@ app.use((req, res, next) => {
   
   // Initialize LiveKit Worker if configured (SIP/WebRTC Bridge)
   if (process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
-    try {
-      console.log('[STARTUP] 🚀 Initializing LiveKit Agent Worker...');
-      const { startLiveKitWorker } = await import("./services/livekit/worker");
-      startLiveKitWorker();
-    } catch (err) {
-      console.error('[STARTUP] LiveKit Worker initialization failed:', err);
-    }
+    (async () => {
+      try {
+        console.log('[STARTUP] 🚀 Initializing LiveKit Agent Worker...');
+        const { startLiveKitWorker } = await import("./services/livekit/worker");
+        await startLiveKitWorker();
+      } catch (err) {
+        console.error('[STARTUP] ❌ LiveKit Worker initialization failed:', err);
+      }
+    })();
   }
 
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably

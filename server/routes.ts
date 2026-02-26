@@ -6057,14 +6057,48 @@ export function registerRoutes(app: Express) {
     // Remove dependent rows from tables that do not use ON DELETE CASCADE,
     // then delete the campaign (which cascades to 40+ other tables).
     await db.transaction(async (tx) => {
-      await tx.delete(schema.qaConversationAnalysis)
-        .where(eq(schema.qaConversationAnalysis.campaignId, campaignId));
-      await tx.delete(schema.qaInteractionQuality)
-        .where(eq(schema.qaInteractionQuality.campaignId, campaignId));
-      await tx.delete(schema.qaTouchpointSequenceQuality)
-        .where(eq(schema.qaTouchpointSequenceQuality.campaignId, campaignId));
-      await tx.delete(schema.qaComplianceReview)
-        .where(eq(schema.qaComplianceReview.campaignId, campaignId));
+      // NOTE: Some environments may not have these QA tables yet.
+      // Ignore "relation does not exist" so campaign deletion is backward-compatible
+      // across staggered migration states.
+      const deleteOptionalQaTable = async (
+        runDelete: () => Promise<unknown>,
+        tableName: string
+      ) => {
+        try {
+          await runDelete();
+        } catch (error: any) {
+          if (error?.code === "42P01") {
+            console.warn(`[CampaignDelete] Skipping optional table ${tableName}: relation does not exist`);
+            return;
+          }
+          throw error;
+        }
+      };
+
+      await deleteOptionalQaTable(
+        () =>
+          tx.delete(schema.qaConversationAnalysis)
+            .where(eq(schema.qaConversationAnalysis.campaignId, campaignId)),
+        "qa_conversation_analysis"
+      );
+      await deleteOptionalQaTable(
+        () =>
+          tx.delete(schema.qaInteractionQuality)
+            .where(eq(schema.qaInteractionQuality.campaignId, campaignId)),
+        "qa_interaction_quality"
+      );
+      await deleteOptionalQaTable(
+        () =>
+          tx.delete(schema.qaTouchpointSequenceQuality)
+            .where(eq(schema.qaTouchpointSequenceQuality.campaignId, campaignId)),
+        "qa_touchpoint_sequence_quality"
+      );
+      await deleteOptionalQaTable(
+        () =>
+          tx.delete(schema.qaComplianceReview)
+            .where(eq(schema.qaComplianceReview.campaignId, campaignId)),
+        "qa_compliance_review"
+      );
 
       await tx.delete(campaignAgentAssignments)
         .where(eq(campaignAgentAssignments.campaignId, campaignId));

@@ -12,6 +12,7 @@ import {
   insertCampaignTestCallSchema,
   type CampaignTestCall,
   workOrders, // Import workOrders
+  agentDefaults,
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -315,86 +316,108 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
         const providerForClientState = (ctx.provider === 'google') ? 'gemini_live' : 'openai_realtime';
 
-    // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
-    // DEVELOPMENT: Use ngrok tunnel (PUBLIC_WEBHOOK_HOST) - this is set by dev-with-ngrok.ts
-    // PRODUCTION: Use PUBLIC_TEXML_HOST or TELNYX_WEBHOOK_URL
-    let webhookHost = '';
-    
-    // In development, prefer the ngrok tunnel host
-    if (process.env.NODE_ENV !== 'production' && process.env.PUBLIC_WEBHOOK_HOST) {
-      webhookHost = process.env.PUBLIC_WEBHOOK_HOST;
-      console.log(`[Campaign Test Call] Using ngrok tunnel host: ${webhookHost}`);
-    } else {
-      // Production or fallback
-      webhookHost = env.PUBLIC_TEXML_HOST || env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || '';
-      if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
-        try {
-          const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
-          webhookHost = u.host;
-        } catch {}
-      }
-    }
-    
-    // Ensure host doesn't have protocol
-    webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
-    
-    const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
-    // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
-    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
-    
+    // Determine call engine from agent_defaults (same logic as orchestrator & ai-calls.ts)
+    const [engineDefaults] = await db.select({ defaultCallEngine: agentDefaults.defaultCallEngine }).from(agentDefaults).limit(1);
+    const callEngine = engineDefaults?.defaultCallEngine || 'texml';
+    console.log(`[Campaign Test Call] Call engine from DB: "${engineDefaults?.defaultCallEngine}" → using: "${callEngine}"`);
+
     // Detect international call routing info
     const callInfo = getInternationalCallInfo(normalizedPhone);
 
-    console.log("=".repeat(60));
-    console.log(`[Campaign Test Call] 🔧 CRITICAL CONFIGURATION CHECK:`);
-    console.log(`[Campaign Test Call] NODE_ENV: ${process.env.NODE_ENV}`);
-    console.log(`[Campaign Test Call] PUBLIC_WEBHOOK_HOST: ${process.env.PUBLIC_WEBHOOK_HOST}`);
-    console.log(`[Campaign Test Call] PUBLIC_TEXML_HOST: ${process.env.PUBLIC_TEXML_HOST}`);
-    console.log(`[Campaign Test Call] webhookHost (resolved): ${webhookHost}`);
-    console.log(`[Campaign Test Call] TeXML URL that Telnyx will fetch: ${texmlUrl}`);
-    console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
-    console.log(`[Campaign Test Call] 🌍 International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
-    console.log(`[Campaign Test Call] 🎧 Codec: ${callInfo.codec} (${callInfo.codec === 'PCMA' ? 'A-law' : 'µ-law'})`);
-    if (callInfo.isInternational) {
-      console.log(`[Campaign Test Call] 📋 International call notes:`);
-      console.log(`[Campaign Test Call]   - TeXML will use ${callInfo.codec} codec to minimize transcoding`);
-      console.log(`[Campaign Test Call]   - Krisp noise suppression will be enabled automatically`);
-      console.log(`[Campaign Test Call]   - A-law optimized audio path will be used for transcoding`);
+    let telnyxResponse: Response;
+
+    if (callEngine === 'livekit') {
+      // ── LiveKit SIP path: Telnyx Call Control → SIP bridge → LiveKit room ──
+      const LIVEKIT_SIP_URI = process.env.LIVEKIT_SIP_URI;
+      const BASE_URL = process.env.BASE_URL || `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost:5000'}`;
+
+      if (!LIVEKIT_SIP_URI) {
+        return res.status(422).json({ success: false, message: "LIVEKIT_SIP_URI not configured. Switch to TeXML or set the env var." });
+      }
+
+      console.log("=".repeat(60));
+      console.log(`[Campaign Test Call] 🔧 LIVEKIT SIP ENGINE`);
+      console.log(`[Campaign Test Call] SIP URI: ${LIVEKIT_SIP_URI}`);
+      console.log(`[Campaign Test Call] Webhook: ${BASE_URL}/api/webhooks/telnyx-livekit`);
+      console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
+      console.log(`[Campaign Test Call] 🌍 International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
+      console.log("=".repeat(60));
+
+      // Use Telnyx Call Control API (same as outbound-service.ts)
+      telnyxResponse = await fetch('https://api.telnyx.com/v2/calls', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({
+          to: normalizedPhone,
+          from: fromNumber,
+          connection_id: process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID,
+          webhook_url: `${BASE_URL}/api/webhooks/telnyx-livekit`,
+          webhook_url_method: 'POST',
+          client_state: clientStateB64,
+          answering_machine_detection: 'detect',
+          answering_machine_detection_config: { total_analysis_time_millis: 3500 },
+        }),
+      });
+    } else {
+      // ── TeXML path (default) ──
+      // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
+      // DEVELOPMENT: Use ngrok tunnel (PUBLIC_WEBHOOK_HOST) - this is set by dev-with-ngrok.ts
+      // PRODUCTION: Use PUBLIC_TEXML_HOST or TELNYX_WEBHOOK_URL
+      let webhookHost = '';
+
+      if (process.env.NODE_ENV !== 'production' && process.env.PUBLIC_WEBHOOK_HOST) {
+        webhookHost = process.env.PUBLIC_WEBHOOK_HOST;
+        console.log(`[Campaign Test Call] Using ngrok tunnel host: ${webhookHost}`);
+      } else {
+        webhookHost = env.PUBLIC_TEXML_HOST || env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || '';
+        if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+          try {
+            const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
+            webhookHost = u.host;
+          } catch {}
+        }
+      }
+
+      webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
+      const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
+      const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
+
+      console.log("=".repeat(60));
+      console.log(`[Campaign Test Call] 🔧 TEXML ENGINE`);
+      console.log(`[Campaign Test Call] NODE_ENV: ${process.env.NODE_ENV}`);
+      console.log(`[Campaign Test Call] webhookHost (resolved): ${webhookHost}`);
+      console.log(`[Campaign Test Call] TeXML URL that Telnyx will fetch: ${texmlUrl}`);
+      console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
+      console.log(`[Campaign Test Call] 🌍 International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
+      console.log(`[Campaign Test Call] 🎧 Codec: ${callInfo.codec} (${callInfo.codec === 'PCMA' ? 'A-law' : 'µ-law'})`);
+      if (callInfo.isInternational) {
+        console.log(`[Campaign Test Call]   - TeXML will use ${callInfo.codec} codec to minimize transcoding`);
+        console.log(`[Campaign Test Call]   - Krisp noise suppression will be enabled automatically`);
+      }
+      console.log(`[Campaign Test Call] ⚠️ If ngrok is not running, Telnyx cannot reach ${webhookHost}!`);
+      console.log("=".repeat(60));
+
+      const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
+      console.log('[Campaign Test Call] Telnyx endpoint:', telnyxEndpoint);
+
+      telnyxResponse = await fetch(telnyxEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({
+          To: normalizedPhone,
+          From: fromNumber,
+          Url: texmlUrl,
+          StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
+          ClientState: clientStateB64,
+        }),
+      });
     }
-    console.log(`[Campaign Test Call] ⚠️ If ngrok is not running, Telnyx cannot reach ${webhookHost}!`);
-    console.log("=".repeat(60));
-
-    const payload = {
-      texml_application_id: texmlAppId,
-      to: normalizedPhone,
-      from: fromNumber,
-      url: texmlUrl, // Point to our TeXML endpoint with client_state
-    };
-
-    console.log('[Campaign Test Call] Sending TeXML payload to Telnyx:', JSON.stringify(payload, null, 2));
-
-    // Initiate the Telnyx TeXML call using the path-based endpoint
-    // API format: POST /v2/texml/calls/{application_id}
-    const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
-    console.log('[Campaign Test Call] Telnyx endpoint:', telnyxEndpoint);
-
-    const telnyxResponse = await fetch(telnyxEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${telnyxApiKey}`,
-      },
-      body: JSON.stringify({
-        To: payload.to,
-        From: payload.from,
-        Url: payload.url,
-        // Prefer explicit webhook URL secret if provided; fallback to resolved host
-        // Prefer explicit webhook URL override if available, else fallback to TeXML host
-        StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
-        // Include ClientState so webhooks can identify this as a test call
-        ClientState: clientStateB64,
-      }),
-    });
 
     if (!telnyxResponse.ok) {
       releaseNumberWithoutOutcome(callerNumberId || null);

@@ -344,6 +344,7 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
     // Determine call engine from agent defaults
     const [defaults] = await db.select({ defaultCallEngine: agentDefaults.defaultCallEngine }).from(agentDefaults).limit(1);
     const callEngine = defaults?.defaultCallEngine || 'texml';
+    console.log(`[AI Calls] Call engine from DB: "${defaults?.defaultCallEngine}" → using: "${callEngine}"`);
 
     const bridge = getTelnyxAiBridge();
 

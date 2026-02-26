@@ -100,7 +100,7 @@ export async function startOutboundCall(context: OutboundCallContext) {
     body: JSON.stringify({
       to: phoneNumber,
       from: numberSelection.numberE164,
-      connection_id: process.env.TELNYX_CONNECTION_ID, // Your Telnyx App ID
+      connection_id: process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID,
       webhook_url: `${BASE_URL}/api/webhooks/telnyx-livekit`,
       webhook_url_method: "POST",
       // Pass state to be echoed back in webhooks
@@ -132,29 +132,71 @@ export async function handleTelnyxEvent(event: any) {
 
   console.log(`[Telnyx Event] ${event_type} for ${callControlId}`);
 
+  // Log full payload for debugging SIP transfer issues
+  if (event_type === 'call.hangup' || event_type === 'call.initiated') {
+    console.log(`[Telnyx Event Detail] ${event_type}:`, JSON.stringify({
+      hangup_cause: payload.hangup_cause,
+      hangup_source: payload.hangup_source,
+      sip_hangup_cause: payload.sip_hangup_cause,
+      from: payload.from,
+      to: payload.to,
+      direction: payload.direction,
+      state: payload.state,
+      client_state: payload.client_state ? '(present)' : '(none)',
+    }));
+  }
+
   if (event_type === 'call.answered') {
     if (!LIVEKIT_SIP_URI) {
       console.error("[LiveKit Outbound] Cannot bridge: LIVEKIT_SIP_URI missing");
       return;
     }
 
-    console.log(`[LiveKit Outbound] 📞 Call answered! Bridging to LiveKit: ${LIVEKIT_SIP_URI}`);
+    // Parse client state to get call_attempt_id for room naming
+    let callAttemptId = `call-${Date.now()}`;
+    if (clientState) {
+      try {
+        const state = JSON.parse(Buffer.from(clientState, 'base64').toString());
+        callAttemptId = state.call_attempt_id || callAttemptId;
+      } catch (e) {
+        console.error("[LiveKit Outbound] Failed to parse client_state for room ID", e);
+      }
+    }
+
+    // Build SIP URI with user part — LiveKit dispatch rule needs this to create a room
+    // LIVEKIT_SIP_URI = "sip:demandgentic-wmczsvyo.sip.livekit.cloud"
+    // We need: "sip:<user>@demandgentic-wmczsvyo.sip.livekit.cloud"
+    const sipHost = LIVEKIT_SIP_URI.replace('sip:', '');
+    const sipUri = `sip:${callAttemptId}@${sipHost}`;
+
+    console.log(`[LiveKit Outbound] 📞 Call answered! Bridging to LiveKit: ${sipUri}`);
 
     // Bridge the prospect to LiveKit SIP Ingress
-    // We pass the client_state as a SIP Header so the LiveKit Worker can read it
-    await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/dial`, {
+    // Trunk uses IP-based auth (0.0.0.0/0) so no SIP credentials needed
+    const bridgeResponse = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/transfer`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${TELNYX_API_KEY}`
       },
       body: JSON.stringify({
-        to: LIVEKIT_SIP_URI,
+        to: sipUri,
+        from: payload.from,
+        // Pass client state via custom SIP headers (LiveKit maps X-Client-State → client_state attribute)
         custom_headers: [
           { name: "X-Client-State", value: clientState }
-        ]
+        ],
+        webhook_url: `${BASE_URL}/api/webhooks/telnyx-livekit`,
+        webhook_url_method: "POST",
       })
     });
+
+    const bridgeResult = await bridgeResponse.text();
+    if (!bridgeResponse.ok) {
+      console.error(`[LiveKit Outbound] ❌ Bridge failed (${bridgeResponse.status}):`, bridgeResult);
+    } else {
+      console.log(`[LiveKit Outbound] ✅ Bridge transfer initiated to ${sipUri}`);
+    }
   }
   
   else if (event_type === 'call.hangup') {
