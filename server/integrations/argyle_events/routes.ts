@@ -15,8 +15,8 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../../db';
-import { eq, and, desc, asc, isNotNull, sql } from 'drizzle-orm';
-import { externalEvents, workOrderDrafts, clientAccounts } from '@shared/schema';
+import { eq, and, desc, asc, isNotNull, sql, inArray } from 'drizzle-orm';
+import { externalEvents, workOrderDrafts, clientAccounts, workOrders, clientProjects } from '@shared/schema';
 import { isFeatureEnabled, requireFeatureFlag } from '../../feature-flags';
 import { isArgyleClient, runArgyleEventSync } from './sync-runner';
 import { submitDraftAsWorkOrder } from './work-order-adapter';
@@ -104,6 +104,18 @@ function buildArgylePrefillPayload(event: any, draft: any) {
   };
 }
 
+type EventDraftStatus = 'not_created' | 'draft' | 'pending_review' | 'rejected' | 'approved';
+
+function mapProjectStatusToEventStatus(status: string | null | undefined): EventDraftStatus | null {
+  if (!status) return null;
+  if (status === 'rejected') return 'rejected';
+  if (status === 'pending' || status === 'draft') return 'pending_review';
+  if (status === 'active' || status === 'paused' || status === 'completed' || status === 'archived') {
+    return 'approved';
+  }
+  return null;
+}
+
 /**
  * Middleware: Require Argyle client gate.
  * Checks that the authenticated client portal user belongs to the Argyle account.
@@ -167,16 +179,56 @@ router.get('/events',
           updatedAt: workOrderDrafts.updatedAt,
         })
         .from(workOrderDrafts)
-        .where(eq(workOrderDrafts.clientAccountId, clientAccountId));
+        .where(eq(workOrderDrafts.clientAccountId, clientAccountId))
+        .orderBy(desc(workOrderDrafts.updatedAt));
+
+      const eventIds = events.map(({ event }) => event.id);
+      const projectRows = eventIds.length > 0
+        ? await db
+            .select({
+              id: clientProjects.id,
+              externalEventId: clientProjects.externalEventId,
+              status: clientProjects.status,
+              rejectionReason: clientProjects.rejectionReason,
+              updatedAt: clientProjects.updatedAt,
+            })
+            .from(clientProjects)
+            .where(
+              and(
+                eq(clientProjects.clientAccountId, clientAccountId),
+                inArray(clientProjects.externalEventId, eventIds),
+              )
+            )
+            .orderBy(desc(clientProjects.updatedAt))
+        : [];
 
       // Build a map of event ID -> draft
-      const draftMap = new Map(
-        drafts.map(d => [d.externalEventId, d])
-      );
+      const draftMap = new Map<string, typeof drafts[number]>();
+      for (const d of drafts) {
+        if (!d.externalEventId) continue;
+        if (!draftMap.has(d.externalEventId)) {
+          draftMap.set(d.externalEventId, d);
+        }
+      }
+
+      const projectMap = new Map<string, typeof projectRows[number]>();
+      for (const p of projectRows) {
+        if (!p.externalEventId) continue;
+        if (!projectMap.has(p.externalEventId)) {
+          projectMap.set(p.externalEventId, p);
+        }
+      }
 
       // Combine events with draft status
       const results = events.map(({ event }) => {
         const draft = draftMap.get(event.id);
+        const linkedProject = projectMap.get(event.id);
+        const mappedProjectStatus = mapProjectStatusToEventStatus(linkedProject?.status);
+        const normalizedDraftStatus: EventDraftStatus = mappedProjectStatus
+          ? mappedProjectStatus
+          : draft
+            ? 'draft'
+            : 'not_created';
         return {
           id: event.id,
           externalId: event.externalId,
@@ -191,11 +243,15 @@ router.get('/events',
           lastSyncedAt: event.lastSyncedAt,
           // Draft status
           draftId: draft?.id || null,
-          draftStatus: draft?.status || 'not_created',
+          draftStatus: normalizedDraftStatus,
           draftLeadCount: draft?.leadCount || null,
           draftHasEdits: (draft?.editedFields as string[] || []).length > 0,
           draftWorkOrderId: draft?.workOrderId || null,
           draftUpdatedAt: draft?.updatedAt || null,
+          draftRejectionReason:
+            normalizedDraftStatus === 'rejected'
+              ? linkedProject?.rejectionReason || null
+              : null,
         };
       });
 
@@ -328,12 +384,40 @@ async function accessDraftForEvent(req: Request, res: Response) {
         });
     }
 
+    let rejectionReason: string | null = null;
+    let resolvedStatus: EventDraftStatus = 'draft';
+    if (draft.externalEventId) {
+      const [project] = await db
+        .select({
+          status: clientProjects.status,
+          rejectionReason: clientProjects.rejectionReason,
+        })
+        .from(clientProjects)
+        .where(
+          and(
+            eq(clientProjects.clientAccountId, clientAccountId),
+            eq(clientProjects.externalEventId, draft.externalEventId),
+          )
+        )
+        .orderBy(desc(clientProjects.updatedAt))
+        .limit(1);
+
+      const mappedProjectStatus = mapProjectStatusToEventStatus(project?.status);
+      if (mappedProjectStatus) {
+        resolvedStatus = mappedProjectStatus;
+      }
+      if (mappedProjectStatus === 'rejected') {
+        rejectionReason = project?.rejectionReason || null;
+      }
+    }
+
     return res.json({
       draftId: draft.id,
-      status: draft.status,
+      status: resolvedStatus,
       workOrderId: draft.workOrderId || null,
       alreadyExists: hadExistingDraft,
       prefill: buildArgylePrefillPayload(event, draft),
+      rejectionReason,
     });
   } catch (error: any) {
     console.error('[ArgyleEventsRoutes] Error accessing draft:', error);
@@ -387,6 +471,7 @@ router.get('/drafts/:id',
 
       // Fetch linked event
       let event = null;
+      let rejectionReason: string | null = null;
       if (draft.externalEventId) {
         const [evt] = await db
           .select()
@@ -394,6 +479,41 @@ router.get('/drafts/:id',
           .where(eq(externalEvents.id, draft.externalEventId))
           .limit(1);
         event = evt || null;
+      }
+
+      if (draft.workOrderId) {
+        const [order] = await db
+          .select({
+            rejectionReason: workOrders.rejectionReason,
+            status: workOrders.status,
+          })
+          .from(workOrders)
+          .where(eq(workOrders.id, draft.workOrderId))
+          .limit(1);
+        if (order?.status === 'rejected') {
+          rejectionReason = order.rejectionReason || null;
+        }
+      }
+
+      if (draft.externalEventId) {
+        const [project] = await db
+          .select({
+            status: clientProjects.status,
+            rejectionReason: clientProjects.rejectionReason,
+          })
+          .from(clientProjects)
+          .where(
+            and(
+              eq(clientProjects.clientAccountId, clientAccountId),
+              eq(clientProjects.externalEventId, draft.externalEventId),
+            )
+          )
+          .orderBy(desc(clientProjects.updatedAt))
+          .limit(1);
+
+        if (project?.status === 'rejected') {
+          rejectionReason = project.rejectionReason || null;
+        }
       }
 
       res.json({
@@ -408,6 +528,7 @@ router.get('/drafts/:id',
           submittedAt: draft.submittedAt,
           createdAt: draft.createdAt,
           updatedAt: draft.updatedAt,
+          rejectionReason,
         },
         event: event ? {
           id: event.id,

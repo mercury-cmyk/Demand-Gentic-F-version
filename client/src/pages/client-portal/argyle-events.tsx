@@ -54,11 +54,12 @@ interface EventWithDraft {
   needsDateReview: boolean;
   lastSyncedAt: string;
   draftId: string | null;
-  draftStatus: 'not_created' | 'draft' | 'ready' | 'submitted' | 'cancelled';
+  draftStatus: 'not_created' | 'draft' | 'pending_review' | 'rejected' | 'approved';
   draftLeadCount: number | null;
   draftHasEdits: boolean;
   draftWorkOrderId: string | null;
   draftUpdatedAt: string | null;
+  draftRejectionReason: string | null;
 }
 
 
@@ -252,7 +253,7 @@ export function ArgyleEventsContent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
       queryClient.invalidateQueries({ queryKey: ['argyle-draft', selectedDraftId] });
-      toast({ title: 'Campaign ordered', description: 'Your work order has been submitted.' });
+      toast({ title: 'Submitted for review', description: 'Your request is pending admin review.' });
     },
     onError: (error: Error) => {
       toast({ title: 'Submit failed', description: error.message, variant: 'destructive' });
@@ -363,7 +364,13 @@ export function ArgyleEventsContent() {
                     </Badge>
                     {isDraftReady && (
                        <Badge variant="secondary" className="absolute top-4 right-4 shadow-lg bg-white/90 text-foreground backdrop-blur-md">
-                        {event.draftStatus === 'submitted' ? 'Ordered' : 'Draft Ready'}
+                        {event.draftStatus === 'approved'
+                          ? 'Ordered'
+                          : event.draftStatus === 'pending_review'
+                            ? 'Pending'
+                          : event.draftStatus === 'rejected'
+                            ? 'Rejected'
+                            : 'Draft Ready'}
                       </Badge>
                     )}
                   </div>
@@ -411,19 +418,31 @@ export function ArgyleEventsContent() {
                             )}
                             Access Campaign Draft
                           </Button>
-                       ) : event.draftStatus === 'submitted' ? (
+                       ) : event.draftStatus === 'approved' ? (
                           <Button className="w-full bg-green-50 text-green-700 border-green-200 hover:bg-green-100" variant="outline" disabled>
                              <CheckCircle2 className="h-4 w-4 mr-2" />
                              Campaign Ordered
                           </Button>
-                       ) : (
-                          <Button
-                            className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md hover:shadow-lg transition-all border-0"
-                            onClick={() => accessDraftMutation.mutate(event.id)}
-                          >
-                            <Target className="h-4 w-4 mr-2" />
-                            Access Campaign Draft
+                       ) : event.draftStatus === 'pending_review' ? (
+                          <Button className="w-full bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" variant="outline" disabled>
+                             <Loader2 className="h-4 w-4 mr-2" />
+                             Pending Review
                           </Button>
+                       ) : (
+                          <div className="w-full space-y-2">
+                            {event.draftStatus === 'rejected' && event.draftRejectionReason && (
+                              <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+                                <span className="font-medium">Rejected:</span> {event.draftRejectionReason}
+                              </div>
+                            )}
+                            <Button
+                              className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md hover:shadow-lg transition-all border-0"
+                              onClick={() => accessDraftMutation.mutate(event.id)}
+                            >
+                              <Target className="h-4 w-4 mr-2" />
+                              {event.draftStatus === 'rejected' ? 'Edit & Resubmit' : 'Access Campaign Draft'}
+                            </Button>
+                          </div>
                        )}
                     </div>
                   </div>

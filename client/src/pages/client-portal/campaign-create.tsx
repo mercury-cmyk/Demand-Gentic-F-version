@@ -105,6 +105,7 @@ interface ArgylePrefillResponse {
   status: string;
   workOrderId?: string | null;
   alreadyExists: boolean;
+  rejectionReason?: string | null;
   prefill: {
     channel: 'email';
     name?: string;
@@ -358,14 +359,19 @@ export default function ClientPortalCampaignCreate() {
       return res.json();
     },
     onSuccess: (data) => {
+      const isResubmission = argyleFlow && argylePrefill?.status === 'rejected';
       setCreatedCampaign(data.campaign);
       setShowSuccess(true);
       queryClient.invalidateQueries({ queryKey: ['client-portal-campaigns'] });
       queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
       queryClient.invalidateQueries({ queryKey: ['client-portal-work-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
+      queryClient.invalidateQueries({ queryKey: ['argyle-campaign-prefill', argyleEventId, argyleDraftId] });
       toast({
-        title: 'Campaign Submitted',
-        description: 'Your campaign has been submitted for project approval.',
+        title: isResubmission ? 'Resubmitted for review' : 'Campaign Submitted',
+        description: isResubmission
+          ? 'Your campaign has been resubmitted and is now pending admin review.'
+          : 'Your campaign has been submitted for project approval.',
       });
     },
     onError: (error: Error) => {
@@ -1602,6 +1608,21 @@ export default function ClientPortalCampaignCreate() {
                   .filter(Boolean)
                   .join(' • ') || 'Event metadata'}
               </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {argyleFlow && argylePrefill?.status === 'rejected' && !showSuccess && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="p-4 text-sm space-y-1">
+              <p className="font-semibold text-red-800">Request Rejected</p>
+              {argylePrefill.rejectionReason ? (
+                <p className="text-red-700">
+                  <span className="font-medium">Reason:</span> {argylePrefill.rejectionReason}
+                </p>
+              ) : (
+                <p className="text-red-700">Please update the draft and resubmit.</p>
+              )}
             </CardContent>
           </Card>
         )}

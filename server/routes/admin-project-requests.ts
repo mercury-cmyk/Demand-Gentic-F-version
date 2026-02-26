@@ -9,7 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and, desc, sql, ne } from 'drizzle-orm';
+import { eq, and, desc, sql, ne, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { enrichCampaignQADefaults } from '../lib/campaign-qa-defaults';
 import {
@@ -22,8 +22,11 @@ import {
   campaignIntakeRequests,
   clientOrganizationLinks,
   campaignOrganizations,
+  accountIntelligence,
   clientBusinessProfiles,
   externalEvents,
+  workOrders,
+  workOrderDrafts,
 } from '@shared/schema';
 import { requireAuth } from '../auth';
 import { generateJSON } from '../services/vertex-ai';
@@ -31,6 +34,100 @@ import { notificationService } from '../services/notification-service';
 import { notificationService as mercuryNotificationService } from '../services/mercury';
 
 const router = Router();
+
+async function getOrganizationIntelligenceForClientAccount(clientAccountId: string) {
+  const [orgLink] = await db
+    .select({
+      organizationId: clientOrganizationLinks.campaignOrganizationId,
+      isPrimary: clientOrganizationLinks.isPrimary,
+    })
+    .from(clientOrganizationLinks)
+    .where(eq(clientOrganizationLinks.clientAccountId, clientAccountId))
+    .limit(1);
+
+  if (!orgLink?.organizationId) {
+    return {
+      organization: null,
+      campaigns: [],
+      isPrimary: false,
+      message: 'No organization linked to this client account',
+    };
+  }
+
+  const [organization] = await db
+    .select()
+    .from(campaignOrganizations)
+    .where(eq(campaignOrganizations.id, orgLink.organizationId))
+    .limit(1);
+
+  if (!organization) {
+    return {
+      organization: null,
+      campaigns: [],
+      isPrimary: orgLink.isPrimary || false,
+      message: 'Organization not found',
+    };
+  }
+
+  const linkedCampaigns = await db
+    .select({
+      id: campaigns.id,
+      name: campaigns.name,
+      status: campaigns.status,
+      type: campaigns.type,
+    })
+    .from(campaigns)
+    .where(eq(campaigns.problemIntelligenceOrgId, organization.id))
+    .limit(20);
+
+  const isEmptyObj = (obj: any) => !obj || (typeof obj === 'object' && Object.keys(obj).length === 0);
+  let identity = organization.identity;
+  let offerings = organization.offerings;
+  let icp = organization.icp;
+  let positioning = organization.positioning;
+  let outreach = organization.outreach;
+  let events = (organization as any).events;
+  let forums = (organization as any).forums;
+
+  if (organization.domain && isEmptyObj(identity) && isEmptyObj(offerings)) {
+    const [aiProfile] = await db
+      .select()
+      .from(accountIntelligence)
+      .where(eq(accountIntelligence.domain, organization.domain))
+      .orderBy(desc(accountIntelligence.createdAt))
+      .limit(1);
+
+    if (aiProfile) {
+      identity = aiProfile.identity || identity;
+      offerings = aiProfile.offerings || offerings;
+      icp = aiProfile.icp || icp;
+      positioning = aiProfile.positioning || positioning;
+      outreach = aiProfile.outreach || outreach;
+    }
+  }
+
+  return {
+    organization: {
+      id: organization.id,
+      name: organization.name,
+      domain: organization.domain,
+      industry: organization.industry,
+      logoUrl: organization.logoUrl,
+      identity,
+      offerings,
+      icp,
+      positioning,
+      outreach,
+      events: events || {},
+      forums: forums || {},
+      branding: (organization as any).branding || {},
+      compiledOrgContext: organization.compiledOrgContext,
+      updatedAt: organization.updatedAt,
+    },
+    campaigns: linkedCampaigns,
+    isPrimary: orgLink.isPrimary || false,
+  };
+}
 
 // ==================== LIST PROJECT REQUESTS ====================
 
@@ -72,7 +169,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       .from(clientProjects)
       .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
       .leftJoin(externalEvents, eq(clientProjects.externalEventId, externalEvents.id))
-      .orderBy(desc(clientProjects.createdAt))
+      .orderBy(desc(clientProjects.updatedAt), desc(clientProjects.createdAt))
       .limit(parseInt(limit as string))
       .offset(parseInt(offset as string));
 
@@ -170,6 +267,55 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Admin Project Requests] Get error:', error);
     res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== GET PROJECT ORG INTELLIGENCE ====================
+
+/**
+ * Get organization intelligence for the client account tied to a project request.
+ * Used by admin email campaign setup wizard for safe autofill suggestions.
+ */
+router.get('/:id/organization-intelligence', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [project] = await db
+      .select({
+        id: clientProjects.id,
+        clientAccountId: clientProjects.clientAccountId,
+      })
+      .from(clientProjects)
+      .where(eq(clientProjects.id, id))
+      .limit(1);
+
+    if (!project?.clientAccountId) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+    const payload = await getOrganizationIntelligenceForClientAccount(project.clientAccountId);
+    res.json(payload);
+  } catch (error) {
+    console.error('[Admin Project Requests] Org intelligence error:', error);
+    res.status(500).json({ message: 'Failed to fetch organization intelligence' });
+  }
+});
+
+/**
+ * Get organization intelligence by selected client account.
+ * Used by admin email wizard when a project link is not available yet.
+ */
+router.get('/by-client/:clientAccountId/organization-intelligence', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { clientAccountId } = req.params;
+    if (!clientAccountId) {
+      return res.status(400).json({ message: 'clientAccountId is required' });
+    }
+
+    const payload = await getOrganizationIntelligenceForClientAccount(clientAccountId);
+    return res.json(payload);
+  } catch (error) {
+    console.error('[Admin Project Requests] Org intelligence by client error:', error);
+    return res.status(500).json({ message: 'Failed to fetch organization intelligence' });
   }
 });
 
@@ -407,7 +553,14 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
 // ==================== REJECT PROJECT ====================
 
 const rejectSchema = z.object({
-  reason: z.string().min(1, 'Rejection reason is required'),
+  reason: z.preprocess(
+    (value) => {
+      if (typeof value !== 'string') return undefined;
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    },
+    z.string().max(2000).optional()
+  ),
 });
 
 /**
@@ -429,22 +582,61 @@ router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Project not found' });
     }
 
+    if (project.status === 'rejected') {
+      return res.json({
+        success: true,
+        project,
+        alreadyRejected: true,
+        message: 'Project is already rejected',
+      });
+    }
+
     if (project.status !== 'pending' && project.status !== 'draft') {
-      return res.status(400).json({ message: 'Only pending or draft projects can be rejected' });
+      return res.status(400).json({
+        message: `Only pending or draft projects can be rejected (current status: ${project.status})`,
+      });
     }
 
     // Update project status
+    const rejectionReason = parsed.reason && parsed.reason.length > 0 ? parsed.reason : null;
+
     const [updatedProject] = await db
       .update(clientProjects)
       .set({
         status: 'rejected',
-        rejectionReason: parsed.reason,
+        rejectionReason,
         approvedBy: userId,
         approvedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(clientProjects.id, id))
       .returning();
+
+    // Mark linked work orders as rejected so client-side draft views can surface reject state.
+    const rejectedWorkOrders = await db
+      .update(workOrders)
+      .set({
+        status: 'rejected',
+        rejectedBy: userId,
+        rejectedAt: new Date(),
+        rejectionReason,
+        reviewedBy: userId,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(workOrders.projectId, id))
+      .returning({ id: workOrders.id });
+
+    const rejectedWorkOrderIds = rejectedWorkOrders.map((wo) => wo.id);
+    if (rejectedWorkOrderIds.length > 0) {
+      await db
+        .update(workOrderDrafts)
+        .set({
+          status: 'rejected',
+          updatedAt: new Date(),
+        })
+        .where(inArray(workOrderDrafts.workOrderId, rejectedWorkOrderIds));
+    }
 
     // Log activity
     await db.insert(clientPortalActivityLogs).values({
@@ -454,7 +646,7 @@ router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
       action: 'project_rejected',
       details: {
         rejectedBy: userId,
-        reason: parsed.reason,
+        reason: rejectionReason,
       },
     });
 
@@ -463,7 +655,7 @@ router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
       await notificationService.notifyClientOfProjectRejection(
         project.clientAccountId,
         project.name,
-        parsed.reason
+        rejectionReason || undefined
       );
     } catch (notifyError) {
       console.error('[Admin Project Requests] Notification error:', notifyError);
@@ -477,7 +669,7 @@ router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
       payload: {
         projectName: project.name,
         projectId: project.id,
-        rejectionReason: parsed.reason,
+        rejectionReason: rejectionReason || '',
         recipientName: project.name,
       },
     }).catch(err => {
@@ -529,6 +721,34 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
         message: 'Cannot delete project with associated campaigns. Please delete or reassign campaigns first.',
         campaignCount: associatedCampaigns.length,
       });
+    }
+
+    // Reset any linked drafts back to editable state and detach linked work orders.
+    const linkedWorkOrders = await db
+      .select({ id: workOrders.id })
+      .from(workOrders)
+      .where(eq(workOrders.projectId, id));
+
+    const linkedWorkOrderIds = linkedWorkOrders.map((wo) => wo.id);
+    if (linkedWorkOrderIds.length > 0) {
+      await db
+        .update(workOrderDrafts)
+        .set({
+          status: 'draft',
+          workOrderId: null,
+          submittedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(inArray(workOrderDrafts.workOrderId, linkedWorkOrderIds));
+
+      await db
+        .update(workOrders)
+        .set({
+          status: 'cancelled',
+          projectId: null,
+          updatedAt: new Date(),
+        })
+        .where(inArray(workOrders.id, linkedWorkOrderIds));
     }
 
     // Delete client campaign access records for this project
