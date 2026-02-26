@@ -720,15 +720,15 @@ export const PUBLIC_PAGES_MESSAGING = {
   /** Category positioning statement */
   category: 'Agentic Account-Based Marketing for B2B Vendors',
   /** Core positioning tagline for public pages */
-  tagline: 'Human-led ABM strategy. Reasoning-first AI execution. Brand-controlled demand.',
+  tagline: 'Human-led ABM strategy. Reasoning-first AI execution. Compliance-governed, pipeline-ready demand.',
   /** Main value proposition paragraph */
-  valueProposition: 'DemandGentic transforms your ABM strategy into coordinated, multi-channel execution across email, voice, and intelligent workflows\u2014delivering high-quality pipeline from target accounts without compromising compliance, accuracy, or brand integrity.',
+  valueProposition: 'DemandGentic transforms your ABM strategy into coordinated, multi-channel execution across conversational voice, intelligent email, and pipeline workflows\u2014delivering qualified pipeline from target accounts without compromising compliance, data accuracy, or brand integrity.',
   /** Pipeline protection messaging */
   pipelineProtection: {
     headline: 'We do more than generate sales pipeline.',
     subHeadline: 'We protect it.',
     description: 'In a market saturated with fabricated engagement, bot-driven clicks, and budget-inflated "performance," B2B organizations are unknowingly buying noise instead of intent. Millions are spent on activity that never converts to revenue.',
-    resolution: 'DemandGentic safeguards your pipeline from artificial engagement and misaligned traffic. Every touchpoint is reasoning-driven, ICP-aligned, and strategically orchestrated\u2014ensuring your brand reaches real decision-makers inside real accounts.',
+    resolution: 'DemandGentic safeguards your pipeline from artificial engagement and misaligned traffic. Every touchpoint is reasoning-driven, ICP-aligned, compliance-checked, and strategically orchestrated\u2014ensuring your brand reaches real decision-makers inside real accounts.',
   },
   /** Precision statement */
   precisionStatement: {
@@ -738,11 +738,11 @@ export const PUBLIC_PAGES_MESSAGING = {
   /** What We Deliver section */
   deliverables: [
     'Strategic, human-designed ABM frameworks',
-    'Agentic AI execution grounded in contextual reasoning',
-    'Multi-channel orchestration (email, voice, workflow triggers)',
-    'Verified, compliant engagement (GDPR, CCPA, TCPA aligned)',
-    'Pipeline protection against fabricated or low-intent activity',
-    'Brand-controlled messaging across every interaction',
+    'Agentic AI execution grounded in contextual reasoning and shared memory',
+    'Multi-channel orchestration (voice, email, workflow triggers)',
+    'Verified, compliant engagement with suppression and policy controls',
+    'Continuous QA, scoring, and optimization across campaign touchpoints',
+    'Brand-controlled messaging and approvals across every interaction',
   ],
   /** Closing statement */
   closingStatement: {

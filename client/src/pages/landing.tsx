@@ -123,7 +123,7 @@ export default function LandingPage() {
 
             {/* Trust Line */}
             <p className="text-sm text-muted-foreground mb-10 italic">
-              Built for CMOs, VP Demand, RevOps, and ABM teams running precision ABM motions.
+              Built for CMOs, VP Demand, RevOps, Sales Leaders, and ABM teams running precision pipeline motions.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -194,7 +194,7 @@ export default function LandingPage() {
                 <h3 className="text-xl font-bold mb-3 text-white">More Qualified Meetings</h3>
                 <p className="text-slate-400">
                   Create more qualified meetings in target accounts with coordinated,
-                  contextual outreach that reaches the right people at the right time.
+                  reasoning-first outreach across voice, email, and contextual follow-up.
                 </p>
               </CardContent>
             </Card>
@@ -206,8 +206,8 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-xl font-bold mb-3 text-white">Multi-Thread Buying Committees</h3>
                 <p className="text-slate-400">
-                  Multi-thread buying committees with coordinated, contextual follow-up
-                  across every stakeholder in the account.
+                  Engage buying committees with role-aware messaging, stakeholder-level memory,
+                  and orchestration across every key contact in the account.
                 </p>
               </CardContent>
             </Card>
@@ -219,8 +219,8 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-xl font-bold mb-3 text-white">Scale with Governance</h3>
                 <p className="text-slate-400">
-                  Scale execution while keeping governance, approvals, and traceability
-                  at every step of the process.
+                  Scale execution with compliance controls, approvals, suppression safeguards,
+                  and full traceability at every step of the process.
                 </p>
               </CardContent>
             </Card>
@@ -347,7 +347,7 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-xl font-bold mb-3">Agentic Execution Layer</h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  Purpose-built agents research, draft, sequence, and follow up across channels—coordinated under one system.
+                  Purpose-built agents research, call, email, score, and follow up across channels—coordinated under one system.
                 </p>
                 <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
                   <p className="text-xs font-medium text-indigo-900">
@@ -367,10 +367,10 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-xl font-bold mb-3">Memory + Accountability</h3>
                 <p className="text-muted-foreground text-sm mb-4">
-                  Account/contact memory keeps every interaction consistent, contextual, and measurable.
+                  Account/contact memory, quality telemetry, and audit logs keep every interaction consistent and measurable.
                 </p>
                 <ul className="space-y-2">
-                  {["No scattered tools", "No lost context", "Full audit trail"].map((item, i) => (
+                  {["No scattered tools", "No lost context", "Full audit & score trail"].map((item, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
                       <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                       {item}
@@ -430,10 +430,10 @@ export default function LandingPage() {
                 <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">Orchestration</Badge>
                 <h3 className="text-2xl font-bold mb-3">Reasoning-First Outreach Orchestration</h3>
                 <p className="text-muted-foreground mb-4">
-                  Email + conversational voice outreach + workflow coordination with compliance-first behavior.
+                  Conversational voice, intelligent email sequencing, and workflow automation coordinated with compliance-first behavior.
                 </p>
                 <ul className="space-y-2">
-                  {["Multi-channel coordination", "Compliance-first execution", "Contextual follow-up sequencing"].map((item, i) => (
+                  {["Multi-channel coordination", "Real-time call & email actions", "Contextual follow-up sequencing"].map((item, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm">
                       <CheckCircle2 className="h-4 w-4 text-indigo-500" />
                       {item}
@@ -474,13 +474,13 @@ export default function LandingPage() {
                 <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/25">
                   <TrendingUp className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Quality</Badge>
-                <h3 className="text-2xl font-bold mb-3">Quality & Performance Analysis</h3>
+                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Quality + Governance</Badge>
+                <h3 className="text-2xl font-bold mb-3">Quality, Compliance & Revenue Intelligence</h3>
                 <p className="text-muted-foreground mb-4">
-                  Quality checks and iteration loops to improve messaging, targeting, and outcomes over time.
+                  Real-time QA and governance controls with revenue intelligence loops to continuously improve targeting and outcomes.
                 </p>
                 <ul className="space-y-2">
-                  {["Automated quality scoring", "Continuous improvement loops", "Performance analytics"].map((item, i) => (
+                  {["Automated QA scoring", "Suppression & compliance controls", "Pipeline and performance analytics"].map((item, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm">
                       <CheckCircle2 className="h-4 w-4 text-blue-500" />
                       {item}
@@ -530,16 +530,16 @@ export default function LandingPage() {
                 icon: Phone,
                 title: "Voice Agent",
                 subtitle: "Conversational Outreach",
-                description: "AI that conducts real phone conversations with natural speech, live objection handling, and mid-call meeting booking.",
-                capabilities: ["Natural live conversations", "Gatekeeper navigation", "Real-time qualification"],
+                description: "AI that conducts real phone conversations with natural speech, real-time dispositioning, and optional human transfer when needed.",
+                capabilities: ["Natural live conversations", "Function-driven call actions", "Real-time qualification"],
                 color: "amber",
               },
               {
                 icon: Mail,
                 title: "Email Agent",
                 subtitle: "Sequence Orchestration",
-                description: "Persona-specific email sequences with contextual follow-up, send-time optimization, and reply sentiment analysis.",
-                capabilities: ["Persona-specific copy", "Contextual follow-up", "Reply sentiment analysis"],
+                description: "Persona-specific email sequences with contextual follow-up, compliance-safe templates, and reply sentiment intelligence.",
+                capabilities: ["Persona-specific copy", "Sequence automation", "Reply sentiment analysis"],
                 color: "blue",
               },
               {
@@ -554,16 +554,16 @@ export default function LandingPage() {
                 icon: LayoutDashboard,
                 title: "Pipeline Agent",
                 subtitle: "Account Orchestration",
-                description: "Manages account flow through pipeline stages, tracks buyer journeys, and coordinates multi-threaded engagement.",
-                capabilities: ["Account stage automation", "Buyer journey tracking", "Multi-thread coordination"],
+                description: "Manages account flow through pipeline stages, tracks buyer journeys, and surfaces next-best actions for teams.",
+                capabilities: ["Account stage automation", "Buyer journey tracking", "AI scoring insights"],
                 color: "indigo",
               },
               {
                 icon: Shield,
                 title: "QA Agent",
                 subtitle: "Compliance & Quality",
-                description: "Real-time auditing across every interaction for quality, accuracy, and compliance—ensuring every touchpoint meets your standards.",
-                capabilities: ["Real-time monitoring", "Policy enforcement", "Full audit trail"],
+                description: "Audits calls, messages, and outcomes for quality, accuracy, and compliance—ensuring every touchpoint meets your standards.",
+                capabilities: ["Real-time monitoring", "Policy enforcement", "Disposition & audit controls"],
                 color: "rose",
               },
             ].map((agent, i) => (
@@ -759,11 +759,11 @@ export default function LandingPage() {
               { icon: Phone, badge: "Voice AI", title: "Conversational AI Voice Agents", description: "AI agents that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.", features: ["Live phone conversations", "Real-time qualification", "Gatekeeper navigation"], color: "amber" },
               { icon: Mail, badge: "Email Marketing", title: "Intelligent Email Marketing", description: "AI-crafted email campaigns with persona-specific sequences, smart send-time optimization, and reply sentiment analysis.", features: ["Persona-specific sequences", "Send-time optimization", "Reply sentiment analysis"], color: "sky" },
               { icon: Wand2, badge: "Content Studio", title: "Generative Content Creation", description: "A full AI-powered content studio that generates landing pages, email campaigns, blog posts, eBooks, solution briefs, and images — all in your brand voice.", features: ["7 content generation engines", "One-click publishing", "AI-powered refinement"], color: "emerald" },
-              { icon: Bot, badge: "AI SDR", title: "AI SDR-as-a-Service", description: "Autonomous AI agents conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.", features: ["24/7 autonomous engagement", "Human strategist oversight", "Intelligent escalation"], color: "blue" },
-              { icon: LayoutDashboard, badge: "Pipeline", title: "Intelligent Pipeline Management", description: "Manage your entire top-of-funnel with AI-driven account staging, automated AE assignment, and buyer journey tracking.", features: ["AI-powered AE assignment", "Buyer journey stages", "Account intelligence scoring"], color: "indigo" },
+              { icon: Bot, badge: "AI SDR", title: "AI SDR-as-a-Service", description: "Autonomous AI agents conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.", features: ["24/7 autonomous engagement", "Human-in-the-loop escalation", "Campaign-level guardrails"], color: "blue" },
+              { icon: LayoutDashboard, badge: "Pipeline", title: "Intelligent Pipeline Management", description: "Manage your entire top-of-funnel with AI-driven account staging, buyer journey tracking, and actionable revenue intelligence.", features: ["AI account scoring", "Buyer journey stages", "Revenue intelligence signals"], color: "indigo" },
               { icon: Calendar, badge: "Appointments", title: "Qualified Appointment Generation", description: "We deliver BANT-qualified sales appointments directly to your team's calendar through multi-channel outreach.", features: ["Full top-of-funnel management", "Multi-channel outreach", "No-show follow-up"], color: "rose" },
               { icon: Search, badge: "Intelligence", title: "Market & Account Intelligence", description: "Deep research, enrichment, and analysis of accounts and industries to power better GTM decisions.", features: ["ICP refinement", "Competitive landscape", "Buying signal detection"], color: "cyan" },
-              { icon: Database, badge: "Data", title: "B2B Data & Enrichment", description: "Access our 70M+ verified contact database or enrich your existing data with our verification engine.", features: ["Custom list building", "Database enrichment", "Continuous hygiene"], color: "slate" },
+              { icon: Database, badge: "Data", title: "B2B Data & Enrichment", description: "Access our 70M+ verified contact database or enrich your existing data with our verification and hygiene engine.", features: ["Custom list building", "Multi-source verification", "Continuous hygiene"], color: "slate" },
             ].map((service, i) => (
               <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
                 <CardContent className="p-6">
