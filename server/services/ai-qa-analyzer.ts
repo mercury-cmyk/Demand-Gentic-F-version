@@ -531,7 +531,7 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
     return normalizedAnalysis;
 
   } catch (error) {
-    console.error('[AI-QA] Error analyzing lead:', error);
+    console.error('[AI-QA] Error analyzing lead:', formatAnalyzerError(error));
     return null;
   }
 }
@@ -1256,4 +1256,21 @@ export async function analyzeContentQualification(
       console.error(`[AI-QA] Unknown content type: ${contentType}`);
       return null;
   }
+}
+
+function formatAnalyzerError(error: any): Record<string, unknown> {
+  const message =
+    error?.message ??
+    error?.error?.message ??
+    error?.response?.data?.error?.message ??
+    String(error);
+
+  return {
+    name: error?.name,
+    message,
+    code: error?.code,
+    status: error?.status ?? error?.statusCode ?? error?.response?.status,
+    statusText: error?.statusText ?? error?.response?.statusText,
+    stack: error?.stack,
+  };
 }

@@ -18,6 +18,12 @@ import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 const ACCOUNT_INTELLIGENCE_TTL_DAYS = 14;
 const ACCOUNT_MESSAGING_BRIEF_TTL_DAYS = 30;
 const ACCOUNT_CONFIDENCE_THRESHOLD = 0.7;
+const PROVIDER_AUTH_COOLDOWN_MS = 15 * 60 * 1000;
+
+const providerAuthCooldownUntil: Record<"gemini" | "openai", number> = {
+  gemini: 0,
+  openai: 0,
+};
 
 export type AccountIntelligencePayload = {
   account_id: string;
@@ -543,8 +549,12 @@ ${JSON.stringify(params.campaignIntent || {}, null, 2)}
 
 Generate the Account Messaging Brief JSON now.`;
 
+  const now = Date.now();
+  const geminiCoolingDown = providerAuthCooldownUntil.gemini > now;
+  const openaiCoolingDown = providerAuthCooldownUntil.openai > now;
+
   // Try Gemini first (preferred for cost and quota reasons)
-  if (geminiKey) {
+  if (geminiKey && !geminiCoolingDown) {
     try {
       const { GoogleGenerativeAI } = await import("@google/generative-ai");
       const genAI = new GoogleGenerativeAI(geminiKey);
@@ -565,12 +575,27 @@ Generate the Account Messaging Brief JSON now.`;
       const parsed = JSON.parse(content);
       return normalizeMessagingBriefPayload(parsed, params);
     } catch (geminiError) {
-      console.warn("[AccountMessagingBrief] Gemini generation failed, trying OpenAI:", geminiError);
+      const details = formatProviderError(geminiError);
+      const status = getErrorStatusCode(geminiError);
+
+      if (status === 401 || status === 403) {
+        providerAuthCooldownUntil.gemini = Date.now() + PROVIDER_AUTH_COOLDOWN_MS;
+        console.warn(
+          `[AccountMessagingBrief] Gemini auth blocked (status ${status}) - cooling down ${Math.round(
+            PROVIDER_AUTH_COOLDOWN_MS / 60000
+          )}m before retry.`,
+          details
+        );
+      } else {
+        console.warn("[AccountMessagingBrief] Gemini generation failed, trying OpenAI:", details);
+      }
     }
+  } else if (geminiKey && geminiCoolingDown) {
+    console.warn("[AccountMessagingBrief] Gemini temporarily skipped due to recent auth failure cooldown.");
   }
 
   // Fallback to OpenAI
-  if (openaiKey) {
+  if (openaiKey && !openaiCoolingDown) {
     try {
       const OpenAI = (await import("openai")).default;
       const openai = new OpenAI({ apiKey: openaiKey });
@@ -590,8 +615,52 @@ Generate the Account Messaging Brief JSON now.`;
       const parsed = JSON.parse(content);
       return normalizeMessagingBriefPayload(parsed, params);
     } catch (openaiError) {
-      console.error("[AccountMessagingBrief] OpenAI generation failed:", openaiError);
+      const details = formatProviderError(openaiError);
+      const status = getErrorStatusCode(openaiError);
+
+      // If integration key failed auth, attempt direct OpenAI key once before giving up.
+      const directOpenAiKey = process.env.OPENAI_API_KEY;
+      const shouldTryDirectOpenAiKey =
+        (status === 401 || status === 403) &&
+        !!directOpenAiKey &&
+        directOpenAiKey !== openaiKey;
+
+      if (shouldTryDirectOpenAiKey) {
+        try {
+          const OpenAI = (await import("openai")).default;
+          const directOpenAi = new OpenAI({ apiKey: directOpenAiKey });
+
+          const response = await directOpenAi.chat.completions.create({
+            model: process.env.DEMAND_ENGAGE_MODEL || "gpt-4o",
+            temperature: 0.2,
+            max_tokens: 700,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            response_format: { type: "json_object" },
+          });
+
+          const content = response.choices[0]?.message?.content || "{}";
+          const parsed = JSON.parse(content);
+          console.warn("[AccountMessagingBrief] OpenAI fallback key succeeded after integration key auth failure.");
+          return normalizeMessagingBriefPayload(parsed, params);
+        } catch (directOpenAiError) {
+          const directDetails = formatProviderError(directOpenAiError);
+          const directStatus = getErrorStatusCode(directOpenAiError);
+          if (directStatus === 401 || directStatus === 403) {
+            providerAuthCooldownUntil.openai = Date.now() + PROVIDER_AUTH_COOLDOWN_MS;
+          }
+          console.error("[AccountMessagingBrief] OpenAI direct key retry failed:", directDetails);
+        }
+      } else if (status === 401 || status === 403) {
+        providerAuthCooldownUntil.openai = Date.now() + PROVIDER_AUTH_COOLDOWN_MS;
+      }
+
+      console.error("[AccountMessagingBrief] OpenAI generation failed:", details);
     }
+  } else if (openaiKey && openaiCoolingDown) {
+    console.warn("[AccountMessagingBrief] OpenAI temporarily skipped due to recent auth failure cooldown.");
   }
 
   return buildFallbackMessagingBrief(params);
@@ -731,6 +800,35 @@ function clampConfidence(value: any): number {
 function maxDate(a: Date | null, b: Date | null): Date | null {
   if (a && b) return a > b ? a : b;
   return a || b || null;
+}
+
+function getErrorStatusCode(error: any): number | null {
+  const status =
+    error?.status ??
+    error?.statusCode ??
+    error?.response?.status ??
+    error?.cause?.status;
+
+  const num = Number(status);
+  return Number.isFinite(num) ? num : null;
+}
+
+function formatProviderError(error: any): Record<string, unknown> {
+  const message =
+    error?.message ??
+    error?.error?.message ??
+    error?.response?.data?.error?.message ??
+    "Unknown provider error";
+
+  return {
+    name: error?.name,
+    message,
+    status: getErrorStatusCode(error),
+    statusText: error?.statusText ?? error?.response?.statusText,
+    code: error?.code ?? error?.error?.code,
+    type: error?.type ?? error?.error?.type,
+    requestId: error?.requestID ?? error?.response?.headers?.["x-request-id"],
+  };
 }
 
 /**
