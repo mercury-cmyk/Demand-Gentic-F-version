@@ -1783,6 +1783,28 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                   const storedParams = await getCallParams(callId);
                   if (storedParams) {
                     // Merge stored params, preferring already decoded params but filling in gaps
+                    // CRITICAL: Merge campaign/call identifiers first — these are essential for
+                    // loading campaign config, problem intelligence, and enforcing call limits.
+                    // Test calls store these in Redis but client_state URL may not carry them.
+                    if (!customParams.campaign_id && storedParams.campaign_id) {
+                      customParams.campaign_id = storedParams.campaign_id;
+                      console.log(`${LOG_PREFIX} Retrieved campaign_id from session store for ${callId}: ${storedParams.campaign_id}`);
+                    }
+                    if (!customParams.run_id && storedParams.run_id) {
+                      customParams.run_id = storedParams.run_id;
+                    }
+                    if (!customParams.contact_id && storedParams.contact_id) {
+                      customParams.contact_id = storedParams.contact_id;
+                    }
+                    if (!customParams.queue_item_id && storedParams.queue_item_id) {
+                      customParams.queue_item_id = storedParams.queue_item_id;
+                    }
+                    if (!customParams.call_attempt_id && storedParams.call_attempt_id) {
+                      customParams.call_attempt_id = storedParams.call_attempt_id;
+                    }
+                    if (!customParams.virtual_agent_id && storedParams.virtual_agent_id) {
+                      customParams.virtual_agent_id = storedParams.virtual_agent_id;
+                    }
                     if (!customParams.system_prompt && storedParams.system_prompt) {
                       customParams.system_prompt = storedParams.system_prompt;
                       console.log(`${LOG_PREFIX} Retrieved system_prompt from session store for ${callId}`);

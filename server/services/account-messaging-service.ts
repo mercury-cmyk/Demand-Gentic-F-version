@@ -20,7 +20,8 @@ const ACCOUNT_MESSAGING_BRIEF_TTL_DAYS = 30;
 const ACCOUNT_CONFIDENCE_THRESHOLD = 0.7;
 const PROVIDER_AUTH_COOLDOWN_MS = 15 * 60 * 1000;
 
-const providerAuthCooldownUntil: Record<"gemini" | "openai", number> = {
+const providerAuthCooldownUntil: Record<"deepseek" | "gemini" | "openai", number> = {
+  deepseek: 0,
   gemini: 0,
   openai: 0,
 };
@@ -518,11 +519,12 @@ async function generateAccountMessagingBriefPayload(params: {
   campaignFingerprint: string;
   campaignIntent: CampaignIntent | null;
 }): Promise<AccountMessagingBriefPayload> {
-  // Prefer Gemini (Google AI) over OpenAI to avoid quota issues
+  // Prefer DeepSeek, then Gemini, then OpenAI
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
   const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
   
-  if (!geminiKey && !openaiKey) {
+  if (!deepseekKey && !geminiKey && !openaiKey) {
     return buildFallbackMessagingBrief(params);
   }
 
@@ -550,8 +552,52 @@ ${JSON.stringify(params.campaignIntent || {}, null, 2)}
 Generate the Account Messaging Brief JSON now.`;
 
   const now = Date.now();
+  const deepseekCoolingDown = providerAuthCooldownUntil.deepseek > now;
   const geminiCoolingDown = providerAuthCooldownUntil.gemini > now;
   const openaiCoolingDown = providerAuthCooldownUntil.openai > now;
+
+  // Try DeepSeek first
+  if (deepseekKey && !deepseekCoolingDown) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const deepseek = new OpenAI({
+        apiKey: deepseekKey,
+        baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+      });
+
+      const response = await deepseek.chat.completions.create({
+        model: process.env.DEEPSEEK_MESSAGING_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat",
+        temperature: 0.2,
+        max_tokens: 700,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      });
+
+      const content = response.choices[0]?.message?.content || "{}";
+      const parsed = JSON.parse(content);
+      return normalizeMessagingBriefPayload(parsed, params);
+    } catch (deepseekError) {
+      const details = formatProviderError(deepseekError);
+      const status = getErrorStatusCode(deepseekError);
+
+      if (status === 401 || status === 403) {
+        providerAuthCooldownUntil.deepseek = Date.now() + PROVIDER_AUTH_COOLDOWN_MS;
+        console.warn(
+          `[AccountMessagingBrief] DeepSeek auth blocked (status ${status}) - cooling down ${Math.round(
+            PROVIDER_AUTH_COOLDOWN_MS / 60000
+          )}m before retry.`,
+          details
+        );
+      } else {
+        console.warn("[AccountMessagingBrief] DeepSeek generation failed, trying Gemini/OpenAI:", details);
+      }
+    }
+  } else if (deepseekKey && deepseekCoolingDown) {
+    console.warn("[AccountMessagingBrief] DeepSeek temporarily skipped due to recent auth failure cooldown.");
+  }
 
   // Try Gemini first (preferred for cost and quota reasons)
   if (geminiKey && !geminiCoolingDown) {
