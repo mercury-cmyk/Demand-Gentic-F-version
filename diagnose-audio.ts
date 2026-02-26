@@ -105,10 +105,10 @@ async function checkConfiguration() {
     'TELNYX_API_KEY': resolveEnv('TELNYX_API_KEY') ? 'SET' : 'MISSING',
     'OPENAI_API_KEY': resolveEnv('OPENAI_API_KEY') ? 'SET' : 'MISSING',
     'DATABASE_URL': resolveEnv('DATABASE_URL') ? 'SET' : 'MISSING',
-    'TELNYX_PUBLIC_KEY': resolveEnv('TELNYX_PUBLIC_KEY') ? 'SET' : 'MISSING',
   };
   
   const optional = {
+    'TELNYX_PUBLIC_KEY': resolveEnv('TELNYX_PUBLIC_KEY') ? 'SET' : 'MISSING',
     'PUBLIC_WEBSOCKET_URL': resolveEnv('PUBLIC_WEBSOCKET_URL') || 'NOT SET (will use request host)',
     'VOICE_PROVIDER': resolveEnv('VOICE_PROVIDER') || 'openai_realtime (default)',
   };

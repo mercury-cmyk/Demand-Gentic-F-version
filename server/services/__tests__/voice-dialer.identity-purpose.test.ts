@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   evaluateIdentityPurposePivot,
   isAutomatedCallScreenerTranscript,
+  isDtmfIvrCueTranscript,
+  isExplicitCallbackRequestTranscript,
   isVoicemailCueTranscript,
 } from "../voice-dialer";
 
@@ -72,5 +74,28 @@ describe("isAutomatedCallScreenerTranscript", () => {
         "Hi, you've reached the voicemail of Ann. Please leave a message after the beep."
       )
     ).toBe(false);
+  });
+});
+
+describe("isDtmfIvrCueTranscript", () => {
+  it("detects classic keypad IVR prompts", () => {
+    expect(isDtmfIvrCueTranscript("For sales, press 1. For support, press 2.")).toBe(true);
+    expect(isDtmfIvrCueTranscript("Please enter your extension now.")).toBe(true);
+  });
+
+  it("does not flag normal human conversation", () => {
+    expect(isDtmfIvrCueTranscript("Hi, this is James from procurement.")).toBe(false);
+  });
+});
+
+describe("isExplicitCallbackRequestTranscript", () => {
+  it("detects explicit callback requests", () => {
+    expect(isExplicitCallbackRequestTranscript("Can you call me back tomorrow afternoon?")).toBe(true);
+    expect(isExplicitCallbackRequestTranscript("Please call me back next week.")).toBe(true);
+  });
+
+  it("does not treat generic follow-up language as callback", () => {
+    expect(isExplicitCallbackRequestTranscript("Thanks, we can follow up by email.")).toBe(false);
+    expect(isExplicitCallbackRequestTranscript("This sounds interesting, send me details.")).toBe(false);
   });
 });

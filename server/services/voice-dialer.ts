@@ -1,4 +1,4 @@
-import WebSocket, { WebSocketServer } from "ws";
+﻿import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db";
@@ -145,7 +145,7 @@ function debugLog(...args: unknown[]): void {
 }
 
 // Telnyx media streaming expects real-time G.711 packetization.
-// For 8kHz μ-law: 20ms == 160 bytes.
+// For 8kHz Î¼-law: 20ms == 160 bytes.
 const TELNYX_G711_FRAME_BYTES = 160;
 const TELNYX_G711_FRAME_MS = 20;
 const TELNYX_MAX_FRAMES_PER_TICK = 10;
@@ -163,6 +163,8 @@ const MAX_RESPONSE_LATENCIES = 100;
 // Keep the fast-abort window wide enough to catch longer voicemail greetings
 // before the AI completes a full opening pitch.
 const VOICEMAIL_EARLY_WINDOW_MS = 12000;
+const FAST_AUTOMATION_ABORT_WINDOW_MS = 3000;
+const TRANSFER_HOLD_GRACE_WINDOW_MS = 45000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
 const HARD_MAX_CALL_DURATION_SECONDS = 300;
 
@@ -588,7 +590,7 @@ function schedulePurposePivotGuard(session: OpenAIRealtimeSession): void {
       const provider = (session as any).geminiProvider;
       if (provider?.isReady?.()) {
         provider.sendTextMessage(
-          "STATE ENFORCEMENT: identity confirmed. Immediately deliver your core purpose/value statement now in ONE concise sentence, then stop and listen."
+          "STATE ENFORCEMENT: identity confirmed. Respond NOW using this two-sentence pattern with no filler: \"This is [Agent Name] calling on behalf of [Organization]. I'm calling to [single clear purpose].\" Then stop and listen."
         );
       }
       return;
@@ -598,7 +600,7 @@ function schedulePurposePivotGuard(session: OpenAIRealtimeSession): void {
       session.openaiWs.send(JSON.stringify({
         type: "response.create",
         response: {
-          instructions: "STATE ENFORCEMENT: identity confirmed. Immediately deliver your core purpose/value statement now in ONE concise sentence, then stop and listen.",
+          instructions: "STATE ENFORCEMENT: identity confirmed. Respond NOW using this two-sentence pattern with no filler: \"This is [Agent Name] calling on behalf of [Organization]. I'm calling to [single clear purpose].\" Then stop and listen.",
         },
       }));
     }
@@ -660,6 +662,99 @@ function normalizeTranscriptForComparison(text: string): string {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function isExplicitCallbackRequestTranscript(transcript: string): boolean {
+  const lower = normalizeTranscriptForComparison(transcript);
+  if (!lower) return false;
+
+  const callbackPatterns = [
+    /\bcall me back\b/i,
+    /\bcan you call me back\b/i,
+    /\bplease call me back\b/i,
+    /\bcallback\b/i,
+    /\bring me back\b/i,
+    /\breach me (later|tomorrow|next week|next month)\b/i,
+    /\bbetter time (to|for) (call|talk)\b/i,
+    /\bnot a good time\b.*\b(call|talk)\b.*\b(back|later)\b/i,
+    /\blets (talk|speak) (later|tomorrow|next week)\b/i,
+    /\bcall (again|later)\b/i,
+  ];
+
+  return callbackPatterns.some((pattern) => pattern.test(lower));
+}
+
+function hasExplicitCallbackRequest(transcripts: OpenAIRealtimeSession["transcripts"]): boolean {
+  return transcripts
+    .filter((turn) => turn.role === "user")
+    .some((turn) => isExplicitCallbackRequestTranscript(turn.text));
+}
+
+export function isDtmfIvrCueTranscript(transcript: string): boolean {
+  const lower = normalizeTranscriptForComparison(transcript);
+  if (!lower) return false;
+  if (isAutomatedCallScreenerTranscript(lower)) return false;
+
+  const dtmfPatterns = [
+    /\bpress\s*(\d|one|two|three|four|five|six|seven|eight|nine|zero|star|pound|#|\*)\b/i,
+    /\bfor\s+[\w\s]{1,40}\s+press\s*(\d|one|two|three|four|five|six|seven|eight|nine|zero)\b/i,
+    /\bmain menu\b/i,
+    /\bdial by name\b/i,
+    /\bdial by extension\b/i,
+    /\benter (your|the)\s+(extension|account|selection|digits|pin)\b/i,
+    /\bif you know (your|the)\s+(party s|party)\s+extension\b/i,
+  ];
+
+  return dtmfPatterns.some((pattern) => pattern.test(lower));
+}
+
+function isTransferOrHoldCueTranscript(transcript: string): boolean {
+  const lower = normalizeTranscriptForComparison(transcript);
+  if (!lower) return false;
+
+  const holdPatterns = [
+    "please hold",
+    "one moment please",
+    "one moment while",
+    "stay on the line",
+    "while i try to connect",
+    "while i transfer",
+    "transferring your call",
+    "your call is being transferred",
+    "connecting you now",
+    "do not hang up",
+  ];
+
+  return holdPatterns.some((phrase) => lower.includes(phrase));
+}
+
+function hasRecentTransferOrHoldCue(
+  session: OpenAIRealtimeSession,
+  windowMs = TRANSFER_HOLD_GRACE_WINDOW_MS
+): boolean {
+  const now = Date.now();
+  const transcriptCue = session.transcripts
+    .filter((turn) => turn.role === "user" && now - turn.timestamp.getTime() <= windowMs)
+    .some((turn) => isTransferOrHoldCueTranscript(turn.text));
+  if (transcriptCue) return true;
+
+  return session.audioDetection.audioPatterns
+    .filter((pattern) => now - pattern.timestamp.getTime() <= windowMs)
+    .some((pattern) => isTransferOrHoldCueTranscript(pattern.transcript));
+}
+
+function shouldAbortForDtmfIvr(session: OpenAIRealtimeSession, transcript: string): boolean {
+  if (!isDtmfIvrCueTranscript(transcript)) return false;
+  if (session.audioDetection.humanDetected || session.conversationState.identityConfirmed) return false;
+
+  const now = Date.now();
+  const baseline =
+    session.timingMetrics.firstProspectAudioAt?.getTime() ||
+    session.timingMetrics.callConnectedAt?.getTime() ||
+    session.startTime.getTime();
+  const elapsedMs = Math.max(0, now - baseline);
+
+  return elapsedMs <= FAST_AUTOMATION_ABORT_WINDOW_MS;
 }
 
 export function isAutomatedCallScreenerTranscript(transcript: string): boolean {
@@ -1084,7 +1179,7 @@ const amdResultsByCallControlId = new Map<string, {
  * This allows the voice-dialer WebSocket session to receive AMD results from HTTP webhooks
  */
 export function setAmdResultForSession(callControlId: string, result: string, confidence: number): void {
-  console.log(`${LOG_PREFIX} 📠 AMD result received for ${callControlId}: ${result} (confidence: ${confidence})`);
+  console.log(`${LOG_PREFIX} ðŸ“  AMD result received for ${callControlId}: ${result} (confidence: ${confidence})`);
 
   // Store in pending map for sessions that haven't started yet
   amdResultsByCallControlId.set(callControlId, {
@@ -1106,7 +1201,7 @@ export function setAmdResultForSession(callControlId: string, result: string, co
       // If machine detected, mark session for voicemail disposition
       // CRITICAL: Use startsWith('machine') to catch ALL machine results (machine, machine_start, machine_end_*)
       if (result.startsWith('machine') || result === 'fax') {
-        console.log(`${LOG_PREFIX} 📠 Machine detected via AMD for active session ${sessionId} - setting voicemail disposition`);
+        console.log(`${LOG_PREFIX} ðŸ“  Machine detected via AMD for active session ${sessionId} - setting voicemail disposition`);
         session.detectedDisposition = 'voicemail';
         session.callOutcome = 'voicemail';
       }
@@ -1230,20 +1325,20 @@ function resolveAudioFormat(
   // start message media_format.encoding should report the ACTUAL bidirectional
   // WebSocket codec (PCMA for international, PCMU for US).
   //
-  // If Telnyx omits media_format, trust client_state — it now matches
+  // If Telnyx omits media_format, trust client_state â€” it now matches
   // bidirectionalCodec (set in TeXML), NOT just the SIP leg codec.
   //
   // Previously: codec="PCMA" only controlled inbound track; bidirectional
-  // defaulted to PCMU. Client_state said A-law but wire was µ-law → garbled audio.
+  // defaulted to PCMU. Client_state said A-law but wire was Âµ-law â†’ garbled audio.
   // Now both attributes are set, so client_state is trustworthy.
   if (!rawFormat) {
     const clientOverride = normalizeG711Format(clientStateFormat);
     if (clientOverride) {
-      console.warn(`${LOG_PREFIX} 🎧 Telnyx media_format missing; using bidirectionalCodec from TeXML: ${clientOverride}${telnyxTo ? ` (to: ${telnyxTo})` : ''}`);
+      console.warn(`${LOG_PREFIX} ðŸŽ§ Telnyx media_format missing; using bidirectionalCodec from TeXML: ${clientOverride}${telnyxTo ? ` (to: ${telnyxTo})` : ''}`);
       return { format: clientOverride, source: 'client_state' };
     }
     const source = telnyxTo ? 'telnyx' : 'default';
-    console.warn(`${LOG_PREFIX} 🎧 Telnyx media_format missing, no client_state; defaulting to g711_ulaw (PCMU)${telnyxTo ? ` (to: ${telnyxTo})` : ''}`);
+    console.warn(`${LOG_PREFIX} ðŸŽ§ Telnyx media_format missing, no client_state; defaulting to g711_ulaw (PCMU)${telnyxTo ? ` (to: ${telnyxTo})` : ''}`);
     return { format: 'g711_ulaw', source };
   }
 
@@ -1255,9 +1350,9 @@ function resolveAudioFormat(
   
   // Log format resolution for debugging UK/international call quality
   if (rawFormat) {
-    console.log(`${LOG_PREFIX} 🎧 Audio format: ${format} (Telnyx reported: ${rawFormat}, phone: ${telnyxTo || 'unknown'})`);
+    console.log(`${LOG_PREFIX} ðŸŽ§ Audio format: ${format} (Telnyx reported: ${rawFormat}, phone: ${telnyxTo || 'unknown'})`);
   } else if (telnyxTo) {
-    console.log(`${LOG_PREFIX} 🎧 Audio format: ${format} (from phone number: ${telnyxTo}, no Telnyx format reported)`);
+    console.log(`${LOG_PREFIX} ðŸŽ§ Audio format: ${format} (from phone number: ${telnyxTo}, no Telnyx format reported)`);
   }
 
   return { format, source };
@@ -1533,12 +1628,12 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
   const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 
   console.log(`${LOG_PREFIX} ========================================`);
-  console.log(`${LOG_PREFIX} 🎙️  VOICE PROVIDER CONFIGURATION`);
+  console.log(`${LOG_PREFIX} ðŸŽ™ï¸  VOICE PROVIDER CONFIGURATION`);
   console.log(`${LOG_PREFIX} ========================================`);
-  console.log(`${LOG_PREFIX} Primary Provider: ${isGeminiActive ? '🟢 Google Gemini Live' : '🔵 OpenAI Realtime'}`);
+  console.log(`${LOG_PREFIX} Primary Provider: ${isGeminiActive ? 'ðŸŸ¢ Google Gemini Live' : 'ðŸ”µ OpenAI Realtime'}`);
   console.log(`${LOG_PREFIX} Model: ${isGeminiActive ? geminiModel : 'gpt-4o-realtime-preview'}`);
   const fallbackTarget = 'gemini';
-  console.log(`${LOG_PREFIX} Fallback: ❌ Disabled (Gemini-only mode)`);
+  console.log(`${LOG_PREFIX} Fallback: âŒ Disabled (Gemini-only mode)`);
   console.log(`${LOG_PREFIX} Cost Savings: ${isGeminiActive ? '~50-70% vs OpenAI Realtime' : 'N/A'}`);
   console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} WebSocket server initialized on /voice-dialer`);
@@ -1548,7 +1643,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
   });
 
   wss.on("connection", (ws: WebSocket, req) => {
-    console.log(`${LOG_PREFIX} âœ… CONNECTION EVENT FIRED - New Telnyx connection from: ${req.url}`);
+    console.log(`${LOG_PREFIX} Ã¢Å“â€¦ CONNECTION EVENT FIRED - New Telnyx connection from: ${req.url}`);
     
     // Send a welcome message immediately to confirm connection
     const activeProvider = 'Gemini Live';
@@ -1583,7 +1678,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
         if (message.event === "start") {
           // Guard against multiple start events on the same connection
           if (session) {
-            console.warn(`${LOG_PREFIX} âš ï¸  Received duplicate 'start' event for active session ${session.callId}. Ignoring to prevent session reset.`);
+            console.warn(`${LOG_PREFIX} Ã¢Å¡Â Ã¯Â¸Â  Received duplicate 'start' event for active session ${session.callId}. Ignoring to prevent session reset.`);
             return;
           }
 
@@ -1599,7 +1694,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               const storedContext = await getPendingCallState(urlCallId);
               if (storedContext) {
                 customParams = storedContext;
-                console.log(`${LOG_PREFIX} ✅ Retrieved call context from pending-call-state for ${urlCallId}`);
+                console.log(`${LOG_PREFIX} âœ… Retrieved call context from pending-call-state for ${urlCallId}`);
 
                 // Also merge from Redis call-session-store to fill gaps (system_prompt, openai_config, etc.)
                 // This mirrors the Priority 1 merge logic and ensures test calls from Preview Studio
@@ -1639,14 +1734,14 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                         customParams.agent_settings = storedParams.agent_settings;
                         console.log(`${LOG_PREFIX} Retrieved agent_settings from session store for ${mergeCallId}`);
                       }
-                      console.log(`${LOG_PREFIX} ✅ Merged session store params for pending-call-state`);
+                      console.log(`${LOG_PREFIX} âœ… Merged session store params for pending-call-state`);
                     }
                   } catch (storeErr) {
                     console.warn(`${LOG_PREFIX} Failed to merge from session store:`, storeErr);
                   }
                 }
               } else {
-                console.warn(`${LOG_PREFIX} ⚠️ No pending call state found for ${urlCallId}, falling back to other methods`);
+                console.warn(`${LOG_PREFIX} âš ï¸ No pending call state found for ${urlCallId}, falling back to other methods`);
               }
             } catch (storeErr) {
               console.error(`${LOG_PREFIX} Failed to retrieve from pending-call-state:`, storeErr);
@@ -1678,7 +1773,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             if (parsedState) {
               customParams = parsedState.params;
               debugLog(`${LOG_PREFIX} Decoded client_state (${parsedState.format}) from ${clientStateOrigin}:`, customParams);
-              debugLog(`${LOG_PREFIX} 🔍 client_state campaign_id value:`, customParams.campaign_id, `(type: ${typeof customParams.campaign_id})`);
+              debugLog(`${LOG_PREFIX} ðŸ” client_state campaign_id value:`, customParams.campaign_id, `(type: ${typeof customParams.campaign_id})`);
 
               // Try to fetch additional params from call session store (system_prompt, openai_config, etc.)
               if (customParams.call_id || customParams.test_call_id) {
@@ -1751,7 +1846,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                       customParams.agent_settings = storedParams.agent_settings;
                       console.log(`${LOG_PREFIX} Retrieved agent_settings from session store for ${callId}`);
                     }
-                    console.log(`${LOG_PREFIX} ✅ Merged session store params for unified call context`);
+                    console.log(`${LOG_PREFIX} âœ… Merged session store params for unified call context`);
                   }
                 } catch (storeErr) {
                   console.warn(`${LOG_PREFIX} Failed to fetch from session store:`, storeErr);
@@ -1790,12 +1885,12 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             null;
 
           if (telnyxCallControlId) {
-            console.log(`${LOG_PREFIX} 📞 Telnyx call_control_id captured: ${telnyxCallControlId}`);
+            console.log(`${LOG_PREFIX} ðŸ“ž Telnyx call_control_id captured: ${telnyxCallControlId}`);
           }
 
-          debugLog(`${LOG_PREFIX} 🔍 Raw customParams keys:`, Object.keys(customParams));
-          debugLog(`${LOG_PREFIX} 🔍 Raw urlParams:`, JSON.stringify(urlParams));
-          debugLog(`${LOG_PREFIX} 🔍 Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
+          debugLog(`${LOG_PREFIX} ðŸ” Raw customParams keys:`, Object.keys(customParams));
+          debugLog(`${LOG_PREFIX} ðŸ” Raw urlParams:`, JSON.stringify(urlParams));
+          debugLog(`${LOG_PREFIX} ðŸ” Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
 
           const calledNumber = (customParams as any).called_number || (urlParams as any).called_number || null;
           const fromNumber = (customParams as any).from_number || (customParams as any).fromNumber || null;
@@ -1823,13 +1918,13 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           if (texmlRequestedCodec && telnyxReportedRaw) {
             const telnyxNormalized = normalizeG711Format(telnyxReportedRaw);
             if (telnyxNormalized && telnyxNormalized !== texmlRequestedCodec) {
-              console.error(`${LOG_PREFIX} ⚠️ CODEC MISMATCH: bidirectionalCodec=${texmlRequestedCodec} but Telnyx stream=${telnyxNormalized} (raw: ${telnyxReportedRaw}). Using Telnyx value. Check if bidirectionalCodec attribute is supported on <Stream>.`);
+              console.error(`${LOG_PREFIX} âš ï¸ CODEC MISMATCH: bidirectionalCodec=${texmlRequestedCodec} but Telnyx stream=${telnyxNormalized} (raw: ${telnyxReportedRaw}). Using Telnyx value. Check if bidirectionalCodec attribute is supported on <Stream>.`);
               // Trust Telnyx-reported format (it's what's actually on the wire)
             } else if (telnyxNormalized) {
-              console.log(`${LOG_PREFIX} ✅ Codec validated: bidirectionalCodec=${texmlRequestedCodec}, Telnyx stream=${telnyxNormalized} — match`);
+              console.log(`${LOG_PREFIX} âœ… Codec validated: bidirectionalCodec=${texmlRequestedCodec}, Telnyx stream=${telnyxNormalized} â€” match`);
             }
           } else if (texmlRequestedCodec && !telnyxReportedRaw) {
-            console.log(`${LOG_PREFIX} 🎧 Telnyx did not report media_format; trusting bidirectionalCodec: ${texmlRequestedCodec} (${audioFormatSource})`);
+            console.log(`${LOG_PREFIX} ðŸŽ§ Telnyx did not report media_format; trusting bidirectionalCodec: ${texmlRequestedCodec} (${audioFormatSource})`);
           }
 
           // Check for test session - either from explicit flag or from ID prefixes
@@ -1849,7 +1944,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
 
           if (isTestSession) {
             // Preserve negotiated codec for test calls (especially international PCMA).
-            // Forcing µ-law here can mismatch Telnyx's actual wire codec and result in
+            // Forcing Âµ-law here can mismatch Telnyx's actual wire codec and result in
             // silence/garbled audio in Preview Studio phone tests.
             if (audioFormatSource === 'default') {
               audioFormat = 'g711_ulaw';
@@ -1858,8 +1953,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             console.log(`${LOG_PREFIX} Test session using provider: ${provider}, audio format: ${audioFormat} (source: ${audioFormatSource})`);
           }
 
-          console.log(`${LOG_PREFIX} ðŸ“ž Starting session for call: ${sessionId}`);
-          console.log(`${LOG_PREFIX} ðŸ“‹ Session parameters:`, {
+          console.log(`${LOG_PREFIX} Ã°Å¸â€œÅ¾ Starting session for call: ${sessionId}`);
+          console.log(`${LOG_PREFIX} Ã°Å¸â€œâ€¹ Session parameters:`, {
             call_id: sessionId,
             run_id: runId,
             campaign_id: campaignId,
@@ -1883,11 +1978,11 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
 
             if (missingParams.length > 0) {
               // Log warning but allow session to continue - AI calls can work without full tracking
-              console.warn(`${LOG_PREFIX} ⚠️ Missing parameters: ${missingParams.join(', ')}. Call will proceed without full tracking.`);
+              console.warn(`${LOG_PREFIX} âš ï¸ Missing parameters: ${missingParams.join(', ')}. Call will proceed without full tracking.`);
               // Don't terminate - allow the AI call to proceed for better UX
             }
           } else {
-            console.log(`${LOG_PREFIX} 🧪 Test session detected - skipping production parameter validation`);
+            console.log(`${LOG_PREFIX} ðŸ§ª Test session detected - skipping production parameter validation`);
           }
 
           // Get virtualAgentId from params
@@ -2224,18 +2319,18 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               currentState: 'IDENTITY_CHECK',
             },
           });
-          console.log(`${LOG_PREFIX} ✅ Session persisted to store for call: ${sessionId}`);
+          console.log(`${LOG_PREFIX} âœ… Session persisted to store for call: ${sessionId}`);
 
           // Notify TelnyxAiBridge that call is answered (WebSocket connection proves it)
-          console.log(`${LOG_PREFIX} 🔔 Attempting to notify bridge of answered call...`);
+          console.log(`${LOG_PREFIX} ðŸ”” Attempting to notify bridge of answered call...`);
           try {
             const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
             const bridge = getTelnyxAiBridge();
             // Mark by callId (the sessionId like ai-call-xxx)
             const marked = bridge.markCallAnsweredByCallId(sessionId!);
-            console.log(`${LOG_PREFIX} 📞 Notified bridge call answered by callId: ${sessionId} (marked: ${marked})`);
+            console.log(`${LOG_PREFIX} ðŸ“ž Notified bridge call answered by callId: ${sessionId} (marked: ${marked})`);
           } catch (err) {
-            console.error(`${LOG_PREFIX} ❌ Failed to notify bridge of answered call:`, err);
+            console.error(`${LOG_PREFIX} âŒ Failed to notify bridge of answered call:`, err);
           }
 
           // ROBUST stream_id extraction - Telnyx may send it in different formats
@@ -2260,7 +2355,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           setTimeout(() => {
             if (session!.isActive && !session!.streamSid) {
               const telnyxState = session!.telnyxWs ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session!.telnyxWs.readyState] : 'NULL';
-              console.warn(`${LOG_PREFIX} âš ï¸  No stream_id received yet for call ${session!.callId}. Telnyx state=${telnyxState}. Audio cannot be sent until stream_id arrives.`);
+              console.warn(`${LOG_PREFIX} Ã¢Å¡Â Ã¯Â¸Â  No stream_id received yet for call ${session!.callId}. Telnyx state=${telnyxState}. Audio cannot be sent until stream_id arrives.`);
             }
           }, 4000);
 
@@ -2285,7 +2380,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           // This is where Telnyx sends the stream_id for the media streaming connection
           if (message.stream_id && session) {
             session.streamSid = message.stream_id;
-            console.log(`${LOG_PREFIX} ðŸ”— Telnyx streaming_event received! stream_id set to: ${message.stream_id} for call: ${session.callId}`);
+            console.log(`${LOG_PREFIX} Ã°Å¸â€â€” Telnyx streaming_event received! stream_id set to: ${message.stream_id} for call: ${session.callId}`);
             
             // Map stream_id to call ID for routing
             if (!streamIdToCallId.has(message.stream_id)) {
@@ -2294,7 +2389,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             
             // Flush any buffered audio frames now that we have stream_id
             if (session.audioFrameBuffer.length > 0) {
-              console.log(`${LOG_PREFIX} ðŸ“¤ Flushing ${session.audioFrameBuffer.length} buffered audio frames now that stream_id is available`);
+              console.log(`${LOG_PREFIX} Ã°Å¸â€œÂ¤ Flushing ${session.audioFrameBuffer.length} buffered audio frames now that stream_id is available`);
               flushAudioBuffer(session);
             }
           }
@@ -2314,10 +2409,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
       if (sessionId) {
         const session = activeSessions.get(sessionId);
         if (session && session.isActive && !session.isEnding) {
-          console.warn(`${LOG_PREFIX} âš ï¸  Telnyx WebSocket closed unexpectedly during active call. Attempting to flush buffered audio...`);
+          console.warn(`${LOG_PREFIX} Ã¢Å¡Â Ã¯Â¸Â  Telnyx WebSocket closed unexpectedly during active call. Attempting to flush buffered audio...`);
           // Try to flush any buffered audio frames before ending
           if (session.audioFrameBuffer.length > 0) {
-            console.log(`${LOG_PREFIX} ðŸ“¤ ${session.audioFrameBuffer.length} frames were buffered when Telnyx disconnected`);
+            console.log(`${LOG_PREFIX} Ã°Å¸â€œÂ¤ ${session.audioFrameBuffer.length} frames were buffered when Telnyx disconnected`);
           }
         }
         await endCall(sessionId, 'completed');
@@ -2482,7 +2577,7 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
         if (session.telnyxOutboundFramesSent > 0 && geminiProv?.isResponding) {
           const now = Date.now();
           if (!(session as any)._lastUnderrunAt || (now - (session as any)._lastUnderrunAt) > 2000) {
-            console.warn(`${LOG_PREFIX} [PACER] ⚠️ Buffer underrun mid-utterance (frames_sent=${session.telnyxOutboundFramesSent}, call=${session.callId})`);
+            console.warn(`${LOG_PREFIX} [PACER] âš ï¸ Buffer underrun mid-utterance (frames_sent=${session.telnyxOutboundFramesSent}, call=${session.callId})`);
             (session as any)._lastUnderrunAt = now;
           }
         }
@@ -2524,10 +2619,10 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
             session.telnyxWs.send(msg);
             
             if (session.telnyxOutboundFramesSent === 0) {
-              console.log(`${LOG_PREFIX} ✅ FIRST OUTBOUND FRAME to Telnyx! call=${session.callId} stream_id=${cachedStreamId}`);
+              console.log(`${LOG_PREFIX} âœ… FIRST OUTBOUND FRAME to Telnyx! call=${session.callId} stream_id=${cachedStreamId}`);
             }
         } catch (e) {
-            console.error(`${LOG_PREFIX} ❌ Error sending to Telnyx WS`, e);
+            console.error(`${LOG_PREFIX} âŒ Error sending to Telnyx WS`, e);
         }
 
         session.telnyxOutboundFramesSent += 1;
@@ -2550,12 +2645,12 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
   // Log masked API key for debugging
   const maskedKey = apiKey.substring(0, 8) + "..." + apiKey.substring(apiKey.length - 4);
-  console.log(`${LOG_PREFIX} ðŸ”‘ Using OpenAI API Key: ${maskedKey} (Length: ${apiKey.length})`);
+  console.log(`${LOG_PREFIX} Ã°Å¸â€â€˜ Using OpenAI API Key: ${maskedKey} (Length: ${apiKey.length})`);
 
   try {
     await ensureSessionCampaignId(session);
     const campaignConfig = await getCampaignConfig(session.campaignId);
-    console.log(`${LOG_PREFIX} 🔍 Fetched Campaign Config for ${session.campaignId}:`, {
+    console.log(`${LOG_PREFIX} ðŸ” Fetched Campaign Config for ${session.campaignId}:`, {
         found: !!campaignConfig,
         objective: campaignConfig?.campaignObjective ? 'Present' : 'Missing',
         brief: campaignConfig?.campaignContextBrief ? 'Present' : 'Missing',
@@ -2570,7 +2665,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
       );
       session.campaignMaxCallDurationSeconds = clampedCampaignMax;
       console.log(
-        `${LOG_PREFIX} ⏱️ Campaign max call duration set to ${clampedCampaignMax}s (requested: ${campaignConfig.maxCallDurationSeconds}s, hard cap: ${HARD_MAX_CALL_DURATION_SECONDS}s)`
+        `${LOG_PREFIX} â±ï¸ Campaign max call duration set to ${clampedCampaignMax}s (requested: ${campaignConfig.maxCallDurationSeconds}s, hard cap: ${HARD_MAX_CALL_DURATION_SECONDS}s)`
       );
     }
 
@@ -2589,14 +2684,14 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
     let contactInfo = await getContactInfo(session.contactId);
 
     // DEBUG: Log contact resolution details
-    console.log(`${LOG_PREFIX} ðŸ”Ž Contact Info Resolution - IsTest: ${session.isTestSession}, ContactInfo Found: ${!!contactInfo}, TestContact Present: ${!!session.testContact}`);
+    console.log(`${LOG_PREFIX} Ã°Å¸â€Å½ Contact Info Resolution - IsTest: ${session.isTestSession}, ContactInfo Found: ${!!contactInfo}, TestContact Present: ${!!session.testContact}`);
     if (session.isTestSession && session.testContact) {
-       console.log(`${LOG_PREFIX} ðŸ§ª Test Contact Data:`, JSON.stringify(session.testContact));
+       console.log(`${LOG_PREFIX} Ã°Å¸Â§Âª Test Contact Data:`, JSON.stringify(session.testContact));
     }
 
     // For test sessions, use test contact data if database lookup returns null
     if (session.isTestSession && !contactInfo && session.testContact) {
-      console.log(`${LOG_PREFIX} 🧪 Using test contact data for test session: ${session.testContact.name}`);
+      console.log(`${LOG_PREFIX} ðŸ§ª Using test contact data for test session: ${session.testContact.name}`);
       contactInfo = {
         id: session.contactId,
         firstName: session.testContact.name?.split(' ')[0] || 'Test',
@@ -2617,11 +2712,11 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         const fallbackCompany = session.testContact.company || 'Test Company';
         contactInfo.company = fallbackCompany;
         contactInfo.companyName = fallbackCompany;
-        console.log(`${LOG_PREFIX} 🧪 Filled missing company from test contact: ${fallbackCompany}`);
+        console.log(`${LOG_PREFIX} ðŸ§ª Filled missing company from test contact: ${fallbackCompany}`);
       }
       if (!contactInfo.jobTitle && session.testContact.title) {
         contactInfo.jobTitle = session.testContact.title;
-        console.log(`${LOG_PREFIX} 🧪 Filled missing job title from test contact: ${session.testContact.title}`);
+        console.log(`${LOG_PREFIX} ðŸ§ª Filled missing job title from test contact: ${session.testContact.title}`);
       }
     }
 
@@ -2631,8 +2726,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
     if (!session.isTestSession) {
       const validationResult = validateContactForCall(contactInfo, campaignConfig);
       if (!validationResult.valid) {
-        console.error(`${LOG_PREFIX} ❌ Contact validation failed for call ${session.callId}: ${validationResult.reason}`);
-        console.error(`${LOG_PREFIX} ❌ Missing variables: ${validationResult.missing.join(', ')}`);
+        console.error(`${LOG_PREFIX} âŒ Contact validation failed for call ${session.callId}: ${validationResult.reason}`);
+        console.error(`${LOG_PREFIX} âŒ Missing variables: ${validationResult.missing.join(', ')}`);
         
         // Log to activity for tracking
         try {
@@ -2662,7 +2757,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         await endCall(session.callId, 'error');
         return;
       }
-      console.log(`${LOG_PREFIX} ✅ Contact validation passed for call ${session.callId}`);
+      console.log(`${LOG_PREFIX} âœ… Contact validation passed for call ${session.callId}`);
     }
 
     const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
@@ -2749,7 +2844,7 @@ openaiWs.on("open", async () => {
     let resolvedOrgName = campaignConfig?.organizationName || campaignConfig?.companyName;
     
     if (!resolvedOrgName) {
-      console.warn(`${LOG_PREFIX} ⚠️ MISSING ORG NAME: Campaign ${session.campaignId} has no organizationName or companyName. Check:
+      console.warn(`${LOG_PREFIX} âš ï¸ MISSING ORG NAME: Campaign ${session.campaignId} has no organizationName or companyName. Check:
   1. aiAgentSettings.persona.companyName
   2. problemIntelligenceOrgId linked to campaignOrganizations`);
       
@@ -2765,10 +2860,10 @@ openaiWs.on("open", async () => {
       
       if (!resolvedOrgName) {
         resolvedOrgName = 'our organization';
-        console.error(`${LOG_PREFIX} ❌ CRITICAL: No organization name found for campaign ${session.campaignId}. Using generic fallback. FIX: Set problemIntelligenceOrgId or aiAgentSettings.persona.companyName`);
+        console.error(`${LOG_PREFIX} âŒ CRITICAL: No organization name found for campaign ${session.campaignId}. Using generic fallback. FIX: Set problemIntelligenceOrgId or aiAgentSettings.persona.companyName`);
       }
     } else {
-      console.log(`${LOG_PREFIX} ✅ Organization name resolved: "${resolvedOrgName}"`);
+      console.log(`${LOG_PREFIX} âœ… Organization name resolved: "${resolvedOrgName}"`);
     }
 
       // Resolve agent name from persona or selected voice name
@@ -2819,7 +2914,7 @@ openaiWs.on("open", async () => {
       // Get Agent Defaults voice as fallback (user-configured global default)
       const [agentDefaultsRecord] = await db.select({ defaultVoice: agentDefaults.defaultVoice }).from(agentDefaults).limit(1);
       const globalDefaultVoice = agentDefaultsRecord?.defaultVoice || "marin";
-      // Voice priority: session override → virtual agent → campaign → agent defaults → fallback
+      // Voice priority: session override â†’ virtual agent â†’ campaign â†’ agent defaults â†’ fallback
       let voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || globalDefaultVoice;
       if (!VALID_VOICES.includes(voice)) {
         console.warn(`${LOG_PREFIX} Invalid voice '${voice}' detected. Falling back to 'marin'.`);
@@ -2944,7 +3039,7 @@ openaiWs.on("open", async () => {
             );
 
             if (!validation.valid) {
-              console.error(`${LOG_PREFIX} ❌ ${validation.message}`);
+              console.error(`${LOG_PREFIX} âŒ ${validation.message}`);
               console.error(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')}`);
               // BLOCK THE CALL - do not proceed with incomplete data
               await endCall(session.callId, 'error');
@@ -2955,7 +3050,7 @@ openaiWs.on("open", async () => {
           // For test sessions, FORCE the canonical opening to ensure identity verification behavior
           if (session.isTestSession) {
             const debugCompanyName = contactInfo?.companyName || contactInfo?.company;
-            console.log(`${LOG_PREFIX} ðŸ§ª Interpolating Canonical Opening. Company Name: "${debugCompanyName}", FullName: "${contactInfo?.fullName}"`);
+            console.log(`${LOG_PREFIX} Ã°Å¸Â§Âª Interpolating Canonical Opening. Company Name: "${debugCompanyName}", FullName: "${contactInfo?.fullName}"`);
             
             openingScript = interpolateCanonicalOpening(
               {
@@ -2969,7 +3064,7 @@ openaiWs.on("open", async () => {
               },
               canonicalAgentName
             );
-            console.log(`${LOG_PREFIX} ✅ Test session - forcing canonical gatekeeper-first opening: "${openingScript}"`);
+            console.log(`${LOG_PREFIX} âœ… Test session - forcing canonical gatekeeper-first opening: "${openingScript}"`);
           } else {
             // Interpolate the canonical opening with validated data
             openingScript = interpolateCanonicalOpening(
@@ -2984,7 +3079,7 @@ openaiWs.on("open", async () => {
               },
               canonicalAgentName
             );
-            console.log(`${LOG_PREFIX} ✅ Canonical opening variables validated and interpolated`);
+            console.log(`${LOG_PREFIX} âœ… Canonical opening variables validated and interpolated`);
           }
         } else {
           // Custom message without canonical variables - interpolate allowed tokens
@@ -3008,7 +3103,7 @@ openaiWs.on("open", async () => {
         );
 
         if (!validation.valid) {
-          console.warn(`${LOG_PREFIX} ⚠️ ${validation.message}`);
+          console.warn(`${LOG_PREFIX} âš ï¸ ${validation.message}`);
           console.warn(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')} - Falling back to generic opening`);
           useGenericOpening = true;
         }
@@ -3017,7 +3112,7 @@ openaiWs.on("open", async () => {
         if (useGenericOpening) {
           const testContactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
           openingScript = `Hello, may I speak with ${testContactName} please?`;
-          console.log(`${LOG_PREFIX} ⚠️ Validation failed - using simple opening message`);
+          console.log(`${LOG_PREFIX} âš ï¸ Validation failed - using simple opening message`);
         } else {
           // Use the canonical opening with interpolation
           openingScript = interpolateCanonicalOpening(
@@ -3032,7 +3127,7 @@ openaiWs.on("open", async () => {
             },
             canonicalAgentName
           );
-          console.log(`${LOG_PREFIX} ✅ Using canonical gatekeeper-first opening`);
+          console.log(`${LOG_PREFIX} âœ… Using canonical gatekeeper-first opening`);
         }
       }
 
@@ -3099,14 +3194,14 @@ openaiWs.on("open", async () => {
         const greetingRetryTimer = setTimeout(() => {
           if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
             if (session.openingRestartCount >= 1) {
-              console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): No agent audio after 10s but already retried ${session.openingRestartCount} time(s) — skipping to avoid repeated intro`);
+              console.warn(`${LOG_PREFIX} âš ï¸ GREETING SAFETY NET (OpenAI): No agent audio after 10s but already retried ${session.openingRestartCount} time(s) â€” skipping to avoid repeated intro`);
               queueSessionEvent(session, "realtime.loop_detected", {
                 valueText: "opening_retry_suppressed",
                 metadata: { provider: "openai", count: session.openingRestartCount },
               });
               return;
             }
-            console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 10s — retrying opening message (once)`);
+            console.warn(`${LOG_PREFIX} âš ï¸ GREETING SAFETY NET (OpenAI): greeting sent but no agent audio after 10s â€” retrying opening message (once)`);
             session.openingRestartCount += 1;
             // Force the next agent transcript to start a new entry so the retry is visible
             (session as any)._forceNewAgentTranscript = true;
@@ -3179,11 +3274,11 @@ openaiWs.on("open", async () => {
 
     openaiWs.on("open", () => {
       clearTimeout(connectionTimeout);
-      console.log(`${LOG_PREFIX} âœ… OpenAI Realtime connected for call: ${session.callId}`);
+      console.log(`${LOG_PREFIX} Ã¢Å“â€¦ OpenAI Realtime connected for call: ${session.callId}`);
       
       // Process any buffered audio frames
       if (session.audioFrameBuffer.length > 0) {
-        console.log(`${LOG_PREFIX} ðŸ“¤ Processing ${session.audioFrameBuffer.length} buffered audio frames...`);
+        console.log(`${LOG_PREFIX} Ã°Å¸â€œÂ¤ Processing ${session.audioFrameBuffer.length} buffered audio frames...`);
         // Note: Don't send buffered frames as they're already old
         // Just clear them and start fresh with new audio
         session.audioFrameBuffer = [];
@@ -3213,7 +3308,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
   const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 
   if (!apiKey && !projectId) {
-    console.error(`${LOG_PREFIX} ❌ GEMINI CONFIG ERROR: No API key or Project ID found`);
+    console.error(`${LOG_PREFIX} âŒ GEMINI CONFIG ERROR: No API key or Project ID found`);
     console.error(`${LOG_PREFIX} Set GEMINI_API_KEY or GOOGLE_AI_API_KEY in .env.local`);
     await endCall(session.callId, 'error');
     return;
@@ -3233,14 +3328,14 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // PARALLEL INITIALIZATION: Run Gemini connection AND database calls concurrently
     // This significantly reduces initialization time (from ~10-20s serial to ~3-5s parallel)
     console.log(`${LOG_PREFIX} Starting parallel initialization (Gemini + DB)...`);
-    console.log(`${LOG_PREFIX} 🔍 [Gemini] Session IDs: campaignId=${session.campaignId || 'EMPTY'}, contactId=${session.contactId || 'EMPTY'}, virtualAgentId=${session.virtualAgentId || 'EMPTY'}`);
+    console.log(`${LOG_PREFIX} ðŸ” [Gemini] Session IDs: campaignId=${session.campaignId || 'EMPTY'}, contactId=${session.contactId || 'EMPTY'}, virtualAgentId=${session.virtualAgentId || 'EMPTY'}`);
 
     const [geminiConnected, campaignConfig, contactInfoResult, agentConfig, agentDefaultsRecord] = await Promise.all([
       // Gemini connection
       (async () => {
         console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
         await provider.connectWithRetry(2);
-        console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API (+${Date.now() - initStartTime}ms)`);
+        console.log(`${LOG_PREFIX} âœ… Connected to Gemini Live API (+${Date.now() - initStartTime}ms)`);
         return true;
       })(),
       // Database calls - all in parallel (including agent defaults for voice fallback)
@@ -3257,10 +3352,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       const clampedCampaignMax = Math.min(campaignMaxDurationRaw, HARD_MAX_CALL_DURATION_SECONDS);
       session.campaignMaxCallDurationSeconds = clampedCampaignMax;
       console.log(
-        `${LOG_PREFIX} [Gemini] ⏱️ Campaign max call duration set to ${clampedCampaignMax}s (requested: ${campaignMaxDurationRaw}s, hard cap: ${HARD_MAX_CALL_DURATION_SECONDS}s)`
+        `${LOG_PREFIX} [Gemini] â±ï¸ Campaign max call duration set to ${clampedCampaignMax}s (requested: ${campaignMaxDurationRaw}s, hard cap: ${HARD_MAX_CALL_DURATION_SECONDS}s)`
       );
     } else {
-      console.log(`${LOG_PREFIX} [Gemini] ⏱️ Campaign max call duration not set or disabled (value: ${campaignConfig?.maxCallDurationSeconds ?? 'null'})`);
+      console.log(`${LOG_PREFIX} [Gemini] â±ï¸ Campaign max call duration not set or disabled (value: ${campaignConfig?.maxCallDurationSeconds ?? 'null'})`);
     }
 
     // Set campaign type on session for disposition validation
@@ -3295,7 +3390,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         const fallbackCompany = session.testContact.company || 'Test Company';
         contactInfo.company = fallbackCompany;
         contactInfo.companyName = fallbackCompany;
-        console.log(`${LOG_PREFIX} 🧪 [Gemini] Filled missing company from test contact: ${fallbackCompany}`);
+        console.log(`${LOG_PREFIX} ðŸ§ª [Gemini] Filled missing company from test contact: ${fallbackCompany}`);
       }
     }
 
@@ -3311,7 +3406,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     let resolvedOrgNameGemini = campaignConfig?.organizationName || campaignConfig?.companyName;
     
     if (!resolvedOrgNameGemini) {
-      console.warn(`${LOG_PREFIX} [Gemini] ⚠️ MISSING ORG NAME: Campaign ${session.campaignId} has no organizationName or companyName. Check:
+      console.warn(`${LOG_PREFIX} [Gemini] âš ï¸ MISSING ORG NAME: Campaign ${session.campaignId} has no organizationName or companyName. Check:
   1. aiAgentSettings.persona.companyName
   2. problemIntelligenceOrgId linked to campaignOrganizations`);
       
@@ -3327,10 +3422,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       
       if (!resolvedOrgNameGemini) {
         resolvedOrgNameGemini = 'our organization';
-        console.error(`${LOG_PREFIX} [Gemini] ❌ CRITICAL: No organization name found for campaign ${session.campaignId}. Using generic fallback. FIX: Set problemIntelligenceOrgId or aiAgentSettings.persona.companyName`);
+        console.error(`${LOG_PREFIX} [Gemini] âŒ CRITICAL: No organization name found for campaign ${session.campaignId}. Using generic fallback. FIX: Set problemIntelligenceOrgId or aiAgentSettings.persona.companyName`);
       }
     } else {
-      console.log(`${LOG_PREFIX} [Gemini] ✅ Organization name resolved: "${resolvedOrgNameGemini}"`);
+      console.log(`${LOG_PREFIX} [Gemini] âœ… Organization name resolved: "${resolvedOrgNameGemini}"`);
     }
 
     // Build system prompt - resolve agent name from persona or selected voice name
@@ -3387,10 +3482,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Agent Defaults voice fallback (already fetched in parallel init block above)
     const globalDefaultVoice = agentDefaultsRecord?.defaultVoice || "Kore";
-    // Voice priority: session override → virtual agent → campaign → agent defaults → fallback
+    // Voice priority: session override â†’ virtual agent â†’ campaign â†’ agent defaults â†’ fallback
     const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || globalDefaultVoice;
     const geminiVoice = mapVoiceToProvider(voice, 'google');
-    console.log(`${LOG_PREFIX} [Gemini] Voice selection: override=${session.voiceOverride || 'none'}, agent=${agentConfig?.voice || 'none'}, campaign=${campaignConfig?.voice || 'none'}, default=${globalDefaultVoice} → using "${voice}" → Gemini voice "${geminiVoice}"`);
+    console.log(`${LOG_PREFIX} [Gemini] Voice selection: override=${session.voiceOverride || 'none'}, agent=${agentConfig?.voice || 'none'}, campaign=${campaignConfig?.voice || 'none'}, default=${globalDefaultVoice} â†’ using "${voice}" â†’ Gemini voice "${geminiVoice}"`);
 
     // Map tools to ProviderTool format
     const providerTools = getAvailableTools(agentSettings.systemTools).map((tool) => ({
@@ -3426,18 +3521,18 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       await provider.configure(geminiConfig);
       console.log(`${LOG_PREFIX} Reconnect + reconfigure succeeded`);
     }
-    console.log(`${LOG_PREFIX} ✅ Gemini configured (+${Date.now() - initStartTime}ms)`);
+    console.log(`${LOG_PREFIX} âœ… Gemini configured (+${Date.now() - initStartTime}ms)`);
 
     // Track Gemini connection timing
     session.timingMetrics.geminiConnectedAt = new Date();
-    console.log(`${LOG_PREFIX} ⏱️ [TIMING] Gemini connected at ${session.timingMetrics.geminiConnectedAt.toISOString()}`);
+    console.log(`${LOG_PREFIX} â±ï¸ [TIMING] Gemini connected at ${session.timingMetrics.geminiConnectedAt.toISOString()}`);
 
     // Event handlers: Audio from Gemini -> Telnyx
     let audioOutChunks = 0;
     provider.on('audio:delta', (event: any) => {
       if (!event?.audioBuffer || !(event.audioBuffer instanceof Buffer)) {
-        if (!event?.audioBuffer) console.warn(`${LOG_PREFIX} ⚠️ audio:delta missing audioBuffer`);
-        else console.warn(`${LOG_PREFIX} ⚠️ audioBuffer is not a Buffer: ${typeof event.audioBuffer}`);
+        if (!event?.audioBuffer) console.warn(`${LOG_PREFIX} âš ï¸ audio:delta missing audioBuffer`);
+        else console.warn(`${LOG_PREFIX} âš ï¸ audioBuffer is not a Buffer: ${typeof event.audioBuffer}`);
         return;
       }
 
@@ -3460,20 +3555,20 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           ? session.timingMetrics.firstAgentAudioAt.getTime() - session.timingMetrics.geminiConnectedAt.getTime()
           : null;
         const callStartToFirstAudioMs = session.timingMetrics.firstAgentAudioAt.getTime() - session.startTime.getTime();
-        console.log(`${LOG_PREFIX} 🎤 First audio:delta queued for Telnyx: ${event.audioBuffer.length} bytes (format: ${event.format || 'g711_ulaw'})`);
-        console.log(`${LOG_PREFIX} ⏱️ [TIMING] First agent audio at ${session.timingMetrics.firstAgentAudioAt.toISOString()} (Gemini→Audio: ${geminiToFirstAudioMs}ms, CallStart→Audio: ${callStartToFirstAudioMs}ms)`);
-        // Mark greeting as sent — Gemini has started speaking (either naturally or via nudge)
+        console.log(`${LOG_PREFIX} ðŸŽ¤ First audio:delta queued for Telnyx: ${event.audioBuffer.length} bytes (format: ${event.format || 'g711_ulaw'})`);
+        console.log(`${LOG_PREFIX} â±ï¸ [TIMING] First agent audio at ${session.timingMetrics.firstAgentAudioAt.toISOString()} (Geminiâ†’Audio: ${geminiToFirstAudioMs}ms, CallStartâ†’Audio: ${callStartToFirstAudioMs}ms)`);
+        // Mark greeting as sent â€” Gemini has started speaking (either naturally or via nudge)
         if (!session.audioDetection.hasGreetingSent) {
           session.audioDetection.hasGreetingSent = true;
-          console.log(`${LOG_PREFIX} ✅ Gemini responded naturally to prospect audio — greeting marked as sent`);
+          console.log(`${LOG_PREFIX} âœ… Gemini responded naturally to prospect audio â€” greeting marked as sent`);
         }
-        // Clear the greeting retry timer — audio is flowing
+        // Clear the greeting retry timer â€” audio is flowing
         if ((session as any).greetingRetryTimer) {
           clearTimeout((session as any).greetingRetryTimer);
           (session as any).greetingRetryTimer = null;
         }
       } else if (audioOutChunks % 200 === 0) {
-        console.log(`${LOG_PREFIX} 🎤 Audio:delta stats: ${audioOutChunks} chunks queued, buffer=${session.telnyxOutboundBuffer.length}B, frames_sent=${session.telnyxOutboundFramesSent}`);
+        console.log(`${LOG_PREFIX} ðŸŽ¤ Audio:delta stats: ${audioOutChunks} chunks queued, buffer=${session.telnyxOutboundBuffer.length}B, frames_sent=${session.telnyxOutboundFramesSent}`);
       }
 
       enqueueTelnyxOutboundAudio(session, event.audioBuffer);
@@ -3490,6 +3585,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         session.detectedDisposition = 'voicemail';
         session.callOutcome = 'voicemail';
         recordVoicemailDetectedEvent(session, "gemini_early_voicemail_cue");
+        await endCall(session.callId, 'voicemail');
+        return;
+      }
+
+      if (shouldAbortForDtmfIvr(session, event.text)) {
+        console.log(`${LOG_PREFIX} [AudioGuard] Gemini fast DTMF IVR cue detected - ending call`);
+        session.transcripts.push({ role: 'user', text: event.text, timestamp: new Date() });
+        trimArray(session.transcripts, MAX_TRANSCRIPTS);
+        session.detectedDisposition = 'voicemail';
+        session.callOutcome = 'voicemail';
+        recordVoicemailDetectedEvent(session, "gemini_dtmf_ivr_fast_abort");
         await endCall(session.callId, 'voicemail');
         return;
       }
@@ -3561,7 +3667,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
           if (isVoicemail && shouldOverrideDisposition) {
             if (session.detectedDisposition && session.detectedDisposition !== 'voicemail') {
-              console.log(`${LOG_PREFIX} ⚠️ [Gemini] VOICEMAIL CORRECTION: AI had set disposition to '${session.detectedDisposition}' but transcript indicates voicemail`);
+              console.log(`${LOG_PREFIX} âš ï¸ [Gemini] VOICEMAIL CORRECTION: AI had set disposition to '${session.detectedDisposition}' but transcript indicates voicemail`);
             }
             console.log(`${LOG_PREFIX} [Gemini] VOICEMAIL DETECTED via transcript: "${event.text.substring(0, 60)}..."`);
             console.log(`${LOG_PREFIX} [Gemini] Immediately ending call ${session.callId} - NO voicemail will be left`);
@@ -3581,7 +3687,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
                     connected: false,
                     updatedAt: new Date()
                   }).where(eq(dialerCallAttempts.id, session.callAttemptId));
-                  console.log(`${LOG_PREFIX} ✅ [Gemini] Updated voicemailDetected=true for call attempt ${session.callAttemptId}`);
+                  console.log(`${LOG_PREFIX} âœ… [Gemini] Updated voicemailDetected=true for call attempt ${session.callAttemptId}`);
                 } catch (err) {
                   console.error(`${LOG_PREFIX} [Gemini] Failed to update voicemailDetected flag:`, err);
                 }
@@ -3680,10 +3786,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           const agentAudioToProspectSpeechMs = session.timingMetrics.firstAgentAudioAt
             ? session.timingMetrics.firstProspectSpeechAt.getTime() - session.timingMetrics.firstAgentAudioAt.getTime()
             : null;
-          console.log(`${LOG_PREFIX} ⏱️ [TIMING] First prospect speech at ${session.timingMetrics.firstProspectSpeechAt.toISOString()} (CallStart→Speech: ${callStartToFirstSpeechMs}ms, AgentAudio→ProspectSpeech: ${agentAudioToProspectSpeechMs}ms)`);
+          console.log(`${LOG_PREFIX} â±ï¸ [TIMING] First prospect speech at ${session.timingMetrics.firstProspectSpeechAt.toISOString()} (CallStartâ†’Speech: ${callStartToFirstSpeechMs}ms, AgentAudioâ†’ProspectSpeech: ${agentAudioToProspectSpeechMs}ms)`);
         }
 
-        console.log(`${LOG_PREFIX} ✅ [Gemini] HUMAN DETECTED for call ${session.callId} at ${session.audioDetection.humanDetectedAt.toISOString()}`);
+        console.log(`${LOG_PREFIX} âœ… [Gemini] HUMAN DETECTED for call ${session.callId} at ${session.audioDetection.humanDetectedAt.toISOString()}`);
 
         if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
           setImmediate(async () => {
@@ -3692,7 +3798,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
                 connected: true,
                 updatedAt: new Date()
               }).where(eq(dialerCallAttempts.id, session.callAttemptId));
-              console.log(`${LOG_PREFIX} ✅ [Gemini] Updated connected=true for call attempt ${session.callAttemptId}`);
+              console.log(`${LOG_PREFIX} âœ… [Gemini] Updated connected=true for call attempt ${session.callAttemptId}`);
             } catch (err) {
               console.error(`${LOG_PREFIX} [Gemini] Failed to update connected flag:`, err);
             }
@@ -3736,7 +3842,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
           session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
           trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
-          console.log(`${LOG_PREFIX} ✅ [Gemini] Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
+          console.log(`${LOG_PREFIX} âœ… [Gemini] Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
 
           // CRITICAL: Inject identity lock reminder to force immediate AI response
           // This prevents the "silence after identity confirmation" issue
@@ -3758,20 +3864,20 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
             session.conversationState.currentState = 'GATEKEEPER';
             session.conversationState.stateHistory.push('GATEKEEPER');
             trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
-            console.log(`${LOG_PREFIX} 🚪 [Gemini] GATEKEEPER DETECTED for call: ${session.callId} - Transitioning to GATEKEEPER state`);
+            console.log(`${LOG_PREFIX} ðŸšª [Gemini] GATEKEEPER DETECTED for call: ${session.callId} - Transitioning to GATEKEEPER state`);
 
             // Inject gatekeeper handling reminder so the agent engages properly
             const contactFirstName = contactInfo?.firstName || contactInfo?.fullName?.split(' ')[0] || 'the person';
             const agentName = resolvedAgentNameGemini || 'calling agent';
             const orgName = resolvedOrgNameGemini || 'our company';
             const gatekeeperReminder = `[GATEKEEPER DETECTED] You are speaking with a gatekeeper/receptionist, NOT ${contactFirstName}. ` +
-              `Do NOT repeat "May I speak with ${contactFirstName}?" again — they already heard you. ` +
+              `Do NOT repeat "May I speak with ${contactFirstName}?" again â€” they already heard you. ` +
               `ENGAGE with the gatekeeper warmly and answer their questions: ` +
               `If asked "What is this regarding?", say: "My name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${contactFirstName} available?" ` +
               `If asked "Who is calling?", say: "My name is ${agentName}, calling from ${orgName}." ` +
               `Be kind, polite, and professional. Make no more than 2 polite attempts. If refused, thank them sincerely and end the call.`;
             provider.sendTextMessage(gatekeeperReminder);
-            console.log(`${LOG_PREFIX} 🚪 [Gemini] Injected gatekeeper handling guidance for call: ${session.callId}`);
+            console.log(`${LOG_PREFIX} ðŸšª [Gemini] Injected gatekeeper handling guidance for call: ${session.callId}`);
 
             // Reset repetition tracking since gatekeeper is a major state transition
             if ('softResetRepetitionTracking' in provider) {
@@ -3809,7 +3915,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
               session.conversationState.userTurnsSinceLastReinforcement = 0;
               console.log(`${LOG_PREFIX} [StateReinforcement] Injected state reminder #${session.conversationState.stateReinforcementCount} for call: ${session.callId}`);
             } else {
-              console.log(`${LOG_PREFIX} [StateReinforcement] Deferred — provider mid-response for call: ${session.callId}`);
+              console.log(`${LOG_PREFIX} [StateReinforcement] Deferred â€” provider mid-response for call: ${session.callId}`);
             }
           }
         }
@@ -3881,7 +3987,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           session.timingMetrics.avgResponseLatencyMs = Math.round(
             latencies.reduce((a, b) => a + b, 0) / latencies.length
           );
-          console.log(`${LOG_PREFIX} ⏱️ [TIMING] Response latency: ${responseLatencyMs}ms (avg: ${session.timingMetrics.avgResponseLatencyMs}ms, samples: ${latencies.length})`);
+          console.log(`${LOG_PREFIX} â±ï¸ [TIMING] Response latency: ${responseLatencyMs}ms (avg: ${session.timingMetrics.avgResponseLatencyMs}ms, samples: ${latencies.length})`);
         }
       }
     });
@@ -3891,7 +3997,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     provider.on('response:cancelled', () => {
       console.log(`${LOG_PREFIX} [Gemini] Response cancelled/interrupted for call: ${session.callId}`);
 
-      // Clear stale audio from cancelled response — prevents contact hearing tail of interrupted utterance
+      // Clear stale audio from cancelled response â€” prevents contact hearing tail of interrupted utterance
       // (Same pattern as OpenAI barge-in handler at line 5512)
       session.telnyxOutboundBuffer = Buffer.alloc(0);
       session.telnyxOutboundLastSendAt = null;
@@ -3915,7 +4021,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
                 session.conversationState.userTurnsSinceLastReinforcement = 0;
                 console.log(`${LOG_PREFIX} [StateRecovery] Post-interruption state reinforcement for call: ${session.callId}`);
               } else if (provider.isResponding) {
-                console.log(`${LOG_PREFIX} [StateRecovery] Skipped reinforcement — provider mid-response for call: ${session.callId}`);
+                console.log(`${LOG_PREFIX} [StateRecovery] Skipped reinforcement â€” provider mid-response for call: ${session.callId}`);
               }
             }, 1500);
           }
@@ -3930,11 +4036,11 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       const MAX_CONSECUTIVE_FAILURES = 3;
       const failureCount = session.functionCallFailures.get(event.name) || 0;
       if (failureCount >= MAX_CONSECUTIVE_FAILURES) {
-        console.warn(`${LOG_PREFIX} 🔴 CIRCUIT BREAKER: ${event.name} has failed ${failureCount} times consecutively. Forcing graceful resolution.`);
+        console.warn(`${LOG_PREFIX} ðŸ”´ CIRCUIT BREAKER: ${event.name} has failed ${failureCount} times consecutively. Forcing graceful resolution.`);
 
         if (event.name === 'end_call' || event.name === 'submit_disposition') {
           // For end_call/disposition stuck in a loop: force end the call
-          console.warn(`${LOG_PREFIX} 🔴 Force-ending call due to ${event.name} loop (${failureCount} failures)`);
+          console.warn(`${LOG_PREFIX} ðŸ”´ Force-ending call due to ${event.name} loop (${failureCount} failures)`);
           provider.respondToFunctionCall(event.callId, {
             success: true,
             message: 'Call ending gracefully due to repeated issues.'
@@ -3957,7 +4063,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       const shouldCountFailure = result && result.success === false && result.countAsFailure !== false;
       if (shouldCountFailure) {
         session.functionCallFailures.set(event.name, failureCount + 1);
-        console.warn(`${LOG_PREFIX} ⚠️ ${event.name} failure #${failureCount + 1}/${MAX_CONSECUTIVE_FAILURES} before circuit breaker triggers`);
+        console.warn(`${LOG_PREFIX} âš ï¸ ${event.name} failure #${failureCount + 1}/${MAX_CONSECUTIVE_FAILURES} before circuit breaker triggers`);
       } else if (result && result.success === false && result.countAsFailure === false) {
         session.functionCallFailures.set(event.name, 0);
         console.log(`${LOG_PREFIX} [Gemini] ${event.name} blocked by policy guard (not counting as tool failure)`);
@@ -3966,7 +4072,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         session.functionCallFailures.set(event.name, 0);
       }
 
-      // Clear any buffered audio before sending tool response — Gemini will generate fresh audio
+      // Clear any buffered audio before sending tool response â€” Gemini will generate fresh audio
       // after receiving the function result, and stale pre-tool-call frames would overlap
       if (session.telnyxOutboundBuffer.length > 0) {
         console.log(`${LOG_PREFIX} [ToolCall] Clearing ${session.telnyxOutboundBuffer.length}B outbound buffer before tool response`);
@@ -3995,9 +4101,9 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     if (isDeepgramEnabled()) {
       (session as any).deepgramEnabled = true;
       (session as any).deepgramSession = null; // Will be initialized on first audio
-      console.log(`${LOG_PREFIX} 🎙️ Deepgram enabled - will start when audio flows`);
+      console.log(`${LOG_PREFIX} ðŸŽ™ï¸ Deepgram enabled - will start when audio flows`);
     } else {
-      console.log(`${LOG_PREFIX} ⚠️ Deepgram not configured - transcription will use Gemini fallback`);
+      console.log(`${LOG_PREFIX} âš ï¸ Deepgram not configured - transcription will use Gemini fallback`);
     }
 
     // Start audio health monitoring (enforces max call duration, silence detection, etc.)
@@ -4026,7 +4132,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // Do NOT force-feed a greeting text. Instead, let Gemini hear the prospect's audio
     // (their "Hello?") and respond naturally per its system prompt instructions:
     // "When you hear ANY human voice, your FIRST response MUST be to ask for the contact by name."
-    // The audio stream is already flowing to Gemini — it will hear the prospect and respond.
+    // The audio stream is already flowing to Gemini â€” it will hear the prospect and respond.
     console.log(`${LOG_PREFIX} Gemini ready - audio flowing, will respond naturally to prospect's greeting`);
 
     // Store the opening script for speech-triggered greeting
@@ -4103,17 +4209,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // The retry timer is cleared as soon as the first agent audio chunk arrives (line ~3320).
     const greetingRetryTimer = setTimeout(() => {
       if (session.isActive && session.audioDetection.hasGreetingSent && !session.timingMetrics.firstAgentAudioAt) {
-        // Only retry ONCE — never send the opening more than twice total.
+        // Only retry ONCE â€” never send the opening more than twice total.
         // Multiple retries cause the agent to repeat its intro, confusing the prospect.
         if (session.openingRestartCount >= 1) {
-          console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: No agent audio after 10s but already retried ${session.openingRestartCount} time(s) — skipping to avoid repeated intro`);
+          console.warn(`${LOG_PREFIX} âš ï¸ GREETING SAFETY NET: No agent audio after 10s but already retried ${session.openingRestartCount} time(s) â€” skipping to avoid repeated intro`);
           queueSessionEvent(session, "realtime.loop_detected", {
             valueText: "opening_retry_suppressed",
             metadata: { provider: "google", count: session.openingRestartCount },
           });
           return;
         }
-        console.warn(`${LOG_PREFIX} ⚠️ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 10s — retrying opening message (once)`);
+        console.warn(`${LOG_PREFIX} âš ï¸ GREETING SAFETY NET: hasGreetingSent=true but no agent audio produced after 10s â€” retrying opening message (once)`);
         session.openingRestartCount += 1;
         // Force the next agent transcript to start a new entry so the retry is visible
         (session as any)._forceNewAgentTranscript = true;
@@ -4126,16 +4232,16 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     }, 10000);
     (session as any).greetingRetryTimer = greetingRetryTimer;
 
-    console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);
+    console.log(`${LOG_PREFIX} âœ… Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);
   } catch (error: any) {
-    console.error(`${LOG_PREFIX} ❌ Gemini init failed:`, error.message || error);
+    console.error(`${LOG_PREFIX} âŒ Gemini init failed:`, error.message || error);
     console.error(`${LOG_PREFIX} Stack:`, error.stack);
     // Check for common errors
     if (error.message?.includes('401') || error.message?.includes('UNAUTHENTICATED')) {
-      console.error(`${LOG_PREFIX} 🔑 Authentication error - check your GEMINI_API_KEY`);
+      console.error(`${LOG_PREFIX} ðŸ”‘ Authentication error - check your GEMINI_API_KEY`);
     }
     if (error.message?.includes('timeout')) {
-      console.error(`${LOG_PREFIX} ⏱️ Connection timeout - Gemini API may be unreachable`);
+      console.error(`${LOG_PREFIX} â±ï¸ Connection timeout - Gemini API may be unreachable`);
     }
     await endCall(session.callId, 'error');
   }
@@ -4146,25 +4252,25 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
   const LOG_PREFIX = '[Voice-Dialer]';
   
   // DIAGNOSTIC: Log ALL function calls from AI for debugging disposition issues
-  console.log(`${LOG_PREFIX} [Gemini] 🔧 AI Tool Call: ${name}`, JSON.stringify(args).substring(0, 200));
+  console.log(`${LOG_PREFIX} [Gemini] ðŸ”§ AI Tool Call: ${name}`, JSON.stringify(args).substring(0, 200));
 
   const toolCallKey = `${name}:${callId || JSON.stringify(args)}`;
   if (session.handledToolCalls.has(toolCallKey)) {
-    console.log(`${LOG_PREFIX} [Gemini] ⚠️ Duplicate tool call ignored: ${toolCallKey}`);
+    console.log(`${LOG_PREFIX} [Gemini] âš ï¸ Duplicate tool call ignored: ${toolCallKey}`);
     return { success: true, message: 'Duplicate tool call ignored' };
   }
   session.handledToolCalls.add(toolCallKey);
   
   switch (name) {
     case 'submit_disposition': {
-      console.log(`${LOG_PREFIX} [Gemini] ✅ AI called submit_disposition with: disposition=${args.disposition}, confidence=${args.confidence}, reason=${args.reason?.substring(0, 100)}`);
+      console.log(`${LOG_PREFIX} [Gemini] âœ… AI called submit_disposition with: disposition=${args.disposition}, confidence=${args.confidence}, reason=${args.reason?.substring(0, 100)}`);
       
       // CRITICAL: Prevent repeated disposition submissions (AI spam loop protection)
       if (session.detectedDisposition) {
         console.log(`${LOG_PREFIX} [Gemini] Disposition already set to ${session.detectedDisposition}, ignoring duplicate submit_disposition call`);
         // If voicemail already set, force end the call to prevent infinite loop
         if (session.detectedDisposition === 'voicemail' && session.isActive && !session.isEnding) {
-          console.log(`${LOG_PREFIX} [Gemini] ⚠️ Voicemail already submitted but call still active - forcing end_call`);
+          console.log(`${LOG_PREFIX} [Gemini] âš ï¸ Voicemail already submitted but call still active - forcing end_call`);
           setImmediate(() => endCall(session.callId, 'voicemail'));
         }
         return { success: true, message: 'Disposition already recorded' };
@@ -4193,15 +4299,15 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
       // SAFEGUARD: Auto-correct invalid_data to not_interested if there was a meaningful conversation
       // EXCEPTION: Keep invalid_data if AI explicitly confirmed wrong number/person left
       if (disposition === 'invalid_data' && callDurationSeconds >= MINIMUM_QUALIFIED_DURATION && !isLegitimateInvalidData) {
-        console.warn(`${LOG_PREFIX} ⚠️ [Gemini] DISPOSITION CORRECTION: AI marked ${callDurationSeconds}s call as invalid_data without wrong number evidence. Auto-correcting to not_interested.`);
+        console.warn(`${LOG_PREFIX} âš ï¸ [Gemini] DISPOSITION CORRECTION: AI marked ${callDurationSeconds}s call as invalid_data without wrong number evidence. Auto-correcting to not_interested.`);
         disposition = 'not_interested';
       } else if (disposition === 'invalid_data' && isLegitimateInvalidData) {
-        console.log(`${LOG_PREFIX} ✅ [Gemini] invalid_data confirmed: ${reason}`);
+        console.log(`${LOG_PREFIX} âœ… [Gemini] invalid_data confirmed: ${reason}`);
       }
 
       // Also correct if there are transcripts indicating a real conversation (without wrong number indicators)
       if (disposition === 'invalid_data' && session.transcripts.length > 2 && !isLegitimateInvalidData) {
-        console.warn(`${LOG_PREFIX} ⚠️ [Gemini] DISPOSITION CORRECTION: Call has ${session.transcripts.length} transcript entries but marked as invalid_data. Auto-correcting to not_interested.`);
+        console.warn(`${LOG_PREFIX} âš ï¸ [Gemini] DISPOSITION CORRECTION: Call has ${session.transcripts.length} transcript entries but marked as invalid_data. Auto-correcting to not_interested.`);
         disposition = 'not_interested';
       }
 
@@ -4215,12 +4321,12 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
       );
 
       if (disposition === 'no_answer' && hasActiveResponses) {
-        console.warn(`${LOG_PREFIX} 🚫 [Gemini] BLOCKING no_answer DISPOSITION: Prospect IS responding (${userResponses.join(', ')}). This indicates audio issues, not disengagement.`);
-        console.warn(`${LOG_PREFIX} 💡 [Gemini] Instructing AI to continue conversation - ask "Can you hear me?"`);
+        console.warn(`${LOG_PREFIX} ðŸš« [Gemini] BLOCKING no_answer DISPOSITION: Prospect IS responding (${userResponses.join(', ')}). This indicates audio issues, not disengagement.`);
+        console.warn(`${LOG_PREFIX} ðŸ’¡ [Gemini] Instructing AI to continue conversation - ask "Can you hear me?"`);
         // Return error to force AI to continue the conversation
         return {
           success: false,
-          error: 'INVALID DISPOSITION: You cannot use no_answer when the prospect IS responding. The prospect said: ' + userResponses.join(', ') + '. This indicates audio issues - they cannot hear you clearly. Say "I apologize, can you hear me?" and continue the conversation. Only use no_answer after 60+ seconds of COMPLETE silence.',
+          error: 'INVALID DISPOSITION: You cannot use no_answer when the prospect IS responding. The prospect said: ' + userResponses.join(', ') + '. This indicates audio issues. Say "I apologize for the connection issue. Can you hear me clearly now?" Wait for confirmation, then restart with "May I speak with [Contact Name]?". Only use no_answer after 60+ seconds of COMPLETE silence.',
           countAsFailure: false,
         };
       }
@@ -4254,7 +4360,7 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
               text: s.text,
               timestamp: new Date(s.timestamp),
             }));
-            console.log(`${LOG_PREFIX} [Gemini] 🔄 Using ${agentTranscripts.length} Deepgram agent transcripts for validation (native-audio mode)`);
+            console.log(`${LOG_PREFIX} [Gemini] ðŸ”„ Using ${agentTranscripts.length} Deepgram agent transcripts for validation (native-audio mode)`);
           } else if (userTurnCount >= 5 && callDurationSec >= 60) {
             // No agent transcripts from any source - we CANNOT verify booking was completed
             // CRITICAL FIX: Do NOT bypass validation here - require evidence in the reason field
@@ -4267,12 +4373,12 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
               (reasonLower.includes('meeting') && (reasonLower.includes('confirmed') || reasonLower.includes('set')));
 
             if (reasonHasBookingEvidence) {
-              console.log(`${LOG_PREFIX} ✅ [Gemini] Native-audio mode: No transcripts but reason contains booking evidence. Allowing qualified_lead. Reason: ${reason}`);
+              console.log(`${LOG_PREFIX} âœ… [Gemini] Native-audio mode: No transcripts but reason contains booking evidence. Allowing qualified_lead. Reason: ${reason}`);
               session.detectedDisposition = disposition;
               return { success: true };
             } else {
               // Block - require AI to complete booking flow first
-              console.warn(`${LOG_PREFIX} 🚫 [Gemini] Native-audio mode: No transcripts and reason lacks booking evidence. Blocking qualified_lead.`);
+              console.warn(`${LOG_PREFIX} ðŸš« [Gemini] Native-audio mode: No transcripts and reason lacks booking evidence. Blocking qualified_lead.`);
               return {
                 success: false,
                 error: `INCOMPLETE BOOKING: Your reason "${reason}" does not confirm booking was completed. Before submitting qualified_lead, you MUST:
@@ -4364,7 +4470,7 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
         const missingSteps: string[] = [];
 
         // FUNDAMENTAL CHECK: Must have some agent dialogue (but keep thresholds low)
-        // The AI was in the conversation — trust its judgment on qualification
+        // The AI was in the conversation â€” trust its judgment on qualification
         if (!hasMinimalAgentDialogue && !hasSubstantialAgentDialogue) {
           missingSteps.push('have a conversation with the prospect (minimum 2 agent turns)');
         }
@@ -4388,7 +4494,7 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
           }
         }
 
-        // Qualification questions are advisory — log but don't block
+        // Qualification questions are advisory â€” log but don't block
         // The AI was in the conversation and knows if it asked the right questions
         const qualificationCriteria = session.qualificationCriteria;
         if (qualificationCriteria && qualificationCriteria.trim().length > 0) {
@@ -4415,20 +4521,20 @@ Only AFTER completing these steps, submit qualified_lead with a reason like: "Me
             agentTranscriptText.includes('would you');
 
           if (!reasonHasQualification && !agentAskedQuestions) {
-            console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: Qualification questions may not have been addressed, but AI says qualified. Allowing.`);
+            console.log(`${LOG_PREFIX} â„¹ï¸ [Gemini] Advisory: Qualification questions may not have been addressed, but AI says qualified. Allowing.`);
           }
         }
 
         // Goodbye is nice to have, not a blocking requirement
         if (!hasGoodbye) {
-          console.log(`${LOG_PREFIX} ℹ️ [Gemini] Advisory: No goodbye detected, but not blocking disposition.`);
+          console.log(`${LOG_PREFIX} â„¹ï¸ [Gemini] Advisory: No goodbye detected, but not blocking disposition.`);
         }
 
         if (missingSteps.length > 0) {
-          console.warn(`${LOG_PREFIX} 🚫 [Gemini] BLOCKING qualified_lead DISPOSITION: Booking flow incomplete.`);
-          console.warn(`${LOG_PREFIX} 📊 Agent turns: ${agentTranscripts.length}, Agent words: ${agentWordCount}`);
-          console.warn(`${LOG_PREFIX} ❌ Missing: ${missingSteps.join(', ')}`);
-          console.warn(`${LOG_PREFIX} 💡 Instructing AI to complete booking flow before ending call`);
+          console.warn(`${LOG_PREFIX} ðŸš« [Gemini] BLOCKING qualified_lead DISPOSITION: Booking flow incomplete.`);
+          console.warn(`${LOG_PREFIX} ðŸ“Š Agent turns: ${agentTranscripts.length}, Agent words: ${agentWordCount}`);
+          console.warn(`${LOG_PREFIX} âŒ Missing: ${missingSteps.join(', ')}`);
+          console.warn(`${LOG_PREFIX} ðŸ’¡ Instructing AI to complete booking flow before ending call`);
           return {
             success: false,
             error: isAppointmentCampaign
@@ -4443,14 +4549,14 @@ Only AFTER completing these steps can you submit the disposition.`
               : `INCOMPLETE FOLLOW-UP: You cannot submit qualified_lead yet. You MUST first: ${missingSteps.join('; ')}.
 
 DO THIS NOW:
-1. "Great — what's the best email to send it to?" (or confirm it by spelling it out)
-2. After they confirm, say "Perfect — I’ll send it over right now. Thank you for your time today!"
+1. "Great â€” what's the best email to send it to?" (or confirm it by spelling it out)
+2. After they confirm, say "Perfect â€” Iâ€™ll send it over right now. Thank you for your time today!"
 
 Only AFTER completing these steps can you submit the disposition.`,
             countAsFailure: false,
           };
         }
-        console.log(`${LOG_PREFIX} ✅ [Gemini] qualified_lead validation passed: agentTurns=${agentTranscripts.length}, words=${agentWordCount}, emailConfirmed=${hasEmailConfirmation}, timeProposed=${agentProposedTime}, goodbye=${hasGoodbye}, campaignType=${campaignType || 'unknown'}`);
+        console.log(`${LOG_PREFIX} âœ… [Gemini] qualified_lead validation passed: agentTurns=${agentTranscripts.length}, words=${agentWordCount}, emailConfirmed=${hasEmailConfirmation}, timeProposed=${agentProposedTime}, goodbye=${hasGoodbye}, campaignType=${campaignType || 'unknown'}`);
       }
 
       if (disposition === 'not_interested' && isMinimalHumanInteraction(session.transcripts)) {
@@ -4459,12 +4565,12 @@ Only AFTER completing these steps can you submit the disposition.`,
       }
 
       session.detectedDisposition = disposition;
-      console.log(`${LOG_PREFIX} [Gemini] Disposition: ${args.disposition}${disposition !== args.disposition ? ` → ${disposition} (auto-corrected)` : ''} (duration: ${callDurationSeconds}s, reason: ${reason})`);
+      console.log(`${LOG_PREFIX} [Gemini] Disposition: ${args.disposition}${disposition !== args.disposition ? ` â†’ ${disposition} (auto-corrected)` : ''} (duration: ${callDurationSeconds}s, reason: ${reason})`);
       
       // CRITICAL: Auto-terminate voicemail calls immediately after disposition
       // The AI should hang up on voicemail, but if it doesn't, we force it
       if (disposition === 'voicemail') {
-        console.log(`${LOG_PREFIX} [Gemini] 📞 Voicemail detected - auto-triggering end_call to prevent infinite loop`);
+        console.log(`${LOG_PREFIX} [Gemini] ðŸ“ž Voicemail detected - auto-triggering end_call to prevent infinite loop`);
         setImmediate(() => endCall(session.callId, 'voicemail'));
       }
       
@@ -4506,7 +4612,7 @@ Only AFTER completing these steps can you submit the disposition.`,
       // CRITICAL: Prevent duplicate end_call processing (AI spam loop protection)
       // Gemini can call end_call multiple times in a loop after the call has ended
       if (session.isEnding) {
-        console.log(`${LOG_PREFIX} [Gemini] ⚠️ end_call already requested, ignoring duplicate call. Reason: ${args.reason || 'none'}`);
+        console.log(`${LOG_PREFIX} [Gemini] âš ï¸ end_call already requested, ignoring duplicate call. Reason: ${args.reason || 'none'}`);
         return { success: true, message: 'Call already ending' };
       }
 
@@ -4529,12 +4635,12 @@ Only AFTER completing these steps can you submit the disposition.`,
         (reason.includes('hello') || reason.includes('no engagement') || reason.includes('no interaction') || reason.includes('no meaningful'));
 
       if (isAudioIssueScenario) {
-        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - AUDIO ISSUE DETECTED: Prospect saying hello/responding but AI thinks no engagement`);
-        console.warn(`${LOG_PREFIX} [Gemini] 📢 Recent user transcripts: ${JSON.stringify(recentUserTranscripts)}`);
-        console.warn(`${LOG_PREFIX} [Gemini] 💡 Instructing AI to ask "Can you hear me?" and continue conversation`);
+        console.warn(`${LOG_PREFIX} [Gemini] ðŸš« BLOCKING END_CALL - AUDIO ISSUE DETECTED: Prospect saying hello/responding but AI thinks no engagement`);
+        console.warn(`${LOG_PREFIX} [Gemini] ðŸ“¢ Recent user transcripts: ${JSON.stringify(recentUserTranscripts)}`);
+        console.warn(`${LOG_PREFIX} [Gemini] ðŸ’¡ Instructing AI to ask "Can you hear me?" and continue conversation`);
         return {
           success: false,
-          error: 'AUDIO ISSUE DETECTED: The prospect IS responding (saying hello). This indicates they cannot hear you clearly. DO NOT end the call. Instead: (1) Say "I apologize, can you hear me?" (2) Wait for their response (3) If they confirm, restart your greeting. Only end after 60+ seconds of COMPLETE silence with zero response.',
+          error: 'AUDIO ISSUE DETECTED: The prospect IS responding (saying hello). This indicates they cannot hear you clearly. DO NOT end the call. Instead: (1) Say "I apologize for the connection issue. Can you hear me clearly now?" (2) Wait for their response (3) If they confirm, restart with "May I speak with [Contact Name]?" Only end after 60+ seconds of COMPLETE silence with zero response.',
           countAsFailure: false,
         };
       }
@@ -4553,10 +4659,10 @@ Only AFTER completing these steps can you submit the disposition.`,
 
       if (identityConfirmed && !hasDeliveredValue && !isNotInterested && !isExplicitStop &&
           session.detectedDisposition !== 'voicemail' && session.detectedDisposition !== 'invalid_data') {
-        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Value proposition NOT delivered yet! Identity confirmed but agent only said ${agentWordCount} words.`);
+        console.warn(`${LOG_PREFIX} [Gemini] ðŸš« BLOCKING END_CALL - Value proposition NOT delivered yet! Identity confirmed but agent only said ${agentWordCount} words.`);
         return {
           success: false,
-          error: 'STOP — you have NOT delivered your value proposition yet. The prospect confirmed their identity but you haven\'t explained why you\'re calling. Before ending, you MUST deliver your pitch based on the campaign objective and talking points. Only AFTER the prospect responds can you end the call.',
+          error: 'STOP â€” you have NOT delivered your value proposition yet. The prospect confirmed their identity but you haven\'t explained why you\'re calling. Before ending, you MUST deliver your pitch based on the campaign objective and talking points. Only AFTER the prospect responds can you end the call.',
           countAsFailure: false,
         };
       }
@@ -4582,10 +4688,10 @@ Only AFTER completing these steps can you submit the disposition.`,
         callDurationSeconds < 45 &&
         !isLegitimateEarlyEnd
       ) {
-        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - intro/purpose not fully delivered before termination.`);
+        console.warn(`${LOG_PREFIX} [Gemini] ðŸš« BLOCKING END_CALL - intro/purpose not fully delivered before termination.`);
         return {
           success: false,
-          error: 'STOP — your opening was incomplete. You confirmed the prospect\'s identity but never delivered your intro and purpose. Say this now: "Hi [First Name], this is [Agent Name] calling on behalf of [Organization] — [single-sentence purpose]. Would that be worth a quick conversation?" Wait for their response before continuing.',
+          error: 'STOP - your opening was incomplete. You confirmed identity but did not finish the intro and purpose. Say this now in two short sentences: "This is [Agent Name] calling on behalf of [Organization]. I\'m calling to [clear purpose, e.g., offer our free white paper]." Then ask one brief engagement question and wait for their response.',
           countAsFailure: false,
         };
       }
@@ -4622,16 +4728,16 @@ Only AFTER completing these steps can you submit the disposition.`,
       // The farewell must be in the LAST agent statement, not just somewhere in the transcript
       const requiresFarewell = !isLegitimateEarlyEnd && userTranscriptCount > 0;
       if (requiresFarewell && !hasProperClosingFarewell) {
-        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Missing proper closing farewell from agent.`);
+        console.warn(`${LOG_PREFIX} [Gemini] ðŸš« BLOCKING END_CALL - Missing proper closing farewell from agent.`);
         console.warn(`${LOG_PREFIX} [Gemini] Last agent statement: "${lastAgentText.substring(0, 100)}..."`);
         return {
           success: false,
-          error: 'STOP — you have NOT said a proper farewell yet. Before ending the call, you MUST: (1) Confirm the appointment/outcome details, (2) Say "Thank you so much for your time today! Have a great day!", (3) WAIT for the prospect to respond with their goodbye, (4) ONLY THEN call end_call. NEVER hang up immediately after confirming appointment details or email.',
+          error: 'STOP â€” you have NOT said a proper farewell yet. Before ending the call, you MUST: (1) Confirm the appointment/outcome details, (2) Say "Thank you so much for your time today! Have a great day!", (3) WAIT for the prospect to respond with their goodbye, (4) ONLY THEN call end_call. NEVER hang up immediately after confirming appointment details or email.',
           countAsFailure: false,
         };
       }
 
-      // CRITICAL: Prospect-led disconnect — agent said farewell but prospect hasn't responded yet
+      // CRITICAL: Prospect-led disconnect â€” agent said farewell but prospect hasn't responded yet
       // Must wait for the prospect to say "bye", "thanks", "take care" etc. before disconnecting
       if (requiresFarewell && hasProperClosingFarewell && !userSaidFarewell) {
         // Check if the very last transcript entry is the agent's farewell (prospect hasn't spoken since)
@@ -4651,8 +4757,8 @@ Only AFTER completing these steps can you submit the disposition.`,
       }
 
       if (isPrematureTermination && reasonSuggestsHangup && !isLegitimateEarlyEnd) {
-        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING PREMATURE END_CALL: duration=${callDurationSeconds}s, userTurns=${userTranscriptCount}, reason="${reason}"`);
-        console.warn(`${LOG_PREFIX} [Gemini] ⏳ AI incorrectly assumed hang-up. Continuing conversation - prospect may still be listening.`);
+        console.warn(`${LOG_PREFIX} [Gemini] ðŸš« BLOCKING PREMATURE END_CALL: duration=${callDurationSeconds}s, userTurns=${userTranscriptCount}, reason="${reason}"`);
+        console.warn(`${LOG_PREFIX} [Gemini] â³ AI incorrectly assumed hang-up. Continuing conversation - prospect may still be listening.`);
         // Return success to prevent AI from spamming end_call, but don't actually end the call
         return {
           success: false,
@@ -4672,6 +4778,9 @@ Only AFTER completing these steps can you submit the disposition.`,
         const isAppointmentCampaign = isAppointmentCampaignType(campaignType);
         const isContentCampaign = isContentCampaignType(campaignType);
         const hasBookedMeetingEvidence = hasAppointmentBookingEvidence(session, reason);
+        const hasExplicitCallbackLanguage =
+          isExplicitCallbackRequestTranscript(reason) ||
+          hasExplicitCallbackRequest(session.transcripts);
         
         // If prospect hung up after speaking, they're not interested (not "no answer")
         if (reason.includes('hung up') && hasUserTranscripts) {
@@ -4690,7 +4799,7 @@ Only AFTER completing these steps can you submit the disposition.`,
         }
         // If reason indicates a COMPLETED BOOKING/QUALIFICATION FLOW
         // This catches cases where submit_disposition was blocked but the AI completed the flow.
-        // Trust the AI's judgment — it was in the conversation.
+        // Trust the AI's judgment â€” it was in the conversation.
         else if (
           userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
           (!isAppointmentCampaign || hasBookedMeetingEvidence) &&
@@ -4700,9 +4809,9 @@ Only AFTER completing these steps can you submit the disposition.`,
            (reason.includes('email') && reason.includes('confirmed')))
         ) {
           session.detectedDisposition = 'qualified_lead';
-          console.log(`${LOG_PREFIX} [Gemini] ✅ Inferred disposition: qualified_lead (from end_call reason with booking evidence: "${reason}")`);
+          console.log(`${LOG_PREFIX} [Gemini] âœ… Inferred disposition: qualified_lead (from end_call reason with booking evidence: "${reason}")`);
         }
-        // Content acceptance (send info, whitepaper, follow-up with email confirmed) → qualified_lead
+        // Content acceptance (send info, whitepaper, follow-up with email confirmed) â†’ qualified_lead
         // For content syndication campaigns, accepting content delivery IS the campaign objective.
         // "Send me the whitepaper" + email confirmed = QUALIFIED, not needs_review.
         else if (
@@ -4716,18 +4825,18 @@ Only AFTER completing these steps can you submit the disposition.`,
             session.detectedDisposition = 'qualified_lead';
             console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: qualified_lead (content accepted/email confirmed for ${campaignType || 'unknown'} campaign: "${reason}")`);
           } else {
-            session.detectedDisposition = 'callback_requested';
-            console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: callback_requested (follow-up path agreed: "${reason}")`);
+            session.detectedDisposition = hasExplicitCallbackLanguage ? 'callback_requested' : 'needs_review';
+            console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: ${session.detectedDisposition} (content/follow-up without booking evidence: "${reason}")`);
           }
         }
-        // Polite goodbye after a real conversation with engagement → callback_requested (not needs_review)
+        // Polite goodbye after a real conversation is ambiguous unless callback timing is explicit.
         else if (
           userTranscriptCount >= 2 && callDurationSeconds >= 30 &&
           (reason.includes('follow up') || reason.includes('follow-up') ||
            reason.includes('polite goodbye') || reason.includes('call back'))
         ) {
-          session.detectedDisposition = 'callback_requested';
-          console.log(`${LOG_PREFIX} [Gemini] 📞 Inferred disposition: callback_requested (follow-up agreed: "${reason}")`);
+          session.detectedDisposition = hasExplicitCallbackLanguage ? 'callback_requested' : 'needs_review';
+          console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: ${session.detectedDisposition} (follow-up reason: "${reason}")`);
         }
       }
       
@@ -4758,7 +4867,7 @@ Only AFTER completing these steps can you submit the disposition.`,
         };
       }
 
-      console.log(`${LOG_PREFIX} [Gemini] 📅 MEETING BOOKED for call ${session.callId}:`, {
+      console.log(`${LOG_PREFIX} [Gemini] ðŸ“… MEETING BOOKED for call ${session.callId}:`, {
         date: args.meeting_date,
         time: args.meeting_time,
         timezone: args.timezone || 'not specified',
@@ -4792,7 +4901,7 @@ Only AFTER completing these steps can you submit the disposition.`,
       };
     }
     case 'confirm_meeting_details': {
-      console.log(`${LOG_PREFIX} [Gemini] 📋 Confirming meeting details for call ${session.callId}:`, {
+      console.log(`${LOG_PREFIX} [Gemini] ðŸ“‹ Confirming meeting details for call ${session.callId}:`, {
         date: args.proposed_date,
         time: args.proposed_time,
         email: args.email_to_confirm
@@ -4805,7 +4914,7 @@ Only AFTER completing these steps can you submit the disposition.`,
       };
     }
     case 'detect_voicemail_and_hangup': {
-      console.log(`${LOG_PREFIX} [Gemini] 📞 AI called detect_voicemail_and_hangup - ending call as voicemail`);
+      console.log(`${LOG_PREFIX} [Gemini] ðŸ“ž AI called detect_voicemail_and_hangup - ending call as voicemail`);
 
       if (session.detectedDisposition === 'voicemail') {
         console.log(`${LOG_PREFIX} [Gemini] Voicemail already detected, ensuring call ends`);
@@ -4827,7 +4936,7 @@ Only AFTER completing these steps can you submit the disposition.`,
               connected: false,
               updatedAt: new Date()
             }).where(eq(dialerCallAttempts.id, session.callAttemptId));
-            console.log(`${LOG_PREFIX} ✅ [Gemini] Updated voicemailDetected=true (AI tool call) for call attempt ${session.callAttemptId}`);
+            console.log(`${LOG_PREFIX} âœ… [Gemini] Updated voicemailDetected=true (AI tool call) for call attempt ${session.callAttemptId}`);
           } catch (err) {
             console.error(`${LOG_PREFIX} [Gemini] Failed to update voicemailDetected flag:`, err);
           }
@@ -4913,7 +5022,7 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
       result = interpolateBracketTokens(result, voiceTemplateValues);
     }
     // Strip any remaining unresolved bracket tokens (e.g. [Your Name] when no persona is configured)
-    // Also clean up artifacts like "this is  with" → "this is with"
+    // Also clean up artifacts like "this is  with" â†’ "this is with"
     result = result.replace(/\[(?:Your Name|Name|Company|First Name|Title)\]/gi, '').replace(/\s{2,}/g, ' ').replace(/this is\s+with/i, 'this is a representative with').trim();
     console.log(`${LOG_PREFIX} [Gemini Opening] Interpolated result: "${result}"`);
     if (!result?.trim()) {
@@ -5122,7 +5231,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           session.timingMetrics.firstAgentAudioAt = new Date();
           if (!session.audioDetection.hasGreetingSent) {
             session.audioDetection.hasGreetingSent = true;
-            console.log(`${LOG_PREFIX} ✅ OpenAI responded naturally — greeting marked as sent`);
+            console.log(`${LOG_PREFIX} âœ… OpenAI responded naturally â€” greeting marked as sent`);
           }
           if ((session as any).greetingRetryTimer) {
             clearTimeout((session as any).greetingRetryTimer);
@@ -5147,7 +5256,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           console.log(`${LOG_PREFIX} Audio frames received: ${session.audioFrameCount}, bytes: ${session.audioBytesSent} (Last packet: ${audioBuffer.length} bytes / ~${packetDuration}ms), playback: ${Math.round(session.audioPlaybackMs)}ms, call: ${session.callId}`);
         }
 
-        // Enqueue decoded μ-law bytes and let the pacer send exact 20ms (160-byte) frames.
+        // Enqueue decoded Î¼-law bytes and let the pacer send exact 20ms (160-byte) frames.
         // Never send partial frames and never send large OpenAI chunks as a single Telnyx media event.
         if (session.telnyxWs?.readyState === WebSocket.OPEN) {
           if (!session.streamSid) {
@@ -5295,6 +5404,21 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           break;
         }
 
+        if (shouldAbortForDtmfIvr(session, message.transcript)) {
+          console.log(`${LOG_PREFIX} [AudioGuard] DTMF IVR detected in fast window - ending call immediately`);
+          session.transcripts.push({
+            role: 'user',
+            text: message.transcript,
+            timestamp: new Date(),
+          });
+          trimArray(session.transcripts, MAX_TRANSCRIPTS);
+          session.detectedDisposition = 'voicemail';
+          session.callOutcome = 'voicemail';
+          recordVoicemailDetectedEvent(session, "openai_dtmf_ivr_fast_abort");
+          await endCall(session.callId, 'voicemail');
+          break;
+        }
+
         // INTELLIGENT AUDIO DETECTION - Determine if this is human, IVR, or music
         const audioType = detectAudioType(message.transcript, session);
         const lowerTranscript = message.transcript.toLowerCase();
@@ -5377,7 +5501,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
           if (isVoicemail && shouldOverrideDisposition) {
             if (session.detectedDisposition && session.detectedDisposition !== 'voicemail') {
-              console.log(`${LOG_PREFIX} ⚠️ VOICEMAIL CORRECTION: AI had set disposition to '${session.detectedDisposition}' but transcript indicates voicemail`);
+              console.log(`${LOG_PREFIX} âš ï¸ VOICEMAIL CORRECTION: AI had set disposition to '${session.detectedDisposition}' but transcript indicates voicemail`);
             }
             console.log(`${LOG_PREFIX} VOICEMAIL DETECTED via transcript: "${message.transcript.substring(0, 60)}..."`);
             console.log(`${LOG_PREFIX} Immediately ending call ${session.callId} - NO voicemail will be left`);
@@ -5403,7 +5527,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
                     connected: false,
                     updatedAt: new Date()
                   }).where(eq(dialerCallAttempts.id, session.callAttemptId));
-                  console.log(`${LOG_PREFIX} ✅ Updated voicemailDetected=true for call attempt ${session.callAttemptId}`);
+                  console.log(`${LOG_PREFIX} âœ… Updated voicemailDetected=true for call attempt ${session.callAttemptId}`);
                 } catch (err) {
                   console.error(`${LOG_PREFIX} Failed to update voicemailDetected flag:`, err);
                 }
@@ -5465,7 +5589,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
                         connected: false,
                         updatedAt: new Date()
                       }).where(eq(dialerCallAttempts.id, session.callAttemptId));
-                      console.log(`${LOG_PREFIX} ✅ Updated voicemailDetected=true (IVR repeat) for call attempt ${session.callAttemptId}`);
+                      console.log(`${LOG_PREFIX} âœ… Updated voicemailDetected=true (IVR repeat) for call attempt ${session.callAttemptId}`);
                     } catch (err) {
                       console.error(`${LOG_PREFIX} Failed to update voicemailDetected flag:`, err);
                     }
@@ -5512,19 +5636,19 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
               session.technicalIssue.firstDetectedAt = new Date();
             }
             
-            console.log(`${LOG_PREFIX} ⚠️ AUDIO QUALITY COMPLAINT DETECTED (${session.technicalIssue.issueCount}x): "${audioIssue.phrase}" - call: ${session.callId}`);
+            console.log(`${LOG_PREFIX} âš ï¸ AUDIO QUALITY COMPLAINT DETECTED (${session.technicalIssue.issueCount}x): "${audioIssue.phrase}" - call: ${session.callId}`);
             
             // If this is the 2nd+ complaint, offer to call back
             if (session.technicalIssue.issueCount >= 2 && !session.technicalIssue.offeredCallback) {
               session.technicalIssue.offeredCallback = true;
-              console.log(`${LOG_PREFIX} 📞 Multiple audio complaints - triggering callback offer for call: ${session.callId}`);
+              console.log(`${LOG_PREFIX} ðŸ“ž Multiple audio complaints - triggering callback offer for call: ${session.callId}`);
               
               // Inject a system message to offer callback
               await injectAudioQualityResponse(session, 'callback_offer');
               break; // Don't process further, let the callback offer play out
             } else if (session.technicalIssue.issueCount === 1) {
               // First complaint - repeat and check
-              console.log(`${LOG_PREFIX} 🔄 First audio complaint - repeating message for call: ${session.callId}`);
+              console.log(`${LOG_PREFIX} ðŸ”„ First audio complaint - repeating message for call: ${session.callId}`);
               await injectAudioQualityResponse(session, 'repeat_check');
               break;
             }
@@ -5535,7 +5659,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             session.audioDetection.humanDetected = true;
             session.audioDetection.humanDetectedAt = new Date();
             markFirstHumanAudio(session, "openai_input_transcript");
-            console.log(`${LOG_PREFIX} ✅ HUMAN DETECTED for call ${session.callId} at ${session.audioDetection.humanDetectedAt.toISOString()}`);
+            console.log(`${LOG_PREFIX} âœ… HUMAN DETECTED for call ${session.callId} at ${session.audioDetection.humanDetectedAt.toISOString()}`);
 
             // Update connected flag in database immediately (non-blocking)
             // This ensures real-time stats are accurate
@@ -5546,7 +5670,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
                     connected: true,
                     updatedAt: new Date()
                   }).where(eq(dialerCallAttempts.id, session.callAttemptId));
-                  console.log(`${LOG_PREFIX} ✅ Updated connected=true for call attempt ${session.callAttemptId}`);
+                  console.log(`${LOG_PREFIX} âœ… Updated connected=true for call attempt ${session.callAttemptId}`);
                 } catch (err) {
                   console.error(`${LOG_PREFIX} Failed to update connected flag:`, err);
                 }
@@ -6104,14 +6228,14 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
     // Repeated sounds that transcription picks up
     /^(\w{1,3}\s?){10,}$/,                   // Very short repeated syllables
     /^(la|na|da|ba|ma|hmm|uh|ah){5,}/i,      // Repeated musical syllables
-    /[♪♫]/,                                  // Music notes (if transcribed)
+    /[â™ªâ™«]/,                                  // Music notes (if transcribed)
     // Gibberish that's not words
     /^[^aeiou\s]{20,}$/i,                    // Long strings without vowels (garbled)
   ];
 
   for (const pattern of musicPatterns) {
     if (pattern.test(normalizedText)) {
-      console.log(`${LOG_PREFIX} 🎵 MUSIC/HOLD DETECTED: "${normalizedText.substring(0, 50)}..."`);
+      console.log(`${LOG_PREFIX} ðŸŽµ MUSIC/HOLD DETECTED: "${normalizedText.substring(0, 50)}..."`);
       return { type: 'music', confidence: 0.85 };
     }
   }
@@ -6159,30 +6283,53 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
     return { type: 'human', confidence: Math.min(humanConfidence, 0.95) };
   }
 
-  // Couldn't determine with high confidence - treat as potential human to be safe
-  console.log(`${LOG_PREFIX} [AudioDetect] UNKNOWN (treating as human): "${normalizedText.substring(0, 50)}..."`);
-  return { type: 'human', confidence: 0.5 }; // Changed from 'unknown' to 'human' - be safe and respond
+  const weakAutomationCue =
+    /\b(press|main menu|extension|dial by name|please hold|transferring|stay on the line)\b/i.test(normalizedText);
+  if (weakAutomationCue && !session.audioDetection.humanDetected) {
+    console.log(`${LOG_PREFIX} [AudioDetect] WEAK AUTOMATION CUE -> IVR: "${normalizedText.substring(0, 50)}..."`);
+    return { type: 'ivr', confidence: 0.75 };
+  }
+
+  if (!session.audioDetection.humanDetected && !session.audioDetection.hasGreetingSent) {
+    console.log(`${LOG_PREFIX} [AudioDetect] UNKNOWN pre-human audio - waiting for clearer signal`);
+    return { type: 'unknown', confidence: 0.45 };
+  }
+
+  // Mid-conversation ambiguous audio should still be treated as human to avoid dead air.
+  console.log(`${LOG_PREFIX} [AudioDetect] UNKNOWN mid-conversation (treating as human): "${normalizedText.substring(0, 50)}..."`);
+  return { type: 'human', confidence: 0.5 };
 }
 
 function hasOpeningPurposeDelivered(agentTranscriptText: string): boolean {
   const text = normalizeTranscriptForComparison(agentTranscriptText);
   if (!text) return false;
 
-  const introPattern =
+  const introSignal =
     text.includes("calling on behalf of") ||
     text.includes("this is") ||
     text.includes("my name is");
 
-  const purposePattern =
+  const purposeSignal =
     text.includes("im calling to") ||
     text.includes("i am calling to") ||
+    text.includes("im calling about") ||
+    text.includes("i am calling about") ||
+    text.includes("im calling to offer") ||
+    text.includes("i am calling to offer") ||
+    text.includes("quick reason for my call") ||
     text.includes("reason im calling") ||
     text.includes("reason i am calling") ||
     text.includes("white paper") ||
+    text.includes("leading with finance");
+
+  const valueSignal =
     text.includes("offer") ||
+    text.includes("free") ||
+    text.includes("share") ||
+    text.includes("send") ||
     text.includes("help");
 
-  return introPattern && purposePattern;
+  return introSignal && purposeSignal && valueSignal;
 }
 
 /**
@@ -6325,13 +6472,14 @@ async function injectAudioQualityResponse(session: OpenAIRealtimeSession, respon
       instructions = `The contact just indicated they couldn't hear you properly (audio quality issue detected).
 
 RESPOND IMMEDIATELY with this EXACT pattern:
-1. Acknowledge: "I apologize for the connection quality."
+1. Acknowledge: "I apologize for the connection issue."
 2. Check: "Can you hear me clearly now?"
 3. Wait for their response.
 
-EXAMPLE: "I apologize for the connection quality. Can you hear me clearly now?"
+EXAMPLE: "I apologize for the connection issue. Can you hear me clearly now?"
 
-If they confirm they can hear you, continue with your introduction.
+If they confirm they can hear you, restart the opening with:
+"May I speak with [Contact Name]?"
 If they still can't hear, you will offer to call them back.
 
 DO NOT:
@@ -6378,7 +6526,7 @@ This is CRITICAL - do not ignore the audio issue or continue as if nothing happe
     
     session.openaiWs.send(JSON.stringify(responseCreate));
     
-    console.log(`${LOG_PREFIX} 🎤 Injected audio quality response (${responseType}) for call: ${session.callId}`);
+    console.log(`${LOG_PREFIX} ðŸŽ¤ Injected audio quality response (${responseType}) for call: ${session.callId}`);
     
   } catch (err) {
     console.error(`${LOG_PREFIX} Failed to inject audio quality response:`, err);
@@ -6398,7 +6546,7 @@ async function injectGeminiAudioQualityResponse(
     let message: string;
 
     if (responseType === 'repeat_check') {
-      message = "I apologize for the connection quality. Can you hear me clearly now?";
+      message = "I apologize for the connection issue. Can you hear me clearly now?";
     } else {
       message = "I sincerely apologize - it seems we have a poor connection today. Would it be better if I called you back in a few minutes, or is there another number that might work better?";
     }
@@ -6406,7 +6554,7 @@ async function injectGeminiAudioQualityResponse(
     // Send as a text message that Gemini will speak
     provider.sendTextMessage(message);
 
-    console.log(`${LOG_PREFIX} 🎤 [Gemini] Injected audio quality response (${responseType}) for call: ${session.callId}`);
+    console.log(`${LOG_PREFIX} ðŸŽ¤ [Gemini] Injected audio quality response (${responseType}) for call: ${session.callId}`);
 
   } catch (err) {
     console.error(`${LOG_PREFIX} Failed to inject Gemini audio quality response:`, err);
@@ -6460,13 +6608,15 @@ async function injectGeminiIdentityLockReminder(
       // Prospect asked a question immediately after confirming identity
       promptMessage = `[SYSTEM UPDATE: Identity CONFIRMED. The prospect just said: "${prospectTranscript}"
 
-They asked a question. Respond IMMEDIATELY — value first, under 7 seconds.
+They asked a question. Respond IMMEDIATELY â€” value first, under 7 seconds.
 
-Deliver your value proposition from the campaign context and talking points. Then STOP and WAIT for their response.
+Use this exact structure with no filler:
+"This is [Agent Name] calling on behalf of [Organization]. I'm calling to [clear purpose]."
+Then answer their question in one short sentence. STOP and WAIT for their response.
 
 RULES:
-- Lead with the VALUE — answer their curiosity with the campaign offer immediately
-- Do NOT waste time on pleasantries — get to the value proposition in the first sentence
+- Lead with the VALUE â€” answer their curiosity with the campaign offer immediately
+- Do NOT waste time on pleasantries â€” get to the value proposition in the first sentence
 - NEVER ask discovery or qualification questions before delivering the offer
 - Your entire response MUST be under 7 seconds
 - PERMANENT: Identity is LOCKED. You will NEVER ask "May I speak with [Name]?" again for the rest of this call, even after silence or interruption.]`;
@@ -6474,27 +6624,29 @@ RULES:
       console.log(`${LOG_PREFIX} [Gemini] EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript?.substring(0, 80) ?? ''}..."`);
     } else {
       // Standard identity confirmation - proceed with value-lead intro (5-7 seconds max)
-      promptMessage = `[SYSTEM UPDATE: Identity CONFIRMED. Speak IMMEDIATELY — value first, no pleasantries.
+      promptMessage = `[SYSTEM UPDATE: Identity CONFIRMED. Speak IMMEDIATELY â€” value first, no pleasantries.
 
-Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
+Use this exact structure with no filler:
+"This is [Agent Name] calling on behalf of [Organization]. I'm calling to [clear purpose]."
+Then add one concise campaign value sentence. STOP and WAIT for their response.
 
 ${session.campaignType === 'content_syndication' ? `CONTENT SYNDICATION FIXED FLOW: Keep this sequence locked on every call: (1) brief rapport, (2) role/company relevance, (3) asset intro + 1-2 value points, (4) confirm email, (5) ask explicit permission to send, (6) optional consent for future updates, (7) polite close. Only the campaign context changes (asset/topic/value details), not the flow.
 
 ` : ''}${session.campaignType === 'lead_qualification' ? `LEAD QUALIFICATION FLOW: This campaign is awareness + qualification. After this short value-first intro and after the prospect responds, ask a MAXIMUM of TWO concise discovery questions to confirm two things: (1) whether they see a gap in current demand gen results, and (2) whether they are open to a problem-first approach. Do not over-question. Then secure a concrete next step: short discovery call OR permission to send briefing with follow-up date.
 
 ` : ''}RULES:
-- Lead with the VALUE — not with "thanks for confirming" or pleasantries
-- Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
+- Lead with the VALUE â€” not with "thanks for confirming" or pleasantries
+- Do NOT say "Great", "Thanks for confirming", "I appreciate your time" â€” go straight to the offer
 - NEVER ask "do you have a moment?" or "would you be interested?"
 - NEVER ask discovery or qualification questions before the offer
-- Your entire intro MUST be under 7 seconds — cut every unnecessary word
+- Your entire intro MUST be under 7 seconds â€” cut every unnecessary word
 - PERMANENT: Identity is LOCKED. You will NEVER ask "May I speak with [Name]?" again for the rest of this call, even after silence or interruption.]`;
     }
 
     // Send as a text message that will prompt Gemini to respond
     provider.sendTextMessage(promptMessage);
 
-    console.log(`${LOG_PREFIX} ✅ [Gemini] Injected identity lock reminder for call: ${session.callId} (earlyQuestion: ${hasEarlyQuestion})`);
+    console.log(`${LOG_PREFIX} âœ… [Gemini] Injected identity lock reminder for call: ${session.callId} (earlyQuestion: ${hasEarlyQuestion})`);
 
   } catch (err) {
     console.error(`${LOG_PREFIX} Failed to inject Gemini identity lock reminder:`, err);
@@ -6558,23 +6710,29 @@ function shouldSendGreeting(session: OpenAIRealtimeSession): boolean {
   // Count human vs non-human patterns
   const humanCount = recentPatterns.filter(p => p.type === 'human').length;
   const ivrMusicCount = recentPatterns.filter(p => p.type === 'ivr' || p.type === 'music').length;
+  const unknownCount = recentPatterns.filter(p => p.type === 'unknown').length;
 
   // If we detect IVR or music, don't greet yet
   if (ivrMusicCount > 0) {
-    console.log(`${LOG_PREFIX} 🚫 Not greeting - IVR/music detected (${ivrMusicCount} patterns)`);
+    console.log(`${LOG_PREFIX} ðŸš« Not greeting - IVR/music detected (${ivrMusicCount} patterns)`);
+    return false;
+  }
+
+  if (humanCount === 0 && unknownCount >= 2) {
+    console.log(`${LOG_PREFIX} [OpenGuard] Holding greeting - unknown pickup audio (${unknownCount}) without human confirmation`);
     return false;
   }
 
   // If we have at least 2 human speech patterns, it's safe to greet
   if (humanCount >= 2) {
-    console.log(`${LOG_PREFIX} ✅ Ready to greet - ${humanCount} human speech patterns detected`);
+    console.log(`${LOG_PREFIX} âœ… Ready to greet - ${humanCount} human speech patterns detected`);
     session.audioDetection.humanDetected = true;
     session.audioDetection.humanDetectedAt = new Date();
     return true;
   }
 
   // Need more data
-  console.log(`${LOG_PREFIX} ⏳ Waiting for more audio data (${humanCount} human, ${ivrMusicCount} ivr/music, ${recentPatterns.length} total)`);
+  console.log(`${LOG_PREFIX} â³ Waiting for more audio data (${humanCount} human, ${ivrMusicCount} ivr/music, ${recentPatterns.length} total)`);
   return false;
 }
 
@@ -6627,13 +6785,13 @@ async function injectIdentityLockReminder(session: OpenAIRealtimeSession, prospe
 
 CRITICAL: You MUST respond IMMEDIATELY. Do NOT go silent. Do NOT pause.
 
-Lead with value first, under 7 seconds. Deliver your value proposition from the campaign context and talking points.
-
-Then STOP and WAIT for their response.
+Use this exact two-sentence structure with no filler:
+"This is [Agent Name] calling on behalf of [Organization]. I'm calling to [clear purpose]."
+Then answer their direct question in one short sentence and STOP.
 
 RULES:
-- Lead with the VALUE — answer their curiosity with the campaign offer immediately
-- Do NOT waste time on pleasantries — get to the value proposition in the first sentence
+- Lead with the VALUE â€” answer their curiosity with the campaign offer immediately
+- Do NOT waste time on pleasantries â€” get to the value proposition in the first sentence
 - NEVER ask discovery or qualification questions before delivering the offer
 - Your entire response MUST be under 7 seconds`;
 
@@ -6644,18 +6802,20 @@ RULES:
 
 CRITICAL: Within 2 SECONDS of this message, you MUST be speaking. Silence = FAILURE.
 
-Deliver your value proposition from the campaign context and talking points in ONE breath (under 7 seconds). Then STOP and WAIT for their response.
+Use this exact two-sentence structure with no filler:
+"This is [Agent Name] calling on behalf of [Organization]. I'm calling to [clear purpose]."
+Then add one concise campaign value sentence and STOP.
 
 ${session.campaignType === 'content_syndication' ? `CONTENT SYNDICATION FIXED FLOW: Keep this sequence locked on every call: (1) brief rapport, (2) role/company relevance, (3) asset intro + 1-2 value points, (4) confirm email, (5) ask explicit permission to send, (6) optional consent for future updates, (7) polite close. Only the campaign context changes (asset/topic/value details), not the flow.
 
 ` : ''}${session.campaignType === 'lead_qualification' ? `LEAD QUALIFICATION FLOW: This campaign is awareness + qualification. After this short value-first intro and after the prospect responds, ask a MAXIMUM of TWO concise discovery questions to confirm two things: (1) whether they see a gap in current demand gen results, and (2) whether they are open to a problem-first approach. Do not over-question. Then secure a concrete next step: short discovery call OR permission to send briefing with follow-up date.
 
 ` : ''}RULES:
-- Lead with the VALUE — not with "thanks for confirming" or pleasantries
-- Do NOT say "Great", "Thanks for confirming", "I appreciate your time" — go straight to the offer
+- Lead with the VALUE â€” not with "thanks for confirming" or pleasantries
+- Do NOT say "Great", "Thanks for confirming", "I appreciate your time" â€” go straight to the offer
 - NEVER ask "do you have a moment?" or "would you be interested?"
 - NEVER ask discovery or qualification questions before the offer
-- Your entire intro MUST be under 7 seconds — cut every unnecessary word`;
+- Your entire intro MUST be under 7 seconds â€” cut every unnecessary word`;
     }
 
     // Add a system message to reinforce identity lock
@@ -6712,7 +6872,7 @@ function updateConversationState(
   session.conversationState.currentState = newState;
   session.conversationState.stateHistory.push(newState);
   trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
-  console.log(`${LOG_PREFIX} State transition: ${oldState} → ${newState} for call: ${session.callId}`);
+  console.log(`${LOG_PREFIX} State transition: ${oldState} â†’ ${newState} for call: ${session.callId}`);
 }
 
 function normalizeCallSummary(args: unknown): CallSummary | null {
@@ -6845,7 +7005,7 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
 
     const toolCallKey = `${name}:${call_id || JSON.stringify(args)}`;
     if (session.handledToolCalls.has(toolCallKey)) {
-      console.log(`${LOG_PREFIX} ⚠️ Duplicate tool call ignored: ${toolCallKey}`);
+      console.log(`${LOG_PREFIX} âš ï¸ Duplicate tool call ignored: ${toolCallKey}`);
       if (session.openaiWs?.readyState === WebSocket.OPEN && call_id) {
         session.openaiWs.send(JSON.stringify({
           type: "conversation.item.create",
@@ -6864,7 +7024,7 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
       case "submit_disposition":
         {
           if (session.detectedDisposition) {
-            console.log(`${LOG_PREFIX} ⚠️ Disposition already set to ${session.detectedDisposition}; ignoring duplicate submit_disposition`);
+            console.log(`${LOG_PREFIX} âš ï¸ Disposition already set to ${session.detectedDisposition}; ignoring duplicate submit_disposition`);
             if (session.openaiWs?.readyState === WebSocket.OPEN && call_id) {
               session.openaiWs.send(JSON.stringify({
                 type: "conversation.item.create",
@@ -6887,13 +7047,13 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
           
           // QUALITY GATE: Warn and log if AI is marking short calls as qualified
           if (disposition === 'qualified_lead' && callDurationSeconds < MINIMUM_QUALIFIED_DURATION) {
-            console.warn(`${LOG_PREFIX} ⚠️ QUALITY ALERT: AI marked call ${session.callId} as qualified_lead after only ${callDurationSeconds}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Confidence: ${confidence}. Reason: ${reason}`);
-            console.warn(`${LOG_PREFIX} ⚠️ This lead will be flagged for immediate QA review due to short duration.`);
+            console.warn(`${LOG_PREFIX} âš ï¸ QUALITY ALERT: AI marked call ${session.callId} as qualified_lead after only ${callDurationSeconds}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Confidence: ${confidence}. Reason: ${reason}`);
+            console.warn(`${LOG_PREFIX} âš ï¸ This lead will be flagged for immediate QA review due to short duration.`);
           }
           
           // Also warn if confidence is too high for a short call
           if (disposition === 'qualified_lead' && confidence > 0.7 && callDurationSeconds < MINIMUM_QUALIFIED_DURATION) {
-            console.warn(`${LOG_PREFIX} ⚠️ HIGH CONFIDENCE SHORT CALL: AI has ${confidence} confidence for qualified_lead but call is only ${callDurationSeconds}s. This may indicate AI hallucination.`);
+            console.warn(`${LOG_PREFIX} âš ï¸ HIGH CONFIDENCE SHORT CALL: AI has ${confidence} confidence for qualified_lead but call is only ${callDurationSeconds}s. This may indicate AI hallucination.`);
           }
 
           // SAFEGUARD: Auto-correct invalid_data to not_interested if there was a meaningful conversation
@@ -6918,18 +7078,18 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
 
           if (disposition === 'invalid_data' && callDurationSeconds >= MINIMUM_QUALIFIED_DURATION && !isLegitimateInvalidData) {
             // If it's a long call without explicit wrong number indication, auto-correct
-            console.warn(`${LOG_PREFIX} ⚠️ DISPOSITION CORRECTION: AI marked ${callDurationSeconds}s call as invalid_data without wrong number evidence.`);
-            console.warn(`${LOG_PREFIX} ⚠️ Auto-correcting disposition from invalid_data to not_interested. Reason given: ${reason}`);
+            console.warn(`${LOG_PREFIX} âš ï¸ DISPOSITION CORRECTION: AI marked ${callDurationSeconds}s call as invalid_data without wrong number evidence.`);
+            console.warn(`${LOG_PREFIX} âš ï¸ Auto-correcting disposition from invalid_data to not_interested. Reason given: ${reason}`);
             finalDisposition = 'not_interested';
           } else if (disposition === 'invalid_data' && isLegitimateInvalidData) {
-            console.log(`${LOG_PREFIX} ✅ invalid_data confirmed: ${reason}`);
+            console.log(`${LOG_PREFIX} âœ… invalid_data confirmed: ${reason}`);
           }
 
           // Also check transcript content for conversation indicators
           if (disposition === 'invalid_data' && session.transcripts.length > 2 && !isLegitimateInvalidData) {
-            console.warn(`${LOG_PREFIX} ⚠️ SUSPICIOUS invalid_data: Call has ${session.transcripts.length} transcript entries but marked as invalid_data.`);
+            console.warn(`${LOG_PREFIX} âš ï¸ SUSPICIOUS invalid_data: Call has ${session.transcripts.length} transcript entries but marked as invalid_data.`);
             if (finalDisposition === 'invalid_data') {
-              console.warn(`${LOG_PREFIX} ⚠️ Auto-correcting to not_interested based on transcript activity.`);
+              console.warn(`${LOG_PREFIX} âš ï¸ Auto-correcting to not_interested based on transcript activity.`);
               finalDisposition = 'not_interested';
             }
           }
@@ -6941,7 +7101,7 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
 
           session.detectedDisposition = finalDisposition;
           if (finalDisposition !== disposition) {
-            console.log(`${LOG_PREFIX} Disposition: ${disposition} → ${finalDisposition} (auto-corrected, confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
+            console.log(`${LOG_PREFIX} Disposition: ${disposition} â†’ ${finalDisposition} (auto-corrected, confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
           } else {
             console.log(`${LOG_PREFIX} Disposition detected: ${disposition} (confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
           }
@@ -7083,7 +7243,7 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
             });
             
             if (response.ok) {
-              console.log(`${LOG_PREFIX} ✅ DTMF "${digits}" sent successfully for call ${session.callId}`);
+              console.log(`${LOG_PREFIX} âœ… DTMF "${digits}" sent successfully for call ${session.callId}`);
               if (session.openaiWs?.readyState === WebSocket.OPEN) {
                 session.openaiWs.send(JSON.stringify({
                   type: "conversation.item.create",
@@ -7203,7 +7363,7 @@ async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transc
   if (isUnclear && !session.detectedDisposition) {
     console.log(`${LOG_PREFIX} Unclear/garbled audio detected for call: ${session.callId}, transcript: "${transcript}"`);
     // Don't set disposition yet - let the agent ask for clarification
-    // This stays in STATE_IDENTITY_CHECK and asks: "Sorry, I didn't catch that—could you say it again?"
+    // This stays in STATE_IDENTITY_CHECK and asks: "Sorry, I didn't catch thatâ€”could you say it again?"
     return;
   }
 
@@ -7260,13 +7420,13 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
           ? session.timingMetrics.firstProspectAudioAt.getTime() - session.timingMetrics.geminiConnectedAt.getTime()
           : null;
         console.log(`${LOG_PREFIX} First inbound audio frame received from Telnyx for call: ${session.callId} (Gemini provider)`);
-        console.log(`${LOG_PREFIX} ⏱️ [TIMING] First prospect audio at ${session.timingMetrics.firstProspectAudioAt.toISOString()} (CallStart→ProspectAudio: ${callStartToFirstAudioMs}ms, GeminiReady→ProspectAudio: ${geminiConnectedToFirstAudioMs}ms)`);
+        console.log(`${LOG_PREFIX} â±ï¸ [TIMING] First prospect audio at ${session.timingMetrics.firstProspectAudioAt.toISOString()} (CallStartâ†’ProspectAudio: ${callStartToFirstAudioMs}ms, GeminiReadyâ†’ProspectAudio: ${geminiConnectedToFirstAudioMs}ms)`);
 
         // NATURAL FLOW: Do NOT send greeting on first audio frame.
-        // Audio is already streaming to Gemini — it will hear the prospect's "Hello?"
+        // Audio is already streaming to Gemini â€” it will hear the prospect's "Hello?"
         // and respond naturally per its system prompt instructions.
         // The greeting text is only used as a fallback nudge if Gemini stays silent too long.
-        console.log(`${LOG_PREFIX} 🎙️ First audio detected - Gemini is listening, will respond naturally`);
+        console.log(`${LOG_PREFIX} ðŸŽ™ï¸ First audio detected - Gemini is listening, will respond naturally`);
       } else if (session.telnyxInboundFrames % 25 === 0) {
         debugLog(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId} (Gemini)`);
       }
@@ -7283,7 +7443,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
       if ((session as any).deepgramEnabled && !(session as any).deepgramSession) {
         // Use the correct encoding based on the call's audio format (PCMA/alaw for UK/UAE, PCMU/mulaw for US)
         const deepgramEncoding = session.audioFormat === 'g711_alaw' ? 'alaw' : 'mulaw';
-        console.log(`${LOG_PREFIX} 🎙️ Starting Deepgram on first audio for call ${session.callId} (encoding: ${deepgramEncoding})`);
+        console.log(`${LOG_PREFIX} ðŸŽ™ï¸ Starting Deepgram on first audio for call ${session.callId} (encoding: ${deepgramEncoding})`);
         const deepgramSession = startTranscriptionSession(session.callId, {
           callAttemptId: session.callAttemptId,
           campaignId: session.campaignId,
@@ -7379,7 +7539,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                 // and causes Gemini to get confused about conversation state, leading to
                 // premature disposition calls and "prospect did not respond" errors.
                 //
-                // The audio stream → Gemini handles the actual conversation.
+                // The audio stream â†’ Gemini handles the actual conversation.
                 // Deepgram transcripts are stored in session.transcripts for:
                 // - Post-call analytics
                 // - Transcript storage
@@ -7394,7 +7554,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                     session.audioDetection.humanDetected = true;
                     session.audioDetection.humanDetectedAt = new Date();
                     markFirstHumanAudio(session, "deepgram_contact_transcript");
-                    console.log(`${LOG_PREFIX} ✅ [Deepgram] HUMAN DETECTED for call ${session.callId}`);
+                    console.log(`${LOG_PREFIX} âœ… [Deepgram] HUMAN DETECTED for call ${session.callId}`);
                   }
                 }
 
@@ -7407,7 +7567,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                     session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
                     session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
                     trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
-                    console.log(`${LOG_PREFIX} ✅ [Deepgram] Identity CONFIRMED for call: ${session.callId}`);
+                    console.log(`${LOG_PREFIX} âœ… [Deepgram] Identity CONFIRMED for call: ${session.callId}`);
 
                     // Inject identity lock reminder
                     injectGeminiIdentityLockReminder(session, geminiProvider, segment.text).catch(err => {
@@ -7429,7 +7589,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
         });
         if (deepgramSession) {
           (session as any).deepgramSession = deepgramSession;
-          console.log(`${LOG_PREFIX} ✅ Deepgram transcription started for call ${session.callId}`);
+          console.log(`${LOG_PREFIX} âœ… Deepgram transcription started for call ${session.callId}`);
         }
       }
 
@@ -7529,7 +7689,7 @@ function flushAudioBuffer(session: OpenAIRealtimeSession): void {
     return;
   }
 
-  console.log(`${LOG_PREFIX} ðŸ“¤ Flushing ${session.audioFrameBuffer.length} buffered audio frames to Telnyx`);
+  console.log(`${LOG_PREFIX} Ã°Å¸â€œÂ¤ Flushing ${session.audioFrameBuffer.length} buffered audio frames to Telnyx`);
   
   while (session.audioFrameBuffer.length > 0) {
     const frame = session.audioFrameBuffer.shift();
@@ -7649,13 +7809,13 @@ async function resolveTelnyxCallControlId(session: OpenAIRealtimeSession): Promi
 async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<boolean> {
   const telnyxApiKey = process.env.TELNYX_API_KEY;
   if (!telnyxApiKey) {
-    console.warn(`${LOG_PREFIX} ⚠️ TELNYX_API_KEY not set - cannot hang up call ${session.callId} via Telnyx API`);
+    console.warn(`${LOG_PREFIX} âš ï¸ TELNYX_API_KEY not set - cannot hang up call ${session.callId} via Telnyx API`);
     return false;
   }
 
   const callControlId = await resolveTelnyxCallControlId(session);
   if (!callControlId) {
-    console.warn(`${LOG_PREFIX} ⚠️ Cannot resolve callControlId for call ${session.callId} (callAttemptId=${session.callAttemptId}) - Telnyx hangup SKIPPED. Call may become zombie!`);
+    console.warn(`${LOG_PREFIX} âš ï¸ Cannot resolve callControlId for call ${session.callId} (callAttemptId=${session.callAttemptId}) - Telnyx hangup SKIPPED. Call may become zombie!`);
     return false;
   }
 
@@ -7675,7 +7835,7 @@ async function forceTelnyxHangup(session: OpenAIRealtimeSession): Promise<boolea
       return false;
     }
 
-    console.log(`${LOG_PREFIX} ✅ Telnyx hangup API succeeded for call ${session.callId} (control_id=${callControlId})`);
+    console.log(`${LOG_PREFIX} âœ… Telnyx hangup API succeeded for call ${session.callId} (control_id=${callControlId})`);
     return true;
   } catch (error) {
     console.warn(`${LOG_PREFIX} Telnyx hangup API request failed for call ${session.callId}:`, error);
@@ -7732,7 +7892,7 @@ async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRet
             body: JSON.stringify({}),
           });
           if (resp.ok) {
-            console.log(`${LOG_PREFIX} ✅ Retry hangup succeeded using fallback ID ${id} for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
+            console.log(`${LOG_PREFIX} âœ… Retry hangup succeeded using fallback ID ${id} for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
             hung = true;
             break;
           }
@@ -7741,12 +7901,12 @@ async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRet
       if (hung) return;
 
       if (attempt < maxRetries) {
-        console.warn(`${LOG_PREFIX} ⚠️ Retry hangup attempt ${attempt}/${maxRetries}: no callControlId for ${session.callId}, retrying in ${attempt * 2}s...`);
+        console.warn(`${LOG_PREFIX} âš ï¸ Retry hangup attempt ${attempt}/${maxRetries}: no callControlId for ${session.callId}, retrying in ${attempt * 2}s...`);
         await new Promise(r => setTimeout(r, attempt * 2000));
         continue;
       }
       if (await isCallLikelyStillActive(session)) {
-        console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries exhausted for call ${session.callId} - could not resolve callControlId`);
+        console.error(`${LOG_PREFIX} â›” ZOMBIE CALL RISK: All ${maxRetries} hangup retries exhausted for call ${session.callId} - could not resolve callControlId`);
       } else {
         console.warn(`${LOG_PREFIX} Hangup retries exhausted for ${session.callId}, but call already appears inactive (no active bridge/session state).`);
       }
@@ -7760,7 +7920,7 @@ async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRet
         body: JSON.stringify({}),
       });
       if (response.ok) {
-        console.log(`${LOG_PREFIX} ✅ Retry hangup succeeded for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
+        console.log(`${LOG_PREFIX} âœ… Retry hangup succeeded for call ${session.callId} (attempt ${attempt}/${maxRetries})`);
         return;
       }
       const errText = await response.text().catch(() => '');
@@ -7774,7 +7934,7 @@ async function forceTelnyxHangupWithRetry(session: OpenAIRealtimeSession, maxRet
     }
   }
   if (await isCallLikelyStillActive(session)) {
-    console.error(`${LOG_PREFIX} ⛔ ZOMBIE CALL RISK: All ${maxRetries} hangup retries failed for call ${session.callId}`);
+    console.error(`${LOG_PREFIX} â›” ZOMBIE CALL RISK: All ${maxRetries} hangup retries failed for call ${session.callId}`);
   } else {
     console.warn(`${LOG_PREFIX} Hangup retries failed for ${session.callId}, but call already appears inactive (no active bridge/session state).`);
   }
@@ -7830,17 +7990,17 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // Log timing summary for latency analysis
   const tm = session.timingMetrics;
   const callDurationMs = Date.now() - session.startTime.getTime();
-  console.log(`${LOG_PREFIX} ⏱️ [TIMING SUMMARY] Call ${callId}:`);
-  console.log(`${LOG_PREFIX} ⏱️   Total call duration: ${callDurationMs}ms (${(callDurationMs / 1000).toFixed(1)}s)`);
-  console.log(`${LOG_PREFIX} ⏱️   Gemini connected: ${tm.geminiConnectedAt ? `+${tm.geminiConnectedAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
-  console.log(`${LOG_PREFIX} ⏱️   First prospect audio: ${tm.firstProspectAudioAt ? `+${tm.firstProspectAudioAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
-  console.log(`${LOG_PREFIX} ⏱️   First agent audio: ${tm.firstAgentAudioAt ? `+${tm.firstAgentAudioAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
-  console.log(`${LOG_PREFIX} ⏱️   First prospect speech: ${tm.firstProspectSpeechAt ? `+${tm.firstProspectSpeechAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
-  console.log(`${LOG_PREFIX} ⏱️   Avg response latency: ${tm.avgResponseLatencyMs ? `${tm.avgResponseLatencyMs}ms` : 'N/A'} (${tm.responseLatencies.length} samples)`);
+  console.log(`${LOG_PREFIX} â±ï¸ [TIMING SUMMARY] Call ${callId}:`);
+  console.log(`${LOG_PREFIX} â±ï¸   Total call duration: ${callDurationMs}ms (${(callDurationMs / 1000).toFixed(1)}s)`);
+  console.log(`${LOG_PREFIX} â±ï¸   Gemini connected: ${tm.geminiConnectedAt ? `+${tm.geminiConnectedAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
+  console.log(`${LOG_PREFIX} â±ï¸   First prospect audio: ${tm.firstProspectAudioAt ? `+${tm.firstProspectAudioAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
+  console.log(`${LOG_PREFIX} â±ï¸   First agent audio: ${tm.firstAgentAudioAt ? `+${tm.firstAgentAudioAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
+  console.log(`${LOG_PREFIX} â±ï¸   First prospect speech: ${tm.firstProspectSpeechAt ? `+${tm.firstProspectSpeechAt.getTime() - session.startTime.getTime()}ms` : 'N/A'}`);
+  console.log(`${LOG_PREFIX} â±ï¸   Avg response latency: ${tm.avgResponseLatencyMs ? `${tm.avgResponseLatencyMs}ms` : 'N/A'} (${tm.responseLatencies.length} samples)`);
   if (tm.responseLatencies.length > 0) {
     const min = Math.min(...tm.responseLatencies);
     const max = Math.max(...tm.responseLatencies);
-    console.log(`${LOG_PREFIX} ⏱️   Response latency range: ${min}ms - ${max}ms`);
+    console.log(`${LOG_PREFIX} â±ï¸   Response latency range: ${min}ms - ${max}ms`);
   }
   const p95ModelLatencyMs = percentile(tm.responseLatencies, 95);
   if (p95ModelLatencyMs !== null) {
@@ -7929,7 +8089,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // Finalize transcript: sort by timestamp, merge fragments, deduplicate before any consumption
   finalizeTranscripts(session);
 
-  // Build transcript — use Gemini in-session transcripts as a lightweight fallback
+  // Build transcript â€” use Gemini in-session transcripts as a lightweight fallback
   // Full precision transcript comes from post-call analysis (from recording)
   const geminiTranscript = session.transcripts.length > 0
     ? session.transcripts
@@ -7940,9 +8100,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   const fullTranscript = geminiTranscript;
 
   if (geminiTranscript.length > 0) {
-    console.log(`${LOG_PREFIX} 📝 Gemini in-session transcript available: ${geminiTranscript.length} chars (full analysis runs post-call)`);
+    console.log(`${LOG_PREFIX} ðŸ“ Gemini in-session transcript available: ${geminiTranscript.length} chars (full analysis runs post-call)`);
   } else {
-    console.log(`${LOG_PREFIX} 📝 No in-session transcript — post-call analysis will transcribe from recording`);
+    console.log(`${LOG_PREFIX} ðŸ“ No in-session transcript â€” post-call analysis will transcribe from recording`);
   }
 
   let disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome, session);
@@ -7950,14 +8110,14 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
   // DIAGNOSTIC: Log whether AI called submit_disposition or fallback was used
   if (session.detectedDisposition) {
-    console.log(`${LOG_PREFIX} ✅ Disposition from AI submit_disposition: ${disposition}`);
+    console.log(`${LOG_PREFIX} âœ… Disposition from AI submit_disposition: ${disposition}`);
   } else {
     // AI didn't call submit_disposition - this is NORMAL when:
     // 1. User hung up before AI could submit
     // 2. Call ended due to no-human detection
     // 3. Call ended due to max duration
     // The fallback mapOutcomeToDisposition analyzes transcripts to determine correct disposition
-    console.log(`${LOG_PREFIX} 📊 Auto-disposition (user hangup/system end): ${disposition} (analyzed from outcome=${outcome}, transcripts=${session.transcripts.length})`);
+    console.log(`${LOG_PREFIX} ðŸ“Š Auto-disposition (user hangup/system end): ${disposition} (analyzed from outcome=${outcome}, transcripts=${session.transcripts.length})`);
   }
 
   // ==================== HUMAN vs MACHINE TURN DETECTION ====================
@@ -7986,16 +8146,17 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   const humanTurnCount = humanUserTurns.length;
   const totalUserTurnCount = userTranscripts.length;
 
-  console.log(`${LOG_PREFIX} 🔍 Turn analysis: ${totalUserTurnCount} total user turns, ${humanTurnCount} human turns (${totalUserTurnCount - humanTurnCount} machine turns)`);
+  console.log(`${LOG_PREFIX} ðŸ” Turn analysis: ${totalUserTurnCount} total user turns, ${humanTurnCount} human turns (${totalUserTurnCount - humanTurnCount} machine turns)`);
 
   // Safeguard: avoid "not_interested" when the transcript indicates engagement/interest,
   // but ONLY if the interest signals come from real human turns (not machine audio).
   if (disposition === 'not_interested' && humanTurnCount > 0) {
     const hasDecline = hasExplicitDecline(session.transcripts);
     const hasInterest = hasInterestSignals(session.transcripts);
+    const hasExplicitCallback = hasExplicitCallbackRequest(session.transcripts);
     if (hasInterest && !hasDecline) {
-      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: ${humanTurnCount} human turns show interest without explicit decline. Overriding not_interested → callback_requested.`);
-      disposition = 'callback_requested';
+      disposition = hasExplicitCallback ? 'callback_requested' : 'needs_review';
+      console.warn(`${LOG_PREFIX} Disposition safeguard: ${humanTurnCount} human turns show interest without explicit decline. Overriding not_interested -> ${disposition}.`);
     }
   }
 
@@ -8004,23 +8165,24 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   if (disposition === 'no_answer' && humanTurnCount >= 3) {
     const hasInterestInTranscript = hasInterestSignals(session.transcripts);
     const hasDeclineInTranscript = hasExplicitDecline(session.transcripts);
+    const hasExplicitCallback = hasExplicitCallbackRequest(session.transcripts);
 
     if (hasInterestInTranscript && !hasDeclineInTranscript) {
-      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns with interest signals. Overriding → callback_requested.`);
-      disposition = 'callback_requested';
+      disposition = hasExplicitCallback ? 'callback_requested' : 'needs_review';
+      console.warn(`${LOG_PREFIX} Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns with interest signals. Overriding -> ${disposition}.`);
     } else if (!hasDeclineInTranscript) {
-      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns (real conversation). Overriding → callback_requested.`);
-      disposition = 'callback_requested';
+      disposition = hasExplicitCallback ? 'callback_requested' : 'needs_review';
+      console.warn(`${LOG_PREFIX} Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns. Overriding -> ${disposition}.`);
     } else {
-      console.warn(`${LOG_PREFIX} ⚠️ Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns but decline detected. Overriding → not_interested.`);
+      console.warn(`${LOG_PREFIX} Disposition safeguard: no_answer has ${humanTurnCount} HUMAN turns but decline detected. Overriding -> not_interested.`);
       disposition = 'not_interested';
     }
   } else if (disposition === 'no_answer' && totalUserTurnCount >= 3 && humanTurnCount < 3) {
-    // Had turns but they were mostly machine — keep as no_answer
-    console.log(`${LOG_PREFIX} ℹ️ no_answer has ${totalUserTurnCount} total turns but only ${humanTurnCount} human turns (mostly machine). Keeping as no_answer.`);
+    // Had turns but they were mostly machine â€” keep as no_answer
+    console.log(`${LOG_PREFIX} â„¹ï¸ no_answer has ${totalUserTurnCount} total turns but only ${humanTurnCount} human turns (mostly machine). Keeping as no_answer.`);
   }
 
-  // Check for voicemail in transcript — catches cases where AMD missed the voicemail
+  // Check for voicemail in transcript â€” catches cases where AMD missed the voicemail
   // Also catches needs_review when the safeguard at line 5768 overrode not_interested
   // but the transcript clearly indicates a voicemail system, not a human conversation
   // CRITICAL: Do NOT override to voicemail if a gatekeeper was detected or if there was
@@ -8031,7 +8193,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript (was ${disposition}), overriding disposition to voicemail`);
     disposition = 'voicemail';
   } else if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript) && (hadGatekeeperInteraction || hadMultipleTurns)) {
-    console.log(`${LOG_PREFIX} ⚠️ Voicemail phrases found in transcript but gatekeeper/multi-turn conversation detected — keeping disposition as ${disposition} (not overriding to voicemail)`);
+    console.log(`${LOG_PREFIX} âš ï¸ Voicemail phrases found in transcript but gatekeeper/multi-turn conversation detected â€” keeping disposition as ${disposition} (not overriding to voicemail)`);
   }
 
   // Check for IVR/auto-attendant system (keep as no_answer but log for analytics)
@@ -8046,7 +8208,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // This catches under-classified calls (e.g., no_answer that was actually a real conversation)
   // The smart analyzer CAN upgrade to qualified_lead when transcript evidence is strong.
   // It uses keyword matching + conversation metrics to catch calls the AI under-classified.
-  // CRITICAL: Never override a 'voicemail' disposition — transcript-based voicemail detection
+  // CRITICAL: Never override a 'voicemail' disposition â€” transcript-based voicemail detection
   // (isVoicemailTranscript) is authoritative.
   if (session.campaignId && session.transcripts.length > 0 && !session.isTestSession && disposition !== 'voicemail') {
     try {
@@ -8064,7 +8226,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         // Allow smart analysis to override disposition when confidence is high enough
         // This includes upgrading to qualified_lead when transcript evidence is strong
         if (smartResult.shouldOverride) {
-          console.log(`${LOG_PREFIX} 🎯 Smart disposition override: ${disposition} → ${smartResult.suggestedDisposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
+          console.log(`${LOG_PREFIX} ðŸŽ¯ Smart disposition override: ${disposition} â†’ ${smartResult.suggestedDisposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
           console.log(`${LOG_PREFIX}   Reason: ${smartResult.reasoning}`);
           if (smartResult.positiveSignals.length > 0) {
             console.log(`${LOG_PREFIX}   Positive signals: ${smartResult.positiveSignals.join(', ')}`);
@@ -8074,8 +8236,8 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             isAppointmentCampaignType(session.campaignType) &&
             !hasAppointmentBookingEvidence(session)
           ) {
-            disposition = 'callback_requested';
-            console.log(`${LOG_PREFIX} Appointment campaign guard: smart override to qualified_lead blocked (no booking evidence). Using callback_requested.`);
+            disposition = hasExplicitCallbackRequest(session.transcripts) ? 'callback_requested' : 'needs_review';
+            console.log(`${LOG_PREFIX} Appointment campaign guard: smart override to qualified_lead blocked (no booking evidence). Using ${disposition}.`);
           } else {
             disposition = smartResult.suggestedDisposition;
           }
@@ -8134,7 +8296,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             text: seg.text,
             timestamp: new Date(seg.timestamp).toISOString(),
           }));
-          console.log(`${LOG_PREFIX} 📝 Test call using ${deepgramSegments.length} Deepgram segments for transcript turns`);
+          console.log(`${LOG_PREFIX} ðŸ“ Test call using ${deepgramSegments.length} Deepgram segments for transcript turns`);
         } else {
           transcriptTurns = session.transcripts.map((t: { role: 'user' | 'assistant'; text: string; timestamp: Date }) => ({
             role: t.role === 'assistant' ? 'agent' : 'contact',
@@ -8156,7 +8318,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         const derivedTestResult = 'pending_analysis';
 
         const callSummaryText =
-          session.callSummary?.summary || 'Post-call analysis pending — full results available after recording upload';
+          session.callSummary?.summary || 'Post-call analysis pending â€” full results available after recording upload';
 
         // Update the test call record with post-call data
         await db.update(campaignTestCalls).set({
@@ -8174,7 +8336,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           updatedAt: new Date(),
         }).where(eq(campaignTestCalls.id, testCallId));
 
-        // ✅ CRITICAL: Also create a call_sessions record and log intelligence for test calls
+        // âœ… CRITICAL: Also create a call_sessions record and log intelligence for test calls
         // This ensures test calls are visible in the main call quality analytics
         try {
           // For test calls, contactId is a fake ID like 'test-contact-xxx' which doesn't exist in DB
@@ -8212,13 +8374,13 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             callDurationSec: callDuration,
             geminiTranscript: testCallFullTranscript || undefined,
           });
-          console.log(`${LOG_PREFIX} ✅ Post-call analysis scheduled for test call ${testCallSession.id}`);
+          console.log(`${LOG_PREFIX} âœ… Post-call analysis scheduled for test call ${testCallSession.id}`);
         } catch (testSessionError) {
           console.error(`${LOG_PREFIX} Error creating test call session/intelligence:`, testSessionError);
         }
 
         dispositionProcessed = true;
-        console.log(`${LOG_PREFIX} ✅ Test call ${callId} post-call analysis saved to campaignTestCalls`);
+        console.log(`${LOG_PREFIX} âœ… Test call ${callId} post-call analysis saved to campaignTestCalls`);
         console.log(`${LOG_PREFIX} Test call summary: ${session.callSummary?.summary || 'No summary generated'}`);
         console.log(`${LOG_PREFIX} Test call disposition: ${disposition}`);
         console.log(`${LOG_PREFIX} Test call duration: ${callDuration}s`);
@@ -8328,7 +8490,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               }).returning();
 
               callSessionId = callSession.id;
-              console.log(`${LOG_PREFIX} ✅ Created call session ${callSessionId} with full conversation intelligence`);
+              console.log(`${LOG_PREFIX} âœ… Created call session ${callSessionId} with full conversation intelligence`);
               if (session.pendingSessionEvents.length > 0) {
                 await emitCallSessionEvents(callSessionId, session.pendingSessionEvents);
                 session.pendingSessionEvents = [];
@@ -8375,7 +8537,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           if (session.contactId && disposition) {
             try {
               await updateContactSuppression(session.contactId, disposition);
-              console.log(`${LOG_PREFIX} ✅ Updated contact suppression for fallback session: ${disposition}`);
+              console.log(`${LOG_PREFIX} âœ… Updated contact suppression for fallback session: ${disposition}`);
             } catch (suppErr) {
               console.error(`${LOG_PREFIX} Failed to update contact suppression:`, suppErr);
             }
@@ -8383,7 +8545,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
           // Mark disposition as processed (via call_sessions record)
           dispositionProcessed = true;
-          console.log(`${LOG_PREFIX} ✅ Fallback session disposition recorded via call_sessions: ${disposition}`);
+          console.log(`${LOG_PREFIX} âœ… Fallback session disposition recorded via call_sessions: ${disposition}`);
         }
 
         // CRITICAL FOR SYSTEMATIC RELEASE: Trigger immediate replenishment
@@ -8415,7 +8577,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               prospectNumber: session.calledNumber || '',
               campaignId: session.campaignId || undefined,
             });
-            console.log(`${LOG_PREFIX} ✅ Recorded number pool metrics for ${session.callerNumberId}`);
+            console.log(`${LOG_PREFIX} âœ… Recorded number pool metrics for ${session.callerNumberId}`);
           } catch (poolErr) {
             console.error(`${LOG_PREFIX} Failed to record number pool metrics:`, poolErr);
           }
@@ -8451,7 +8613,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               qualityScore: qualityScore?.toString() || undefined,
             });
 
-            console.log(`${LOG_PREFIX} ✅ Created call producer tracking record with quality score: ${qualityScore || 'N/A'}`);
+            console.log(`${LOG_PREFIX} âœ… Created call producer tracking record with quality score: ${qualityScore || 'N/A'}`);
           } catch (trackingError) {
             console.error(`${LOG_PREFIX} Failed to create call producer tracking:`, trackingError);
           }
@@ -8467,7 +8629,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               updatedAt: new Date(),
             }).where(eq(leads.id, dispositionResult.leadId));
 
-            console.log(`${LOG_PREFIX} ✅ Saved ${session.transcripts.length} transcript turns to lead ${dispositionResult.leadId}`);
+            console.log(`${LOG_PREFIX} âœ… Saved ${session.transcripts.length} transcript turns to lead ${dispositionResult.leadId}`);
           } catch (transcriptError) {
             console.error(`${LOG_PREFIX} Failed to save transcripts to lead:`, transcriptError);
           }
@@ -8498,7 +8660,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             callDurationSec: callDuration,
             geminiTranscript: fullTranscript || undefined,
           });
-          console.log(`${LOG_PREFIX} ✅ Post-call analysis scheduled for ${callSessionId}`);
+          console.log(`${LOG_PREFIX} âœ… Post-call analysis scheduled for ${callSessionId}`);
         }
       }
     } catch (error) {
@@ -8618,12 +8780,12 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   }
 
   async function runRealtimeQualityAnalysis(session: OpenAIRealtimeSession): Promise<void> {
-    // DISABLED: Real-time quality analysis removed — all analysis runs post-call
+    // DISABLED: Real-time quality analysis removed â€” all analysis runs post-call
     return;
   }
 
   function scheduleRealtimeQualityAnalysis(session: OpenAIRealtimeSession): void {
-    // DISABLED: Real-time quality analysis removed — all analysis runs post-call
+    // DISABLED: Real-time quality analysis removed â€” all analysis runs post-call
     return;
   }
 
@@ -8792,8 +8954,13 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           // Must be checked BEFORE the generic not_interested fallback
           if (hasUserTranscripts && identityConfirmed && hasInterestSignals(session.transcripts)) {
             if (isAppointmentCampaign && !hasBookedMeetingEvidence) {
-              console.log(`${LOG_PREFIX} Outcome '${outcome}' has interest signals but no confirmed booking evidence for appointment campaign - marking as callback_requested`);
-              return 'callback_requested';
+              const explicitCallback = hasExplicitCallbackRequest(session.transcripts);
+              if (explicitCallback) {
+                console.log(`${LOG_PREFIX} Outcome '${outcome}' has explicit callback language and no booking evidence - marking as callback_requested`);
+                return 'callback_requested';
+              }
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' has interest without booking evidence and no explicit callback request - marking as needs_review`);
+              return 'needs_review';
             }
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with INTEREST SIGNALS detected and identity confirmed - marking as qualified_lead`);
             return 'qualified_lead';
@@ -8814,8 +8981,13 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           // Check for interest signals even without identity confirmation (still valuable lead)
           if (hasUserTranscripts && hasInterestSignals(session.transcripts)) {
             if (isAppointmentCampaign && !hasBookedMeetingEvidence) {
-              console.log(`${LOG_PREFIX} Outcome '${outcome}' has interest signals but no confirmed booking evidence for appointment campaign - marking as callback_requested`);
-              return 'callback_requested';
+              const explicitCallback = hasExplicitCallbackRequest(session.transcripts);
+              if (explicitCallback) {
+                console.log(`${LOG_PREFIX} Outcome '${outcome}' has explicit callback language and no booking evidence - marking as callback_requested`);
+                return 'callback_requested';
+              }
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' has interest without booking evidence and no explicit callback request - marking as needs_review`);
+              return 'needs_review';
             }
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with INTEREST SIGNALS detected (identity not confirmed) - marking as qualified_lead`);
             return 'qualified_lead';
@@ -8869,7 +9041,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       'for billing',
       'for customer service',
       'for english',
-      'para español',
+      'para espaÃ±ol',
       'to speak with',
       'to reach',
       'main menu',
@@ -9285,7 +9457,7 @@ async function validateSessionIdentifiers(
     // auto-lock it. This handles the race where WebSocket connects before orchestrator PRE-LOCK completes.
     const expectedVirtualAgentId = callAttempt.virtualAgentId;
     if (queueItem.status === 'queued') {
-      console.log(`${LOG_PREFIX} 🔄 AUTO-LOCK: Queue item ${queueItemId} is 'queued' but call attempt exists. Attempting auto-lock...`);
+      console.log(`${LOG_PREFIX} ðŸ”„ AUTO-LOCK: Queue item ${queueItemId} is 'queued' but call attempt exists. Attempting auto-lock...`);
       try {
         await db.update(campaignQueue).set({
           status: 'in_progress',
@@ -9298,9 +9470,9 @@ async function validateSessionIdentifiers(
             eq(campaignQueue.status, 'queued') // Only update if still queued (optimistic lock)
           )
         );
-        console.log(`${LOG_PREFIX} ✅ AUTO-LOCK: Queue item ${queueItemId} locked successfully`);
+        console.log(`${LOG_PREFIX} âœ… AUTO-LOCK: Queue item ${queueItemId} locked successfully`);
       } catch (autoLockError) {
-        console.error(`${LOG_PREFIX} ❌ AUTO-LOCK failed:`, autoLockError);
+        console.error(`${LOG_PREFIX} âŒ AUTO-LOCK failed:`, autoLockError);
         return { valid: false, error: `Queue item is not locked (status: ${queueItem.status}) and auto-lock failed` };
       }
     } else if (queueItem.status !== 'in_progress') {
@@ -9468,7 +9640,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
           .limit(1);
         if (org?.name) {
           companyName = org.name;
-          console.log(`${LOG_PREFIX} [getCampaignConfig] ✅ Campaign Organization (calling FROM): "${companyName}" (via problemIntelligenceOrgId)`);
+          console.log(`${LOG_PREFIX} [getCampaignConfig] âœ… Campaign Organization (calling FROM): "${companyName}" (via problemIntelligenceOrgId)`);
         }
       } catch (orgErr) {
         console.warn(`${LOG_PREFIX} [getCampaignConfig] Could not resolve organization from problemIntelligenceOrgId:`, orgErr);
@@ -9479,7 +9651,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     if (companyName) {
       console.log(`${LOG_PREFIX} [getCampaignConfig] Campaign Organization resolved: "${companyName}"`);
     } else {
-      console.warn(`${LOG_PREFIX} [getCampaignConfig] ⚠️ No Campaign Organization set! AI agent may use wrong company name.`);
+      console.warn(`${LOG_PREFIX} [getCampaignConfig] âš ï¸ No Campaign Organization set! AI agent may use wrong company name.`);
     }
     
     // Spread aiSettings FIRST so our explicit DB column values always win
@@ -9537,7 +9709,7 @@ async function ensureSessionCampaignId(session: OpenAIRealtimeSession): Promise<
 
       if (attempt?.campaignId) {
         session.campaignId = attempt.campaignId;
-        console.log(`${LOG_PREFIX} ✅ Recovered missing campaignId from callAttempt ${session.callAttemptId}: ${session.campaignId}`);
+        console.log(`${LOG_PREFIX} âœ… Recovered missing campaignId from callAttempt ${session.callAttemptId}: ${session.campaignId}`);
         return;
       }
     } catch (error) {
@@ -9556,7 +9728,7 @@ async function ensureSessionCampaignId(session: OpenAIRealtimeSession): Promise<
 
       if (queueRecord?.campaignId) {
         session.campaignId = queueRecord.campaignId;
-        console.log(`${LOG_PREFIX} ✅ Recovered missing campaignId from queueItem ${session.queueItemId}: ${session.campaignId}`);
+        console.log(`${LOG_PREFIX} âœ… Recovered missing campaignId from queueItem ${session.queueItemId}: ${session.campaignId}`);
         return;
       }
     } catch (error) {
@@ -9564,7 +9736,7 @@ async function ensureSessionCampaignId(session: OpenAIRealtimeSession): Promise<
     }
   }
 
-  console.warn(`${LOG_PREFIX} ⚠️ Could not recover campaignId for call ${session.callId}. Campaign max duration enforcement may be unavailable.`);
+  console.warn(`${LOG_PREFIX} âš ï¸ Could not recover campaignId for call ${session.callId}. Campaign max duration enforcement may be unavailable.`);
 }
 
 async function getContactInfo(contactId: string): Promise<any> {
@@ -9633,9 +9805,9 @@ function buildVoiceTemplateValues({
   if (resolvedAgentName && !values["agent.name"]) {
     values["agent.name"] = resolvedAgentName;
   } else if (!values["agent.name"] || !values["agent.name"].trim()) {
-    // No agent name at all — remove the key so bracket interpolation can strip the token cleanly
+    // No agent name at all â€” remove the key so bracket interpolation can strip the token cleanly
     delete values["agent.name"];
-    console.warn(`${LOG_PREFIX} ⚠️ [Template Values] agent.name is EMPTY. [Your Name] tokens will be stripped from scripts. Configure a persona name in Campaign > AI Agent Settings.`);
+    console.warn(`${LOG_PREFIX} âš ï¸ [Template Values] agent.name is EMPTY. [Your Name] tokens will be stripped from scripts. Configure a persona name in Campaign > AI Agent Settings.`);
   }
 
   // Log both for debugging call identity
@@ -9690,12 +9862,12 @@ function applyPersonalityConfiguration(
 }
 
 /**
- * Build the Gemini compliance preamble — the master system instruction block.
+ * Build the Gemini compliance preamble â€” the master system instruction block.
  *
  * Architecture follows Google's recommended patterns for Gemini 2.5 system instructions:
  * 1. Consistent XML delimiters (<role>, <call_flow>, <conversation_rules>, <examples>)
  * 2. Positive-pattern instructions (show what TO do, not lists of prohibitions)
- * 3. Context-first ordering (role → flow → rules → examples)
+ * 3. Context-first ordering (role â†’ flow â†’ rules â†’ examples)
  * 4. Few-shot conversation examples for critical behaviors
  * 5. Concise, non-redundant sections
  *
@@ -9718,18 +9890,18 @@ Use natural fillers like "hmm", "well", "got it", "makes sense" instead of robot
 ## ABSOLUTE FIRST RULE: LISTEN BEFORE SPEAKING
 
 When the call connects, you MUST remain COMPLETELY SILENT for the first 2-3 seconds.
-Do NOT speak until you hear the other person speak first. This is an outbound call — THEY answer, YOU wait.
+Do NOT speak until you hear the other person speak first. This is an outbound call â€” THEY answer, YOU wait.
 
 During this initial silence, LISTEN carefully to what the caller says:
-- If they say "Hello?" or "Hi" → Ask for the contact by name (Phase 1)
-- If they identify themselves by name (e.g., "This is John", "John speaking") → Skip identity check, go to introduction (Phase 3)
-- If they sound like a gatekeeper ("How may I direct your call?", "Who is calling?") → Handle as gatekeeper (Phase 2)
+- If they say "Hello?" or "Hi" â†’ Ask for the contact by name (Phase 1)
+- If they identify themselves by name (e.g., "This is John", "John speaking") â†’ Skip identity check, go to introduction (Phase 3)
+- If they sound like a gatekeeper ("How may I direct your call?", "Who is calling?") â†’ Handle as gatekeeper (Phase 2)
 
 **NEVER say "thanks for confirming" or "great" or any acknowledgment UNLESS the person has EXPLICITLY confirmed their identity in response to YOUR question.**
 **NEVER assume identity is confirmed just because someone answered the phone.**
-**A person saying "Hello?" is NOT confirming anything — they are simply answering the phone.**
+**A person saying "Hello?" is NOT confirming anything â€” they are simply answering the phone.**
 
-**OPENING CLARITY**: Your first words after the prospect speaks MUST be clear, complete, and audible. Do NOT mumble, rush, or start speaking before the prospect finishes their greeting. Wait for a brief natural pause (0.5-1 second) after they say "Hello?" before beginning your response. Speak at a normal conversational pace — not too fast, not too slow.
+**OPENING CLARITY**: Your first words after the prospect speaks MUST be clear, complete, and audible. Do NOT mumble, rush, or start speaking before the prospect finishes their greeting. Wait for a brief natural pause (0.5-1 second) after they say "Hello?" before beginning your response. Speak at a normal conversational pace â€” not too fast, not too slow.
 </critical_listening_rule>
 
 <call_flow>
@@ -9739,8 +9911,8 @@ During this initial silence, LISTEN carefully to what the caller says:
 - Ringing/ringback tone is NOT a person. Do NOT speak during ringtone.
 - If there is silence, hold music, or ringtone audio, do NOT deliver your greeting.
 - Speak only after you hear someone (human OR automated system) start talking.
-- **IMPORTANT**: If an automated system ASKS YOU A QUESTION (e.g., "Who are you trying to reach?", "Please say the name of the person", "How may I direct your call?", "What is your name?"), you MUST respond verbally. These systems require a spoken answer — staying silent will stall the call indefinitely. Say: "I'm trying to reach [Contact Name], please." If asked for your name, give it.
-- **VOICEMAIL ABORT (HIGHEST PRIORITY — REACT WITHIN 1-2 SECONDS):**
+- **IMPORTANT**: If an automated system ASKS YOU A QUESTION (e.g., "Who are you trying to reach?", "Please say the name of the person", "How may I direct your call?", "What is your name?"), you MUST respond verbally. These systems require a spoken answer â€” staying silent will stall the call indefinitely. Say: "I'm trying to reach [Contact Name], please." If asked for your name, give it.
+- **VOICEMAIL ABORT (HIGHEST PRIORITY â€” REACT WITHIN 1-2 SECONDS):**
   If you hear ANY of these cues, STOP SPEAKING IMMEDIATELY mid-word if needed, call detect_voicemail_and_hangup, then submit_disposition("voicemail") and end_call. Do NOT finish your sentence. Do NOT deliver any pitch. Do NOT say goodbye:
   - "Leave a message" / "Leave your message" / "Please leave"
   - "After the beep" / "After the tone" / "At the tone"
@@ -9761,11 +9933,11 @@ When you hear a standard greeting (e.g., "Hello?", "Hi", "Yeah?"), your first re
 Wait silently for their answer. Identity is confirmed ONLY by explicit affirmation:
 - "Yes", "That's me", "Speaking", "This is [Name]"
 
-Greetings like "Hello?" or "Hi" are NOT identity confirmation — they are just the person answering.
+Greetings like "Hello?" or "Hi" are NOT identity confirmation â€” they are just the person answering.
 
 If they ask "Who is this?": "Oh hi, this is [your first name]. Am I speaking with [Contact Name]?"
 If they ask "What's this about?": "Just wanted to connect briefly. Is this [Contact Name]?"
-If they correct the name (e.g., "No, this is James"): Accept the corrected name immediately, then flow straight into Phase 3 with the corrected name — do NOT re-ask identity. Treat name correction as identity confirmation.
+If they correct the name (e.g., "No, this is James"): Accept the corrected name immediately, then flow straight into Phase 3 with the corrected name â€” do NOT re-ask identity. Treat name correction as identity confirmation.
 
 ### Phase 2: Gatekeeper & IVR Handling
 If someone else answers (receptionist, assistant, automated system):
@@ -9773,28 +9945,28 @@ If someone else answers (receptionist, assistant, automated system):
 - If pressed: "It's related to some of the services we offer."
 - Maximum two polite attempts. If refused, thank them and end the call.
 - For DTMF IVR menus (e.g., "Press 1 for sales"): use send_dtmf after listening to ALL options.
-- For VERBAL automated systems (e.g., "Who are you trying to reach?", "Please say the name", "How may I direct your call?"): respond VERBALLY with "I'm trying to reach [Contact Name], please." Do NOT stay silent — the system is waiting for your spoken answer.
+- For VERBAL automated systems (e.g., "Who are you trying to reach?", "Please say the name", "How may I direct your call?"): respond VERBALLY with "I'm trying to reach [Contact Name], please." Do NOT stay silent â€” the system is waiting for your spoken answer.
 - If asked "What is your name?" or "Who should I say is calling?": say "[Your Name] calling from [Organization]."
 
-If transferred to a new voice, re-verify identity: "Hi, just to confirm — am I speaking with [Contact Name]?"
+If transferred to a new voice, re-verify identity: "Hi, just to confirm â€” am I speaking with [Contact Name]?"
 
-### Phase 3: Introduction & Value Hook (ZERO-GAP TRANSITION — CRITICAL)
+### Phase 3: Introduction & Value Hook (ZERO-GAP TRANSITION â€” CRITICAL)
 Once identity is confirmed ("Yes" / "Speaking" / "That's me"), you have a 3-SECOND WINDOW before the prospect disengages. Execute this in ONE continuous breath:
-1. "Hi [First Name], this is [Agent Name] calling on behalf of [Organization Name] — [ONE sentence value proposition/reason for calling]."
-2. Follow IMMEDIATELY with the ask — do NOT ask "do you have a moment?" first.
+1. "Hi [First Name], this is [Agent Name] calling on behalf of [Organization Name] â€” [ONE sentence value proposition/reason for calling]."
+2. Follow IMMEDIATELY with the ask â€” do NOT ask "do you have a moment?" first.
 3. STOP and wait for their response.
 
 **CRITICAL TIMING RULES:**
 - Do NOT insert filler phrases like "Great!", "Wonderful!", "Thanks for confirming!" before your intro. These waste the engagement window.
 - Do NOT pause between your name and the value proposition. Combine them in ONE flowing sentence.
-- Do NOT ask "How are you?" or "Do you have a moment?" — these trigger disengagement.
+- Do NOT ask "How are you?" or "Do you have a moment?" â€” these trigger disengagement.
 - The MAXIMUM gap between hearing "Yes" and stating your purpose is 3 seconds.
-- Be warm, kind, and respectful throughout — but be CONCISE.
+- Be warm, kind, and respectful throughout â€” but be CONCISE.
 
 **WRONG:** "Great, thanks for taking the call! So, I'm calling from Harver, and... the reason for my call is..."
-**RIGHT:** "Hi John, this is Sarah calling on behalf of Harver — we're helping companies like yours reduce time-to-hire by 40%. Would that be worth a quick conversation?"
+**RIGHT:** "Hi John, this is Sarah calling on behalf of Harver â€” we're helping companies like yours reduce time-to-hire by 40%. Would that be worth a quick conversation?"
 
-If the prospect says "hello?" THREE or more times in a row with no acknowledgment of your words, they likely cannot hear you. Only then say: "I apologize for the connection — can you hear me now?" Do NOT use an audio check after a single "hello?" — that is normal call behavior, not an audio issue.
+If the prospect says "hello?" THREE or more times in a row with no acknowledgment of your words, they likely cannot hear you. Only then say: "I apologize for the connection â€” can you hear me now?" Do NOT use an audio check after a single "hello?" â€” that is normal call behavior, not an audio issue.
 
 Keep the organization name confidential until identity is confirmed.
 
@@ -9804,27 +9976,27 @@ State the call purpose concisely in your own words (do not read a script).
 **CRITICAL**: Your qualification approach is defined ENTIRELY by the **Campaign Context** section below.
 - Use the campaign's **Talking Points** to guide your conversation
 - Work toward the campaign's **Success Criteria** or **Objective**
-- The **Campaign Objective** defines what you need to achieve — follow it directly
+- The **Campaign Objective** defines what you need to achieve â€” follow it directly
 
 **FLOW FOR CONTENT/WHITE PAPER CAMPAIGNS:**
 If the campaign objective is about sending a white paper, content piece, or resource:
 1. Briefly introduce what the content is about (1-2 sentences)
 2. Ask directly: "Would you like me to send it over?"
-3. If yes → confirm email address and close warmly
+3. If yes â†’ confirm email address and close warmly
 4. Do NOT ask discovery questions like "Are you focused on this?" or qualification questions
-5. Keep it simple — permission and consent to send is the only goal
+5. Keep it simple â€” permission and consent to send is the only goal
 
 **FLOW FOR APPOINTMENT/MEETING CAMPAIGNS:**
 If the campaign objective is about scheduling a meeting, demo, or discovery call:
 1. Deliver a key talking point from the campaign context (with specific metrics if available)
 2. Ask ONE relevant discovery question to confirm interest (e.g., "Is [pain point] something you're dealing with?")
-3. Listen — if they show interest ("yes", "tell me more", "how does that work?"), move to booking
+3. Listen â€” if they show interest ("yes", "tell me more", "how does that work?"), move to booking
 4. PROPOSE SPECIFIC TIMES: "Great! Would [next Tuesday] at [10am] or [Thursday] at [2pm] work better for a quick 15-20 minute call?"
 5. Confirm the details: "Perfect, I'll send a calendar invite to [email]. You'll be speaking with [name/team]. Looking forward to it!"
 
 **APPOINTMENT BOOKING PHRASES TO USE:**
 - "Would early next week or later in the week work better for you?"
-- "I have availability on [day] at [time] or [day] at [time] — which works best?"
+- "I have availability on [day] at [time] or [day] at [time] â€” which works best?"
 - "Perfect, let me get that on the calendar for you."
 
 **GATE RULE FOR APPOINTMENTS**: Do NOT propose a meeting until you have:
@@ -9837,22 +10009,22 @@ If the campaign objective is about scheduling a meeting, demo, or discovery call
 - Explicit agreement to receive a calendar invite
 
 ### Phase 5: Closing & Farewell
-Complete the full call flow: qualifying questions → confirm email → propose times → get confirmation.
+Complete the full call flow: qualifying questions â†’ confirm email â†’ propose times â†’ get confirmation.
 After booking is confirmed:
 1. Confirm the meeting details: date, time, and email for the calendar invite
 2. Set expectations: "You'll receive a calendar invite shortly"
 3. Thank them warmly and sincerely for their time
 4. Close gracefully: "Thank you so much for your time, [First Name]. Have a wonderful day!"
-5. Let the prospect respond — wait for their farewell
+5. Let the prospect respond â€” wait for their farewell
 6. Only trigger end_call AFTER they say goodbye ("bye", "take care", "thank you")
 
-Call submit_disposition BEFORE every end_call — no exceptions. Execute tools silently; never speak tool names.
+Call submit_disposition BEFORE every end_call â€” no exceptions. Execute tools silently; never speak tool names.
 </call_flow>
 
 <conversation_rules>
 ## Conversation Discipline
 
-**Pacing**: Speak slowly and clearly. After asking any question, wait at least 3-5 seconds for a response. Match the prospect's energy — if they speak slowly, you speak slowly.
+**Pacing**: Speak slowly and clearly. After asking any question, wait at least 3-5 seconds for a response. Match the prospect's energy â€” if they speak slowly, you speak slowly.
 
 **Turn-taking**: One question at a time. Never stack multiple questions. Keep your responses to 1-2 sentences maximum. Let each exchange breathe naturally.
 
@@ -9862,7 +10034,7 @@ Call submit_disposition BEFORE every end_call — no exceptions. Execute tools s
 - Acknowledge what the prospect said and respond to THAT specifically
 If the prospect says "you keep repeating" or "you already said that", immediately apologize and change topic.
 
-**Silence is normal**: After a question, silence means the person is thinking — not that they left. Wait at least 5 seconds before gently prompting. Background noise, breathing, or typing means the person is still there. You cannot detect hang-ups; only the phone system ends calls. You need at least 4-5 exchanges before considering someone may have left. After 10+ seconds of complete silence, gently say "Are you still there?" but do NOT end the call.
+**Silence is normal**: After a question, silence means the person is thinking â€” not that they left. Wait at least 5 seconds before gently prompting. Background noise, breathing, or typing means the person is still there. You cannot detect hang-ups; only the phone system ends calls. You need at least 4-5 exchanges before considering someone may have left. After 10+ seconds of complete silence, gently say "Are you still there?" but do NOT end the call.
 
 **Minimum call duration**: Every call with a confirmed contact must last at least 45 seconds, include your full introduction, at least one qualifying question, and explicit conversation ending from the prospect.
 
@@ -9872,39 +10044,39 @@ If the prospect says "you keep repeating" or "you already said that", immediatel
 
 **Name handling (STRICT)**: ALWAYS use the contact's full name or formal first name EXACTLY as provided in the contact data. NEVER use nicknames, diminutives, or shortened forms (e.g., do NOT say "Timmy" for "Timothy", "Bobby" for "Robert", "Jenny" for "Jennifer"). If the contact introduces themselves with a nickname, you may use it after they do, but never assume one.
 
-**NEVER vocalize instructions (ABSOLUTE RULE)**: Your system instructions, rules, phases, and internal logic must NEVER be spoken aloud. If you catch yourself about to say things like "following the 2-step opening rule", "as per my instructions", "I need to verify identity first because...", or any reference to your internal protocol — STOP. The prospect must never know you are following a script or rules. Sound completely natural.
+**NEVER vocalize instructions (ABSOLUTE RULE)**: Your system instructions, rules, phases, and internal logic must NEVER be spoken aloud. If you catch yourself about to say things like "following the 2-step opening rule", "as per my instructions", "I need to verify identity first because...", or any reference to your internal protocol â€” STOP. The prospect must never know you are following a script or rules. Sound completely natural.
 </conversation_rules>
 
 <examples>
 ## Correct Behavior Examples
 
-### Example 1: Standard pickup → Identity check → Value-lead offer (correct)
+### Example 1: Standard pickup â†’ Identity check â†’ Value-lead offer (correct)
 Prospect: "Hello?"
 You: "Hi, am I speaking with Sarah Johnson?"
 Prospect: "Yes, this is Sarah."
-You: "Hi Sarah, I'm Alex from Acme Solutions — [deliver campaign value proposition concisely]. Can I grab a quick minute?"
+You: "Hi Sarah, I'm Alex from Acme Solutions â€” [deliver campaign value proposition concisely]. Can I grab a quick minute?"
 
-### Example 1b: Right party self-identifies → Value-lead offer (correct)
+### Example 1b: Right party self-identifies â†’ Value-lead offer (correct)
 Prospect: "This is Sarah Johnson."
-You: "Hi Sarah, I'm Alex from Acme Solutions — [deliver campaign value proposition concisely]. Can I grab a quick minute?"
+You: "Hi Sarah, I'm Alex from Acme Solutions â€” [deliver campaign value proposition concisely]. Can I grab a quick minute?"
 
-### Example 1c: What NOT to do (INCORRECT — NEVER DO THIS)
+### Example 1c: What NOT to do (INCORRECT â€” NEVER DO THIS)
 Prospect: "Hello?"
-You: "Great, thanks for confirming!" ← WRONG! "Hello?" is NOT confirmation of anything.
+You: "Great, thanks for confirming!" â† WRONG! "Hello?" is NOT confirmation of anything.
 
-### Example 1d: Name correction → seamless recovery (correct)
+### Example 1d: Name correction â†’ seamless recovery (correct)
 You: "Hi, am I speaking with John Smith?"
 Prospect: "No, this is James Smith."
-You: "Oh apologies James — I'm Sarah calling on behalf of Harver. [deliver campaign value proposition concisely]. Would that be worth a quick chat?"
-[NOTE: Agent corrected immediately, used the RIGHT name, and delivered value prop in the same breath — no gap.]
+You: "Oh apologies James â€” I'm Sarah calling on behalf of Harver. [deliver campaign value proposition concisely]. Would that be worth a quick chat?"
+[NOTE: Agent corrected immediately, used the RIGHT name, and delivered value prop in the same breath â€” no gap.]
 
-### Example 1e: Voicemail detected mid-sentence → STOP immediately (correct)
-You: "Hi, am I speaking with—"
+### Example 1e: Voicemail detected mid-sentence â†’ STOP immediately (correct)
+You: "Hi, am I speaking withâ€”"
 Recording: "Hi, you've reached the voicemail of John Smith. Please leave a message after the beep."
 You: [IMMEDIATELY STOP SPEAKING. Call detect_voicemail_and_hangup. Do NOT say anything else.]
 [NOTE: Agent stopped mid-word the instant voicemail cues were heard. No pitch, no goodbye.]
 
-### Example 1f: Automated verbal system asking a question → RESPOND verbally (correct)
+### Example 1f: Automated verbal system asking a question â†’ RESPOND verbally (correct)
 Automated system: "Thank you for calling. Please say the name of the person you're trying to reach."
 You: "I'm trying to reach Sarah Johnson, please."
 Automated system: "Who should I say is calling?"
@@ -9920,10 +10092,10 @@ You: "It's related to some of the services we offer. Would you be able to put me
 ### Example 3: Buying signal response with SPECIFIC VALUE (correct)
 You: "We help companies streamline their hiring assessment process."
 Prospect: "Oh, how do you do that?"
-You: "Great question — we use structured digital assessments that replace manual screening, which typically cuts time-to-hire by about 40%. What does your current screening process look like?"
+You: "Great question â€” we use structured digital assessments that replace manual screening, which typically cuts time-to-hire by about 40%. What does your current screening process look like?"
 
 ### Example 4: Value proposition with METRICS (correct)
-You: "The reason I'm calling is — we've helped companies similar to yours reduce their [metric] by [X%] while improving [outcome]. For example, one of our clients saw [specific result]. I'm curious — is [pain point] something you're dealing with?"
+You: "The reason I'm calling is â€” we've helped companies similar to yours reduce their [metric] by [X%] while improving [outcome]. For example, one of our clients saw [specific result]. I'm curious â€” is [pain point] something you're dealing with?"
 
 **VALUE PROPOSITION RULES:**
 - ALWAYS include at least ONE specific metric (%, $, time saved, etc.)
@@ -9934,23 +10106,23 @@ You: "The reason I'm calling is — we've helped companies similar to yours redu
 ### Example 5: Silence handling (correct)
 You: "What challenges are you seeing with your current approach?"
 [5 seconds of silence]
-You: [continues waiting — silence is normal]
+You: [continues waiting â€” silence is normal]
 [3 more seconds]
 Prospect: "Well, honestly, it's been taking us forever to fill roles..."
 
 ### Example 6: Anti-repetition (correct)
 Prospect: "Why did you repeat that?"
-You: "My apologies — let me move on. What I'm curious about is what challenges you're facing with [topic]?"
+You: "My apologies â€” let me move on. What I'm curious about is what challenges you're facing with [topic]?"
 [NOTE: Agent acknowledged and immediately changed direction without repeating]
 
 ### Example 7: Appointment booking and graceful farewell (correct)
 You: "Would next Tuesday at 10am or Thursday at 2pm work better for a quick 15-minute call?"
 Prospect: "Thursday at 2 works."
-You: "Perfect! Let me confirm — I'll send a calendar invite to your email. You'll be speaking with our team about [topic]. Is there anything specific you'd like us to focus on?"
+You: "Perfect! Let me confirm â€” I'll send a calendar invite to your email. You'll be speaking with our team about [topic]. Is there anything specific you'd like us to focus on?"
 Prospect: "No, that sounds good."
-You: "Wonderful. You'll receive that calendar invite shortly. Thank you so much for your time today, Sarah — I really appreciate it. Have a wonderful day!"
+You: "Wonderful. You'll receive that calendar invite shortly. Thank you so much for your time today, Sarah â€” I really appreciate it. Have a wonderful day!"
 Prospect: "Thanks, you too!"
-You: [call can now end — prospect said farewell]
+You: [call can now end â€” prospect said farewell]
 </examples>
 
 `;
@@ -9962,17 +10134,17 @@ You: [call can now end — prospect said farewell]
  */
 function buildBuyingSignalSection(): string {
   return `
-### BUYING SIGNAL RECOGNITION (CRITICAL — NEVER IGNORE INTEREST)
+### BUYING SIGNAL RECOGNITION (CRITICAL â€” NEVER IGNORE INTEREST)
 When the prospect shows interest or asks questions like "How do you do that?", "Tell me more", or says "Yes":
-- **STOP your current sentence immediately** — do NOT finish a pre-planned thought
+- **STOP your current sentence immediately** â€” do NOT finish a pre-planned thought
 - **Directly answer THEIR question** in 1-2 concise sentences
 - **Then ask a qualifying follow-up** to deepen the conversation
 
 Buying signals you MUST respond to:
-- "How do you do that?" → Answer specifically, then ask about their current process
-- "Tell me more" / "That sounds interesting" → Engage deeper, ask what aspect interests them
-- "Yes" / "We're looking at that" → Acknowledge and ask a deeper qualifying question
-- "What does that cost?" / "How long does it take?" → Answer, then qualify their timeline
+- "How do you do that?" â†’ Answer specifically, then ask about their current process
+- "Tell me more" / "That sounds interesting" â†’ Engage deeper, ask what aspect interests them
+- "Yes" / "We're looking at that" â†’ Acknowledge and ask a deeper qualifying question
+- "What does that cost?" / "How long does it take?" â†’ Answer, then qualify their timeline
 
 **Your pitch is LESS valuable than their questions. When they engage, MATCH their energy and respond to what THEY asked.**
 `;
@@ -9985,7 +10157,7 @@ Buying signals you MUST respond to:
 function buildPronunciationGuide(campaignConfig: any, contactInfo: any): string {
   const guides: string[] = [];
 
-  // Known TTS mispronunciation corrections (brand → common mistake → phonetic guide)
+  // Known TTS mispronunciation corrections (brand â†’ common mistake â†’ phonetic guide)
   const KNOWN_CORRECTIONS: Record<string, string> = {
     'harver': 'Pronounced "HAR-ver" (rhymes with carver). NOT "Harvard".',
     'callidus': 'Pronounced "kah-LID-us". NOT "callous" or "cal-EYE-dus".',
@@ -10018,11 +10190,11 @@ function buildPronunciationGuide(campaignConfig: any, contactInfo: any): string 
     const orgName = campaignConfig?.organizationName || campaignConfig?.companyName || '';
     if (orgName && !guides.some(g => g.toLowerCase().includes(orgName.toLowerCase()))) {
       // No known correction but still emphasize exact pronunciation
-      guides.push(`- **${orgName}**: Say this company name exactly as spelled — "${orgName}". Do NOT substitute similar-sounding words.`);
+      guides.push(`- **${orgName}**: Say this company name exactly as spelled â€” "${orgName}". Do NOT substitute similar-sounding words.`);
     }
   }
 
-  // Add contact name pronunciation — prevent Gemini from guessing wrong pronunciations
+  // Add contact name pronunciation â€” prevent Gemini from guessing wrong pronunciations
   const contactFirstName = contactInfo?.firstName?.trim();
   const contactLastName = contactInfo?.lastName?.trim();
   const contactFullName = contactInfo?.fullName?.trim()
@@ -10033,7 +10205,7 @@ function buildPronunciationGuide(campaignConfig: any, contactInfo: any): string 
 
   if (guides.length === 0) return '';
 
-  return `\n### PRONUNCIATION GUIDE (CRITICAL — Say names EXACTLY as written)\n${guides.join('\n')}\n`;
+  return `\n### PRONUNCIATION GUIDE (CRITICAL â€” Say names EXACTLY as written)\n${guides.join('\n')}\n`;
 }
 
 /**
@@ -10238,7 +10410,7 @@ async function buildSystemPrompt(
       campaignType: campaignConfig?.type,
     });
 
-    console.log(`${LOG_PREFIX} 🔍 DEBUG CAMPAIGN CONTEXT (PATH 1):`, {
+    console.log(`${LOG_PREFIX} ðŸ” DEBUG CAMPAIGN CONTEXT (PATH 1):`, {
       hasCampaignConfig: !!campaignConfig,
       campaignId: campaignConfig?.id,
       objective: !!campaignConfig?.campaignObjective,
@@ -10248,10 +10420,10 @@ async function buildSystemPrompt(
     });
 
     if (campaignContextSection) {
-      console.log(`${LOG_PREFIX} ✅ Injected Campaign Context (Length: ${campaignContextSection.length})`);
+      console.log(`${LOG_PREFIX} âœ… Injected Campaign Context (Length: ${campaignContextSection.length})`);
       prompt += `\n\n---\n\n${campaignContextSection}`;
     } else {
-      console.warn(`${LOG_PREFIX} ⚠️ No Campaign Context generated to inject in custom prompt`);
+      console.warn(`${LOG_PREFIX} âš ï¸ No Campaign Context generated to inject in custom prompt`);
     }
 
     if (accountContextSection) {
@@ -10275,7 +10447,7 @@ async function buildSystemPrompt(
     let finalPrompt = ensureVoiceAgentControlLayer(prompt, useCondensedPrompt);
 
     // For Gemini: Add optimized compliance preamble (Google-recommended structure)
-    // Uses buildGeminiCompliancePreamble() — single source of truth for all paths
+    // Uses buildGeminiCompliancePreamble() â€” single source of truth for all paths
     if (provider === 'google') {
       let geminiPreamble = buildGeminiCompliancePreamble();
       // Add pronunciation guide for brand names
@@ -10366,7 +10538,7 @@ async function buildSystemPrompt(
 
   // =====================================================================
   // PATH 3: CANONICAL SYSTEM PROMPT STRUCTURE (Legacy fallback)
-  // This follows the required flow: Personality → Environment → Tone → Goal → Call Flow → Guardrails
+  // This follows the required flow: Personality â†’ Environment â†’ Tone â†’ Goal â†’ Call Flow â†’ Guardrails
   // =====================================================================
 
   // Resolve agent name: persona name > voice name from rotation > single voice > fallback
@@ -10443,14 +10615,14 @@ This is **not a sales call**.
 
 ## Call Behavior Logic
 
-### STEP 0: YOUR FIRST RESPONSE — ASK FOR THE CONTACT BY NAME
+### STEP 0: YOUR FIRST RESPONSE â€” ASK FOR THE CONTACT BY NAME
 When the call connects, wait for the other person to speak.
-When you hear ANY human voice — including "Hello?", "Hi", "Yeah?", "Good morning" — your FIRST and ONLY response MUST be:
+When you hear ANY human voice â€” including "Hello?", "Hi", "Yeah?", "Good morning" â€” your FIRST and ONLY response MUST be:
 "Hi, am I speaking with ${firstName}?"
 
 **"Hello?" is NOT identity confirmation. Do NOT say "Great, thanks for confirming" as your first response.**
 **Ringing/ringback tone is NOT human speech. Never speak during ringtone.**
-**If you hear IVR/robot audio, wait or navigate IVR first — only continue after a real person speaks.**
+**If you hear IVR/robot audio, wait or navigate IVR first â€” only continue after a real person speaks.**
 
 ### CRITICAL: Turn-Taking Rules
 **NEVER speak until the other person finishes responding.** After asking ANY question:
@@ -10461,7 +10633,7 @@ When you hear ANY human voice — including "Hello?", "Hi", "Yeah?", "Good morni
 
 ---
 
-### 1. Identity Confirmation (MANDATORY — NO EXCEPTIONS)
+### 1. Identity Confirmation (MANDATORY â€” NO EXCEPTIONS)
 When you hear a human voice, your first words MUST be the identity question:
 "Am I speaking with ${firstName}, at ${fullName.includes(' ') ? 'your company' : 'the company'}?"
 **After asking, STOP speaking and wait in silence for their response.**
@@ -10472,11 +10644,11 @@ Identity is CONFIRMED only when they explicitly say:
 - "Yes" / "That's me" / "Speaking" / "This is [Name]" / "[Name] speaking"
 
 **What is NOT identity confirmation:**
-- "Hello?" / "Hi" / "Yeah?" / "Who is this?" / "What's this about?" — these are NOT confirmations
+- "Hello?" / "Hi" / "Yeah?" / "Who is this?" / "What's this about?" â€” these are NOT confirmations
 
 If they say "who is this?" or "who's calling?":
 - Respond naturally: "Oh hi, my name is ${agentName}, calling on behalf of ${orgName}. Am I speaking with ${firstName}?"
-- Be confident and clear about your identity — say your name smoothly without hesitation
+- Be confident and clear about your identity â€” say your name smoothly without hesitation
 
 If they say "what's this about?":
 - Keep it vague: "Just wanted to connect briefly. Is this ${firstName}?"
@@ -10486,14 +10658,14 @@ Ambiguity, hesitation, or deflection = NOT confirmed. Ask one clarifying questio
 
 ---
 
-### 2. Right Party Detected — Value-Lead Opening (5-7 seconds max)
+### 2. Right Party Detected â€” Value-Lead Opening (5-7 seconds max)
 If the person confirms they are ${fullName}:
 
-1. Lead IMMEDIATELY with the value — your name and org are secondary:
-   "Hi ${firstName}, I'm ${agentName} from ${orgName} — [deliver campaign value proposition concisely]. Can I grab a minute?"
+1. Lead IMMEDIATELY with the value â€” your name and org are secondary:
+   "Hi ${firstName}, I'm ${agentName} from ${orgName} â€” [deliver campaign value proposition concisely]. Can I grab a minute?"
 2. WAIT for their response. If they say no, respect it and end politely.
 3. If they agree, proceed with the campaign objective (book meeting, confirm email for content, etc.).
-4. Close warmly — thank them for their time, say goodbye.
+4. Close warmly â€” thank them for their time, say goodbye.
 
 ${campaignType === 'content_syndication' ? `**CONTENT CAMPAIGN RAPPORT STEP (MANDATORY):**
 After identity is confirmed, follow the fixed framework in this exact order:
@@ -10518,17 +10690,17 @@ After identity is confirmed and after your short value-first opening:
 **TIMING RULE: Your entire post-confirmation intro MUST be under 7 seconds. No filler. No pleasantries. Value first.**
 
 **CRITICAL RULES:**
-- Lead with what's in it for THEM — not with who you are
+- Lead with what's in it for THEM â€” not with who you are
 - Do NOT say "Great, thanks for confirming" or any other pleasantry before the value hook
 - Do NOT ask "do you have a moment?" or "would you be interested?"
 - Avoid generic/weak permission language (e.g., "are you interested?"). For content campaigns, use clear and specific consent language after value + email confirmation (e.g., "May I send you a copy?").
-- Keep the entire intro to ONE short sentence — name + org + value + ask
+- Keep the entire intro to ONE short sentence â€” name + org + value + ask
 - Use the campaign objective and talking points from the Campaign Context section below to frame your value proposition
 
 If permission is given for other campaign types:
 - Clearly and briefly state the call purpose aligned with the campaign objective
-- Deliver it concisely, naturally, and in a human-sounding tone — NOT scripted
-- For content/white paper campaigns: keep the same fixed scaffold every time; only swap context values (title/company, asset title, topic, and value points). Example: "I see you're heading up [role] at [company], that's why I reached out. We published [asset] on [topic], including [value point 1] and [value point 2]. I have ${contactEmail} as your email, is that right? Great — may I send you a copy?"
+- Deliver it concisely, naturally, and in a human-sounding tone â€” NOT scripted
+- For content/white paper campaigns: keep the same fixed scaffold every time; only swap context values (title/company, asset title, topic, and value points). Example: "I see you're heading up [role] at [company], that's why I reached out. We published [asset] on [topic], including [value point 1] and [value point 2]. I have ${contactEmail} as your email, is that right? Great â€” may I send you a copy?"
 - For meeting/appointment campaigns: ask ONE relevant question, then propose next steps
 - For lead qualification campaigns: keep discovery light (max two questions), confirm gap + interest, and end with a clear next step
 - Listen carefully and allow them to speak without interruption
@@ -10548,10 +10720,10 @@ If the response is any of:
 - "Please state your name and purpose"
 - Any indication the person is NOT ${firstName} (receptionist, assistant, office staff)
 
-**CRITICAL: You are now talking to a gatekeeper. Do NOT repeat "May I speak with ${firstName}?" — they already heard you. ANSWER THEIR QUESTIONS.**
+**CRITICAL: You are now talking to a gatekeeper. Do NOT repeat "May I speak with ${firstName}?" â€” they already heard you. ANSWER THEIR QUESTIONS.**
 
 **When Asked "What is this regarding?" or "What's this about?":**
-- Answer warmly: "Of course — my name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${firstName} available?"
+- Answer warmly: "Of course â€” my name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${firstName} available?"
 - Do NOT dodge the question. Do NOT just repeat the name request.
 - If pressed further: "I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?"
 
@@ -10560,16 +10732,16 @@ If the response is any of:
 - Then ask: "Could you connect me with ${firstName}?"
 
 **When Asked "How can I help you?" or "Can I help you?":**
-- Acknowledge warmly: "Thank you! I was hoping to speak with ${firstName} briefly — is ${firstName} available?"
+- Acknowledge warmly: "Thank you! I was hoping to speak with ${firstName} briefly â€” is ${firstName} available?"
 
 **When Told "${firstName} is not available / in a meeting / at their desk:**
 - Be understanding: "I completely understand. Is there a better time to reach ${firstName}?"
 - If no time offered: "No worries at all. Thank you so much for your help!"
 
 - Make NO MORE than two polite attempts.
-- ALWAYS answer gatekeeper questions — never ignore or dodge them.
+- ALWAYS answer gatekeeper questions â€” never ignore or dodge them.
 - Be kind, warm, and grateful for their time.
-- If refused → Thank them sincerely and END THE CALL gracefully.
+- If refused â†’ Thank them sincerely and END THE CALL gracefully.
 
 ---
 
@@ -10585,9 +10757,9 @@ If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
 "This is ${agentName} calling from ${orgName} for ${firstName} regarding a business opportunity."
 
 **Then WAIT IN COMPLETE SILENCE. Do NOT repeat yourself. Do NOT ask questions.**
-- If a human connects → restart identity check: "Hi, am I speaking with ${firstName}?"
-- If the screener repeats its prompt → remain silent (it is still processing)
-- If 30+ seconds of silence after your response → end the call with no_answer disposition
+- If a human connects â†’ restart identity check: "Hi, am I speaking with ${firstName}?"
+- If the screener repeats its prompt â†’ remain silent (it is still processing)
+- If 30+ seconds of silence after your response â†’ end the call with no_answer disposition
 - NEVER respond to the screener more than once
 - Do NOT deliver pitch/discovery until a real human responds
 
@@ -10596,7 +10768,7 @@ If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
 ### 4. Right Party Transfer Verification
 When a new voice comes on the line AFTER a transfer:
 - Do NOT assume the transfer succeeded
-- Confirm identity again: "Hi, just to confirm — am I speaking with ${firstName}?"
+- Confirm identity again: "Hi, just to confirm â€” am I speaking with ${firstName}?"
 - Only after confirmation: proceed with introduction and permission-based opening (Step 2)
 
 ---
@@ -10625,48 +10797,48 @@ If you hear an automated phone system (IVR), menu prompts, or "press X for...":
 ---
 
 ### 6. Conversational Discipline
-- Always listen before responding — never interrupt
-- Avoid long monologues — keep responses to 1–2 sentences max
-- Take turns naturally — recognize when it is the prospect's turn to speak
+- Always listen before responding â€” never interrupt
+- Avoid long monologues â€” keep responses to 1â€“2 sentences max
+- Take turns naturally â€” recognize when it is the prospect's turn to speak
 - Adapt pacing based on the prospect's responses
 - Ask only ONE question at a time, then wait
 - Use natural language: "Got it", "Makes sense", not "I understand", "That is correct"
 
 ---
 
-### 7. Call Closure & Graceful Farewell — NO PREMATURE DISCONNECTS
+### 7. Call Closure & Graceful Farewell â€” NO PREMATURE DISCONNECTS
 At the end of the call:
 - After booking confirmation:
   1. Confirm the meeting details (date, time, email for calendar invite)
   2. Set expectations: "You'll receive a calendar invite shortly"
   3. Thank them warmly and sincerely: "Thank you so much for your time, ${firstName}"
   4. Close gracefully: "Have a wonderful day!"
-- WAIT for the prospect to respond after your closing remarks — do NOT call end_call yet
+- WAIT for the prospect to respond after your closing remarks â€” do NOT call end_call yet
 - The call must NOT be disconnected until:
   * The prospect clearly says "thank you", "bye", "take care", or equivalent
   * The conversation has naturally and MUTUALLY ended
 - NEVER hang up immediately after delivering a closing statement
 - Call termination must always be PROSPECT-LED, not agent-triggered
-- Be genuinely warm and respectful in your farewell — leave them with a positive impression
+- Be genuinely warm and respectful in your farewell â€” leave them with a positive impression
 
 ---
 
-### 8. MANDATORY PROGRESSION — Value FIRST, Under 7 Seconds
-**The MOMENT identity is confirmed, deliver the value hook IMMEDIATELY — no filler, no pleasantries.**
+### 8. MANDATORY PROGRESSION â€” Value FIRST, Under 7 Seconds
+**The MOMENT identity is confirmed, deliver the value hook IMMEDIATELY â€” no filler, no pleasantries.**
 
 Your post-confirmation response must contain ALL of these in ONE sentence (under 7 seconds):
-1. Your name and organization (brief — "I'm ${agentName} from ${orgName}")
+1. Your name and organization (brief â€” "I'm ${agentName} from ${orgName}")
 2. The core value proposition from the Campaign Context section
 3. A clear ask aligned with the campaign objective
 
 **Do NOT waste time before the value hook:**
-- Do NOT say "Thanks for confirming", "Great", "I appreciate your time" — go straight to the offer
+- Do NOT say "Thanks for confirming", "Great", "I appreciate your time" â€” go straight to the offer
 - Do NOT ask any discovery or qualification questions before the offer
 - Keep it concise and relevant to the prospect's role and industry
 
 ### 9. NON-ENGLISH LANGUAGE HANDLING
 If the contact responds in a language other than English:
-- Recognize this immediately — do NOT continue speaking English as if nothing happened
+- Recognize this immediately â€” do NOT continue speaking English as if nothing happened
 - Say: "I apologize, I only speak English. Is there someone else I can speak with?"
 - If they continue in a non-English language, politely end the call
 - Submit disposition as "no_answer" with a note indicating the language barrier
@@ -10676,7 +10848,7 @@ If the contact responds in a language other than English:
 # Guardrails
 
 Once the right person is confirmed, do not re-check or re-confirm identity later in the conversation.
-If the contact says "I don't know" or hesitates, treat it as uncertainty about the topic — not about who they are.
+If the contact says "I don't know" or hesitates, treat it as uncertainty about the topic â€” not about who they are.
 
 If a person asks whether you are an AI or automated system:
 - Acknowledge honestly and confidently.
@@ -10687,7 +10859,7 @@ If a person asks whether you are an AI or automated system:
 - Pause and wait for their response.
 
 Use language similar to:
-"Yes — I'm an automated assistant. I'm calling today to share a message created by real people, focused on real challenges leaders are thinking about. If you're comfortable continuing, I'll keep this very brief."
+"Yes â€” I'm an automated assistant. I'm calling today to share a message created by real people, focused on real challenges leaders are thinking about. If you're comfortable continuing, I'll keep this very brief."
 
 If the person expresses discomfort or asks to stop:
 - Apologize politely.
@@ -10712,18 +10884,18 @@ Use this to navigate IVR systems by sending DTMF tones (keypad digits).
 Call this when you determine the call outcome. REQUIRED at end of every call.
 
 **QUALIFICATION CRITERIA (FLEXIBLE - Consider ANY of these signals for qualified_lead):**
-1. ✅ Acknowledged a problem or pain point (e.g., "We don't have a good ABM strategy", "Current solution isn't working")
-2. ✅ Asked any meaningful questions (e.g., "How does this work?", "What would the process look like?", "How much would it cost?")
-3. ✅ Expressed interest or curiosity (e.g., "That sounds interesting", "Tell me more", "I'd like to learn more")
-4. ✅ Engaged in conversation for 15+ seconds with back-and-forth dialogue
-5. ✅ Explicitly requested follow-up (e.g., "Send me info", "Schedule a call", "I'd like a demo")
-6. ✅ Requested callback at a specific time
+1. âœ… Acknowledged a problem or pain point (e.g., "We don't have a good ABM strategy", "Current solution isn't working")
+2. âœ… Asked any meaningful questions (e.g., "How does this work?", "What would the process look like?", "How much would it cost?")
+3. âœ… Expressed interest or curiosity (e.g., "That sounds interesting", "Tell me more", "I'd like to learn more")
+4. âœ… Engaged in conversation for 15+ seconds with back-and-forth dialogue
+5. âœ… Explicitly requested follow-up (e.g., "Send me info", "Schedule a call", "I'd like a demo")
+6. âœ… Requested callback at a specific time
 
 **NOT qualified_lead if:**
-- ❌ Prospect explicitly said "not interested", "not a fit", "not looking", "don't call back"
-- ❌ Only one-word responses with no elaboration or follow-up questions
-- ❌ Conversation was entirely one-sided (you talking, them silent)
-- ❌ Call ended with prospect hanging up abruptly (indicates rejection)
+- âŒ Prospect explicitly said "not interested", "not a fit", "not looking", "don't call back"
+- âŒ Only one-word responses with no elaboration or follow-up questions
+- âŒ Conversation was entirely one-sided (you talking, them silent)
+- âŒ Call ended with prospect hanging up abruptly (indicates rejection)
 
 **Disposition codes:**
 - qualified_lead: Prospect showed at least ONE clear signal of interest, engagement, or openness to learning more.
@@ -10735,10 +10907,10 @@ Call this when you determine the call outcome. REQUIRED at end of every call.
 - invalid_data: ONLY use when phone number is CONFIRMED wrong ("wrong number", "no one by that name") or line is disconnected/out of service.
 
 **CRITICAL DECISION TREE:**
-1. Did they explicitly decline or say "not interested"? → use not_interested
-2. Did they show ANY interest signal (question, acknowledgment, curiosity, request)? → use qualified_lead
-3. Did they hang up silently or only respond with one-word answers? → use no_answer
-4. Is this a callback request at a specific time? → use callback_requested
+1. Did they explicitly decline or say "not interested"? â†’ use not_interested
+2. Did they show ANY interest signal (question, acknowledgment, curiosity, request)? â†’ use qualified_lead
+3. Did they hang up silently or only respond with one-word answers? â†’ use no_answer
+4. Is this a callback request at a specific time? â†’ use callback_requested
 5. Otherwise, use not_interested (they didn't engage positively)
 
 ## end_call
@@ -10904,6 +11076,19 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
     return;
   }
 
+  if (shouldAbortForDtmfIvr(session, transcript)) {
+    console.log(`${LOG_PREFIX} [AudioGuard] ${source} fast DTMF IVR cue detected - ending call`);
+    session.detectedDisposition = 'voicemail';
+    session.callOutcome = 'voicemail';
+    recordVoicemailDetectedEvent(session, `${source}_dtmf_ivr_fast_abort`);
+    setImmediate(() => {
+      endCall(callId, 'voicemail').catch((err) => {
+        console.error(`${LOG_PREFIX} Failed to end call after ${source} DTMF IVR cue:`, err);
+      });
+    });
+    return;
+  }
+
   if (isLikelyChannelBleed(session, transcript)) {
     recordChannelBleedDetected(session, transcript, `${source}_transcript_feed`);
     return;
@@ -10925,7 +11110,7 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
   // and causes Gemini to get confused about conversation state, leading to
   // premature disposition calls and "prospect did not respond" errors.
   //
-  // The audio stream → Gemini handles the actual conversation.
+  // The audio stream â†’ Gemini handles the actual conversation.
   // This function now only stores transcripts for post-call analytics.
   console.log(`${LOG_PREFIX} [${source}] Transcript stored: "${transcript.substring(0, 50)}..." (NOT sent to Gemini - native audio handles it)`);
 
@@ -10936,7 +11121,7 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
       session.audioDetection.humanDetected = true;
       session.audioDetection.humanDetectedAt = new Date();
       markFirstHumanAudio(session, `${source}_transcript_feed`);
-      console.log(`${LOG_PREFIX} ✅ [${source}] HUMAN DETECTED for call ${callId}`);
+      console.log(`${LOG_PREFIX} âœ… [${source}] HUMAN DETECTED for call ${callId}`);
     }
   }
 
@@ -10949,7 +11134,7 @@ export function feedTranscriptToGemini(callId: string, transcript: string, sourc
       session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
       session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
       trimArray(session.conversationState.stateHistory, MAX_STATE_HISTORY);
-      console.log(`${LOG_PREFIX} ✅ [${source}] Identity CONFIRMED for call: ${callId}`);
+      console.log(`${LOG_PREFIX} âœ… [${source}] Identity CONFIRMED for call: ${callId}`);
 
       // Inject identity lock reminder
       injectGeminiIdentityLockReminder(session, geminiProvider, transcript).catch(err => {
@@ -11121,7 +11306,7 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
 
       // ABSOLUTE HARD LIMIT: Force terminate after grace period (no exceptions)
       if (elapsedSeconds > absoluteMax) {
-        console.warn(`${LOG_PREFIX} ⛔ ABSOLUTE MAX EXCEEDED - Force ending call ${session.callId} after ${elapsedSeconds}s (absolute limit: ${absoluteMax}s)`);
+        console.warn(`${LOG_PREFIX} â›” ABSOLUTE MAX EXCEEDED - Force ending call ${session.callId} after ${elapsedSeconds}s (absolute limit: ${absoluteMax}s)`);
         endCall(session.callId, 'completed');
         // Defense-in-depth: backup Telnyx hangup in case endCall's hangup failed
         setTimeout(async () => {
@@ -11134,7 +11319,7 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       if (elapsedSeconds >= warnThreshold && !session.wrapUpWarningSent) {
         session.wrapUpWarningSent = true;
         const remainingSeconds = absoluteMax - elapsedSeconds;
-        console.log(`${LOG_PREFIX} ⏰ TIME WARNING - Call ${session.callId} approaching limit. Sending wrap-up instruction. Remaining: ${remainingSeconds}s`);
+        console.log(`${LOG_PREFIX} â° TIME WARNING - Call ${session.callId} approaching limit. Sending wrap-up instruction. Remaining: ${remainingSeconds}s`);
 
         // Inject wrap-up instruction to AI (OpenAI provider)
         if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
@@ -11186,7 +11371,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       // Original limit exceeded (now serves as logging only, actual termination at absolute max)
       if (elapsedSeconds > effectiveMaxDuration) {
         const source = campaignMaxDurationSeconds >= 0 && campaignMaxDurationSeconds <= agentMaxDurationSeconds ? 'campaign' : 'agent';
-        console.warn(`${LOG_PREFIX} ⚠️ MAX DURATION EXCEEDED - Call ${session.callId} at ${elapsedSeconds}s (limit: ${effectiveMaxDuration}s, ${source} limit). Grace period active until ${absoluteMax}s.`);
+        console.warn(`${LOG_PREFIX} âš ï¸ MAX DURATION EXCEEDED - Call ${session.callId} at ${elapsedSeconds}s (limit: ${effectiveMaxDuration}s, ${source} limit). Grace period active until ${absoluteMax}s.`);
       }
     }
 
@@ -11203,7 +11388,8 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     // ENHANCED VOICEMAIL DETECTION: One-way conversation pattern
     // If we've been talking for 15+ seconds but got no interactive human responses, it's likely voicemail
     // Reduced from 30s to 15s - call analysis showed agent lingering 12-21s on voicemail lines
-    const MAX_ONE_WAY_CONVERSATION_SECONDS = 15;
+    const transferHoldGraceActive = hasRecentTransferOrHoldCue(session);
+    const MAX_ONE_WAY_CONVERSATION_SECONDS = transferHoldGraceActive ? 35 : 15;
     if (elapsedSeconds > MAX_ONE_WAY_CONVERSATION_SECONDS && !session.detectedDisposition) {
       // Count INTERACTIVE user responses: responses that came AFTER the AI spoke at least once
       // This filters out voicemail greetings that are just the recorded message playing
@@ -11220,6 +11406,10 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
 
       // If AI sent 2+ messages but got 0 interactive responses, likely voicemail/IVR
       if (aiMessages >= 2 && interactiveUserResponses === 0) {
+        if (transferHoldGraceActive) {
+          console.log(`${LOG_PREFIX} [AudioGuard] Transfer/hold cue present - delaying one-way voicemail fallback for call ${session.callId}`);
+          return;
+        }
         console.warn(`${LOG_PREFIX} ONE-WAY CONVERSATION DETECTED - AI sent ${aiMessages} messages, got ${interactiveUserResponses} interactive responses in ${elapsedSeconds}s`);
         console.log(`${LOG_PREFIX} Transcripts: ${JSON.stringify(session.transcripts.map(t => ({ role: t.role, words: t.text?.split(/\s+/).length || 0, preview: t.text?.substring(0, 30) })))}`);
 
@@ -11230,7 +11420,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     }
 
     // POST-GREETING VOICEMAIL RECHECK: Catch split-segment voicemail greetings
-    // Scenario: "Hi, this is John" → humanDetected=true, then "leave a message after the beep" → IVR
+    // Scenario: "Hi, this is John" â†’ humanDetected=true, then "leave a message after the beep" â†’ IVR
     // If human was detected but subsequent IVR/voicemail patterns appeared within 15s, revoke humanDetected
     if (session.audioDetection.humanDetected && !session.detectedDisposition) {
       const humanDetectedAt = session.audioDetection.humanDetectedAt;
@@ -11256,7 +11446,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
 
     // NO-DISPOSITION TIMEOUT: End call if 60s passed without any disposition
     // Catches cases where humanDetected=true from voicemail greeting but no real conversation
-    const MAX_CALL_WITHOUT_DISPOSITION_SECONDS = 60;
+    const MAX_CALL_WITHOUT_DISPOSITION_SECONDS = transferHoldGraceActive ? 90 : 60;
     if (
       elapsedSeconds > MAX_CALL_WITHOUT_DISPOSITION_SECONDS
       && !session.detectedDisposition
@@ -11279,7 +11469,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     // CRITICAL FIX: End call if no human detected after 30 seconds
     // This prevents AI from talking to voicemail/IVR for extended periods
     // Reduced from 60s to 30s based on analysis showing 700+ calls running 60s+ on voicemail
-    const MAX_DURATION_WITHOUT_HUMAN_SECONDS = 30;
+    const MAX_DURATION_WITHOUT_HUMAN_SECONDS = transferHoldGraceActive ? 75 : 30;
     if (
       elapsedSeconds > MAX_DURATION_WITHOUT_HUMAN_SECONDS
       && !session.audioDetection.humanDetected
@@ -11342,7 +11532,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
     if (elapsedSeconds >= GLOBAL_WRAP_UP_WARNING_SECONDS && elapsedSeconds < GLOBAL_ABSOLUTE_CEILING_SECONDS && !session.wrapUpWarningSent) {
       session.wrapUpWarningSent = true;
       const remainingSeconds = GLOBAL_ABSOLUTE_CEILING_SECONDS - elapsedSeconds;
-      console.warn(`${LOG_PREFIX} ⏰ GLOBAL WRAP-UP WARNING - Call ${session.callId} at ${elapsedSeconds}s. Sending wrap-up instruction. Remaining: ${remainingSeconds}s`);
+      console.warn(`${LOG_PREFIX} â° GLOBAL WRAP-UP WARNING - Call ${session.callId} at ${elapsedSeconds}s. Sending wrap-up instruction. Remaining: ${remainingSeconds}s`);
 
       const geminiProvider = (session as any).geminiProvider;
       if (geminiProvider && geminiProvider.isConnected) {
@@ -11379,7 +11569,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       }
     }
     if (elapsedSeconds >= GLOBAL_ABSOLUTE_CEILING_SECONDS) {
-      console.error(`${LOG_PREFIX} ⛔ GLOBAL CEILING BREACHED - Force terminating call ${session.callId} after ${elapsedSeconds}s (GLOBAL CEILING: ${GLOBAL_ABSOLUTE_CEILING_SECONDS}s). This should never happen.`);
+      console.error(`${LOG_PREFIX} â›” GLOBAL CEILING BREACHED - Force terminating call ${session.callId} after ${elapsedSeconds}s (GLOBAL CEILING: ${GLOBAL_ABSOLUTE_CEILING_SECONDS}s). This should never happen.`);
 
       // If call has a real disposition, end gracefully; otherwise mark as needs_review
       if (!session.detectedDisposition) {
@@ -11410,7 +11600,7 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
         try {
           await forceTelnyxHangupWithRetry(session, 3);
         } catch (e) {
-          console.error(`${LOG_PREFIX} ⛔ GLOBAL CEILING: Backup Telnyx hangup also failed for ${session.callId}:`, e);
+          console.error(`${LOG_PREFIX} â›” GLOBAL CEILING: Backup Telnyx hangup also failed for ${session.callId}:`, e);
         }
       }, 5000);
       return;
@@ -11421,43 +11611,43 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       const openaiState = session.openaiWs ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session.openaiWs.readyState] : 'NULL';
       const telnyxState = session.telnyxWs ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session.telnyxWs.readyState] : 'NULL';
       
-      console.log(`${LOG_PREFIX} ðŸ“Š Audio Health Check [${session.callId}]:
+      console.log(`${LOG_PREFIX} Ã°Å¸â€œÅ  Audio Health Check [${session.callId}]:
   - Elapsed: ${elapsedSeconds}s
   - Audio Frames: ${session.audioFrameCount}
   - Bytes Transmitted: ${session.audioBytesSent}
   - Last Audio: ${timeSinceLastAudio}s ago
   - Telnyx Inbound Frames: ${session.telnyxInboundFrames}
   - Telnyx Inbound Last: ${session.telnyxInboundLastTime ? `${session.telnyxInboundLastTime.toISOString()}` : 'N/A'}
-  - OpenAI Status: ${openaiState === 'OPEN' ? 'âœ… Connected' : `âŒ ${openaiState}`}
-  - Telnyx Status: ${telnyxState === 'OPEN' ? 'âœ… Connected' : `âŒ ${telnyxState}`}
+  - OpenAI Status: ${openaiState === 'OPEN' ? 'Ã¢Å“â€¦ Connected' : `Ã¢ÂÅ’ ${openaiState}`}
+  - Telnyx Status: ${telnyxState === 'OPEN' ? 'Ã¢Å“â€¦ Connected' : `Ã¢ÂÅ’ ${telnyxState}`}
   - Buffered Frames: ${session.audioFrameBuffer.length}
   - Stream ID: ${session.streamSid || 'NOT SET'}`);
     }
 
     // Alert if no audio for 15 seconds
     if (session.audioFrameCount > 0 && timeSinceLastAudio > 15) {
-      console.warn(`${LOG_PREFIX} âš ï¸  No audio received for ${timeSinceLastAudio}s on call ${session.callId}`);
+      console.warn(`${LOG_PREFIX} Ã¢Å¡Â Ã¯Â¸Â  No audio received for ${timeSinceLastAudio}s on call ${session.callId}`);
     }
 
     // Alert if audio production seems slow - DISABLED (False positive during listening/silence periods)
     /* 
     const framesPerSecond = session.audioFrameCount / (elapsedSeconds + 1);
     if (session.audioFrameCount > 10 && framesPerSecond < 10) {
-      console.warn(`${LOG_PREFIX} âš ï¸  Low audio frame rate: ${framesPerSecond.toFixed(1)} fps on call ${session.callId}`);
+      console.warn(`${LOG_PREFIX} Ã¢Å¡Â Ã¯Â¸Â  Low audio frame rate: ${framesPerSecond.toFixed(1)} fps on call ${session.callId}`);
     } 
     */
     
     // Alert if buffered frames are accumulating (indicates Telnyx connection issues)
     if (session.audioFrameBuffer.length > 50) {
-      console.error(`${LOG_PREFIX} âŒ CRITICAL: ${session.audioFrameBuffer.length} frames buffered - Telnyx stream may be broken!`);
+      console.error(`${LOG_PREFIX} Ã¢ÂÅ’ CRITICAL: ${session.audioFrameBuffer.length} frames buffered - Telnyx stream may be broken!`);
     }
     
     // Try to recover if Telnyx disconnected but OpenAI is still active
     if (session.openaiWs?.readyState === WebSocket.OPEN && session.telnyxWs?.readyState !== WebSocket.OPEN) {
-      console.error(`${LOG_PREFIX} âŒ CRITICAL: OpenAI connected but Telnyx disconnected - audio cannot reach caller!`);
+      console.error(`${LOG_PREFIX} Ã¢ÂÅ’ CRITICAL: OpenAI connected but Telnyx disconnected - audio cannot reach caller!`);
       // This is a critical error - the call should probably be terminated
       if (session.audioFrameBuffer.length > 100) {
-        console.error(`${LOG_PREFIX} âŒ Buffer overflow - terminating call to prevent memory issues`);
+        console.error(`${LOG_PREFIX} Ã¢ÂÅ’ Buffer overflow - terminating call to prevent memory issues`);
         endCall(session.callId, 'error');
       }
     }
@@ -11489,14 +11679,14 @@ setInterval(async () => {
 
     // Clean up sessions that are inactive but still in the map (memory leak prevention)
     if (!session.isActive && ageMs > 5 * 60 * 1000) {
-      console.log(`${LOG_PREFIX} 🧹 Reaper: Removing stale inactive session ${callId} (age: ${Math.round(ageMs / 1000)}s)`);
+      console.log(`${LOG_PREFIX} ðŸ§¹ Reaper: Removing stale inactive session ${callId} (age: ${Math.round(ageMs / 1000)}s)`);
       activeSessions.delete(callId);
       continue;
     }
 
     // Force-kill any active session that exceeds the zombie max age
     if (session.isActive && ageMs > ZOMBIE_MAX_AGE_MS) {
-      console.error(`${LOG_PREFIX} ⛔ ZOMBIE REAPER: Call ${callId} has been active for ${Math.round(ageMs / 1000)}s (max: ${ZOMBIE_MAX_AGE_MS / 1000}s). Force terminating.`);
+      console.error(`${LOG_PREFIX} â›” ZOMBIE REAPER: Call ${callId} has been active for ${Math.round(ageMs / 1000)}s (max: ${ZOMBIE_MAX_AGE_MS / 1000}s). Force terminating.`);
 
       // Set disposition if not already set
       if (!session.detectedDisposition) {
@@ -11507,7 +11697,7 @@ setInterval(async () => {
       try {
         await endCall(callId, 'completed');
       } catch (e) {
-        console.error(`${LOG_PREFIX} ⛔ Zombie reaper: endCall failed for ${callId}:`, e);
+        console.error(`${LOG_PREFIX} â›” Zombie reaper: endCall failed for ${callId}:`, e);
         // Even if endCall fails, force isActive=false to prevent infinite retries
         session.isActive = false;
         session.isEnding = true;
@@ -11517,7 +11707,7 @@ setInterval(async () => {
       try {
         await forceTelnyxHangupWithRetry(session, 3);
       } catch (e) {
-        console.error(`${LOG_PREFIX} ⛔ Zombie reaper: Telnyx hangup retry also failed for ${callId}:`, e);
+        console.error(`${LOG_PREFIX} â›” Zombie reaper: Telnyx hangup retry also failed for ${callId}:`, e);
       }
 
       // Force-close all connections

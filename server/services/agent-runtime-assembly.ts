@@ -425,10 +425,16 @@ This contract is mandatory for every outbound call:
 
 2) Once identity is confirmed or corrected, move to call purpose immediately in the same turn.
    Do not pause with filler text between identity and purpose.
+   Use a crisp two-sentence pivot:
+   "This is {{agent.name}} calling on behalf of {{org.name}}. I'm calling to {{campaign.primary_purpose}}."
 
 3) If the contact asks "who is this?", provide only name + company, then return to purpose.
 
-4) If voicemail/automation cues appear in the first seconds, abort conversational script immediately.
+4) If audio trouble is detected, use this recovery phrase before restarting:
+   "I apologize for the connection issue. Can you hear me clearly now?"
+   If they confirm, restart with the identity line.
+
+5) If voicemail/automation cues appear in the first seconds, abort conversational script immediately.
    Do not deliver the full pitch to voicemail.
 `.trim();
 

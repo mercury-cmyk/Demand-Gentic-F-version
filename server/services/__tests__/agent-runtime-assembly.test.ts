@@ -13,10 +13,13 @@ describe("injectCampaignOpeningContract", () => {
     expect(result).toContain("May I speak with");
   });
 
-  it("does not inject contract for other campaigns", () => {
+  it("injects only the global opening contract for non-voice-lift campaigns", () => {
     const basePrompt = "# Base Prompt\nFollow policy.";
     const result = injectCampaignOpeningContract(basePrompt, "Other Campaign");
 
-    expect(result).toBe(basePrompt);
+    expect(result).toContain(basePrompt);
+    expect(result).toContain("Opening Contract");
+    expect(result).toContain("May I speak with");
+    expect(result).not.toContain("Campaign Opening Contract");
   });
 });
