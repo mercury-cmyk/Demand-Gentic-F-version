@@ -467,20 +467,20 @@ router.get('/', async (req: Request, res: Response) => {
       db
         .select({
           campaignId: campaignQueue.campaignId,
-          total: sql<number>`count(*)::int`,
-          pending: sql<number>`sum(case when status = 'queued' or status = 'pending' then 1 else 0 end)::int`,
+          total: sql<number>`COUNT(DISTINCT CASE WHEN ${campaignQueue.status} <> 'removed' THEN COALESCE(${campaignQueue.contactId}::text, ${campaignQueue.dialedNumber}, ${campaignQueue.id}::text) ELSE NULL END)::int`,
+          pending: sql<number>`COUNT(DISTINCT CASE WHEN ${campaignQueue.status} IN ('queued', 'pending') THEN COALESCE(${campaignQueue.contactId}::text, ${campaignQueue.dialedNumber}, ${campaignQueue.id}::text) ELSE NULL END)::int`,
         })
         .from(campaignQueue)
         .where(inArray(campaignQueue.campaignId, campaignIdList))
         .groupBy(campaignQueue.campaignId),
       db
         .select({
-          campaignId: callAttempts.campaignId,
+          campaignId: dialerCallAttempts.campaignId,
           count: sql<number>`count(*)::int`,
         })
-        .from(callAttempts)
-        .where(inArray(callAttempts.campaignId, campaignIdList))
-        .groupBy(callAttempts.campaignId),
+        .from(dialerCallAttempts)
+        .where(inArray(dialerCallAttempts.campaignId, campaignIdList))
+        .groupBy(dialerCallAttempts.campaignId),
       db
         .select({
           campaignId: leads.campaignId,

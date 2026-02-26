@@ -604,6 +604,8 @@ export default function CampaignsPage() {
                 const emailStats: EmailStats | null = emailSnapshot || null;
                 const emailRecipients = emailSnapshot?.totalRecipients ?? campaign.sent ?? 0;
                 const emailOpens = emailSnapshot?.opens ?? campaign.opened ?? 0;
+                const callStatsDefinition = 'Recipients = unique non-removed contacts targeted; Attempts = total dialer call attempts; RPC = connected calls (count); Qualified = approved leads or qualified call outcomes; DNC = do_not_call / dnc_request outcomes.';
+                const emailStatsDefinition = 'Recipients = total recipients targeted; Delivered = delivered messages; Opened = unique opens; Clicked = unique clicks; Unsub = unsubscribes.';
                 const engagementRate = emailRecipients > 0
                   ? Math.round((emailOpens / emailRecipients) * 100)
                   : 0;
@@ -656,46 +658,46 @@ export default function CampaignsPage() {
                             <>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-foreground">{(callSnapshot?.contactsInQueue ?? campaignQueueStats?.total ?? 0).toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Recipients</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={callStatsDefinition}>Recipients</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{callAttempts.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Attempts</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={callStatsDefinition}>Attempts</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{callConnected.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">RPC</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={callStatsDefinition}>RPC</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{(callSnapshot?.leadsQualified ?? 0).toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Qualified</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={callStatsDefinition}>Qualified</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-red-500 dark:text-red-400">{(callSnapshot?.dncRequests ?? 0).toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">DNC</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={callStatsDefinition}>DNC</p>
                               </div>
                             </>
                           ) : (
                             <>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-foreground">{emailRecipients.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Recipients</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={emailStatsDefinition}>Recipients</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{(emailSnapshot?.delivered ?? 0).toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Delivered</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={emailStatsDefinition}>Delivered</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{emailOpens.toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Opened</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={emailStatsDefinition}>Opened</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">{(emailSnapshot?.clicks ?? 0).toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Clicked</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={emailStatsDefinition}>Clicked</p>
                               </div>
                               <div className="flex flex-col items-center">
                                 <p className="text-sm font-bold tabular-nums text-red-500 dark:text-red-400">{(emailSnapshot?.unsubscribes ?? 0).toLocaleString()}</p>
-                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Unsub</p>
+                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground" title={emailStatsDefinition}>Unsub</p>
                               </div>
                             </>
                           )}

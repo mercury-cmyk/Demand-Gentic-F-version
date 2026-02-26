@@ -1423,39 +1423,37 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
       : await db
           .select({
             campaignId: campaignQueue.campaignId,
-            contactsInQueue: sql<number>`COUNT(CASE WHEN ${campaignQueue.status} IN ('queued', 'pending') THEN 1 END)::int`,
+            contactsInQueue: sql<number>`COUNT(DISTINCT CASE WHEN ${campaignQueue.status} <> 'removed' THEN COALESCE(${campaignQueue.contactId}::text, ${campaignQueue.dialedNumber}, ${campaignQueue.id}::text) ELSE NULL END)::int`,
           })
           .from(campaignQueue)
           .where(inArray(campaignQueue.campaignId, allowedCampaignIds))
           .groupBy(campaignQueue.campaignId);
-
-    const attemptRows = allowedCampaignIds.length === 0
-      ? []
-      : await db
-          .select({
-            campaignId: callAttempts.campaignId,
-            callsMade: sql<number>`COUNT(*)::int`,
-          })
-          .from(callAttempts)
-          .where(inArray(callAttempts.campaignId, allowedCampaignIds))
-          .groupBy(callAttempts.campaignId);
 
     const dialerRows = allowedCampaignIds.length === 0
       ? []
       : await db
           .select({
             campaignId: dialerCallAttempts.campaignId,
+            callsMade: sql<number>`COUNT(*)::int`,
             callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
-            dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} IN ('dnc-request', 'do_not_call', 'dnc_added') THEN 1 END)::int`,
+            qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
+            dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} IN ('dnc-request', 'dnc_request', 'do_not_call', 'dnc_added') THEN 1 END)::int`,
+            noAnswer: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'no_answer' THEN 1 END)::int`,
+            voicemail: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'voicemail' THEN 1 END)::int`,
+            notInterested: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
           })
           .from(dialerCallAttempts)
           .where(inArray(dialerCallAttempts.campaignId, allowedCampaignIds))
           .groupBy(dialerCallAttempts.campaignId);
 
     const queueByCampaign = new Map(queueRows.map((r) => [r.campaignId, r.contactsInQueue]));
-    const attemptsByCampaign = new Map(attemptRows.map((r) => [r.campaignId, r.callsMade]));
+    const callsMadeByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.callsMade]));
     const connectedByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.callsConnected]));
+    const qualifiedByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.qualified]));
     const dncByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.dncRequests]));
+    const noAnswerByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.noAnswer]));
+    const voicemailByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.voicemail]));
+    const notInterestedByCampaign = new Map(dialerRows.map((r) => [r.campaignId, r.notInterested]));
 
     const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
       leadsQualifiedRows.map((r) => [r.campaignId, r.count])
@@ -1495,12 +1493,17 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
         }
 
         if (info.isCall) {
+          const approvedQualified = leadsQualifiedByCampaign[campaignId] || 0;
+          const dialerQualified = Number(qualifiedByCampaign.get(campaignId) || 0);
           entry.call = {
             contactsInQueue: Number(queueByCampaign.get(campaignId) || 0),
-            callsMade: Number(attemptsByCampaign.get(campaignId) || 0),
+            callsMade: Number(callsMadeByCampaign.get(campaignId) || 0),
             callsConnected: Number(connectedByCampaign.get(campaignId) || 0),
-            leadsQualified: leadsQualifiedByCampaign[campaignId] || 0,
+            leadsQualified: Math.max(approvedQualified, dialerQualified),
             dncRequests: Number(dncByCampaign.get(campaignId) || 0),
+            notInterested: Number(notInterestedByCampaign.get(campaignId) || 0),
+            noAnswer: Number(noAnswerByCampaign.get(campaignId) || 0),
+            voicemail: Number(voicemailByCampaign.get(campaignId) || 0),
           };
         }
       } catch (err) {
