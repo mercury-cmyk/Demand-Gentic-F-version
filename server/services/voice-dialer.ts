@@ -4645,6 +4645,24 @@ Only AFTER completing these steps can you submit the disposition.`,
         };
       }
 
+      const transferHoldGraceActive = hasRecentTransferOrHoldCue(session);
+      const reasonSuggestsFalseDisconnectDuringTransfer =
+        reason.includes('hung up') ||
+        reason.includes('disconnected') ||
+        reason.includes('no response') ||
+        reason.includes('no interaction') ||
+        reason.includes('no meaningful') ||
+        reason.includes('silence');
+
+      if (transferHoldGraceActive && reasonSuggestsFalseDisconnectDuringTransfer) {
+        console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - transfer/hold wait in progress, likely false disconnect`);
+        return {
+          success: false,
+          error: 'TRANSFER OR HOLD IN PROGRESS: The contact asked you to stay on the line/hold while connecting. Do NOT end for silence yet. Stay quiet, wait for the transferred speaker, then re-verify identity and continue.',
+          countAsFailure: false,
+        };
+      }
+
       // MINIMUM VALUE DELIVERY CHECK
       // If the contact confirmed identity but the agent hasn't delivered the value proposition yet,
       // block termination and force the agent to deliver the offer.

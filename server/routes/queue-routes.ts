@@ -202,75 +202,87 @@ router.post(
           console.log(`[queues:set] Using snapshot with ${campaignContactIds.length} contacts`);
         } else if (campaign.audienceRefs) {
           // No snapshot - resolve audience dynamically from campaign refs
+          // Uses INTERSECTION logic: when filters accompany lists/segments, they narrow down the audience
           console.log('[queues:set] No snapshot - resolving audience from campaign refs');
           const audienceRefs = campaign.audienceRefs as any;
-          const uniqueContactIds = new Set<string>();
-          
-          // Resolve from filterGroup (advanced filters)
-          if (audienceRefs.filterGroup) {
+
+          const hasFilterGroup = audienceRefs.filterGroup?.conditions?.length > 0;
+          const allListIds = [
+            ...(audienceRefs.lists && Array.isArray(audienceRefs.lists) ? audienceRefs.lists : []),
+            ...(audienceRefs.selectedLists && Array.isArray(audienceRefs.selectedLists) ? audienceRefs.selectedLists : []),
+          ];
+          const hasLists = allListIds.length > 0;
+          const segmentIdsArr = audienceRefs.segments && Array.isArray(audienceRefs.segments) ? audienceRefs.segments : [];
+          const hasSegments = segmentIdsArr.length > 0;
+
+          // Step 1: Collect contact IDs from filter group
+          let filterContactIds: Set<string> | null = null;
+          if (hasFilterGroup) {
+            filterContactIds = new Set<string>();
             const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
             if (filterSQL) {
               const audienceContacts = await tx.select({ id: contacts.id })
                 .from(contacts)
                 .where(filterSQL);
-              audienceContacts.forEach(c => uniqueContactIds.add(c.id));
-              console.log(`[queues:set] Found ${audienceContacts.length} contacts from filterGroup`);
+              audienceContacts.forEach(c => filterContactIds!.add(c.id));
+              console.log(`[queues:set] Found ${filterContactIds.size} contacts from filterGroup`);
             }
           }
-          
-          // Resolve from lists (handles both contact-type and account-type lists)
-          if (audienceRefs.lists && Array.isArray(audienceRefs.lists)) {
-            for (const listId of audienceRefs.lists) {
+
+          // Step 2: Collect contact IDs from lists and segments
+          let sourceContactIds: Set<string> | null = null;
+
+          if (hasLists) {
+            sourceContactIds = sourceContactIds || new Set<string>();
+            for (const listId of allListIds) {
               const [list] = await tx.select()
                 .from(lists)
                 .where(eq(lists.id, listId))
                 .limit(1);
-
               if (list && list.recordIds && list.recordIds.length > 0) {
                 const resolvedIds = await resolveListToContactIds(list as any, tx as any, '[queues:set]');
-                resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
+                resolvedIds.forEach((id: string) => sourceContactIds!.add(id));
                 console.log(`[queues:set] Found ${resolvedIds.length} contacts from list ${listId} (entityType: ${list.entityType})`);
               }
             }
           }
 
-          // Resolve from selectedLists (alternate field name)
-          if (audienceRefs.selectedLists && Array.isArray(audienceRefs.selectedLists)) {
-            for (const listId of audienceRefs.selectedLists) {
-              const [list] = await tx.select()
-                .from(lists)
-                .where(eq(lists.id, listId))
-                .limit(1);
-
-              if (list && list.recordIds && list.recordIds.length > 0) {
-                const resolvedIds = await resolveListToContactIds(list as any, tx as any, '[queues:set]');
-                resolvedIds.forEach((id: string) => uniqueContactIds.add(id));
-                console.log(`[queues:set] Found ${resolvedIds.length} contacts from selectedList ${listId} (entityType: ${list.entityType})`);
-              }
-            }
-          }
-
-          // Resolve from segments
-          if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
-            for (const segmentId of audienceRefs.segments) {
+          if (hasSegments) {
+            sourceContactIds = sourceContactIds || new Set<string>();
+            for (const segmentId of segmentIdsArr) {
               const [segment] = await tx.select()
                 .from(segments)
                 .where(eq(segments.id, segmentId))
                 .limit(1);
-              
               if (segment && segment.definitionJson) {
                 const filterSQL = buildFilterQuery(segment.definitionJson as FilterGroup, contacts);
                 if (filterSQL) {
                   const segmentContacts = await tx.select({ id: contacts.id })
                     .from(contacts)
                     .where(filterSQL);
-                  segmentContacts.forEach(c => uniqueContactIds.add(c.id));
+                  segmentContacts.forEach(c => sourceContactIds!.add(c.id));
                   console.log(`[queues:set] Found ${segmentContacts.length} contacts from segment ${segmentId}`);
                 }
               }
             }
           }
-          
+
+          // Step 3: Combine using INTERSECTION when both filters and sources exist
+          let uniqueContactIds: Set<string>;
+          if (filterContactIds && sourceContactIds) {
+            // INTERSECTION: contacts must match filters AND be in list/segment
+            uniqueContactIds = new Set(
+              [...sourceContactIds].filter(id => filterContactIds!.has(id))
+            );
+            console.log(`[queues:set] Intersection: ${sourceContactIds.size} source contacts INTERSECT ${filterContactIds.size} filter contacts = ${uniqueContactIds.size}`);
+          } else if (filterContactIds) {
+            uniqueContactIds = filterContactIds;
+          } else if (sourceContactIds) {
+            uniqueContactIds = sourceContactIds;
+          } else {
+            uniqueContactIds = new Set<string>();
+          }
+
           campaignContactIds = Array.from(uniqueContactIds);
           console.log(`[queues:set] Total resolved: ${campaignContactIds.length} unique contacts from audience refs`);
         }

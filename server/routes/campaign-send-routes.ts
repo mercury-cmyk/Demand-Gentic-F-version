@@ -111,70 +111,98 @@ router.post("/:id/send", async (req: Request, res: Response) => {
 
     console.log(`[Campaign Send] Fetching audience for campaign ${campaignId}`);
 
-    // Fetch campaign audience using proper audience resolution
+    // Fetch campaign audience using proper audience resolution with INTERSECTION logic
+    // When a list/segment has additional filters, the filters narrow down (intersect) the list contacts
     // @ts-ignore - audienceRefs may not exist
     const audienceRefs = campaign.audienceRefs as any;
-    const uniqueContactIds = new Set<string>();
     let campaignContacts: any[] = [];
 
-    // Resolve from filterGroup (advanced filters) - THIS IS THE KEY FIX
-    if (audienceRefs?.filterGroup) {
+    const hasFilterGroup = audienceRefs?.filterGroup?.conditions?.length > 0;
+    const listIds = audienceRefs?.lists || audienceRefs?.selectedLists || [];
+    const hasLists = listIds.length > 0;
+    const segmentIds = audienceRefs?.segments || audienceRefs?.selectedSegments || [];
+    const hasSegments = segmentIds.length > 0;
+    const hasAllContacts = audienceRefs?.allContacts === true;
+
+    // Step 1: Collect contact IDs from filter group
+    let filterContactIds: Set<string> | null = null;
+    if (hasFilterGroup) {
+      filterContactIds = new Set<string>();
       console.log(`[Campaign Send] Resolving contacts from filterGroup for campaign ${campaignId}`);
       const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
       if (filterSQL) {
-        const audienceContacts = await db.select()
+        const audienceContacts = await db.select({ id: contacts.id })
           .from(contacts)
           .where(filterSQL);
-        audienceContacts.forEach(c => uniqueContactIds.add(c.id));
-        console.log(`[Campaign Send] FilterGroup resolved ${audienceContacts.length} contacts`);
+        audienceContacts.forEach(c => filterContactIds!.add(c.id));
+        console.log(`[Campaign Send] FilterGroup resolved ${filterContactIds.size} contacts`);
       }
     }
 
-    // Resolve from lists
-    const listIds = audienceRefs?.lists || audienceRefs?.selectedLists || [];
-    if (listIds.length > 0) {
+    // Step 2: Collect contact IDs from lists and segments
+    let sourceContactIds: Set<string> | null = null;
+
+    if (hasLists) {
+      sourceContactIds = sourceContactIds || new Set<string>();
       console.log(`[Campaign Send] Resolving contacts from ${listIds.length} lists`);
       for (const listId of listIds) {
         const [list] = await db.select()
           .from(lists)
           .where(eq(lists.id, listId))
           .limit(1);
-
         if (list && list.recordIds && Array.isArray(list.recordIds) && list.recordIds.length > 0) {
-          list.recordIds.forEach((id: string) => uniqueContactIds.add(id));
+          list.recordIds.forEach((id: string) => sourceContactIds!.add(id));
         }
       }
+      console.log(`[Campaign Send] Lists resolved ${sourceContactIds.size} contacts`);
     }
 
-    // Resolve from segments
-    const segmentIds = audienceRefs?.segments || audienceRefs?.selectedSegments || [];
-    if (segmentIds.length > 0) {
+    if (hasSegments) {
+      sourceContactIds = sourceContactIds || new Set<string>();
       console.log(`[Campaign Send] Resolving contacts from ${segmentIds.length} segments`);
       for (const segmentId of segmentIds) {
         const [segment] = await db.select()
           .from(segments)
           .where(eq(segments.id, segmentId))
           .limit(1);
-
         if (segment && segment.definitionJson) {
           const filterSQL = buildFilterQuery(segment.definitionJson as FilterGroup, contacts);
           if (filterSQL) {
-            const segmentContacts = await db.select()
+            const segmentContacts = await db.select({ id: contacts.id })
               .from(contacts)
               .where(filterSQL);
-            segmentContacts.forEach(c => uniqueContactIds.add(c.id));
+            segmentContacts.forEach(c => sourceContactIds!.add(c.id));
           }
         }
       }
+      console.log(`[Campaign Send] Lists+Segments resolved ${sourceContactIds.size} contacts total`);
     }
 
-    // Resolve "All Contacts" audience
-    if (audienceRefs?.allContacts === true) {
+    if (hasAllContacts) {
+      sourceContactIds = sourceContactIds || new Set<string>();
       console.log(`[Campaign Send] Resolving ALL contacts for campaign ${campaignId}`);
       const allContacts = await db.select({ id: contacts.id })
         .from(contacts);
-      allContacts.forEach(c => uniqueContactIds.add(c.id));
+      allContacts.forEach(c => sourceContactIds!.add(c.id));
       console.log(`[Campaign Send] All contacts resolved: ${allContacts.length} contacts`);
+    }
+
+    // Step 3: Combine using INTERSECTION when both filters and sources exist
+    let uniqueContactIds: Set<string>;
+    if (filterContactIds && sourceContactIds) {
+      // INTERSECTION: contacts must match filters AND be in list/segment
+      uniqueContactIds = new Set(
+        [...sourceContactIds].filter(id => filterContactIds!.has(id))
+      );
+      console.log(`[Campaign Send] Intersection: ${sourceContactIds.size} source contacts INTERSECT ${filterContactIds.size} filter contacts = ${uniqueContactIds.size}`);
+    } else if (filterContactIds) {
+      // Standalone filters (no list/segment selected)
+      uniqueContactIds = filterContactIds;
+    } else if (sourceContactIds) {
+      // List/segment without additional filters
+      uniqueContactIds = sourceContactIds;
+    } else {
+      uniqueContactIds = new Set<string>();
     }
 
     // Convert contact IDs to full contact objects (with batching for large datasets)

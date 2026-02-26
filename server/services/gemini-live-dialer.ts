@@ -367,6 +367,51 @@ function getQueueStatusFromDisposition(disposition: CanonicalDisposition): 'queu
   }
 }
 
+function isTransferOrHoldCueTranscript(transcript: string): boolean {
+  const normalized = transcript.toLowerCase();
+  const transferOrHoldCues = [
+    'please stay on the line',
+    'stay on the line',
+    'hold please',
+    'please hold',
+    'one moment while i transfer',
+    'while i transfer',
+    'let me transfer',
+    'i can transfer you',
+    "i'll transfer",
+    'i will transfer',
+    'transferring your call',
+    'your call is being transferred',
+    'putting you through',
+    'before i try to connect you',
+    "i'll see if this person is available",
+    'i will see if this person is available',
+    'record your name and reason for calling',
+    'state your name and reason for calling',
+    'call screening',
+    'call assist',
+  ];
+
+  return transferOrHoldCues.some((cue) => normalized.includes(cue));
+}
+
+function hasOpeningPurposeDelivered(agentTranscriptText: string): boolean {
+  const normalized = agentTranscriptText.toLowerCase();
+  const introSignal =
+    normalized.includes('calling on behalf of') ||
+    normalized.includes('this is ') ||
+    normalized.includes("i'm calling on behalf of");
+  const purposeSignal =
+    normalized.includes('quick reason for my call') ||
+    normalized.includes('reason for my call') ||
+    normalized.includes("i'm calling to") ||
+    normalized.includes('i am calling to') ||
+    normalized.includes('calling to offer') ||
+    normalized.includes('calling to share');
+
+  return introSignal && purposeSignal;
+}
+
 /**
  * Substitute placeholders in system prompt with actual values
  * This ensures the agent uses correct contact names, not "Agent Name"
@@ -507,6 +552,7 @@ If you hear phrases like "record your name and reason for calling", "state your 
 - Respond ONCE: "I'm calling on behalf of ${orgRef} for ${context.contactFirstName || context.contactName || 'the contact'} regarding a business opportunity."
 - Then WAIT SILENTLY — do not speak again until a human voice speaks
 - If the screener repeats its prompt, STAY SILENT — it is processing your response
+- Treat "please stay on the line" as a WAIT command, not a connection failure
 - If a human connects after screening, re-verify identity: "Hi, am I speaking with ${context.contactFirstName || context.contactName || 'the contact'}?"
 - If no human connects within 30 seconds of silence, use submit_disposition with "no_answer" and end the call
 - NEVER repeat yourself to the screener — respond exactly ONCE
@@ -563,6 +609,12 @@ Examples: "Hello?", "Hi", "Yeah?", "Good morning", "Who's this?"
 Examples: "Hi, this is Tom speaking", "Tom Brown here", "This is Tom", "[Name] speaking"
 → If the name they said MATCHES the contact name you are calling, their identity is ALREADY CONFIRMED. Do NOT ask "May I speak with [name]?" again — that is redundant and unprofessional. Instead, skip directly to your introduction:
 - "Hi ${context.contactFirstName || context.contactName || '[Name]'}, thanks for taking my call! I'm calling on behalf of ${orgRef}..."
+
+
+### SCENARIO C: They correct the name
+Example: "No, this is James."
+→ Treat the corrected name as identity confirmation and IMMEDIATELY continue to intro + purpose.
+→ Do NOT restart identity checks or repeat "May I speak with..."
 
 → If the name they said does NOT match the contact name, treat them as a gatekeeper and ask for the right person.
 
@@ -627,6 +679,14 @@ Examples of early questions:
 
 **⚠️ NEVER go silent when asked a direct question. ALWAYS respond immediately with a conversational answer.**
 **⚠️ Silence after identity confirmation = CRITICAL FAILURE**
+
+## AUDIO RECOVERY (MANDATORY)
+
+If the contact repeatedly says "hello?" or indicates they cannot hear you:
+1. Say exactly: "I apologize, can you hear me clearly now?"
+2. If they confirm, restart crisply: "Hello, may I please speak with ${context.contactName || '[the contact]'}?"
+3. Do NOT end the call after a single failed exchange.
+
 
 ---
 
@@ -967,12 +1027,27 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   // (e.g., "let me check" over and over when gatekeeper puts on hold)
   const REPETITION_THRESHOLD = 3; // Same phrase 3+ times = stuck
   const MAX_HOLD_SILENCE_MS = 45_000; // 45 seconds of hold/silence before forcing end
+  const MAX_TRANSFER_HOLD_SILENCE_MS = 120_000; // 120 seconds when transfer/hold cue is active
+  const TRANSFER_HOLD_GRACE_WINDOW_MS = 120_000; // Transfer/hold cue stays active for 120 seconds
   let lastContactSpeechAt: number = Date.now();
+  let lastTransferHoldCueAt: number | null = null;
+  let lastTransferHoldCueText: string | null = null;
+
+  function markTransferHoldCue(text: string, source: 'contact_transcript' | 'end_call_reason'): void {
+    lastTransferHoldCueAt = Date.now();
+    lastTransferHoldCueText = text;
+    console.log(`[Gemini Live] 🕒 Transfer/Hold cue detected from ${source}: "${text.substring(0, 120)}"`);
+  }
+
+  function hasRecentTransferHoldCue(windowMs = TRANSFER_HOLD_GRACE_WINDOW_MS): boolean {
+    if (!lastTransferHoldCueAt) return false;
+    return (Date.now() - lastTransferHoldCueAt) <= windowMs;
+  }
 
   function isScreenerContext(): boolean {
     return transcriptTurns
       .filter(t => t.role === 'contact')
-      .some(t => /record your name|state your name|reason for calling|stay on the line|this person is available|before i try to connect you|call screening|call assist/i.test(t.text));
+      .some(t => isTransferOrHoldCueTranscript(t.text));
   }
 
   function detectAgentRepetitionLoop(): { isLooping: boolean; phrase: string } {
@@ -2738,14 +2813,16 @@ Instructions:
               console.warn(`[Gemini Live] 🔄 REPETITION LOOP DETECTED: Agent repeating "${loopCheck.phrase.substring(0, 80)}" (${REPETITION_THRESHOLD}+ times, contact silent for ${Math.round(holdDuration / 1000)}s)`);
 
               // If contact hasn't spoken for a while AND agent is looping, force end the call
-              if (holdDuration > MAX_HOLD_SILENCE_MS) {
-                console.warn(`[Gemini Live] ⏱️ HOLD TIMEOUT: Contact silent for ${Math.round(holdDuration / 1000)}s during repetition loop — forcing no_answer disposition`);
+              const transferHoldGraceActive = hasRecentTransferHoldCue();
+              const maxHoldSilenceMs = transferHoldGraceActive ? MAX_TRANSFER_HOLD_SILENCE_MS : MAX_HOLD_SILENCE_MS;
+              if (holdDuration > maxHoldSilenceMs) {
+                console.warn(`[Gemini Live] ⏱️ HOLD TIMEOUT: Contact silent for ${Math.round(holdDuration / 1000)}s during repetition loop (threshold ${Math.round(maxHoldSilenceMs / 1000)}s) — forcing no_answer disposition`);
 
                 // Submit no_answer disposition directly since AI is stuck
                 if (!dispositionProcessed && !submittedDisposition && callContext.callAttemptId) {
                   submittedDisposition = {
                     disposition: 'no_answer',
-                    notes: `Agent stuck in repetition loop: "${loopCheck.phrase.substring(0, 100)}". Contact silent for ${Math.round(holdDuration / 1000)}s (likely on hold/transferred). Forcing call end.`,
+                    notes: `Agent stuck in repetition loop: "${loopCheck.phrase.substring(0, 100)}". Contact silent for ${Math.round(holdDuration / 1000)}s${transferHoldGraceActive ? ` after transfer/hold cue "${(lastTransferHoldCueText || '').substring(0, 80)}"` : ''}. Forcing call end.`,
                     submittedAt: Date.now(),
                   };
                   callContext.disposition = 'no_answer';
@@ -2836,6 +2913,10 @@ Instructions:
             lastContactSpeechAt = Date.now(); // Reset hold timer — contact is speaking
             audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Contact transcript captured: "${contactText.substring(0, 100)}${contactText.length > 100 ? '...' : ''}"`);
+
+            if (isTransferOrHoldCueTranscript(contactText)) {
+              markTransferHoldCue(contactText, 'contact_transcript');
+            }
 
             // EARLY VOICEMAIL ABORT: if we hear voicemail-like cues in the first ~3s
             // of contact speech, terminate immediately before conversational scripting continues.
@@ -3504,6 +3585,38 @@ Instructions:
                 return;
               }
 
+              if (isTransferOrHoldCueTranscript(reasonLower)) {
+                markTransferHoldCue(reasonLower, 'end_call_reason');
+              }
+
+              const transferHoldGraceActive = hasRecentTransferHoldCue();
+              const reasonSuggestsFalseDisconnectDuringTransfer =
+                reasonLower.includes('hung up') ||
+                reasonLower.includes('disconnected') ||
+                reasonLower.includes('no response') ||
+                reasonLower.includes('no interaction') ||
+                reasonLower.includes('no meaningful') ||
+                reasonLower.includes('silence');
+
+              if (transferHoldGraceActive && reasonSuggestsFalseDisconnectDuringTransfer) {
+                console.warn(`[Gemini Live] 🚫 BLOCKING END_CALL - transfer/hold wait in progress, likely false disconnect`);
+                const toolResponse = {
+                  toolResponse: {
+                    functionResponses: [{
+                      name: call.name,
+                      id: call.id,
+                      response: {
+                        error: 'TRANSFER OR HOLD IN PROGRESS: The contact asked you to stay on the line/hold while connecting. Do NOT end the call for silence yet. Stay silent, wait for the new speaker, then re-verify identity and continue.'
+                      }
+                    }]
+                  }
+                };
+                if (geminiWs?.readyState === WebSocket.OPEN) {
+                  geminiWs.send(JSON.stringify(toolResponse));
+                }
+                return;
+              }
+
               // Check for legitimate early endings (voicemail, explicit goodbye, wrong number)
               const isLegitimateEarlyEnd =
                 reasonLower.includes('voicemail') ||
@@ -3512,6 +3625,36 @@ Instructions:
                 reasonLower.includes('do not call') ||
                 reasonLower.includes('stop calling') ||
                 (submittedDisposition?.disposition === 'voicemail');
+
+              const agentTranscriptText = transcriptTurns
+                .filter(t => t.role === 'agent')
+                .map(t => t.text.toLowerCase())
+                .join(' ');
+              const openingPurposeDelivered = hasOpeningPurposeDelivered(agentTranscriptText);
+              const reasonSuggestsDisconnect =
+                reasonSuggestsHangup ||
+                reasonLower.includes('no engagement') ||
+                reasonLower.includes('no meaningful') ||
+                reasonLower.includes('silence');
+
+              if (!openingPurposeDelivered && callDurationSeconds < 45 && reasonSuggestsDisconnect && !isLegitimateEarlyEnd) {
+                console.warn(`[Gemini Live] 🚫 BLOCKING END_CALL - opening intro/purpose not fully delivered before termination`);
+                const toolResponse = {
+                  toolResponse: {
+                    functionResponses: [{
+                      name: call.name,
+                      id: call.id,
+                      response: {
+                        error: 'OPENING INCOMPLETE: Do NOT end the call yet. Deliver this now in two short sentences: "This is [Agent Name] calling on behalf of [Organization]. Quick reason for my call: [clear purpose]." Then ask one brief engagement question and wait for their response.'
+                      }
+                    }]
+                  }
+                };
+                if (geminiWs?.readyState === WebSocket.OPEN) {
+                  geminiWs.send(JSON.stringify(toolResponse));
+                }
+                return;
+              }
 
               if (isPrematureTermination && reasonSuggestsHangup && !isLegitimateEarlyEnd) {
                 console.warn(`[Gemini Live] 🚫 BLOCKING PREMATURE END_CALL: duration=${callDurationSeconds}s, userTurns=${userTurnCount}, reason="${reason}"`);

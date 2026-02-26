@@ -72,10 +72,13 @@ export default function EmailCampaignCreatePage() {
       if (data.audience?.source === 'domain_set' && data.audience.selectedDomainSets?.length > 0) {
         audienceRefs.domainSets = data.audience.selectedDomainSets;
       }
-      if (data.audience?.source === 'filters' && data.audience.filterGroup) {
+      // Always persist filterGroup when it has conditions (used for intersection filtering on list/segment)
+      if (data.audience?.filterGroup?.conditions?.length > 0) {
         audienceRefs.filterGroup = data.audience.filterGroup;
       }
-      
+      // Persist audience source so backend knows the intent
+      audienceRefs.source = data.audience?.source;
+
       // Add exclusions if present
       if (data.audience?.excludedSegments?.length > 0) {
         audienceRefs.excludedSegments = data.audience.excludedSegments;

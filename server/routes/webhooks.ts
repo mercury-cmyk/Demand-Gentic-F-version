@@ -632,181 +632,180 @@ router.post("/telnyx", async (req, res) => {
         return res.json({ status: "ignored", event_type: eventType });
     }
 
-    // Recording completed handling (original logic)
+    // Recording completed handling (heavy path): acknowledge immediately, process async
     if (eventType !== 'recording.completed') {
       return res.json({ status: "ignored", event_type: eventType });
     }
 
-    const { call_control_id, recording_urls, public_recording_urls } = payload;
-    
-    // Prefer public URLs, fallback to signed URLs (mp3 preferred over wav)
-    const recordingUrl = 
-      public_recording_urls?.mp3 || 
-      public_recording_urls?.wav || 
-      recording_urls.mp3 || 
-      recording_urls.wav;
+    res.json({ status: "accepted", event_type: eventType });
 
-    if (!recordingUrl) {
-      console.warn('[Telnyx Webhook] No recording URL in payload');
-      return res.status(400).json({ error: "No recording URL" });
-    }
+    void (async () => {
+      const { call_control_id, recording_urls, public_recording_urls } = payload;
 
-    // Extract stable Telnyx recording ID from the event payload
-    const recordingEventData = (req.body as any)?.data;
-    const telnyxRecordingId: string | undefined =
-      payload.recording_id || payload.id || recordingEventData?.id || undefined;
+      // Prefer public URLs, fallback to signed URLs (mp3 preferred over wav)
+      const recordingUrl =
+        public_recording_urls?.mp3 ||
+        public_recording_urls?.wav ||
+        recording_urls.mp3 ||
+        recording_urls.wav;
 
-    console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}, recording_id: ${telnyxRecordingId || 'none'}`);
-
-    // Import recording storage service for permanent S3 storage
-    const { storeRecordingFromWebhook, isRecordingStorageEnabled } = await import('../services/recording-storage');
-
-    // DE-DUPLICATION: Check if recording already exists for this call
-    // This prevents duplicate recordings when both recording.completed and call.recording.saved fire
-    const existingSession = await db
-      .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
-      .from(callSessions)
-      .where(eq(callSessions.telnyxCallId, call_control_id))
-      .limit(1);
-
-    if (existingSession.length > 0 && existingSession[0].recordingUrl) {
-      console.log(`[Telnyx Webhook] ⏭️ Recording already exists for call ${call_control_id}, skipping duplicate`);
-      return res.json({ status: "ok", message: "Recording already exists", skipped: true });
-    }
-
-    // Update leads table
-    // Set recordingStatus to 'pending' - storeRecordingFromWebhook() will update to 'stored' or 'failed'
-    const updatedLeads = await db
-      .update(leads)
-      .set({
-        recordingUrl,
-        recordingStatus: 'pending',
-        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
-      })
-      .where(eq(leads.telnyxCallId, call_control_id))
-      .returning({ id: leads.id });
-
-    // Update calls table (for manual calls) - calls table doesn't have recordingStatus
-    const updatedCalls = await db
-      .update(calls)
-      .set({
-        recordingUrl
-      })
-      .where(eq(calls.telnyxCallId, call_control_id))
-      .returning({ id: calls.id });
-
-    // Update call_sessions table (for AI calls and recordings dashboard)
-    // This is CRITICAL for the recordings dashboard which queries call_sessions
-    // NOTE: We set recordingStatus to 'pending' here - the storeCallSessionRecording()
-    // function will update it to 'stored' or 'failed' after S3 upload completes.
-    // This prevents false 'stored' status when S3 upload fails.
-    const updatedSessions = await db
-      .update(callSessions)
-      .set({
-        recordingUrl,
-        recordingStatus: 'pending',
-        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
-      })
-      .where(eq(callSessions.telnyxCallId, call_control_id))
-      .returning({ id: callSessions.id, campaignId: callSessions.campaignId });
-
-    // Update dialer_call_attempts table (for human agent calls)
-    // This ensures recordings are linked to the call attempt for lead creation
-    const updatedCallAttempts = await db
-      .update(dialerCallAttempts)
-      .set({
-        recordingUrl,
-        updatedAt: new Date(),
-        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
-      })
-      .where(eq(dialerCallAttempts.telnyxCallId, call_control_id))
-      .returning({ id: dialerCallAttempts.id });
-
-    const totalUpdated = updatedLeads.length + updatedCalls.length + updatedSessions.length + updatedCallAttempts.length;
-
-    if (totalUpdated === 0) {
-      console.log(`[Telnyx Webhook] No matching lead/call/session found for call_control_id: ${call_control_id}`);
-      // Still return 200 to prevent Telnyx from retrying
-      return res.json({ status: "ok", updated: 0, message: "No matching records" });
-    }
-
-    console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL (leads: ${updatedLeads.length}, calls: ${updatedCalls.length}, sessions: ${updatedSessions.length}, callAttempts: ${updatedCallAttempts.length})`);
-
-    // Store recordings permanently in S3 (async, don't block webhook response)
-    if (isRecordingStorageEnabled()) {
-      // Import storeCallSessionRecording for call_sessions S3 storage
-      const { storeCallSessionRecording } = await import('../services/recording-storage');
-
-      // Store lead recordings in background (with single retry on failure)
-      for (const lead of updatedLeads) {
-        storeRecordingFromWebhook(lead.id, recordingUrl).catch(async (err) => {
-          console.error(`[Telnyx Webhook] Failed to store recording for lead ${lead.id}, retrying in 10s:`, err);
-          setTimeout(async () => {
-            try {
-              await storeRecordingFromWebhook(lead.id, recordingUrl);
-              console.log(`[Telnyx Webhook] ✅ Retry succeeded for lead ${lead.id}`);
-            } catch (retryErr) {
-              console.error(`[Telnyx Webhook] ❌ Retry also failed for lead ${lead.id}:`, retryErr);
-            }
-          }, 10000);
-        });
+      if (!recordingUrl) {
+        console.warn('[Telnyx Webhook] No recording URL in payload');
+        return;
       }
 
-      // Store call session recordings in background (with single retry on failure)
-      for (const session of updatedSessions) {
-        storeCallSessionRecording(session.id, recordingUrl).catch(async (err) => {
-          console.error(`[Telnyx Webhook] Failed to store recording for session ${session.id}, retrying in 10s:`, err);
-          setTimeout(async () => {
-            try {
-              await storeCallSessionRecording(session.id, recordingUrl);
-              console.log(`[Telnyx Webhook] ✅ Retry succeeded for session ${session.id}`);
-            } catch (retryErr) {
-              console.error(`[Telnyx Webhook] ❌ Retry also failed for session ${session.id}:`, retryErr);
-            }
-          }, 10000);
-        });
+      // Extract stable Telnyx recording ID from the event payload
+      const recordingEventData = (req.body as any)?.data;
+      const telnyxRecordingId: string | undefined =
+        payload.recording_id || payload.id || recordingEventData?.id || undefined;
+
+      console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}, recording_id: ${telnyxRecordingId || 'none'}`);
+
+      // Import recording storage service for permanent S3 storage
+      const { storeRecordingFromWebhook, isRecordingStorageEnabled } = await import('../services/recording-storage');
+
+      // DE-DUPLICATION: Check if recording already exists for this call
+      // This prevents duplicate recordings when both recording.completed and call.recording.saved fire
+      const existingSession = await db
+        .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
+        .from(callSessions)
+        .where(eq(callSessions.telnyxCallId, call_control_id))
+        .limit(1);
+
+      if (existingSession.length > 0 && existingSession[0].recordingUrl) {
+        console.log(`[Telnyx Webhook] ⏭️ Recording already exists for call ${call_control_id}, skipping duplicate`);
+        return;
       }
 
-      console.log(`[Telnyx Webhook] Initiated S3 storage for ${updatedLeads.length} lead(s) and ${updatedSessions.length} session(s)`);
-    }
+      // Update leads table
+      // Set recordingStatus to 'pending' - storeRecordingFromWebhook() will update to 'stored' or 'failed'
+      const updatedLeads = await db
+        .update(leads)
+        .set({
+          recordingUrl,
+          recordingStatus: 'pending',
+          ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
+        })
+        .where(eq(leads.telnyxCallId, call_control_id))
+        .returning({ id: leads.id });
 
-    // TRANSCRIPTION FALLBACK: Trigger transcription for call attempts missing transcripts
-    // This ensures we get transcripts even when Gemini real-time transcription fails
-    if (updatedCallAttempts.length > 0) {
-      const { checkTranscriptStatus, attemptFallbackTranscription } = await import('../services/transcription-reliability');
+      // Update calls table (for manual calls) - calls table doesn't have recordingStatus
+      const updatedCalls = await db
+        .update(calls)
+        .set({
+          recordingUrl
+        })
+        .where(eq(calls.telnyxCallId, call_control_id))
+        .returning({ id: calls.id });
 
-      for (const attempt of updatedCallAttempts) {
-        // Schedule transcription check after a short delay (5s) to allow DB writes to commit
-        setTimeout(async () => {
-          try {
-            const status = await checkTranscriptStatus(attempt.id);
-            if (!status.hasTranscript) {
-              console.log(`[Telnyx Webhook] 🎤 Call attempt ${attempt.id} missing transcript - triggering fallback`);
-              const result = await attemptFallbackTranscription(attempt.id, recordingUrl, call_control_id);
-              if (result.success) {
-                console.log(`[Telnyx Webhook] ✅ Fallback transcription succeeded for ${attempt.id}`);
-              } else {
-                console.log(`[Telnyx Webhook] ⏳ Fallback transcription queued for ${attempt.id}: ${result.error}`);
+      // Update call_sessions table (for AI calls and recordings dashboard)
+      // This is CRITICAL for the recordings dashboard which queries call_sessions
+      // NOTE: We set recordingStatus to 'pending' here - the storeCallSessionRecording()
+      // function will update it to 'stored' or 'failed' after S3 upload completes.
+      // This prevents false 'stored' status when S3 upload fails.
+      const updatedSessions = await db
+        .update(callSessions)
+        .set({
+          recordingUrl,
+          recordingStatus: 'pending',
+          ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
+        })
+        .where(eq(callSessions.telnyxCallId, call_control_id))
+        .returning({ id: callSessions.id, campaignId: callSessions.campaignId });
+
+      // Update dialer_call_attempts table (for human agent calls)
+      // This ensures recordings are linked to the call attempt for lead creation
+      const updatedCallAttempts = await db
+        .update(dialerCallAttempts)
+        .set({
+          recordingUrl,
+          updatedAt: new Date(),
+          ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
+        })
+        .where(eq(dialerCallAttempts.telnyxCallId, call_control_id))
+        .returning({ id: dialerCallAttempts.id });
+
+      const totalUpdated = updatedLeads.length + updatedCalls.length + updatedSessions.length + updatedCallAttempts.length;
+
+      if (totalUpdated === 0) {
+        console.log(`[Telnyx Webhook] No matching lead/call/session found for call_control_id: ${call_control_id}`);
+        return;
+      }
+
+      console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL (leads: ${updatedLeads.length}, calls: ${updatedCalls.length}, sessions: ${updatedSessions.length}, callAttempts: ${updatedCallAttempts.length})`);
+
+      // Store recordings permanently in S3 (async, don't block webhook response)
+      if (isRecordingStorageEnabled()) {
+        // Import storeCallSessionRecording for call_sessions S3 storage
+        const { storeCallSessionRecording } = await import('../services/recording-storage');
+
+        // Store lead recordings in background (with single retry on failure)
+        for (const lead of updatedLeads) {
+          storeRecordingFromWebhook(lead.id, recordingUrl).catch(async (err) => {
+            console.error(`[Telnyx Webhook] Failed to store recording for lead ${lead.id}, retrying in 10s:`, err);
+            setTimeout(async () => {
+              try {
+                await storeRecordingFromWebhook(lead.id, recordingUrl);
+                console.log(`[Telnyx Webhook] ✅ Retry succeeded for lead ${lead.id}`);
+              } catch (retryErr) {
+                console.error(`[Telnyx Webhook] ❌ Retry also failed for lead ${lead.id}:`, retryErr);
               }
-            } else {
-              console.log(`[Telnyx Webhook] ✅ Call attempt ${attempt.id} already has transcript (source: ${status.transcriptSource})`);
-            }
-          } catch (e) {
-            console.error(`[Telnyx Webhook] ❌ Fallback transcription error for ${attempt.id}:`, e);
-          }
-        }, 5000);
-      }
-    }
+            }, 10000);
+          });
+        }
 
-    return res.json({
-      status: "ok",
-      updated: totalUpdated,
-      leads: updatedLeads.length,
-      calls: updatedCalls.length,
-      sessions: updatedSessions.length,
-      callAttempts: updatedCallAttempts.length,
-      s3Storage: isRecordingStorageEnabled() ? 'initiated' : 'disabled'
+        // Store call session recordings in background (with single retry on failure)
+        for (const session of updatedSessions) {
+          storeCallSessionRecording(session.id, recordingUrl).catch(async (err) => {
+            console.error(`[Telnyx Webhook] Failed to store recording for session ${session.id}, retrying in 10s:`, err);
+            setTimeout(async () => {
+              try {
+                await storeCallSessionRecording(session.id, recordingUrl);
+                console.log(`[Telnyx Webhook] ✅ Retry succeeded for session ${session.id}`);
+              } catch (retryErr) {
+                console.error(`[Telnyx Webhook] ❌ Retry also failed for session ${session.id}:`, retryErr);
+              }
+            }, 10000);
+          });
+        }
+
+        console.log(`[Telnyx Webhook] Initiated S3 storage for ${updatedLeads.length} lead(s) and ${updatedSessions.length} session(s)`);
+      }
+
+      // TRANSCRIPTION FALLBACK: Trigger transcription for call attempts missing transcripts
+      // This ensures we get transcripts even when Gemini real-time transcription fails
+      if (updatedCallAttempts.length > 0) {
+        const { checkTranscriptStatus, attemptFallbackTranscription } = await import('../services/transcription-reliability');
+
+        for (const attempt of updatedCallAttempts) {
+          // Schedule transcription check after a short delay (5s) to allow DB writes to commit
+          setTimeout(async () => {
+            try {
+              const status = await checkTranscriptStatus(attempt.id);
+              if (!status.hasTranscript) {
+                console.log(`[Telnyx Webhook] 🎤 Call attempt ${attempt.id} missing transcript - triggering fallback`);
+                const result = await attemptFallbackTranscription(attempt.id, recordingUrl, call_control_id);
+                if (result.success) {
+                  console.log(`[Telnyx Webhook] ✅ Fallback transcription succeeded for ${attempt.id}`);
+                } else {
+                  console.log(`[Telnyx Webhook] ⏳ Fallback transcription queued for ${attempt.id}: ${result.error}`);
+                }
+              } else {
+                console.log(`[Telnyx Webhook] ✅ Call attempt ${attempt.id} already has transcript (source: ${status.transcriptSource})`);
+              }
+            } catch (e) {
+              console.error(`[Telnyx Webhook] ❌ Fallback transcription error for ${attempt.id}:`, e);
+            }
+          }, 5000);
+        }
+      }
+
+      console.log(`[Telnyx Webhook] recording.completed async processing finished (updated=${totalUpdated})`);
+    })().catch((err) => {
+      console.error('[Telnyx Webhook] recording.completed async processing failed:', err);
     });
+
+    return;
 
   } catch (error: any) {
     console.error('[Telnyx Webhook] Error:', error);
