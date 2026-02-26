@@ -126,8 +126,8 @@ $env_vars = @(
     "NODE_ENV=production",
     "ENABLE_LOG_STREAMING=true",
     "CALL_EXECUTION_ENABLED=true",
-    "GLOBAL_MAX_CONCURRENT_CALLS=100",
-    "MAX_CONCURRENT_CALLS=100",
+    "GLOBAL_MAX_CONCURRENT_CALLS=50",
+    "MAX_CONCURRENT_CALLS=50",
 
     # Feature Flags
     "FEATURE_FLAGS=argyle_event_drafts",
