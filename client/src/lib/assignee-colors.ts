@@ -58,7 +58,9 @@ export function getAssigneeColorTheme(assigneeName?: string | null): AssigneeCol
     return DEFAULT_THEME;
   }
 
-  if (normalized.toLowerCase() === "zahid") {
+  const normalizedLower = normalized.toLowerCase();
+
+  if (normalizedLower === "zahid") {
     return {
       cardClass: "border-l-green-500 bg-green-50/50",
       badgeClass: "bg-green-100 text-green-800 border-green-300",
@@ -66,6 +68,14 @@ export function getAssigneeColorTheme(assigneeName?: string | null): AssigneeCol
     };
   }
 
-  const paletteIndex = hashAssigneeName(normalized.toLowerCase()) % ASSIGNEE_THEMES.length;
+  if (normalizedLower.includes("tabasum")) {
+    return {
+      cardClass: "border-l-pink-500 bg-pink-50/50",
+      badgeClass: "bg-pink-100 text-pink-800 border-pink-300",
+      accentClass: "text-pink-700",
+    };
+  }
+
+  const paletteIndex = hashAssigneeName(normalizedLower) % ASSIGNEE_THEMES.length;
   return ASSIGNEE_THEMES[paletteIndex];
 }
