@@ -956,6 +956,137 @@ Pivotal B2B - DemandGentic.ai Platform`,
       { name: 'portalLink', description: 'Link to view order in client portal', required: false, exampleValue: 'https://demandgentic.ai/client-portal/orders/abc123' },
     ],
   },
+  {
+    templateKey: 'project_request_approved',
+    name: 'Project Request Approved',
+    description: 'Notification sent to client users when their project request is approved by an admin.',
+    category: 'notification',
+    subjectTemplate: 'Your project "{{projectName}}" has been approved!',
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+:root { color-scheme: light only; }
+@media (prefers-color-scheme: dark) {
+  body, .body-wrap { background-color: #f0f2f5 !important; }
+  .card-wrap, .card-wrap td { background-color: #ffffff !important; }
+  .header-band { background-color: #059669 !important; }
+  .header-band h1 { color: #ffffff !important; }
+  .body-text { color: #374151 !important; }
+  .body-text-light { color: #4b5563 !important; }
+  .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+}
+[data-ogsc] .body-wrap { background-color: #f0f2f5 !important; }
+[data-ogsc] .card-wrap, [data-ogsc] .card-wrap td { background-color: #ffffff !important; }
+[data-ogsc] .header-band { background-color: #059669 !important; }
+[data-ogsc] .header-band h1 { color: #ffffff !important; }
+[data-ogsc] .body-text { color: #374151 !important; }
+[data-ogsc] .body-text-light { color: #4b5563 !important; }
+[data-ogsc] .cta-btn { background-color: #059669 !important; color: #ffffff !important; }
+</style>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="body-wrap" style="background-color:#f0f2f5;"><tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="card-wrap" style="background-color:#ffffff;">
+  <tr><td class="header-band" style="background-color:#059669; padding:24px 32px;">
+    <h1 style="color:#ffffff; margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:24px; font-weight:700;">Project Approved</h1>
+  </td></tr>
+  <tr><td style="padding:32px; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+    <p class="body-text" style="font-size:16px; color:#374151; margin:0 0 16px;">Hi {{recipientName}},</p>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px;">Great news! Your project <strong>"{{projectName}}"</strong> has been reviewed and approved.</p>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin:16px 0;"><tr><td style="background-color:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:16px;">
+      <p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Project:</strong> {{projectName}}</p>
+      <p style="margin:4px 0; font-size:14px; color:#166534;"><strong>Approved on:</strong> {{approvalDate}}</p>
+    </td></tr></table>
+    <p class="body-text-light" style="font-size:14px; color:#4b5563; line-height:1.6; margin:16px 0;">You can log in to your portal to view the project and track progress. Our team will begin working on it shortly.</p>
+    {{#if portalLink}}
+    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin:24px 0;" align="center"><tr><td align="center">
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{portalLink}}" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="14%" stroke="f" fillcolor="#059669"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;">View in Portal</center></v:roundrect><![endif]-->
+      <!--[if !mso]><!--><a href="{{portalLink}}" style="background-color:#059669; color:#ffffff; padding:12px 28px; border-radius:6px; text-decoration:none; font-size:15px; font-weight:600; display:inline-block; font-family:'Segoe UI',Helvetica,Arial,sans-serif;">View in Portal</a><!--<![endif]-->
+    </td></tr></table>
+    {{/if}}
+    <p style="font-size:13px; color:#6b7280; margin:16px 0 0;">Thank you for choosing Pivotal B2B.</p>
+  </td></tr>
+</table>
+<table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:20px;"><p style="margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:11px; color:#94a3b8;">Pivotal B2B &middot; DemandGentic.ai</p></td></tr></table>
+</td></tr></table>
+</body></html>`,
+    textTemplate: `Hi {{recipientName}},
+
+Great news! Your project "{{projectName}}" has been reviewed and approved.
+
+Project: {{projectName}}
+Approved on: {{approvalDate}}
+
+You can log in to your portal to view the project and track progress.
+
+View in Portal: {{portalLink}}
+
+Our team will begin working on it shortly. Thank you for choosing Pivotal B2B.
+
+--
+Pivotal B2B - DemandGentic.ai Platform`,
+    variables: [
+      { name: 'recipientName', description: 'Recipient full name or project name', required: true, exampleValue: 'Jane Smith' },
+      { name: 'projectName', description: 'Project name', required: true, exampleValue: 'Q1 Lead Generation Campaign' },
+      { name: 'approvalDate', description: 'Date of approval', required: true, exampleValue: 'February 21, 2026' },
+      { name: 'approvedBy', description: 'Admin who approved', required: false, exampleValue: 'Admin User' },
+      { name: 'portalLink', description: 'Link to view project in client portal', required: false, exampleValue: 'https://demandgentic.ai/client-portal/projects' },
+    ],
+  },
+  {
+    templateKey: 'project_request_rejected',
+    name: 'Project Request Rejected',
+    description: 'Notification sent to client users when their project request is rejected by an admin.',
+    category: 'notification',
+    subjectTemplate: 'Update on your project "{{projectName}}"',
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background-color:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+<div style="background:#ffffff;border-radius:12px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+<div style="text-align:center;margin-bottom:32px;">
+<div style="display:inline-block;background:#fef2f2;border-radius:50%;padding:16px;margin-bottom:16px;">
+<span style="font-size:32px;">&#10060;</span>
+</div>
+<h1 style="margin:0;font-size:24px;color:#1f2937;">Project Request Update</h1>
+</div>
+<p style="font-size:16px;color:#374151;line-height:1.6;">Hi {{recipientName}},</p>
+<p style="font-size:16px;color:#374151;line-height:1.6;">We've reviewed your project <strong>"{{projectName}}"</strong> and unfortunately we are unable to proceed with it at this time.</p>
+{{#if rejectionReason}}
+<div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;border-radius:0 8px 8px 0;margin:24px 0;">
+<p style="margin:0 0 4px;font-weight:600;color:#991b1b;">Reason:</p>
+<p style="margin:0;color:#7f1d1d;">{{rejectionReason}}</p>
+</div>
+{{/if}}
+<p style="font-size:16px;color:#374151;line-height:1.6;">Please feel free to submit a revised request or reach out to your account manager if you have any questions.</p>
+<p style="font-size:14px;color:#6b7280;">Thank you for your understanding.</p>
+</div>
+</div>
+</body>
+</html>`,
+    textTemplate: `Hi {{recipientName}},
+
+We've reviewed your project "{{projectName}}" and unfortunately we are unable to proceed with it at this time.
+
+Reason: {{rejectionReason}}
+
+Please feel free to submit a revised request or reach out to your account manager if you have any questions.
+
+Thank you for your understanding.
+
+--
+Pivotal B2B - DemandGentic.ai Platform`,
+    variables: [
+      { name: 'recipientName', description: 'Recipient full name or project name', required: true, exampleValue: 'Jane Smith' },
+      { name: 'projectName', description: 'Project name', required: true, exampleValue: 'Q1 Lead Generation Campaign' },
+      { name: 'rejectionReason', description: 'Reason for rejection', required: false, exampleValue: 'Insufficient budget allocation for the requested scope' },
+    ],
+  },
 ];
 
 /**
@@ -1036,6 +1167,22 @@ export const DEFAULT_RULES: DefaultRule[] = [
     recipientResolver: 'all_tenant_users',
     isEnabled: true,
     description: 'Send rejection notification to all client users when their campaign order is rejected.',
+  },
+  {
+    eventType: 'project_request_approved',
+    templateKey: 'project_request_approved',
+    channelType: 'email',
+    recipientResolver: 'all_tenant_users',
+    isEnabled: true,
+    description: 'Send approval notification to all client users when their project request is approved.',
+  },
+  {
+    eventType: 'project_request_rejected',
+    templateKey: 'project_request_rejected',
+    channelType: 'email',
+    recipientResolver: 'all_tenant_users',
+    isEnabled: true,
+    description: 'Send rejection notification to all client users when their project request is rejected.',
   },
 ];
 

@@ -1,6 +1,7 @@
 import { storage } from './storage';
 import { hashPassword } from './auth';
 import { seedDefaultKnowledgeBlocks, areKnowledgeBlocksInitialized } from './services/knowledge-block-service';
+import { seedDefaultTemplates, seedDefaultRules } from './services/mercury/default-templates';
 import {
   initializeSuperOrganization,
   setupAdminAsSuperOrgOwner,
@@ -19,6 +20,9 @@ export async function initializeDatabase() {
 
     // Initialize Super Organization (Pivotal B2B)
     await initializeSuperOrganizationData();
+
+    // Seed Mercury notification templates and rules
+    await initializeMercuryNotifications();
 
     // Check if any users exist
     const users = await storage.getUsers();
@@ -144,5 +148,23 @@ async function initializeKnowledgeBlocks() {
   } catch (error) {
     console.error('[DB-INIT] ⚠️ Failed to initialize knowledge blocks:', error);
     // Don't throw - knowledge blocks are optional for basic functionality
+  }
+}
+
+/**
+ * Seed Mercury notification templates and rules.
+ * Safe to call every startup — skips already-existing entries.
+ */
+async function initializeMercuryNotifications() {
+  try {
+    console.log('[DB-INIT] Seeding Mercury notification templates and rules...');
+    const templates = await seedDefaultTemplates();
+    const rules = await seedDefaultRules();
+    console.log(
+      `[DB-INIT] ✅ Mercury seeded: templates=${templates.created} new/${templates.skipped} existing, rules=${rules.created} new/${rules.skipped} existing`
+    );
+  } catch (error) {
+    console.error('[DB-INIT] ⚠️ Failed to seed Mercury notifications:', error);
+    // Don't throw - Mercury seeding is non-critical for basic startup
   }
 }

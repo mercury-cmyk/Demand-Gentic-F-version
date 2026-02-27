@@ -10,6 +10,7 @@ import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';
 import { processMissingTranscripts } from './transcription-reliability';
 import { syncTelnyxRecordingsToDatabase } from './telnyx-sync-service';
 import { executeDueJourneyActions } from './client-journey-automation';
+import { mercuryEmailService } from './mercury/email-service';
 import { db } from '../db';
 import { agentQueue, campaignQueue } from '@shared/schema';
 import { eq, lt, and, inArray, sql } from 'drizzle-orm';
@@ -24,6 +25,7 @@ const AI_ANALYSIS_JOB_INTERVAL = 120000; // Every 120 seconds (was 90s)
 const LOCK_SWEEPER_INTERVAL = 600000; // Every 10 minutes (was 5 min)
 const TELNYX_RECORDING_SYNC_INTERVAL = 300000; // Every 5 minutes - auto-fetch last 24h recordings
 const JOURNEY_ACTION_INTERVAL = 60000; // Every 60 seconds
+const MERCURY_OUTBOX_INTERVAL = 60000; // Every 60 seconds — flush queued Mercury emails
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -41,6 +43,7 @@ let analysisInterval: NodeJS.Timeout | null = null;
 let lockSweeperInterval: NodeJS.Timeout | null = null;
 let telnyxSyncInterval: NodeJS.Timeout | null = null;
 let journeyActionInterval: NodeJS.Timeout | null = null;
+let mercuryOutboxInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
@@ -48,6 +51,7 @@ let isAnalysisRunning = false;
 let isLockSweeperRunning = false;
 let isTelnyxSyncRunning = false;
 let isJourneyActionRunning = false;
+let isMercuryOutboxRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -56,6 +60,7 @@ const ENABLE_AI_ANALYSIS = process.env.ENABLE_AI_ANALYSIS_JOB !== 'false';
 const ENABLE_LOCK_SWEEPER = process.env.ENABLE_LOCK_SWEEPER !== 'false';
 const ENABLE_TELNYX_RECORDING_SYNC = process.env.ENABLE_TELNYX_RECORDING_SYNC !== 'false'; // ENABLED by default
 const ENABLE_JOURNEY_AUTOMATION = process.env.ENABLE_JOURNEY_AUTOMATION !== 'false'; // ENABLED by default
+const ENABLE_MERCURY_OUTBOX = process.env.ENABLE_MERCURY_OUTBOX !== 'false'; // ENABLED by default
 
 /**
  * Lock Sweeper - Release expired locks and stuck queue entries
@@ -131,6 +136,7 @@ export function startBackgroundJobs() {
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   • Journey Automation: ${ENABLE_JOURNEY_AUTOMATION ? 'ENABLED (every 60s)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   • Mercury Outbox: ${ENABLE_MERCURY_OUTBOX ? 'ENABLED (every 60s)' : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] ON-DEMAND JOBS (Manual Trigger):');
   console.log(`[Background Jobs]   • Email Validation: ${ENABLE_EMAIL_VALIDATION ? 'AUTO-RUN ENABLED' : 'MANUAL ONLY (use API)'}`);
@@ -292,6 +298,29 @@ export function startBackgroundJobs() {
   console.log('[Background Jobs] ✅ Job system initialized');
   console.log('[Background Jobs] 💡 Tip: Use manual trigger API endpoints for on-demand processing');
 
+  // Mercury outbox processor — flush queued notification emails
+  if (ENABLE_MERCURY_OUTBOX) {
+    mercuryOutboxInterval = setInterval(async () => {
+      if (isMercuryOutboxRunning) {
+        return;
+      }
+
+      isMercuryOutboxRunning = true;
+      try {
+        const result = await withJobTimeout('Mercury Outbox', () => mercuryEmailService.processOutbox(50));
+        if (result.processed > 0) {
+          console.log(
+            `[Background Jobs] Mercury outbox: processed=${result.processed}, sent=${result.succeeded}, failed=${result.failed}`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Mercury outbox error:', error);
+      } finally {
+        isMercuryOutboxRunning = false;
+      }
+    }, MERCURY_OUTBOX_INTERVAL);
+  }
+
   // Email Sequence Processor - Schedule emails ready to send
   setInterval(async () => {
     try {
@@ -335,6 +364,11 @@ export function stopBackgroundJobs() {
   if (journeyActionInterval) {
     clearInterval(journeyActionInterval);
     journeyActionInterval = null;
+  }
+
+  if (mercuryOutboxInterval) {
+    clearInterval(mercuryOutboxInterval);
+    mercuryOutboxInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');

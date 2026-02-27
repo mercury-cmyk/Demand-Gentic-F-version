@@ -90,18 +90,18 @@ export default function LandingPage() {
       </nav>
 
       {/* ─── HERO SECTION ─────────────────────────────────────────────── */}
-      <section className="pt-32 pb-24 px-6 relative overflow-hidden perspective-1000">
+      <section className="pt-32 pb-24 relative overflow-hidden perspective-1000">
         <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-background to-blue-50" />
         <div className="absolute top-20 right-0 w-[800px] h-[800px] bg-gradient-to-br from-violet-500/10 to-indigo-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-to-tr from-blue-500/10 to-cyan-500/10 rounded-full blur-3xl" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#8882_1px,transparent_1px),linear-gradient(to_bottom,#8882_1px,transparent_1px)] bg-[size:14px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
 
-        <div className="max-w-7xl mx-auto relative grid lg:grid-cols-2 gap-12 items-center">
+        <div className="max-w-[1600px] mx-auto px-6 relative grid lg:grid-cols-2 gap-12 items-center">
           <motion.div 
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, ease: "easeOut" }}
-            className="text-left max-w-2xl"
+            className="text-left max-w-3xl"
           >
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />

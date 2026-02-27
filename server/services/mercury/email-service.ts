@@ -63,6 +63,7 @@ export class MercuryEmailService {
         // Fallback: use SMTP_HOST/SMTP_USER/SMTP_PASS env vars
         transporter = smtpOAuthService.createEnvTransporter();
         if (!transporter) {
+          console.error('[Mercury] No SMTP provider available. Configure a provider via Mercury admin UI or set SMTP_HOST, SMTP_USER, SMTP_PASS env vars.');
           return { success: false, error: 'No active SMTP provider configured and SMTP_HOST/SMTP_USER/SMTP_PASS env vars are not set' };
         }
       }
@@ -173,16 +174,23 @@ export class MercuryEmailService {
       return { processed: 0, succeeded: 0, failed: 0 };
     }
 
+    // Recover stuck "sending" entries (older than 5 minutes) back to "queued"
+    // so they can be retried. This handles cases where the process crashed mid-send.
+    const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000);
+    await db.update(mercuryEmailOutbox)
+      .set({ status: 'queued' })
+      .where(
+        and(
+          eq(mercuryEmailOutbox.status, 'sending'),
+          sql`${mercuryEmailOutbox.updatedAt} < ${stuckCutoff}`,
+        )
+      );
+
     // Fetch queued emails
     const queued = await db
       .select()
       .from(mercuryEmailOutbox)
-      .where(
-        and(
-          eq(mercuryEmailOutbox.status, 'queued'),
-          // Only process if scheduledAt is null or in the past
-        )
-      )
+      .where(eq(mercuryEmailOutbox.status, 'queued'))
       .orderBy(mercuryEmailOutbox.createdAt)
       .limit(batchSize);
 
