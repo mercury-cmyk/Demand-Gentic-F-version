@@ -1,10 +1,9 @@
 # ============================================
 # DemandGentic AI - Multi-Service Cloud Run Deployment
-# Deploys the same codebase as 4 separate services:
-# 1. demandgentic-web (Main API & Frontend)
-# 2. demandgentic-voice (AI Voice Agents & WebSockets)
-# 3. demandgentic-analysis (Vertex AI, Queues)
-# 4. demandgentic-email (Email Sync & Validation)
+# Deploys the same codebase as 3 separate services:
+# 1. demandgentic-voice (AI Voice Agents & WebSockets)
+# 2. demandgentic-analysis (Vertex AI, Queues)
+# 3. demandgentic-email (Email Sync & Validation)
 # ============================================
 
 $PROJECT_ID = "pivotalb2b-2026"
@@ -118,37 +117,7 @@ $env_vars = @(
 )
 
 Write-Host "============================================"
-Write-Host "Step 2: Deploying demandgentic-web (API & UI)"
-Write-Host "============================================"
-$web_env = $env_vars + @(
-  "SERVICE_ROLE=web",
-  "BASE_URL=https://app.pivotal-b2b.com",
-  "PUBLIC_TEXML_HOST=app.pivotal-b2b.com"
-)
-$web_env_string = $web_env -join ","
-
-& $gcloudExe run deploy demandgentic-web `
-  --image $IMAGE_URL `
-  --region $REGION `
-  --platform managed `
-  --allow-unauthenticated `
-  --memory 2Gi `
-  --cpu 2 `
-  --min-instances 1 `
-  --max-instances 20 `
-  --port 8080 `
-  --timeout 900 `
-  --concurrency 150 `
-  --vpc-connector pivotal-connector `
-  --vpc-egress private-ranges-only `
-  --set-env-vars $web_env_string `
-  --set-secrets $secret_string
-if ($LASTEXITCODE -ne 0) {
-  throw "Deploy failed for demandgentic-web"
-}
-
-Write-Host "============================================"
-Write-Host "Step 3: Deploying demandgentic-voice (AI Calls)"
+Write-Host "Step 2: Deploying demandgentic-voice (AI Calls)"
 Write-Host "============================================"
 $voice_env = $env_vars + @(
   "SERVICE_ROLE=voice",
@@ -179,7 +148,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "============================================"
-Write-Host "Step 4: Deploying demandgentic-analysis (Queues & Vertex AI)"
+Write-Host "Step 3: Deploying demandgentic-analysis (Queues & Vertex AI)"
 Write-Host "============================================"
 $analysis_env = $env_vars + @(
   "SERVICE_ROLE=analysis",
@@ -209,7 +178,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "============================================"
-Write-Host "Step 5: Deploying demandgentic-email (Email Sync & Validation)"
+Write-Host "Step 4: Deploying demandgentic-email (Email Sync & Validation)"
 Write-Host "============================================"
 $email_env = $env_vars + @(
   "SERVICE_ROLE=email",
@@ -245,6 +214,5 @@ Write-Host "1. Map your custom domains in Cloud Run (requested routing):"
 Write-Host "   - demandgentic.ai -> demandgentic-voice (AI Calls)"
 Write-Host "   - pivotal-b2b.com -> demandgentic-email (Email Campaigns)"
 Write-Host "   - app.pivotal-b2b.com -> demandgentic-analysis (Analysis)"
-Write-Host "2. Optional: map an internal/admin domain to demandgentic-web if needed"
-Write-Host "3. Update Telnyx/LiveKit webhooks to use demandgentic.ai"
+Write-Host "2. Update Telnyx/LiveKit webhooks to use demandgentic.ai"
 Write-Host "============================================"
