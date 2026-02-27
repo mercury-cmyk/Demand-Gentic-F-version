@@ -30,6 +30,8 @@ interface AutoEnrollParams {
   callbackAt?: Date | null;
 }
 
+let journeySchemaMissingWarned = false;
+
 function normalizeDisposition(value: string): string {
   return String(value || "").trim().toLowerCase();
 }
@@ -404,18 +406,35 @@ export async function autoEnrollJourneyLeadFromDisposition(
 
 export async function executeDueJourneyActions(limit: number = 25): Promise<{ processed: number; completed: number; failed: number }> {
   const now = new Date();
-  const dueActions = await db
-    .select()
-    .from(clientJourneyActions)
-    .where(
-      and(
-        eq(clientJourneyActions.status, "scheduled"),
-        isNotNull(clientJourneyActions.scheduledAt),
-        lte(clientJourneyActions.scheduledAt, now)
+  let dueActions: typeof clientJourneyActions.$inferSelect[] = [];
+
+  try {
+    dueActions = await db
+      .select()
+      .from(clientJourneyActions)
+      .where(
+        and(
+          eq(clientJourneyActions.status, "scheduled"),
+          isNotNull(clientJourneyActions.scheduledAt),
+          lte(clientJourneyActions.scheduledAt, now)
+        )
       )
-    )
-    .orderBy(asc(clientJourneyActions.scheduledAt))
-    .limit(limit);
+      .orderBy(asc(clientJourneyActions.scheduledAt))
+      .limit(limit);
+  } catch (error: any) {
+    // DB schema may lag code on some environments during deploys.
+    // Skip gracefully instead of error-spamming every scheduler tick.
+    if (error?.code === "42P01") {
+      if (!journeySchemaMissingWarned) {
+        journeySchemaMissingWarned = true;
+        console.warn(
+          "[Journey Automation] Skipping execution: required journey table is missing. Apply latest migrations to enable this job."
+        );
+      }
+      return { processed: 0, completed: 0, failed: 0 };
+    }
+    throw error;
+  }
 
   let completed = 0;
   let failed = 0;

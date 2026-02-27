@@ -15,6 +15,23 @@ import { notificationService as mercuryNotificationService } from '../services/m
 
 const router = Router();
 
+const CURRENT_ORDER_SYSTEM = (process.env.CURRENT_ORDER_SYSTEM || 'agentic').toLowerCase();
+const LEGACY_ORDER_ROUTES_DISABLED =
+  process.env.DISABLE_LEGACY_ORDER_ROUTES === 'true' || CURRENT_ORDER_SYSTEM === 'agentic';
+
+// Keep read endpoints available for historical visibility, but block legacy writes
+// when Agentic is configured as the current order system.
+router.use((req: Request, res: Response, next) => {
+  if (!LEGACY_ORDER_ROUTES_DISABLED) return next();
+  if (req.method === 'GET' || req.method === 'HEAD') return next();
+
+  return res.status(410).json({
+    message: 'Legacy order submission routes are disabled. Use the current Agentic order flow.',
+    currentOrderSystem: 'agentic',
+    createEndpoint: '/api/client-portal/agentic/orders/create',
+  });
+});
+
 // Helper to generate order number
 function generateOrderNumber(): string {
   const date = new Date();
