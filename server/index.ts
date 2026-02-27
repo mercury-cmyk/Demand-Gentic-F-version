@@ -300,16 +300,20 @@ if (isMainModule) {
     }
 
     // Initialize Number Pool Scheduler (hourly/daily counter resets, cooldown processing, reputation recalc)
-    try {
-      const { initializeAlignedScheduler } = await import("./services/number-pool-scheduler");
-      const { resetHourlyCounters } = await import("./services/number-pool/number-service");
-      initializeAlignedScheduler();
-      // Immediately reset hourly counters on startup since they may be stale from previous run
-      resetHourlyCounters().then(count => {
-        if (count > 0) console.log(`[STARTUP] Reset stale hourly counters for ${count} numbers`);
-      }).catch(() => {});
-    } catch (err) {
-      console.error('[STARTUP] Number Pool Scheduler initialization failed (non-blocking):', err);
+    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'voice') {
+      try {
+        const { initializeAlignedScheduler } = await import("./services/number-pool-scheduler");
+        const { resetHourlyCounters } = await import("./services/number-pool/number-service");
+        initializeAlignedScheduler();
+        // Immediately reset hourly counters on startup since they may be stale from previous run
+        resetHourlyCounters().then(count => {
+          if (count > 0) console.log(`[STARTUP] Reset stale hourly counters for ${count} numbers`);
+        }).catch(() => {});
+      } catch (err) {
+        console.error('[STARTUP] Number Pool Scheduler initialization failed (non-blocking):', err);
+      }
+    } else {
+      console.log(`[Startup] ⏭️ Skipping Number Pool Scheduler (Role: ${SERVICE_ROLE})`);
     }
 
     // Initialize WebSocket servers for real-time communication
@@ -395,18 +399,22 @@ if (isMainModule) {
     // Initialize LiveKit Worker if explicitly enabled (SIP/WebRTC Bridge)
     // Requires LIVEKIT_WORKER_ENABLED=true because the @livekit/rtc-node native module
     // is not available on Alpine Linux (Cloud Run) and causes unhandled rejections on import.
-    if (process.env.LIVEKIT_WORKER_ENABLED === 'true' && process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
-      (async () => {
-        try {
-          console.log('[STARTUP] 🚀 Initializing LiveKit Agent Worker...');
-          const { startLiveKitWorker } = await import("./services/livekit/worker");
-          await startLiveKitWorker();
-        } catch (err) {
-          console.error('[STARTUP] ❌ LiveKit Worker initialization failed:', err);
-        }
-      })();
-    } else if (process.env.LIVEKIT_URL && !process.env.LIVEKIT_WORKER_ENABLED) {
-      console.log('[STARTUP] ℹ️ LiveKit configured but worker disabled (set LIVEKIT_WORKER_ENABLED=true to enable)');
+    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'voice') {
+      if (process.env.LIVEKIT_WORKER_ENABLED === 'true' && process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
+        (async () => {
+          try {
+            console.log('[STARTUP] 🚀 Initializing LiveKit Agent Worker...');
+            const { startLiveKitWorker } = await import("./services/livekit/worker");
+            await startLiveKitWorker();
+          } catch (err) {
+            console.error('[STARTUP] ❌ LiveKit Worker initialization failed:', err);
+          }
+        })();
+      } else if (process.env.LIVEKIT_URL && !process.env.LIVEKIT_WORKER_ENABLED) {
+        console.log('[STARTUP] ℹ️ LiveKit configured but worker disabled (set LIVEKIT_WORKER_ENABLED=true to enable)');
+      }
+    } else {
+      console.log(`[Startup] ⏭️ Skipping LiveKit Worker (Role: ${SERVICE_ROLE})`);
     }
 
     // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
@@ -577,179 +585,199 @@ if (isMainModule) {
     // Check if Redis is configured using the centralized config
     const { isRedisConfigured, getRedisUrl } = await import("./lib/redis-config");
     const hasRedis = isRedisConfigured() && !!getRedisUrl();
-    const { startBackgroundJobs } = await import("./services/background-jobs");
-    if (hasRedis) {
-      startBackgroundJobs();
-      // console.log("[BackgroundJobs] Temporarily disabled for stability");
+    
+    const SERVICE_ROLE = process.env.SERVICE_ROLE || 'all';
+    console.log(`\n[Startup] 🚀 Running with SERVICE_ROLE: ${SERVICE_ROLE.toUpperCase()}`);
+
+    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'analysis') {
+      const { startBackgroundJobs } = await import("./services/background-jobs");
+      if (hasRedis) {
+        startBackgroundJobs();
+        // console.log("[BackgroundJobs] Temporarily disabled for stability");
+      } else {
+        console.log("[BackgroundJobs] Skipped - Redis not configured (set REDIS_URL or REDIS_URL_PROD)");
+      }
+      
+      // Initialize CSV import queue and worker (BullMQ)
+      if (hasRedis) {
+        const { initializeCSVImportQueue } = await import("./lib/csv-import-queue");
+        initializeCSVImportQueue();
+      }
+      
+      // Initialize cap enforcement queue and worker (BullMQ)
+      if (hasRedis) {
+        const { initializeCapEnforcementQueue } = await import("./lib/cap-enforcement-queue");
+        initializeCapEnforcementQueue();
+      }
+      
+      // Initialize bulk list operation queue and worker (BullMQ)
+      if (hasRedis) {
+        const { initializeBulkListQueue } = await import("./lib/bulk-list-queue");
+        initializeBulkListQueue();
+      }
+      
+      // Initialize contacts CSV import queue and worker (BullMQ)
+      if (hasRedis) {
+        const { initializeContactsCSVImportQueue } = await import("./lib/contacts-csv-import-queue");
+        initializeContactsCSVImportQueue();
+      }
+      
+      // Initialize verification CSV import queue and worker (BullMQ - OPTIMIZED with PostgreSQL COPY)
+      if (hasRedis) {
+        const { initializeVerificationCSVImportQueue } = await import("./lib/verification-csv-import-queue");
+        initializeVerificationCSVImportQueue();
+      }
+      
+      // Initialize verification workflow orchestrator (BullMQ)
+      if (hasRedis) {
+        const { initializeVerificationWorkflowQueue } = await import("./lib/verification-workflow-queue");
+        initializeVerificationWorkflowQueue();
+      }
+      
+      // Initialize verification enrichment queue and worker (BullMQ)
+      if (hasRedis) {
+        const { initializeEnrichmentQueue } = await import("./lib/enrichment-queue");
+        initializeEnrichmentQueue();
+      }
     } else {
-      console.log("[BackgroundJobs] Skipped - Redis not configured (set REDIS_URL or REDIS_URL_PROD)");
+      console.log(`[Startup] ⏭️ Skipping analysis/data queues (Role: ${SERVICE_ROLE})`);
     }
     
-    // Initialize CSV import queue and worker (BullMQ)
-    if (hasRedis) {
-      const { initializeCSVImportQueue } = await import("./lib/csv-import-queue");
-      initializeCSVImportQueue();
-    }
-    
-    // Initialize cap enforcement queue and worker (BullMQ)
-    if (hasRedis) {
-      const { initializeCapEnforcementQueue } = await import("./lib/cap-enforcement-queue");
-      initializeCapEnforcementQueue();
-    }
-    
-    // Initialize bulk list operation queue and worker (BullMQ)
-    if (hasRedis) {
-      const { initializeBulkListQueue } = await import("./lib/bulk-list-queue");
-      initializeBulkListQueue();
-    }
-    
-    // Initialize contacts CSV import queue and worker (BullMQ)
-    if (hasRedis) {
-      const { initializeContactsCSVImportQueue } = await import("./lib/contacts-csv-import-queue");
-      initializeContactsCSVImportQueue();
-    }
-    
-    // Initialize verification CSV import queue and worker (BullMQ - OPTIMIZED with PostgreSQL COPY)
-    if (hasRedis) {
-      const { initializeVerificationCSVImportQueue } = await import("./lib/verification-csv-import-queue");
-      initializeVerificationCSVImportQueue();
-    }
-    
-    // Initialize verification workflow orchestrator (BullMQ)
-    if (hasRedis) {
-      const { initializeVerificationWorkflowQueue } = await import("./lib/verification-workflow-queue");
-      initializeVerificationWorkflowQueue();
-    }
-    
-    // Initialize verification enrichment queue and worker (BullMQ)
-    if (hasRedis) {
-      const { initializeEnrichmentQueue } = await import("./lib/enrichment-queue");
-      initializeEnrichmentQueue();
-    }
-    
-    // Initialize auto recording sync worker (BullMQ)
-    if (hasRedis) {
-      const { initializeAutoRecordingSyncWorker } = await import("./workers/auto-recording-sync-worker");
-      // Initialize in background, don't block server startup
-      setImmediate(() => {
-        try {
-          initializeAutoRecordingSyncWorker();
-        } catch (err) {
-          console.error('[AutoRecordingSyncWorker] Background init failed:', err);
-        }
-      });
-    }
-    
-    // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
-    const { initializeAiCampaignOrchestrator, getOrchestratorStatus } = await import("./lib/ai-campaign-orchestrator");
-    if (hasRedis) {
-      try {
-        await initializeAiCampaignOrchestrator();
-
-        const configuredHealthcheckMs = Number(process.env.AI_ORCHESTRATOR_HEALTHCHECK_MS || 60000);
-        const orchestratorHealthcheckMs = Number.isFinite(configuredHealthcheckMs)
-          ? Math.max(30000, configuredHealthcheckMs)
-          : 60000;
-
-        setInterval(async () => {
+    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'voice') {
+      // Initialize auto recording sync worker (BullMQ)
+      if (hasRedis) {
+        const { initializeAutoRecordingSyncWorker } = await import("./workers/auto-recording-sync-worker");
+        // Initialize in background, don't block server startup
+        setImmediate(() => {
           try {
-            const status = await getOrchestratorStatus();
-            if (!status.available) {
-              console.warn(
-                `[AI Orchestrator] Healthcheck detected unavailable orchestrator ` +
-                `(workerRunning=${status.workerRunning}, workerPaused=${status.workerPaused}, staleTick=${status.staleTick}, lastTickAgeMs=${status.lastTickAgeMs}) - attempting forced re-initialization`
-              );
-              await initializeAiCampaignOrchestrator({ forceReinitialize: true });
-            }
+            initializeAutoRecordingSyncWorker();
           } catch (err) {
-            console.error('[AI Orchestrator] Healthcheck failed:', err);
+            console.error('[AutoRecordingSyncWorker] Background init failed:', err);
           }
-        }, orchestratorHealthcheckMs);
-      } catch (err) {
-        console.error('[AI Orchestrator] Initialization failed, enabling fallback dialer:', err);
-        await startAutonomousDialerFallback('AI orchestrator failed to initialize');
-      }
-    } else {
-      await startAutonomousDialerFallback('Redis unavailable for BullMQ orchestrator');
-    }
-
-    // Initialize Vertex AI Agentic CRM Operator
-    if (process.env.USE_VERTEX_AI === 'true') {
-      const { initializeVertexAI } = await import("./services/vertex-ai");
-      try {
-        const vertexResult = await initializeVertexAI({
-          indexData: false,  // Set to true to pre-index accounts/contacts for vector search
-          startOperator: true,  // Start the agentic operator task queue
         });
-        console.log(`[VertexAI] Agentic CRM Operator initialized: ${vertexResult.status}`);
-        if (vertexResult.operatorStarted) {
-          console.log("[VertexAI] Task queue processor started");
+      }
+      
+      // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
+      const { initializeAiCampaignOrchestrator, getOrchestratorStatus } = await import("./lib/ai-campaign-orchestrator");
+      if (hasRedis) {
+        try {
+          await initializeAiCampaignOrchestrator();
+
+          const configuredHealthcheckMs = Number(process.env.AI_ORCHESTRATOR_HEALTHCHECK_MS || 60000);
+          const orchestratorHealthcheckMs = Number.isFinite(configuredHealthcheckMs)
+            ? Math.max(30000, configuredHealthcheckMs)
+            : 60000;
+
+          setInterval(async () => {
+            try {
+              const status = await getOrchestratorStatus();
+              if (!status.available) {
+                console.warn(
+                  `[AI Orchestrator] Healthcheck detected unavailable orchestrator ` +
+                  `(workerRunning=${status.workerRunning}, workerPaused=${status.workerPaused}, staleTick=${status.staleTick}, lastTickAgeMs=${status.lastTickAgeMs}) - attempting forced re-initialization`
+                );
+                await initializeAiCampaignOrchestrator({ forceReinitialize: true });
+              }
+            } catch (err) {
+              console.error('[AI Orchestrator] Healthcheck failed:', err);
+            }
+          }, orchestratorHealthcheckMs);
+        } catch (err) {
+          console.error('[AI Orchestrator] Initialization failed, enabling fallback dialer:', err);
+          await startAutonomousDialerFallback('AI orchestrator failed to initialize');
         }
-      } catch (error) {
-        console.error("[VertexAI] Failed to initialize:", error);
+      } else {
+        await startAutonomousDialerFallback('Redis unavailable for BullMQ orchestrator');
       }
     } else {
-      console.log("[VertexAI] Disabled - Set USE_VERTEX_AI=true to enable Agentic CRM Operator");
+      console.log(`[Startup] ⏭️ Skipping voice orchestrator (Role: ${SERVICE_ROLE})`);
     }
 
-    // M365 email sync - Only start if enabled (DISABLED by default for performance)
-    // Enable M365 auto-sync for production email inbox
-    const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true';
-    if (ENABLE_M365_SYNC) {
-      const { startM365SyncJob } = await import("./jobs/m365-sync-job");
-      startM365SyncJob();
-    } else {
-      console.log("[M365SyncJob] AUTO-SYNC DISABLED - Use manual trigger API endpoint");
+    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'analysis') {
+      // Initialize Vertex AI Agentic CRM Operator
+      if (process.env.USE_VERTEX_AI === 'true') {
+        const { initializeVertexAI } = await import("./services/vertex-ai");
+        try {
+          const vertexResult = await initializeVertexAI({
+            indexData: false,  // Set to true to pre-index accounts/contacts for vector search
+            startOperator: true,  // Start the agentic operator task queue
+          });
+          console.log(`[VertexAI] Agentic CRM Operator initialized: ${vertexResult.status}`);
+          if (vertexResult.operatorStarted) {
+            console.log("[VertexAI] Task queue processor started");
+          }
+        } catch (error) {
+          console.error("[VertexAI] Failed to initialize:", error);
+        }
+      } else {
+        console.log("[VertexAI] Disabled - Set USE_VERTEX_AI=true to enable Agentic CRM Operator");
+      }
     }
 
-    // Gmail email sync - Only start if enabled
-    const ENABLE_GMAIL_SYNC = process.env.ENABLE_GMAIL_SYNC === 'true';
-    if (ENABLE_GMAIL_SYNC) {
-      const { startGmailSyncJob } = await import("./jobs/gmail-sync-job");
-      startGmailSyncJob();
+    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'email') {
+      // M365 email sync - Only start if enabled (DISABLED by default for performance)
+      // Enable M365 auto-sync for production email inbox
+      const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true';
+      if (ENABLE_M365_SYNC) {
+        const { startM365SyncJob } = await import("./jobs/m365-sync-job");
+        startM365SyncJob();
+      } else {
+        console.log("[M365SyncJob] AUTO-SYNC DISABLED - Use manual trigger API endpoint");
+      }
+
+      // Gmail email sync - Only start if enabled
+      const ENABLE_GMAIL_SYNC = process.env.ENABLE_GMAIL_SYNC === 'true';
+      if (ENABLE_GMAIL_SYNC) {
+        const { startGmailSyncJob } = await import("./jobs/gmail-sync-job");
+        startGmailSyncJob();
+      } else {
+        console.log("[GmailSyncJob] AUTO-SYNC DISABLED - Use manual trigger API endpoint");
+      }
+      
+      // Auto-resume stuck email validation jobs (with error handling and timeout)
+      const { resumeStuckEmailValidationJobs } = await import("./lib/resume-validation-jobs");
+      setTimeout(async () => {
+        console.log("[VALIDATION RESUME] Checking for stuck email validation jobs...");
+        let timeoutId: NodeJS.Timeout;
+        try {
+          await Promise.race([
+            resumeStuckEmailValidationJobs(),
+            new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => reject(new Error('Resume validation timeout')), 15000);
+            })
+          ]);
+          clearTimeout(timeoutId!);
+          console.log("[VALIDATION RESUME] Check completed successfully");
+        } catch (error: any) {
+          clearTimeout(timeoutId!);
+          console.error("[VALIDATION RESUME] Error checking for stuck jobs:", error.message || error);
+        }
+      }, 5000); // Wait 5 seconds after startup
     } else {
-      console.log("[GmailSyncJob] AUTO-SYNC DISABLED - Use manual trigger API endpoint");
+      console.log(`[Startup] ⏭️ Skipping email sync/validation jobs (Role: ${SERVICE_ROLE})`);
     }
     
-    // Auto-resume stuck email validation jobs (with error handling and timeout)
-    const { resumeStuckEmailValidationJobs } = await import("./lib/resume-validation-jobs");
-    setTimeout(async () => {
-      console.log("[VALIDATION RESUME] Checking for stuck email validation jobs...");
-      let timeoutId: NodeJS.Timeout;
-      try {
-        await Promise.race([
-          resumeStuckEmailValidationJobs(),
-          new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error('Resume validation timeout')), 15000);
-          })
-        ]);
-        clearTimeout(timeoutId!);
-        console.log("[VALIDATION RESUME] Check completed successfully");
-      } catch (error: any) {
-        clearTimeout(timeoutId!);
-        console.error("[VALIDATION RESUME] Error checking for stuck jobs:", error.message || error);
-      }
-    }, 5000); // Wait 5 seconds after startup
-    
-    // Auto-resume stuck CSV upload jobs (with error handling and timeout)
-    const { resumeStuckUploadJobs } = await import("./lib/upload-job-processor");
-    setTimeout(async () => {
-      console.log("[UPLOAD JOB RESUME] Checking for stuck upload jobs...");
-      let timeoutId: NodeJS.Timeout;
-      try {
-        await Promise.race([
-          resumeStuckUploadJobs(),
-          new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error('Resume upload timeout')), 15000);
-          })
-        ]);
-        clearTimeout(timeoutId!);
-        console.log("[UPLOAD JOB RESUME] Check completed successfully");
-      } catch (error: any) {
-        clearTimeout(timeoutId!);
-        console.error("[UPLOAD JOB RESUME] Error checking for stuck jobs:", error.message || error);
-      }
-    }, 5000); // Wait 5 seconds after startup
+    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'analysis') {
+      // Auto-resume stuck CSV upload jobs (with error handling and timeout)
+      const { resumeStuckUploadJobs } = await import("./lib/upload-job-processor");
+      setTimeout(async () => {
+        console.log("[UPLOAD JOB RESUME] Checking for stuck upload jobs...");
+        let timeoutId: NodeJS.Timeout;
+        try {
+          await Promise.race([
+            resumeStuckUploadJobs(),
+            new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => reject(new Error('Resume upload timeout')), 15000);
+            })
+          ]);
+          clearTimeout(timeoutId!);
+          console.log("[UPLOAD JOB RESUME] Check completed successfully");
+        } catch (error: any) {
+          clearTimeout(timeoutId!);
+          console.error("[UPLOAD JOB RESUME] Error checking for stuck jobs:", error.message || error);
+        }
+      }, 5000); // Wait 5 seconds after startup
+    }
     
     // =========================================================================
     // CALL ORCHESTRATION ENVIRONMENT VALIDATION
