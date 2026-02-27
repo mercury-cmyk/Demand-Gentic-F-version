@@ -41,6 +41,14 @@ function normalizeGeminiVoice(voice?: string) {
 
 const router = Router();
 
+function getTelnyxWhitelistRemovalReason(errorMessage: string | undefined): 'country_not_whitelisted' | 'invalid_lrn' {
+  const msg = (errorMessage || '').toLowerCase();
+  if (msg.includes('d50') || msg.includes('valid lrn')) {
+    return 'invalid_lrn';
+  }
+  return 'country_not_whitelisted';
+}
+
 const generateScriptsSchema = z.object({
   campaignBrief: z.string().min(20, "Campaign brief must be at least 20 characters"),
   companyName: z.string().optional(),
@@ -397,9 +405,10 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
       if (queueItemId && queueItemId !== 'test-queue-item') {
         const isWhitelistError = error instanceof Error && error.message.includes('Whitelist Error');
         if (isWhitelistError) {
+          const removedReason = getTelnyxWhitelistRemovalReason(error instanceof Error ? error.message : String(error));
           await db.execute(sql`
             UPDATE campaign_queue 
-            SET status = 'removed', removed_reason = 'country_not_whitelisted', updated_at = NOW()
+            SET status = 'removed', removed_reason = ${removedReason}, updated_at = NOW()
             WHERE id = ${queueItemId}
           `);
         } else {
@@ -744,10 +753,11 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
           
           if (isWhitelistError) {
             console.error(`[AI Batch] Permanent failure for ${item.id}: ${initiateError.message}`);
+            const removedReason = getTelnyxWhitelistRemovalReason(initiateError.message);
             await db.execute(sql`
               UPDATE campaign_queue 
               SET status = 'removed', 
-                  removed_reason = 'country_not_whitelisted',
+                  removed_reason = ${removedReason},
                   updated_at = NOW()
               WHERE id = ${item.id}
             `);
@@ -1725,9 +1735,10 @@ async function processContinuousCalls(campaignId: string, delayBetweenCalls: num
         const isWhitelistError = initiateError.message?.includes('Whitelist Error');
         if (isWhitelistError) {
           console.error(`[AI Continuous] Permanent failure for ${item.id}: ${initiateError.message}`);
+          const removedReason = getTelnyxWhitelistRemovalReason(initiateError.message);
           await db.execute(sql`
             UPDATE campaign_queue
-            SET status = 'removed', removed_reason = 'country_not_whitelisted', updated_at = NOW()
+            SET status = 'removed', removed_reason = ${removedReason}, updated_at = NOW()
             WHERE id = ${item.id}
           `);
         } else {

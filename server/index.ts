@@ -49,6 +49,7 @@ import { WebSocketServer, type WebSocket as WsWebSocket } from 'ws';
 
 const app = express();
 let server: http.Server | null = null;
+const SERVICE_ROLE = process.env.SERVICE_ROLE || 'all';
 
 // Trust Replit proxy for accurate client IP detection (required for rate limiting)
 // Replit runs behind a reverse proxy that sets X-Forwarded-For header
@@ -204,6 +205,13 @@ if (isMainModule) {
       });
     });
 
+    // CRITICAL: Register a lightweight /api/health BEFORE heavy route imports.
+    // The full registerRoutes() can take 30-60s due to massive import tree.
+    // Without this, Cloud Run health checks fail during initialization.
+    app.get('/api/health', (_req, res) => {
+      res.json({ status: 'ok', timestamp: new Date().toISOString(), phase: 'initializing' });
+    });
+
     // Redirect /favicon.ico to the logo
     app.get('/favicon.ico', (_req, res) => res.redirect(301, '/demangent-logo.png'));
 
@@ -225,8 +233,7 @@ if (isMainModule) {
       }
     });
 
-    // CRITICAL: Register routes IMMEDIATELY after listening so health check endpoint works
-    // This must happen before any potentially slow initialization
+    // Register all application routes (this import is heavy — 560KB+ route file with many sub-imports)
     const { registerRoutes } = await import("./routes");
     registerRoutes(app);
 
@@ -250,9 +257,6 @@ if (isMainModule) {
       const { serveStatic } = await import("./static");
       serveStatic(app);
     }
-
-    // Determine service role early — used throughout startup to gate subsystems
-    const SERVICE_ROLE = process.env.SERVICE_ROLE || 'all';
 
     // Now initialize everything else (after server is listening and health check is available)
     // This ensures health checks pass even if initialization is slow

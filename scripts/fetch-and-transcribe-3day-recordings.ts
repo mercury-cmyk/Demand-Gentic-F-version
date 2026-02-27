@@ -27,6 +27,7 @@ const CONCURRENCY = 2; // parallel downloads/transcriptions
 const DRY_RUN = process.argv.includes("--dry-run");
 const DB_ONLY = process.argv.includes("--db-only");
 const LIMIT = parseInt(process.argv.find(a => a.startsWith("--limit="))?.split("=")[1] || "0", 10) || Infinity;
+const MIN_DURATION_SECONDS = parseInt(process.argv.find(a => a.startsWith("--min-seconds="))?.split("=")[1] || "10", 10) || 10;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface TelnyxRecording {
@@ -473,6 +474,7 @@ async function findDbRecordsMissingTranscripts(): Promise<Array<{ table: string;
   const sinceStr = since.toISOString();
 
   console.log(`\n[Bonus] Scanning DB for leads/call_sessions from last ${DAYS_BACK} days missing transcription …`);
+  console.log(`        Applying min duration filter: > ${MIN_DURATION_SECONDS}s`);
 
   // Leads with recording but no structured transcript (duration > 10s only)
   const leadRows = await pool.query(
@@ -482,9 +484,9 @@ async function findDbRecordsMissingTranscripts(): Promise<Array<{ table: string;
        AND (recording_url IS NOT NULL OR recording_s3_key IS NOT NULL)
        AND (structured_transcript IS NULL OR structured_transcript::text = 'null' OR structured_transcript::text = '{}')
        AND (transcript IS NULL OR length(transcript) < 20 OR transcription_status != 'completed')
-       AND COALESCE(call_duration, 0) > 10
+       AND COALESCE(call_duration, 0) > $2
      ORDER BY created_at DESC`,
-    [sinceStr]
+    [sinceStr, MIN_DURATION_SECONDS]
   );
 
   // Call sessions with recording but no structured transcript (duration > 10s only)
@@ -494,9 +496,9 @@ async function findDbRecordsMissingTranscripts(): Promise<Array<{ table: string;
      WHERE started_at >= $1
        AND (recording_url IS NOT NULL OR recording_s3_key IS NOT NULL)
        AND (ai_transcript IS NULL OR length(ai_transcript) < 20)
-       AND COALESCE(duration_sec, 0) > 10
+       AND COALESCE(duration_sec, 0) > $2
      ORDER BY started_at DESC`,
-    [sinceStr]
+    [sinceStr, MIN_DURATION_SECONDS]
   );
 
   const results: Array<{ table: string; id: string; audioUrl: string; s3Key: string | null; telnyxCallId: string | null }> = [];
@@ -547,6 +549,26 @@ async function transcribeMissingDbRecords(records: Array<{ table: string; id: st
       // Resolve audio source URL for download if needed
       let sourceUrl = rec.audioUrl;
       if (needsDownloadAndUpload) {
+        // First, ask centralized resolver for a fresh playable URL.
+        // This handles stale cached URLs by prioritizing GCS / Telnyx recording ID / call ID lookup.
+        try {
+          const { getPlayableRecordingLink } = await import("../server/services/recording-link-resolver");
+          const link = await getPlayableRecordingLink(rec.id, { gcsOnly: false, skipCached: true });
+          if (link?.url) {
+            sourceUrl = link.url;
+            if (link.url.startsWith("gcs-internal://")) {
+              const extractedKey = link.url.replace(/^gcs-internal:\/\/[^/]+\//, "");
+              if (extractedKey) {
+                gcsKey = extractedKey;
+                needsDownloadAndUpload = false;
+              }
+            }
+            console.log(`${prefix}   Resolved fresh recording URL via recording-link-resolver (${link.source})`);
+          }
+        } catch {
+          // Fall back to existing URL handling below.
+        }
+
         // Try refreshing if it's a GCS internal URL
         if (rec.audioUrl.startsWith("gcs-internal://")) {
           const extractedKey = rec.audioUrl.replace(/^gcs-internal:\/\/[^/]+\//, "");
@@ -650,7 +672,7 @@ async function main() {
   console.log(`  Dry run    : ${DRY_RUN}`);
   console.log(`  DB only    : ${DB_ONLY}`);
   console.log(`  Limit      : ${LIMIT === Infinity ? "none" : LIMIT}`);
-  console.log(`  Min dur    : >10s`);
+  console.log(`  Min dur    : >${MIN_DURATION_SECONDS}s`);
   console.log(`  Provider   : Google Cloud Speech-to-Text (telephony model)`);
   console.log(`  Diarization: 2-speaker (Agent / Prospect)`);
   console.log("=".repeat(80));

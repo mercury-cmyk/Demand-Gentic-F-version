@@ -201,7 +201,7 @@ gcloud run deploy demandgentic-api `
   --max-instances 50 `
   --cpu 4 `
   --memory 4Gi `
-  --concurrency 20 `
+  --concurrency 150 `
   --timeout 900 `
   --set-secrets=$secrets `
   --set-env-vars=$env_vars

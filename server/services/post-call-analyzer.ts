@@ -774,6 +774,7 @@ export async function runPostCallAnalysis(
         id: callSessions.id,
         recordingUrl: callSessions.recordingUrl,
         recordingS3Key: callSessions.recordingS3Key,
+        recordingStatus: callSessions.recordingStatus,
         durationSec: callSessions.durationSec,
         aiDisposition: callSessions.aiDisposition,
         campaignId: callSessions.campaignId,
@@ -802,6 +803,20 @@ export async function runPostCallAnalysis(
       result.success = true;
       result.skipped = true;
       result.skipReason = `Call too short (${callDurationSec}s) - below ${MINIMUM_ANALYSIS_DURATION}s minimum for analysis`;
+      return result;
+    }
+
+    // 🎙️ RECORDING READINESS CHECK: If recording is still uploading, bail early so the
+    // caller can retry later. Without this, we'd burn Deepgram/AI credits on a recording
+    // that doesn't exist in storage yet.
+    const recordingStatus = session.recordingStatus;
+    if (
+      !options?.geminiTranscript &&  // Only matters when we need Deepgram (no Gemini transcript)
+      (recordingStatus === 'recording' || recordingStatus === 'uploading') &&
+      !session.recordingS3Key  // S3 key not yet backfilled → upload still in progress
+    ) {
+      result.error = `Recording still ${recordingStatus} — will retry later`;
+      console.log(`${LOG_PREFIX} ⏳ ${result.error} for session ${callSessionId}`);
       return result;
     }
 
@@ -1270,41 +1285,54 @@ export async function runPostCallAnalysis(
 
 /**
  * Retry post-call analysis after a delay (for when recording is still uploading).
- * Uses graduated delays: 20s, 60s, 180s
+ * Uses cascading retries: each attempt only fires if the previous one failed.
+ * Delays: 30s → 60s → 120s → 300s → 600s (total coverage: ~18 minutes)
  */
 export function schedulePostCallAnalysis(
   callSessionId: string,
   options?: Parameters<typeof runPostCallAnalysis>[1]
 ): void {
-  const retryDelays = [20_000, 60_000, 180_000];
+  const retryDelays = [30_000, 60_000, 120_000, 300_000, 600_000];
 
-  for (let i = 0; i < retryDelays.length; i++) {
-    setTimeout(async () => {
-      try {
-        // Check if analysis already succeeded (from earlier retry)
-        const [session] = await db
-          .select({ aiAnalysis: callSessions.aiAnalysis })
-          .from(callSessions)
-          .where(eq(callSessions.id, callSessionId))
-          .limit(1);
+  const attemptAnalysis = async (attemptIndex: number) => {
+    try {
+      // Check if analysis already succeeded (from earlier retry or background job)
+      const [session] = await db
+        .select({ aiAnalysis: callSessions.aiAnalysis })
+        .from(callSessions)
+        .where(eq(callSessions.id, callSessionId))
+        .limit(1);
 
-        const existingAnalysis = session?.aiAnalysis as Record<string, unknown> | null;
-        if (existingAnalysis?.postCallAnalysis) {
-          console.log(`${LOG_PREFIX} Analysis already exists for ${callSessionId} — skipping retry ${i + 1}`);
-          return;
-        }
-
-        console.log(`${LOG_PREFIX} 🔄 Post-call analysis attempt ${i + 1}/${retryDelays.length} for ${callSessionId}`);
-        const result = await runPostCallAnalysis(callSessionId, options);
-
-        if (result.success) {
-          console.log(`${LOG_PREFIX} ✅ Post-call analysis succeeded on attempt ${i + 1}`);
-        } else if (i === retryDelays.length - 1) {
-          console.warn(`${LOG_PREFIX} ⚠️ All post-call analysis attempts exhausted for ${callSessionId}: ${result.error}`);
-        }
-      } catch (err: any) {
-        console.error(`${LOG_PREFIX} ❌ Post-call analysis retry ${i + 1} failed:`, err.message);
+      const existingAnalysis = session?.aiAnalysis as Record<string, unknown> | null;
+      if (existingAnalysis?.postCallAnalysis) {
+        console.log(`${LOG_PREFIX} Analysis already exists for ${callSessionId} — skipping attempt ${attemptIndex + 1}`);
+        return;
       }
-    }, retryDelays[i]);
-  }
+
+      console.log(`${LOG_PREFIX} 🔄 Post-call analysis attempt ${attemptIndex + 1}/${retryDelays.length} for ${callSessionId}`);
+      const result = await runPostCallAnalysis(callSessionId, options);
+
+      if (result.success) {
+        console.log(`${LOG_PREFIX} ✅ Post-call analysis succeeded on attempt ${attemptIndex + 1}`);
+        return; // Done — no more retries
+      }
+
+      // Failed — schedule next retry if available
+      if (attemptIndex + 1 < retryDelays.length) {
+        console.log(`${LOG_PREFIX} ⏳ Scheduling retry ${attemptIndex + 2}/${retryDelays.length} in ${retryDelays[attemptIndex + 1] / 1000}s for ${callSessionId}: ${result.error}`);
+        setTimeout(() => attemptAnalysis(attemptIndex + 1), retryDelays[attemptIndex + 1]);
+      } else {
+        console.warn(`${LOG_PREFIX} ⚠️ All ${retryDelays.length} post-call analysis attempts exhausted for ${callSessionId}: ${result.error}`);
+      }
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} ❌ Post-call analysis attempt ${attemptIndex + 1} failed:`, err.message);
+      // Schedule next retry on exception too
+      if (attemptIndex + 1 < retryDelays.length) {
+        setTimeout(() => attemptAnalysis(attemptIndex + 1), retryDelays[attemptIndex + 1]);
+      }
+    }
+  };
+
+  // Start first attempt after initial delay
+  setTimeout(() => attemptAnalysis(0), retryDelays[0]);
 }

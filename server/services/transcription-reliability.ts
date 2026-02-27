@@ -15,7 +15,7 @@
 
 import { db } from '../db';
 import { dialerCallAttempts, callSessions, activityLog } from '@shared/schema';
-import { eq, and, or, isNull, isNotNull, gt, lt, sql } from 'drizzle-orm';
+import { eq, and, or, isNull, isNotNull, gt, lt, sql, inArray } from 'drizzle-orm';
 import { transcribeFromRecording } from './deepgram-postcall-transcription';
 
 const LOG_PREFIX = '[Transcription-Reliability]';
@@ -119,7 +119,58 @@ export async function attemptFallbackTranscription(
     }
 
     if (!urlToUse) {
-      // Mark as failed in DB to prevent infinite retry loops
+      // Check if the recording is still being uploaded before giving up permanently
+      let stillUploading = false;
+      try {
+        const [attempt] = await db
+          .select({ callSessionId: dialerCallAttempts.callSessionId })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, callAttemptId))
+          .limit(1);
+
+        if (attempt?.callSessionId) {
+          const [session] = await db
+            .select({ recordingStatus: callSessions.recordingStatus })
+            .from(callSessions)
+            .where(eq(callSessions.id, attempt.callSessionId))
+            .limit(1);
+
+          stillUploading = session?.recordingStatus === 'recording' || session?.recordingStatus === 'uploading';
+        }
+      } catch {
+        // Non-critical — default to permanent mark
+      }
+
+      if (stillUploading) {
+        // Recording not ready yet — don't permanently mark as failed, let future retries pick it up
+        console.log(`${LOG_PREFIX} Recording still uploading for ${callAttemptId} — skipping (will retry later)`);
+        return {
+          success: false,
+          source: 'fallback_stt',
+          error: 'Recording still uploading — will retry later',
+        };
+      }
+
+      // Check if the call ended recently (< 10 minutes) — recording may still be processing
+      const [attemptTiming] = await db
+        .select({ callEndedAt: dialerCallAttempts.callEndedAt })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, callAttemptId))
+        .limit(1);
+
+      const endedAt = attemptTiming?.callEndedAt ? new Date(attemptTiming.callEndedAt).getTime() : 0;
+      const minutesSinceEnd = endedAt ? (Date.now() - endedAt) / 60_000 : Infinity;
+
+      if (minutesSinceEnd < 10) {
+        console.log(`${LOG_PREFIX} Call ${callAttemptId} ended ${minutesSinceEnd.toFixed(1)}m ago — recording may still be processing, skipping permanent mark`);
+        return {
+          success: false,
+          source: 'fallback_stt',
+          error: 'No recording URL yet — call ended recently, will retry later',
+        };
+      }
+
+      // Truly no recording available — mark permanently to prevent infinite retry loops
       await db.update(dialerCallAttempts)
         .set({
           fullTranscript: '[SYSTEM: No recording available]',
@@ -254,9 +305,63 @@ export async function processMissingTranscripts(): Promise<{
 
     console.log(`${LOG_PREFIX} Found ${callsWithoutTranscripts.length} calls without transcripts`);
 
+    // Check which call sessions are still uploading recordings — skip those
+    const callSessionIds = callsWithoutTranscripts
+      .map(c => c.id)
+      .filter(Boolean);
+
+    const uploadingSessionIds = new Set<string>();
+    if (callSessionIds.length > 0) {
+      try {
+        // Look up recording status for linked call sessions
+        const sessions = await db
+          .select({
+            id: callSessions.id,
+            recordingStatus: callSessions.recordingStatus,
+          })
+          .from(callSessions)
+          .innerJoin(dialerCallAttempts, eq(dialerCallAttempts.callSessionId, callSessions.id))
+          .where(
+            and(
+              inArray(dialerCallAttempts.id, callSessionIds),
+              or(
+                eq(callSessions.recordingStatus, 'recording'),
+                eq(callSessions.recordingStatus, 'uploading')
+              )
+            )
+          );
+
+        for (const s of sessions) {
+          uploadingSessionIds.add(s.id);
+        }
+      } catch {
+        // Non-critical — proceed without filter
+      }
+    }
+
     let skippedTooShort = 0;
+    let skippedUploading = 0;
 
     for (const call of callsWithoutTranscripts) {
+      // Skip calls whose recording is still being uploaded
+      if (uploadingSessionIds.size > 0) {
+        // Check if this call attempt's session is still uploading
+        try {
+          const [attempt] = await db
+            .select({ callSessionId: dialerCallAttempts.callSessionId })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.id, call.id))
+            .limit(1);
+
+          if (attempt?.callSessionId && uploadingSessionIds.has(attempt.callSessionId)) {
+            skippedUploading++;
+            continue;
+          }
+        } catch {
+          // Non-critical — proceed with transcription attempt
+        }
+      }
+
       // Calculate call duration
       if (call.callStartedAt && call.callEndedAt) {
         const durationSec = (new Date(call.callEndedAt).getTime() - new Date(call.callStartedAt).getTime()) / 1000;
@@ -283,6 +388,9 @@ export async function processMissingTranscripts(): Promise<{
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
+    if (skippedUploading > 0) {
+      console.log(`${LOG_PREFIX} Skipped ${skippedUploading} calls with recordings still uploading`);
+    }
     if (skippedTooShort > 0) {
       console.log(`${LOG_PREFIX} Skipped ${skippedTooShort} calls shorter than ${MIN_CALL_DURATION_FOR_TRANSCRIPT}s`);
     }

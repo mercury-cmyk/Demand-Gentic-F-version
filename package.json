@@ -23,6 +23,7 @@
     "start:livekit-agent": "tsx server/services/livekit/worker.ts dev",
     "vector:backfill": "tsx scripts/backfill-vector-documents.ts",
     "recordings:backfill:showcase": "tsx scripts/backfill-showcase-recordings.ts"
+    ,"queue:invalid-lrn": "tsx scripts/cleanup-invalid-lrn-queue.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

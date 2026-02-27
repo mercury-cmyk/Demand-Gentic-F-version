@@ -192,6 +192,14 @@ function isTelnyxFatalError(error: any): { code: number; detail: string; isWhite
   return null;
 }
 
+function getTelnyxWhitelistRemovalReason(detail: string | undefined): 'country_not_whitelisted' | 'invalid_lrn' {
+  const msg = String(detail || '').toLowerCase();
+  if (msg.includes('d50') || msg.includes('valid lrn')) {
+    return 'invalid_lrn';
+  }
+  return 'country_not_whitelisted';
+}
+
 /**
  * Check if a contact is within their local business hours based on country and campaign config.
  * Timezone detection delegates to the shared detectContactTimezone() utility.
@@ -1818,11 +1826,12 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           if (telnyxFatalError.isWhitelist) {
             console.error(`[AI Orchestrator] ⚠️ Whitelist error for contact: ${telnyxFatalError.detail}`);
             // For whitelist errors, just remove the contact, DON'T pause the whole campaign
+            const removedReason = getTelnyxWhitelistRemovalReason(telnyxFatalError.detail);
             try {
               await db.execute(sql`
                 UPDATE campaign_queue
                 SET status = 'removed',
-                    removed_reason = 'country_not_whitelisted',
+                    removed_reason = ${removedReason},
                     enqueued_reason = COALESCE(enqueued_reason, '') || '|whitelist_fail',
                     updated_at = NOW()
                 WHERE id = ${item.id}

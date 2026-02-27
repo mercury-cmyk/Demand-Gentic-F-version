@@ -43,6 +43,29 @@ async function backfillDispositions() {
     console.log('    ✅ Updated');
   }
 
+  // invalid_lrn -> invalid_data
+  const invalidLrnCount = await db.execute(sql`
+    SELECT COUNT(*) as count
+    FROM dialer_call_attempts dca
+    INNER JOIN campaign_queue cq ON cq.id = dca.queue_item_id
+    WHERE dca.disposition IS NULL
+      AND cq.removed_reason = 'invalid_lrn'
+  `);
+  console.log(`  invalid_lrn -> invalid_data: ${(invalidLrnCount.rows[0] as any)?.count} records`);
+
+  if (!DRY_RUN) {
+    await db.execute(sql`
+      UPDATE dialer_call_attempts dca
+      SET disposition = 'invalid_data',
+          updated_at = NOW()
+      FROM campaign_queue cq
+      WHERE cq.id = dca.queue_item_id
+        AND dca.disposition IS NULL
+        AND cq.removed_reason = 'invalid_lrn'
+    `);
+    console.log('    ✅ Updated');
+  }
+
   // invalid_phone_number -> invalid_data
   const phoneCount = await db.execute(sql`
     SELECT COUNT(*) as count
