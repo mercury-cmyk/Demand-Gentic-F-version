@@ -84,7 +84,9 @@ $secrets = @(
     "PGPORT=PGPORT:latest",
     "PGUSER=PGUSER:latest",
     "PGPASSWORD=PGPASSWORD:latest",
-    "LIVEKIT_WEBHOOK_SECRET=LIVEKIT_WEBHOOK_SECRET:latest"
+    "LIVEKIT_WEBHOOK_SECRET=LIVEKIT_WEBHOOK_SECRET:latest",
+    "LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest",
+    "LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest"
 )
 $secret_string = $secrets -join ","
 
@@ -111,12 +113,8 @@ $env_vars = @(
     "ENABLE_LOG_STREAMING=true",
     "APP_GIT_SHA=$SHORT_SHA",
     "LIVEKIT_URL=wss://demandgentic-wmczsvyo.livekit.cloud",
-    "LIVEKIT_API_KEY=APIrrxH8abxypDR",
-    "LIVEKIT_API_SECRET=IcnJqDNrrl74YSb1Kwrfl0r5L0sfhfeFbdtxtAFYq7TA",
     "LIVEKIT_SIP_URI=sip:demandgentic-wmczsvyo.sip.livekit.cloud",
-    "LIVEKIT_SIP_CONNECTION_ID=2903106223836497802",
-    "LIVEKIT_SIP_USERNAME=dglivekitsip",
-    "LIVEKIT_SIP_PASSWORD=LKsip2026DmndG99"
+    "LIVEKIT_SIP_CONNECTION_ID=2903106223836497802"
 )
 
 Write-Host "============================================"

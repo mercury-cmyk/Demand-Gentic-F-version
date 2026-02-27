@@ -238,6 +238,9 @@ if (isMainModule) {
       serveStatic(app);
     }
 
+    // Determine service role early — used throughout startup to gate subsystems
+    const SERVICE_ROLE = process.env.SERVICE_ROLE || 'all';
+
     // Now initialize everything else (after server is listening and health check is available)
     // This ensures health checks pass even if initialization is slow
 
@@ -586,7 +589,6 @@ if (isMainModule) {
     const { isRedisConfigured, getRedisUrl } = await import("./lib/redis-config");
     const hasRedis = isRedisConfigured() && !!getRedisUrl();
     
-    const SERVICE_ROLE = process.env.SERVICE_ROLE || 'all';
     console.log(`\n[Startup] 🚀 Running with SERVICE_ROLE: ${SERVICE_ROLE.toUpperCase()}`);
 
     if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'analysis') {
