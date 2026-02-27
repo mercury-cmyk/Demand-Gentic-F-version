@@ -97,6 +97,7 @@ import agentPanelRouter from './routes/agent-panel';
 import agentPanelOrdersRouter from './routes/agent-panel-orders'; // Register the missing orders router
 import agentDefaultsRouter from './routes/agent-defaults';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
+import adminEmailCampaignTemplateRouter from './routes/admin-email-campaign-template-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
@@ -120,6 +121,7 @@ import organizationManagerRouter from './routes/organization-manager-routes';
 import opsManagementRouter from './routes/ops-management';
 import unifiedAgentArchitectureRouter from './routes/unified-agent-architecture';
 import aiAudienceFilterRouter from './routes/ai-audience-filter-routes';
+import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
 import {
@@ -990,6 +992,56 @@ export function registerRoutes(app: Express) {
   });
 
   // ==================== AUTH ====================
+
+  // Resolve brand palette for admin campaign setup (Argyle-first, extensible for more orgs)
+  app.get("/api/admin/brand-palette/resolve", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+    try {
+      const clientAccountId = typeof req.query.clientAccountId === "string" ? req.query.clientAccountId : "";
+      const requestedOrgName = typeof req.query.orgName === "string" ? req.query.orgName : "";
+      const requestedWebsite = typeof req.query.website === "string" ? req.query.website : "";
+
+      let orgName = requestedOrgName.trim();
+      let website = requestedWebsite.trim();
+
+      if (clientAccountId) {
+        const [client] = await db
+          .select({
+            id: clientAccounts.id,
+            name: clientAccounts.name,
+            companyName: clientAccounts.companyName,
+          })
+          .from(clientAccounts)
+          .where(eq(clientAccounts.id, clientAccountId))
+          .limit(1);
+
+        if (client) {
+          orgName = orgName || client.name || client.companyName || "";
+        }
+      }
+
+      const resolved = await resolveBrandPaletteForOrganization({
+        clientAccountId: clientAccountId || null,
+        organizationName: orgName || null,
+        website: website || null,
+      });
+
+      if (!resolved) {
+        return res.status(404).json({
+          message: "No brand palette mapping found for the selected organization.",
+        });
+      }
+
+      return res.json({
+        palette: resolved,
+        fallback: getArgyleFallbackPalette(),
+      });
+    } catch (error: any) {
+      console.error("[Brand Palette] Failed to resolve palette:", error);
+      return res.status(500).json({
+        message: error?.message || "Failed to resolve brand palette",
+      });
+    }
+  });
 
   // ==================== USERS (Admin Only) ====================
 
@@ -15533,6 +15585,7 @@ Provide JSON response with:
 
   // ==================== ADMIN AGENTIC CAMPAIGNS ====================
   app.use('/api/admin', adminAgenticCampaignsRouter);
+  app.use('/api/admin/email-campaign-templates', adminEmailCampaignTemplateRouter);
 
   app.use('/api/client-portal', clientPortalRouter);
   app.use('/api/client-portal/qualified-leads', clientPortalQualifiedLeadsRouter);
