@@ -252,26 +252,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ─── PROBLEM / REFRAME ────────────────────────────────────────── */}
-      <section className="py-12 px-6 bg-white">
-        <div className="max-w-4xl mx-auto text-center">
-          <p className="text-sm md:text-base text-muted-foreground">
-            {PUBLIC_PAGES_MESSAGING.closingStatement.contrast}
-          </p>
-          <p className="text-xl md:text-2xl font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-            {PUBLIC_PAGES_MESSAGING.closingStatement.assertion}
-          </p>
-          <p className="text-sm md:text-base text-muted-foreground">
-            <span className="font-semibold text-foreground">Human-Led Strategy</span> +{" "}
-            <span className="font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              Agentic ABM Execution
-            </span>
-            —guided by your brand, constrained by your rules, built for what's next.
-          </p>
-        </div>
-      </section>
-
-      {/* ─── PROBLEM / REFRAME ────────────────────────────────────────── */}
+      {/* ─── MARKET REALITY / REFRAME ─────────────────────────────────── */}
       <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
 
@@ -619,9 +600,8 @@ export default function LandingPage() {
               <span className="text-violet-400">Your Exclusive AI Studio.</span>
             </h2>
             <p className="text-xl text-slate-400 max-w-3xl mx-auto">
-              Purpose-built agents research, draft, sequence, and follow up across channels—coordinated
-              under one system. Your organization's exclusive content studio generates campaign assets
-              in your brand voice. Every action is justified before it runs.
+              This section is the operating view: how specialized agents coordinate execution while your
+              organization-exclusive AI layer preserves brand context, governance rules, and auditability.
             </p>
           </div>
 
@@ -700,55 +680,25 @@ export default function LandingPage() {
             ))}
           </div>
 
-          {/* ── Organization Exclusive AI Studio ── */}
-          <div className="mb-16">
-            <div className="text-center mb-10">
+          {/* ── Organization Exclusive AI Studio (Condensed) ── */}
+          <div className="mb-16 p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur">
+            <div className="text-center mb-6">
               <div className="flex items-center gap-2 justify-center mb-3">
                 <Wand2 className="h-5 w-5 text-violet-400" />
                 <span className="text-sm font-bold uppercase tracking-wider text-violet-400">Organization Exclusive AI Studio</span>
               </div>
-              <h3 className="text-3xl font-bold mb-4 text-white">
-                Your Organization's{" "}
-                <span className="text-violet-400">Exclusive Content Engine</span>
-              </h3>
-              <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-                {CONTENT_STUDIO.subheadline}
-              </p>
+              <h3 className="text-2xl font-bold mb-3 text-white">Your AI Output Layer, Constrained by Your Rules</h3>
+              <p className="text-slate-400 max-w-3xl mx-auto">{CONTENT_STUDIO.subheadline}</p>
             </div>
-
-            {/* Content Engines */}
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+            <div className="grid md:grid-cols-3 gap-4">
               {[
-                { icon: Globe, title: "Landing Pages", description: "Full responsive landing pages with forms, CTAs, and SEO — generated and published with a single click.", color: "violet" },
-                { icon: Mail, title: "Email Campaigns", description: "Persona-targeted email templates and sequences that match your tone, your offer, and your audience's pain points.", color: "blue" },
-                { icon: FileText, title: "Blog Posts", description: "SEO-optimized thought leadership content that positions your brand as the authority in your space.", color: "indigo" },
-                { icon: BookOpen, title: "eBooks & Briefs", description: "Long-form eBooks and solution briefs designed to educate buyers and drive high-intent lead capture.", color: "emerald" },
-              ].map((engine, i) => (
-                <Card key={i} className="bg-white/5 border-white/10 backdrop-blur hover:bg-white/10 transition-colors">
-                  <CardContent className="p-6">
-                    <div className={`h-12 w-12 rounded-xl bg-${engine.color}-500/20 flex items-center justify-center mb-4`}>
-                      <engine.icon className={`h-6 w-6 text-${engine.color}-400`} />
-                    </div>
-                    <h3 className="font-bold text-lg mb-2 text-white">{engine.title}</h3>
-                    <p className="text-sm text-slate-400">{engine.description}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            {/* Workflow: Generate → Refine → Publish */}
-            <div className="grid md:grid-cols-3 gap-8">
-              {[
-                { icon: Sparkles, title: "Generate", description: "Describe what you need. The AI creates complete, publication-ready content with your brand voice, value propositions, and audience context built in.", color: "violet" },
-                { icon: PenTool, title: "Refine", description: "Chat with the AI to iterate. Adjust tone, expand sections, add CTAs, or rework entire pieces — all through natural conversation.", color: "emerald" },
-                { icon: Globe, title: "Publish", description: "One click to go live. Landing pages publish to branded URLs with full SEO. Content saves to your asset library for campaign use across all channels.", color: "blue" },
-              ].map((step, i) => (
-                <div key={i} className="text-center">
-                  <div className={`h-16 w-16 rounded-2xl bg-${step.color}-500/20 flex items-center justify-center mx-auto mb-4`}>
-                    <step.icon className={`h-8 w-8 text-${step.color}-400`} />
-                  </div>
-                  <h3 className="text-xl font-bold mb-2 text-white">{step.title}</h3>
-                  <p className="text-sm text-slate-400">{step.description}</p>
+                "Generate campaign assets using organization-specific context",
+                "Refine with human review and approval-aware edits",
+                "Publish channel-ready outputs for voice, email, and landing workflows",
+              ].map((item, i) => (
+                <div key={i} className="rounded-xl border border-white/15 bg-white/5 p-4 text-sm text-slate-300 flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-violet-400 mt-0.5" />
+                  <span>{item}</span>
                 </div>
               ))}
             </div>
