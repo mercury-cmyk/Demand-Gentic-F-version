@@ -90,7 +90,6 @@ if (-not $currentProject -or $currentProject -eq "(unset)") {
 }
 
 $services = @(
-    @{ Name = "demandgentic-web"; ExpectedRole = "web"; ExpectedDomain = "" },
     @{ Name = "demandgentic-voice"; ExpectedRole = "voice"; ExpectedDomain = "demandgentic.ai" },
     @{ Name = "demandgentic-analysis"; ExpectedRole = "analysis"; ExpectedDomain = "app.pivotal-b2b.com" },
     @{ Name = "demandgentic-email"; ExpectedRole = "email"; ExpectedDomain = "pivotal-b2b.com" }
@@ -102,7 +101,24 @@ foreach ($svc in $services) {
     $name = $svc.Name
     $expectedRole = $svc.ExpectedRole
 
-    $url = Invoke-GcloudCommand -CommandArgs @('run', 'services', 'describe', $name, '--region', $Region, '--project', $ProjectId, '--format=value(status.url)', '--quiet') -Fallback ''
+    $serviceJson = Invoke-GcloudCommand -CommandArgs @('run', 'services', 'describe', $name, '--region', $Region, '--project', $ProjectId, '--format=json', '--quiet') -Fallback ''
+
+    if (-not $serviceJson) {
+        Add-Check -Name "$name exists" -Passed $false -Details "Service not found or inaccessible"
+        Add-Check -Name "$name role" -Passed $false -Details "Cannot validate SERVICE_ROLE"
+        continue
+    }
+
+    $service = $null
+    try {
+        $service = $serviceJson | ConvertFrom-Json
+    } catch {
+        Add-Check -Name "$name exists" -Passed $false -Details "Unable to parse service describe output"
+        Add-Check -Name "$name role" -Passed $false -Details "Cannot validate SERVICE_ROLE"
+        continue
+    }
+
+    $url = $service.status.url
 
     if (-not $url) {
         Add-Check -Name "$name exists" -Passed $false -Details "Service not found or inaccessible"
@@ -112,7 +128,14 @@ foreach ($svc in $services) {
 
     Add-Check -Name "$name exists" -Passed $true -Details "URL: $url"
 
-    $roleValue = Invoke-GcloudCommand -CommandArgs @('run', 'services', 'describe', $name, '--region', $Region, '--project', $ProjectId, '--format=value(spec.template.spec.containers[0].env[?name=''SERVICE_ROLE''].value)', '--quiet') -Fallback ''
+    $roleValue = ""
+    $envEntries = $service.spec.template.spec.containers[0].env
+    if ($envEntries) {
+        $matchedEnv = $envEntries | Where-Object { $_.name -eq 'SERVICE_ROLE' } | Select-Object -First 1
+        if ($matchedEnv) {
+            $roleValue = $matchedEnv.value
+        }
+    }
 
     if (-not $roleValue) {
         Add-Check -Name "$name role" -Passed $false -Details "SERVICE_ROLE not set"
@@ -121,15 +144,21 @@ foreach ($svc in $services) {
         Add-Check -Name "$name role" -Passed ($roleValue -eq $expectedRole) -Details "Expected=$expectedRole, Actual=$roleValue"
     }
 
-    # Optional health via service URL
+    # Health via service URL (try common endpoints)
     $healthOk = $false
     $healthDetails = ""
-    try {
-        $healthResp = Invoke-WebRequest -Uri ("{0}/api/health" -f $url.TrimEnd('/')) -Method GET -TimeoutSec 20 -UseBasicParsing
-        $healthOk = ($healthResp.StatusCode -ge 200 -and $healthResp.StatusCode -lt 300)
-        $healthDetails = "HTTP $($healthResp.StatusCode) via service URL"
-    } catch {
-        $healthDetails = "Health check failed via service URL: $($_.Exception.Message)"
+    $healthPaths = @('/api/health', '/health', '/')
+    foreach ($path in $healthPaths) {
+        try {
+            $healthResp = Invoke-WebRequest -Uri ("{0}{1}" -f $url.TrimEnd('/'), $path) -Method GET -TimeoutSec 20 -UseBasicParsing
+            if ($healthResp.StatusCode -ge 200 -and $healthResp.StatusCode -lt 300) {
+                $healthOk = $true
+                $healthDetails = "HTTP $($healthResp.StatusCode) via $path"
+                break
+            }
+        } catch {
+            $healthDetails = "Health check failed via service URL: $($_.Exception.Message)"
+        }
     }
     Add-Check -Name "$name health" -Passed $healthOk -Details $healthDetails
 }

@@ -15,7 +15,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci
+RUN sh -c 'for i in 1 2 3; do npm ci && exit 0; echo "npm ci failed (attempt $i), retrying in 10s..."; sleep 10; done; exit 1'
 
 # Copy source files
 COPY . .
@@ -45,7 +45,7 @@ RUN addgroup -g 1001 -S nodejs && \
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm ci --omit=dev && npm cache clean --force
+RUN sh -c 'for i in 1 2 3; do npm ci --omit=dev && npm cache clean --force && exit 0; echo "npm ci --omit=dev failed (attempt $i), retrying in 10s..."; sleep 10; done; exit 1'
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
