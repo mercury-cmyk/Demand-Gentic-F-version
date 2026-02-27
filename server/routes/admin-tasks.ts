@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -9,6 +9,8 @@ import { adminTodoBoardNotes, adminTodoTasks } from "@shared/schema";
 const router = Router();
 
 const taskStatusSchema = z.enum(["todo", "in_progress", "done"]);
+const BOARD_VIEWER_ROLES = ["admin", "campaign_manager", "data_ops", "quality_analyst", "agent"] as const;
+const BOARD_MANAGER_ROLES = ["admin", "campaign_manager"] as const;
 
 const createTaskSchema = z.object({
   title: z.string().min(1, "Title is required").max(500),
@@ -37,7 +39,27 @@ const idParamSchema = z.object({
   id: z.string().uuid(),
 });
 
-router.use(requireAuth, requireRole("admin"));
+function getUserRoles(req: Request): string[] {
+  const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+  if (roles.length > 0) {
+    return roles;
+  }
+  return req.user?.role ? [req.user.role] : [];
+}
+
+function hasAnyRole(req: Request, allowedRoles: readonly string[]): boolean {
+  const roles = getUserRoles(req);
+  return roles.some((role) => allowedRoles.includes(role));
+}
+
+function requireBoardManager(req: Request, res: Response, next: NextFunction) {
+  if (hasAnyRole(req, BOARD_MANAGER_ROLES)) {
+    return next();
+  }
+  return res.status(403).json({ message: "Manager access required for this action" });
+}
+
+router.use(requireAuth, requireRole(...BOARD_VIEWER_ROLES));
 
 let ensureSchemaPromise: Promise<void> | null = null;
 
@@ -161,6 +183,18 @@ export async function updateAdminTask(req: Request, res: Response) {
     await ensureAdminTodoSchema();
     const { id } = idParamSchema.parse(req.params);
     const parsed = updateTaskSchema.parse(req.body);
+    const isBoardManager = hasAnyRole(req, BOARD_MANAGER_ROLES);
+
+    if (!isBoardManager) {
+      const providedFields = Object.keys(parsed);
+      const disallowedFields = providedFields.filter((field) => field !== "status");
+      if (disallowedFields.length > 0) {
+        return res.status(403).json({
+          message: "Only status updates are allowed for your role",
+          disallowedFields,
+        });
+      }
+    }
 
     const updates: Record<string, unknown> = {
       updatedAt: new Date(),
@@ -295,10 +329,10 @@ export async function updateAdminTodoBoardNote(req: Request, res: Response) {
 }
 
 router.get("/", listAdminTasks);
-router.post("/", createAdminTask);
 router.get("/notes", getAdminTodoBoardNote);
-router.put("/notes", updateAdminTodoBoardNote);
 router.patch("/:id", updateAdminTask);
-router.delete("/:id", deleteAdminTask);
+router.post("/", requireBoardManager, createAdminTask);
+router.put("/notes", requireBoardManager, updateAdminTodoBoardNote);
+router.delete("/:id", requireBoardManager, deleteAdminTask);
 
 export default router;

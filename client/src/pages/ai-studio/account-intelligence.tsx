@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Search, Sparkles, ArrowRight } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Search, Sparkles, Globe, Database } from "lucide-react";
 import { PipelineStatus } from "@/components/ai-studio/account-intelligence/pipeline-status";
 import { ResearchEngineView } from "@/components/ai-studio/account-intelligence/research-engine-view";
 import { ReasoningEngineView } from "@/components/ai-studio/account-intelligence/reasoning-engine-view";
-import { Separator } from "@/components/ui/separator";
+import { IntelligenceGatherPanel } from "@/components/ai-studio/account-intelligence/intelligence-gather-panel";
 
 export default function AccountIntelligencePage() {
   const [analyzing, setAnalyzing] = useState(false);
@@ -17,8 +18,7 @@ export default function AccountIntelligencePage() {
     if (!domain) return;
     setAnalyzing(true);
     setResultsVisible(false);
-    
-    // Simulate pipeline delay
+
     setTimeout(() => {
       setAnalyzing(false);
       setResultsVisible(true);
@@ -44,80 +44,99 @@ export default function AccountIntelligencePage() {
         </div>
       </div>
 
-      <Card className="shrink-0">
-        <CardContent className="p-6">
-          <div className="flex gap-4 items-end">
-            <div className="flex-1 space-y-2">
-              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                Target Account Domain
-              </label>
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="e.g. netflix.com" 
-                  className="pl-8" 
-                  value={domain}
-                  onChange={(e) => setDomain(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
-                />
-              </div>
-            </div>
-            <Button onClick={handleAnalyze} disabled={analyzing || !domain} className="min-w-[140px]">
-              {analyzing ? (
-                <>Analyzing...</>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Analyze Account
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="batch" className="flex-1 flex flex-col min-h-0">
+        <TabsList className="w-fit shrink-0">
+          <TabsTrigger value="batch" className="gap-1.5">
+            <Database className="h-4 w-4" />
+            Batch Intelligence
+          </TabsTrigger>
+          <TabsTrigger value="single" className="gap-1.5">
+            <Globe className="h-4 w-4" />
+            Single Account
+          </TabsTrigger>
+        </TabsList>
 
-      {(analyzing || resultsVisible) && (
-        <div className="grid lg:grid-cols-12 gap-6 flex-1 min-h-0">
-          {/* Pipeline Status Sidebar */}
-          <Card className="lg:col-span-3 h-fit">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Analysis Pipeline</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <PipelineStatus steps={pipelineSteps as any} />
+        {/* Batch Intelligence Tab */}
+        <TabsContent value="batch" className="flex-1 mt-4 overflow-auto">
+          <IntelligenceGatherPanel />
+        </TabsContent>
+
+        {/* Single Account Tab (existing domain analysis) */}
+        <TabsContent value="single" className="flex-1 mt-4">
+          <Card className="shrink-0">
+            <CardContent className="p-6">
+              <div className="flex gap-4 items-end">
+                <div className="flex-1 space-y-2">
+                  <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Target Account Domain
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="e.g. netflix.com"
+                      className="pl-8"
+                      value={domain}
+                      onChange={(e) => setDomain(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
+                    />
+                  </div>
+                </div>
+                <Button onClick={handleAnalyze} disabled={analyzing || !domain} className="min-w-[140px]">
+                  {analyzing ? (
+                    <>Analyzing...</>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Analyze Account
+                    </>
+                  )}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
-          {/* Main Content Area */}
-          <div className="lg:col-span-9 space-y-6 pb-10">
-            {resultsVisible ? (
-              <div className="grid lg:grid-cols-2 gap-6">
-                <Card className="h-fit">
-                  <CardContent className="p-6">
-                    <ResearchEngineView />
-                  </CardContent>
-                </Card>
-                <Card className="h-fit border-primary/20 shadow-md">
-                  <CardContent className="p-6">
-                    <ReasoningEngineView />
-                  </CardContent>
-                </Card>
+          {(analyzing || resultsVisible) && (
+            <div className="grid lg:grid-cols-12 gap-6 mt-6">
+              <Card className="lg:col-span-3 h-fit">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">Analysis Pipeline</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <PipelineStatus steps={pipelineSteps as any} />
+                </CardContent>
+              </Card>
+
+              <div className="lg:col-span-9 space-y-6 pb-10">
+                {resultsVisible ? (
+                  <div className="grid lg:grid-cols-2 gap-6">
+                    <Card className="h-fit">
+                      <CardContent className="p-6">
+                        <ResearchEngineView />
+                      </CardContent>
+                    </Card>
+                    <Card className="h-fit border-primary/20 shadow-md">
+                      <CardContent className="p-6">
+                        <ReasoningEngineView />
+                      </CardContent>
+                    </Card>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-[400px] text-center space-y-4">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full animate-pulse" />
+                      <Sparkles className="h-12 w-12 text-primary relative z-10 animate-bounce" />
+                    </div>
+                    <h3 className="text-xl font-semibold">Gathering Intelligence...</h3>
+                    <p className="text-muted-foreground max-w-md">
+                      Our agents are scanning public sources, verifying facts, and synthesizing a strategy for {domain}.
+                    </p>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-[400px] text-center space-y-4">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full animate-pulse" />
-                  <Sparkles className="h-12 w-12 text-primary relative z-10 animate-bounce" />
-                </div>
-                <h3 className="text-xl font-semibold">Gathering Intelligence...</h3>
-                <p className="text-muted-foreground max-w-md">
-                  Our agents are scanning public sources, verifying facts, and synthesizing a strategy for {domain}.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -11,7 +11,7 @@ vi.mock("../../db", () => ({
 }));
 
 import { db } from "../../db";
-import { createAdminTask, listAdminTasks } from "../admin-tasks";
+import { createAdminTask, listAdminTasks, updateAdminTask } from "../admin-tasks";
 import { requireRole } from "../../auth";
 
 function createMockResponse() {
@@ -24,6 +24,7 @@ function createMockResponse() {
 
 describe("Admin To-Do Tasks handlers", () => {
   const mockedDb = db as any;
+  const TASK_ID = "07adf381-fb65-4f53-a00c-7fd0f85eef91";
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,7 +57,7 @@ describe("Admin To-Do Tasks handlers", () => {
 
   it("createAdminTask trims fields and defaults status to todo", async () => {
     const insertedTask = {
-      id: "07adf381-fb65-4f53-a00c-7fd0f85eef91",
+      id: TASK_ID,
       title: "Draft Monday checklist",
       status: "todo",
       assigneeName: "Zahid",
@@ -82,9 +83,60 @@ describe("Admin To-Do Tasks handlers", () => {
       title: "Draft Monday checklist",
       status: "todo",
       assigneeName: "Zahid",
+      details: null,
+      needsAttention: false,
     });
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith(insertedTask);
+  });
+
+  it("updateAdminTask blocks non-manager users from editing non-status fields", async () => {
+    const req = {
+      params: { id: TASK_ID },
+      body: { title: "Updated by contributor" },
+      user: {
+        role: "agent",
+        roles: ["agent"],
+      },
+    } as any;
+    const res = createMockResponse();
+
+    await updateAdminTask(req, res as any);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({
+      message: "Only status updates are allowed for your role",
+      disallowedFields: ["title"],
+    });
+  });
+
+  it("updateAdminTask allows contributors to update status only", async () => {
+    const updatedTask = {
+      id: TASK_ID,
+      title: "Draft Monday checklist",
+      status: "in_progress",
+      assigneeName: "Zahid",
+    };
+
+    const returning = vi.fn().mockResolvedValue([updatedTask]);
+    const where = vi.fn().mockReturnValue({ returning });
+    const set = vi.fn().mockReturnValue({ where });
+    mockedDb.update.mockReturnValue({ set });
+
+    const req = {
+      params: { id: TASK_ID },
+      body: { status: "in_progress" },
+      user: {
+        role: "agent",
+        roles: ["agent"],
+      },
+    } as any;
+    const res = createMockResponse();
+
+    await updateAdminTask(req, res as any);
+
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "in_progress" }));
+    expect(res.json).toHaveBeenCalledWith(updatedTask);
   });
 });
 

@@ -377,11 +377,11 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
       },
       {
         id: 'todo-board',
-        title: 'To-Do Board',
+        title: 'Strategic Task Management',
         url: '/admin/todo-board',
         icon: 'KanbanSquare',
-        roles: [USER_ROLES.ADMIN],
-        description: 'Admin task board with assignment and status tracking',
+        roles: [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER, USER_ROLES.DATA_OPS, USER_ROLES.QUALITY_ANALYST, USER_ROLES.AGENT],
+        description: 'Role-aware team task tracking with strategic planning and execution visibility',
       },
       {
         id: 'pm-review',
