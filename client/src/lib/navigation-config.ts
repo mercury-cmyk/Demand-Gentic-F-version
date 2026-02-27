@@ -419,7 +419,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         url: '/admin/todo-board',
         icon: 'KanbanSquare',
         roles: [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER, USER_ROLES.DATA_OPS, USER_ROLES.QUALITY_ANALYST, USER_ROLES.AGENT],
-        description: 'Role-aware team task tracking with strategic planning and execution visibility',
+        description: 'AI-powered issue detection, prioritization, and role-aware task assignment',
       },
       {
         id: 'pm-review',

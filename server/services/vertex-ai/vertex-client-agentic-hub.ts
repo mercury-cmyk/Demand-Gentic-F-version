@@ -41,6 +41,7 @@ import {
 } from "@shared/schema";
 import { eq, and, or, desc, sql, gte, lte, count, sum } from "drizzle-orm";
 import { notificationService } from "../notification-service";
+import { notificationService as mercuryNotificationService } from "../mercury";
 import { wrapPromptWithOI } from "../../lib/org-intelligence-helper";
 
 // ==================== TYPES ====================
@@ -509,6 +510,30 @@ Return JSON:
           order,
           clientAccount?.name || this.context.clientName || 'Unknown Client'
         );
+
+        // Keep Agentic orders aligned with the Mercury notification bridge
+        // used by other client order submission flows.
+        mercuryNotificationService.dispatch({
+          eventType: 'campaign_order_submitted',
+          tenantId: this.context.clientAccountId,
+          actorUserId: this.context.clientUserId || undefined,
+          payload: {
+            orderNumber: order.orderNumber,
+            clientName: clientAccount?.name || this.context.clientName || 'Unknown Client',
+            orderTitle: order.orderNumber,
+            orderType: request.campaignType || 'campaign_order',
+            priority: 'normal',
+            targetLeadCount: String(order.requestedQuantity || ''),
+            budget: request.budget ? `$${request.budget}` : '',
+            description: request.specialRequirements || '',
+            submittedAt: new Date().toLocaleDateString('en-US', {
+              year: 'numeric', month: 'long', day: 'numeric',
+            }),
+            adminLink: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/admin/project-requests`,
+          },
+        }).catch(err => {
+          console.error('[Client Agentic Hub] Mercury campaign_order_submitted error:', err.message);
+        });
       } catch (notifyError) {
         console.error('[Client Agentic Hub] Failed to send admin order notification:', notifyError);
       }

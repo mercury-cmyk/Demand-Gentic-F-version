@@ -147,7 +147,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   {
     pattern: '/admin/todo-board',
     roles: [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER, USER_ROLES.DATA_OPS, USER_ROLES.QUALITY_ANALYST, USER_ROLES.AGENT],
-    description: 'Strategic Task Management Board',
+    description: 'AI-Powered Strategic Task Management Board',
   },
 
   // ============================================
