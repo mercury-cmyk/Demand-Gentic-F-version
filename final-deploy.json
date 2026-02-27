@@ -716,6 +716,7 @@
                                                                       "ports":  [
                                                                                     {
                                                                                         "containerPort":  8080,
+                                                                                        "containerPort": 8080,
                                                                                         "name":  "http1"
                                                                                     }
                                                                                 ],
@@ -728,10 +729,13 @@
                                                                       "startupProbe":  {
                                                                                            "failureThreshold":  1,
                                                                                            "periodSeconds":  240,
+                                                                                           "failureThreshold": 3,
+                                                                                           "periodSeconds": 10,
                                                                                            "tcpSocket":  {
                                                                                                              "port":  8080
                                                                                                          },
                                                                                            "timeoutSeconds":  240
+                                                                                           "timeoutSeconds": 240
                                                                                        }
                                                                   }
                                                               ],

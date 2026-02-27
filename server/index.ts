@@ -1,3 +1,6 @@
+// Emit startup timestamp immediately so Cloud Run logs capture boot progress
+console.log(`[BOOT] Process starting — PID ${process.pid}, Node ${process.version}, argv[1]=${process.argv[1]}`);
+
 // Increase thread pool size for heavy concurrent I/O (DNS, FS, Crypto/SSL)
 // Must be set before any libuv operations to be effective
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '128';
@@ -155,18 +158,26 @@ app.use((req, res, next) => {
 
 // This will be null if the module is imported, and non-null if run directly.
 const isMainModule = (() => {
-  // CommonJS execution path (local scripts/tests that transpile to CJS)
-  if (typeof require !== 'undefined' && typeof module !== 'undefined') {
-    return require.main === module;
-  }
+  try {
+    // CommonJS execution path (local scripts/tests that transpile to CJS)
+    if (typeof require !== 'undefined' && typeof module !== 'undefined') {
+      return require.main === module;
+    }
 
-  // ESM execution path (Cloud Run production build uses ESM output)
-  const entryPoint = process.argv[1];
-  if (!entryPoint) return false;
-  return import.meta.url === pathToFileURL(entryPoint).href;
+    // ESM execution path (Cloud Run production build uses ESM output)
+    const entryPoint = process.argv[1];
+    if (!entryPoint) return false;
+    const resolved = import.meta.url === pathToFileURL(entryPoint).href;
+    console.log(`[BOOT] isMainModule: import.meta.url=${import.meta.url} entryFile=${pathToFileURL(entryPoint).href} match=${resolved}`);
+    return resolved;
+  } catch (err) {
+    console.error('[BOOT] isMainModule detection error, defaulting to true:', err);
+    return true;
+  }
 })();
 
 if (isMainModule) {
+  console.log('[BOOT] Starting server...');
   (async () => {
     // Create server with Express app as the default handler
     // WebSocket upgrades will be handled separately via server.on('upgrade')
@@ -183,9 +194,11 @@ if (isMainModule) {
     // All other initialization happens AFTER the server is listening
     const port = parseInt(process.env.PORT || '8080', 10);
     const host = process.env.HOST || '0.0.0.0';
+    console.log(`[BOOT] Binding to ${host}:${port}...`);
 
     await new Promise<void>((resolve) => {
       server!.listen({ port, host }, () => {
+        console.log(`[BOOT] Port ${port} bound successfully`);
         log(`Server listening on http://${host}:${port} - starting initialization...`);
         resolve();
       });

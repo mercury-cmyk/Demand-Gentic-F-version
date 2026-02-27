@@ -20,9 +20,9 @@ RUN npm ci
 # Copy source files
 COPY . .
 
-# Build the application
-# Note: Vite will compile despite TypeScript errors if configured
-RUN npm run build || echo "Build completed with errors"
+# Build the application — fail the Docker build if compilation fails
+# (never swallow errors: a missing dist/server/index.js causes silent container crashes)
+RUN npm run build
 
 # --------------------
 # Runner: lean image with only production artifacts
