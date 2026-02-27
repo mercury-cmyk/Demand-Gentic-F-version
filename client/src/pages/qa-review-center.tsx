@@ -155,7 +155,7 @@ export default function QAReviewCenter() {
   const queryClient = useQueryClient();
 
   // State
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState('all');
   const [contentTypeFilter, setContentTypeFilter] = useState<string>('all');
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
@@ -316,6 +316,11 @@ export default function QAReviewCenter() {
 
   const stats = statsData?.stats as QAStats | undefined;
   const content = contentData?.content as QAContentWithClient[] | undefined;
+  const availableOutsidePending =
+    (stats?.byStatus?.approved || 0) +
+    (stats?.byStatus?.published || 0) +
+    (stats?.byStatus?.rejected || 0) +
+    (stats?.byStatus?.returned || 0);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -526,8 +531,27 @@ export default function QAReviewCenter() {
                   </TableBody>
                 </Table>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  No content found
+                <div className="text-center py-8 text-muted-foreground space-y-3">
+                  <p>
+                    {activeTab === 'pending'
+                      ? 'No pending review items found.'
+                      : 'No content found for this filter.'}
+                  </p>
+                  {activeTab === 'pending' && availableOutsidePending > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm">
+                        There are {availableOutsidePending} reviewed items available in other tabs.
+                      </p>
+                      <div className="flex justify-center gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setActiveTab('approved')}>
+                          View Approved
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setActiveTab('all')}>
+                          View All
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </TabsContent>

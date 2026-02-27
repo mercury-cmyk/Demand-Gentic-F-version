@@ -3,7 +3,7 @@ import { Server as HttpServer } from "http";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db";
 import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking, campaignOrganizations, agentDefaults, campaignAccountProblems } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, ilike } from "drizzle-orm";
 import { processDisposition, updateContactSuppression } from "./disposition-engine";
 import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
 import { handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome } from "./number-pool-integration";
@@ -2713,7 +2713,27 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
     // For test sessions, use test contact data if database lookup returns null
     if (session.isTestSession && !contactInfo && session.testContact) {
-      console.log(`${LOG_PREFIX} ðŸ§ª Using test contact data for test session: ${session.testContact.name}`);
+      console.log(`${LOG_PREFIX} 🧪 Using test contact data for test session: ${session.testContact.name}`);
+
+      // Resolve accountId from company name so test calls load the same intelligence as production
+      let resolvedAccountId: string | null = null;
+      const testCompany = session.testContact.company;
+      if (testCompany) {
+        try {
+          const [matchedAccount] = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(ilike(accounts.name, testCompany))
+            .limit(1);
+          if (matchedAccount) {
+            resolvedAccountId = matchedAccount.id;
+            console.log(`${LOG_PREFIX} 🧪 Resolved test company "${testCompany}" → accountId=${resolvedAccountId}`);
+          }
+        } catch (err) {
+          console.warn(`${LOG_PREFIX} 🧪 Failed to resolve account for test company "${testCompany}":`, err);
+        }
+      }
+
       contactInfo = {
         id: session.contactId,
         firstName: session.testContact.name?.split(' ')[0] || 'Test',
@@ -2723,7 +2743,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         email: session.testContact.email || 'test@example.com',
         company: session.testContact.company || 'Test Company',
         companyName: session.testContact.company || 'Test Company',
-        accountId: null,
+        accountId: resolvedAccountId,
       };
     }
 
@@ -2734,11 +2754,27 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         const fallbackCompany = session.testContact.company || 'Test Company';
         contactInfo.company = fallbackCompany;
         contactInfo.companyName = fallbackCompany;
-        console.log(`${LOG_PREFIX} ðŸ§ª Filled missing company from test contact: ${fallbackCompany}`);
+        console.log(`${LOG_PREFIX} 🧪 Filled missing company from test contact: ${fallbackCompany}`);
       }
       if (!contactInfo.jobTitle && session.testContact.title) {
         contactInfo.jobTitle = session.testContact.title;
-        console.log(`${LOG_PREFIX} ðŸ§ª Filled missing job title from test contact: ${session.testContact.title}`);
+        console.log(`${LOG_PREFIX} 🧪 Filled missing job title from test contact: ${session.testContact.title}`);
+      }
+      // Resolve accountId from company name if DB contact has no account linked
+      if (!contactInfo.accountId && session.testContact.company) {
+        try {
+          const [matchedAccount] = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(ilike(accounts.name, session.testContact.company))
+            .limit(1);
+          if (matchedAccount) {
+            contactInfo.accountId = matchedAccount.id;
+            console.log(`${LOG_PREFIX} 🧪 Resolved missing accountId from company "${session.testContact.company}" → ${matchedAccount.id}`);
+          }
+        } catch (err) {
+          console.warn(`${LOG_PREFIX} 🧪 Failed to resolve account for fill-in:`, err);
+        }
       }
     }
 

@@ -58,9 +58,10 @@ gcloud run deploy ${SERVICE_NAME} \
     --memory 4Gi \
     --cpu 4 \
     --min-instances 1 \
-    --max-instances 10 \
+    --max-instances 50 \
     --port 8080 \
-    --concurrency 80 \
+    --timeout 900 \
+    --concurrency 150 \
     --startup-cpu-boost \
     --vpc-connector pivotal-connector \
     --vpc-egress private-ranges-only \

@@ -290,7 +290,7 @@ export default function ClientPortalCampaignCreate() {
             colorClass: defaultType?.colorClass || 'text-slate-600 bg-slate-50 border-slate-200',
           };
         })
-    : DEFAULT_PROGRAM_TYPES.map(d => ({ ...d, icon: d.icon }));
+    : [];
 
   // Fetch existing projects for linking
   const { data: projects } = useQuery<Project[]>({
@@ -749,8 +749,8 @@ export default function ClientPortalCampaignCreate() {
         />
       </div>
 
-      {/* Program Type & Pricing (optional) */}
-      <div className="space-y-3">
+      {/* Program Type & Pricing (optional) — only shown when client has custom pricing configured */}
+      {programTypes.length > 0 && (<div className="space-y-3">
         <Label className="font-medium flex items-center gap-1.5">
           <Tag className="h-3.5 w-3.5" /> Campaign Program & Pricing <span className="text-muted-foreground text-xs ml-1">(optional)</span>
         </Label>
@@ -787,7 +787,7 @@ export default function ClientPortalCampaignCreate() {
             );
           })}
         </div>
-      </div>
+      </div>)}
 
       {/* Link to existing project (optional) */}
       {projects && projects.length > 0 && (

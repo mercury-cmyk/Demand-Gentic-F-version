@@ -220,8 +220,8 @@ export const SERVICES = [
   {
     id: 'voice-ai',
     badge: 'Voice AI',
-    title: 'Conversational AI Voice Agents',
-    description: 'AI agents that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.',
+    title: 'Autonomous Voice AI',
+    description: 'AI systems that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.',
     features: ['Live phone conversations', 'Real-time qualification', 'Gatekeeper navigation'],
     idealFor: 'Outbound at scale without headcount',
     iconName: 'Phone',
@@ -563,7 +563,7 @@ export const BRAND_VOICE = {
 export const SEO = {
   defaultTitle: `${BRAND.company.parentBrand}: ${TAGLINE.full}`,
   defaultDescription: `${BRAND.company.parentBrand}: ${TAGLINE.full} Enterprise CRM platform with AI-powered lead qualification, multi-channel campaigns, and comprehensive analytics for B2B demand generation. Powered by Google Gemini AI.`,
-  defaultKeywords: 'B2B Demand Generation, AI CRM, Google Gemini AI, Automated Lead Qualification, Voice Agents, Email Automation, Sales Intelligence, Pivotal B2B, AI Sales Agents, Autonomous CRM, Predictive Analytics, Conversational AI, Gemini Flash, Voice AI, Outbound AI, Intelligent Campaigns, Revenue Operations, B2B Marketing Automation',
+  defaultKeywords: 'B2B Demand Generation, AI CRM, Google Gemini AI, Automated Lead Qualification, Conversational AI, Email Automation, Sales Intelligence, Pivotal B2B, AI Sales Agents, Autonomous CRM, Predictive Analytics, Gemini Flash, Voice AI, Outbound AI, Intelligent Campaigns, Revenue Operations, B2B Marketing Automation',
   ogSiteName: BRAND.company.productName,
   twitterTitle: `${BRAND.company.productName} - AI-Powered B2B Demand Generation`,
   twitterDescription: `Scale your B2B growth with ${BRAND.company.productName}. AI-driven lead qualification, autonomous campaigns, and intelligent CRM capabilities powered by Gemini.`,

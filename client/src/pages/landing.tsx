@@ -2,6 +2,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { motion } from "framer-motion";
 import {
   Brain,
   Target,
@@ -89,21 +90,25 @@ export default function LandingPage() {
       </nav>
 
       {/* ─── HERO SECTION ─────────────────────────────────────────────── */}
-      <section className="pt-32 pb-24 px-6 relative overflow-hidden">
+      <section className="pt-32 pb-24 px-6 relative overflow-hidden perspective-1000">
         <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-background to-blue-50" />
         <div className="absolute top-20 right-0 w-[800px] h-[800px] bg-gradient-to-br from-violet-500/10 to-indigo-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-to-tr from-blue-500/10 to-cyan-500/10 rounded-full blur-3xl" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#8882_1px,transparent_1px),linear-gradient(to_bottom,#8882_1px,transparent_1px)] bg-[size:14px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
 
-        <div className="max-w-7xl mx-auto relative">
-          <div className="text-center max-w-4xl mx-auto">
+        <div className="max-w-7xl mx-auto relative grid lg:grid-cols-2 gap-12 items-center">
+          <motion.div 
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="text-left max-w-2xl"
+          >
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
               {PUBLIC_PAGES_MESSAGING.category}
             </Badge>
 
-
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 leading-[1.1]">
               <span className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 bg-clip-text text-transparent">
                 {PUBLIC_PAGES_MESSAGING.headline}
               </span>
@@ -113,25 +118,20 @@ export default function LandingPage() {
               </span>
             </h1>
 
-            <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed max-w-3xl mx-auto font-medium">
+            <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed font-medium">
               {PUBLIC_PAGES_MESSAGING.tagline}
             </p>
 
-            <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed max-w-3xl mx-auto">
+            <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed">
               {PUBLIC_PAGES_MESSAGING.valueProposition}
             </p>
 
-            {/* Trust Line */}
-            <p className="text-sm text-muted-foreground mb-10 italic">
-              Built for CMOs, VP Demand, RevOps, Sales Leaders, and ABM teams focused on predictable pipeline quality.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25 transition-all hover:scale-105">
                 Book a Live Strategy Session
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
-              <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2" onClick={() => {
+              <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2 transition-all hover:scale-105" onClick={() => {
                 document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
               }}>
                 <Play className="mr-2 h-5 w-5" />
@@ -139,18 +139,105 @@ export default function LandingPage() {
               </Button>
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-3 justify-center">
+            <div className="mt-8 flex flex-wrap gap-3">
               {[
                 "Enterprise-ready governance",
                 "Voice + email + workflow orchestration",
                 "Reasoning-first AI with full audit trail",
               ].map((pill, i) => (
-                <Badge key={i} variant="outline" className="bg-white/60 backdrop-blur-sm">
+                <Badge key={i} variant="outline" className="bg-white/60 backdrop-blur-sm border-violet-200 text-violet-800">
                   {pill}
                 </Badge>
               ))}
             </div>
-          </div>
+          </motion.div>
+
+          {/* 3D Animated Visualization */}
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.8, rotateY: 20 }}
+            animate={{ opacity: 1, scale: 1, rotateY: 0 }}
+            transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
+            className="relative h-[600px] hidden lg:block perspective-1000"
+          >
+            <div className="absolute inset-0 flex items-center justify-center transform-style-3d">
+              {/* Central Core */}
+              <motion.div 
+                animate={{ 
+                  rotateY: [0, 360],
+                  rotateX: [10, -10, 10]
+                }}
+                transition={{ 
+                  rotateY: { duration: 20, repeat: Infinity, ease: "linear" },
+                  rotateX: { duration: 5, repeat: Infinity, ease: "easeInOut" }
+                }}
+                className="relative w-64 h-64 transform-style-3d"
+              >
+                {/* Core Sphere/Glow */}
+                <div className="absolute inset-0 bg-gradient-to-tr from-violet-600 to-indigo-500 rounded-full blur-2xl opacity-40 animate-pulse" />
+                
+                {/* Floating Cards */}
+                {[
+                  { icon: Brain, title: "Intelligence", color: "violet", delay: 0, z: 100, x: -80, y: -80 },
+                  { icon: Phone, title: "Voice AI", color: "amber", delay: 0.2, z: 150, x: 80, y: -40 },
+                  { icon: Wand2, title: "Content", color: "emerald", delay: 0.4, z: 80, x: -60, y: 80 },
+                  { icon: Target, title: "Orchestration", color: "blue", delay: 0.6, z: 120, x: 60, y: 60 },
+                ].map((card, i) => (
+                  <motion.div
+                    key={i}
+                    animate={{ 
+                      y: [card.y, card.y - 20, card.y],
+                      rotateZ: [-2, 2, -2]
+                    }}
+                    transition={{ 
+                      duration: 4, 
+                      repeat: Infinity, 
+                      ease: "easeInOut",
+                      delay: card.delay 
+                    }}
+                    className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 bg-white/90 backdrop-blur-xl border border-white/50 rounded-2xl p-4 shadow-2xl shadow-${card.color}-500/20`}
+                    style={{
+                      transform: `translate3d(${card.x}px, ${card.y}px, ${card.z}px)`,
+                    }}
+                  >
+                    <div className={`h-10 w-10 rounded-xl bg-${card.color}-100 flex items-center justify-center mb-3`}>
+                      <card.icon className={`h-5 w-5 text-${card.color}-600`} />
+                    </div>
+                    <div className="font-bold text-sm text-slate-800">{card.title}</div>
+                    <div className="h-1.5 w-1/2 bg-slate-200 rounded-full mt-2" />
+                    <div className="h-1.5 w-3/4 bg-slate-200 rounded-full mt-1.5" />
+                  </motion.div>
+                ))}
+
+                {/* Connecting Lines (SVG) */}
+                <svg className="absolute inset-0 w-full h-full overflow-visible pointer-events-none" style={{ transform: 'translateZ(50px)' }}>
+                  <motion.circle 
+                    cx="128" cy="128" r="100" 
+                    fill="none" stroke="url(#grad1)" strokeWidth="2" strokeDasharray="4 4"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+                    style={{ transformOrigin: 'center' }}
+                  />
+                  <motion.circle 
+                    cx="128" cy="128" r="140" 
+                    fill="none" stroke="url(#grad2)" strokeWidth="1" strokeDasharray="8 8"
+                    animate={{ rotate: -360 }}
+                    transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
+                    style={{ transformOrigin: 'center' }}
+                  />
+                  <defs>
+                    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.5" />
+                      <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.5" />
+                    </linearGradient>
+                    <linearGradient id="grad2" x1="100%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
+                      <stop offset="100%" stopColor="#6366f1" stopOpacity="0.3" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </motion.div>
+            </div>
+          </motion.div>
         </div>
       </section>
 
@@ -618,7 +705,7 @@ export default function LandingPage() {
               },
               {
                 icon: Phone,
-                title: "Voice Agent",
+                title: "Voice AI",
                 subtitle: "Conversational Outreach",
                 description: "AI that conducts real phone conversations with natural speech, real-time dispositioning, and optional human transfer when needed.",
                 capabilities: ["Natural live conversations", "Function-driven call actions", "Real-time qualification"],
@@ -816,10 +903,10 @@ export default function LandingPage() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
               { icon: Target, badge: "ABM", title: "AI-Led Account-Based Marketing", description: "Target, engage, and convert high-value accounts with intelligence-driven orchestration across email, voice, and content.", features: ["Buying committee mapping", "Cross-channel orchestration", "Account-level reasoning"], color: "violet" },
-              { icon: Phone, badge: "Voice AI", title: "Conversational AI Voice Agents", description: "AI agents that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.", features: ["Live phone conversations", "Real-time qualification", "Gatekeeper navigation"], color: "amber" },
+              { icon: Phone, badge: "Voice AI", title: "Autonomous Voice AI", description: "AI systems that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.", features: ["Live phone conversations", "Real-time qualification", "Gatekeeper navigation"], color: "amber" },
               { icon: Mail, badge: "Email Marketing", title: "Intelligent Email Marketing", description: "AI-crafted email campaigns with persona-specific sequences, smart send-time optimization, and reply sentiment analysis.", features: ["Persona-specific sequences", "Send-time optimization", "Reply sentiment analysis"], color: "sky" },
               { icon: Wand2, badge: "Content Studio", title: "Generative Content Creation", description: "A full AI-powered content studio that generates landing pages, email campaigns, blog posts, eBooks, solution briefs, and images — all in your brand voice.", features: ["7 content generation engines", "One-click publishing", "AI-powered refinement"], color: "emerald" },
-              { icon: Bot, badge: "AI SDR", title: "AI SDR-as-a-Service", description: "Autonomous AI agents conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.", features: ["24/7 autonomous engagement", "Human-in-the-loop escalation", "Campaign-level guardrails"], color: "blue" },
+              { icon: Bot, badge: "AI SDR", title: "AI SDR-as-a-Service", description: "Autonomous AI systems conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.", features: ["24/7 autonomous engagement", "Human-in-the-loop escalation", "Campaign-level guardrails"], color: "blue" },
               { icon: LayoutDashboard, badge: "Pipeline", title: "Intelligent Pipeline Management", description: "Manage your entire top-of-funnel with AI-driven account staging, buyer journey tracking, and actionable revenue intelligence.", features: ["AI account scoring", "Buyer journey stages", "Revenue intelligence signals"], color: "indigo" },
               { icon: Calendar, badge: "Appointments", title: "Qualified Appointment Generation", description: "We deliver BANT-qualified sales appointments directly to your team's calendar through multi-channel outreach.", features: ["Full top-of-funnel management", "Multi-channel outreach", "No-show follow-up"], color: "rose" },
               { icon: Search, badge: "Intelligence", title: "Market & Account Intelligence", description: "Deep research, enrichment, and analysis of accounts and industries to power better GTM decisions.", features: ["ICP refinement", "Competitive landscape", "Buying signal detection"], color: "cyan" },
