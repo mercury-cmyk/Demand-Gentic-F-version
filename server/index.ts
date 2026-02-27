@@ -837,6 +837,8 @@ if (isMainModule) {
     // Log that all initialization is complete
     log(`Initialization complete - server ready on http://${host}:${port}`);
   })();
+} else {
+  console.warn('[BOOT] isMainModule=false — server will NOT start. This file was imported, not executed directly.');
 }
 
 export { app, server };
