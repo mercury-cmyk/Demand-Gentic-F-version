@@ -63,7 +63,7 @@ export default function GenerationForm({
   const [brandKitId, setBrandKitId] = useState("");
   const [additionalContext, setAdditionalContext] = useState("");
 
-  const hasOrgIntel = !!orgIntelligence?.identity?.legalName?.value;
+  const hasOrgIntel = !!getOiValue(orgIntelligence?.identity?.legalName);
   // OI is mandatory — disable form if not available
   const isDisabled = !!disabled || !hasOrgIntel;
 
@@ -121,7 +121,7 @@ export default function GenerationForm({
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
             <p className="text-xs font-semibold text-emerald-700">
-              {orgIntelligence!.identity!.legalName!.value} — Intelligence Active
+              {getOiValue(orgIntelligence?.identity?.legalName)} — Intelligence Active
             </p>
             <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-600 ml-auto shrink-0">
               Single Source of Truth

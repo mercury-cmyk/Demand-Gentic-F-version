@@ -40,6 +40,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+function getOiValue(field: any): string {
+  if (!field) return "";
+  if (typeof field === "string") return field;
+  return field.value || "";
+}
+
 const IMAGE_STYLES = [
   { value: "photorealistic", label: "Photorealistic" },
   { value: "illustration", label: "Illustration" },
@@ -87,7 +93,7 @@ export default function ImageGenerationTab({
   const [brokenImages, setBrokenImages] = useState<Set<number>>(new Set());
   const [expandedImage, setExpandedImage] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const hasOrgIntel = !!orgIntelligence?.identity?.legalName?.value;
+  const hasOrgIntel = !!getOiValue(orgIntelligence?.identity?.legalName);
   const isDisabled = !organizationId || !hasOrgIntel;
 
   const generateMutation = useMutation({
@@ -291,12 +297,12 @@ export default function ImageGenerationTab({
           </div>
         )}
 
-        {orgIntelligence?.identity?.legalName?.value && (
+        {getOiValue(orgIntelligence?.identity?.legalName) && (
           <div className="flex items-start gap-2 p-2 rounded-md bg-emerald-50/50 border border-emerald-100 mt-auto">
             <Brain className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
             <div className="min-w-0">
               <p className="text-[11px] font-medium text-emerald-700 leading-tight">
-                OI Active: {typeof orgIntelligence.identity.legalName === 'string' ? orgIntelligence.identity.legalName : orgIntelligence.identity.legalName.value}
+                OI Active: {getOiValue(orgIntelligence?.identity?.legalName)}
               </p>
             </div>
           </div>

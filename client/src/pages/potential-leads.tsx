@@ -282,7 +282,7 @@ export default function PotentialLeadsPage() {
     queryKey: ['/api/qa/conversations', selectedId],
     queryFn: async () => {
       if (!selectedId) return null;
-      const response = await apiRequest('GET', `/api/qa/conversations?search=${selectedId}&limit=1`);
+      const response = await apiRequest('GET', `/api/qa/conversations?id=${selectedId}&limit=1`);
       const data = await response.json();
       const conv = data.conversations?.find((c: any) => c.id === selectedId);
       if (!conv) return null;

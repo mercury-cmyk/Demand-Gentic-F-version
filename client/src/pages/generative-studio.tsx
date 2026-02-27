@@ -201,7 +201,9 @@ export default function GenerativeStudioPage() {
   const [activeModule, setActiveModule] = useState("image");
   const [historyOpen, setHistoryOpen] = useState(false);
   // Client Portal: default to null (will be set from API); Admin: default to Pivotal B2B super org
-  const clientPortalToken = localStorage.getItem("clientPortalToken");
+  // Only treat as client portal if we're actually on a client portal page — prevents stale tokens from breaking admin mode
+  const isClientPortalPage = window.location.pathname.startsWith('/client-portal');
+  const clientPortalToken = isClientPortalPage ? localStorage.getItem("clientPortalToken") : null;
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(clientPortalToken ? null : SUPER_ORG_ID);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);

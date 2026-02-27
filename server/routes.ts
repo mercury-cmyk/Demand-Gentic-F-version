@@ -16404,7 +16404,7 @@ Provide JSON response with:
   // Get all conversations for QA review (call sessions AND test calls with transcripts)
   app.get("/api/qa/conversations", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { campaignId, type, search, source, limit = '100', dateFrom, dateTo, sortBy } = req.query;
+      const { campaignId, type, search, source, limit = '100', dateFrom, dateTo, sortBy, id } = req.query;
       const limitNum = Math.min(500, Math.max(1, parseInt(limit as string, 10)));
       const sortMode = (sortBy as string) || 'date'; // 'date' | 'score'
 
@@ -16413,6 +16413,10 @@ Provide JSON response with:
 
       // Build where clauses at outer scope so they're accessible for both fetch and count queries
       const sessionConditions: any[] = [];
+      // Direct ID lookup - used by potential leads detail view
+      if (id) {
+        sessionConditions.push(eq(callSessions.id, id as string));
+      }
       if (campaignId && campaignId !== 'all') {
         sessionConditions.push(eq(callSessions.campaignId, campaignId as string));
       }
