@@ -6,8 +6,12 @@ import {
   insertClientPortalOrderSchema,
   verificationCampaigns,
   campaigns,
+  clientAccounts,
+  users,
 } from '@shared/schema';
 import { z } from 'zod';
+import { requireAuth } from '../auth';
+import { notificationService as mercuryNotificationService } from '../services/mercury';
 
 const router = Router();
 
@@ -17,6 +21,10 @@ function generateOrderNumber(): string {
   const dateStr = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
   const random = Math.random().toString(36).substring(2, 8).toUpperCase();
   return `ORD-${dateStr}-${random}`;
+}
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 /**
@@ -43,7 +51,7 @@ router.get('/', async (req: Request, res: Response) => {
         createdAt: clientPortalOrders.createdAt,
         campaignId: clientPortalOrders.campaignId,
         metadata: clientPortalOrders.metadata,
-        campaignName: verificationCampaigns.name, // Join with campaign name
+        campaignName: verificationCampaigns.name,
       })
       .from(clientPortalOrders)
       .leftJoin(verificationCampaigns, eq(clientPortalOrders.campaignId, verificationCampaigns.id))
@@ -86,6 +94,8 @@ router.get('/:id', async (req: Request, res: Response) => {
         clientNotes: clientPortalOrders.clientNotes,
         adminNotes: clientPortalOrders.adminNotes,
         rejectionReason: clientPortalOrders.rejectionReason,
+        submittedAt: clientPortalOrders.submittedAt,
+        approvedAt: clientPortalOrders.approvedAt,
         campaignName: verificationCampaigns.name,
       })
       .from(clientPortalOrders)
@@ -115,15 +125,13 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const clientAccountId = req.clientUser?.clientAccountId;
     const clientUserId = req.clientUser?.clientUserId;
-    
+
     if (!clientAccountId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Validate body (relaxed validation as frontend might send partial data)
-    // We'll trust the ID references if they exist, or create a generic order
     const body = req.body;
-    
+
     const orderData = {
       clientAccountId,
       clientUserId: clientUserId || null,
@@ -134,20 +142,17 @@ router.post('/', async (req: Request, res: Response) => {
       clientNotes: body.clientNotes || null,
       campaignId: body.campaignId || null,
       metadata: body.metadata || {},
-      status: 'draft', // Default to draft
+      status: 'draft',
     };
-    
+
     // Verify campaign ownership if campaignId provided
     if (orderData.campaignId) {
-       // Check verification campaigns primarily
        const [camp] = await db.select().from(verificationCampaigns).where(eq(verificationCampaigns.id, orderData.campaignId)).limit(1);
-       // Or regular campaigns
        if (!camp) {
          const [regCamp] = await db.select().from(campaigns).where(eq(campaigns.id, orderData.campaignId)).limit(1);
          if (!regCamp) {
             return res.status(404).json({ message: "Campaign not found" });
          }
-         // Check ownership for regular campaign
          if (regCamp.clientAccountId !== clientAccountId) {
              return res.status(403).json({ message: "Campaign does not belong to your account" });
          }
@@ -165,6 +170,254 @@ router.post('/', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[CLIENT PORTAL ORDERS] Create error:', error);
     res.status(500).json({ message: "Failed to create order" });
+  }
+});
+
+/**
+ * POST /:id/submit
+ * Client submits a draft order for admin approval.
+ * Dispatches 'campaign_order_submitted' Mercury notification to admins.
+ */
+router.post('/:id/submit', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    const clientUserId = req.clientUser?.clientUserId;
+
+    if (!clientAccountId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { id } = req.params;
+
+    // Fetch current order
+    const [order] = await db
+      .select()
+      .from(clientPortalOrders)
+      .where(and(
+        eq(clientPortalOrders.id, id),
+        eq(clientPortalOrders.clientAccountId, clientAccountId)
+      ))
+      .limit(1);
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (order.status !== 'draft') {
+      return res.status(400).json({ message: `Order cannot be submitted from '${order.status}' status` });
+    }
+
+    // Update status to submitted
+    const [updated] = await db
+      .update(clientPortalOrders)
+      .set({
+        status: 'submitted',
+        submittedAt: new Date(),
+        clientNotes: req.body.clientNotes || order.clientNotes,
+        updatedAt: new Date(),
+      })
+      .where(eq(clientPortalOrders.id, id))
+      .returning();
+
+    // Resolve client account name for notification
+    let clientName = 'Unknown Client';
+    try {
+      const [acct] = await db
+        .select({ name: clientAccounts.name })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, clientAccountId))
+        .limit(1);
+      if (acct?.name) clientName = acct.name;
+    } catch { /* proceed with default */ }
+
+    // Dispatch Mercury notification — campaign_order_submitted
+    const metadata = (order.metadata || {}) as Record<string, any>;
+    mercuryNotificationService.dispatch({
+      eventType: 'campaign_order_submitted',
+      tenantId: clientAccountId,
+      actorUserId: clientUserId || undefined,
+      payload: {
+        orderNumber: updated.orderNumber,
+        clientName,
+        orderTitle: metadata.title || updated.orderNumber,
+        orderType: metadata.orderType || 'campaign_order',
+        priority: metadata.priority || 'normal',
+        targetLeadCount: String(updated.requestedQuantity || ''),
+        budget: metadata.budget || '',
+        description: updated.clientNotes || '',
+        submittedAt: formatDate(new Date()),
+        adminLink: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/admin/project-requests`,
+      },
+    }).catch(err => {
+      console.error('[CLIENT PORTAL ORDERS] Mercury campaign_order_submitted error:', err.message);
+    });
+
+    console.log(`[CLIENT PORTAL ORDERS] Order ${updated.orderNumber} submitted by client ${clientAccountId}`);
+    res.json(updated);
+
+  } catch (error) {
+    console.error('[CLIENT PORTAL ORDERS] Submit error:', error);
+    res.status(500).json({ message: "Failed to submit order" });
+  }
+});
+
+/**
+ * POST /:id/approve
+ * Admin approves a submitted order.
+ * Dispatches 'campaign_order_approved' Mercury notification to client users.
+ */
+router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req.user as any)?.id || (req.user as any)?.userId;
+    const { id } = req.params;
+    const { approvedQuantity, adminNotes } = req.body;
+
+    // Fetch order
+    const [order] = await db
+      .select()
+      .from(clientPortalOrders)
+      .where(eq(clientPortalOrders.id, id))
+      .limit(1);
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (order.status !== 'submitted') {
+      return res.status(400).json({ message: `Order cannot be approved from '${order.status}' status` });
+    }
+
+    // Update to approved
+    const [updated] = await db
+      .update(clientPortalOrders)
+      .set({
+        status: 'approved',
+        approvedQuantity: approvedQuantity ?? order.requestedQuantity,
+        approvedBy: userId,
+        approvedAt: new Date(),
+        adminNotes: adminNotes || order.adminNotes,
+        updatedAt: new Date(),
+      })
+      .where(eq(clientPortalOrders.id, id))
+      .returning();
+
+    // Resolve client name
+    let clientName = 'Client';
+    try {
+      const [acct] = await db
+        .select({ name: clientAccounts.name })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, order.clientAccountId))
+        .limit(1);
+      if (acct?.name) clientName = acct.name;
+    } catch { /* proceed */ }
+
+    const metadata = (order.metadata || {}) as Record<string, any>;
+
+    // Dispatch Mercury notification — campaign_order_approved to client
+    mercuryNotificationService.dispatch({
+      eventType: 'campaign_order_approved',
+      tenantId: order.clientAccountId,
+      actorUserId: userId,
+      payload: {
+        recipientName: clientName,
+        orderNumber: updated.orderNumber,
+        orderTitle: metadata.title || updated.orderNumber,
+        approvalDate: formatDate(new Date()),
+        approvedBy: userId || '',
+        approvedQuantity: String(updated.approvedQuantity || updated.requestedQuantity),
+        adminNotes: adminNotes || '',
+        portalLink: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/client-portal/orders/${updated.id}`,
+      },
+    }).catch(err => {
+      console.error('[CLIENT PORTAL ORDERS] Mercury campaign_order_approved error:', err.message);
+    });
+
+    console.log(`[CLIENT PORTAL ORDERS] Order ${updated.orderNumber} approved by admin ${userId}`);
+    res.json(updated);
+
+  } catch (error) {
+    console.error('[CLIENT PORTAL ORDERS] Approve error:', error);
+    res.status(500).json({ message: "Failed to approve order" });
+  }
+});
+
+/**
+ * POST /:id/reject
+ * Admin rejects a submitted order.
+ * Dispatches 'campaign_order_rejected' Mercury notification to client users.
+ */
+router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req.user as any)?.id || (req.user as any)?.userId;
+    const { id } = req.params;
+    const { rejectionReason, adminNotes } = req.body;
+
+    // Fetch order
+    const [order] = await db
+      .select()
+      .from(clientPortalOrders)
+      .where(eq(clientPortalOrders.id, id))
+      .limit(1);
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (order.status !== 'submitted') {
+      return res.status(400).json({ message: `Order cannot be rejected from '${order.status}' status` });
+    }
+
+    // Update to rejected
+    const [updated] = await db
+      .update(clientPortalOrders)
+      .set({
+        status: 'rejected',
+        rejectedBy: userId,
+        rejectedAt: new Date(),
+        rejectionReason: rejectionReason || null,
+        adminNotes: adminNotes || order.adminNotes,
+        updatedAt: new Date(),
+      })
+      .where(eq(clientPortalOrders.id, id))
+      .returning();
+
+    // Resolve client name
+    let clientName = 'Client';
+    try {
+      const [acct] = await db
+        .select({ name: clientAccounts.name })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, order.clientAccountId))
+        .limit(1);
+      if (acct?.name) clientName = acct.name;
+    } catch { /* proceed */ }
+
+    const metadata = (order.metadata || {}) as Record<string, any>;
+
+    // Dispatch Mercury notification — campaign_order_rejected to client
+    mercuryNotificationService.dispatch({
+      eventType: 'campaign_order_rejected',
+      tenantId: order.clientAccountId,
+      actorUserId: userId,
+      payload: {
+        recipientName: clientName,
+        orderNumber: updated.orderNumber,
+        orderTitle: metadata.title || updated.orderNumber,
+        rejectionReason: rejectionReason || 'No reason provided',
+        rejectedAt: formatDate(new Date()),
+        portalLink: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/client-portal/orders/${updated.id}`,
+      },
+    }).catch(err => {
+      console.error('[CLIENT PORTAL ORDERS] Mercury campaign_order_rejected error:', err.message);
+    });
+
+    console.log(`[CLIENT PORTAL ORDERS] Order ${updated.orderNumber} rejected by admin ${userId}`);
+    res.json(updated);
+
+  } catch (error) {
+    console.error('[CLIENT PORTAL ORDERS] Reject error:', error);
+    res.status(500).json({ message: "Failed to reject order" });
   }
 });
 

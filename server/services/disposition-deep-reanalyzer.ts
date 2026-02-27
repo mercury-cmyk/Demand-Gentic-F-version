@@ -1973,16 +1973,10 @@ export async function getContactsByDisposition(
   if (filters.minDurationSec) conditions.push(gte(callSessions.durationSec, filters.minDurationSec));
   if (filters.maxDurationSec) conditions.push(lte(callSessions.durationSec, filters.maxDurationSec));
 
-  // Get total count
-  const [countResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(callSessions)
-    .where(and(...conditions));
-
-  const total = countResult?.count || 0;
-
-  // Get sessions
-  const sessions = await db
+  // Get all sessions that satisfy base SQL conditions.
+  // Additional filters (transcript text, turn count, QA-accuracy) are applied below,
+  // then pagination is applied on the fully filtered set to ensure page correctness.
+  const allMatchingSessions = await db
     .select({
       id: callSessions.id,
       aiDisposition: callSessions.aiDisposition,
@@ -1998,16 +1992,14 @@ export async function getContactsByDisposition(
     })
     .from(callSessions)
     .where(and(...conditions))
-    .orderBy(desc(callSessions.startedAt))
-    .limit(limit)
-    .offset(offset);
+    .orderBy(desc(callSessions.startedAt), desc(callSessions.id));
 
-  if (sessions.length === 0) {
-    return { contacts: [], total, disposition, page: Math.floor(offset / limit), pageSize: limit };
+  if (allMatchingSessions.length === 0) {
+    return { contacts: [], total: 0, disposition, page: Math.floor(offset / limit), pageSize: limit };
   }
 
   // Pre-load all call attempts
-  const sessionIds = sessions.map(s => s.id);
+  const sessionIds = allMatchingSessions.map(s => s.id);
   const attemptMap = new Map<string, { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null; fullTranscript: string | null }>();
   if (sessionIds.length > 0) {
     const attempts = await db
@@ -2027,7 +2019,7 @@ export async function getContactsByDisposition(
   }
 
   // Pre-load contacts with full info
-  const contactIds = sessions.map(s => s.contactId).filter(Boolean) as string[];
+  const contactIds = allMatchingSessions.map(s => s.contactId).filter(Boolean) as string[];
   const contactMap = new Map<string, { name: string; company: string; email: string | null; jobTitle: string | null; city: string | null; state: string | null }>();
   if (contactIds.length > 0) {
     const cInfos = await db
@@ -2058,7 +2050,7 @@ export async function getContactsByDisposition(
   }
 
   // Pre-load campaigns
-  const campaignIds = [...new Set(sessions.map(s => s.campaignId).filter(Boolean) as string[])];
+  const campaignIds = [...new Set(allMatchingSessions.map(s => s.campaignId).filter(Boolean) as string[])];
   const campaignMap = new Map<string, { name: string; objective: string | null }>();
   if (campaignIds.length > 0) {
     const camps = await db
@@ -2159,10 +2151,10 @@ export async function getContactsByDisposition(
   }
 
   // Apply search filter if provided
-  let filteredSessions = sessions;
+  let filteredSessions = allMatchingSessions;
   if (filters.search) {
     const searchLower = filters.search.toLowerCase();
-    filteredSessions = sessions.filter(s => {
+    filteredSessions = allMatchingSessions.filter(s => {
       const contactInfo = s.contactId ? contactMap.get(s.contactId) : null;
       if (!contactInfo) return false;
       return contactInfo.name.toLowerCase().includes(searchLower) ||
@@ -2229,8 +2221,11 @@ export async function getContactsByDisposition(
     });
   }
 
+  const totalFiltered = filteredSessions.length;
+  const pagedSessions = filteredSessions.slice(offset, offset + limit);
+
   // Build results
-  const contactResults: DispositionContactDetail[] = filteredSessions.map(session => {
+  const contactResults: DispositionContactDetail[] = pagedSessions.map(session => {
     const contactInfo = session.contactId ? contactMap.get(session.contactId) : null;
     const attempt = attemptMap.get(session.id);
     const campInfo = session.campaignId ? campaignMap.get(session.campaignId) : null;
@@ -2284,7 +2279,7 @@ export async function getContactsByDisposition(
 
   return {
     contacts: contactResults,
-    total,
+    total: totalFiltered,
     disposition,
     page: Math.floor(offset / limit),
     pageSize: limit,

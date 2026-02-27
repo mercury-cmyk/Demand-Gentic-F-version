@@ -921,6 +921,22 @@ export default function DispositionReanalysisPage() {
     return count;
   }, [contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo, contactsTranscriptText, contactsAccuracy, contactsExpectedDisposition, contactsCurrentDisposition]);
 
+  const activeContactsFilterSummary = useMemo(() => {
+    const labels: string[] = [];
+    if (contactsSearch.trim()) labels.push(`Search: "${contactsSearch.trim()}"`);
+    if (contactsTranscriptText.trim()) labels.push(`Transcript contains: "${contactsTranscriptText.trim()}"`);
+    if (contactsMinDuration) labels.push(`Min duration: ${contactsMinDuration}s`);
+    if (contactsMaxDuration) labels.push(`Max duration: ${contactsMaxDuration}s`);
+    if (contactsMinTurns) labels.push(`Min turns: ${contactsMinTurns}`);
+    if (contactsMaxTurns) labels.push(`Max turns: ${contactsMaxTurns}`);
+    if (contactsDateFrom) labels.push(`From: ${contactsDateFrom}`);
+    if (contactsDateTo) labels.push(`To: ${contactsDateTo}`);
+    if (contactsAccuracy !== 'all') labels.push(`Accuracy: ${contactsAccuracy}`);
+    if (contactsExpectedDisposition) labels.push(`Expected: ${DISPOSITION_LABELS[contactsExpectedDisposition] || contactsExpectedDisposition}`);
+    if (contactsCurrentDisposition) labels.push(`Current: ${DISPOSITION_LABELS[contactsCurrentDisposition] || contactsCurrentDisposition}`);
+    return labels;
+  }, [contactsSearch, contactsTranscriptText, contactsMinDuration, contactsMaxDuration, contactsMinTurns, contactsMaxTurns, contactsDateFrom, contactsDateTo, contactsAccuracy, contactsExpectedDisposition, contactsCurrentDisposition]);
+
   const clearContactsFilters = useCallback(() => {
     setContactsMinDuration('');
     setContactsMaxDuration('');
@@ -1575,14 +1591,27 @@ export default function DispositionReanalysisPage() {
             <>
               {/* Header with disposition context */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Button variant="ghost" size="sm" onClick={() => { setContactsDisposition(''); setActiveTab('overview'); }}>
-                    <ChevronLeft className="h-4 w-4 mr-1" /> Back
-                  </Button>
-                  <DispositionBadge disposition={contactsDisposition} />
-                  <span className="text-sm text-muted-foreground">
-                    {contactsByDisp?.total?.toLocaleString() || '...'} contacts
-                  </span>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-3">
+                    <Button variant="ghost" size="sm" onClick={() => { setContactsDisposition(''); setActiveTab('overview'); }}>
+                      <ChevronLeft className="h-4 w-4 mr-1" /> Back
+                    </Button>
+                    <DispositionBadge disposition={contactsDisposition} />
+                    <Badge variant="secondary" className="text-xs">
+                      {(contactsByDisp?.total ?? 0).toLocaleString()} total after filters
+                    </Badge>
+                    {activeContactsFilterSummary.length > 0 && (
+                      <Badge variant="outline" className="text-xs">
+                        {activeContactsFilterSummary.length} active filters
+                      </Badge>
+                    )}
+                  </div>
+                  {activeContactsFilterSummary.length > 0 && (
+                    <p className="text-xs text-muted-foreground ml-2">
+                      Active: {activeContactsFilterSummary.slice(0, 3).join(' • ')}
+                      {activeContactsFilterSummary.length > 3 ? ` • +${activeContactsFilterSummary.length - 3} more` : ''}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Input
@@ -1916,10 +1945,10 @@ export default function DispositionReanalysisPage() {
                       </ScrollArea>
 
                       {/* Pagination */}
-                      {contactsByDisp.total > 50 && (
+                      {contactsByDisp.total > (contactsByDisp.pageSize || 50) && (
                         <div className="flex items-center justify-between mt-4">
                           <p className="text-sm text-muted-foreground">
-                            Showing {contactsPage * 50 + 1}-{Math.min((contactsPage + 1) * 50, contactsByDisp.total)} of {contactsByDisp.total}
+                            Showing {contactsPage * (contactsByDisp.pageSize || 50) + 1}-{Math.min((contactsPage + 1) * (contactsByDisp.pageSize || 50), contactsByDisp.total)} of {contactsByDisp.total}
                           </p>
                           <div className="flex gap-2">
                             <Button
@@ -1933,7 +1962,7 @@ export default function DispositionReanalysisPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={(contactsPage + 1) * 50 >= contactsByDisp.total}
+                              disabled={(contactsPage + 1) * (contactsByDisp.pageSize || 50) >= contactsByDisp.total}
                               onClick={() => setContactsPage(p => p + 1)}
                             >
                               Next <ChevronRight className="h-4 w-4" />

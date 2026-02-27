@@ -33,10 +33,20 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Mail, CheckCircle, XCircle, Send, Eye, RefreshCw, Users, Zap, FileText,
   Settings, AlertTriangle, Loader2, Plus, Trash2, Edit, Play, Download,
-  Sparkles, Wand2, Copy, LayoutGrid,
+  Sparkles, Wand2, Copy, LayoutGrid, ArrowRight, Bell, Power,
+  Workflow, MailCheck, MailX, UserCheck, ShieldCheck, ChevronDown,
 } from 'lucide-react';
 
 // ─── API Helpers ─────────────────────────────────────────────────────────────
@@ -73,6 +83,7 @@ const mercuryApi = {
   getRules: () => apiRequest('GET', '/api/communications/mercury/notifications/rules').then(r => r.json()),
   createRule: (data: any) => apiRequest('POST', '/api/communications/mercury/notifications/rules', data).then(r => r.json()),
   deleteRule: (id: string) => apiRequest('DELETE', `/api/communications/mercury/notifications/rules/${id}`).then(r => r.json()),
+  updateRule: (id: string, data: any) => apiRequest('PUT', `/api/communications/mercury/notifications/rules/${id}`, data).then(r => r.json()),
 };
 
 // ─── Template Gallery Data ───────────────────────────────────────────────────
@@ -169,6 +180,9 @@ export default function MercuryNotificationsPage() {
           <TabsTrigger value="logs">
             <Mail className="h-4 w-4 mr-1" /> Email Logs
           </TabsTrigger>
+          <TabsTrigger value="workflows">
+            <Workflow className="h-4 w-4 mr-1" /> Workflows
+          </TabsTrigger>
           <TabsTrigger value="rules">
             <Zap className="h-4 w-4 mr-1" /> Rules
           </TabsTrigger>
@@ -179,6 +193,7 @@ export default function MercuryNotificationsPage() {
         <TabsContent value="ai-studio"><AIStudioTab /></TabsContent>
         <TabsContent value="invitations"><InvitationsTab /></TabsContent>
         <TabsContent value="logs"><LogsTab /></TabsContent>
+        <TabsContent value="workflows"><WorkflowsTab /></TabsContent>
         <TabsContent value="rules"><RulesTab /></TabsContent>
       </Tabs>
     </div>
@@ -1548,6 +1563,393 @@ function LogsTab() {
 }
 
 // ─── Rules Tab ───────────────────────────────────────────────────────────────
+
+// ─── Notification Workflow Constants ─────────────────────────────────────────
+
+const EVENT_META: Record<string, { label: string; description: string; icon: typeof Bell; color: string }> = {
+  campaign_order_submitted: {
+    label: 'Campaign Order Submitted',
+    description: 'Client submits a new campaign order for approval',
+    icon: MailCheck,
+    color: 'bg-blue-100 text-blue-700 border-blue-200',
+  },
+  campaign_order_approved: {
+    label: 'Campaign Order Approved',
+    description: 'Admin approves a submitted campaign order',
+    icon: UserCheck,
+    color: 'bg-green-100 text-green-700 border-green-200',
+  },
+  campaign_order_rejected: {
+    label: 'Campaign Order Rejected',
+    description: 'Admin rejects a submitted campaign order',
+    icon: MailX,
+    color: 'bg-red-100 text-red-700 border-red-200',
+  },
+  project_request_approved: {
+    label: 'Project Request Approved',
+    description: 'Admin approves a client project request',
+    icon: ShieldCheck,
+    color: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  },
+  project_request_rejected: {
+    label: 'Project Request Rejected',
+    description: 'Admin rejects a client project request',
+    icon: MailX,
+    color: 'bg-orange-100 text-orange-700 border-orange-200',
+  },
+  campaign_launched: {
+    label: 'Campaign Launched',
+    description: 'A campaign goes live and starts generating leads',
+    icon: Play,
+    color: 'bg-purple-100 text-purple-700 border-purple-200',
+  },
+  leads_delivered: {
+    label: 'Leads Delivered',
+    description: 'New leads are delivered to the client',
+    icon: Users,
+    color: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  },
+  client_invite: {
+    label: 'Client Invitation',
+    description: 'New client user receives portal access invitation',
+    icon: Mail,
+    color: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  },
+};
+
+const RESOLVER_LABELS: Record<string, string> = {
+  requester: 'Requester (actor)',
+  tenant_admins: 'Tenant Admins',
+  all_tenant_users: 'All Client Users',
+  custom: 'Custom Recipients',
+};
+
+// ─── Workflows Tab ──────────────────────────────────────────────────────────
+
+function WorkflowsTab() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const rulesQuery = useQuery({ queryKey: ['mercury-rules'], queryFn: mercuryApi.getRules });
+  const templatesQuery = useQuery({ queryKey: ['mercury-templates'], queryFn: mercuryApi.getTemplates });
+  const [showCreate, setShowCreate] = useState(false);
+  const [newWorkflow, setNewWorkflow] = useState({
+    eventType: '',
+    templateKey: '',
+    recipientResolver: 'all_tenant_users',
+    customRecipients: '',
+    description: '',
+  });
+
+  const rules: any[] = rulesQuery.data || [];
+  const templates: any[] = templatesQuery.data || [];
+  const templateMap = new Map<string, any>();
+  for (const t of templates) templateMap.set(t.templateKey, t);
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, isEnabled }: { id: string; isEnabled: boolean }) =>
+      mercuryApi.updateRule(id, { isEnabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mercury-rules'] });
+      toast({ title: 'Workflow updated' });
+    },
+    onError: (err: any) => toast({ title: 'Update failed', description: String(err.message || err), variant: 'destructive' }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => mercuryApi.deleteRule(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mercury-rules'] });
+      toast({ title: 'Workflow deleted' });
+    },
+    onError: (err: any) => toast({ title: 'Delete failed', description: String(err.message || err), variant: 'destructive' }),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: () => mercuryApi.createRule({
+      eventType: newWorkflow.eventType,
+      templateKey: newWorkflow.templateKey,
+      channelType: 'email',
+      recipientResolver: newWorkflow.recipientResolver,
+      customRecipients: newWorkflow.recipientResolver === 'custom'
+        ? newWorkflow.customRecipients.split(',').map(s => s.trim()).filter(Boolean)
+        : undefined,
+      isEnabled: true,
+      description: newWorkflow.description,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mercury-rules'] });
+      setShowCreate(false);
+      setNewWorkflow({ eventType: '', templateKey: '', recipientResolver: 'all_tenant_users', customRecipients: '', description: '' });
+      toast({ title: 'Workflow created' });
+    },
+    onError: (err: any) => toast({ title: 'Create failed', description: String(err.message || err), variant: 'destructive' }),
+  });
+
+  // Group rules by eventType for visual grouping
+  const eventTypes = Array.from(new Set(rules.map((r: any) => r.eventType)));
+  const allEventTypes = Array.from(new Set([...Object.keys(EVENT_META), ...eventTypes]));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">Notification Workflows</h2>
+          <p className="text-sm text-muted-foreground">
+            Visual automation pipelines — when an event fires, Mercury sends the right email to the right people.
+          </p>
+        </div>
+        <Button onClick={() => setShowCreate(true)}>
+          <Plus className="h-4 w-4 mr-1" /> Create Workflow
+        </Button>
+      </div>
+
+      {/* Active Workflows */}
+      <div className="space-y-4">
+        {rules.length === 0 && !rulesQuery.isLoading && (
+          <Card className="border-dashed">
+            <CardContent className="py-12 text-center">
+              <Workflow className="h-12 w-12 mx-auto text-muted-foreground mb-4 opacity-50" />
+              <h3 className="text-lg font-medium mb-1">No workflows configured</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Create a workflow to automatically send email notifications when events occur.
+              </p>
+              <Button onClick={() => setShowCreate(true)}>
+                <Plus className="h-4 w-4 mr-1" /> Create Your First Workflow
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {rules.map((rule: any) => {
+          const meta = EVENT_META[rule.eventType] || {
+            label: rule.eventType,
+            description: '',
+            icon: Bell,
+            color: 'bg-gray-100 text-gray-700 border-gray-200',
+          };
+          const Icon = meta.icon;
+          const template = templateMap.get(rule.templateKey);
+
+          return (
+            <Card key={rule.id} className={`transition-all ${!rule.isEnabled ? 'opacity-60' : ''}`}>
+              <CardContent className="p-5">
+                <div className="flex items-start gap-4">
+                  {/* Flow visualization */}
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    {/* Trigger */}
+                    <div className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 shrink-0 ${meta.color}`}>
+                      <Icon className="h-4 w-4" />
+                      <div>
+                        <p className="text-xs font-semibold leading-tight">{meta.label}</p>
+                        <p className="text-[10px] opacity-75">Trigger</p>
+                      </div>
+                    </div>
+
+                    <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+
+                    {/* Template */}
+                    <div className="flex items-center gap-2 rounded-lg border bg-amber-50 text-amber-800 border-amber-200 px-3 py-2.5 shrink-0">
+                      <FileText className="h-4 w-4" />
+                      <div>
+                        <p className="text-xs font-semibold leading-tight truncate max-w-[140px]">
+                          {template?.name || rule.templateKey}
+                        </p>
+                        <p className="text-[10px] opacity-75">Template</p>
+                      </div>
+                    </div>
+
+                    <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+
+                    {/* Recipients */}
+                    <div className="flex items-center gap-2 rounded-lg border bg-violet-50 text-violet-800 border-violet-200 px-3 py-2.5 shrink-0">
+                      <Users className="h-4 w-4" />
+                      <div>
+                        <p className="text-xs font-semibold leading-tight">
+                          {RESOLVER_LABELS[rule.recipientResolver] || rule.recipientResolver}
+                        </p>
+                        <p className="text-[10px] opacity-75">Recipients</p>
+                      </div>
+                    </div>
+
+                    <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+
+                    {/* Channel */}
+                    <div className="flex items-center gap-2 rounded-lg border bg-slate-50 text-slate-700 border-slate-200 px-3 py-2.5 shrink-0">
+                      <Mail className="h-4 w-4" />
+                      <div>
+                        <p className="text-xs font-semibold leading-tight capitalize">{rule.channelType || 'email'}</p>
+                        <p className="text-[10px] opacity-75">Channel</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Controls */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Switch
+                      checked={rule.isEnabled}
+                      onCheckedChange={(checked) => toggleMutation.mutate({ id: rule.id, isEnabled: checked })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-600 h-8 w-8 p-0"
+                      onClick={() => deleteMutation.mutate(rule.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                {rule.description && (
+                  <p className="text-xs text-muted-foreground mt-2 ml-1">{rule.description}</p>
+                )}
+
+                {rule.recipientResolver === 'custom' && rule.customRecipients?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2 ml-1">
+                    {rule.customRecipients.map((email: string, i: number) => (
+                      <Badge key={i} variant="outline" className="text-[10px] h-5">{email}</Badge>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Create Workflow Dialog */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Workflow className="h-5 w-5" />
+              Create Notification Workflow
+            </DialogTitle>
+            <DialogDescription>
+              When the selected event fires, Mercury will send the chosen email template to the specified recipients.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Event Type */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Trigger Event</Label>
+              <Select value={newWorkflow.eventType} onValueChange={(v) => setNewWorkflow({ ...newWorkflow, eventType: v })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an event..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {allEventTypes.map((evt) => {
+                    const meta = EVENT_META[evt];
+                    return (
+                      <SelectItem key={evt} value={evt}>
+                        <span className="flex items-center gap-2">
+                          {meta ? <meta.icon className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}
+                          {meta?.label || evt}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              {newWorkflow.eventType && EVENT_META[newWorkflow.eventType] && (
+                <p className="text-xs text-muted-foreground">{EVENT_META[newWorkflow.eventType].description}</p>
+              )}
+            </div>
+
+            {/* Template */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Email Template</Label>
+              <Select value={newWorkflow.templateKey} onValueChange={(v) => setNewWorkflow({ ...newWorkflow, templateKey: v })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a template..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((t: any) => (
+                    <SelectItem key={t.templateKey} value={t.templateKey}>
+                      <span className="flex items-center gap-2">
+                        <FileText className="h-3.5 w-3.5" />
+                        {t.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Recipients */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Recipients</Label>
+              <Select value={newWorkflow.recipientResolver} onValueChange={(v) => setNewWorkflow({ ...newWorkflow, recipientResolver: v })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="requester">Requester (actor who triggered)</SelectItem>
+                  <SelectItem value="tenant_admins">Tenant Admins</SelectItem>
+                  <SelectItem value="all_tenant_users">All Client Users</SelectItem>
+                  <SelectItem value="custom">Custom Email Recipients</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {newWorkflow.recipientResolver === 'custom' && (
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">Custom Recipients (comma-separated)</Label>
+                <Input
+                  value={newWorkflow.customRecipients}
+                  onChange={(e) => setNewWorkflow({ ...newWorkflow, customRecipients: e.target.value })}
+                  placeholder="admin@company.com, ops@company.com"
+                />
+              </div>
+            )}
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Description (optional)</Label>
+              <Input
+                value={newWorkflow.description}
+                onChange={(e) => setNewWorkflow({ ...newWorkflow, description: e.target.value })}
+                placeholder="What this workflow does"
+              />
+            </div>
+
+            {/* Preview */}
+            {newWorkflow.eventType && newWorkflow.templateKey && (
+              <Card className="bg-muted/30 border-dashed">
+                <CardContent className="p-3">
+                  <p className="text-xs font-medium mb-2">Workflow Preview</p>
+                  <div className="flex items-center gap-2 text-xs">
+                    <Badge className={EVENT_META[newWorkflow.eventType]?.color || 'bg-gray-100 text-gray-700'}>
+                      {EVENT_META[newWorkflow.eventType]?.label || newWorkflow.eventType}
+                    </Badge>
+                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                    <Badge variant="outline">{templateMap.get(newWorkflow.templateKey)?.name || newWorkflow.templateKey}</Badge>
+                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                    <Badge variant="secondary">{RESOLVER_LABELS[newWorkflow.recipientResolver] || newWorkflow.recipientResolver}</Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending || !newWorkflow.eventType || !newWorkflow.templateKey}
+            >
+              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Zap className="h-4 w-4 mr-1" />}
+              Create Workflow
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Rules Tab ──────────────────────────────────────────────────────────────
 
 function RulesTab() {
   const { toast } = useToast();

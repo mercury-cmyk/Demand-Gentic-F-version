@@ -901,6 +901,61 @@ Pivotal B2B - DemandGentic.ai Platform`,
       { name: 'portalLink', description: 'Link to view campaign in client portal', required: false, exampleValue: 'https://demandgentic.ai/client-portal/campaigns/abc123' },
     ],
   },
+  {
+    templateKey: 'campaign_order_rejected',
+    name: 'Campaign Order Rejected',
+    description: 'Notification sent to client users when their campaign order is rejected by an admin.',
+    category: 'notification',
+    subjectTemplate: 'Update on your campaign order "{{orderTitle}}"',
+    htmlTemplate: `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background-color:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+<div style="background:#ffffff;border-radius:12px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+<div style="text-align:center;margin-bottom:32px;">
+<div style="display:inline-block;background:#fef2f2;border-radius:50%;padding:16px;margin-bottom:16px;">
+<span style="font-size:32px;">&#10060;</span>
+</div>
+<h1 style="margin:0;font-size:24px;color:#1f2937;">Campaign Order Update</h1>
+</div>
+<p style="font-size:16px;color:#374151;line-height:1.6;">Hi {{recipientName}},</p>
+<p style="font-size:16px;color:#374151;line-height:1.6;">We've reviewed your campaign order <strong>"{{orderTitle}}"</strong> and unfortunately we are unable to proceed with it at this time.</p>
+<div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;border-radius:0 8px 8px 0;margin:24px 0;">
+<p style="margin:0 0 4px;font-weight:600;color:#991b1b;">Reason:</p>
+<p style="margin:0;color:#7f1d1d;">{{rejectionReason}}</p>
+</div>
+<p style="font-size:16px;color:#374151;line-height:1.6;">Please feel free to submit a revised order or reach out to your account manager if you have any questions.</p>
+<div style="text-align:center;margin:32px 0;">
+<a href="{{portalLink}}" style="display:inline-block;background:#3b82f6;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:16px;">View in Portal</a>
+</div>
+<p style="font-size:14px;color:#6b7280;">Thank you for your understanding.</p>
+</div>
+</div>
+</body>
+</html>`,
+    textTemplate: `Hi {{recipientName}},
+
+We've reviewed your campaign order "{{orderTitle}}" and unfortunately we are unable to proceed with it at this time.
+
+Reason: {{rejectionReason}}
+
+Please feel free to submit a revised order or reach out to your account manager if you have any questions.
+
+View in Portal: {{portalLink}}
+
+Thank you for your understanding.
+
+--
+Pivotal B2B - DemandGentic.ai Platform`,
+    variables: [
+      { name: 'recipientName', description: 'Recipient full name', required: true, exampleValue: 'Jane Smith' },
+      { name: 'orderTitle', description: 'Campaign order title or project name', required: true, exampleValue: 'Q1 Lead Generation Campaign' },
+      { name: 'rejectionReason', description: 'Reason for rejection', required: true, exampleValue: 'Insufficient budget allocation for the requested lead volume' },
+      { name: 'rejectedAt', description: 'Date of rejection', required: false, exampleValue: 'February 27, 2026' },
+      { name: 'portalLink', description: 'Link to view order in client portal', required: false, exampleValue: 'https://demandgentic.ai/client-portal/orders/abc123' },
+    ],
+  },
 ];
 
 /**
@@ -973,6 +1028,14 @@ export const DEFAULT_RULES: DefaultRule[] = [
     recipientResolver: 'all_tenant_users',
     isEnabled: true,
     description: 'Send approval confirmation to all client users when their campaign order is approved.',
+  },
+  {
+    eventType: 'campaign_order_rejected',
+    templateKey: 'campaign_order_rejected',
+    channelType: 'email',
+    recipientResolver: 'all_tenant_users',
+    isEnabled: true,
+    description: 'Send rejection notification to all client users when their campaign order is rejected.',
   },
 ];
 
