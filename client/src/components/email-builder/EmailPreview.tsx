@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Monitor, Smartphone, Tablet, Moon, Sun } from "lucide-react";
@@ -154,6 +154,9 @@ export function EmailPreview({
               </Button>
             </div>
           </DialogTitle>
+          <DialogDescription>
+            Preview the generated email content with sample personalization across desktop, tablet, and mobile views.
+          </DialogDescription>
         </DialogHeader>
 
         {/* Email Header Info */}
@@ -240,7 +243,7 @@ export function EmailPreview({
                   height: "100%",
                   border: "none"
                 }}
-                sandbox="allow-same-origin allow-scripts"
+                sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
               />
             </div>
           </div>

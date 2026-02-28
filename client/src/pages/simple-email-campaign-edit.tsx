@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -16,7 +16,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EmailPreview } from "@/components/email-builder";
 import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
-import { buildBrandedEmailHtml, buildTextFirstEmailHtml, type BrandPaletteKey } from "@/components/email-builder/ai-email-template";
+import {
+  buildBrandedEmailHtml,
+  buildTextFirstEmailHtml,
+  type BrandPaletteKey,
+  type BrandPaletteOverrides,
+} from "@/components/email-builder/ai-email-template";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -117,7 +122,7 @@ interface ListContactRecord {
 
 type AudienceSource = "segment" | "list";
 type TemplateTone = "professional" | "friendly" | "direct";
-type TemplateDesign = "plain" | "branded" | "newsletter";
+type TemplateDesign = "plain" | "branded" | "newsletter" | "argyle-brand";
 
 interface PersistedAdminAudienceConfig {
   source?: AudienceSource;
@@ -135,9 +140,25 @@ interface PersistedAdminEmailTemplateConfig {
   tone?: TemplateTone;
   design?: TemplateDesign;
   subject?: string;
+  preheader?: string;
   bodyText?: string;
   bodyHtml?: string;
+  promptSource?: string;
+  promptKey?: string | null;
   personalizationTokens?: string[];
+}
+
+interface GeneratedAdminEmailTemplateResponse {
+  success: boolean;
+  template?: {
+    subject?: string;
+    preheader?: string;
+    bodyText?: string;
+    bodyHtml?: string;
+    promptSource?: string;
+    promptKeyUsed?: string | null;
+    usedFallback?: boolean;
+  };
 }
 
 interface TestSendRow {
@@ -182,6 +203,27 @@ interface OrganizationIntelligenceResponse {
   campaigns?: Array<{ id: string; name: string; status: string; type: string }>;
   isPrimary?: boolean;
   message?: string;
+}
+
+interface AdminBrandPaletteResponse {
+  palette: {
+    key: string;
+    source: "website-css" | "fallback";
+    website: string;
+    primary: string;
+    secondary: string;
+    neutral: string;
+    overrides: BrandPaletteOverrides;
+  };
+  fallback?: {
+    key: string;
+    source: "fallback";
+    website: string;
+    primary: string;
+    secondary: string;
+    neutral: string;
+    overrides: BrandPaletteOverrides;
+  };
 }
 
 type AutofillFieldKey =
@@ -232,6 +274,13 @@ const DEFAULT_FORM: EditFormState = {
 
 const DEFAULT_TEMPLATE_TONE: TemplateTone = "professional";
 const DEFAULT_TEMPLATE_DESIGN: TemplateDesign = "plain";
+const DEFAULT_ARGYLE_BRAND_OVERRIDES: BrandPaletteOverrides = {
+  heroGradient: "linear-gradient(135deg, #1f5f95 0%, #4e9fd1 60%, #f3f7fb 100%)",
+  cta: "#1f5f95",
+  accent: "#4e9fd1",
+  surface: "#f3f7fb",
+  button: "#1f5f95",
+};
 const SUPPORTED_PERSONALIZATION_TOKENS = [
   "{{firstName}}",
   "{{lastName}}",
@@ -242,6 +291,12 @@ const SUPPORTED_PERSONALIZATION_TOKENS = [
   "{{unsubscribe_url}}",
   "{{preferences_url}}",
 ];
+const EMPTY_LIST_MEMBERS: ListContactRecord[] = [];
+
+function getTemplateDesignLabel(design: TemplateDesign): string {
+  if (design === "argyle-brand") return "Argyle Brand";
+  return design[0].toUpperCase() + design.slice(1);
+}
 
 function normalizeTextArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
@@ -304,6 +359,15 @@ function bodyTextToHtml(value: string): string {
     .join("");
 }
 
+function withExternalAnchorTargets(html: string): string {
+  return html.replace(/<a\b([^>]*)>/gi, (_match, attrs: string) => {
+    const hasTarget = /\btarget\s*=/.test(attrs);
+    const hasRel = /\brel\s*=/.test(attrs);
+    const nextAttrs = `${attrs}${hasTarget ? "" : ' target="_blank"'}${hasRel ? "" : ' rel="noopener noreferrer"'}`;
+    return `<a${nextAttrs}>`;
+  });
+}
+
 function createTestSendRow(partial?: Partial<TestSendRow>): TestSendRow {
   const rowId =
     typeof globalThis !== "undefined" && globalThis.crypto?.randomUUID
@@ -346,7 +410,8 @@ function generateTemplateVariant(args: {
   landingPageUrl: string;
   targetAudience: string;
   orgName: string;
-}): { subject: string; bodyText: string; bodyHtml: string } {
+  paletteOverrides?: BrandPaletteOverrides;
+}): { subject: string; preheader: string; bodyText: string; bodyHtml: string } {
   const {
     tone,
     design,
@@ -356,18 +421,24 @@ function generateTemplateVariant(args: {
     landingPageUrl,
     targetAudience,
     orgName,
+    paletteOverrides,
   } = args;
 
   const safeCampaignName = campaignName.trim() || "Email Outreach Campaign";
   const safeObjective = objective.trim() || "share a relevant idea that creates qualified pipeline conversations";
   const safeDescription = description.trim();
   const safeAudience = targetAudience.trim();
-  const ctaUrl = ensureAbsoluteUrl(landingPageUrl) || "https://example.com";
+  const ctaUrl = ensureAbsoluteUrl(landingPageUrl) || "#";
 
   const subjectByTone: Record<TemplateTone, string> = {
     professional: `${safeCampaignName}: a relevant idea for {{company}}`,
     friendly: `Quick thought for {{company}}, {{firstName}}`,
     direct: `{{firstName}}, quick win for {{company}}`,
+  };
+  const preheaderByTone: Record<TemplateTone, string> = {
+    professional: `Focused outreach for ${safeObjective}.`,
+    friendly: `Quick note on ${safeObjective}.`,
+    direct: `Fast path to ${safeObjective}.`,
   };
 
   const openerByTone: Record<TemplateTone, string> = {
@@ -408,6 +479,7 @@ function generateTemplateVariant(args: {
     });
     return {
       subject: subjectByTone[tone],
+      preheader: preheaderByTone[tone],
       bodyText,
       bodyHtml,
     };
@@ -418,6 +490,7 @@ function generateTemplateVariant(args: {
     brand: brandPalette,
     companyName: orgName || "Your Organization",
     ctaUrl,
+    paletteOverrides,
     copy: {
       subject: subjectByTone[tone],
       heroTitle: safeCampaignName,
@@ -440,6 +513,7 @@ function generateTemplateVariant(args: {
 
   return {
     subject: subjectByTone[tone],
+    preheader: preheaderByTone[tone],
     bodyText,
     bodyHtml: brandedHtml,
   };
@@ -454,9 +528,10 @@ function buildTemplateHtmlFromInputs(args: {
   targetAudience: string;
   landingPageUrl: string;
   orgName: string;
+  paletteOverrides?: BrandPaletteOverrides;
 }): string {
-  const { tone, design, subject, bodyText, objective, targetAudience, landingPageUrl, orgName } = args;
-  const ctaUrl = ensureAbsoluteUrl(landingPageUrl) || "https://example.com";
+  const { tone, design, subject, bodyText, objective, targetAudience, landingPageUrl, orgName, paletteOverrides } = args;
+  const ctaUrl = ensureAbsoluteUrl(landingPageUrl) || "#";
   const ctaByTone: Record<TemplateTone, string> = {
     professional: "View Brief",
     friendly: "Take a Quick Look",
@@ -478,6 +553,7 @@ function buildTemplateHtmlFromInputs(args: {
     brand: brandPalette,
     companyName: orgName || "Your Organization",
     ctaUrl,
+    paletteOverrides,
     copy: {
       subject,
       heroTitle: subject || "Email Campaign",
@@ -543,9 +619,13 @@ export default function SimpleEmailCampaignEditPage() {
   const [templateTone, setTemplateTone] = useState<TemplateTone>(DEFAULT_TEMPLATE_TONE);
   const [templateDesign, setTemplateDesign] = useState<TemplateDesign>(DEFAULT_TEMPLATE_DESIGN);
   const [templateSubject, setTemplateSubject] = useState("");
+  const [templatePreheader, setTemplatePreheader] = useState("");
   const [templateBodyText, setTemplateBodyText] = useState("");
   const [templateBodyHtml, setTemplateBodyHtml] = useState("");
+  const [templatePromptSource, setTemplatePromptSource] = useState("default fallback");
+  const [templatePromptKey, setTemplatePromptKey] = useState<string | null>(null);
   const [showTemplatePreviewModal, setShowTemplatePreviewModal] = useState(false);
+  const initialPromptTemplateLoadedRef = useRef(false);
   const [testSendRows, setTestSendRows] = useState<TestSendRow[]>([]);
   const [isSendingTests, setIsSendingTests] = useState(false);
   const [testSendSummary, setTestSendSummary] = useState<{
@@ -657,6 +737,61 @@ export default function SimpleEmailCampaignEditPage() {
     staleTime: 120_000,
   });
 
+  const selectedClientAccount = useMemo(
+    () => clientAccounts.find((client) => client.id === selectedClientAccountId) || null,
+    [clientAccounts, selectedClientAccountId]
+  );
+
+  const selectedOrgNameForBrand = firstNonEmptyString(
+    selectedClientAccount?.name,
+    selectedClientAccount?.companyName,
+    relatedOrder?.title
+  );
+  const selectedOrgWebsiteForBrand = ensureAbsoluteUrl(
+    firstNonEmptyString(
+      organizationIntelligence?.organization?.identity?.website,
+      organizationIntelligence?.organization?.identity?.websiteUrl,
+      organizationIntelligence?.organization?.website,
+      organizationIntelligence?.organization?.domain
+    )
+  );
+
+  const { data: brandPaletteResponse } = useQuery<AdminBrandPaletteResponse | null>({
+    queryKey: [
+      "admin-email-campaign-brand-palette",
+      selectedClientAccountId,
+      selectedOrgNameForBrand,
+      selectedOrgWebsiteForBrand,
+    ],
+    enabled:
+      !!selectedClientAccountId ||
+      selectedOrgNameForBrand.toLowerCase().includes("argyle") ||
+      selectedOrgWebsiteForBrand.includes("argyleforum.com"),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (selectedClientAccountId) params.set("clientAccountId", selectedClientAccountId);
+      if (selectedOrgNameForBrand) params.set("orgName", selectedOrgNameForBrand);
+      if (selectedOrgWebsiteForBrand) params.set("website", selectedOrgWebsiteForBrand);
+      try {
+        const res = await apiRequest("GET", `/api/admin/brand-palette/resolve?${params.toString()}`);
+        return res.json();
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 10 * 60_000,
+  });
+
+  const argylePaletteOverrides = useMemo<BrandPaletteOverrides>(() => {
+    const serverPalette =
+      brandPaletteResponse?.palette?.key === "argyle"
+        ? brandPaletteResponse.palette.overrides
+        : brandPaletteResponse?.fallback?.key === "argyle"
+          ? brandPaletteResponse.fallback.overrides
+          : null;
+    return serverPalette || DEFAULT_ARGYLE_BRAND_OVERRIDES;
+  }, [brandPaletteResponse]);
+
   const { data: segments = [] } = useQuery<SegmentRecord[]>({
     queryKey: ["admin-email-campaign-segments"],
     queryFn: async () => {
@@ -720,8 +855,11 @@ export default function SimpleEmailCampaignEditPage() {
       tone: wizardTemplate.tone,
       design: wizardTemplate.design,
       subject: firstNonEmptyString(wizardTemplate.subject),
+      preheader: firstNonEmptyString(wizardTemplate.preheader),
       bodyText: firstNonEmptyString(wizardTemplate.bodyText),
       bodyHtml: firstNonEmptyString(wizardTemplate.bodyHtml),
+      promptSource: firstNonEmptyString(wizardTemplate.promptSource),
+      promptKey: firstNonEmptyString(wizardTemplate.promptKey),
       personalizationTokens: normalizeTextArray(wizardTemplate.personalizationTokens),
     };
   }, [campaign?.audienceRefs]);
@@ -739,7 +877,7 @@ export default function SimpleEmailCampaignEditPage() {
   }, [campaign?.audienceRefs]);
 
   const {
-    data: listMembers = [],
+    data: listMembersData,
     isLoading: listMembersLoading,
   } = useQuery<ListContactRecord[]>({
     queryKey: ["admin-email-campaign-list-members", selectedListId],
@@ -752,6 +890,7 @@ export default function SimpleEmailCampaignEditPage() {
     },
     staleTime: 30_000,
   });
+  const listMembers = listMembersData ?? EMPTY_LIST_MEMBERS;
 
   const clientSnapshot = useMemo(() => {
     const wizardDetails = (campaign?.audienceRefs as any)?.wizardDetails || {};
@@ -850,7 +989,10 @@ export default function SimpleEmailCampaignEditPage() {
         ? persistedTemplateConfig.tone
         : DEFAULT_TEMPLATE_TONE;
     const initialDesign =
-      persistedTemplateConfig?.design === "plain" || persistedTemplateConfig?.design === "branded" || persistedTemplateConfig?.design === "newsletter"
+      persistedTemplateConfig?.design === "plain" ||
+      persistedTemplateConfig?.design === "branded" ||
+      persistedTemplateConfig?.design === "newsletter" ||
+      persistedTemplateConfig?.design === "argyle-brand"
         ? persistedTemplateConfig.design
         : DEFAULT_TEMPLATE_DESIGN;
     const generatedTemplate = generateTemplateVariant({
@@ -865,12 +1007,16 @@ export default function SimpleEmailCampaignEditPage() {
         clientAccounts.find((client) => client.id === inferredClientAccountId)?.name ||
         relatedOrder?.title ||
         "Your Organization",
+      paletteOverrides: initialDesign === "argyle-brand" ? argylePaletteOverrides : undefined,
     });
     setTemplateTone(initialTone);
     setTemplateDesign(initialDesign);
     setTemplateSubject(firstNonEmptyString(persistedTemplateConfig?.subject, generatedTemplate.subject));
+    setTemplatePreheader(firstNonEmptyString(persistedTemplateConfig?.preheader, generatedTemplate.preheader));
     setTemplateBodyText(firstNonEmptyString(persistedTemplateConfig?.bodyText, generatedTemplate.bodyText));
     setTemplateBodyHtml(firstNonEmptyString(persistedTemplateConfig?.bodyHtml, generatedTemplate.bodyHtml));
+    setTemplatePromptSource(firstNonEmptyString(persistedTemplateConfig?.promptSource, "default fallback"));
+    setTemplatePromptKey(firstNonEmptyString(persistedTemplateConfig?.promptKey) || null);
     const persistedRows = Array.isArray(persistedTestSendConfig?.rows)
       ? persistedTestSendConfig.rows
           .map((row) =>
@@ -918,6 +1064,7 @@ export default function SimpleEmailCampaignEditPage() {
     persistedTemplateConfig,
     persistedTestSendConfig,
     clientAccounts,
+    argylePaletteOverrides,
   ]);
 
   const listMemberIds = useMemo(
@@ -972,11 +1119,6 @@ export default function SimpleEmailCampaignEditPage() {
     filteredListMembers.every((member) => (member.id ? !!contactSelection[member.id] : false));
   const segmentAudienceCount = Number(selectedSegment?.recordCountCache || 0);
 
-  const selectedClientAccount = useMemo(
-    () => clientAccounts.find((client) => client.id === selectedClientAccountId) || null,
-    [clientAccounts, selectedClientAccountId]
-  );
-
   const firstIncludedListMember = useMemo(() => {
     if (selectedAudienceSource !== "list") return null;
     return listMembers.find((member) => member.id && !excludedContactIdSet.has(member.id)) || null;
@@ -1018,6 +1160,10 @@ export default function SimpleEmailCampaignEditPage() {
     () => replaceTemplateTokens(templateSubject || "", templateSampleContact),
     [templateSubject, templateSampleContact]
   );
+  const templateRenderedPreheader = useMemo(
+    () => replaceTemplateTokens(templatePreheader || "", templateSampleContact),
+    [templatePreheader, templateSampleContact]
+  );
 
   const templateRenderedBodyText = useMemo(
     () => replaceTemplateTokens(templateBodyText || "", templateSampleContact),
@@ -1029,6 +1175,12 @@ export default function SimpleEmailCampaignEditPage() {
     if (!html) return "";
     return replaceTemplateTokens(html, templateSampleContact);
   }, [templateBodyHtml, templateSampleContact]);
+  const landingPageUrlForTemplate = ensureAbsoluteUrl(form.landingPageUrl);
+  const hasLandingPageUrl = !!landingPageUrlForTemplate;
+  const templateRenderedHtmlWithTargets = useMemo(
+    () => withExternalAnchorTargets(templateRenderedHtml || bodyTextToHtml(templateRenderedBodyText)),
+    [templateRenderedHtml, templateRenderedBodyText]
+  );
 
   const previewContacts = useMemo(
     () => [
@@ -1084,18 +1236,47 @@ export default function SimpleEmailCampaignEditPage() {
 
   useEffect(() => {
     if (selectedAudienceSource !== "list") return;
-    setExcludedContactIds((prev) => prev.filter((contactId) => listMemberIdSet.has(contactId)));
+    setExcludedContactIds((prev) => {
+      const next = prev.filter((contactId) => listMemberIdSet.has(contactId));
+      if (next.length === prev.length && next.every((contactId, idx) => contactId === prev[idx])) {
+        return prev;
+      }
+      return next;
+    });
     setContactSelection((prev) => {
       const next: Record<string, boolean> = {};
       for (const [contactId, selected] of Object.entries(prev)) {
         if (selected && listMemberIdSet.has(contactId)) next[contactId] = true;
       }
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length === nextKeys.length && prevKeys.every((key) => !!prev[key] === !!next[key])) {
+        return prev;
+      }
       return next;
     });
   }, [selectedAudienceSource, listMemberIdSet]);
 
-  const applyGeneratedTemplate = (nextTone: TemplateTone, nextDesign: TemplateDesign) => {
-    const generated = generateTemplateVariant({
+  const getPaletteOverridesForDesign = (design: TemplateDesign): BrandPaletteOverrides | undefined =>
+    design === "argyle-brand" ? argylePaletteOverrides : undefined;
+
+  const inferredPromptCampaignType = useMemo(() => {
+    if (projectRequest?.externalEventId) return "argyle_event";
+    const orderType =
+      typeof relatedOrder?.campaignConfig?.campaignType === "string"
+        ? relatedOrder.campaignConfig.campaignType
+        : "";
+    return firstNonEmptyString(orderType, campaign?.type, "default");
+  }, [campaign?.type, projectRequest?.externalEventId, relatedOrder?.campaignConfig]);
+
+  const applyGeneratedTemplate = async (
+    nextTone: TemplateTone,
+    nextDesign: TemplateDesign,
+    options?: { silent?: boolean }
+  ) => {
+    const cacheBust = Date.now();
+    const generationUrl = "/api/admin/email-campaign-templates/generate";
+    const fallbackGenerated = generateTemplateVariant({
       tone: nextTone,
       design: nextDesign,
       campaignName: form.name,
@@ -1104,13 +1285,145 @@ export default function SimpleEmailCampaignEditPage() {
       landingPageUrl: form.landingPageUrl,
       targetAudience: form.targetAudience,
       orgName: templateOrganizationName,
+      paletteOverrides: getPaletteOverridesForDesign(nextDesign),
     });
-    setTemplateTone(nextTone);
-    setTemplateDesign(nextDesign);
-    setTemplateSubject(generated.subject);
-    setTemplateBodyText(generated.bodyText);
-    setTemplateBodyHtml(generated.bodyHtml);
+
+    try {
+      console.info("[EmailTemplateDebug] client.request", {
+        method: "POST",
+        url: generationUrl,
+        campaignId,
+        tone: nextTone,
+        design: nextDesign,
+        cacheBust,
+      });
+
+      const response = await apiRequest("POST", generationUrl, {
+        campaignId,
+        projectId: campaign?.projectId || undefined,
+        clientAccountId: selectedClientAccountId || campaign?.clientAccountId || undefined,
+        campaignType: inferredPromptCampaignType,
+        channel: form.channel,
+        tone: nextTone,
+        design: nextDesign,
+        campaignName: form.name,
+        objective: form.objective,
+        description: form.description,
+        targetAudience: form.targetAudience,
+        successCriteria: form.successCriteria,
+        targetJobTitles: form.targetJobTitles,
+        targetIndustries: form.targetIndustries,
+        landingPageUrl: form.landingPageUrl,
+        organizationName: templateOrganizationName,
+        organizationIntelligence: (organizationIntelligence?.organization as any) || undefined,
+        eventContext: projectRequest
+          ? {
+              title: firstNonEmptyString((projectRequest as any)?.eventTitle, form.name),
+              date: firstNonEmptyString((projectRequest as any)?.eventDate),
+              type: firstNonEmptyString((projectRequest as any)?.eventType),
+              location: firstNonEmptyString((projectRequest as any)?.eventLocation),
+              community: firstNonEmptyString((projectRequest as any)?.eventCommunity),
+              sourceUrl: firstNonEmptyString((projectRequest as any)?.eventSourceUrl, form.landingPageUrl),
+              overview: firstNonEmptyString((projectRequest as any)?.description, form.description),
+            }
+          : undefined,
+        recipient: {
+          firstName: templateSampleContact.firstName,
+          company: templateSampleContact.company,
+          jobTitle: templateSampleContact.jobTitle,
+          industry: firstNonEmptyString(form.targetIndustries[0]),
+        },
+        paletteOverrides: getPaletteOverridesForDesign(nextDesign),
+        cacheBust,
+        forceRefreshEventBrief: true,
+      });
+      const responseContentType = (response.headers.get("content-type") || "").toLowerCase();
+      console.info("[EmailTemplateDebug] client.response.meta", {
+        url: generationUrl,
+        status: response.status,
+        contentType: responseContentType,
+      });
+      if (!responseContentType.includes("application/json")) {
+        const rawBody = await response.text();
+        const preview = rawBody.replace(/\s+/g, " ").trim().slice(0, 120);
+        throw new Error(
+          `Template generation returned non-JSON content (${responseContentType || "unknown"}).${preview ? ` ${preview}` : ""}`
+        );
+      }
+
+      let body: GeneratedAdminEmailTemplateResponse;
+      try {
+        body = (await response.json()) as GeneratedAdminEmailTemplateResponse;
+      } catch {
+        throw new Error("Template generation returned invalid JSON response");
+      }
+      const generated = body?.template;
+
+      if (!generated) {
+        throw new Error("Template generator returned an empty response");
+      }
+
+      console.info("[EmailTemplateDebug] client.response.template", {
+        subjectLength: firstNonEmptyString(generated.subject).length,
+        preheaderLength: firstNonEmptyString(generated.preheader).length,
+        bodyLength: firstNonEmptyString(generated.bodyText).length,
+        promptSource: firstNonEmptyString(generated.promptSource),
+        promptKey: firstNonEmptyString(generated.promptKeyUsed),
+      });
+
+      setTemplateTone(nextTone);
+      setTemplateDesign(nextDesign);
+      setTemplateSubject(firstNonEmptyString(generated.subject, fallbackGenerated.subject));
+      setTemplatePreheader(firstNonEmptyString(generated.preheader, fallbackGenerated.preheader));
+      setTemplateBodyText(firstNonEmptyString(generated.bodyText, fallbackGenerated.bodyText));
+      setTemplateBodyHtml(firstNonEmptyString(generated.bodyHtml, fallbackGenerated.bodyHtml));
+      setTemplatePromptSource(firstNonEmptyString(generated.promptSource, "default fallback"));
+      setTemplatePromptKey(firstNonEmptyString(generated.promptKeyUsed) || null);
+    } catch (error: any) {
+      setTemplateTone(nextTone);
+      setTemplateDesign(nextDesign);
+      setTemplateSubject(fallbackGenerated.subject);
+      setTemplatePreheader(fallbackGenerated.preheader);
+      setTemplateBodyText(fallbackGenerated.bodyText);
+      setTemplateBodyHtml(fallbackGenerated.bodyHtml);
+      setTemplatePromptSource("default fallback");
+      setTemplatePromptKey(null);
+
+      console.info("[EmailTemplateDebug] client.fallback-used", {
+        reason: String(error?.message || "unknown"),
+      });
+
+      if (!options?.silent) {
+        const rawMessage = String(error?.message || "");
+        const userMessage = rawMessage.includes("non-JSON content")
+          ? "Server returned HTML instead of JSON. Please refresh and retry; if it persists, restart the backend server."
+          : rawMessage || "Used fallback template rules.";
+        toast({
+          title: "Prompt generation unavailable",
+          description: userMessage,
+          variant: "destructive",
+        });
+      }
+    }
   };
+
+  useEffect(() => {
+    if (!initialized || initialPromptTemplateLoadedRef.current) return;
+
+    const hasPersistedTemplate =
+      !!persistedTemplateConfig?.subject &&
+      !!persistedTemplateConfig?.bodyText;
+    initialPromptTemplateLoadedRef.current = true;
+    if (hasPersistedTemplate) return;
+
+    void applyGeneratedTemplate(templateTone, templateDesign, { silent: true });
+  }, [
+    initialized,
+    persistedTemplateConfig?.subject,
+    persistedTemplateConfig?.bodyText,
+    templateTone,
+    templateDesign,
+  ]);
 
   useEffect(() => {
     if (!initialized) return;
@@ -1123,6 +1436,7 @@ export default function SimpleEmailCampaignEditPage() {
       targetAudience: form.targetAudience,
       landingPageUrl: form.landingPageUrl,
       orgName: templateOrganizationName,
+      paletteOverrides: getPaletteOverridesForDesign(templateDesign),
     });
     setTemplateBodyHtml(nextHtml);
   }, [
@@ -1135,6 +1449,7 @@ export default function SimpleEmailCampaignEditPage() {
     form.targetAudience,
     form.landingPageUrl,
     templateOrganizationName,
+    argylePaletteOverrides,
   ]);
 
   const addArrayItem = (field: "targetJobTitles" | "targetIndustries", value: string, clear: () => void) => {
@@ -1624,8 +1939,11 @@ export default function SimpleEmailCampaignEditPage() {
         tone: templateTone,
         design: templateDesign,
         subject: templateSubject.trim(),
+        preheader: templatePreheader.trim(),
         bodyText: templateBodyText.trim(),
         bodyHtml: templateBodyHtml,
+        promptSource: templatePromptSource,
+        promptKey: templatePromptKey,
         personalizationTokens: SUPPORTED_PERSONALIZATION_TOKENS,
       };
       const persistedTestSend: PersistedAdminEmailTestSendConfig = {
@@ -2385,7 +2703,7 @@ export default function SimpleEmailCampaignEditPage() {
                 <Label className="font-medium">Tone</Label>
                 <Select
                   value={templateTone}
-                  onValueChange={(value) => applyGeneratedTemplate(value as TemplateTone, templateDesign)}
+                  onValueChange={(value) => void applyGeneratedTemplate(value as TemplateTone, templateDesign)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select tone" />
@@ -2401,7 +2719,7 @@ export default function SimpleEmailCampaignEditPage() {
                 <Label className="font-medium">Design</Label>
                 <Select
                   value={templateDesign}
-                  onValueChange={(value) => applyGeneratedTemplate(templateTone, value as TemplateDesign)}
+                  onValueChange={(value) => void applyGeneratedTemplate(templateTone, value as TemplateDesign)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select design" />
@@ -2410,6 +2728,7 @@ export default function SimpleEmailCampaignEditPage() {
                     <SelectItem value="plain">Plain</SelectItem>
                     <SelectItem value="branded">Branded</SelectItem>
                     <SelectItem value="newsletter">Newsletter</SelectItem>
+                    <SelectItem value="argyle-brand">Argyle Brand</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -2418,12 +2737,20 @@ export default function SimpleEmailCampaignEditPage() {
                   type="button"
                   variant="outline"
                   className="w-full"
-                  onClick={() => applyGeneratedTemplate(templateTone, templateDesign)}
+                  onClick={() => void applyGeneratedTemplate(templateTone, templateDesign)}
                 >
                   Regenerate from Tone + Design
                 </Button>
               </div>
             </div>
+
+            {templateDesign === "argyle-brand" && (
+              <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+                Using Argyle palette
+                {" "}
+                ({brandPaletteResponse?.palette?.source === "website-css" ? "auto-detected from argyleforum.com CSS" : "fallback defaults"}).
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label className="font-medium">Subject Line</Label>
@@ -2431,6 +2758,15 @@ export default function SimpleEmailCampaignEditPage() {
                 value={templateSubject}
                 onChange={(e) => setTemplateSubject(e.target.value)}
                 placeholder="Write a clear subject line..."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="font-medium">Preheader</Label>
+              <Input
+                value={templatePreheader}
+                onChange={(e) => setTemplatePreheader(e.target.value)}
+                placeholder="Add short preview text shown after the subject..."
               />
             </div>
 
@@ -2459,6 +2795,24 @@ export default function SimpleEmailCampaignEditPage() {
                   Open Full Preview
                 </Button>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!hasLandingPageUrl}
+                  title={hasLandingPageUrl ? "Open landing page in new tab" : "No landing page URL provided."}
+                  onClick={() => {
+                    if (!hasLandingPageUrl) return;
+                    window.open(landingPageUrlForTemplate, "_blank", "noopener,noreferrer");
+                  }}
+                >
+                  View brief
+                </Button>
+                {!hasLandingPageUrl && (
+                  <span className="text-xs text-muted-foreground">No landing page URL provided.</span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
                 {SUPPORTED_PERSONALIZATION_TOKENS.map((token) => (
                   <Badge key={token} variant="secondary">
@@ -2472,6 +2826,8 @@ export default function SimpleEmailCampaignEditPage() {
               <div className="rounded-md border p-4 space-y-2">
                 <p className="text-xs text-muted-foreground">Rendered Subject</p>
                 <p className="font-medium">{templateRenderedSubject || "-"}</p>
+                <p className="text-xs text-muted-foreground pt-2">Rendered Preheader</p>
+                <p className="text-sm">{templateRenderedPreheader || "-"}</p>
                 <p className="text-xs text-muted-foreground pt-2">Rendered Text Fallback</p>
                 <pre className="max-h-[320px] overflow-auto whitespace-pre-wrap text-xs rounded bg-muted/30 p-3">
                   {templateRenderedBodyText || "-"}
@@ -2493,11 +2849,11 @@ export default function SimpleEmailCampaignEditPage() {
                             img { max-width: 100%; height: auto; }
                           </style>
                         </head>
-                        <body>${sanitizeHtmlForIframePreview(templateRenderedHtml || bodyTextToHtml(templateRenderedBodyText))}</body>
+                        <body>${sanitizeHtmlForIframePreview(templateRenderedHtmlWithTargets)}</body>
                       </html>
                     `}
                     className="h-full w-full border-0"
-                    sandbox="allow-same-origin allow-scripts"
+                    sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
                   />
                 </div>
               </div>
@@ -2699,10 +3055,12 @@ export default function SimpleEmailCampaignEditPage() {
               <div className="rounded-md border p-3 md:col-span-2">
                 <p className="text-xs text-muted-foreground">Email Template</p>
                 <p className="font-medium">
-                  Tone: {templateTone[0].toUpperCase() + templateTone.slice(1)} | Design: {templateDesign[0].toUpperCase() + templateDesign.slice(1)}
+                  Tone: {templateTone[0].toUpperCase() + templateTone.slice(1)} | Design: {getTemplateDesignLabel(templateDesign)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">Subject</p>
                 <p className="font-medium">{templateSubject || "-"}</p>
+                <p className="mt-2 text-xs text-muted-foreground">Preheader</p>
+                <p className="font-medium">{templatePreheader || "-"}</p>
                 <p className="mt-2 text-xs text-muted-foreground">Body (text fallback)</p>
                 <p className="whitespace-pre-wrap">{templateBodyText || "-"}</p>
                 <p className="mt-2 text-xs text-muted-foreground">Supported tokens</p>
@@ -2784,9 +3142,9 @@ export default function SimpleEmailCampaignEditPage() {
       <EmailPreview
         open={showTemplatePreviewModal}
         onOpenChange={setShowTemplatePreviewModal}
-        htmlContent={templateRenderedHtml || bodyTextToHtml(templateRenderedBodyText)}
+        htmlContent={templateRenderedHtmlWithTargets}
         subject={templateRenderedSubject || templateSubject || "Untitled email"}
-        preheader={templateRenderedBodyText.split("\n")[0] || ""}
+        preheader={templateRenderedPreheader || templateRenderedBodyText.split("\n")[0] || ""}
         fromName={templateOrganizationName}
         fromEmail="campaigns@demandgentic.local"
         sampleContacts={previewContacts}
