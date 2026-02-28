@@ -45,6 +45,52 @@ interface Campaign {
   name: string;
 }
 
+function stringifyForDisplay(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stringifyForDisplay(item))
+      .filter(Boolean)
+      .join(' • ');
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const preferredFields = [
+      'description',
+      'text',
+      'suggestedChange',
+      'recommendation',
+      'currentBehavior',
+      'expectedImpact',
+      'message',
+      'title',
+      'name',
+      'type',
+      'category',
+      'severity',
+    ];
+
+    const parts = preferredFields
+      .map((key) => stringifyForDisplay(record[key]))
+      .filter(Boolean);
+
+    if (parts.length > 0) {
+      return parts.join(' • ');
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '[invalid value]';
+    }
+  }
+
+  return String(value);
+}
+
 type HubTab =
   | 'disposition-intelligence'
   | 'conversation-quality'
@@ -115,12 +161,12 @@ function adaptConversationToDetail(conv: any): UnifiedConversationDetail {
 
   // Extract detected issues
   const detectedIssues = (conv.detectedIssues || conv.analysis?.issues || []).map((issue: any) => ({
-    severity: issue.severity || 'medium',
-    code: issue.type || issue.code || 'unknown',
-    type: issue.type,
-    description: issue.description || '',
-    recommendation: issue.suggestion || issue.recommendation,
-    evidence: issue.evidence,
+    severity: (typeof issue.severity === 'string' ? issue.severity : 'medium') as 'high' | 'medium' | 'low',
+    code: stringifyForDisplay(issue.type || issue.code || 'unknown'),
+    type: stringifyForDisplay(issue.type),
+    description: stringifyForDisplay(issue.description || issue),
+    recommendation: stringifyForDisplay(issue.suggestion || issue.recommendation),
+    evidence: stringifyForDisplay(issue.evidence),
   }));
 
   // Extract quality subscores
@@ -128,12 +174,12 @@ function adaptConversationToDetail(conv: any): UnifiedConversationDetail {
 
   // Extract recommendations
   const recommendations = (conv.analysis?.recommendations || []).map((rec: any) => ({
-    area: rec.category || 'general',
-    category: rec.category,
-    text: rec.suggestedChange || rec.text || '',
-    suggestedChange: rec.suggestedChange,
-    impact: rec.expectedImpact || rec.impact,
-    priority: rec.priority,
+    area: stringifyForDisplay(rec.category || rec.area || 'general'),
+    category: stringifyForDisplay(rec.category || rec.area),
+    text: stringifyForDisplay(rec.suggestedChange || rec.text || rec),
+    suggestedChange: stringifyForDisplay(rec.suggestedChange || rec.text),
+    impact: stringifyForDisplay(rec.expectedImpact || rec.impact),
+    priority: (typeof rec.priority === 'string' ? rec.priority : undefined) as 'high' | 'medium' | 'low' | undefined,
   }));
 
   return {

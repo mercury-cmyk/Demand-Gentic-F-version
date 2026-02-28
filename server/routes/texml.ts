@@ -3,6 +3,7 @@ import { storePendingCallState } from "../services/pending-call-state";
 import { getPreferredCodecForDestination } from "../services/audio-configuration";
 
 const router = Router();
+const VERBOSE_TEXML_LOGS = process.env.TEXML_VERBOSE_LOGS === 'true';
 
 // Hardcoded production WebSocket host - env vars get overwritten by dev scripts
 const PRODUCTION_WS_HOST = 'wss://demandgentic.ai';
@@ -90,13 +91,17 @@ function getCodecDescription(codec: 'PCMA' | 'PCMU', phoneNumber?: string): stri
  * to avoid URL length limits that can cause ngrok/proxy WebSocket upgrade failures.
  */
 const aiCallHandler = async (req: any, res: any) => {
-  console.log("=".repeat(60));
-  console.log("[TeXML] 🔔 RECEIVED REQUEST - THIS MEANS TELNYX CAN REACH US!");
-  console.log("[TeXML] Method:", req.method);
-  console.log("[TeXML] Headers:", JSON.stringify(req.headers, null, 2));
-  console.log("[TeXML] Body:", JSON.stringify(req.body, null, 2));
-  console.log("[TeXML] Query:", JSON.stringify(req.query, null, 2));
-  console.log("=".repeat(60));
+  if (VERBOSE_TEXML_LOGS) {
+    console.log("=".repeat(60));
+    console.log("[TeXML] 🔔 RECEIVED REQUEST");
+    console.log("[TeXML] Method:", req.method);
+    console.log("[TeXML] Headers:", JSON.stringify(req.headers, null, 2));
+    console.log("[TeXML] Body:", JSON.stringify(req.body, null, 2));
+    console.log("[TeXML] Query:", JSON.stringify(req.query, null, 2));
+    console.log("=".repeat(60));
+  } else {
+    console.log(`[TeXML] Request received method=${req.method} host=${req.get('host') || 'unknown'}`);
+  }
 
   // Extract parameters from either body (POST) or query (GET)
   const params = req.method === 'GET' ? req.query : req.body;
@@ -112,8 +117,10 @@ const aiCallHandler = async (req: any, res: any) => {
   const destinationNumber = params.To || params.to || params.Called || params.called ||
                            params.dialed_number || params.destination || null;
 
-  console.log("[TeXML] Client state from query:", req.query.client_state ? "present" : "missing");
-  console.log("[TeXML] Destination number:", destinationNumber || "unknown");
+  if (VERBOSE_TEXML_LOGS) {
+    console.log("[TeXML] Client state from query:", req.query.client_state ? "present" : "missing");
+    console.log("[TeXML] Destination number:", destinationNumber || "unknown");
+  }
 
   // Determine if we have custom parameters passed from the initiation
   // These might be in ClientState (base64) or directly in the body if we added them to the URL
@@ -150,7 +157,9 @@ const aiCallHandler = async (req: any, res: any) => {
 
       const provider = contextData!.provider?.toLowerCase() || 'gemini_live';
       dialerPath = '/voice-dialer';
-      console.log(`[TeXML] Provider: ${provider} → routing to /voice-dialer (Gemini-only)`);
+      if (VERBOSE_TEXML_LOGS) {
+        console.log(`[TeXML] Provider: ${provider} → routing to /voice-dialer (Gemini-only)`);
+      }
 
       // Build WebSocket URL with correct dialer path
       const wsUrl = host.startsWith('wss://') || host.startsWith('ws://')
@@ -160,7 +169,9 @@ const aiCallHandler = async (req: any, res: any) => {
       if (actualCallId) {
         // Only pass call_id in URL (short, safe for WebSocket upgrade)
         finalWsUrl = `${wsUrl}?call_id=${encodeURIComponent(actualCallId)}`;
-        console.log(`[TeXML] Stored context for call ${actualCallId}, URL length now: ${finalWsUrl.length}`);
+        if (VERBOSE_TEXML_LOGS) {
+          console.log(`[TeXML] Stored context for call ${actualCallId}, URL length now: ${finalWsUrl.length}`);
+        }
       } else {
         // Fallback: no call_id found, use legacy behavior (may fail with long URLs)
         console.warn("[TeXML] No call_id in client_state, using legacy URL encoding");
@@ -182,10 +193,12 @@ const aiCallHandler = async (req: any, res: any) => {
     finalWsUrl = wsUrl;
   }
 
-  console.log(`[TeXML] Client state length: ${clientState?.length || 0}`);
-  console.log(`[TeXML] Final WS URL length: ${finalWsUrl.length}`);
-  console.log(`[TeXML] Dialer path: ${dialerPath}`);
-  console.log(`[TeXML] Responding with Stream to: ${finalWsUrl.replace(/\?.*$/, '')}`);
+  if (VERBOSE_TEXML_LOGS) {
+    console.log(`[TeXML] Client state length: ${clientState?.length || 0}`);
+    console.log(`[TeXML] Final WS URL length: ${finalWsUrl.length}`);
+    console.log(`[TeXML] Dialer path: ${dialerPath}`);
+    console.log(`[TeXML] Responding with Stream to: ${finalWsUrl.replace(/\?.*$/, '')}`);
+  }
 
   // Escape any XML special characters in the URL
   const escapedWsUrl = finalWsUrl.replace(/&/g, '&amp;');
@@ -224,11 +237,9 @@ const aiCallHandler = async (req: any, res: any) => {
   if (contextData && actualCallId) {
     contextData.texml_codec = codec;
     contextData.audio_format = codec === 'PCMA' ? 'g711_alaw' : 'g711_ulaw';
-    try {
-      await storePendingCallState(actualCallId, contextData);
-    } catch (error) {
+    void storePendingCallState(actualCallId, contextData).catch((error) => {
       console.error(`[TeXML] Failed to persist pending call state for ${actualCallId}:`, error);
-    }
+    });
   }
   console.log(`[TeXML] 🎧 Codec selection: ${codecDescription}`);
 
@@ -269,12 +280,14 @@ const aiCallHandler = async (req: any, res: any) => {
     </Connect>
 </Response>`;
 
-  console.log("[TeXML] ✅ Sending TeXML response to Telnyx:");
-  console.log("[TeXML] Full WebSocket URL:", finalWsUrl);
-  console.log(`[TeXML] 🌍 International call: ${isInternationalCall ? 'YES (Krisp noise suppression enabled)' : 'NO (US/Canada)'}`);
-  console.log("[TeXML] XML Response:", texmlResponse);
-  console.log("[TeXML] Telnyx should now connect to this WebSocket URL");
-  console.log("=".repeat(60));
+  if (VERBOSE_TEXML_LOGS) {
+    console.log("[TeXML] ✅ Sending TeXML response to Telnyx:");
+    console.log("[TeXML] Full WebSocket URL:", finalWsUrl);
+    console.log(`[TeXML] 🌍 International call: ${isInternationalCall ? 'YES (Krisp noise suppression enabled)' : 'NO (US/Canada)'}`);
+    console.log("[TeXML] XML Response:", texmlResponse);
+    console.log("[TeXML] Telnyx should now connect to this WebSocket URL");
+    console.log("=".repeat(60));
+  }
 
   res.send(texmlResponse);
 };

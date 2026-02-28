@@ -208,12 +208,21 @@ if (isMainModule) {
     // CRITICAL: Register a lightweight /api/health BEFORE heavy route imports.
     // The full registerRoutes() can take 30-60s due to massive import tree.
     // Without this, Cloud Run health checks fail during initialization.
+    let initPhase = 'starting';
     app.get('/api/health', (_req, res) => {
-      res.json({ status: 'ok', timestamp: new Date().toISOString(), phase: 'initializing' });
+      res.json({ status: 'ok', timestamp: new Date().toISOString(), phase: initPhase });
     });
 
     // Redirect /favicon.ico to the logo
     app.get('/favicon.ico', (_req, res) => res.redirect(301, '/demangent-logo.png'));
+
+    log('Health endpoint registered, yielding to event loop before heavy imports...');
+
+    // CRITICAL: Yield to the event loop so Express can process the health check
+    // request that Cloud Run sends immediately after the TCP probe succeeds.
+    // Without this yield, the synchronous module evaluation from import("./routes")
+    // blocks the event loop for 30-60s, preventing all HTTP responses.
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     // LiveKit Webhook Handler (Signed with LIVEKIT_WEBHOOK_SECRET or LIVEKIT_API_SECRET)
     app.post('/webhook', async (req, res) => {
@@ -234,8 +243,11 @@ if (isMainModule) {
     });
 
     // Register all application routes (this import is heavy — 560KB+ route file with many sub-imports)
+    initPhase = 'loading_routes';
+    log('Loading routes...');
     const { registerRoutes } = await import("./routes");
     registerRoutes(app);
+    initPhase = 'routes_ready';
 
     // Add error handler after routes
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -257,6 +269,7 @@ if (isMainModule) {
       const { serveStatic } = await import("./static");
       serveStatic(app);
     }
+    initPhase = 'ready';
 
     // Now initialize everything else (after server is listening and health check is available)
     // This ensures health checks pass even if initialization is slow
