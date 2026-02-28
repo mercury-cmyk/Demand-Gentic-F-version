@@ -402,6 +402,7 @@ export class M365SyncService {
     cc?: string;
     subject: string;
     body: string;
+    skipTracking?: boolean;
   }): Promise<void> {
     console.log(`[M365 Send] Sending email from mailbox ${mailboxAccountId}`);
 
@@ -427,17 +428,21 @@ export class M365SyncService {
         }))
       : [];
 
-    // Generate unique message ID for tracking
-    const trackingMessageId = `sent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Apply message-level tracking (Option A: Normal email behavior)
-    // NOTE: Tracking is at message-level, not per-recipient
-    // We use the first recipient for token generation, but stats aggregate at message level
-    const trackingEmail = toRecipients.length > 0 ? toRecipients[0].emailAddress.address : mailboxAccount.mailboxEmail || '';
-    const trackedBody = emailTrackingService.applyTracking(emailData.body, {
-      messageId: trackingMessageId,
-      recipientEmail: trackingEmail,
-    });
+    let trackedBody: string;
+    let trackingMessageId: string;
+
+    if (emailData.skipTracking) {
+      // Body already has tracking applied by caller
+      trackedBody = emailData.body;
+      trackingMessageId = `sent-${Date.now()}`;
+    } else {
+      trackingMessageId = `sent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const trackingEmail = toRecipients.length > 0 ? toRecipients[0].emailAddress.address : mailboxAccount.mailboxEmail || '';
+      trackedBody = emailTrackingService.applyTracking(emailData.body, {
+        messageId: trackingMessageId,
+        recipientEmail: trackingEmail,
+      });
+    }
 
     // Send single email with proper To/CC headers (normal email behavior)
     const message = {

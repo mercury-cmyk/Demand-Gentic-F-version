@@ -8,6 +8,7 @@ import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like
 import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { enrichCampaignQADefaults, buildCampaignContextBrief, generateQAParametersFromContext } from "./lib/campaign-qa-defaults";
 import { storage } from "./storage";
+import { emailTrackingService } from "./lib/email-tracking-service";
 import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
@@ -2105,7 +2106,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Send email via M365
+  // Send email with open/click tracking linked to dealMessages
   app.post("/api/emails/send", requireAuth, async (req, res) => {
     try {
       const { to, cc, subject, body, mailboxAccountId } = req.body;
@@ -2119,15 +2120,71 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Mailbox account not found" });
       }
 
+      const fromEmail = mailboxAccount.mailboxEmail || "";
+      const toEmails = to.split(",").map((e: string) => e.trim()).filter(Boolean);
+      const ccEmails = cc ? cc.split(",").map((e: string) => e.trim()).filter(Boolean) : [];
+      const allParticipants = [fromEmail, ...toEmails, ...ccEmails].filter(Boolean);
+      const now = new Date();
+
+      // Create dealConversation + dealMessage so tracking IDs are linked
+      const conversation = await storage.createDealConversation({
+        opportunityId: null,
+        subject: subject || "(No Subject)",
+        threadId: null,
+        participantEmails: allParticipants,
+        messageCount: 1,
+        lastMessageAt: now,
+        direction: "outbound",
+        status: "active",
+      });
+
+      const dealMessage = await storage.createDealMessage({
+        conversationId: conversation.id,
+        opportunityId: null,
+        m365MessageId: `pending-send-${conversation.id}`,
+        fromEmail,
+        toEmails,
+        ccEmails,
+        subject: subject || "(No Subject)",
+        bodyPreview: body.replace(/<[^>]*>/g, "").substring(0, 500) || null,
+        bodyContent: body,
+        direction: "outbound",
+        messageStatus: "sending",
+        sentAt: now,
+        receivedAt: now,
+        isFromCustomer: false,
+        hasAttachments: false,
+        importance: "normal",
+      });
+
+      // Apply tracking using the dealMessage.id so stats are retrievable in inbox
+      const trackedBody = emailTrackingService.applyTracking(body, {
+        messageId: dealMessage.id,
+        recipientEmail: toEmails[0] || fromEmail,
+      });
+
+      // Send via provider with skipTracking (already tracked above)
       if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
         const { gmailSyncService } = await import('./services/gmail-sync-service');
-        await gmailSyncService.sendEmail(mailboxAccountId, { to, cc, subject, body });
+        const result = await gmailSyncService.sendEmail(mailboxAccountId, {
+          to, cc, subject, body: trackedBody, skipTracking: true,
+        });
+        // Update m365MessageId for sync dedup
+        await storage.updateDealMessage(dealMessage.id, {
+          m365MessageId: `google:${mailboxAccountId}:${result.messageId}`,
+          messageStatus: "delivered",
+        });
       } else {
         const { m365SyncService } = await import('./services/m365-sync-service');
-        await m365SyncService.sendEmail(mailboxAccountId, { to, cc, subject, body });
+        await m365SyncService.sendEmail(mailboxAccountId, {
+          to, cc, subject, body: trackedBody, skipTracking: true,
+        });
+        await storage.updateDealMessage(dealMessage.id, {
+          messageStatus: "delivered",
+        });
       }
 
-      res.json({ message: "Email sent successfully" });
+      res.json({ message: "Email sent successfully", dealMessageId: dealMessage.id });
     } catch (error: any) {
       console.error("Failed to send email:", error);
       res.status(500).json({ message: "Failed to send email", error: error.message });

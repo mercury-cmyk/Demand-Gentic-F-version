@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { PageShell } from "@/components/patterns/page-shell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,7 +15,8 @@ import {
   Mail, Inbox as InboxIcon, Send, Archive, Star, StarOff,
   RefreshCw, Reply, Forward, Trash2, Paperclip,
   Search, Building2, User, Target, ChevronRight, Loader2, X, Plus,
-  Sparkles, CheckCircle2, AlertCircle, Zap, Eye, MousePointer
+  Sparkles, CheckCircle2, AlertCircle, Zap, Eye, MousePointer,
+  Link2, Unlink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -72,6 +73,14 @@ interface MailboxAccount {
   provider: string;
 }
 
+interface GmailConnectionStatus {
+  connected: boolean;
+  mailboxEmail?: string;
+  displayName?: string;
+  connectedAt?: string;
+  lastSyncAt?: string;
+}
+
 interface TrackingStats {
   opens: number;
   uniqueOpens: number;
@@ -112,6 +121,94 @@ export default function InboxPage() {
     sentiment: string;
     suggestions: string[];
   } | null>(null);
+
+  // Gmail connection status
+  const { data: gmailStatus, isLoading: gmailStatusLoading } = useQuery<GmailConnectionStatus>({
+    queryKey: ['/api/oauth/google/status'],
+  });
+
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  // Gmail OAuth popup connect handler
+  const handleConnectGmail = useCallback(async () => {
+    setIsConnecting(true);
+    try {
+      const res = await apiRequest("GET", "/api/oauth/google/authorize");
+      const { authUrl } = await res.json();
+
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.innerWidth - width) / 2;
+      const top = window.screenY + (window.innerHeight - height) / 2;
+      const popup = window.open(
+        authUrl,
+        "gmail-oauth",
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
+      );
+
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === "oauth-success" && event.data?.provider === "google") {
+          window.removeEventListener("message", handleMessage);
+          setIsConnecting(false);
+          queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/status"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/mailbox-accounts"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/inbox/messages"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/inbox/stats"] });
+          toast({ title: "Gmail Connected", description: "Your Gmail account has been connected successfully." });
+        }
+        if (event.data?.type === "oauth-error" && event.data?.provider === "google") {
+          window.removeEventListener("message", handleMessage);
+          setIsConnecting(false);
+          toast({ title: "Connection Failed", description: event.data.error || "Failed to connect Gmail account.", variant: "destructive" });
+        }
+      };
+      window.addEventListener("message", handleMessage);
+
+      // Cleanup if popup is closed without completing
+      const checkClosed = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(checkClosed);
+          window.removeEventListener("message", handleMessage);
+          setIsConnecting(false);
+        }
+      }, 1000);
+    } catch (error) {
+      setIsConnecting(false);
+      toast({ title: "Connection Failed", description: "Failed to initiate Gmail connection.", variant: "destructive" });
+    }
+  }, [toast]);
+
+  // Gmail disconnect mutation
+  const disconnectGmailMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/oauth/google/disconnect");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/mailbox-accounts"] });
+      toast({ title: "Gmail Disconnected", description: "Your Gmail account has been disconnected." });
+    },
+    onError: () => {
+      toast({ title: "Disconnect Failed", description: "Failed to disconnect Gmail account.", variant: "destructive" });
+    },
+  });
+
+  // Gmail sync mutation
+  const syncGmailMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/oauth/google/sync");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/sent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/status"] });
+      toast({ title: "Sync Complete", description: "Gmail emails have been synced." });
+    },
+    onError: () => {
+      toast({ title: "Sync Failed", description: "Failed to sync Gmail emails.", variant: "destructive" });
+    },
+  });
 
   // Fetch inbox statistics
   const { data: statsResponse } = useQuery<{ stats: InboxStats[] }>({
@@ -622,6 +719,52 @@ export default function InboxPage() {
       ]}
       actions={
         <div className="flex items-center gap-2">
+          {/* Gmail connection status indicator */}
+          {gmailStatus?.connected && (
+            <div className="flex items-center gap-2 mr-2">
+              <Badge variant="outline" className="gap-1.5 text-xs font-normal py-1 px-2">
+                <div className="h-2 w-2 rounded-full bg-green-500" />
+                {gmailStatus.mailboxEmail}
+                {gmailStatus.lastSyncAt && (
+                  <span className="text-muted-foreground ml-1">
+                    synced {formatDistanceToNow(new Date(gmailStatus.lastSyncAt), { addSuffix: true })}
+                  </span>
+                )}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => syncGmailMutation.mutate()}
+                disabled={syncGmailMutation.isPending}
+                title="Sync Gmail now"
+                data-testid="button-sync-gmail"
+              >
+                <RefreshCw className={cn("h-4 w-4", syncGmailMutation.isPending && "animate-spin")} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => disconnectGmailMutation.mutate()}
+                disabled={disconnectGmailMutation.isPending}
+                title="Disconnect Gmail"
+                data-testid="button-disconnect-gmail"
+              >
+                <Unlink className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
+          )}
+          {!gmailStatus?.connected && !gmailStatusLoading && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleConnectGmail}
+              disabled={isConnecting}
+              data-testid="button-connect-gmail-header"
+            >
+              {isConnecting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
+              Connect Gmail
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -672,11 +815,24 @@ export default function InboxPage() {
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     <AlertCircle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
-                    <div>
+                    <div className="flex-1">
                       <h4 className="font-semibold text-sm mb-1">No Mailbox Connected</h4>
-                      <p className="text-sm text-muted-foreground">
-                        You need to connect a mailbox account before sending emails. Go to Settings to connect your Microsoft 365 or Google account.
+                      <p className="text-sm text-muted-foreground mb-3">
+                        Connect your Gmail account to send emails directly from the inbox.
                       </p>
+                      <Button
+                        size="sm"
+                        onClick={handleConnectGmail}
+                        disabled={isConnecting}
+                        data-testid="button-connect-gmail-composer"
+                      >
+                        {isConnecting ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Link2 className="h-4 w-4 mr-2" />
+                        )}
+                        Connect Gmail
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
@@ -1085,31 +1241,54 @@ export default function InboxPage() {
                     ) : (
                       <>
                         <h3 className="text-lg font-semibold mb-2">Your Inbox is Empty</h3>
-                        <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-                          Connect your Microsoft 365 or Google account and sync your emails to start managing communications from within the CRM
-                        </p>
-                        <div className="flex flex-col gap-3 items-center">
-                          <Button
-                            size="lg"
-                            onClick={() => window.location.href = '/settings'}
-                            data-testid="button-connect-m365"
-                          >
-                            <Mail className="h-4 w-4 mr-2" />
-                            Connect Email
-                          </Button>
-                          <p className="text-xs text-muted-foreground">
-                            Or sync your existing connection
-                          </p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => refetch()}
-                            data-testid="button-refresh-inbox-empty"
-                          >
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Refresh Inbox
-                          </Button>
-                        </div>
+                        {!gmailStatus?.connected ? (
+                          <>
+                            <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
+                              Connect your Gmail account to sync and send emails directly from within the CRM
+                            </p>
+                            <div className="flex flex-col gap-3 items-center">
+                              <Button
+                                size="lg"
+                                onClick={handleConnectGmail}
+                                disabled={isConnecting}
+                                data-testid="button-connect-gmail-empty"
+                              >
+                                {isConnecting ? (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Mail className="h-4 w-4 mr-2" />
+                                )}
+                                Connect Gmail
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
+                              Your Gmail is connected. Sync your emails to see them here.
+                            </p>
+                            <div className="flex flex-col gap-3 items-center">
+                              <Button
+                                size="lg"
+                                onClick={() => syncGmailMutation.mutate()}
+                                disabled={syncGmailMutation.isPending}
+                                data-testid="button-sync-gmail-empty"
+                              >
+                                <RefreshCw className={cn("h-4 w-4 mr-2", syncGmailMutation.isPending && "animate-spin")} />
+                                Sync Gmail Now
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => refetch()}
+                                data-testid="button-refresh-inbox-empty"
+                              >
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Refresh Inbox
+                              </Button>
+                            </div>
+                          </>
+                        )}
                       </>
                     )}
                   </div>

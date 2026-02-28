@@ -7,16 +7,17 @@
 
 import { storage } from "../storage";
 import { createQueue, createWorker } from "../lib/queue";
-import type { 
-  SequenceEmailSend, 
-  Contact, 
+import type {
+  SequenceEmailSend,
+  Contact,
   MailboxAccount,
-  Account 
+  Account
 } from "@shared/schema";
 import CryptoJS from "crypto-js";
 import { db } from "../db";
 import { sequenceEmailSends, sequenceEnrollments, sequenceSteps, emailSequences } from "@shared/schema";
 import { eq, and, lte, or } from "drizzle-orm";
+import { emailTrackingService } from "../lib/email-tracking-service";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-encryption-key-change-in-production";
 
@@ -305,11 +306,17 @@ export class EmailSequenceProcessor {
       const personalizedHtmlBody = this.personalizeText(htmlBody, { contact, account });
       const personalizedTextBody = textBody ? this.personalizeText(textBody, { contact, account }) : undefined;
 
+      // Apply open/click tracking using the sequenceEmailSend ID
+      const trackedHtmlBody = emailTrackingService.applyTracking(personalizedHtmlBody, {
+        messageId: sendId,
+        recipientEmail: contact.email,
+      });
+
       const { messageId, conversationId } = await this.sendEmailViaGraph(
         accessToken,
         contact.email,
         personalizedSubject,
-        personalizedHtmlBody,
+        trackedHtmlBody,
         personalizedTextBody
       );
 

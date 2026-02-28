@@ -347,6 +347,7 @@ export class GmailSyncService {
       cc?: string;
       subject: string;
       body: string;
+      skipTracking?: boolean;
     }
   ): Promise<{ messageId: string }> {
     const mailboxAccount = await storage.getMailboxAccountById(mailboxAccountId);
@@ -356,11 +357,17 @@ export class GmailSyncService {
 
     const accessToken = await this.getValidAccessToken(mailboxAccount);
 
-    const trackingMessageId = `sent-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const trackedBody = emailTrackingService.applyTracking(emailData.body, {
-      messageId: trackingMessageId,
-      recipientEmail: emailData.to.split(",")[0]?.trim() || mailboxAccount.mailboxEmail || "",
-    });
+    let trackedBody: string;
+    if (emailData.skipTracking) {
+      // Body already has tracking applied by caller
+      trackedBody = emailData.body;
+    } else {
+      const trackingMessageId = `sent-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      trackedBody = emailTrackingService.applyTracking(emailData.body, {
+        messageId: trackingMessageId,
+        recipientEmail: emailData.to.split(",")[0]?.trim() || mailboxAccount.mailboxEmail || "",
+      });
+    }
 
     const lines = [
       `To: ${emailData.to}`,

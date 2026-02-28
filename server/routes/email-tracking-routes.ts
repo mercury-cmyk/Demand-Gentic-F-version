@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { emailTrackingService } from '../lib/email-tracking-service';
+import { requireAuth } from '../auth';
 
 const router = Router();
 
@@ -118,7 +119,7 @@ router.get('/click/:token', async (req: Request, res: Response) => {
  * Get tracking stats for a message
  * GET /api/track/stats/:messageId
  */
-router.get('/stats/:messageId', async (req: Request, res: Response) => {
+router.get('/stats/:messageId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { messageId } = req.params;
     const stats = await emailTrackingService.getMessageTrackingStats(messageId);
