@@ -23,8 +23,8 @@ $RUNTIME_SERVICE_ACCOUNT = if ([string]::IsNullOrWhiteSpace($env:CLOUD_RUN_RUNTI
 
 $VOICE_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:VOICE_BASE_URL)) { "https://demandgentic.ai" } else { $env:VOICE_BASE_URL }
 $VOICE_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:VOICE_PUBLIC_TEXML_HOST)) { "demandgentic.ai" } else { $env:VOICE_PUBLIC_TEXML_HOST }
-$ANALYSIS_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:ANALYSIS_BASE_URL)) { "https://app.pivotal-b2b.com" } else { $env:ANALYSIS_BASE_URL }
-$ANALYSIS_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:ANALYSIS_PUBLIC_TEXML_HOST)) { "app.pivotal-b2b.com" } else { $env:ANALYSIS_PUBLIC_TEXML_HOST }
+$ANALYSIS_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:ANALYSIS_BASE_URL)) { "https://pivotal-b2b.com" } else { $env:ANALYSIS_BASE_URL }
+$ANALYSIS_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:ANALYSIS_PUBLIC_TEXML_HOST)) { "pivotal-b2b.com" } else { $env:ANALYSIS_PUBLIC_TEXML_HOST }
 $EMAIL_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:EMAIL_BASE_URL)) { "https://pivotal-b2b.com" } else { $env:EMAIL_BASE_URL }
 $EMAIL_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:EMAIL_PUBLIC_TEXML_HOST)) { "pivotal-b2b.com" } else { $env:EMAIL_PUBLIC_TEXML_HOST }
 
@@ -242,6 +242,6 @@ Write-Host "Next Steps:"
 Write-Host "1. Map your custom domains in Cloud Run (requested routing):"
 Write-Host "   - demandgentic.ai -> demandgentic-voice (AI Calls)"
 Write-Host "   - pivotal-b2b.com -> demandgentic-email (Email Campaigns)"
-Write-Host "   - app.pivotal-b2b.com -> demandgentic-analysis (Analysis)"
+Write-Host "   - pivotal-b2b.com -> demandgentic-analysis (Analysis)"
 Write-Host "2. Update Telnyx/LiveKit webhooks to use demandgentic.ai"
 Write-Host "============================================"
