@@ -6,10 +6,27 @@
 # 3. demandgentic-email (Email Sync & Validation)
 # ============================================
 
-$PROJECT_ID = "pivotalb2b-2026"
-$REGION = "us-central1"
-$REPOSITORY = "cloud-run-source-deploy"
-$IMAGE_NAME = "demandgentic-api" # We use the same image for all 3
+$PROJECT_ID = $env:GCP_PROJECT_ID
+if ([string]::IsNullOrWhiteSpace($PROJECT_ID)) {
+  $PROJECT_ID = (gcloud config get-value project 2>$null).Trim()
+}
+if ([string]::IsNullOrWhiteSpace($PROJECT_ID)) {
+  throw "No GCP project configured. Set GCP_PROJECT_ID or run 'gcloud config set project <PROJECT_ID>'."
+}
+
+$REGION = if ([string]::IsNullOrWhiteSpace($env:GCP_REGION)) { "us-central1" } else { $env:GCP_REGION }
+$REPOSITORY = if ([string]::IsNullOrWhiteSpace($env:ARTIFACT_REPOSITORY)) { "cloud-run-source-deploy" } else { $env:ARTIFACT_REPOSITORY }
+$IMAGE_NAME = if ([string]::IsNullOrWhiteSpace($env:IMAGE_NAME)) { "demandgentic-api" } else { $env:IMAGE_NAME } # same image for all 3
+$VPC_CONNECTOR = if ([string]::IsNullOrWhiteSpace($env:GCP_VPC_CONNECTOR)) { "pivotal-connector" } else { $env:GCP_VPC_CONNECTOR }
+$GCS_BUCKET = if ([string]::IsNullOrWhiteSpace($env:GCS_BUCKET)) { "demandgentic-storage" } else { $env:GCS_BUCKET }
+$RUNTIME_SERVICE_ACCOUNT = if ([string]::IsNullOrWhiteSpace($env:CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT)) { "" } else { $env:CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }
+
+$VOICE_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:VOICE_BASE_URL)) { "https://demandgentic.ai" } else { $env:VOICE_BASE_URL }
+$VOICE_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:VOICE_PUBLIC_TEXML_HOST)) { "demandgentic.ai" } else { $env:VOICE_PUBLIC_TEXML_HOST }
+$ANALYSIS_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:ANALYSIS_BASE_URL)) { "https://app.pivotal-b2b.com" } else { $env:ANALYSIS_BASE_URL }
+$ANALYSIS_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:ANALYSIS_PUBLIC_TEXML_HOST)) { "app.pivotal-b2b.com" } else { $env:ANALYSIS_PUBLIC_TEXML_HOST }
+$EMAIL_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:EMAIL_BASE_URL)) { "https://pivotal-b2b.com" } else { $env:EMAIL_BASE_URL }
+$EMAIL_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:EMAIL_PUBLIC_TEXML_HOST)) { "pivotal-b2b.com" } else { $env:EMAIL_PUBLIC_TEXML_HOST }
 
 $ErrorActionPreference = "Stop"
 
@@ -30,7 +47,7 @@ $IMAGE_URL = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}
 Write-Host "============================================"
 Write-Host "Step 1: Building and Pushing Docker Image..."
 Write-Host "============================================"
-& $gcloudExe builds submit --config cloudbuild.yaml --substitutions "_IMAGE_TAG=$SHORT_SHA" .
+& $gcloudExe builds submit --project $PROJECT_ID --tag $IMAGE_URL .
 if ($LASTEXITCODE -ne 0) {
   throw "Cloud Build failed; aborting deploy."
 }
@@ -89,6 +106,12 @@ $secrets = @(
 )
 $secret_string = $secrets -join ","
 
+$serviceAccountArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($RUNTIME_SERVICE_ACCOUNT)) {
+  $serviceAccountArgs = @("--service-account", $RUNTIME_SERVICE_ACCOUNT)
+  Write-Host "Using runtime service account: $RUNTIME_SERVICE_ACCOUNT"
+}
+
 # Common Env Vars
 $env_vars = @(
     "NODE_ENV=production",
@@ -99,10 +122,10 @@ $env_vars = @(
     "VOICE_PROVIDER_FALLBACK_TARGET=openai",
     "GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio",
     "USE_VERTEX_AI=true",
-    "GOOGLE_CLOUD_PROJECT=pivotalb2b-2026",
-    "GCP_PROJECT_ID=pivotalb2b-2026",
-    "GCS_PROJECT_ID=pivotalb2b-2026",
-    "GCS_BUCKET=demandgentic-storage",
+    "GOOGLE_CLOUD_PROJECT=$PROJECT_ID",
+    "GCP_PROJECT_ID=$PROJECT_ID",
+    "GCS_PROJECT_ID=$PROJECT_ID",
+    "GCS_BUCKET=$GCS_BUCKET",
     "DEEPGRAM_MODEL=nova-2-phonecall",
     "DEEPGRAM_LANGUAGE=en-US",
     "CONVERSATION_QUALITY_MODEL=deepseek-chat",
@@ -121,12 +144,13 @@ Write-Host "Step 2: Deploying demandgentic-voice (AI Calls)"
 Write-Host "============================================"
 $voice_env = $env_vars + @(
   "SERVICE_ROLE=voice",
-  "BASE_URL=https://demandgentic.ai",
-  "PUBLIC_TEXML_HOST=demandgentic.ai"
+  "BASE_URL=$VOICE_BASE_URL",
+  "PUBLIC_TEXML_HOST=$VOICE_PUBLIC_HOST"
 )
 $voice_env_string = $voice_env -join ","
 
 & $gcloudExe run deploy demandgentic-voice `
+  --project $PROJECT_ID `
   --image $IMAGE_URL `
   --region $REGION `
   --platform managed `
@@ -139,8 +163,9 @@ $voice_env_string = $voice_env -join ","
   --timeout 3600 `
   --concurrency 150 `
   --cpu-boost `
-  --vpc-connector pivotal-connector `
+  --vpc-connector $VPC_CONNECTOR `
   --vpc-egress private-ranges-only `
+  @serviceAccountArgs `
   --set-env-vars $voice_env_string `
   --set-secrets $secret_string
 if ($LASTEXITCODE -ne 0) {
@@ -152,12 +177,13 @@ Write-Host "Step 3: Deploying demandgentic-analysis (Queues & Vertex AI)"
 Write-Host "============================================"
 $analysis_env = $env_vars + @(
   "SERVICE_ROLE=analysis",
-  "BASE_URL=https://app.pivotal-b2b.com",
-  "PUBLIC_TEXML_HOST=app.pivotal-b2b.com"
+  "BASE_URL=$ANALYSIS_BASE_URL",
+  "PUBLIC_TEXML_HOST=$ANALYSIS_PUBLIC_HOST"
 )
 $analysis_env_string = $analysis_env -join ","
 
 & $gcloudExe run deploy demandgentic-analysis `
+  --project $PROJECT_ID `
   --image $IMAGE_URL `
   --region $REGION `
   --platform managed `
@@ -169,8 +195,9 @@ $analysis_env_string = $analysis_env -join ","
   --port 8080 `
   --timeout 3600 `
   --concurrency 80 `
-  --vpc-connector pivotal-connector `
+  --vpc-connector $VPC_CONNECTOR `
   --vpc-egress private-ranges-only `
+  @serviceAccountArgs `
   --set-env-vars $analysis_env_string `
   --set-secrets $secret_string
 if ($LASTEXITCODE -ne 0) {
@@ -182,12 +209,13 @@ Write-Host "Step 4: Deploying demandgentic-email (Email Sync & Validation)"
 Write-Host "============================================"
 $email_env = $env_vars + @(
   "SERVICE_ROLE=email",
-  "BASE_URL=https://pivotal-b2b.com",
-  "PUBLIC_TEXML_HOST=pivotal-b2b.com"
+  "BASE_URL=$EMAIL_BASE_URL",
+  "PUBLIC_TEXML_HOST=$EMAIL_PUBLIC_HOST"
 )
 $email_env_string = $email_env -join ","
 
 & $gcloudExe run deploy demandgentic-email `
+  --project $PROJECT_ID `
   --image $IMAGE_URL `
   --region $REGION `
   --platform managed `
@@ -199,8 +227,9 @@ $email_env_string = $email_env -join ","
   --port 8080 `
   --timeout 3600 `
   --concurrency 80 `
-  --vpc-connector pivotal-connector `
+  --vpc-connector $VPC_CONNECTOR `
   --vpc-egress private-ranges-only `
+  @serviceAccountArgs `
   --set-env-vars $email_env_string `
   --set-secrets $secret_string
 if ($LASTEXITCODE -ne 0) {

@@ -2,9 +2,18 @@
 # Ensures 1:1 parity between local .env and Google Secret Manager + Cloud Run
 
 # $ErrorActionPreference = "Stop" # Disabled to prevent gcloud stderr from halting script
-$ProjectId = "pivotalb2b-2026"
-$ServiceName = "demandgentic-api"
-$Region = "us-central1"
+$ProjectId = $env:GCP_PROJECT_ID
+if ([string]::IsNullOrWhiteSpace($ProjectId)) {
+    $ProjectId = (gcloud config get-value project 2>$null).Trim()
+}
+
+if ([string]::IsNullOrWhiteSpace($ProjectId)) {
+    Write-Error "No GCP project configured. Set GCP_PROJECT_ID or run 'gcloud config set project <PROJECT_ID>'."
+    exit 1
+}
+
+$ServiceName = if ([string]::IsNullOrWhiteSpace($env:CLOUD_RUN_SERVICE)) { "demandgentic-api" } else { $env:CLOUD_RUN_SERVICE }
+$Region = if ([string]::IsNullOrWhiteSpace($env:GCP_REGION)) { "us-central1" } else { $env:GCP_REGION }
 
 Write-Host "STARTING SECRET SYNC for Project: $ProjectId" -ForegroundColor Cyan
 

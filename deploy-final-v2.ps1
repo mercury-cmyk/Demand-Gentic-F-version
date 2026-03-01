@@ -3,6 +3,23 @@
 # Syncs ALL .env secrets and env vars to production
 # ============================================
 
+$ProjectId = $env:GCP_PROJECT_ID
+if ([string]::IsNullOrWhiteSpace($ProjectId)) {
+  $ProjectId = (gcloud config get-value project 2>$null).Trim()
+}
+
+if ([string]::IsNullOrWhiteSpace($ProjectId)) {
+  Write-Error "No GCP project configured. Set GCP_PROJECT_ID or run 'gcloud config set project <PROJECT_ID>'."
+  exit 1
+}
+
+$Region = if ([string]::IsNullOrWhiteSpace($env:GCP_REGION)) { "us-central1" } else { $env:GCP_REGION }
+$ServiceName = if ([string]::IsNullOrWhiteSpace($env:CLOUD_RUN_SERVICE)) { "demandgentic-api" } else { $env:CLOUD_RUN_SERVICE }
+$VpcConnector = if ([string]::IsNullOrWhiteSpace($env:GCP_VPC_CONNECTOR)) { "pivotal-connector" } else { $env:GCP_VPC_CONNECTOR }
+$GcsBucket = if ([string]::IsNullOrWhiteSpace($env:GCS_BUCKET)) { "demandgentic-storage" } else { $env:GCS_BUCKET }
+$BaseUrl = if ([string]::IsNullOrWhiteSpace($env:BASE_URL)) { "https://demandgentic.ai" } else { $env:BASE_URL }
+$PublicTexmlHost = if ([string]::IsNullOrWhiteSpace($env:PUBLIC_TEXML_HOST)) { "demandgentic.ai" } else { $env:PUBLIC_TEXML_HOST }
+
 # Step 1: Remove old secret bindings that are now plain env vars
 # Cloud Run doesn't allow changing a var from secret to env var in one step
 Write-Host "============================================"
@@ -33,8 +50,9 @@ $old_secret_vars = @(
 
 $remove_secrets = ($old_secret_vars | ForEach-Object { $_ }) -join ","
 
-gcloud run services update demandgentic-api `
-  --region us-central1 `
+gcloud run services update $ServiceName `
+  --project $ProjectId `
+  --region $Region `
   --remove-secrets=$remove_secrets 2>$null
 
 Write-Host "Old secret bindings cleared (or already absent).`n"
@@ -98,6 +116,10 @@ $secrets = @(
 
     # LiveKit Webhooks
     "LIVEKIT_WEBHOOK_SECRET=LIVEKIT_WEBHOOK_SECRET:latest",
+    "LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest",
+    "LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest",
+    "LIVEKIT_SIP_USERNAME=LIVEKIT_SIP_USERNAME:latest",
+    "LIVEKIT_SIP_PASSWORD=LIVEKIT_SIP_PASSWORD:latest",
 
     # Infrastructure
     "REDIS_URL=REDIS_URL:latest",
@@ -133,10 +155,10 @@ $env_vars = @(
     "FEATURE_FLAGS=argyle_event_drafts",
 
     # Google Cloud
-    "GOOGLE_CLOUD_PROJECT=pivotalb2b-2026",
-    "GCP_PROJECT_ID=pivotalb2b-2026",
-    "GCS_PROJECT_ID=pivotalb2b-2026",
-    "GCS_BUCKET=demandgentic-storage",
+    "GOOGLE_CLOUD_PROJECT=$ProjectId",
+    "GCP_PROJECT_ID=$ProjectId",
+    "GCS_PROJECT_ID=$ProjectId",
+    "GCS_BUCKET=$GcsBucket",
     "USE_VERTEX_AI=true",
 
     # Telnyx App IDs (non-secret)
@@ -160,8 +182,8 @@ $env_vars = @(
     "VERTEX_REASONING_MODEL=gemini-3-pro-preview",
 
     # Production URLs
-    "BASE_URL=https://demandgentic.ai",
-    "PUBLIC_TEXML_HOST=demandgentic.ai",
+    "BASE_URL=$BaseUrl",
+    "PUBLIC_TEXML_HOST=$PublicTexmlHost",
     # "TELNYX_WEBHOOK_URL=https://demandgentic.ai/api/webhooks/telnyx",
 
     # OpenAI SIP Configuration
@@ -174,12 +196,8 @@ $env_vars = @(
 
     # LiveKit Configuration
     "LIVEKIT_URL=wss://demandgentic-wmczsvyo.livekit.cloud",
-    "LIVEKIT_API_KEY=APIrrxH8abxypDR",
-    "LIVEKIT_API_SECRET=IcnJqDNrrl74YSb1Kwrfl0r5L0sfhfeFbdtxtAFYq7TA",
     "LIVEKIT_SIP_URI=sip:demandgentic-wmczsvyo.sip.livekit.cloud",
-    "LIVEKIT_SIP_CONNECTION_ID=2903106223836497802",
-    "LIVEKIT_SIP_USERNAME=dglivekitsip",
-    "LIVEKIT_SIP_PASSWORD=LKsip2026DmndG99"
+    "LIVEKIT_SIP_CONNECTION_ID=2903106223836497802"
 ) -join ","
 
 Write-Host "============================================"
@@ -190,12 +208,13 @@ Write-Host "Secrets: $($secrets.Split(',').Count) from GCP Secret Manager"
 Write-Host "Env vars: $($env_vars.Split(',').Count) non-secret config"
 Write-Host ""
 
-gcloud run deploy demandgentic-api `
+gcloud run deploy $ServiceName `
   --source . `
-  --region us-central1 `
+  --project $ProjectId `
+  --region $Region `
   --allow-unauthenticated `
   --clear-base-image `
-  --vpc-connector pivotal-connector `
+  --vpc-connector $VpcConnector `
   --vpc-egress private-ranges-only `
   --min-instances 1 `
   --max-instances 50 `

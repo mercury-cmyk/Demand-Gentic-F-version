@@ -3,7 +3,16 @@ import path from "path";
 import dotenv from "dotenv";
 import { z } from "zod";
 
-const NODE_ENV = (process.env.NODE_ENV || "development").toLowerCase();
+const inferredManagedRuntime = Boolean(
+  process.env.K_SERVICE ||
+  process.env.CLOUD_RUN_JOB ||
+  process.env.FUNCTION_TARGET
+);
+
+const NODE_ENV = (
+  process.env.NODE_ENV ||
+  (inferredManagedRuntime ? "production" : "development")
+).toLowerCase();
 
 function isTruthy(value: string | undefined): boolean {
   return String(value || "").toLowerCase() === "true";
