@@ -133,8 +133,21 @@ const getErrorMessage = (error: unknown): string => {
 const configuredApiOrigin =
   ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined)?.trim()?.replace(/\/$/, '') || '';
 
+const configuredExtraApiOriginsRaw =
+  ((import.meta as any).env?.VITE_VOICE_TRAINING_API_ORIGINS as string | undefined) || '';
+
+const configuredExtraApiOrigins = configuredExtraApiOriginsRaw
+  .split(',')
+  .map((entry) => entry.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
 const autoDetectedVoiceApiOrigin =
   typeof window !== 'undefined' && /(^|\.)pivotal-b2b\.com$/i.test(window.location.hostname)
+    ? 'https://demandgentic.ai'
+    : '';
+
+const productionVoiceApiFallback =
+  typeof window !== 'undefined' && !/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
     ? 'https://demandgentic.ai'
     : '';
 
@@ -145,43 +158,52 @@ const withApiOrigin = (path: string): string => {
 
 const API_PATH_BASES = ['/api/voice-agent-training', '/api/unified-agents/voice-training'];
 
-const ORIGIN_CANDIDATES = [
-  configuredApiOrigin,
-  '',
-  autoDetectedVoiceApiOrigin,
-];
+const getApiBases = (): string[] => {
+  const knownProductionOrigins = [
+    'https://demandgentic.ai',
+    'https://www.demandgentic.ai',
+    'https://pivotal-b2b.com',
+    'https://www.pivotal-b2b.com',
+  ];
 
-const API_BASES = Array.from(new Set(ORIGIN_CANDIDATES)).flatMap((origin) =>
-  API_PATH_BASES.map((pathBase) => (origin ? `${origin}${withApiOrigin(pathBase)}` : withApiOrigin(pathBase))),
-);
+  const originCandidates = [
+    configuredApiOrigin,
+    '',
+    autoDetectedVoiceApiOrigin,
+    productionVoiceApiFallback,
+    ...configuredExtraApiOrigins,
+    ...knownProductionOrigins,
+  ];
+
+  return Array.from(new Set(originCandidates.filter(Boolean).map((entry) => entry.replace(/\/$/, '')))).flatMap((origin) =>
+    API_PATH_BASES.map((pathBase) => (origin ? `${origin}${withApiOrigin(pathBase)}` : withApiOrigin(pathBase))),
+  ).concat(API_PATH_BASES);
+};
 
 const isLikelyHtmlFallback = (value: string): boolean => {
   const normalized = value.trim().toLowerCase();
   return normalized.startsWith('<!doctype') || normalized.startsWith('<html');
 };
 
-const shouldTrySecondaryBase = (error: unknown): boolean => {
-  const message = getErrorMessage(error).toLowerCase();
-  return (
-    message.includes("unexpected token '<'") ||
-    message.includes('non-json response') ||
-    message.startsWith('404:')
-  );
-};
-
 const roleHelpText = 'Required role: admin, campaign_manager, quality_analyst (aliases: manager, qa_analyst).';
 const apiHelpText =
   'If this persists in production, set VITE_API_BASE_URL to your backend origin so API calls do not hit the frontend HTML fallback. On pivotal-b2b.com we auto-try https://demandgentic.ai as a backup.';
+const localhostHelpText =
+  typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
+    ? ' Local dev detected: configure VITE_VOICE_TRAINING_PROXY_TARGET (or VITE_API_BASE_URL) and restart the Vite dev server so /api routes proxy to backend instead of returning index.html.'
+    : '';
 
 async function trainingApiRequest<T>(
   method: string,
   routePath: string,
   data?: unknown,
 ): Promise<T> {
+  const apiBases = Array.from(new Set(getApiBases()));
   let lastError: unknown;
+  const attemptErrors: string[] = [];
 
-  for (let index = 0; index < API_BASES.length; index += 1) {
-    const base = API_BASES[index];
+  for (let index = 0; index < apiBases.length; index += 1) {
+    const base = apiBases[index];
     const url = `${base}${routePath}`;
     try {
       const response = await apiRequest(method, url, data);
@@ -194,21 +216,21 @@ async function trainingApiRequest<T>(
       const text = await response.text();
       if (isLikelyHtmlFallback(text)) {
         throw new Error(
-          `API returned HTML instead of JSON at ${url}. This usually means auth/session or gateway routing is blocking the API. ${roleHelpText} ${apiHelpText}`,
+          `API returned HTML instead of JSON at ${url}. This usually means auth/session or gateway routing is blocking the API. ${roleHelpText} ${apiHelpText}${localhostHelpText}`,
         );
       }
 
       return JSON.parse(text) as T;
     } catch (error) {
       lastError = error;
-      const canTryNextBase = index < API_BASES.length - 1;
-      if (!canTryNextBase || !shouldTrySecondaryBase(error)) {
-        throw error;
-      }
+      attemptErrors.push(`${url} -> ${getErrorMessage(error)}`);
+      // Continue trying all configured origins/paths before failing.
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Voice Agent Training request failed');
+  const currentHost = typeof window !== 'undefined' ? window.location.origin : 'unknown-host';
+  const consolidated = `Voice Agent Training request failed after trying ${apiBases.length} endpoint(s) from ${currentHost}. ${attemptErrors.join(' | ')}`;
+  throw lastError instanceof Error ? new Error(consolidated) : new Error(consolidated);
 }
 
 export default function VoiceAgentTrainingDashboard() {

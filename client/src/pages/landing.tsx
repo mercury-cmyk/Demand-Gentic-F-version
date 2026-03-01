@@ -39,6 +39,12 @@ import {
   Eye,
   ClipboardCheck,
   MessageSquare,
+  Crown,
+  Flame,
+  Star,
+  BrainCircuit,
+  ShieldCheck,
+  Code,
 } from "lucide-react";
 import {
   BRAND, TAGLINE, STATS,
@@ -54,11 +60,11 @@ export default function LandingPage() {
   const [, setLocation] = useLocation();
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b">
+    <div className="min-h-screen bg-background" itemScope itemType="https://schema.org/WebPage">
+      {/* Navigation — semantic <nav> with aria-label for accessibility & SEO */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b" aria-label="Main navigation" itemScope itemType="https://schema.org/SiteNavigationElement">
         <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <a href="/" className="flex items-center gap-2" aria-label="Pivotal B2B - DemandGentic: Agentic Demand Generation & ABM Platform" title="Pivotal B2B - DemandGentic Home">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
               <div className="relative flex items-center justify-center">
                 <span className="font-bold text-sm text-violet-700 tracking-tighter">PB</span>
@@ -67,15 +73,16 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Agentic Account-Based Marketing for B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Agentic Demand Generation & ABM for B2B</span>
             </div>
-          </div>
-          <div className="hidden md:flex items-center gap-8">
-            <a href="#how-it-works" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
-            <a href="#capabilities" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Capabilities</a>
-            <a href="#built-for-you" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">For Your Team</a>
-            <a href="/resources-centre" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Resources</a>
-            <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">About</a>
+          </a>
+          <div className="hidden md:flex items-center gap-8" role="menubar">
+            <a href="#the-problem" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">The Problem</a>
+            <a href="#our-solutions" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Our Solutions</a>
+            <a href="#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Platform</a>
+            <a href="#features" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Features</a>
+            <a href="/resources-centre" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Resources</a>
+            <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">About Us</a>
           </div>
           <div className="flex items-center gap-4">
             <Button variant="ghost" onClick={() => setLocation("/client-portal/login")}>
@@ -90,14 +97,14 @@ export default function LandingPage() {
       </nav>
 
       {/* ─── HERO SECTION ─────────────────────────────────────────────── */}
-      <section className="pt-32 pb-24 relative overflow-hidden perspective-1000">
+      <header className="pt-32 pb-24 relative overflow-hidden perspective-1000" role="banner">
         <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-background to-blue-50" />
         <div className="absolute top-20 right-0 w-[800px] h-[800px] bg-gradient-to-br from-violet-500/10 to-indigo-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-to-tr from-blue-500/10 to-cyan-500/10 rounded-full blur-3xl" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#8882_1px,transparent_1px),linear-gradient(to_bottom,#8882_1px,transparent_1px)] bg-[size:14px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
 
         <div className="max-w-[1600px] mx-auto px-6 relative grid lg:grid-cols-2 gap-12 items-center">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, ease: "easeOut" }}
@@ -108,7 +115,7 @@ export default function LandingPage() {
               {PUBLIC_PAGES_MESSAGING.category}
             </Badge>
 
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 leading-[1.1]">
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 leading-[1.1]" data-speakable="true">
               <span className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 bg-clip-text text-transparent">
                 {PUBLIC_PAGES_MESSAGING.headline}
               </span>
@@ -118,12 +125,17 @@ export default function LandingPage() {
               </span>
             </h1>
 
-            <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed font-medium">
+            <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed font-medium" data-speakable="true">
               {PUBLIC_PAGES_MESSAGING.tagline}
             </p>
 
-            <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed">
+            <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed" data-speakable="true">
               {PUBLIC_PAGES_MESSAGING.valueProposition}
+            </p>
+
+            {/* SEO: keyword-rich descriptor hidden visually but readable by crawlers and AI */}
+            <p className="sr-only">
+              Pivotal B2B - DemandGentic is the leading agentic demand generation and agentic account-based marketing (ABM) platform for B2B marketing and sales pipeline acceleration. Our AI-powered platform combines voice AI agents, intelligent email orchestration, and generative content creation to deliver qualified pipeline from target accounts.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4">
@@ -239,22 +251,23 @@ export default function LandingPage() {
             </div>
           </motion.div>
         </div>
-      </section>
+      </header>
 
+      <main>
       {/* ─── FEATURED INTELLIGENCE SYSTEMS ─────────────────────────── */}
-      <section className="py-24 px-6 bg-white" id="featured-intelligence">
+      <section className="py-24 px-6 bg-white" id="features" aria-labelledby="features-heading">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-14">
             <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
               <CircleDot className="h-3.5 w-3.5 mr-2" />
-              Featured Intelligence Systems
+              Agentic Demand Generation Features
             </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-5">
-              The Systems That Power
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent"> Revenue-Grade Execution</span>
+            <h2 id="features-heading" className="text-4xl md:text-5xl font-bold mb-5">
+              The AI Systems That Power
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent"> B2B Sales Pipeline</span>
             </h2>
             <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-              These are the platform intelligence systems we recommend showcasing in demos, proposals, and buyer conversations—including Queue Scoring with AI and your Organization-Exclusive AI layer.
+              Our agentic demand generation platform features purpose-built intelligence systems for ABM execution — including AI voice agents, queue scoring, and organization-exclusive content generation.
             </p>
           </div>
 
@@ -340,24 +353,24 @@ export default function LandingPage() {
       </section>
 
       {/* ─── MARKET REALITY / REFRAME ─────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
+      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden" id="the-problem" aria-labelledby="problems-heading">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
 
         <div className="max-w-7xl mx-auto relative">
           <div className="text-center mb-16">
             <Badge className="mb-4 bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/10">
               <AlertTriangle className="h-3.5 w-3.5 mr-2" />
-              The Shift
+              Why Agentic ABM
             </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Traditional demand generation optimizes for{" "}
+            <h2 id="problems-heading" className="text-4xl md:text-5xl font-bold mb-6">
+              Traditional B2B marketing optimizes for{" "}
               <span className="text-red-400">volume.</span>
               <br />
-              ABM wins with{" "}
+              Agentic account-based marketing wins with{" "}
               <span className="text-emerald-400">precision.</span>
             </h2>
             <p className="text-xl text-slate-400 max-w-3xl mx-auto">
-              DemandGentic is built for the reality of modern B2B buying: committees, long cycles,
+              DemandGentic is the agentic demand generation platform built for modern B2B buying: buying committees, long sales cycles,
               strict compliance, and brand risk.
             </p>
           </div>
@@ -443,23 +456,23 @@ export default function LandingPage() {
       </section>
 
       {/* ─── WHAT DEMANDGENTIC IS ─────────────────────────────────────── */}
-      <section className="py-24 px-6 relative overflow-hidden" id="platform">
+      <section className="py-24 px-6 relative overflow-hidden" id="platform" aria-labelledby="platform-heading">
         <div className="absolute inset-0 bg-gradient-to-b from-slate-50 to-white" />
 
         <div className="max-w-5xl mx-auto relative text-center">
           <Badge className="mb-4 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
             <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
-            What DemandGentic Is
+            Agentic Demand Generation Platform
           </Badge>
-          <h2 className="text-4xl md:text-5xl font-bold mb-6">
+          <h2 id="platform-heading" className="text-4xl md:text-5xl font-bold mb-6">
             A Reasoning-First{" "}
             <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              Agentic System
+              Agentic ABM Platform
             </span>
           </h2>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
-            A reasoning-first agentic system that plans and executes ABM plays—guided by your
-            team's strategy and constrained by your brand, rules, and approvals.
+          <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8" data-speakable="true">
+            DemandGentic.ai is a reasoning-first agentic demand generation system that plans and executes account-based marketing plays — guided by your
+            team's strategy and constrained by your brand, rules, and approvals. Every B2B marketing interaction is reasoned before execution.
           </p>
 
           {/* One-liner definition */}
@@ -475,340 +488,160 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ─── HOW IT WORKS ─────────────────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-50" id="how-it-works">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-200">
-              How It Works
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Three Layers.{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">One System.</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Human strategy, agentic execution, and persistent memory—working together under your control.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {/* Layer 1 */}
-            <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-white shadow-xl shadow-violet-500/5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="text-xs font-bold uppercase tracking-wider text-violet-500 mb-4">Layer 01</div>
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-500/25">
-                  <Users className="h-7 w-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold mb-3">Human-Led Strategy Layer</h3>
-                <p className="text-muted-foreground text-sm mb-4">
-                  Problem intelligence → solution mapping → organizational context, before automation.
-                </p>
-                <ul className="space-y-2">
-                  {["ICP & account strategy", "Solution-to-problem mapping", "Brand & compliance guardrails"].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
-                      <CheckCircle2 className="h-4 w-4 text-violet-500" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            {/* Layer 2 */}
-            <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-xl shadow-indigo-500/5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="text-xs font-bold uppercase tracking-wider text-indigo-500 mb-4">Layer 02</div>
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center mb-5 shadow-lg shadow-indigo-500/25">
-                  <Brain className="h-7 w-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold mb-3">Agentic Execution Layer</h3>
-                <p className="text-muted-foreground text-sm mb-4">
-                  Purpose-built agents research, call, email, score, and follow up across channels—coordinated under one system.
-                </p>
-                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
-                  <p className="text-xs font-medium text-indigo-900">
-                    The Agentic Demand Council — every move reasoned, every action accountable.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Layer 3 */}
-            <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="text-xs font-bold uppercase tracking-wider text-emerald-500 mb-4">Layer 03</div>
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center mb-5 shadow-lg shadow-emerald-500/25">
-                  <Database className="h-7 w-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold mb-3">Memory + Accountability</h3>
-                <p className="text-muted-foreground text-sm mb-4">
-                  Account/contact memory, quality telemetry, and audit logs keep every interaction consistent and measurable.
-                </p>
-                <ul className="space-y-2">
-                  {["No scattered tools", "No lost context", "Full audit & score trail"].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── CORE CAPABILITIES (4 PILLARS) ────────────────────────────── */}
-      <section className="py-24 px-6" id="capabilities">
+      {/* --- PLATFORM OVERVIEW (STRATEGIC, INTELLIGENCE, EXECUTION) --- */}
+      <section className="py-24 px-6 bg-slate-50" id="platform">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
-              Core Capabilities
+              The Platform
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Four Pillars of{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Precision ABM</span>
+              Three Distinct Layers of{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">B2B Demand</span>
             </h2>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8">
-            {/* Pillar 1 */}
-            <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-white shadow-xl shadow-violet-500/5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-500/25">
-                  <Search className="h-7 w-7 text-white" />
-                </div>
-                <Badge className="mb-3 bg-violet-100 text-violet-700 border-none">Intelligence</Badge>
-                <h3 className="text-2xl font-bold mb-3">Account & Buying Committee Intelligence</h3>
-                <p className="text-muted-foreground mb-4">
-                  Research, roles, triggers, and context to inform messaging and plays.
-                </p>
-                <ul className="space-y-2">
-                  {["Buying committee mapping", "Trigger event detection", "Account-level research briefs"].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className="h-4 w-4 text-violet-500" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            {/* Pillar 2 */}
-            <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-xl shadow-indigo-500/5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center mb-5 shadow-lg shadow-indigo-500/25">
-                  <Zap className="h-7 w-7 text-white" />
-                </div>
-                <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">Orchestration</Badge>
-                <h3 className="text-2xl font-bold mb-3">Reasoning-First Outreach Orchestration</h3>
-                <p className="text-muted-foreground mb-4">
-                  Conversational voice, intelligent email sequencing, and workflow automation coordinated with compliance-first behavior.
-                </p>
-                <ul className="space-y-2">
-                  {["Multi-channel coordination", "Real-time call & email actions", "Contextual follow-up sequencing"].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className="h-4 w-4 text-indigo-500" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            {/* Pillar 3 */}
-            <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center mb-5 shadow-lg shadow-emerald-500/25">
-                  <Wand2 className="h-7 w-7 text-white" />
-                </div>
-                <Badge className="mb-3 bg-emerald-100 text-emerald-700 border-none">Content</Badge>
-                <h3 className="text-2xl font-bold mb-3">Brand-Exclusive Content Studio</h3>
-                <p className="text-muted-foreground mb-4">
-                  Landing pages, emails, briefs, blogs, eBooks—generated in your voice with your
-                  structure, guardrails, and approvals.
-                </p>
-                <ul className="space-y-2">
-                  {["Your brand voice & guidelines", "Full approval workflows", "One-click publishing"].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            {/* Pillar 4 */}
-            <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white shadow-xl shadow-blue-500/5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/25">
-                  <TrendingUp className="h-7 w-7 text-white" />
-                </div>
-                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Quality + Governance</Badge>
-                <h3 className="text-2xl font-bold mb-3">Quality, Compliance & Revenue Intelligence</h3>
-                <p className="text-muted-foreground mb-4">
-                  Real-time QA and governance controls with revenue intelligence loops to continuously improve targeting and outcomes.
-                </p>
-                <ul className="space-y-2">
-                  {["Automated QA scoring", "Suppression & compliance controls", "Pipeline and performance analytics"].map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className="h-4 w-4 text-blue-500" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── THE AGENTIC DEMAND COUNCIL & ORGANIZATION EXCLUSIVE AI STUDIO ── */}
-      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
-
-        <div className="max-w-7xl mx-auto relative">
-          {/* ── Header ── */}
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/10">
-              <Bot className="h-3.5 w-3.5 mr-2" />
-              The Agentic Demand Council & Organization Exclusive AI Studio
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Purpose-Built Agents.{" "}
-              <span className="text-violet-400">Your Exclusive AI Studio.</span>
-            </h2>
-            <p className="text-xl text-slate-400 max-w-3xl mx-auto">
-              This section is the operating view: how specialized agents coordinate execution while your
-              organization-exclusive AI layer preserves brand context, governance rules, and auditability.
+            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
+              Our architecture combines human strategic expertise, organization-specific intelligence, and 
+              AI-powered execution to deliver cohesive, reasoning-first campaigns.
             </p>
           </div>
 
-          {/* ── Agent Cards ── */}
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
-            {[
-              {
-                icon: Search,
-                title: "Research Agent",
-                subtitle: "Account Intelligence",
-                description: "Autonomous research across accounts, roles, triggers, and buying signals to build actionable intelligence briefs.",
-                capabilities: ["Multi-source verification", "Buying committee mapping", "Trigger event detection"],
-                color: "emerald",
-              },
-              {
-                icon: Phone,
-                title: "Voice AI",
-                subtitle: "Conversational Outreach",
-                description: "AI that conducts real phone conversations with natural speech, real-time dispositioning, and optional human transfer when needed.",
-                capabilities: ["Natural live conversations", "Function-driven call actions", "Real-time qualification"],
-                color: "amber",
-              },
-              {
-                icon: Mail,
-                title: "Email Agent",
-                subtitle: "Sequence Orchestration",
-                description: "Persona-specific email sequences with contextual follow-up, compliance-safe templates, and reply sentiment intelligence.",
-                capabilities: ["Persona-specific copy", "Sequence automation", "Reply sentiment analysis"],
-                color: "blue",
-              },
-              {
-                icon: Wand2,
-                title: "Content Agent",
-                subtitle: "Brand-Exclusive Studio",
-                description: "Generates landing pages, emails, blogs, eBooks, and briefs—all in your brand voice with your structure and approvals.",
-                capabilities: ["Your brand guidelines", "Full approval workflows", "One-click publishing"],
-                color: "violet",
-              },
-              {
-                icon: LayoutDashboard,
-                title: "Pipeline Agent",
-                subtitle: "Account Orchestration",
-                description: "Manages account flow through pipeline stages, tracks buyer journeys, and surfaces next-best actions for teams.",
-                capabilities: ["Account stage automation", "Buyer journey tracking", "AI scoring insights"],
-                color: "indigo",
-              },
-              {
-                icon: Shield,
-                title: "QA Agent",
-                subtitle: "Compliance & Quality",
-                description: "Audits calls, messages, and outcomes for quality, accuracy, and compliance—ensuring every touchpoint meets your standards.",
-                capabilities: ["Real-time monitoring", "Policy enforcement", "Disposition & audit controls"],
-                color: "rose",
-              },
-            ].map((agent, i) => (
-              <Card key={i} className="bg-white/5 border-white/10 backdrop-blur hover:bg-white/10 transition-colors">
-                <CardContent className="p-6">
-                  <div className={`h-12 w-12 rounded-xl bg-${agent.color}-500/20 flex items-center justify-center mb-4`}>
-                    <agent.icon className={`h-6 w-6 text-${agent.color}-400`} />
-                  </div>
-                  <div className="mb-3">
-                    <h3 className="font-bold text-lg text-white">{agent.title}</h3>
-                    <p className={`text-sm text-${agent.color}-400`}>{agent.subtitle}</p>
-                  </div>
-                  <p className="text-sm text-slate-400 mb-4">{agent.description}</p>
-                  <ul className="space-y-1.5">
-                    {agent.capabilities.map((cap, j) => (
-                      <li key={j} className="flex items-center gap-2 text-xs text-slate-300">
-                        <CheckCircle2 className={`h-3 w-3 text-${agent.color}-400`} />
-                        {cap}
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* ── Organization Exclusive AI Studio (Condensed) ── */}
-          <div className="mb-16 p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur">
-            <div className="text-center mb-6">
-              <div className="flex items-center gap-2 justify-center mb-3">
-                <Wand2 className="h-5 w-5 text-violet-400" />
-                <span className="text-sm font-bold uppercase tracking-wider text-violet-400">Organization Exclusive AI Studio</span>
-              </div>
-              <h3 className="text-2xl font-bold mb-3 text-white">Your AI Output Layer, Constrained by Your Rules</h3>
-              <p className="text-slate-400 max-w-3xl mx-auto">{CONTENT_STUDIO.subheadline}</p>
-            </div>
-            <div className="grid md:grid-cols-3 gap-4">
-              {[
-                "Generate campaign assets using organization-specific context",
-                "Refine with human review and approval-aware edits",
-                "Publish channel-ready outputs for voice, email, and landing workflows",
-              ].map((item, i) => (
-                <div key={i} className="rounded-xl border border-white/15 bg-white/5 p-4 text-sm text-slate-300 flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-violet-400 mt-0.5" />
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Council Summary ── */}
-          <div className="p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur">
-            <div className="grid md:grid-cols-2 gap-8 items-center">
+          <div className="space-y-12">
+            {/* Layer 1: The Strategic Layer */}
+            <div className="grid lg:grid-cols-2 gap-12 items-center bg-white p-8 md:p-12 rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50">
               <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <Layers className="h-5 w-5 text-violet-400" />
-                  <span className="text-sm font-bold uppercase tracking-wider text-violet-400">Coordinated Under One System</span>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="h-12 w-12 rounded-xl bg-violet-100 flex items-center justify-center">
+                    <Users className="h-6 w-6 text-violet-600" />
+                  </div>
+                  <Badge className="bg-violet-50 text-violet-700 border-violet-200">The Strategic Layer</Badge>
                 </div>
-                <h3 className="text-2xl font-bold mb-4 text-white">Every Agent Shares Memory. Every Action Is Reasoned.</h3>
-                <p className="text-slate-400">
-                  Account and contact memory keeps every interaction consistent, contextual, and measurable
-                  across all agents. No scattered tools. No lost context. Full traceability.
+                <h3 className="text-3xl font-bold mb-4">Human-Led Strategy</h3>
+                <p className="text-lg text-slate-600 mb-6">
+                  Before any automation executes, we define the roadmap. Built on 11+ years of pure B2B demand generation experience, our human experts orchestrate the foundational plays. 
                 </p>
+                <ul className="space-y-3">
+                  {[
+                    "Deep problem-solution mapping tailored to your ICP",
+                    "Precise targeting informed by human intelligence and precision data",
+                    "Brand and message positioning that respects your market authority",
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-violet-500 mt-0.5 shrink-0" />
+                      <span className="text-slate-700">{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <div className="flex flex-wrap gap-2 justify-center md:justify-end">
-                {["Reasoning First", "Shared Memory", "Compliance Built-In", "Brand Governed", "Full Audit Trail", "Exclusive AI Studio"].map((item, i) => (
-                  <Badge key={i} className="bg-white/10 border-white/20 text-white">{item}</Badge>
-                ))}
+              <div className="relative h-full min-h-[300px] rounded-2xl overflow-hidden bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-100 flex items-center justify-center p-8">
+                <div className="w-full max-w-sm space-y-4 relative z-10">
+                  <div className="h-4 w-1/3 bg-violet-200/50 rounded-full" />
+                  <div className="h-12 w-full bg-white/80 backdrop-blur-sm rounded-xl shadow-sm border border-slate-100 flex items-center px-4 gap-3">
+                    <Target className="h-5 w-5 text-violet-500" />
+                    <div className="h-2 w-1/2 bg-slate-200 rounded-full" />
+                  </div>
+                  <div className="h-12 w-5/6 bg-white/80 backdrop-blur-sm rounded-xl shadow-sm border border-slate-100 flex items-center px-4 gap-3">
+                    <Search className="h-5 w-5 text-indigo-500" />
+                    <div className="h-2 w-2/3 bg-slate-200 rounded-full" />
+                  </div>
+                </div>
+                {/* Decorative background elements */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 rounded-full blur-2xl" />
+                <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl" />
+              </div>
+            </div>
+
+            {/* Layer 2: The Intelligence Layer */}
+            <div className="grid lg:grid-cols-2 gap-12 items-center bg-slate-900 text-white p-8 md:p-12 rounded-3xl border border-slate-800 shadow-xl shadow-slate-900/50 group">
+              <div className="order-2 lg:order-1 relative h-full min-h-[300px] rounded-2xl overflow-hidden bg-gradient-to-br from-slate-800 to-slate-950 border border-slate-700 flex items-center justify-center p-8">
+                 <div className="w-full max-w-sm space-y-4 relative z-10">
+                  <div className="flex gap-4">
+                    <div className="h-16 w-16 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center">
+                      <Database className="h-6 w-6 text-emerald-400" />
+                    </div>
+                    <div className="flex-1 space-y-2 py-2">
+                       <div className="h-3 w-3/4 bg-slate-700 rounded-full" />
+                       <div className="h-2 w-1/2 bg-slate-700 rounded-full" />
+                    </div>
+                  </div>
+                  <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-4 border border-slate-700 transform transition-transform group-hover:scale-[1.02]">
+                    <div className="flex items-center gap-2 mb-3">
+                       <Wand2 className="h-4 w-4 text-emerald-400" />
+                       <span className="text-xs font-medium text-slate-300">Organization-Exclusive Studio</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-700 rounded-full mb-2" />
+                    <div className="h-2 w-5/6 bg-slate-700 rounded-full" />
+                  </div>
+                 </div>
+                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl" />
+              </div>
+              <div className="order-1 lg:order-2">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="h-12 w-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                    <Brain className="h-6 w-6 text-emerald-400" />
+                  </div>
+                  <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20">The Intelligence Layer</Badge>
+                </div>
+                <h3 className="text-3xl font-bold mb-4">Data, Insight & Content</h3>
+                <p className="text-lg text-slate-300 mb-6">
+                  We bridge your strategic objectives with an organization-exclusive intelligence system that ensures every action is aligned with your truth.
+                </p>
+                <ul className="space-y-3">
+                  {[
+                    "Continuous intelligence gathering at the account and contact level",
+                    "Precision data enrichment for accurate targeting",
+                    "An organization-exclusive content studio guided by the client�s brand",
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400 mt-0.5 shrink-0" />
+                      <span className="text-slate-300">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            {/* Layer 3: The Execution Layer */}
+            <div className="grid lg:grid-cols-2 gap-12 items-center bg-white p-8 md:p-12 rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50">
+              <div>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="h-12 w-12 rounded-xl bg-blue-100 flex items-center justify-center">
+                    <Zap className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <Badge className="bg-blue-50 text-blue-700 border-blue-200">The Execution Layer</Badge>
+                </div>
+                <h3 className="text-3xl font-bold mb-4">AI Agents & Orchestration</h3>
+                <p className="text-lg text-slate-600 mb-6">
+                  Our unified execution engine transforms strategy and intelligence into massive-scale, highly personalized outreach.
+                </p>
+                <ul className="space-y-3">
+                  {[
+                    "Core Capabilities: AI-powered calls, email execution, and workflow orchestration",
+                    "AI agents trained on 11+ years of B2B demand experience",
+                    "Full lifecycle coordination � from initial touches to verified handoffs",
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+                      <span className="text-slate-700">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="relative h-full min-h-[300px] rounded-2xl overflow-hidden bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center p-8 group">
+                 <div className="w-full max-w-sm grid grid-cols-2 gap-4 relative z-10 transition-transform group-hover:scale-[1.02]">
+                   <div className="bg-white/90 backdrop-blur-sm p-5 rounded-xl shadow-sm border border-slate-200 text-center flex flex-col items-center">
+                     <Phone className="h-8 w-8 text-blue-500 mb-3" />
+                     <span className="text-sm font-bold text-slate-700">AI Voice</span>
+                   </div>
+                   <div className="bg-white/90 backdrop-blur-sm p-5 rounded-xl shadow-sm border border-slate-200 text-center flex flex-col items-center">
+                     <Mail className="h-8 w-8 text-indigo-500 mb-3" />
+                     <span className="text-sm font-bold text-slate-700">Email Gen</span>
+                   </div>
+                   <div className="bg-white/90 backdrop-blur-sm p-5 rounded-xl shadow-sm border border-slate-200 text-center flex flex-col items-center col-span-2">
+                     <Layers className="h-8 w-8 text-violet-500 mb-3" />
+                     <span className="text-sm font-bold text-slate-700">Campaign Orchestration</span>
+                   </div>
+                 </div>
+                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
               </div>
             </div>
           </div>
@@ -882,21 +715,21 @@ export default function LandingPage() {
       </section>
 
       {/* ─── SERVICES GRID ────────────────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-50" id="services">
+      <section className="py-24 px-6 bg-slate-50" id="our-solutions" aria-labelledby="solutions-heading">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
               <Layers className="h-3.5 w-3.5 mr-2" />
-              Services
+              B2B Marketing Solutions
             </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+            <h2 id="solutions-heading" className="text-4xl md:text-5xl font-bold mb-6">
               Full-Stack{" "}
               <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                Demand Services
+                Agentic Demand Generation Services
               </span>
             </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              Every service powered by reasoning-first AI, coordinated under one system, and governed by your brand.
+            <p className="text-xl text-muted-foreground max-w-3xl mx-auto" data-speakable="true">
+              Complete B2B marketing and sales pipeline services — from ABM and AI voice agents to content creation and data enrichment — all powered by reasoning-first AI and governed by your brand.
             </p>
           </div>
 
@@ -943,10 +776,10 @@ export default function LandingPage() {
       <section className="py-16 px-6 bg-white border-y">
         <div className="max-w-5xl mx-auto text-center">
           <h3 className="text-3xl md:text-4xl font-bold mb-3">
-            Ready to operationalize agentic ABM in your current GTM stack?
+            Ready to accelerate your B2B sales pipeline with agentic ABM?
           </h3>
           <p className="text-muted-foreground text-lg max-w-3xl mx-auto mb-8">
-            Get a practical walkthrough of how DemandGentic fits your workflow, governance model, and pipeline goals.
+            See how Pivotal B2B - DemandGentic fits your B2B marketing workflow, governance model, and sales pipeline goals.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-12 px-7 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
@@ -961,18 +794,18 @@ export default function LandingPage() {
       </section>
 
       {/* ─── ENTERPRISE READINESS / PROOF ───────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-50" id="enterprise-proof">
+      <section className="py-24 px-6 bg-slate-50" id="enterprise-proof" aria-labelledby="enterprise-heading">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-14">
             <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
               <ClipboardCheck className="h-3.5 w-3.5 mr-2" />
-              Enterprise Readiness
+              Enterprise B2B Marketing
             </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-5">
-              Built for Complex B2B Revenue Environments
+            <h2 id="enterprise-heading" className="text-4xl md:text-5xl font-bold mb-5">
+              Enterprise-Grade ABM for Complex B2B Sales Pipeline
             </h2>
             <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-              Deploy agentic ABM with practical controls for multi-stakeholder teams, governed execution, and measurable rollout.
+              Deploy agentic account-based marketing with practical controls for multi-stakeholder teams, governed execution, and measurable sales pipeline outcomes.
             </p>
           </div>
 
@@ -1195,11 +1028,11 @@ export default function LandingPage() {
           <div className="text-center mb-16">
             <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
               <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
-              What We Deliver
+              B2B Marketing Deliverables
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
               Everything You Need for{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Precision ABM</span>
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Agentic Account-Based Marketing</span>
             </h2>
           </div>
 
@@ -1268,7 +1101,7 @@ export default function LandingPage() {
 
         <div className="max-w-4xl mx-auto text-center relative">
           <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            Ready to launch reasoning-first ABM with measurable pipeline outcomes?
+            Ready to accelerate your B2B sales pipeline with agentic demand generation?
           </h2>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
@@ -1283,8 +1116,10 @@ export default function LandingPage() {
         </div>
       </section>
 
+      </main>
+
       {/* Footer */}
-      <footer className="py-16 px-6 bg-slate-900 text-white">
+      <footer className="py-16 px-6 bg-slate-900 text-white" itemScope itemType="https://schema.org/WPFooter">
         <div className="max-w-[1600px] mx-auto">
           <div className="grid md:grid-cols-5 gap-12 mb-12">
             <div className="md:col-span-1">
@@ -1339,7 +1174,7 @@ export default function LandingPage() {
               <ul className="space-y-2 text-slate-400 text-sm">
                 <li><a href="/resources-centre" className="hover:text-white transition-colors">Resources Center</a></li>
                 <li><a href="#about" className="hover:text-white transition-colors">About Us</a></li>
-                <li><a href="/about" className="hover:text-white transition-colors">Our Story</a></li>
+                <li><a href="#about" className="hover:text-white transition-colors">Our Story</a></li>
               </ul>
             </div>
 

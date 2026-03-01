@@ -26,6 +26,9 @@ import {
   Wand2,
   Trophy,
   RefreshCw,
+  PanelTop,
+  Phone,
+  Mail,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -91,6 +94,9 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Wand2,
   Trophy,
   RefreshCw,
+  PanelTop,
+  Phone,
+  Mail,
 };
 
 function resolveIcon(iconName: string): LucideIcon {
@@ -264,7 +270,16 @@ interface SidebarSubNavItemProps {
 }
 
 function SidebarSubNavItem({ subItem, location, isSpotlight }: SidebarSubNavItemProps) {
-  const subActive = location === subItem.url;
+  const subActive = (() => {
+    if (location === subItem.url) return true;
+    // Handle query param URLs (e.g. /disposition-intelligence?tab=conversation-quality)
+    if (subItem.url.includes('?')) {
+      const [basePath, queryPart] = subItem.url.split('?');
+      const locationBase = location.split('?')[0];
+      if (locationBase === basePath && location.includes(queryPart)) return true;
+    }
+    return false;
+  })();
   const hasBadge = subItem.badge?.variant === 'new' || isSpotlight;
 
   return (

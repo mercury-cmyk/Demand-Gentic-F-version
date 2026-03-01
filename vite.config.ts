@@ -8,6 +8,11 @@ import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const voiceTrainingProxyTarget =
+  process.env.VITE_VOICE_TRAINING_PROXY_TARGET?.trim() ||
+  process.env.VITE_API_BASE_URL?.trim() ||
+  "https://demandgentic-voice-yehu6cmsbq-uc.a.run.app";
+
 export default defineConfig({
   plugins: [
     react(),
@@ -73,5 +78,17 @@ export default defineConfig({
     hmr: process.env.USE_TUNNEL === 'true' || process.env.NGROK_AUTHTOKEN
       ? { clientPort: 443 }
       : true,
+    proxy: {
+      "/api/voice-agent-training": {
+        target: voiceTrainingProxyTarget,
+        changeOrigin: true,
+        secure: true,
+      },
+      "/api/unified-agents/voice-training": {
+        target: voiceTrainingProxyTarget,
+        changeOrigin: true,
+        secure: true,
+      },
+    },
   },
 });

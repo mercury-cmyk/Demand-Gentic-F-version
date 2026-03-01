@@ -203,9 +203,9 @@ export async function getMergeDataForContact(
     }),
     current_year: new Date().getFullYear().toString(),
     // Unsubscribe URL (CAN-SPAM compliant)
-    unsubscribe_url: `${process.env.APP_BASE_URL || 'https://beta-platform.pivotal-b2b.com'}/unsubscribe?email=${encodeURIComponent(contact.email || '')}&campaign_id=${campaignId || ''}`,
+    unsubscribe_url: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/unsubscribe?email=${encodeURIComponent(contact.email || '')}&campaign_id=${campaignId || ''}`,
     // View in browser URL
-    view_in_browser_url: `${process.env.APP_BASE_URL || 'https://beta-platform.pivotal-b2b.com'}/email/view?email=${encodeURIComponent(contact.email || '')}&campaign_id=${campaignId || ''}`,
+    view_in_browser_url: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/email/view?email=${encodeURIComponent(contact.email || '')}&campaign_id=${campaignId || ''}`,
   };
 
   return mergeData;

@@ -6,7 +6,7 @@ import CryptoJS from 'crypto-js';
 import { storage } from '../storage';
 import { bookingEmailService } from './booking-email-service';
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.GMAIL_CLIENT_ID;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID || process.env.GMAIL_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || process.env.GMAIL_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI || `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/api/oauth/google/callback`;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || process.env.MAILBOX_ENCRYPTION_KEY || "default-encryption-key-change-in-production";

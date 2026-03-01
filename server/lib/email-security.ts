@@ -163,7 +163,7 @@ export function generateBulkEmailHeaders(options: {
     fromEmail,
     recipientEmail,
     campaignId,
-    unsubscribeBaseUrl = process.env.APP_BASE_URL || 'https://beta-platform.pivotal-b2b.com',
+    unsubscribeBaseUrl = process.env.APP_BASE_URL || 'https://demandgentic.ai',
     messageId,
   } = options;
 

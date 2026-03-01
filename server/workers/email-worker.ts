@@ -53,7 +53,7 @@ async function sendViaMailgun(options: EmailJobData['options']): Promise<{ messa
   const apiKey = process.env.MAILGUN_API_KEY;
   const domain = process.env.MAILGUN_DOMAIN;
   const apiBase = process.env.MAILGUN_API_BASE || 'https://api.mailgun.net/v3';
-  const appBaseUrl = process.env.APP_BASE_URL || 'https://beta-platform.pivotal-b2b.com';
+  const appBaseUrl = process.env.APP_BASE_URL || 'https://demandgentic.ai';
 
   if (!apiKey || !domain) {
     throw new Error('Mailgun not configured. Set MAILGUN_API_KEY and MAILGUN_DOMAIN environment variables.');

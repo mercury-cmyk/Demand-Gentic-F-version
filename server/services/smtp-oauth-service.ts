@@ -76,7 +76,7 @@ export class SmtpOAuthService {
    */
   getGoogleAuthUrl(redirectUri: string, state?: string): string {
     const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
+      client_id: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
       redirect_uri: redirectUri,
       response_type: "code",
       scope: GOOGLE_SCOPES.join(" "),
@@ -93,7 +93,7 @@ export class SmtpOAuthService {
    */
   async exchangeGoogleCode(code: string, redirectUri: string): Promise<OAuthTokens> {
     const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
+      client_id: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
       client_secret: process.env.GOOGLE_CLIENT_SECRET!,
       code,
       redirect_uri: redirectUri,
@@ -129,7 +129,7 @@ export class SmtpOAuthService {
     const refreshToken = this.decryptToken(encryptedRefreshToken);
 
     const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
+      client_id: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
       client_secret: process.env.GOOGLE_CLIENT_SECRET!,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
@@ -349,7 +349,7 @@ export class SmtpOAuthService {
         auth: {
           type: "OAuth2",
           user: provider.emailAddress,
-          clientId: process.env.GOOGLE_CLIENT_ID!,
+          clientId: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
           clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
           refreshToken: this.decryptToken(provider.refreshTokenEncrypted!),
           accessToken,

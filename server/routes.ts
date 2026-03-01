@@ -332,7 +332,7 @@ const M365_TENANT_ID = process.env.MICROSOFT_TENANT_ID ?? process.env.MSFT_OAUTH
 const M365_SCOPES =
   process.env.MSFT_OAUTH_SCOPES ?? "offline_access Mail.Read Mail.ReadBasic Mail.ReadWrite Mail.Send";
 // Use published domain for stable OAuth redirects (works in both dev and production)
-const APP_BASE_URL = process.env.APP_BASE_URL ?? process.env.MSFT_OAUTH_APP_URL ?? "https://beta-platform.pivotal-b2b.com";
+const APP_BASE_URL = process.env.APP_BASE_URL ?? process.env.BASE_URL ?? process.env.MSFT_OAUTH_APP_URL ?? "https://demandgentic.ai";
 const M365_REDIRECT_URI =
   process.env.MSFT_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/microsoft/callback`;
 const MAILBOX_ENCRYPTION_KEY =
@@ -340,7 +340,7 @@ const MAILBOX_ENCRYPTION_KEY =
   process.env.MSFT_OAUTH_CLIENT_SECRET ??
   process.env.M365_CLIENT_SECRET ??
   M365_CLIENT_SECRET;
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? process.env.GMAIL_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? process.env.GOOGLE_AUTH_CLIENT_ID ?? process.env.GMAIL_CLIENT_ID ?? "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "";
 const GOOGLE_SCOPES =
   process.env.GOOGLE_OAUTH_SCOPES ??
