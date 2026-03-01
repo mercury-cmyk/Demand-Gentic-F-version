@@ -71,6 +71,7 @@ import unifiedEmailSystemRouter from './routes/unified-email-system';
 import emailBuilderRouter from './routes/email-builder';
 import clientPortalRouter from './routes/client-portal';
 import clientPortalQualifiedLeadsRouter from './routes/client-portal-qualified-leads';
+import qaGatedContentRouter from './routes/qa-gated-content';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
 import virtualAgentsRouter from './routes/virtual-agents';
@@ -90,6 +91,7 @@ import campaignTestCallsRouter from './routes/campaign-test-calls';
 import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
 import simulationsRouter from './routes/simulations';
+import voiceAgentTrainingRouter from './routes/voice-agent-training';
 import voiceProviderRoutes from './routes/voice-provider-routes';
 import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
@@ -15320,6 +15322,11 @@ Provide JSON response with:
 
   app.use("/api/simulations", simulationsRouter);
 
+  // ==================== VOICE AGENT TRAINING (Development Preview Layer) ====================
+
+  app.use('/api/voice-agent-training', requireAuth, voiceAgentTrainingRouter);
+  app.use('/api/unified-agents/voice-training', requireAuth, voiceAgentTrainingRouter);
+
   // ==================== VOICE PROVIDER ROUTES (TTS, Voice Discovery) ====================
 
   app.use("/api/voice-providers", voiceProviderRoutes);
@@ -15647,6 +15654,7 @@ Provide JSON response with:
 
   app.use('/api/client-portal', clientPortalRouter);
   app.use('/api/client-portal/qualified-leads', clientPortalQualifiedLeadsRouter);
+  app.use('/api', qaGatedContentRouter);
 
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);

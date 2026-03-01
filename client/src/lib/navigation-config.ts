@@ -77,7 +77,13 @@ export type UserRole = typeof USER_ROLES[keyof typeof USER_ROLES];
 const ALL_ROLES: string[] = Object.values(USER_ROLES);
 const MANAGEMENT_ROLES: string[] = [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER];
 const DATA_ROLES: string[] = [USER_ROLES.ADMIN, USER_ROLES.DATA_OPS];
-const QA_ROLES: string[] = [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER, USER_ROLES.QUALITY_ANALYST];
+const QA_ROLES: string[] = [
+  USER_ROLES.ADMIN,
+  USER_ROLES.CAMPAIGN_MANAGER,
+  USER_ROLES.QUALITY_ANALYST,
+  'manager',
+  'qa_analyst',
+];
 
 /**
  * Main navigation configuration
@@ -91,14 +97,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     id: 'ai-intelligence',
     label: 'AI & Intelligence',
     domain: NAVIGATION_DOMAINS.AI_INTELLIGENCE,
-    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST],
     description: 'AI agents, organization intelligence, and prompt configuration',
     items: [
       {
         id: 'ai-studio',
         title: 'AI Studio',
         icon: 'Sparkles',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST],
         items: [
           {
             id: 'ai-dashboard',
@@ -128,6 +134,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/preview-studio',
             roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
             description: 'Test and preview AI agent behavior',
+          },
+          {
+            id: 'voice-agent-training',
+            title: 'Voice Agent Training',
+            url: '/voice-agent-training',
+            roles: QA_ROLES,
+            badge: { text: 'New', variant: 'new' },
+            description: 'Draft, simulate, and publish unified voice prompt modules safely',
           },
           {
             id: 'agentic-operator',
@@ -313,6 +327,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'MessageSquare',
         roles: QA_ROLES,
         description: 'Conversation quality analysis and scoring',
+      },
+      {
+        id: 'transcription-health',
+        title: 'Transcription Health',
+        url: '/disposition-intelligence?tab=transcription-health',
+        icon: 'Activity',
+        roles: QA_ROLES,
+        description: 'Track transcription coverage, identify gaps, and regenerate missing transcripts',
       },
       {
         id: 'reanalysis',

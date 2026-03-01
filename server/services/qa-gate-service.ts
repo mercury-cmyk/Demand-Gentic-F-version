@@ -15,9 +15,8 @@ import {
   campaigns,
   activityLog,
   type QAGatedContent,
-  type InsertQAGatedContent,
 } from "@shared/schema";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, inArray, isNull, isNotNull } from "drizzle-orm";
 
 // QA Content Types
 export type QAContentType = 'simulation' | 'mock_call' | 'report' | 'data_export';
@@ -55,6 +54,15 @@ export interface SyncResult {
   synced: number;
   failed: number;
   errors: string[];
+}
+
+export interface QALegacyMigrationResult {
+  simulationsLinked: number;
+  mockCallsLinked: number;
+  reportsLinked: number;
+  alreadyLinked: number;
+  failures: number;
+  totalLinked: number;
 }
 
 /**
@@ -674,6 +682,145 @@ export async function getPendingContent(
     .limit(limit);
 
   return content;
+}
+
+/**
+ * Backfill existing client content into QA-gated registry and link qa_content_id references.
+ * This enables legacy records to appear in the new QA Review Center.
+ */
+export async function migrateLegacyContentToQaGate(): Promise<QALegacyMigrationResult> {
+  const result: QALegacyMigrationResult = {
+    simulationsLinked: 0,
+    mockCallsLinked: 0,
+    reportsLinked: 0,
+    alreadyLinked: 0,
+    failures: 0,
+    totalLinked: 0,
+  };
+
+  const simulations = await db
+    .select({
+      id: clientSimulationSessions.id,
+      clientAccountId: clientSimulationSessions.clientAccountId,
+      campaignId: clientSimulationSessions.campaignId,
+      projectId: clientSimulationSessions.projectId,
+      qaContentId: clientSimulationSessions.qaContentId,
+    })
+    .from(clientSimulationSessions)
+    .where(isNull(clientSimulationSessions.qaContentId));
+
+  for (const simulation of simulations) {
+    try {
+      const qa = await registerContent("simulation", simulation.id, {
+        campaignId: simulation.campaignId || undefined,
+        clientAccountId: simulation.clientAccountId,
+        projectId: simulation.projectId || undefined,
+      });
+
+      await db
+        .update(clientSimulationSessions)
+        .set({ qaContentId: qa.id })
+        .where(eq(clientSimulationSessions.id, simulation.id));
+
+      result.simulationsLinked += 1;
+    } catch (error) {
+      console.error("[QA-Gate] Failed to migrate simulation:", simulation.id, error);
+      result.failures += 1;
+    }
+  }
+
+  const mockCalls = await db
+    .select({
+      id: clientMockCalls.id,
+      clientAccountId: clientMockCalls.clientAccountId,
+      campaignId: clientMockCalls.campaignId,
+      projectId: clientMockCalls.projectId,
+      qaContentId: clientMockCalls.qaContentId,
+      createdBy: clientMockCalls.createdBy,
+    })
+    .from(clientMockCalls)
+    .where(isNull(clientMockCalls.qaContentId));
+
+  for (const mockCall of mockCalls) {
+    try {
+      const qa = await registerContent("mock_call", mockCall.id, {
+        campaignId: mockCall.campaignId || undefined,
+        clientAccountId: mockCall.clientAccountId,
+        projectId: mockCall.projectId || undefined,
+        createdBy: mockCall.createdBy || undefined,
+      });
+
+      await db
+        .update(clientMockCalls)
+        .set({ qaContentId: qa.id })
+        .where(eq(clientMockCalls.id, mockCall.id));
+
+      result.mockCallsLinked += 1;
+    } catch (error) {
+      console.error("[QA-Gate] Failed to migrate mock call:", mockCall.id, error);
+      result.failures += 1;
+    }
+  }
+
+  const reports = await db
+    .select({
+      id: clientReports.id,
+      clientAccountId: clientReports.clientAccountId,
+      campaignId: clientReports.campaignId,
+      projectId: clientReports.projectId,
+      qaContentId: clientReports.qaContentId,
+      generatedBy: clientReports.generatedBy,
+    })
+    .from(clientReports)
+    .where(isNull(clientReports.qaContentId));
+
+  for (const report of reports) {
+    try {
+      const qa = await registerContent("report", report.id, {
+        campaignId: report.campaignId || undefined,
+        clientAccountId: report.clientAccountId,
+        projectId: report.projectId || undefined,
+        createdBy: report.generatedBy || undefined,
+      });
+
+      await db
+        .update(clientReports)
+        .set({ qaContentId: qa.id })
+        .where(eq(clientReports.id, report.id));
+
+      result.reportsLinked += 1;
+    } catch (error) {
+      console.error("[QA-Gate] Failed to migrate report:", report.id, error);
+      result.failures += 1;
+    }
+  }
+
+  const [linkedSimulationCount, linkedMockCallCount, linkedReportCount] = await Promise.all([
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(clientSimulationSessions)
+      .where(isNotNull(clientSimulationSessions.qaContentId)),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(clientMockCalls)
+      .where(isNotNull(clientMockCalls.qaContentId)),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(clientReports)
+      .where(isNotNull(clientReports.qaContentId)),
+  ]);
+
+  result.alreadyLinked =
+    Number(linkedSimulationCount[0]?.count || 0) +
+    Number(linkedMockCallCount[0]?.count || 0) +
+    Number(linkedReportCount[0]?.count || 0) -
+    result.simulationsLinked -
+    result.mockCallsLinked -
+    result.reportsLinked;
+
+  result.totalLinked = result.simulationsLinked + result.mockCallsLinked + result.reportsLinked;
+
+  return result;
 }
 
 /**

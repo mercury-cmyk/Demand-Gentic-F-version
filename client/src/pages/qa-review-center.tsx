@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import {
   QAStatusBadge,
   QAScoreBadge,
@@ -95,58 +96,37 @@ async function fetchQAContent(params: { status?: string; contentType?: string })
   if (params.status) searchParams.set('status', params.status);
   if (params.contentType) searchParams.set('contentType', params.contentType);
 
-  const response = await fetch(`/api/admin/qa-content?${searchParams.toString()}`, {
-    credentials: 'include',
-  });
-  if (!response.ok) throw new Error('Failed to fetch QA content');
+  const response = await apiRequest('GET', `/api/admin/qa-content?${searchParams.toString()}`);
   return response.json();
 }
 
 async function fetchQAStats() {
-  const response = await fetch('/api/admin/qa-content/stats', {
-    credentials: 'include',
-  });
-  if (!response.ok) throw new Error('Failed to fetch QA stats');
+  const response = await apiRequest('GET', '/api/admin/qa-content/stats');
   return response.json();
 }
 
 async function reviewContent(id: string, review: { status: QAStatus; score?: number; notes?: string }) {
-  const response = await fetch(`/api/admin/qa-content/${id}/review`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(review),
-  });
-  if (!response.ok) throw new Error('Failed to review content');
+  const response = await apiRequest('PATCH', `/api/admin/qa-content/${id}/review`, review);
   return response.json();
 }
 
 async function publishContent(id: string) {
-  const response = await fetch(`/api/admin/qa-content/${id}/publish`, {
-    method: 'POST',
-    credentials: 'include',
-  });
-  if (!response.ok) throw new Error('Failed to publish content');
+  const response = await apiRequest('POST', `/api/admin/qa-content/${id}/publish`);
   return response.json();
 }
 
 async function analyzeContent(id: string) {
-  const response = await fetch(`/api/admin/qa-content/${id}/analyze`, {
-    method: 'POST',
-    credentials: 'include',
-  });
-  if (!response.ok) throw new Error('Failed to analyze content');
+  const response = await apiRequest('POST', `/api/admin/qa-content/${id}/analyze`);
   return response.json();
 }
 
 async function bulkReview(contentIds: string[], review: { status: QAStatus; notes?: string }) {
-  const response = await fetch('/api/admin/qa-content/bulk-review', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ contentIds, ...review }),
-  });
-  if (!response.ok) throw new Error('Failed to bulk review');
+  const response = await apiRequest('POST', '/api/admin/qa-content/bulk-review', { contentIds, ...review });
+  return response.json();
+}
+
+async function migrateLegacyQAContent() {
+  const response = await apiRequest('POST', '/api/admin/qa-content/migrate');
   return response.json();
 }
 
@@ -249,6 +229,22 @@ export default function QAReviewCenter() {
     },
   });
 
+  const migrateMutation = useMutation({
+    mutationFn: migrateLegacyQAContent,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['qa-content'] });
+      queryClient.invalidateQueries({ queryKey: ['qa-stats'] });
+      toast({
+        title: 'Migration complete',
+        description: `${data?.result?.totalLinked ?? 0} legacy item(s) linked to QA Review Center`,
+      });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Failed to migrate legacy content';
+      toast({ title: 'Migration failed', description: message, variant: 'destructive' });
+    },
+  });
+
   // Handlers
   const handleReview = (content: QAContentWithClient) => {
     setSelectedContent(content);
@@ -332,10 +328,20 @@ export default function QAReviewCenter() {
             Review and approve content before publishing to clients
           </p>
         </div>
-        <Button variant="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['qa-content'] })}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => migrateMutation.mutate()}
+            disabled={migrateMutation.isPending}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${migrateMutation.isPending ? 'animate-spin' : ''}`} />
+            {migrateMutation.isPending ? 'Migrating...' : 'Migrate Legacy Content'}
+          </Button>
+          <Button variant="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['qa-content'] })}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}

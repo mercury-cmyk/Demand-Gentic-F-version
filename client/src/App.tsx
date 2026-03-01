@@ -149,6 +149,7 @@ import IntelligentCampaignCreatePage from "@/pages/intelligent-campaign-create";
 import PreviewStudioPage from "@/pages/preview-studio";
 import VoiceSimulationPage from "@/pages/voice-simulation";
 import EmailSimulationPage from "@/pages/email-simulation";
+import VoiceAgentTrainingDashboard from "@/pages/voice-agent-training-dashboard";
 
 // Settings Hub Pages
 import SettingsIndexPage from "@/pages/settings/index";
@@ -563,6 +564,7 @@ function AuthenticatedApp() {
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />
               <Route path="/preview-studio" component={PreviewStudioPage} />
+              <Route path="/voice-agent-training" component={VoiceAgentTrainingDashboard} />
 
               {/* Simulation Pages */}
               <Route path="/voice-simulation" component={VoiceSimulationPage} />

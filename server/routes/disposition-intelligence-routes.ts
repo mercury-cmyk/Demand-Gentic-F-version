@@ -16,12 +16,15 @@ import {
   contacts,
   accounts,
   accountCallBriefs,
+  callSessionEvents,
 } from "@shared/schema";
-import { eq, and, desc, asc, sql, gte, lte, isNotNull, count as drizzleCount } from "drizzle-orm";
+import { eq, and, desc, asc, sql, gte, lte, isNotNull, inArray, count as drizzleCount } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { generateCoachingRecommendations } from "../services/ai-disposition-intelligence";
 import { overrideSingleDisposition } from "../services/bulk-disposition-reanalyzer";
 import { getDispositionCache } from "../services/disposition-analysis-cache";
+import { buildDispositionPhraseInsights, type DetectionSignal } from "../services/disposition-phrase-insights";
+import { buildPromptGuardrailExport } from "../services/disposition-prompt-guardrails";
 import type { CanonicalDisposition } from "@shared/schema";
 
 const router = Router();
@@ -198,6 +201,201 @@ router.get("/overview", requireAuth, async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[DispositionIntelligence] Overview error:', error);
     res.status(500).json({ error: 'Failed to load overview data' });
+  }
+});
+
+// ============================================================================
+// GET /phrase-insights - Historical phrase/keyword visibility by disposition
+// ============================================================================
+
+router.get("/phrase-insights", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const maxCalls = Math.min(5000, Math.max(100, parseInt(String(req.query.maxCalls || '2000'), 10)));
+    const minCount = Math.min(25, Math.max(1, parseInt(String(req.query.minCount || '3'), 10)));
+    const maxKeywords = Math.min(100, Math.max(5, parseInt(String(req.query.maxKeywords || '25'), 10)));
+    const maxPhrases = Math.min(100, Math.max(5, parseInt(String(req.query.maxPhrases || '25'), 10)));
+    const minTokenLength = Math.min(8, Math.max(2, parseInt(String(req.query.minTokenLength || '3'), 10)));
+    const minTranscriptChars = Math.min(400, Math.max(10, parseInt(String(req.query.minTranscriptChars || '30'), 10)));
+    const requestedDisposition = req.query.disposition && req.query.disposition !== 'all'
+      ? String(req.query.disposition).toLowerCase()
+      : null;
+
+    const conditions = buildDateFilters(req.query, callSessions);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await db
+      .select({
+        callSessionId: callSessions.id,
+        disposition: sql<string>`coalesce(${callSessions.aiDisposition}, ${dialerCallAttempts.disposition}::text)`,
+        transcript: sql<string>`coalesce(${callSessions.aiTranscript}, ${dialerCallAttempts.fullTranscript}, ${dialerCallAttempts.aiTranscript})`,
+      })
+      .from(callSessions)
+      .leftJoin(dialerCallAttempts, eq(dialerCallAttempts.callSessionId, callSessions.id))
+      .where(and(
+        whereClause,
+        sql`coalesce(${callSessions.aiDisposition}, ${dialerCallAttempts.disposition}::text) is not null`,
+        requestedDisposition
+          ? sql`lower(coalesce(${callSessions.aiDisposition}, ${dialerCallAttempts.disposition}::text)) = ${requestedDisposition}`
+          : undefined,
+        sql`coalesce(${callSessions.aiTranscript}, ${dialerCallAttempts.fullTranscript}, ${dialerCallAttempts.aiTranscript}) is not null`,
+        sql`length(coalesce(${callSessions.aiTranscript}, ${dialerCallAttempts.fullTranscript}, ${dialerCallAttempts.aiTranscript})) >= ${minTranscriptChars}`,
+      ))
+      .orderBy(desc(callSessions.createdAt))
+      .limit(maxCalls);
+
+    const callSessionIds = rows.map((r) => r.callSessionId);
+    const detectionByCallId: Record<string, DetectionSignal> = {};
+
+    if (callSessionIds.length > 0) {
+      const signalRows = await db
+        .select({
+          callSessionId: callSessionEvents.callSessionId,
+          eventKey: callSessionEvents.eventKey,
+        })
+        .from(callSessionEvents)
+        .where(and(
+          inArray(callSessionEvents.callSessionId, callSessionIds),
+          inArray(callSessionEvents.eventKey, ['amd_machine_detected', 'amd_human_detected']),
+        ));
+
+      for (const row of signalRows) {
+        if (!row.callSessionId) continue;
+        if (row.eventKey === 'amd_machine_detected') {
+          detectionByCallId[row.callSessionId] = 'machine';
+        } else if (!detectionByCallId[row.callSessionId]) {
+          detectionByCallId[row.callSessionId] = 'human';
+        }
+      }
+    }
+
+    const phraseInsights = buildDispositionPhraseInsights(
+      rows.map((row) => ({
+        callSessionId: row.callSessionId,
+        disposition: row.disposition || 'unknown',
+        transcript: row.transcript || '',
+        detectionSignal: detectionByCallId[row.callSessionId] || 'unknown',
+      })),
+      {
+        minCount,
+        maxKeywords,
+        maxPhrases,
+        minTokenLength,
+      },
+    );
+
+    res.json({
+      ...phraseInsights,
+      filters: {
+        startDate: req.query.startDate || null,
+        endDate: req.query.endDate || null,
+        campaignId: req.query.campaignId || 'all',
+        disposition: requestedDisposition || 'all',
+        maxCalls,
+        minTranscriptChars,
+      },
+    });
+  } catch (error: any) {
+    console.error('[DispositionIntelligence] Phrase insights error:', error);
+    res.status(500).json({ error: 'Failed to load phrase insights' });
+  }
+});
+
+// ============================================================================
+// GET /prompt-guardrails - Export prompt-ready detection guardrails from history
+// ============================================================================
+
+router.get("/prompt-guardrails", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const maxCalls = Math.min(5000, Math.max(100, parseInt(String(req.query.maxCalls || '2000'), 10)));
+    const minCount = Math.min(25, Math.max(1, parseInt(String(req.query.minCount || '3'), 10)));
+    const maxKeywords = Math.min(100, Math.max(5, parseInt(String(req.query.maxKeywords || '25'), 10)));
+    const maxPhrases = Math.min(100, Math.max(5, parseInt(String(req.query.maxPhrases || '25'), 10)));
+    const minTokenLength = Math.min(8, Math.max(2, parseInt(String(req.query.minTokenLength || '3'), 10)));
+    const minTranscriptChars = Math.min(400, Math.max(10, parseInt(String(req.query.minTranscriptChars || '30'), 10)));
+    const requestedDisposition = req.query.disposition && req.query.disposition !== 'all'
+      ? String(req.query.disposition).toLowerCase()
+      : null;
+
+    const conditions = buildDateFilters(req.query, callSessions);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await db
+      .select({
+        callSessionId: callSessions.id,
+        disposition: sql<string>`coalesce(${callSessions.aiDisposition}, ${dialerCallAttempts.disposition}::text)`,
+        transcript: sql<string>`coalesce(${callSessions.aiTranscript}, ${dialerCallAttempts.fullTranscript}, ${dialerCallAttempts.aiTranscript})`,
+      })
+      .from(callSessions)
+      .leftJoin(dialerCallAttempts, eq(dialerCallAttempts.callSessionId, callSessions.id))
+      .where(and(
+        whereClause,
+        sql`coalesce(${callSessions.aiDisposition}, ${dialerCallAttempts.disposition}::text) is not null`,
+        requestedDisposition
+          ? sql`lower(coalesce(${callSessions.aiDisposition}, ${dialerCallAttempts.disposition}::text)) = ${requestedDisposition}`
+          : undefined,
+        sql`coalesce(${callSessions.aiTranscript}, ${dialerCallAttempts.fullTranscript}, ${dialerCallAttempts.aiTranscript}) is not null`,
+        sql`length(coalesce(${callSessions.aiTranscript}, ${dialerCallAttempts.fullTranscript}, ${dialerCallAttempts.aiTranscript})) >= ${minTranscriptChars}`,
+      ))
+      .orderBy(desc(callSessions.createdAt))
+      .limit(maxCalls);
+
+    const callSessionIds = rows.map((r) => r.callSessionId);
+    const detectionByCallId: Record<string, DetectionSignal> = {};
+
+    if (callSessionIds.length > 0) {
+      const signalRows = await db
+        .select({
+          callSessionId: callSessionEvents.callSessionId,
+          eventKey: callSessionEvents.eventKey,
+        })
+        .from(callSessionEvents)
+        .where(and(
+          inArray(callSessionEvents.callSessionId, callSessionIds),
+          inArray(callSessionEvents.eventKey, ['amd_machine_detected', 'amd_human_detected']),
+        ));
+
+      for (const row of signalRows) {
+        if (!row.callSessionId) continue;
+        if (row.eventKey === 'amd_machine_detected') {
+          detectionByCallId[row.callSessionId] = 'machine';
+        } else if (!detectionByCallId[row.callSessionId]) {
+          detectionByCallId[row.callSessionId] = 'human';
+        }
+      }
+    }
+
+    const phraseInsights = buildDispositionPhraseInsights(
+      rows.map((row) => ({
+        callSessionId: row.callSessionId,
+        disposition: row.disposition || 'unknown',
+        transcript: row.transcript || '',
+        detectionSignal: detectionByCallId[row.callSessionId] || 'unknown',
+      })),
+      {
+        minCount,
+        maxKeywords,
+        maxPhrases,
+        minTokenLength,
+      },
+    );
+
+    const promptGuardrails = buildPromptGuardrailExport(phraseInsights);
+
+    res.json({
+      ...promptGuardrails,
+      phraseInsights,
+      filters: {
+        startDate: req.query.startDate || null,
+        endDate: req.query.endDate || null,
+        campaignId: req.query.campaignId || 'all',
+        disposition: requestedDisposition || 'all',
+        maxCalls,
+        minTranscriptChars,
+      },
+    });
+  } catch (error: any) {
+    console.error('[DispositionIntelligence] Prompt guardrails error:', error);
+    res.status(500).json({ error: 'Failed to build prompt guardrails' });
   }
 });
 
@@ -1004,6 +1202,23 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
       aggregateStats,
     });
 
+    const phraseInsights = buildDispositionPhraseInsights(
+      sampledCalls.map((call) => ({
+        callSessionId: call.callSessionId,
+        disposition: call.disposition || 'unknown',
+        transcript: call.transcript || '',
+        detectionSignal: 'unknown',
+      })),
+      {
+        minCount: 2,
+        maxKeywords: 12,
+        maxPhrases: 12,
+        minTokenLength: 3,
+      },
+    );
+
+    const promptGuardrails = buildPromptGuardrailExport(phraseInsights);
+
     // Override metadata with actual info
     result.metadata.callsAnalyzed = records.length;
     result.metadata.dateRange = {
@@ -1011,7 +1226,11 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
       end: endDate || (records[0]?.createdAt?.toISOString() || ''),
     };
 
-    res.json(result);
+    res.json({
+      ...result,
+      phraseInsights,
+      promptGuardrails,
+    });
   } catch (error: any) {
     console.error('[DispositionIntelligence] Coaching generation error:', error);
     res.status(500).json({ error: `Failed to generate coaching: ${error.message}` });

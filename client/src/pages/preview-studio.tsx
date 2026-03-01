@@ -366,6 +366,17 @@ export default function PreviewStudioPage() {
               </div>
             </div>
 
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setLocation('/voice-agent-training')}
+                className="h-9 rounded-lg border-purple-400/40 bg-purple-500/10 text-purple-200 hover:bg-purple-500/20 hover:text-white"
+              >
+                <Wand2 className="h-4 w-4 mr-2" />
+                Voice Agent Training
+              </Button>
+            </div>
+
           </div>
         </div>
       </div>

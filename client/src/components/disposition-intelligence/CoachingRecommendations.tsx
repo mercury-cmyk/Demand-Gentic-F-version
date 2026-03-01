@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Loader2,
   GraduationCap,
@@ -27,8 +28,9 @@ import {
   ArrowRight,
   Voicemail,
   MessageCircle,
+  Copy,
 } from 'lucide-react';
-import { type DispositionIntelligenceFilters, type CoachingResponse } from './types';
+import { type DispositionIntelligenceFilters, type CoachingResponse, type PromptGuardrailResponse } from './types';
 
 interface Campaign {
   id: string;
@@ -53,6 +55,7 @@ export function CoachingRecommendations({ filters, campaigns }: CoachingRecommen
   const { toast } = useToast();
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [result, setResult] = useState<CoachingResponse | null>(null);
+  const [guardrailExport, setGuardrailExport] = useState<PromptGuardrailResponse | null>(null);
 
   const coachingMutation = useMutation({
     mutationFn: async () => {
@@ -72,6 +75,46 @@ export function CoachingRecommendations({ filters, campaigns }: CoachingRecommen
       toast({ title: 'Generation Failed', description: error.message || 'Could not generate coaching', variant: 'destructive' });
     },
   });
+
+  const guardrailMutation = useMutation({
+    mutationFn: async () => {
+      const params = new URLSearchParams();
+      params.append('maxCalls', '3000');
+      params.append('maxKeywords', '25');
+      params.append('maxPhrases', '25');
+      if (filters.campaignId !== 'all') params.append('campaignId', filters.campaignId);
+      if (filters.startDate) params.append('startDate', filters.startDate);
+      if (filters.endDate) params.append('endDate', filters.endDate);
+      const res = await apiRequest('GET', `/api/disposition-intelligence/prompt-guardrails?${params}`);
+      return res.json();
+    },
+    onSuccess: (data: PromptGuardrailResponse) => {
+      setGuardrailExport(data);
+      toast({
+        title: 'Prompt Guardrails Ready',
+        description: `Generated from ${data.summary.analyzedCalls} historical calls`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Export Failed',
+        description: error.message || 'Could not build prompt guardrails',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const copyGuardrails = async () => {
+    const text = guardrailExport?.promptBlock || result?.promptGuardrails?.promptBlock;
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: 'Copied', description: 'Prompt guardrail block copied to clipboard' });
+    } catch {
+      toast({ title: 'Copy Failed', description: 'Could not copy to clipboard', variant: 'destructive' });
+    }
+  };
 
   const toggleFocusArea = (id: string) => {
     setFocusAreas(prev => prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]);
@@ -122,6 +165,19 @@ export function CoachingRecommendations({ filters, campaigns }: CoachingRecommen
             <p className="text-xs text-muted-foreground">
               Analyzes up to 250 recent calls with transcripts
             </p>
+            <Button
+              variant="outline"
+              onClick={() => guardrailMutation.mutate()}
+              disabled={guardrailMutation.isPending}
+              className="gap-2"
+            >
+              {guardrailMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Export Prompt Guardrails
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -137,6 +193,34 @@ export function CoachingRecommendations({ filters, campaigns }: CoachingRecommen
               <span>·</span>
               <span>Generated {new Date(result.metadata.generatedAt).toLocaleString()}</span>
             </div>
+
+            {/* Prompt Guardrails Export */}
+            {(guardrailExport || result.promptGuardrails) && (
+              <Card className="border-indigo-200">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-indigo-700">
+                      <Sparkles className="h-4 w-4" />
+                      Prompt Guardrails Export
+                    </span>
+                    <Button variant="outline" size="sm" onClick={copyGuardrails} className="gap-1.5">
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy Block
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Built from {guardrailExport?.summary.analyzedCalls || result.promptGuardrails?.summary.analyzedCalls || result.metadata.callsAnalyzed} calls. Paste this block into your unified SIP agent prompt configuration.
+                  </p>
+                  <Textarea
+                    value={guardrailExport?.promptBlock || result.promptGuardrails?.promptBlock || ''}
+                    readOnly
+                    className="min-h-[260px] font-mono text-xs"
+                  />
+                </CardContent>
+              </Card>
+            )}
 
             {/* Top Issues */}
             {result.topIssues.length > 0 && (

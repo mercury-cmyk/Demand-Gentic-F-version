@@ -183,6 +183,8 @@ interface FormData {
 
   // Step 5: AI Agent
   selectedVoice: string;
+  selectedVoices: string[];
+  selectedPersonaNames: Record<string, string>;
   selectedPhoneNumber: string;
   senderProfileId: string;
   agentPersona: string;
@@ -262,6 +264,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       },
     },
     selectedVoice: 'Fenrir',
+    selectedVoices: ['Fenrir'],
+    selectedPersonaNames: {},
     selectedPhoneNumber: '',
     senderProfileId: '',
     agentPersona: '',
@@ -297,6 +301,16 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
   useEffect(() => {
     if (isEditMode && campaignData && open) {
       const campaign = campaignData as any;
+      const existingSelectedVoices = Array.isArray(campaign.selectedVoices)
+        ? campaign.selectedVoices.filter((v: string) => typeof v === 'string' && v.trim())
+        : [];
+      const selectedVoice = campaign.selectedVoice || existingSelectedVoices[0] || 'Fenrir';
+      const selectedVoices = existingSelectedVoices.length > 0 ? existingSelectedVoices : [selectedVoice];
+      const selectedPersonaNames = selectedVoices.reduce<Record<string, string>>((acc, voiceId) => {
+        acc[voiceId] = campaign.selectedPersonaNames?.[voiceId] || resolveContextPersonaName(voiceId);
+        return acc;
+      }, {});
+
       setFormData(prev => ({
         ...prev,
         name: campaign.name || '',
@@ -308,7 +322,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         successCriteria: campaign.successCriteria || '',
         targetAudience: campaign.targetAudienceDescription || '',
         objections: campaign.campaignObjections || [{ objection: '', response: '' }],
-        selectedVoice: campaign.selectedVoice || 'Fenrir',
+        selectedVoice,
+        selectedVoices,
+        selectedPersonaNames,
         agentPersona: campaign.agentPersona || '',
         agentTone: campaign.agentTone || 'professional',
         openingScript: campaign.openingScript || '',
@@ -590,6 +606,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         targetAudienceDescription: formData.targetAudience,
         campaignObjections: formData.objections?.filter(o => o.objection),
         selectedVoice: formData.selectedVoice,
+        selectedVoices: formData.selectedVoices,
+        selectedPersonaNames: formData.selectedPersonaNames,
         agentPersona: formData.agentPersona,
         agentTone: formData.agentTone,
         openingScript: formData.openingScript,
@@ -749,6 +767,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         },
       },
       selectedVoice: 'Fenrir',
+      selectedVoices: ['Fenrir'],
+      selectedPersonaNames: {},
       selectedPhoneNumber: '',
       senderProfileId: '',
       agentPersona: '',
@@ -904,7 +924,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       case 4:
         return formData.objective.trim().length > 0 && formData.successCriteria.trim().length > 0;
       case 5:
-        return formData.channel === 'email' || !!formData.selectedVoice;
+        return formData.channel === 'email' || formData.selectedVoices.length > 0;
       case 6:
         return formData.audienceSource === 'request_handling' ||
                formData.selectedAccounts.length > 0 ||
@@ -938,7 +958,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         if (!formData.successCriteria.trim()) missing.push('Success Criteria');
         break;
       case 5:
-        if (formData.channel !== 'email' && !formData.selectedVoice) missing.push('AI Voice');
+        if (formData.channel !== 'email' && formData.selectedVoices.length === 0) missing.push('AI Voice');
         break;
       case 6:
         if (formData.audienceSource !== 'request_handling' &&
@@ -1004,6 +1024,90 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
   );
   const selectedType = availableCampaignTypes.find(t => t.value === formData.campaignType);
   const selectedVoiceInfo = AI_VOICES.find(v => v.id === formData.selectedVoice);
+
+  const MALE_CORE_NAMES = ['Gabriel', 'Elias', 'Daniel', 'Adam', 'Amir'];
+  const MALE_EXPANDED_NAMES = ['Noah', 'Omar', 'Samuel', 'Isaac', 'Rayyan'];
+  const FEMALE_CORE_NAMES = ['Sophia', 'Miriam', 'Layla', 'Aisha', 'Hannah'];
+  const FEMALE_EXPANDED_NAMES = ['Zara', 'Nadia', 'Leila', 'Sara', 'Maryam'];
+
+  const hashString = (input: string) => {
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = (hash * 31 + input.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash);
+  };
+
+  const resolveContextPersonaName = (voiceId: string) => {
+    const voice = AI_VOICES.find(v => v.id === voiceId);
+    const isFemale = voice?.gender === 'female';
+    const pool = isFemale
+      ? [...FEMALE_CORE_NAMES, ...FEMALE_EXPANDED_NAMES]
+      : [...MALE_CORE_NAMES, ...MALE_EXPANDED_NAMES];
+
+    const contextSeed = [
+      formData.campaignType,
+      formData.objective,
+      formData.targetAudience,
+      formData.successCriteria,
+      voiceId,
+    ].join('|');
+
+    return pool[hashString(contextSeed) % pool.length];
+  };
+
+  const autoSelectVoicesFromContext = () => {
+    const contextText = [
+      selectedType?.label || '',
+      selectedType?.strategicIntent || '',
+      ...(selectedType?.voicePersonality || []),
+      formData.objective,
+      formData.targetAudience,
+      formData.successCriteria,
+      ...(formData.talkingPoints || []),
+    ].join(' ').toLowerCase();
+
+    const voicePool = AI_VOICES.filter(v => v.provider === 'gemini');
+
+    const scored = voicePool
+      .map((voice) => {
+        let score = 0;
+        const toneTokens = voice.tone.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+        const descriptionTokens = voice.description.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+        const bestForTokens = voice.bestFor.flatMap((b) => b.toLowerCase().split(/[^a-z]+/).filter(Boolean));
+
+        for (const token of [...toneTokens, ...descriptionTokens, ...bestForTokens]) {
+          if (token.length > 2 && contextText.includes(token)) score += 2;
+        }
+
+        // Light balancing to avoid single-gender concentration
+        if (voice.gender === 'female') score += 0.5;
+
+        return { voice, score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const picked = Array.from(new Set(scored.slice(0, 4).map(s => s.voice.id)));
+    const fallback = ['Fenrir', 'Kore', 'Charon', 'Aoede'];
+    const selected = picked.length > 0 ? picked : fallback;
+
+    const selectedPersonaNames = selected.reduce<Record<string, string>>((acc, voiceId) => {
+      acc[voiceId] = resolveContextPersonaName(voiceId);
+      return acc;
+    }, {});
+
+    setFormData(prev => ({
+      ...prev,
+      selectedVoices: selected,
+      selectedVoice: selected[0],
+      selectedPersonaNames,
+    }));
+
+    toast({
+      title: 'Voices auto-selected',
+      description: `${selected.length} voices selected from campaign context`,
+    });
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1923,8 +2027,23 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       {/* Voice Selection Grid */}
                       <div className="max-w-5xl mx-auto">
                         <div className="flex items-center justify-between mb-6">
-                          <Label className="text-base">Select AI Voice</Label>
+                          <div className="flex items-center gap-3">
+                            <Label className="text-base">Select AI Voices</Label>
+                            <Badge variant="outline" className="text-xs">
+                              {formData.selectedVoices.length} selected
+                            </Badge>
+                          </div>
                           <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={autoSelectVoicesFromContext}
+                              className="mr-2"
+                            >
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              Auto Select
+                            </Button>
                             <Badge
                               variant={voiceFilter === 'all' ? 'default' : 'outline'}
                               className="cursor-pointer"
@@ -1955,16 +2074,39 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                 key={voice.id}
                                 className={cn(
                                   'cursor-pointer transition-all hover:shadow-lg relative overflow-hidden group',
-                                  formData.selectedVoice === voice.id
+                                  formData.selectedVoices.includes(voice.id)
                                     ? 'ring-2 ring-primary shadow-md'
                                     : 'hover:ring-1 hover:ring-primary/50'
                                 )}
-                                onClick={() => setFormData(prev => ({ ...prev, selectedVoice: voice.id }))}
+                                onClick={() => {
+                                  setFormData(prev => {
+                                    const isSelected = prev.selectedVoices.includes(voice.id);
+                                    const nextSelectedVoices = isSelected
+                                      ? prev.selectedVoices.filter(v => v !== voice.id)
+                                      : [...prev.selectedVoices, voice.id];
+
+                                    const normalizedSelectedVoices = nextSelectedVoices.length > 0
+                                      ? nextSelectedVoices
+                                      : [voice.id];
+
+                                    const selectedPersonaNames = normalizedSelectedVoices.reduce<Record<string, string>>((acc, voiceId) => {
+                                      acc[voiceId] = prev.selectedPersonaNames?.[voiceId] || resolveContextPersonaName(voiceId);
+                                      return acc;
+                                    }, {});
+
+                                    return {
+                                      ...prev,
+                                      selectedVoices: normalizedSelectedVoices,
+                                      selectedVoice: normalizedSelectedVoices[0],
+                                      selectedPersonaNames,
+                                    };
+                                  });
+                                }}
                               >
                                 {/* Gradient Header */}
                                 <div className={cn('h-2 bg-gradient-to-r', voice.color)} />
 
-                                {formData.selectedVoice === voice.id && (
+                                {formData.selectedVoices.includes(voice.id) && (
                                   <div className="absolute top-4 right-3 z-10">
                                     <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shadow-md">
                                       <Check className="h-4 w-4 text-primary-foreground" />
@@ -2012,6 +2154,14 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                       </Badge>
                                     ))}
                                   </div>
+
+                                  {formData.selectedVoices.includes(voice.id) && (
+                                    <div className="mb-3">
+                                      <Badge variant="outline" className="text-xs border-primary/40 text-primary">
+                                        Persona Name: {formData.selectedPersonaNames?.[voice.id] || resolveContextPersonaName(voice.id)}
+                                      </Badge>
+                                    </div>
+                                  )}
 
                                   {/* Preview Button */}
                                   <Button

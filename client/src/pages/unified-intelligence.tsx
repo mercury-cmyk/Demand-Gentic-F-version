@@ -17,7 +17,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, Brain, MessageSquare, BarChart3, Target, Trophy } from 'lucide-react';
+import { RefreshCw, Brain, MessageSquare, BarChart3, Target, Trophy, Activity } from 'lucide-react';
 import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram';
 import {
   ResizablePanelGroup,
@@ -39,6 +39,7 @@ import { DispositionIntelligenceView } from '@/components/disposition-intelligen
 
 const ShowcaseCallsPage = lazy(() => import('@/pages/showcase-calls'));
 const DispositionReanalysisPage = lazy(() => import('@/pages/disposition-reanalysis'));
+const TranscriptionHealthView = lazy(() => import('@/components/transcription-health-view'));
 
 interface Campaign {
   id: string;
@@ -94,6 +95,7 @@ function stringifyForDisplay(value: unknown): string {
 type HubTab =
   | 'disposition-intelligence'
   | 'conversation-quality'
+  | 'transcription-health'
   | 'showcase-calls'
   | 'reanalysis';
 
@@ -106,6 +108,8 @@ function normalizeTab(tab: string | null): HubTab {
     case 'conversations':
     case 'recordings':
       return 'conversation-quality';
+    case 'transcription-health':
+      return 'transcription-health';
     case 'showcase-calls':
     case 'showcase':
       return 'showcase-calls';
@@ -492,6 +496,10 @@ export default function UnifiedIntelligencePage() {
                 <MessageSquare className="h-4 w-4" />
                 Conversation Quality
               </TabsTrigger>
+              <TabsTrigger value="transcription-health" className="gap-1.5 flex-1">
+                <Activity className="h-4 w-4" />
+                Transcription Health
+              </TabsTrigger>
               <TabsTrigger value="showcase-calls" className="gap-1.5 flex-1">
                 <Trophy className="h-4 w-4" />
                 Showcase Calls
@@ -509,6 +517,12 @@ export default function UnifiedIntelligencePage() {
       {pageTab === 'disposition-intelligence' ? (
         <div className="flex-1 overflow-hidden">
           <DispositionIntelligenceView campaigns={campaigns} />
+        </div>
+      ) : pageTab === 'transcription-health' ? (
+        <div className="flex-1 overflow-auto p-4">
+          <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
+            <TranscriptionHealthView campaigns={campaigns} />
+          </Suspense>
         </div>
       ) : pageTab === 'showcase-calls' ? (
         <div className="flex-1 overflow-hidden">

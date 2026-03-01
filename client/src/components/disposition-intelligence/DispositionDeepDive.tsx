@@ -47,6 +47,7 @@ import {
 import {
   type DispositionIntelligenceFilters,
   type DeepDiveResponse,
+  type PhraseInsightsResponse,
   DISPOSITION_TYPES,
   DISPOSITION_COLORS,
   DISPOSITION_LABELS,
@@ -95,6 +96,24 @@ export function DispositionDeepDive({ filters }: DispositionDeepDiveProps) {
       if (filters.startDate) params.append('startDate', filters.startDate);
       if (filters.endDate) params.append('endDate', filters.endDate);
       const res = await apiRequest('GET', `/api/disposition-intelligence/deep-dive?${params}`);
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: phraseInsights, isLoading: phraseInsightsLoading } = useQuery<PhraseInsightsResponse>({
+    queryKey: ['/api/disposition-intelligence/phrase-insights', selectedDisposition, filters.campaignId, filters.startDate, filters.endDate],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.append('disposition', selectedDisposition);
+      params.append('maxCalls', '2000');
+      params.append('minCount', '2');
+      params.append('maxKeywords', '12');
+      params.append('maxPhrases', '12');
+      if (filters.campaignId !== 'all') params.append('campaignId', filters.campaignId);
+      if (filters.startDate) params.append('startDate', filters.startDate);
+      if (filters.endDate) params.append('endDate', filters.endDate);
+      const res = await apiRequest('GET', `/api/disposition-intelligence/phrase-insights?${params}`);
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
@@ -409,6 +428,89 @@ export function DispositionDeepDive({ filters }: DispositionDeepDiveProps) {
 
           {/* Patterns Panel */}
           <div className="space-y-4">
+            {/* Outcome Keywords & Phrases */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Outcome Keywords ({getDispositionLabel(selectedDisposition)})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {phraseInsightsLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Analyzing historical phrases...
+                  </div>
+                ) : (
+                  (() => {
+                    const dispositionBucket = phraseInsights?.byDisposition?.[0];
+                    if (!dispositionBucket || dispositionBucket.totalCalls === 0) {
+                      return <p className="text-xs text-muted-foreground">No historical phrases available for this filter.</p>;
+                    }
+                    return (
+                      <>
+                        <div className="text-xs text-muted-foreground">
+                          {dispositionBucket.totalCalls} calls analyzed
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-medium mb-2">Top Keywords</p>
+                          <div className="space-y-1">
+                            {dispositionBucket.topKeywords.slice(0, 8).map((term) => (
+                              <div key={term.term} className="flex items-center justify-between text-xs p-2 rounded bg-muted/30">
+                                <span>{term.term}</span>
+                                <Badge variant="outline" className="text-xs">{term.callCoveragePct}%</Badge>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-medium mb-2">Top Trigger Phrases</p>
+                          <div className="space-y-1">
+                            {dispositionBucket.topBigrams.slice(0, 6).map((term) => (
+                              <div key={term.term} className="flex items-center justify-between text-xs p-2 rounded bg-blue-50">
+                                <span className="italic">"{term.term}"</span>
+                                <Badge variant="outline" className="text-xs">{term.callCoveragePct}%</Badge>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Machine vs Human detected language */}
+            {phraseInsights?.byDetectionSignal?.length ? (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">AMD Language Signals</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {phraseInsights.byDetectionSignal
+                    .filter((bucket) => bucket.key === 'machine' || bucket.key === 'human')
+                    .map((bucket) => (
+                      <div key={bucket.key} className="rounded border p-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-medium capitalize">{bucket.key} detected</span>
+                          <Badge variant="outline" className="text-xs">{bucket.totalCalls} calls</Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {bucket.topKeywords.slice(0, 6).map((term) => (
+                            <Badge key={`${bucket.key}-${term.term}`} variant="secondary" className="text-[10px]">
+                              {term.term}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                </CardContent>
+              </Card>
+            ) : null}
+
             {/* Detected Patterns */}
             {data.patterns.length > 0 && (
               <Card>

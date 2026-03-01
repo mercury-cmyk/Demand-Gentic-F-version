@@ -100,6 +100,8 @@ router.post('/create', requireAuth, requireRole('admin'), async (req: Request, r
 
       // Step 5: AI Agent
       selectedVoice: z.string().optional(),
+      selectedVoices: z.array(z.string()).optional(),
+      selectedPersonaNames: z.record(z.string(), z.string()).optional(),
       agentPersona: z.string().optional(),
       agentTone: z.enum(['professional', 'friendly', 'consultative', 'direct']).optional(),
       openingScript: z.string().optional(),
@@ -133,6 +135,12 @@ router.post('/create', requireAuth, requireRole('admin'), async (req: Request, r
         return res.status(404).json({ message: 'Client account not found' });
     }
 
+    const normalizedSelectedVoices = (data.selectedVoices?.filter(v => v?.trim())?.length
+      ? data.selectedVoices.filter(v => v?.trim())
+      : data.selectedVoice
+        ? [data.selectedVoice]
+        : undefined);
+
     // Build campaign configuration
     const campaignConfig: any = {
       channel: data.channel,
@@ -145,7 +153,9 @@ router.post('/create', requireAuth, requireRole('admin'), async (req: Request, r
 
       // AI Agent configuration
       aiAgent: {
-        voice: data.selectedVoice,
+        voice: normalizedSelectedVoices?.[0] || data.selectedVoice,
+        voices: normalizedSelectedVoices,
+        personaNames: data.selectedPersonaNames,
         persona: data.agentPersona,
         tone: data.agentTone,
         openingScript: data.openingScript,

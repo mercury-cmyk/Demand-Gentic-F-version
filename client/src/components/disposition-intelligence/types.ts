@@ -155,6 +155,76 @@ export interface DeepDiveResponse {
 }
 
 // ============================================
+// Phrase Insights Response
+// ============================================
+
+export interface PhraseInsightTerm {
+  term: string;
+  count: number;
+  callCoverage: number;
+  callCoveragePct: number;
+}
+
+export interface PhraseInsightBucket {
+  key: string;
+  totalCalls: number;
+  totalTokens: number;
+  topKeywords: PhraseInsightTerm[];
+  topBigrams: PhraseInsightTerm[];
+  topTrigrams: PhraseInsightTerm[];
+}
+
+export interface PhraseInsightsResponse {
+  generatedAt: string;
+  analyzedCalls: number;
+  settings: {
+    minCount: number;
+    maxKeywords: number;
+    maxPhrases: number;
+    minTokenLength: number;
+  };
+  byDisposition: PhraseInsightBucket[];
+  byDetectionSignal: PhraseInsightBucket[];
+  filters: {
+    startDate: string | null;
+    endDate: string | null;
+    campaignId: string;
+    disposition: string;
+    maxCalls: number;
+    minTranscriptChars: number;
+  };
+}
+
+export interface PromptGuardrailExport {
+  generatedAt: string;
+  summary: {
+    analyzedCalls: number;
+    dispositions: string[];
+  };
+  sections: {
+    voicemailMarkers: string[];
+    qualifiedIntentLexicon: string[];
+    notInterestedSuppressionCues: string[];
+    doNotCallCues: string[];
+    machineDetectedCues: string[];
+    humanDetectedCues: string[];
+  };
+  promptBlock: string;
+}
+
+export interface PromptGuardrailResponse extends PromptGuardrailExport {
+  phraseInsights: PhraseInsightsResponse;
+  filters: {
+    startDate: string | null;
+    endDate: string | null;
+    campaignId: string;
+    disposition: string;
+    maxCalls: number;
+    minTranscriptChars: number;
+  };
+}
+
+// ============================================
 // Agent Performance Response
 // ============================================
 
@@ -286,6 +356,8 @@ export interface CoachingResponse {
     dateRange: { start: string; end: string };
     generatedAt: string;
   };
+  phraseInsights?: Omit<PhraseInsightsResponse, 'filters'>;
+  promptGuardrails?: PromptGuardrailExport;
 }
 
 // ============================================

@@ -18,6 +18,7 @@ import {
   isClientVisible,
   getPendingContent,
   bulkReview,
+  migrateLegacyContentToQaGate,
   type QAContentType,
   type QAStatus,
 } from "../services/qa-gate-service";
@@ -26,6 +27,7 @@ import { qaGatedContent, clientAccounts } from "@shared/schema";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 
 const router = Router();
+const requireQaReviewAccess = requireRole("admin", "quality_analyst", "campaign_manager");
 
 // ==================== ADMIN QA MANAGEMENT ====================
 
@@ -36,7 +38,7 @@ const router = Router();
 router.get(
   "/admin/qa-content",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const {
@@ -108,7 +110,7 @@ router.get(
 router.get(
   "/admin/qa-content/pending",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const { contentType, limit = "50" } = req.query;
@@ -135,9 +137,9 @@ router.get(
  * Get specific QA content with details
  */
 router.get(
-  "/admin/qa-content/:id",
+  "/admin/qa-content/:id([0-9a-fA-F-]{36})",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -175,7 +177,7 @@ router.get(
 router.post(
   "/admin/qa-content/register",
   requireAuth,
-  requireRole("admin", "quality_analyst", "campaign_manager"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const { contentType, contentId, campaignId, clientAccountId, projectId } = req.body;
@@ -213,9 +215,9 @@ router.post(
  * Trigger AI analysis for content
  */
 router.post(
-  "/admin/qa-content/:id/analyze",
+  "/admin/qa-content/:id([0-9a-fA-F-]{36})/analyze",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -243,9 +245,9 @@ router.post(
  * Submit a manual QA review
  */
 router.patch(
-  "/admin/qa-content/:id/review",
+  "/admin/qa-content/:id([0-9a-fA-F-]{36})/review",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -288,9 +290,9 @@ router.patch(
  * Publish approved content to client
  */
 router.post(
-  "/admin/qa-content/:id/publish",
+  "/admin/qa-content/:id([0-9a-fA-F-]{36})/publish",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -321,7 +323,7 @@ router.post(
 router.post(
   "/admin/qa-content/bulk-review",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const { contentIds, status, score, notes } = req.body;
@@ -354,13 +356,36 @@ router.post(
 );
 
 /**
+ * POST /api/admin/qa-content/migrate
+ * Backfill legacy client content into QA-gated registry and link qa_content_id references
+ */
+router.post(
+  "/admin/qa-content/migrate",
+  requireAuth,
+  requireQaReviewAccess,
+  async (_req: Request, res: Response) => {
+    try {
+      const result = await migrateLegacyContentToQaGate();
+      res.json({
+        success: true,
+        result,
+        message: `Migration complete. Linked ${result.totalLinked} item(s).`,
+      });
+    } catch (error) {
+      console.error("Error migrating legacy QA content:", error);
+      res.status(500).json({ error: "Failed to migrate legacy QA content" });
+    }
+  }
+);
+
+/**
  * GET /api/admin/qa-content/stats
  * Get QA content statistics
  */
 router.get(
   "/admin/qa-content/stats",
   requireAuth,
-  requireRole("admin", "quality_analyst"),
+  requireQaReviewAccess,
   async (req: Request, res: Response) => {
     try {
       const stats = await db

@@ -11,7 +11,13 @@ import { USER_ROLES } from './navigation-config';
 const ALL_ROLES = Object.values(USER_ROLES);
 const MANAGEMENT_ROLES = [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER];
 const DATA_ROLES = [USER_ROLES.ADMIN, USER_ROLES.DATA_OPS];
-const QA_ROLES = [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER, USER_ROLES.QUALITY_ANALYST];
+const QA_ROLES = [
+  USER_ROLES.ADMIN,
+  USER_ROLES.CAMPAIGN_MANAGER,
+  USER_ROLES.QUALITY_ANALYST,
+  'manager',
+  'qa_analyst',
+];
 const AGENT_ROLES = [...MANAGEMENT_ROLES, USER_ROLES.AGENT];
 const ANALYTICS_ROLES = [...QA_ROLES, USER_ROLES.CLIENT_USER];
 const CLIENT_ACCESS_ROLES = [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER];
@@ -39,6 +45,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/ai-studio', roles: MANAGEMENT_ROLES, description: 'AI Studio Dashboard' },
   { pattern: /^\/ai-studio\//, roles: MANAGEMENT_ROLES, description: 'AI Studio pages' },
   { pattern: '/preview-studio', roles: MANAGEMENT_ROLES, description: 'Preview Studio (Admin)' },
+  { pattern: '/voice-agent-training', roles: QA_ROLES, description: 'Voice Agent Training Dashboard' },
   { pattern: '/voice-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Voice Simulation' },
   { pattern: '/email-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Email Simulation' },
   { pattern: '/virtual-agents', roles: MANAGEMENT_ROLES, description: 'Virtual Agents' },

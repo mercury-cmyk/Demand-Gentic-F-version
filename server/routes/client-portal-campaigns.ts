@@ -771,6 +771,8 @@ router.post('/create', async (req: Request, res: Response) => {
 
       // Step 5: AI Agent
       selectedVoice: z.string().optional(),
+      selectedVoices: z.array(z.string()).optional(),
+      selectedPersonaNames: z.record(z.string(), z.string()).optional(),
       agentPersona: z.string().optional(),
       agentTone: z.enum(['professional', 'friendly', 'consultative', 'direct']).optional(),
       openingScript: z.string().optional(),
@@ -795,6 +797,12 @@ router.post('/create', async (req: Request, res: Response) => {
     const data = campaignSchema.parse(req.body);
     const orderNumber = await generateOrderNumber();
 
+    const normalizedSelectedVoices = (data.selectedVoices?.filter(v => v?.trim())?.length
+      ? data.selectedVoices.filter(v => v?.trim())
+      : data.selectedVoice
+        ? [data.selectedVoice]
+        : undefined);
+
     // Build campaign configuration
     const campaignConfig: any = {
       channel: data.channel,
@@ -807,7 +815,9 @@ router.post('/create', async (req: Request, res: Response) => {
 
       // AI Agent configuration
       aiAgent: {
-        voice: data.selectedVoice,
+        voice: normalizedSelectedVoices?.[0] || data.selectedVoice,
+        voices: normalizedSelectedVoices,
+        personaNames: data.selectedPersonaNames,
         persona: data.agentPersona,
         tone: data.agentTone,
         openingScript: data.openingScript,
@@ -1289,6 +1299,8 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
 
       // Voice-specific (optional)
       selectedVoice: z.string().optional(),
+      selectedVoices: z.array(z.string()).optional(),
+      selectedPersonaNames: z.record(z.string(), z.string()).optional(),
       callScript: z.string().optional(),
 
       // Whether to create a new project or link to existing
@@ -1783,8 +1795,16 @@ router.post('/quick-create', campaignUpload.array('files', 10), async (req: Requ
       campaignConfig.emailBody = data.emailBody || '';
     }
     if (data.channel === 'voice' || data.channel === 'combo') {
+      const normalizedSelectedVoices = (data.selectedVoices?.filter((v: string) => v?.trim())?.length
+        ? data.selectedVoices.filter((v: string) => v?.trim())
+        : data.selectedVoice
+          ? [data.selectedVoice]
+          : undefined);
+
       campaignConfig.aiAgent = {
-        voice: data.selectedVoice || 'Aoede',
+        voice: normalizedSelectedVoices?.[0] || data.selectedVoice || 'Aoede',
+        voices: normalizedSelectedVoices,
+        personaNames: data.selectedPersonaNames,
         persona: 'professional',
         tone: 'professional',
         openingScript: data.callScript || '',
