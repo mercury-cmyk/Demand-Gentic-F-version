@@ -17,9 +17,11 @@ if ([string]::IsNullOrWhiteSpace($PROJECT_ID)) {
 $REGION = if ([string]::IsNullOrWhiteSpace($env:GCP_REGION)) { "us-central1" } else { $env:GCP_REGION }
 $REPOSITORY = if ([string]::IsNullOrWhiteSpace($env:ARTIFACT_REPOSITORY)) { "cloud-run-source-deploy" } else { $env:ARTIFACT_REPOSITORY }
 $IMAGE_NAME = if ([string]::IsNullOrWhiteSpace($env:IMAGE_NAME)) { "demandgentic-api" } else { $env:IMAGE_NAME } # same image for all 3
-$VPC_CONNECTOR = if ([string]::IsNullOrWhiteSpace($env:GCP_VPC_CONNECTOR)) { "pivotal-connector" } else { $env:GCP_VPC_CONNECTOR }
+$VPC_CONNECTOR = if ([string]::IsNullOrWhiteSpace($env:GCP_VPC_CONNECTOR)) { "" } else { $env:GCP_VPC_CONNECTOR }
 $GCS_BUCKET = if ([string]::IsNullOrWhiteSpace($env:GCS_BUCKET)) { "demandgentic-storage" } else { $env:GCS_BUCKET }
 $RUNTIME_SERVICE_ACCOUNT = if ([string]::IsNullOrWhiteSpace($env:CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT)) { "" } else { $env:CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }
+$ALLOW_UNAUTHENTICATED = -not [string]::IsNullOrWhiteSpace($env:CLOUD_RUN_ALLOW_UNAUTHENTICATED) -and @("1", "true", "yes") -contains $env:CLOUD_RUN_ALLOW_UNAUTHENTICATED.ToLowerInvariant()
+$SKIP_IMAGE_BUILD = -not [string]::IsNullOrWhiteSpace($env:SKIP_IMAGE_BUILD) -and @("1", "true", "yes") -contains $env:SKIP_IMAGE_BUILD.ToLowerInvariant()
 
 $VOICE_BASE_URL = if ([string]::IsNullOrWhiteSpace($env:VOICE_BASE_URL)) { "https://demandgentic.ai" } else { $env:VOICE_BASE_URL }
 $VOICE_PUBLIC_HOST = if ([string]::IsNullOrWhiteSpace($env:VOICE_PUBLIC_TEXML_HOST)) { "demandgentic.ai" } else { $env:VOICE_PUBLIC_TEXML_HOST }
@@ -43,13 +45,18 @@ if (-not $SHORT_SHA) {
 }
 
 $IMAGE_URL = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${SHORT_SHA}"
+$authArg = if ($ALLOW_UNAUTHENTICATED) { "--allow-unauthenticated" } else { "--no-allow-unauthenticated" }
 
 Write-Host "============================================"
 Write-Host "Step 1: Building and Pushing Docker Image..."
 Write-Host "============================================"
-& $gcloudExe builds submit --project $PROJECT_ID --tag $IMAGE_URL .
-if ($LASTEXITCODE -ne 0) {
-  throw "Cloud Build failed; aborting deploy."
+if ($SKIP_IMAGE_BUILD) {
+  Write-Host "Skipping image build (SKIP_IMAGE_BUILD=true). Using image: $IMAGE_URL"
+} else {
+  & $gcloudExe builds submit --project $PROJECT_ID --tag $IMAGE_URL .
+  if ($LASTEXITCODE -ne 0) {
+    throw "Cloud Build failed; aborting deploy."
+  }
 }
 
 # Common Secrets (Shared across all services)
@@ -112,6 +119,15 @@ if (-not [string]::IsNullOrWhiteSpace($RUNTIME_SERVICE_ACCOUNT)) {
   Write-Host "Using runtime service account: $RUNTIME_SERVICE_ACCOUNT"
 }
 
+$vpcArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($VPC_CONNECTOR)) {
+  $vpcArgs = @("--vpc-connector", $VPC_CONNECTOR, "--vpc-egress", "private-ranges-only")
+  Write-Host "Using VPC connector: $VPC_CONNECTOR"
+} else {
+  $vpcArgs = @("--clear-vpc-connector")
+  Write-Host "No VPC connector configured. Clearing any existing VPC connector on services."
+}
+
 # Common Env Vars
 $env_vars = @(
     "NODE_ENV=production",
@@ -154,7 +170,7 @@ $voice_env_string = $voice_env -join ","
   --image $IMAGE_URL `
   --region $REGION `
   --platform managed `
-  --allow-unauthenticated `
+  $authArg `
   --memory 4Gi `
   --cpu 4 `
   --min-instances 1 `
@@ -163,8 +179,7 @@ $voice_env_string = $voice_env -join ","
   --timeout 3600 `
   --concurrency 150 `
   --cpu-boost `
-  --vpc-connector $VPC_CONNECTOR `
-  --vpc-egress private-ranges-only `
+  @vpcArgs `
   @serviceAccountArgs `
   --set-env-vars $voice_env_string `
   --set-secrets $secret_string
@@ -187,7 +202,7 @@ $analysis_env_string = $analysis_env -join ","
   --image $IMAGE_URL `
   --region $REGION `
   --platform managed `
-  --allow-unauthenticated `
+  $authArg `
   --memory 8Gi `
   --cpu 4 `
   --min-instances 1 `
@@ -195,8 +210,7 @@ $analysis_env_string = $analysis_env -join ","
   --port 8080 `
   --timeout 3600 `
   --concurrency 80 `
-  --vpc-connector $VPC_CONNECTOR `
-  --vpc-egress private-ranges-only `
+  @vpcArgs `
   @serviceAccountArgs `
   --set-env-vars $analysis_env_string `
   --set-secrets $secret_string
@@ -219,7 +233,7 @@ $email_env_string = $email_env -join ","
   --image $IMAGE_URL `
   --region $REGION `
   --platform managed `
-  --allow-unauthenticated `
+  $authArg `
   --memory 2Gi `
   --cpu 2 `
   --min-instances 1 `
@@ -227,8 +241,7 @@ $email_env_string = $email_env -join ","
   --port 8080 `
   --timeout 3600 `
   --concurrency 80 `
-  --vpc-connector $VPC_CONNECTOR `
-  --vpc-egress private-ranges-only `
+  @vpcArgs `
   @serviceAccountArgs `
   --set-env-vars $email_env_string `
   --set-secrets $secret_string
