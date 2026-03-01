@@ -671,6 +671,12 @@ if (isMainModule) {
         const { initializeEnrichmentQueue } = await import("./lib/enrichment-queue");
         initializeEnrichmentQueue();
       }
+
+      // Initialize OI batch pipeline queue and worker (BullMQ)
+      if (hasRedis) {
+        const { initializeOiBatchQueue } = await import("./lib/oi-batch-queue");
+        initializeOiBatchQueue();
+      }
     } else {
       console.log(`[Startup] ⏭️ Skipping analysis/data queues (Role: ${SERVICE_ROLE})`);
     }

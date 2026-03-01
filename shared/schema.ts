@@ -14962,3 +14962,47 @@ export type InsertClientJourneyLead = typeof clientJourneyLeads.$inferInsert;
 export const insertClientJourneyActionSchema = createInsertSchema(clientJourneyActions);
 export type ClientJourneyAction = typeof clientJourneyActions.$inferSelect;
 export type InsertClientJourneyAction = typeof clientJourneyActions.$inferInsert;
+
+// ============================================
+// OI BATCH PIPELINE
+// ============================================
+
+export const oiBatchJobStatusEnum = pgEnum("oi_batch_job_status", [
+  "pending", "processing", "completed", "failed", "cancelled",
+]);
+
+export const oiBatchJobs = pgTable("oi_batch_jobs", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  status: oiBatchJobStatusEnum("status").default("pending").notNull(),
+  totalAccounts: integer("total_accounts").default(0).notNull(),
+  processedAccounts: integer("processed_accounts").default(0).notNull(),
+  successCount: integer("success_count").default(0).notNull(),
+  failedCount: integer("failed_count").default(0).notNull(),
+  skippedCount: integer("skipped_count").default(0).notNull(),
+  batchSize: integer("batch_size").default(5).notNull(),
+  concurrency: integer("concurrency").default(2).notNull(),
+  forceRefresh: boolean("force_refresh").default(false).notNull(),
+  includeAccountIntelligence: boolean("include_account_intelligence").default(true).notNull(),
+  includeProblemMapping: boolean("include_problem_mapping").default(true).notNull(),
+  // Input criteria (persisted for audit/re-run)
+  listIds: jsonb("list_ids").$type<string[]>().default([]),
+  campaignIds: jsonb("campaign_ids").$type<string[]>().default([]),
+  accountIds: jsonb("account_ids").$type<string[]>(),
+  mappingCampaignId: varchar("mapping_campaign_id", { length: 36 }),
+  filterCriteria: jsonb("filter_criteria"),
+  // Metadata
+  createdBy: varchar("created_by", { length: 36 }),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  errorLog: jsonb("error_log").$type<Array<{ accountId: string; accountName?: string; error: string }>>().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("oi_batch_jobs_status_idx").on(table.status),
+  createdByIdx: index("oi_batch_jobs_created_by_idx").on(table.createdBy),
+  createdAtIdx: index("oi_batch_jobs_created_at_idx").on(table.createdAt),
+}));
+
+export const insertOiBatchJobSchema = createInsertSchema(oiBatchJobs);
+export type OiBatchJob = typeof oiBatchJobs.$inferSelect;
+export type InsertOiBatchJob = typeof oiBatchJobs.$inferInsert;

@@ -3,11 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Sparkles, Globe, Database } from "lucide-react";
+import { Search, Sparkles, Globe, Database, Workflow } from "lucide-react";
 import { PipelineStatus } from "@/components/ai-studio/account-intelligence/pipeline-status";
 import { ResearchEngineView } from "@/components/ai-studio/account-intelligence/research-engine-view";
 import { ReasoningEngineView } from "@/components/ai-studio/account-intelligence/reasoning-engine-view";
 import { IntelligenceGatherPanel } from "@/components/ai-studio/account-intelligence/intelligence-gather-panel";
+import { OiBatchPipelineTab } from "@/components/ai-studio/account-intelligence/oi-batch-pipeline-tab";
 
 export default function AccountIntelligencePage() {
   const [analyzing, setAnalyzing] = useState(false);
@@ -44,8 +45,12 @@ export default function AccountIntelligencePage() {
         </div>
       </div>
 
-      <Tabs defaultValue="batch" className="flex-1 flex flex-col min-h-0">
+      <Tabs defaultValue="pipeline" className="flex-1 flex flex-col min-h-0">
         <TabsList className="w-fit shrink-0">
+          <TabsTrigger value="pipeline" className="gap-1.5">
+            <Workflow className="h-4 w-4" />
+            Analysis Pipeline
+          </TabsTrigger>
           <TabsTrigger value="batch" className="gap-1.5">
             <Database className="h-4 w-4" />
             Batch Intelligence
@@ -55,6 +60,11 @@ export default function AccountIntelligencePage() {
             Single Account
           </TabsTrigger>
         </TabsList>
+
+        {/* Analysis Pipeline Tab */}
+        <TabsContent value="pipeline" className="flex-1 mt-4 overflow-auto">
+          <OiBatchPipelineTab />
+        </TabsContent>
 
         {/* Batch Intelligence Tab */}
         <TabsContent value="batch" className="flex-1 mt-4 overflow-auto">

@@ -21,6 +21,7 @@ import { processDisposition } from '../disposition-engine';
 import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
+import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -195,10 +196,16 @@ function getQueueStatusFromDisposition(disposition: CanonicalDisposition): 'queu
 /**
  * Build system prompt for Gemini
  */
-function buildSystemPrompt(context: CallContext): string {
+function buildSystemPrompt(context: CallContext, voiceName: string, sessionId: string): string {
   const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
+  const personaProfile = resolveGeminiPersonaProfile({
+    voiceName,
+    sessionId,
+  });
 
-  let prompt = `## YOUR IDENTITY
+  let prompt = `${personaProfile.prompt}
+
+## YOUR IDENTITY
 
 You are an AI voice assistant from ${orgRef}.
 
@@ -275,7 +282,7 @@ export async function createBridgeSession(params: {
     openingMessageSent: false,
     dispositionProcessed: false,
     voiceName: voiceName || GEMINI_VOICES[0],
-    systemPrompt: buildSystemPrompt(context),
+    systemPrompt: buildSystemPrompt(context, voiceName || GEMINI_VOICES[0], callId),
     callContext: context,
     g711Format: detectG711Format((context as any).to || (context as any).phoneNumber),
     metrics: {

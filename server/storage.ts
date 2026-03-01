@@ -93,6 +93,8 @@ import {
   dealConversations, dealMessages,
   type DealConversation, type InsertDealConversation,
   type DealMessage, type InsertDealMessage,
+  oiBatchJobs,
+  type OiBatchJob, type InsertOiBatchJob,
 } from "@shared/schema";
 import { getBestPhoneForContact, normalizePhoneWithCountryCode, normalizeCountryToCode } from "./lib/phone-utils";
 import { detectContactTimezone } from "./utils/business-hours";
@@ -601,6 +603,12 @@ export interface IStorage {
   // Auto-dialer Queues
   getAllAutoDialerQueues(activeOnly?: boolean): Promise<any[]>;
   getAutoDialerQueue(campaignId: string): Promise<any | undefined>;
+
+  // OI Batch Pipeline
+  createOiBatchJob(data: InsertOiBatchJob): Promise<OiBatchJob>;
+  getOiBatchJob(id: string): Promise<OiBatchJob | undefined>;
+  updateOiBatchJob(id: string, data: Partial<InsertOiBatchJob>): Promise<OiBatchJob | undefined>;
+  listOiBatchJobs(limit?: number, offset?: number): Promise<OiBatchJob[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -5998,6 +6006,32 @@ export class DatabaseStorage implements IStorage {
 
   async assignRole(userId: string, role: string): Promise<void> {
     return this.assignUserRole(userId, role);
+  }
+
+  // OI Batch Pipeline
+  async createOiBatchJob(data: InsertOiBatchJob): Promise<OiBatchJob> {
+    const [job] = await db.insert(oiBatchJobs).values(data).returning();
+    return job;
+  }
+
+  async getOiBatchJob(id: string): Promise<OiBatchJob | undefined> {
+    const [job] = await db.select().from(oiBatchJobs).where(eq(oiBatchJobs.id, id));
+    return job || undefined;
+  }
+
+  async updateOiBatchJob(id: string, data: Partial<InsertOiBatchJob>): Promise<OiBatchJob | undefined> {
+    const [job] = await db.update(oiBatchJobs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(oiBatchJobs.id, id))
+      .returning();
+    return job || undefined;
+  }
+
+  async listOiBatchJobs(limit = 50, offset = 0): Promise<OiBatchJob[]> {
+    return db.select().from(oiBatchJobs)
+      .orderBy(desc(oiBatchJobs.createdAt))
+      .limit(limit)
+      .offset(offset);
   }
 }
 

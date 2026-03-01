@@ -23,6 +23,7 @@ import { eq, or, sql } from "drizzle-orm";
 import { createCallSessionSafely } from '../lib/call-session-factory';
 import { audioQualityMonitor } from "./audio-quality-monitor";
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format, createTranscoderState } from "./voice-providers/audio-transcoder";
+import { resolveGeminiPersonaProfile } from "./voice-providers/gemini-dynamic-persona";
 import { peekAmdResult, consumeAmdResult } from "./voice-dialer";
 import { processDisposition } from "./disposition-engine";
 import { analyzeConversationQuality } from "./conversation-quality-analyzer";
@@ -1767,14 +1768,26 @@ Instructions:
               // Build the final system prompt with DemandGentic identity and substitutions
               const identityPreamble = buildDemandGenticIdentityPreamble(callContext);
               let basePrompt = config.system_prompt || systemPrompt;
+
+              const personaProfile = resolveGeminiPersonaProfile({
+                voiceName,
+                sessionId:
+                  config.call_id ||
+                  config.callId ||
+                  callId ||
+                  callContext.callAttemptId ||
+                  streamSid ||
+                  `session-${Date.now()}`,
+              });
               
               // Substitute all placeholders in the base prompt
               basePrompt = substitutePromptPlaceholders(basePrompt, callContext);
               
               // Prepend identity preamble to ensure correct agent identity
-              systemPrompt = identityPreamble + basePrompt;
+              systemPrompt = `${personaProfile.prompt}\n\n${identityPreamble}${basePrompt}`;
               
               console.log(`[Gemini Live] Call ${config.call_id} started. Voice: ${voiceName}`);
+              console.log(`[Gemini Live] Persona selected: ${personaProfile.name} (${personaProfile.archetype})`);
               console.log(`[Gemini Live] Contact: ${callContext.contactName || 'Unknown'}, Title: ${callContext.contactJobTitle || 'N/A'}, Company: ${callContext.accountName || 'N/A'}`);
               console.log(`[Gemini Live] Organization: ${callContext.organizationName || 'DemandGentic.ai By Pivotal B2B'}`);
               const effectiveMaxDuration = getEffectiveMaxCallDurationSeconds();

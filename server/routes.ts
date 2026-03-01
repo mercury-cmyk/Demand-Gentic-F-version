@@ -122,6 +122,7 @@ import organizationManagerRouter from './routes/organization-manager-routes';
 import opsManagementRouter from './routes/ops-management';
 import unifiedAgentArchitectureRouter from './routes/unified-agent-architecture';
 import aiAudienceFilterRouter from './routes/ai-audience-filter-routes';
+import oiBatchRouter from './routes/oi-batch-routes';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
@@ -18561,6 +18562,9 @@ Return ONLY valid JSON, no other text.`;
   // ==================== UNIFIED AGENT ARCHITECTURE (Consolidated AI Intelligence) ====================
   // One Agent Per Type. Fully Self-Contained. Learning-Integrated.
   app.use("/api/unified-agents", requireAuth, unifiedAgentArchitectureRouter);
+
+  // ==================== OI BATCH PIPELINE ====================
+  app.use("/api/oi-batch", requireAuth, oiBatchRouter);
 
   // =============================================================================
   // OTHER ROUTES
