@@ -125,6 +125,8 @@ import opsManagementRouter from './routes/ops-management';
 import unifiedAgentArchitectureRouter from './routes/unified-agent-architecture';
 import aiAudienceFilterRouter from './routes/ai-audience-filter-routes';
 import oiBatchRouter from './routes/oi-batch-routes';
+import previewStudioRouter from './routes/preview-studio';
+import clientPortalSimulationRouter from './routes/client-portal-simulation';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
@@ -15321,6 +15323,14 @@ Provide JSON response with:
   // ==================== SIMULATIONS (Telephony-Free Testing) ====================
 
   app.use("/api/simulations", simulationsRouter);
+
+  // ==================== PREVIEW STUDIO ====================
+
+  app.use("/api/preview-studio", previewStudioRouter);
+
+  // ==================== CLIENT PORTAL SIMULATION ====================
+
+  app.use("/api/client-portal/simulation", requireAuth, clientPortalSimulationRouter);
 
   // ==================== VOICE AGENT TRAINING (Development Preview Layer) ====================
 

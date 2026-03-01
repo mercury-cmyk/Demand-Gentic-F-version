@@ -77,7 +77,6 @@ export default function LandingPage() {
             </div>
           </a>
           <div className="hidden md:flex items-center gap-8" role="menubar">
-            <a href="#the-problem" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">The Problem</a>
             <a href="#our-solutions" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Our Solutions</a>
             <a href="#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Platform</a>
             <a href="#features" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Features</a>
