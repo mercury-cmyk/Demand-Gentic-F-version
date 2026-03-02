@@ -5,7 +5,7 @@
 
 set -e
 
-PROJECT_ID="pivotalb2b-2026"
+PROJECT_ID="gen-lang-client-0789558283"
 echo "Updating secrets in project: $PROJECT_ID"
 
 # Function to create or update a secret
@@ -117,7 +117,7 @@ echo ""
 echo "Next steps:"
 echo "1. Grant Cloud Run service account access to secrets:"
 echo "   gcloud secrets add-iam-policy-binding SECRET_NAME \\"
-echo "     --member='serviceAccount:pivotalb2b-2026@appspot.gserviceaccount.com' \\"
+echo "     --member='serviceAccount:823201449858-compute@developer.gserviceaccount.com' \\"
 echo "     --role='roles/secretmanager.secretAccessor'"
 echo ""
 echo "2. Deploy to Cloud Run with secrets:"

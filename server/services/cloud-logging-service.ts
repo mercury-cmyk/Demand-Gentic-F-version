@@ -8,7 +8,7 @@
 
 import { Logging, LogEntry as GCloudLogEntry } from '@google-cloud/logging';
 
-const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || 'pivotalb2b-2026';
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || 'gen-lang-client-0789558283';
 const SERVICE_NAME = 'demandgentic-api';
 const REGION = 'us-central1';
 

@@ -36,7 +36,7 @@ export interface VertexAIConfig {
 }
 
 const defaultConfig: VertexAIConfig = {
-  projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || "pivotalb2b-2026",
+  projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || "gen-lang-client-0789558283",
   location: process.env.VERTEX_AI_LOCATION || "us-central1",
   models: {
     chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash-001",

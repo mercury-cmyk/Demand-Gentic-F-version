@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PROJECT_ID="pivotalb2b-2026"
+PROJECT_ID="gen-lang-client-0789558283"
 GITHUB_REPO="zahid-mohammadi/DemanGent.ai-2026" # Case sensitive!
 SERVICE_ACCOUNT_NAME="github-actions-deployer"
 POOL_NAME="github-actions-pool-2" # Using suffix to ensure unique

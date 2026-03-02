@@ -6,7 +6,7 @@ async function checkCloudLogs() {
   console.log('='.repeat(80));
   console.log();
 
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'pivotalb2b-2026';
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0789558283';
   console.log(`Project: ${projectId}`);
 
   try {

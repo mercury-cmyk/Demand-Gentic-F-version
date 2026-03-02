@@ -495,7 +495,7 @@ let vertexAIClient: VertexAI | null = null;
 function getVertexAI(): VertexAI {
   if (!vertexAIClient) {
     vertexAIClient = new VertexAI({
-      project: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || 'pivotalb2b-2026',
+      project: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || 'gen-lang-client-0789558283',
       location: process.env.VERTEX_AI_LOCATION || 'us-central1',
     });
   }
