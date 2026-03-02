@@ -62,7 +62,7 @@ gcloud run deploy ${SERVICE_NAME} \
     --port 8080 \
     --timeout 900 \
     --concurrency 150 \
-    --startup-cpu-boost \
+    --cpu-boost \
     --vpc-connector pivotal-connector \
     --vpc-egress private-ranges-only \
     --set-env-vars "NODE_ENV=production,TELNYX_NUMBER_POOL_ENABLED=true,TELNYX_TEXML_APP_ID=2870970047591876264,VOICE_PROVIDER=google,VOICE_PROVIDER_FALLBACK=true,VOICE_PROVIDER_FALLBACK_TARGET=openai,GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio,USE_VERTEX_AI=true,GOOGLE_CLOUD_PROJECT=gen-lang-client-0789558283,GCP_PROJECT_ID=gen-lang-client-0789558283,GCS_PROJECT_ID=gen-lang-client-0789558283,GCS_BUCKET=demandgentic-ai-storage,BASE_URL=https://demandgentic.ai,APP_BASE_URL=https://demandgentic.ai,PUBLIC_TEXML_HOST=demandgentic.ai,DEEPGRAM_MODEL=nova-2-phonecall,DEEPGRAM_LANGUAGE=en-US,CONVERSATION_QUALITY_MODEL=deepseek-chat,CALL_EXECUTION_ENABLED=true,GLOBAL_MAX_CONCURRENT_CALLS=100,MAX_CONCURRENT_CALLS=100,ENABLE_LOG_STREAMING=true,APP_GIT_SHA=${TAG},LIVEKIT_URL=wss://demandgentic-wmczsvyo.livekit.cloud,LIVEKIT_SIP_URI=sip:demandgentic-wmczsvyo.sip.livekit.cloud,LIVEKIT_SIP_CONNECTION_ID=2903106223836497802" \

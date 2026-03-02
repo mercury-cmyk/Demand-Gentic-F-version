@@ -126,7 +126,7 @@ jobs:
             --memory=4Gi \
             --cpu=4 \
             --timeout=900 \
-            --startup-cpu-boost \
+            --cpu-boost \
             --concurrency=150
       
       - name: Get service URL
