@@ -8677,12 +8677,14 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               timestamp: new Date().toISOString(),
             })) || [];
 
+            const isInlineCampaignAgent = session.virtualAgentId?.startsWith('campaign-') && session.virtualAgentId?.includes('-inline');
+            const dbVirtualAgentId = isInlineCampaignAgent ? undefined : (session.virtualAgentId || undefined);
             await db.insert(callProducerTracking).values({
               callSessionId: callSessionId,
               campaignId: session.campaignId!,
               contactId: session.contactId || undefined,
               producerType: 'ai' as const,
-              virtualAgentId: session.virtualAgentId || undefined,
+              virtualAgentId: dbVirtualAgentId,
               handoffStage: 'ai_initial' as const,
               intentsDetected: intentsDetected.length > 0 ? intentsDetected as any : undefined,
               transcriptAnalysis: aiAnalysis as any,
