@@ -4,7 +4,7 @@ import { Storage } from "@google-cloud/storage";
 import { uploadToS3 } from "./server/lib/storage";
 import "dotenv/config";
 
-const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
 const storage = new Storage({ projectId: process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT });
 const bucket = storage.bucket(GCS_BUCKET);
 

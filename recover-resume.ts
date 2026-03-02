@@ -8,7 +8,7 @@ import * as os from 'os';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
-const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
 
 const ALL_IDS = [
   '293ff82c-c7ef-4138-90b7-9c99d65e2422','5a65f2e7-b09e-4890-a489-4cb92133502a',

@@ -1,4 +1,4 @@
-const DEFAULT_RECORDINGS_BUCKET = 'demandgentic-storage';
+const DEFAULT_RECORDINGS_BUCKET = 'demandgentic-ai-storage';
 
 function encodeObjectPath(path: string): string {
   return path

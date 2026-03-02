@@ -132,7 +132,7 @@ async function transcribeNewLeads() {
       let useGcsUri = false;
       if (lead.recording_s3_key || lead.session_recording_s3_key || lead.alt_session_s3_key) {
         const s3Key = lead.recording_s3_key || lead.session_recording_s3_key || lead.alt_session_s3_key;
-        const gcsBucket = process.env.GCS_BUCKET || 'demandgentic-storage';
+        const gcsBucket = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
         recordingUrl = `gs://${gcsBucket}/${s3Key}`;
         sourceLabel = `GCS URI (${s3Key})`;
         useGcsUri = true;

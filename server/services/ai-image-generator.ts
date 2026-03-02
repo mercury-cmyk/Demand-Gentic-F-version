@@ -362,7 +362,7 @@ class AIImageGenerator {
     console.log(`[AIImageGenerator] Image uploaded to GCS: ${storageKey}`);
 
     // Make the file publicly readable so the URL doesn't expire
-    const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
+    const bucketName = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
     try {
       const { Storage } = await import('@google-cloud/storage');
       const gcs = new Storage({ projectId: this.projectId });

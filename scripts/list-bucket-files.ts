@@ -3,7 +3,7 @@ import { Storage } from '@google-cloud/storage';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-const BUCKET_NAME = process.env.GCS_BUCKET || 'demandgentic-storage';
+const BUCKET_NAME = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
 const storage = new Storage();
 const bucket = storage.bucket(BUCKET_NAME);
 

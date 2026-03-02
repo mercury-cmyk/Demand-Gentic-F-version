@@ -9,7 +9,7 @@ import { Readable } from 'stream';
 
 // Environment configuration
 const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-const GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-ai-storage';
 const GCS_KEY_FILE = process.env.GCS_KEY_FILE; // Optional: path to service account key file
 
 // Initialize Google Cloud Storage client

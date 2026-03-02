@@ -35,7 +35,7 @@ Successfully completed comprehensive migration from AWS S3 and AssemblyAI to **G
 - S3_REGION="ap-south-1"    // ← Removed (no longer needed)
   GOOGLE_CLOUD_PROJECT="pivotalb2b-2026"
   GCP_PROJECT_ID="pivotalb2b-2026"
-  GCS_BUCKET="demandgentic-storage"
+  GCS_BUCKET="demandgentic-ai-storage"
 ```
 
 #### `.env.example` Changes
@@ -48,7 +48,7 @@ Successfully completed comprehensive migration from AWS S3 and AssemblyAI to **G
 
 # File Storage (AFTER)
 # GCS_PROJECT_ID=pivotalb2b-2026
-# GCS_BUCKET=demandgentic-storage
+# GCS_BUCKET=demandgentic-ai-storage
 # GCS_KEY_FILE=/path/to/service-account-key.json (optional - uses default SA in Cloud Run)
 ```
 
@@ -173,7 +173,7 @@ vite v5.4.20 building for production...
 # Google Cloud Configuration
 GOOGLE_CLOUD_PROJECT="pivotalb2b-2026"
 GCP_PROJECT_ID="pivotalb2b-2026"
-GCS_BUCKET="demandgentic-storage"
+GCS_BUCKET="demandgentic-ai-storage"
 # GCS_KEY_FILE not needed - uses Application Default Credentials in dev
 ```
 
@@ -182,7 +182,7 @@ GCS_BUCKET="demandgentic-storage"
 # Google Cloud Configuration (same as dev)
 GOOGLE_CLOUD_PROJECT="pivotalb2b-2026"
 GCP_PROJECT_ID="pivotalb2b-2026"
-GCS_BUCKET="demandgentic-storage"
+GCS_BUCKET="demandgentic-ai-storage"
 # No key file needed - Cloud Run service account automatically configured
 ```
 
@@ -242,7 +242,7 @@ roles/logging.logWriter         # Cloud Logging (optional)
 - [ ] Run `npm install` to update dependencies
 - [ ] Run `npm run build` to verify compilation
 - [ ] Test transcription: `npx tsx batch-transcribe-jan15.ts --limit 5`
-- [ ] Verify GCS bucket exists: `gsutil ls gs://demandgentic-storage`
+- [ ] Verify GCS bucket exists: `gsutil ls gs://demandgentic-ai-storage`
 - [ ] Check Cloud Run service account has required IAM roles
 
 ### Cloud Run Deployment
@@ -251,12 +251,12 @@ roles/logging.logWriter         # Cloud Logging (optional)
 gcloud run deploy demandgentic-api \
   --source . \
   --region us-central1 \
-  --set-env-vars="GCS_BUCKET=demandgentic-storage,GOOGLE_CLOUD_PROJECT=pivotalb2b-2026" \
+  --set-env-vars="GCS_BUCKET=demandgentic-ai-storage,GOOGLE_CLOUD_PROJECT=pivotalb2b-2026" \
   --allow-unauthenticated
 ```
 
 ### Post-Deployment Validation
-- [ ] Upload test file: `gsutil cp test.mp3 gs://demandgentic-storage/test/`
+- [ ] Upload test file: `gsutil cp test.mp3 gs://demandgentic-ai-storage/test/`
 - [ ] Test transcription endpoint
 - [ ] Monitor Cloud Logging for errors
 - [ ] Check billing: GCS + Speech API charges

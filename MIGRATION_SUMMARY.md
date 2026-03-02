@@ -33,7 +33,7 @@ npm install  # Result: removed 1 package (assemblyai@^4.19.0)
 |----------|--------|-------|-------|
 | `S3_REGION` | `ap-south-1` | ❌ Removed | No longer needed |
 | `ASSEMBLYAI_API_KEY` | Required | ❌ Removed | Google Cloud Speech-to-Text used instead |
-| `GCS_BUCKET` | Optional | ✅ Required | `demandgentic-storage` (already set) |
+| `GCS_BUCKET` | Optional | ✅ Required | `demandgentic-ai-storage` (already set) |
 | `GOOGLE_CLOUD_PROJECT` | Optional | ✅ Active | `pivotalb2b-2026` (already set) |
 
 ### 3. **Infrastructure Already in Place**
@@ -116,7 +116,7 @@ No changes needed! Your `.env.local` already has:
 ```dotenv
 GOOGLE_CLOUD_PROJECT="pivotalb2b-2026"
 GCP_PROJECT_ID="pivotalb2b-2026"
-GCS_BUCKET="demandgentic-storage"
+GCS_BUCKET="demandgentic-ai-storage"
 ```
 
 ### Production (Cloud Run)
@@ -126,7 +126,7 @@ GCS and Speech API use **Application Default Credentials (ADC)**, so Cloud Run s
 
 **Test GCS Access:**
 ```bash
-gsutil ls gs://demandgentic-storage
+gsutil ls gs://demandgentic-ai-storage
 ```
 
 **Test Transcription:**

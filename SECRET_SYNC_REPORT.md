@@ -72,7 +72,7 @@ PUBLIC_WEBHOOK_HOST=steve-unbalking-guessingly.ngrok-free.dev
 
 ### Infrastructure
 - `REDIS_URL` = redis://default:ttVaOhNjFsLxPOheFUkbFgyad1DLlhdt@redis-11546.fcrce171...
-- `GCS_BUCKET` = demandgentic-storage
+- `GCS_BUCKET` = demandgentic-ai-storage
 
 ### Configuration Values
 - `PORT` = 5000

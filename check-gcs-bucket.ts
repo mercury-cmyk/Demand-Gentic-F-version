@@ -18,15 +18,15 @@ async function checkAndFixGCSRecordings() {
   console.log(`=== Checking GCS bucket for ${missing.rows.length} lead recordings ===\n`);
 
   // Get list of all recording files in GCS
-  const gcsList = execSync('gcloud storage ls gs://demandgentic-storage/recordings/', { encoding: 'utf-8' });
-  const gcsFiles = new Set(gcsList.split('\n').map(f => f.replace('gs://demandgentic-storage/', '').trim()).filter(Boolean));
+  const gcsList = execSync('gcloud storage ls gs://demandgentic-ai-storage/recordings/', { encoding: 'utf-8' });
+  const gcsFiles = new Set(gcsList.split('\n').map(f => f.replace('gs://demandgentic-ai-storage/', '').trim()).filter(Boolean));
   console.log(`Total files in GCS recordings/: ${gcsFiles.size}\n`);
 
   // Also get call-recordings
   let callRecFiles: string[] = [];
   try {
-    const callRecList = execSync('gcloud storage ls gs://demandgentic-storage/call-recordings/ --recursive', { encoding: 'utf-8' });
-    callRecFiles = callRecList.split('\n').map(f => f.replace('gs://demandgentic-storage/', '').trim()).filter(f => f && !f.endsWith('/'));
+    const callRecList = execSync('gcloud storage ls gs://demandgentic-ai-storage/call-recordings/ --recursive', { encoding: 'utf-8' });
+    callRecFiles = callRecList.split('\n').map(f => f.replace('gs://demandgentic-ai-storage/', '').trim()).filter(f => f && !f.endsWith('/'));
   } catch (e) {}
   console.log(`Total files in GCS call-recordings/: ${callRecFiles.length}\n`);
 

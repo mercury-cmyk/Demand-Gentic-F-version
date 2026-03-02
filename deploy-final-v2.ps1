@@ -16,7 +16,7 @@ if ([string]::IsNullOrWhiteSpace($ProjectId)) {
 $Region = if ([string]::IsNullOrWhiteSpace($env:GCP_REGION)) { "us-central1" } else { $env:GCP_REGION }
 $ServiceName = if ([string]::IsNullOrWhiteSpace($env:CLOUD_RUN_SERVICE)) { "demandgentic-api" } else { $env:CLOUD_RUN_SERVICE }
 $VpcConnector = if ([string]::IsNullOrWhiteSpace($env:GCP_VPC_CONNECTOR)) { "pivotal-connector" } else { $env:GCP_VPC_CONNECTOR }
-$GcsBucket = if ([string]::IsNullOrWhiteSpace($env:GCS_BUCKET)) { "demandgentic-storage" } else { $env:GCS_BUCKET }
+$GcsBucket = if ([string]::IsNullOrWhiteSpace($env:GCS_BUCKET)) { "demandgentic-ai-storage" } else { $env:GCS_BUCKET }
 $BaseUrl = if ([string]::IsNullOrWhiteSpace($env:BASE_URL)) { "https://demandgentic.ai" } else { $env:BASE_URL }
 $PublicTexmlHost = if ([string]::IsNullOrWhiteSpace($env:PUBLIC_TEXML_HOST)) { "demandgentic.ai" } else { $env:PUBLIC_TEXML_HOST }
 

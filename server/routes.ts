@@ -975,7 +975,7 @@ export function registerRoutes(app: Express) {
 
       if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
         const gcsMatch = image.storedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
-        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${process.env.GCS_BUCKET || 'demandgentic-storage'}/`, '');
+        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${process.env.GCS_BUCKET || 'demandgentic-ai-storage'}/`, '');
 
         res.setHeader('Content-Type', image.mimeType || 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

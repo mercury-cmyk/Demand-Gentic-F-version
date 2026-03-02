@@ -5,7 +5,7 @@ import { execSync } from 'child_process';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
-const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
 
 const LEAD_IDS = [
   '293ff82c-c7ef-4138-90b7-9c99d65e2422',

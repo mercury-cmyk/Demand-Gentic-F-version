@@ -11,7 +11,7 @@ import { Storage } from "@google-cloud/storage";
 const storage = new Storage({
   projectId: process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
 });
-const bucket = storage.bucket(BUCKET || 'demandgentic-storage');
+const bucket = storage.bucket(BUCKET || 'demandgentic-ai-storage');
 
 async function main() {
   const threeDaysAgo = new Date();

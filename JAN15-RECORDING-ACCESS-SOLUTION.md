@@ -2,7 +2,7 @@
 
 ## Current Status
 
-✅ **GCS Configured**: `demandgentic-storage` bucket ready
+✅ **GCS Configured**: `demandgentic-ai-storage` bucket ready
 ✅ **Calls to transcribe**: 596 calls (115 already done)
 ❌ **Recording URLs**: Expired (AWS S3 pre-signed URLs from `telephony-recorder-prod`)
 
@@ -156,7 +156,7 @@ Example: s3://telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-
 ```
 
 ### Your GCS Setup
-- **Bucket**: `demandgentic-storage`
+- **Bucket**: `demandgentic-ai-storage`
 - **Region**: Configured ✓
 - **Service Account**: Active ✓
 - **Recordings Path**: `recordings/{lead_id}.{mp3|wav}`

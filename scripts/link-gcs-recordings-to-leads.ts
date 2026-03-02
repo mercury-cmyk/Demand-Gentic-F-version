@@ -9,7 +9,7 @@ import { leads } from '../shared/schema';
 import { Storage } from '@google-cloud/storage';
 import { getPresignedDownloadUrl } from '../server/lib/s3';
 
-const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
 const storage = new Storage();
 const bucket = storage.bucket(GCS_BUCKET);
 

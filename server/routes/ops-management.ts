@@ -612,7 +612,7 @@ router.get('/files', async (req: Request, res: Response) => {
   try {
     const { Storage } = await import('@google-cloud/storage');
     const prefix = (req.query.prefix as string) || '';
-    const bucketName = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-storage';
+    const bucketName = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-ai-storage';
 
     const gcs = new Storage({
       projectId: process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
