@@ -31,12 +31,14 @@ jobs:
       
       - name: Validate and normalize GCP credentials
         id: prep-creds
+        env:
+          GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY_JSON }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           set -euo pipefail
 
-          RAW_JSON='${{ secrets.GCP_SA_KEY_JSON }}'
-          FALLBACK='${{ secrets.GCP_SA_KEY }}'
-          CREDENTIALS="${RAW_JSON:-$FALLBACK}"
+          # Using env context ensures safer evaluation and suppresses linter warnings
+          CREDENTIALS="${GCP_SA_KEY_JSON:-$GCP_SA_KEY}"
 
           if [[ -z "$CREDENTIALS" ]]; then
             echo "ERROR: No GCP credentials secret configured."

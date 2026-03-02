@@ -28,7 +28,7 @@ export default function TermsOfServicePage() {
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Home
             </Button>
-            <Button onClick={() => setLocation("/login")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
+            <Button onClick={() => window.location.href = "https://app.demandgentic.ai"} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
               Schedule Demo
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>

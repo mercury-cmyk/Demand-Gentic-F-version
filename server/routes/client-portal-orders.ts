@@ -344,7 +344,7 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
         approvedBy: userId || '',
         approvedQuantity: String(updated.approvedQuantity || updated.requestedQuantity),
         adminNotes: adminNotes || '',
-        portalLink: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/client-portal/orders/${updated.id}`,
+        portalLink: `${process.env.CLIENT_PORTAL_BASE_URL || 'https://app.demandgentic.ai'}/client-portal/orders/${updated.id}`,
       },
     }).catch(err => {
       console.error('[CLIENT PORTAL ORDERS] Mercury campaign_order_approved error:', err.message);
@@ -423,7 +423,7 @@ router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
         orderTitle: metadata.title || updated.orderNumber,
         rejectionReason: rejectionReason || 'No reason provided',
         rejectedAt: formatDate(new Date()),
-        portalLink: `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/client-portal/orders/${updated.id}`,
+        portalLink: `${process.env.CLIENT_PORTAL_BASE_URL || 'https://app.demandgentic.ai'}/client-portal/orders/${updated.id}`,
       },
     }).catch(err => {
       console.error('[CLIENT PORTAL ORDERS] Mercury campaign_order_rejected error:', err.message);

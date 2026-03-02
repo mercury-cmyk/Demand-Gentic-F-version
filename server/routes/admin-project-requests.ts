@@ -526,8 +526,8 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
         approvalDate: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
         approvedBy: userId || '',
         portalLink: createdCampaign
-          ? `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/client-portal/campaigns/${createdCampaign.id}`
-          : `${process.env.APP_BASE_URL || 'https://demandgentic.ai'}/client-portal/projects`,
+          ? `${process.env.CLIENT_PORTAL_BASE_URL || 'https://app.demandgentic.ai'}/client-portal/campaigns/${createdCampaign.id}`
+          : `${process.env.CLIENT_PORTAL_BASE_URL || 'https://app.demandgentic.ai'}/client-portal/projects`,
       },
     }).catch(err => {
       console.error('[Admin Project Requests] Mercury campaign_order_approved error:', err.message);

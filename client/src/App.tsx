@@ -679,7 +679,6 @@ function Router() {
       </Route>
 
       {/* Authentication */}
-      <Route path="/login" component={LoginPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
 
@@ -689,7 +688,18 @@ function Router() {
       <Route path="/book/:username/:slug" component={PublicBookingPage} />
 
       {/* Client Portal public routes (login/join/invite) */}
-      <Route path="/client-portal/login" component={ClientPortalLogin} />
+      <Route path="/client-portal/login">
+        {() => {
+          window.location.href = "https://app.demandgentic.ai";
+          return null;
+        }}
+      </Route>
+      <Route path="/login">
+        {() => {
+          window.location.href = "https://app.demandgentic.ai";
+          return null;
+        }}
+      </Route>
       <Route path="/client-portal/join/:slug" component={ClientPortalJoin} />
       <Route path="/client-portal/accept-invite" component={ClientPortalAcceptInvite} />
 

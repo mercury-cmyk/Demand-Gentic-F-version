@@ -84,7 +84,7 @@ export default function LandingPage() {
             <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">About Us</a>
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => setLocation("/client-portal/login")}>
+            <Button variant="ghost" onClick={() => window.location.href = "https://app.demandgentic.ai"}>
               Client Login
             </Button>
             <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">

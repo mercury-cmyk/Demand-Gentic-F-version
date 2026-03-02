@@ -157,11 +157,11 @@ export default function ClientPortalAcceptInvite() {
             <p className="text-muted-foreground mb-6 max-w-sm">{invalidReason}</p>
             <div className="flex flex-col gap-3 w-full max-w-xs">
               {errorCode === 'TOKEN_USED' ? (
-                <Link href="/client-portal/login">
+                <Link href="https://app.demandgentic.ai">
                   <Button className="w-full">Go to Login</Button>
                 </Link>
               ) : (
-                <Link href="/client-portal/login">
+                <Link href="https://app.demandgentic.ai">
                   <Button variant="outline" className="w-full">Go to Login</Button>
                 </Link>
               )}
@@ -190,7 +190,7 @@ export default function ClientPortalAcceptInvite() {
             <p className="text-muted-foreground mb-8 text-sm">
               Your password has been set. You can now log in with your email.
             </p>
-            <Link href="/client-portal/login">
+            <Link href="https://app.demandgentic.ai">
               <Button size="lg" className="px-8">
                 Log In to Your Portal
               </Button>
@@ -362,7 +362,7 @@ export default function ClientPortalAcceptInvite() {
             </Button>
             <p className="text-xs text-muted-foreground text-center">
               Already have an account?{' '}
-              <Link href="/client-portal/login" className="text-primary hover:underline">
+              <Link href="https://app.demandgentic.ai" className="text-primary hover:underline">
                 Log in instead
               </Link>
             </p>

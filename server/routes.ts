@@ -1424,9 +1424,11 @@ export function registerRoutes(app: Express) {
         expiresAt,
       });
 
-      // Build reset link
-      const baseUrl = process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000';
-      const resetLink = `${baseUrl}/reset-password?token=${token}&type=${type}`;
+      // Build reset link — client resets go to app subdomain, admin resets use main domain
+      const resetBaseUrl = type === 'client'
+        ? (process.env.CLIENT_PORTAL_BASE_URL || process.env.APP_BASE_URL || 'https://demandgentic.ai')
+        : (process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000');
+      const resetLink = `${resetBaseUrl}/reset-password?token=${token}&type=${type}`;
 
       // Send email via transactional email service
       const resetEmailResult = await transactionalEmailService.triggerPasswordResetEmail(email.toLowerCase(), resetLink, "1 hour");
