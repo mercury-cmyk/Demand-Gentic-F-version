@@ -62,13 +62,17 @@ import {
 const ORCHESTRATOR_INTERVAL_MS = 10000; // Check every 10 seconds (increased frequency)
 const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '100', 10);
 const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10);
-const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches (prevents burst overload)
-const PARALLEL_CALL_BATCH_SIZE = 10; // Smaller batches to avoid DB pool exhaustion
+const DELAY_BETWEEN_CALLS_MS = 1000; // 1s delay between call batches (prevents burst overload)
+const PARALLEL_CALL_BATCH_SIZE = 3; // Small batches to prevent event loop saturation from concurrent Gemini WebSocket connections
 const STUCK_ITEM_TIMEOUT_MS = 180000; // 3 minutes - allows normal call lifecycle (~90s) + buffer; watchdog is the single recovery mechanism
 const EMPTY_POOL_RECHECK_SECONDS = Math.max(15, Number(process.env.NUMBER_POOL_EMPTY_RECHECK_SECONDS || 60));
 const EMPTY_POOL_RECHECK_MS = EMPTY_POOL_RECHECK_SECONDS * 1000;
 const ACTIVE_POOL_CACHE_TTL_MS = 30000;
 const ORCHESTRATOR_HEARTBEAT_MS = Math.max(30000, ORCHESTRATOR_INTERVAL_MS * 3);
+// Cold-start ramp-up: limit calls in the first N seconds after boot to avoid flooding Gemini
+const COLD_START_RAMP_UP_MS = 60000; // 60s ramp-up window after boot
+const COLD_START_MAX_CALLS = 4; // Max calls during the ramp-up window
+const orchestratorBootTime = Date.now();
 const STRICT_US_ONLY_CAMPAIGN_NAME_DEFAULTS = ['RingCentral_AppointmentGen'];
 const STRICT_US_ONLY_CAMPAIGN_NAMES = new Set<string>(
   [
@@ -1382,11 +1386,24 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   }
 
   // Process in batches for parallelism
-  for (let i = 0; i < eligibleItems.length; i += PARALLEL_CALL_BATCH_SIZE) {
-    const batch = eligibleItems.slice(i, i + PARALLEL_CALL_BATCH_SIZE);
+  // COLD-START GUARD: If we're within the ramp-up window, cap total calls to prevent
+  // flooding Gemini with 10+ simultaneous WebSocket connections after container restart
+  const isColdStart = (Date.now() - orchestratorBootTime) < COLD_START_RAMP_UP_MS;
+  let effectiveItems = eligibleItems;
+  if (isColdStart && eligibleItems.length > COLD_START_MAX_CALLS) {
+    console.warn(`[AI Orchestrator] COLD-START RAMP-UP: Limiting to ${COLD_START_MAX_CALLS} calls (${eligibleItems.length} eligible) — ${Math.round((COLD_START_RAMP_UP_MS - (Date.now() - orchestratorBootTime)) / 1000)}s remaining in ramp-up`);
+    effectiveItems = eligibleItems.slice(0, COLD_START_MAX_CALLS);
+  }
+  for (let i = 0; i < effectiveItems.length; i += PARALLEL_CALL_BATCH_SIZE) {
+    const batch = effectiveItems.slice(i, i + PARALLEL_CALL_BATCH_SIZE);
     
     const CALL_INITIATION_TIMEOUT_MS = 60000; // 60s max per call initiation to prevent hanging
-    const batchPromises = batch.map(async (item) => {
+    const STAGGER_DELAY_MS = 300; // 300ms stagger between individual calls within a batch
+    const batchPromises = batch.map(async (item, batchIndex) => {
+      // Stagger individual calls within the batch to avoid simultaneous Gemini WebSocket connections
+      if (batchIndex > 0) {
+        await new Promise(resolve => setTimeout(resolve, batchIndex * STAGGER_DELAY_MS));
+      }
       // Wrap each call initiation in a timeout to prevent individual items from blocking the batch
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('CALL_INITIATION_TIMEOUT: Call initiation exceeded 60s')), CALL_INITIATION_TIMEOUT_MS);

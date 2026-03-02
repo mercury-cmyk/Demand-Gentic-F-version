@@ -200,14 +200,15 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
         this.ws = new WebSocket(wsUrl, { headers });
 
-        // Connection timeout
+        // Connection timeout — use terminate() for immediate TCP teardown instead of close()
+        // close() sends a close frame and waits for the peer, which may never arrive
         this.connectionTimeout = setTimeout(() => {
           if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
-            console.error(`${LOG_PREFIX} Connection timeout`);
-            this.ws.close();
+            console.error(`${LOG_PREFIX} Connection timeout — forcing TCP teardown`);
+            this.ws.terminate();
             reject(new Error("Gemini connection timeout"));
           }
-        }, 15000); // Longer timeout for Gemini
+        }, 15000); // 15s timeout for Gemini
 
         this.ws.on("open", () => {
           clearTimeout(this.connectionTimeout!);
@@ -287,9 +288,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             this.auth = null;
           }
 
-          // Clean up stale WebSocket from previous attempt
+          // Clean up stale WebSocket from previous attempt — terminate to force TCP teardown
           if (this.ws) {
-            try { this.ws.close(); } catch (_) {}
+            try { this.ws.terminate(); } catch (_) {}
             this.ws = null;
           }
           this.setupComplete = false;

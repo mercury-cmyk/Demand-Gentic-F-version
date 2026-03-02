@@ -168,6 +168,41 @@ const TRANSFER_HOLD_GRACE_WINDOW_MS = 45000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
 const HARD_MAX_CALL_DURATION_SECONDS = 300;
 
+// ============= GEMINI CONNECTION SEMAPHORE =============
+// Prevents event loop saturation by limiting how many Gemini WebSocket
+// connections can be opened simultaneously. Each connection involves DNS
+// resolution, TCP handshake, TLS negotiation, OAuth token fetch, and the
+// WebSocket upgrade — all of which compete for the event loop. Opening 10+
+// connections at once (e.g. after a container restart) can freeze the process.
+const MAX_CONCURRENT_GEMINI_CONNECTIONS = 3;
+let _activeGeminiConnections = 0;
+const _geminiConnectionQueue: Array<{ resolve: () => void }> = [];
+
+/** Acquire a slot to open a Gemini WebSocket connection. Resolves immediately
+ *  if a slot is free, otherwise waits until one becomes available. */
+function acquireGeminiSlot(): Promise<void> {
+  if (_activeGeminiConnections < MAX_CONCURRENT_GEMINI_CONNECTIONS) {
+    _activeGeminiConnections++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    _geminiConnectionQueue.push({ resolve });
+  });
+}
+
+/** Release a Gemini connection slot, unblocking the next queued caller. */
+function releaseGeminiSlot(): void {
+  _activeGeminiConnections = Math.max(0, _activeGeminiConnections - 1);
+  if (_geminiConnectionQueue.length > 0) {
+    const next = _geminiConnectionQueue.shift()!;
+    _activeGeminiConnections++;
+    next.resolve();
+  }
+}
+
+// Track calls currently in the Gemini connection phase (invisible to session tracker / DB watchdog)
+const _initializingCalls = new Set<string>();
+
 /** Trim array from the front if it exceeds maxLen. Call after pushing. */
 function trimArray<T>(arr: T[], maxLen: number): void {
   if (arr.length > maxLen) arr.splice(0, arr.length - maxLen);
@@ -3385,16 +3420,31 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // PARALLEL INITIALIZATION: Run Gemini connection AND database calls concurrently
     // This significantly reduces initialization time (from ~10-20s serial to ~3-5s parallel)
+    // SAFEGUARD: Outer 45s timeout prevents total hang; semaphore limits concurrent WS connections
     console.log(`${LOG_PREFIX} Starting parallel initialization (Gemini + DB)...`);
-    console.log(`${LOG_PREFIX} ðŸ” [Gemini] Session IDs: campaignId=${session.campaignId || 'EMPTY'}, contactId=${session.contactId || 'EMPTY'}, virtualAgentId=${session.virtualAgentId || 'EMPTY'}`);
+    console.log(`${LOG_PREFIX} 🔑 [Gemini] Session IDs: campaignId=${session.campaignId || 'EMPTY'}, contactId=${session.contactId || 'EMPTY'}, virtualAgentId=${session.virtualAgentId || 'EMPTY'}`);
 
-    const [geminiConnected, campaignConfig, contactInfoResult, agentConfig, agentDefaultsRecord] = await Promise.all([
-      // Gemini connection
+    // Track this call as "initializing" so watchdog can detect stuck pre-init calls
+    _initializingCalls.add(session.callId);
+
+    const INIT_TIMEOUT_MS = 45000; // 45s hard cap on entire parallel init (connect + DB)
+    const initTimeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('GEMINI_INIT_TIMEOUT: Parallel init exceeded 45s')), INIT_TIMEOUT_MS);
+    });
+
+    const initWork = Promise.all([
+      // Gemini connection — gated by semaphore to prevent event loop saturation
       (async () => {
-        console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
-        await provider.connectWithRetry(2);
-        console.log(`${LOG_PREFIX} âœ… Connected to Gemini Live API (+${Date.now() - initStartTime}ms)`);
-        return true;
+        console.log(`${LOG_PREFIX} Waiting for Gemini connection slot (active=${_activeGeminiConnections}, queued=${_geminiConnectionQueue.length})...`);
+        await acquireGeminiSlot();
+        try {
+          console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
+          await provider.connectWithRetry(2);
+          console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API (+${Date.now() - initStartTime}ms)`);
+          return true;
+        } finally {
+          releaseGeminiSlot();
+        }
       })(),
       // Database calls - all in parallel (including agent defaults for voice fallback)
       getCampaignConfig(session.campaignId),
@@ -3403,6 +3453,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       db.select({ defaultVoice: agentDefaults.defaultVoice }).from(agentDefaults).limit(1).then(r => r[0] || null),
     ]);
 
+    const [geminiConnected, campaignConfig, contactInfoResult, agentConfig, agentDefaultsRecord] =
+      await Promise.race([initWork, initTimeout]);
+
+    _initializingCalls.delete(session.callId);
     console.log(`${LOG_PREFIX} Parallel init complete (+${Date.now() - initStartTime}ms)`);
 
     const campaignMaxDurationRaw = Number(campaignConfig?.maxCallDurationSeconds);
@@ -3571,12 +3625,24 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     };
 
     try {
-      await provider.configure(geminiConfig);
+      // Wrap configure in a timeout to prevent hanging if Gemini doesn't respond to setup
+      const configureTimeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('GEMINI_CONFIGURE_TIMEOUT: configure exceeded 40s')), 40000);
+      });
+      await Promise.race([provider.configure(geminiConfig), configureTimeout]);
     } catch (configError: any) {
       console.warn(`${LOG_PREFIX} First configure() failed: ${configError.message} - attempting reconnect...`);
       await provider.disconnect();
-      await provider.connectWithRetry(1);
-      await provider.configure(geminiConfig);
+      await acquireGeminiSlot();
+      try {
+        await provider.connectWithRetry(1);
+      } finally {
+        releaseGeminiSlot();
+      }
+      const reconfigureTimeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('GEMINI_RECONFIGURE_TIMEOUT: reconfigure exceeded 40s')), 40000);
+      });
+      await Promise.race([provider.configure(geminiConfig), reconfigureTimeout]);
       console.log(`${LOG_PREFIX} Reconnect + reconfigure succeeded`);
     }
     console.log(`${LOG_PREFIX} âœ… Gemini configured (+${Date.now() - initStartTime}ms)`);
