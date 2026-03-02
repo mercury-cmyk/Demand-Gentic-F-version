@@ -12,7 +12,7 @@
  */
 
 import { db } from '../../db';
-import { eq, and, desc, isNull, sql, count } from 'drizzle-orm';
+import { eq, and, desc, isNull, sql, count, lt } from 'drizzle-orm';
 import {
   mercuryEmailOutbox,
   mercuryTemplates,
@@ -182,7 +182,7 @@ export class MercuryEmailService {
       .where(
         and(
           eq(mercuryEmailOutbox.status, 'sending'),
-          sql`${mercuryEmailOutbox.updatedAt} < ${stuckCutoff}`,
+          lt(mercuryEmailOutbox.updatedAt, stuckCutoff),
         )
       );
 
