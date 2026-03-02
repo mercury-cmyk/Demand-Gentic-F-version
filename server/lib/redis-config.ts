@@ -163,7 +163,7 @@ export function getRedisConnectionOptions() {
     // Auto-reconnect on disconnect
     lazyConnect: false,
 
-    tls: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined, // Keep-alive to detect dead connections
+    // Keep-alive to detect dead connections
     keepAlive: isProduction ? 30000 : 10000,
   };
 }
