@@ -32,8 +32,8 @@ jobs:
       - name: Validate and normalize GCP credentials
         id: prep-creds
         env:
-          GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY_JSON }}
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_SA_KEY_JSON: ${{ secrets['GCP_SA_KEY_JSON'] }}
+          GCP_SA_KEY: ${{ secrets['GCP_SA_KEY'] }}
         run: |
           set -euo pipefail
 
