@@ -1,11 +1,9 @@
 name: Deploy to GCP Cloud Run
 
 on:
-  # Auto-deploy disabled — use deploy-gcloud.sh or Cloud Build instead
-  # push:
-  #   branches:
-  #     - main
-  #     - staging
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 env:

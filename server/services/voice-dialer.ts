@@ -3937,8 +3937,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         // Gemini may send partial transcriptions, so we merge them
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
         if (lastTranscript?.role === 'user') {
-          // Append to existing user transcript with a space
-          lastTranscript.text += ' ' + event.text;
+          // Merge incremental chunks without duplicating supersets/subsets
+          lastTranscript.text = mergeTranscriptChunk(lastTranscript.text, event.text);
         } else {
           // Start new user transcript
           session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
@@ -4084,8 +4084,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           (session as any)._forceNewAgentTranscript = false;
         }
         if (lastTranscript?.role === 'assistant' && !forceNew) {
-          // Append to existing assistant transcript with a space
-          lastTranscript.text += ' ' + event.text;
+          // Merge incremental chunks without duplicating supersets/subsets
+          lastTranscript.text = mergeTranscriptChunk(lastTranscript.text, event.text);
           maybeRecordPurposeStart(session, lastTranscript.text);
         } else {
           // Start new assistant transcript
@@ -7060,6 +7060,33 @@ function formatCallSummary(summary: CallSummary): string {
   return lines.join("\n");
 }
 
+function mergeTranscriptChunk(existingText: string, incomingText: string): string {
+  const existing = existingText.trim();
+  const incoming = incomingText.trim();
+
+  if (!incoming) return existing;
+  if (!existing) return incoming;
+
+  if (existing.includes(incoming)) return existing;
+  if (incoming.includes(existing)) return incoming;
+
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^\w\s]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const normalizedExisting = normalize(existing);
+  const normalizedIncoming = normalize(incoming);
+
+  if (normalizedExisting === normalizedIncoming) {
+    return existing.length >= incoming.length ? existing : incoming;
+  }
+
+  return `${existing} ${incoming}`;
+}
+
 /**
  * Finalize in-session transcripts before persistence:
  * 1. Sort by timestamp (handles out-of-order arrival from provider)
@@ -7082,15 +7109,9 @@ function finalizeTranscripts(session: OpenAIRealtimeSession): void {
 
     const last = merged[merged.length - 1];
     if (last && last.role === entry.role) {
-      // Skip if new text is already contained in existing (exact substring dedup)
-      if (last.text.includes(trimmedText)) continue;
-      // If existing text is contained in new text, replace with the longer version
-      if (trimmedText.includes(last.text)) {
-        last.text = trimmedText;
-      } else {
-        // Append with space separator
-        last.text = last.text + ' ' + trimmedText;
-      }
+      const mergedText = mergeTranscriptChunk(last.text, trimmedText);
+      if (mergedText === last.text) continue;
+      last.text = mergedText;
     } else {
       merged.push({ role: entry.role, text: trimmedText, timestamp: entry.timestamp });
     }
