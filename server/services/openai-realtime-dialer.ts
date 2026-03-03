@@ -2772,7 +2772,20 @@ async function buildSystemPrompt(
   // Contact-specific personalization and tool definitions are layered on top.
   // =====================================================================
 
-  const unifiedFoundationalPrompt = unifiedVoiceAgent.assembleFoundationalPrompt();
+  let unifiedFoundationalPrompt = unifiedVoiceAgent.assembleFoundationalPrompt();
+
+  // Prefer bridge-assembled unified prompt (includes UI-managed sections + supplement).
+  // Safe fallback remains the in-memory unified voice agent prompt.
+  try {
+    const { getVoiceAgentFoundationalPrompt } = await import('./agents/unified/voice-agent-bridge');
+    const uaResult = await getVoiceAgentFoundationalPrompt();
+    if (uaResult?.source === 'unified_agent' && uaResult.foundationalPrompt?.trim()) {
+      unifiedFoundationalPrompt = uaResult.foundationalPrompt.trim();
+      console.log(`${LOG_PREFIX} Using unified bridge foundational prompt (agentVersion=${uaResult.agentVersion ?? 'unknown'}, promptVersion=${uaResult.versionHash ?? 'unknown'})`);
+    }
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to load unified bridge prompt, using in-memory unified prompt fallback:`, error);
+  }
 
   const basePrompt = `# Agent Identity
 

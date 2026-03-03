@@ -137,6 +137,13 @@ export async function loadPrompt(promptKey: string): Promise<string> {
     console.warn(`${LOG_PREFIX} Database load failed for ${promptKey}, using fallback:`, error);
   }
 
+  // Dynamic fallback for unified foundational prompts so runtime reflects
+  // latest in-process section edits from the unified agent architecture UI.
+  if (promptKey === 'voice.foundational') {
+    console.log(`${LOG_PREFIX} Using dynamic unified fallback for ${promptKey}`);
+    return unifiedVoiceAgent.assembleFoundationalPrompt();
+  }
+
   // Fallback to hardcoded
   const fallback = FALLBACK_PROMPTS[promptKey];
   if (fallback) {

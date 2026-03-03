@@ -121,11 +121,12 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             description: 'Configure organization context and service catalog',
           },
           {
-            id: 'ai-agents',
-            title: 'AI Agents',
-            url: '/ai-studio/agents',
+            id: 'foundational-agents',
+            title: 'Foundational Agents',
+            url: '/unified-agent-architecture',
             roles: MANAGEMENT_ROLES,
-            description: 'Manage virtual voice agents',
+            badge: { text: 'New', variant: 'new' as BadgeVariant },
+            description: 'Unified agent architecture — prompt sections, capabilities, learning pipeline',
           },
           {
             id: 'preview-studio',

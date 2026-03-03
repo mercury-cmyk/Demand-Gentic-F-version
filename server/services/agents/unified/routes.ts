@@ -659,7 +659,7 @@ router.get('/voice/production-prompt-preview', async (req: Request, res: Respons
       ? Math.ceil(result.foundationalPrompt.length / 4)
       : 0;
 
-    const featureFlagEnabled = process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE === 'true';
+    const featureFlagEnabled = (process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE ?? 'true').toLowerCase() !== 'false';
 
     res.json({
       featureFlag: {
@@ -667,7 +667,7 @@ router.get('/voice/production-prompt-preview', async (req: Request, res: Respons
         enabled: featureFlagEnabled,
         note: featureFlagEnabled
           ? 'UA path is ACTIVE — production calls use this prompt'
-          : 'UA path is DISABLED — production calls use legacy hardcoded prompt',
+          : 'UA path is DISABLED via explicit false — production calls use legacy fallback',
       },
       bridge: {
         source: result.source,

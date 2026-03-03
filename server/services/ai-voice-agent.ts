@@ -268,7 +268,7 @@ export class AiVoiceAgent extends EventEmitter {
     }
 
     // ---- Layer 1: Try Unified Agent Architecture foundational prompt ----
-    const useUA = process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE === 'true';
+    const useUA = (process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE ?? 'true').toLowerCase() !== 'false';
     let uaResult: VoiceAgentBridgeResult | null = null;
 
     if (useUA) {
