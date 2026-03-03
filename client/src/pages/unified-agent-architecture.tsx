@@ -634,7 +634,6 @@ function AgentDetailView({
         <div className="px-6 border-b">
           <TabsList className="h-9 bg-transparent gap-4">
             <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-            <TabsTrigger value="setup" className="text-xs">Setup</TabsTrigger>
             <TabsTrigger value="prompt-sections" className="text-xs">Prompt Sections</TabsTrigger>
             <TabsTrigger value="capability-map" className="text-xs">Capability Map</TabsTrigger>
             <TabsTrigger value="recommendations" className="text-xs">
@@ -654,9 +653,6 @@ function AgentDetailView({
         <div className="flex-1 overflow-hidden">
           <TabsContent value="overview" className="h-full mt-0">
             <AgentOverviewTab detail={detail} />
-          </TabsContent>
-          <TabsContent value="setup" className="h-full mt-0">
-            <AgentSetupTab agentType={agentType} />
           </TabsContent>
           <TabsContent value="prompt-sections" className="h-full mt-0">
             <PromptSectionsTab agentType={agentType} />
@@ -1528,6 +1524,28 @@ function ConfigurationTab({ agentType }: { agentType: string }) {
   const cfg = config?.configuration;
   if (!cfg) return <div className="p-6 text-muted-foreground text-sm">Loading...</div>;
 
+  const toDisplayText = (value: any): string => {
+    if (value == null) return "N/A";
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => toDisplayText(item)).join(", ");
+    }
+    if (typeof value === "object") {
+      return (
+        value.name ||
+        value.id ||
+        value.state ||
+        value.trigger ||
+        value.label ||
+        value.description ||
+        JSON.stringify(value)
+      );
+    }
+    return String(value);
+  };
+
   return (
     <ScrollArea className="h-full">
       <div className="p-6 space-y-6">
@@ -1578,8 +1596,8 @@ function ConfigurationTab({ agentType }: { agentType: string }) {
               <div className="mt-3">
                 <span className="text-xs text-muted-foreground">Custom Traits</span>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {cfg.toneAndPersona.customTraits.map((trait: string, i: number) => (
-                    <Badge key={i} variant="secondary" className="text-[10px]">{trait}</Badge>
+                  {cfg.toneAndPersona.customTraits.map((trait: any, i: number) => (
+                    <Badge key={i} variant="secondary" className="text-[10px]">{toDisplayText(trait)}</Badge>
                   ))}
                 </div>
               </div>
@@ -1629,8 +1647,8 @@ function ConfigurationTab({ agentType }: { agentType: string }) {
                   <div>
                     <span className="text-muted-foreground">Frameworks</span>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {cfg.complianceSettings.frameworks.map((fw: string, i: number) => (
-                        <Badge key={i} variant="outline" className="text-[10px]">{fw}</Badge>
+                      {cfg.complianceSettings.frameworks.map((fw: any, i: number) => (
+                        <Badge key={i} variant="outline" className="text-[10px]">{toDisplayText(fw)}</Badge>
                       ))}
                     </div>
                   </div>
@@ -1639,8 +1657,8 @@ function ConfigurationTab({ agentType }: { agentType: string }) {
                   <div>
                     <span className="text-muted-foreground">Prohibited Phrases</span>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {cfg.complianceSettings.prohibitedPhrases.map((p: string, i: number) => (
-                        <Badge key={i} variant="destructive" className="text-[10px]">{p}</Badge>
+                      {cfg.complianceSettings.prohibitedPhrases.map((p: any, i: number) => (
+                        <Badge key={i} variant="destructive" className="text-[10px]">{toDisplayText(p)}</Badge>
                       ))}
                     </div>
                   </div>
@@ -1685,13 +1703,13 @@ function ConfigurationTab({ agentType }: { agentType: string }) {
               <div className="space-y-2 text-xs">
                 <div>
                   <span className="text-muted-foreground">Initial State</span>
-                  <Badge variant="outline" className="ml-2 text-[10px]">{cfg.stateMachine.initialState}</Badge>
+                  <Badge variant="outline" className="ml-2 text-[10px]">{toDisplayText(cfg.stateMachine.initialState)}</Badge>
                 </div>
                 <div>
                   <span className="text-muted-foreground">States</span>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {cfg.stateMachine.states?.map((s: string, i: number) => (
-                      <Badge key={i} variant="secondary" className="text-[10px]">{s}</Badge>
+                    {cfg.stateMachine.states?.map((s: any, i: number) => (
+                      <Badge key={s?.id || `${toDisplayText(s)}-${i}`} variant="secondary" className="text-[10px]">{toDisplayText(s)}</Badge>
                     ))}
                   </div>
                 </div>
@@ -1701,10 +1719,10 @@ function ConfigurationTab({ agentType }: { agentType: string }) {
                     <div className="space-y-1 mt-1">
                       {cfg.stateMachine.transitions.slice(0, 8).map((t: any, i: number) => (
                         <div key={i} className="flex items-center gap-1 text-[10px]">
-                          <Badge variant="outline" className="text-[9px]">{t.from}</Badge>
+                          <Badge variant="outline" className="text-[9px]">{toDisplayText(t.from)}</Badge>
                           <span className="text-muted-foreground">&rarr;</span>
-                          <Badge variant="outline" className="text-[9px]">{t.to}</Badge>
-                          <span className="text-muted-foreground ml-1">({t.trigger})</span>
+                          <Badge variant="outline" className="text-[9px]">{toDisplayText(t.to)}</Badge>
+                          <span className="text-muted-foreground ml-1">({toDisplayText(t.trigger)})</span>
                         </div>
                       ))}
                     </div>

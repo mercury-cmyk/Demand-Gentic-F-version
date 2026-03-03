@@ -448,6 +448,30 @@ router.post('/:agentType/recommendations/:id/apply', (req: Request, res: Respons
       message: `Recommendation ${req.params.id} applied successfully`,
     });
   } catch (error: any) {
+    const message = error?.message || 'Failed to apply recommendation';
+    if (message.includes('requires explicit approval before apply')) {
+      return res.status(409).json({ error: message, code: 'APPROVAL_REQUIRED' });
+    }
+    res.status(500).json({ error: message });
+  }
+});
+
+/** POST /api/unified-agents/:agentType/recommendations/:id/approve — Explicitly approve recommendation */
+router.post('/:agentType/recommendations/:id/approve', (req: Request, res: Response) => {
+  try {
+    const agentType = validateAgentType(req, res);
+    if (!agentType) return;
+
+    const approvedBy = getUserId(req);
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
+
+    unifiedAgentRegistry.approveAgentRecommendation(agentType, req.params.id, approvedBy, notes);
+
+    res.json({
+      success: true,
+      message: `Recommendation ${req.params.id} approved`,
+    });
+  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });

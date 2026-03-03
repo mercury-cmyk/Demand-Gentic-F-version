@@ -1516,6 +1516,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           runId: dialerRunId || undefined,
           callAttemptId: callAttemptId || undefined,
           // Campaign context for AI agent behavior
+          campaignType: (campaign as any).type || (campaign as any).campaignType || undefined,
           // Priority: campaign organization > persona companyName > fallback
           organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
           campaignObjective: (campaign as any).campaignObjective || undefined,
@@ -1523,6 +1524,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           targetAudienceDescription: (campaign as any).targetAudienceDescription || undefined,
           productServiceInfo: (campaign as any).productServiceInfo || undefined,
           talkingPoints: (campaign as any).talkingPoints || undefined,
+          offerType: (campaign as any).offerType || undefined,
+          funnelStage: (campaign as any).funnelStage || undefined,
+          icpPersona: (campaign as any).icpPersona || undefined,
           // Call flow configuration - state machine for AI agent execution
           callFlow: (campaign as any).callFlow || undefined,
           // Max call duration in seconds - auto-hangup after this time

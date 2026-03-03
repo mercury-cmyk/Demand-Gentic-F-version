@@ -358,7 +358,7 @@ export class LearningPipelineService {
       const currentContent = currentPromptSections[mapping.promptSectionId];
       if (!currentContent) continue;
 
-      const recommendation = this.createRecommendation(
+      const recommendation = await this.createRecommendation(
         agentType,
         matchedCapability,
         mapping.promptSectionId,
@@ -385,13 +385,13 @@ export class LearningPipelineService {
     return newRecommendations;
   }
 
-  private createRecommendation(
+  private async createRecommendation(
     agentType: UnifiedAgentType,
     capability: AgentCapability,
     promptSectionId: string,
     finding: AnalysisFinding,
     currentContent: string
-  ): AgentRecommendation {
+  ): Promise<AgentRecommendation> {
     const id = `rec_${agentType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Determine category from finding type
@@ -423,7 +423,7 @@ export class LearningPipelineService {
     // Build proposed change (placeholder — in production, this would use AI to generate)
     const proposedChange: ProposedPromptChange = {
       currentContent,
-      proposedContent: this.generateProposedContent(currentContent, finding, capability),
+      proposedContent: await this.generateProposedContent(currentContent, finding, capability),
       changeDescription: `Optimize ${capability.name} based on ${finding.title}`,
       changeType: 'partial_edit',
     };
@@ -467,24 +467,80 @@ export class LearningPipelineService {
 
   /**
    * Generate proposed content for a prompt section based on a finding.
-   * In production, this would call an AI model to generate the improved content.
-   * For now, it adds contextual annotations to the existing content.
+   * In production, this would call an AI model to generate the improved content using a generative AI model.
    */
-  private generateProposedContent(
+  private async generateProposedContent(
     currentContent: string,
     finding: AnalysisFinding,
     capability: AgentCapability
-  ): string {
-    // Add an optimization directive based on the finding
+  ): Promise<string> {
+    // 1. Construct a detailed prompt for the AI model
+    const generationPrompt = `
+You are an expert prompt engineer for large language models.
+Your task is to rewrite a section of an agent's prompt to improve its performance based on a specific finding.
+
+**Performance Finding:**
+- Title: ${finding.title}
+- Type: ${finding.type}
+- Severity: ${finding.severity}
+- Description: ${finding.description}
+- Related Capability: ${capability.name}
+
+**Current Prompt Section Content:**
+---
+${currentContent}
+---
+
+**Instructions:**
+1. Analyze the performance finding and the current prompt content.
+2. Rewrite the prompt section to directly address the issue described in the finding.
+3. The new content should be clear, concise, and optimized for the AI agent's performance.
+4. Maintain the original intent of the section while incorporating the necessary optimization.
+5. Output ONLY the rewritten prompt section content. Do not include any other text, preamble, or explanation.
+    `;
+
+    // 2. Invoke the generative AI model
+    const rewrittenContent = await this.invokeGenerativeAI(generationPrompt);
+
+    // 3. Add optimization annotations for traceability
     const optimizationNote = `\n\n<!-- OPTIMIZATION: ${finding.title} -->\n` +
       `<!-- Based on ${finding.type} analysis (severity: ${finding.severity}) -->\n` +
-      `<!-- Related capability: ${capability.name} -->`;
+      `<!-- Related capability: ${capability.name} -->\n` +
+      `<!-- AI-generated suggestion -->`;
 
-    // In production, an AI model would rewrite the section.
-    // For now, annotate the section for human review.
-    return currentContent + optimizationNote;
+    return `${optimizationNote}\n\n${rewrittenContent}`;
   }
 
+  /**
+   * Helper to simulate calling a generative AI model.
+   * In a real implementation, this would use a service like the Google AI SDK.
+   */
+  private async invokeGenerativeAI(prompt: string): Promise<string> {
+    console.log(`[AI] Simulating call to generative AI model for prompt optimization...`);
+    
+    // In a real implementation, you would use the Google AI SDK or a similar library
+    // to call a model like Gemini.
+    // e.g., const result = await getGenerativeModel().generateContent(prompt);
+    // const text = result.response.text();
+    
+    // Simulate network latency
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // For demonstration, we return a modified version of the input prompt.
+    const exampleRewrite = `
+/*
+  AI-Rewritten Content:
+  This is a placeholder for what the generative AI model would produce.
+  It would analyze the finding and the original content to create an
+  optimized version of the prompt section. For example, if the finding
+  was "Low mql to sql conversion rate", the AI might add more specific
+  instructions to the 'Pipeline Analysis' prompt section to focus on
+  identifying high-intent leads earlier.
+*/
+    `;
+    
+    return exampleRewrite;
+  }
   // ==================== QUERY METHODS ====================
 
   /**

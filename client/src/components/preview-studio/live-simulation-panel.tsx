@@ -433,15 +433,9 @@ export function LiveSimulationPanel({
         requestBody.maxTokens = maxTokens;
       }
 
-      // Add custom prompts if loaded and modified
-      if (promptLoaded) {
-        if (customSystemPrompt) {
-          requestBody.customSystemPrompt = customSystemPrompt;
-        }
-        if (customFirstMessage) {
-          requestBody.customFirstMessage = customFirstMessage;
-        }
-      }
+      // NOTE: For PHONE tests, do not send custom prompt overrides.
+      // This keeps Preview Studio telephony path identical to Campaign Test Calls,
+      // so both use the same architecture switch + canonical knowledge assembly.
 
       const response = await apiRequest("POST", "/api/preview-studio/phone-test/start", requestBody);
       return parseJsonResponse<any>(response, 'Start phone test');

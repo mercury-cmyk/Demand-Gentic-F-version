@@ -112,12 +112,16 @@ async function routeViaTexml(request: UnifiedCallRequest): Promise<UnifiedCallRe
       queueItemId: request.queueItemId || "unified-router",
       contactId: request.contactId || undefined,
       agentFullName: settings.persona.name,
+      campaignType: request.callContext?.campaignType,
       organizationName: request.callContext?.organizationName,
       campaignObjective: request.callContext?.campaignObjective,
       successCriteria: request.callContext?.successCriteria,
       targetAudienceDescription: request.callContext?.targetAudienceDescription,
       productServiceInfo: request.callContext?.productServiceInfo,
       talkingPoints: request.callContext?.talkingPoints,
+      offerType: request.callContext?.offerType,
+      funnelStage: request.callContext?.funnelStage,
+      icpPersona: request.callContext?.icpPersona,
       maxCallDurationSeconds: request.maxCallDurationSeconds,
     };
 
