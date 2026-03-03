@@ -212,6 +212,13 @@ if (isMainModule) {
     app.get('/api/health', (_req, res) => {
       res.json({ status: 'ok', timestamp: new Date().toISOString(), phase: initPhase });
     });
+    app.get('/api/ready', (_req, res) => {
+      if (initPhase === 'ready') {
+        res.json({ status: 'ok', timestamp: new Date().toISOString() });
+      } else {
+        res.status(503).json({ status: 'initializing', phase: initPhase });
+      }
+    });
 
     // Redirect /favicon.ico to the logo
     app.get('/favicon.ico', (_req, res) => res.redirect(301, '/demangent-logo.png'));

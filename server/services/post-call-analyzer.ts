@@ -21,7 +21,7 @@ import { overrideSingleDisposition } from "./bulk-disposition-reanalyzer";
 import { recordTranscriptionResult } from "./transcription-monitor";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
 import { getFreshAudioUrl } from "./recording-link-resolver";
-import { buildPostCallTranscriptWithSummary } from "./post-call-transcript-summary";
+import { buildPostCallTranscriptWithSummaryAsync } from "./post-call-transcript-summary";
 import {
   runLightweightDispositionTriage,
   runDeepAIAnalysis,
@@ -989,7 +989,7 @@ export async function runPostCallAnalysis(
     result.turns = buildPrecisionTurns(structuredTranscript.utterances, agentSpeaker);
     result.metrics = computeTurnMetrics(result.turns);
     const plainTranscript = formatTranscript(result.turns);
-    const transcriptWithSummary = buildPostCallTranscriptWithSummary(
+    const transcriptWithSummary = await buildPostCallTranscriptWithSummaryAsync(
       plainTranscript,
       result.turns.map((t) => ({
         role: t.speaker,
