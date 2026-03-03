@@ -16,6 +16,7 @@
  */
 
 import { getPromptByKey } from './prompt-management-service';
+import { VOICE_AGENT_FOUNDATIONAL_PROMPT } from './agents';
 
 // ==================== FALLBACK PROMPTS ====================
 
@@ -140,8 +141,10 @@ export async function loadPrompt(promptKey: string): Promise<string> {
   // Dynamic fallback for unified foundational prompts so runtime reflects
   // latest in-process section edits from the unified agent architecture UI.
   if (promptKey === 'voice.foundational') {
-    console.log(`${LOG_PREFIX} Using dynamic unified fallback for ${promptKey}`);
-    return unifiedVoiceAgent.assembleFoundationalPrompt();
+    const { isUnifiedVoiceArchitectureEnabled } = await import('./agents/unified/architecture-mode');
+    const useUnified = isUnifiedVoiceArchitectureEnabled();
+    console.log(`${LOG_PREFIX} Using dynamic ${useUnified ? 'unified' : 'legacy'} fallback for ${promptKey}`);
+    return useUnified ? unifiedVoiceAgent.assembleFoundationalPrompt() : VOICE_AGENT_FOUNDATIONAL_PROMPT;
   }
 
   // Fallback to hardcoded

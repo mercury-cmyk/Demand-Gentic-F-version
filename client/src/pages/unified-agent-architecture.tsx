@@ -260,11 +260,35 @@ export default function UnifiedAgentArchitectureDashboard() {
 // ==================== SYSTEM OVERVIEW ====================
 
 function SystemOverview({ onSelectAgent }: { onSelectAgent: (type: string) => void }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const { data: summary, isLoading, error, isError } = useQuery({
     queryKey: ["unified-agents-summary"],
     queryFn: () => fetchJson(API_BASE),
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
+  });
+
+  const { data: architectureMode, isLoading: architectureModeLoading } = useQuery({
+    queryKey: ["voice-architecture-mode"],
+    queryFn: () => fetchJson(`${API_BASE}/voice/architecture-mode`),
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+  });
+
+  const setArchitectureMode = useMutation({
+    mutationFn: ({ architectureMode }: { architectureMode: "legacy" | "unified" }) =>
+      putJson(`${API_BASE}/voice/architecture-mode`, { architectureMode }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["voice-architecture-mode"] });
+      toast({
+        title: "Voice architecture updated",
+        description: `Runtime mode is now ${data?.architectureMode || "updated"}.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update failed", description: err.message, variant: "destructive" });
+    },
   });
 
   if (isLoading) {
@@ -388,6 +412,48 @@ function SystemOverview({ onSelectAgent }: { onSelectAgent: (type: string) => vo
             </CardContent>
           </Card>
         </div>
+
+        {/* Runtime architecture control */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <GitBranch className="h-4 w-4" />
+              Voice Runtime Architecture
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Toggle production voice runtime between legacy fallback and unified architecture.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Current mode:</span>
+                  <Badge variant="outline" className="text-[10px] capitalize">
+                    {architectureMode?.architectureMode || "unknown"}
+                  </Badge>
+                  <span className="text-muted-foreground">({architectureMode?.source || "n/a"})</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Unified = modern runtime path. Legacy = fallback path.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">Legacy</Label>
+                <Switch
+                  checked={architectureMode?.architectureMode === "unified"}
+                  disabled={architectureModeLoading || setArchitectureMode.isPending || architectureMode?.canManage === false}
+                  onCheckedChange={(checked) => {
+                    const mode = checked ? "unified" : "legacy";
+                    setArchitectureMode.mutate({ architectureMode: mode });
+                  }}
+                />
+                <Label className="text-xs">Unified</Label>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Agent cards grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

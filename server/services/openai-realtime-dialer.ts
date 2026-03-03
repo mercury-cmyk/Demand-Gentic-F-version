@@ -43,6 +43,7 @@ import {
   buildContactContextSection,
 } from "./foundation-capabilities";
 import { unifiedVoiceAgent } from "./agents/unified/unified-voice-agent";
+import { VOICE_AGENT_FOUNDATIONAL_PROMPT } from "./agents";
 import { guardQualifiedLeadDisposition } from "./disposition-engagement-guard";
 import { RealtimeCallTelemetry, hashText } from "./realtime-call-telemetry";
 
@@ -2758,33 +2759,28 @@ async function buildSystemPrompt(
   const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ''} ${contactInfo?.lastName || ''}`.trim() || 'the contact';
   const contactEmail = contactInfo?.email || '';
 
-  // =====================================================================
-  // UNIFIED AGENT ARCHITECTURE: Single Source of Truth
-  // The canonical voice prompt now sources ALL foundational behavioral knowledge
-  // from the Unified Voice Agent (unified-voice-agent.ts) instead of duplicating
-  // a 150-line inline prompt. The unified agent contains:
-  // - Section 0: Core Foundational Knowledge (Human-First Philosophy, Three Truths,
-  //   Output Format, Right-Party Verification, Call State Machine, Turn-Taking,
-  //   Gatekeeper Protocol, Voicemail Handling, DNC/Compliance, Dispositions, etc.)
-  // - Sections 1-12: Identity, Tone, Gatekeeper, Opening, Objection, Qualification,
-  //   Closing, State Machine, Compliance, Escalation, Knowledge, Performance
-  //
-  // Contact-specific personalization and tool definitions are layered on top.
-  // =====================================================================
+  const { isUnifiedVoiceArchitectureEnabled } = await import('./agents/unified/architecture-mode');
+  const useUnifiedArchitecture = isUnifiedVoiceArchitectureEnabled();
 
-  let unifiedFoundationalPrompt = unifiedVoiceAgent.assembleFoundationalPrompt();
+  let foundationalPrompt = VOICE_AGENT_FOUNDATIONAL_PROMPT;
 
-  // Prefer bridge-assembled unified prompt (includes UI-managed sections + supplement).
-  // Safe fallback remains the in-memory unified voice agent prompt.
-  try {
-    const { getVoiceAgentFoundationalPrompt } = await import('./agents/unified/voice-agent-bridge');
-    const uaResult = await getVoiceAgentFoundationalPrompt();
-    if (uaResult?.source === 'unified_agent' && uaResult.foundationalPrompt?.trim()) {
-      unifiedFoundationalPrompt = uaResult.foundationalPrompt.trim();
-      console.log(`${LOG_PREFIX} Using unified bridge foundational prompt (agentVersion=${uaResult.agentVersion ?? 'unknown'}, promptVersion=${uaResult.versionHash ?? 'unknown'})`);
+  if (useUnifiedArchitecture) {
+    foundationalPrompt = unifiedVoiceAgent.assembleFoundationalPrompt();
+
+    // Prefer bridge-assembled unified prompt (includes UI-managed sections + supplement).
+    // Safe fallback remains the in-memory unified voice agent prompt.
+    try {
+      const { getVoiceAgentFoundationalPrompt } = await import('./agents/unified/voice-agent-bridge');
+      const uaResult = await getVoiceAgentFoundationalPrompt();
+      if (uaResult?.source === 'unified_agent' && uaResult.foundationalPrompt?.trim()) {
+        foundationalPrompt = uaResult.foundationalPrompt.trim();
+        console.log(`${LOG_PREFIX} Using unified bridge foundational prompt (agentVersion=${uaResult.agentVersion ?? 'unknown'}, promptVersion=${uaResult.versionHash ?? 'unknown'})`);
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Failed to load unified bridge prompt, using in-memory unified prompt fallback:`, error);
     }
-  } catch (error) {
-    console.warn(`${LOG_PREFIX} Failed to load unified bridge prompt, using in-memory unified prompt fallback:`, error);
+  } else {
+    console.log(`${LOG_PREFIX} Using legacy foundational prompt source (runtime architecture mode: legacy)`);
   }
 
   const basePrompt = `# Agent Identity
@@ -2795,7 +2791,7 @@ Their email address is ${contactEmail || 'not available'}.
 
 ---
 
-${unifiedFoundationalPrompt}
+${foundationalPrompt}
 
 ---
 

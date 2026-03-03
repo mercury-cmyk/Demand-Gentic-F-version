@@ -61,6 +61,11 @@ import {
   RecommendationActionSchema,
   AgentConfigurationUpdateSchema,
 } from './types';
+import {
+  getVoiceArchitectureMode,
+  setVoiceArchitectureMode,
+  type VoiceArchitectureMode,
+} from './architecture-mode';
 import agentPromptsRouter from '../../../routes/agent-prompts';
 import orgIntelligenceInjectionRouter from '../../../routes/org-intelligence-injection-routes';
 
@@ -85,6 +90,18 @@ function validateAgentType(req: Request, res: Response): UnifiedAgentType | null
 
 function getUserId(req: Request): string {
   return (req as any).user?.id || (req as any).userId || 'system';
+}
+
+function canManageArchitectureMode(req: Request): boolean {
+  const user = (req as any).user || {};
+  const roleCandidates = [
+    ...(Array.isArray(user.roles) ? user.roles : []),
+    user.role,
+  ]
+    .filter(Boolean)
+    .map((r: unknown) => String(r).toLowerCase());
+
+  return roleCandidates.includes('admin') || roleCandidates.includes('campaign_manager');
 }
 
 // ==================== SYSTEM ENDPOINTS ====================
@@ -134,6 +151,50 @@ router.get('/pipeline-summary', (_req: Request, res: Response) => {
   try {
     const summary = learningPipeline.getAllPipelineSummary();
     res.json(summary);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** GET /api/unified-agents/voice/architecture-mode — Active voice runtime architecture mode */
+router.get('/voice/architecture-mode', (req: Request, res: Response) => {
+  try {
+    const modeState = getVoiceArchitectureMode();
+    res.json({
+      architectureMode: modeState.mode,
+      source: modeState.source,
+      envDefaultMode: modeState.envDefaultMode,
+      canManage: canManageArchitectureMode(req),
+      note: 'UI override is runtime-only and applies immediately to new calls in this process.',
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** PUT /api/unified-agents/voice/architecture-mode — Set voice runtime architecture mode */
+router.put('/voice/architecture-mode', (req: Request, res: Response) => {
+  try {
+    if (!canManageArchitectureMode(req)) {
+      return res.status(403).json({ error: 'Forbidden: admin or campaign_manager role required' });
+    }
+
+    const mode = String(req.body?.architectureMode || '').toLowerCase();
+    if (mode !== 'legacy' && mode !== 'unified') {
+      return res.status(400).json({ error: 'Invalid architectureMode. Use legacy or unified.' });
+    }
+
+    const updated = setVoiceArchitectureMode(mode as VoiceArchitectureMode, getUserId(req));
+    const state = getVoiceArchitectureMode();
+
+    return res.json({
+      success: true,
+      architectureMode: state.mode,
+      source: state.source,
+      envDefaultMode: state.envDefaultMode,
+      updatedBy: updated.updatedBy,
+      updatedAt: updated.updatedAt,
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -659,15 +720,19 @@ router.get('/voice/production-prompt-preview', async (req: Request, res: Respons
       ? Math.ceil(result.foundationalPrompt.length / 4)
       : 0;
 
-    const featureFlagEnabled = (process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE ?? 'true').toLowerCase() !== 'false';
+    const modeState = getVoiceArchitectureMode();
+    const featureFlagEnabled = modeState.mode === 'unified';
 
     res.json({
       featureFlag: {
-        name: 'VOICE_AGENT_USE_UNIFIED_ARCHITECTURE',
+        name: 'voice_architecture_mode',
         enabled: featureFlagEnabled,
+        architectureMode: modeState.mode,
+        source: modeState.source,
+        envDefaultMode: modeState.envDefaultMode,
         note: featureFlagEnabled
           ? 'UA path is ACTIVE — production calls use this prompt'
-          : 'UA path is DISABLED via explicit false — production calls use legacy fallback',
+          : 'UA path is DISABLED — production calls use legacy fallback',
       },
       bridge: {
         source: result.source,

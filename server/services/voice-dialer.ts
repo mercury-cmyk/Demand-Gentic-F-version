@@ -10454,7 +10454,8 @@ async function buildSystemPrompt(
 ): Promise<string> {
   // Unified Agent Architecture is default-on for voice foundational prompt source.
   // Set VOICE_AGENT_USE_UNIFIED_ARCHITECTURE=false to force legacy fallback paths.
-  const useUnifiedArchitecture = (process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE ?? 'true').toLowerCase() !== 'false';
+  const { isUnifiedVoiceArchitectureEnabled } = await import('./agents/unified/architecture-mode');
+  const useUnifiedArchitecture = isUnifiedVoiceArchitectureEnabled();
   let unifiedFoundationalPrompt: string | null = null;
   let unifiedPromptVersion: string | null = null;
   let unifiedPromptAgentVersion: string | null = null;
