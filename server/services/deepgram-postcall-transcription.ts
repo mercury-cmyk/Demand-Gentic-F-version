@@ -355,7 +355,7 @@ export async function submitToDeepgramBuffer(audioBuffer: Buffer, mimetype?: str
           Authorization: `Token ${DEEPGRAM_API_KEY}`,
           "Content-Type": contentType,
         },
-        body: audioBuffer,
+        body: new Uint8Array(audioBuffer),
       });
 
       if (!response.ok) {

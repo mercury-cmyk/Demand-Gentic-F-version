@@ -92,6 +92,23 @@ function extractGcsKeyFromRecordingUrl(recordingUrl: string | null | undefined):
   return null;
 }
 
+const DIALER_DISPOSITIONS = [
+  "voicemail",
+  "not_interested",
+  "invalid_data",
+  "qualified_lead",
+  "do_not_call",
+  "no_answer",
+  "needs_review",
+  "callback_requested",
+] as const;
+
+type DialerDisposition = (typeof DIALER_DISPOSITIONS)[number];
+
+function isDialerDisposition(value: unknown): value is DialerDisposition {
+  return typeof value === "string" && (DIALER_DISPOSITIONS as readonly string[]).includes(value);
+}
+
 /**
  * GET /api/call-intelligence/records/:callSessionId
  * Retrieve complete call quality and intelligence record for a specific call
@@ -478,7 +495,9 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
     }
 
     if (disposition && disposition !== "all") {
-      dialerConditions.push(eq(dialerCallAttempts.disposition, disposition as string));
+      if (isDialerDisposition(disposition)) {
+        dialerConditions.push(eq(dialerCallAttempts.disposition, disposition));
+      }
     }
 
     if (hasTranscript === "true") {
@@ -1295,13 +1314,12 @@ router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager',
     // Run analysis
     const analysis = await analyzeConversationQuality({
       transcript: callSession.aiTranscript,
+      interactionType: 'live_call',
+      analysisStage: 'post_call',
       disposition: callSession.aiDisposition || undefined,
-      campaign: campaignDetails ? {
-        name: campaignDetails.name,
-        objective: (campaignDetails as any).campaignObjective,
-        context: (campaignDetails as any).campaignContextBrief,
-        talkingPoints: (campaignDetails as any).talkingPoints,
-      } : undefined,
+      campaignId: campaignDetails?.id,
+      campaignName: campaignDetails?.name,
+      campaignObjective: (campaignDetails as any)?.campaignObjective,
     });
 
     if (!analysis) {
@@ -1322,10 +1340,10 @@ router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager',
         objectionHandlingScore: analysis.qualityDimensions?.objectionHandling,
         qualificationScore: analysis.qualityDimensions?.qualification,
         closingScore: analysis.qualityDimensions?.closing,
-        sentiment: analysis.sentiment,
-        engagementLevel: analysis.engagementLevel,
-        identityConfirmed: analysis.identityConfirmed,
-        qualificationMet: analysis.qualificationMet,
+        sentiment: analysis.learningSignals?.sentiment,
+        engagementLevel: analysis.learningSignals?.engagementLevel,
+        identityConfirmed: analysis.qualificationAssessment?.metCriteria ?? false,
+        qualificationMet: analysis.qualificationAssessment?.metCriteria ?? false,
         issues: analysis.issues,
         recommendations: analysis.recommendations,
         breakdowns: analysis.breakdowns,
