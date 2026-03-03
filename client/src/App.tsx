@@ -542,7 +542,9 @@ function AuthenticatedApp() {
               <Route path="/ai-project-creator" component={AIProjectCreatorPage} />
               <Route path="/ai-studio/dashboard" component={IntelligenceStudioDashboard} />
               <Route path="/ai-studio/intelligence" component={OrganizationIntelligencePage} />
-              <Route path="/ai-studio/agents" component={AIAgentsPage} />
+              <Route path="/ai-studio/agents">
+                <Redirect to="/unified-agent-architecture" />
+              </Route>
               <Route path="/ai-studio/operator" component={AgenticCRMOperatorPage} />
               <Route path="/ai-studio/agent-prompts">
                 <Redirect to="/unified-agent-architecture" />

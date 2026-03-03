@@ -105,6 +105,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private lastEmittedAgentText: string = '';
   private lastEmittedAgentTimestamp: number = 0;
 
+  // Track whether output_transcription was received during the current turn.
+  // When true, the turn_complete handler will NOT re-emit the accumulated
+  // currentTranscript, preventing duplicate agent text in the call transcript.
+  private receivedOutputTranscription: boolean = false;
+
   // Queued opening message: if sendOpeningMessage is called before setup completes,
   // queue it and auto-send when setupComplete fires. Prevents silent agent on race conditions.
   private pendingOpeningMessage: string | null = null;
@@ -466,6 +471,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     this.lastEmittedUserTimestamp = 0;
     this.lastEmittedAgentText = '';
     this.lastEmittedAgentTimestamp = 0;
+    this.receivedOutputTranscription = false;
     // Reset reconnection state
     this.reconnectAttempts = 0;
     this.setConnected(false);
@@ -1316,11 +1322,19 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     }
 
     // Handle OUTPUT transcription - what Gemini said (text version of its audio)
+    // This is the AUTHORITATIVE source for agent speech transcription.
+    // When present, it supersedes model_turn.parts text (currentTranscript).
     if (content.output_transcription || content.outputTranscription) {
       const outputTranscription = content.output_transcription || content.outputTranscription;
       const text = outputTranscription.text || outputTranscription.transcript || '';
       const trimmedAgentText = text.trim();
       if (trimmedAgentText) {
+        // Mark that output_transcription is providing the text for this turn.
+        // This prevents turn_complete from re-emitting the same content via currentTranscript.
+        this.receivedOutputTranscription = true;
+        // Clear the model_turn accumulated text since output_transcription supersedes it
+        this.currentTranscript = '';
+
         // Dedup: skip if same text emitted within 2s, or shorter substring of recent within 3s
         const now = Date.now();
         const timeSinceLast = now - this.lastEmittedAgentTimestamp;
@@ -1413,15 +1427,21 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     // Turn complete
     if (content.turn_complete || content.turnComplete) {
       if (DEBUG) console.log(`${LOG_PREFIX} ✋ Turn complete signal received`);
-      if (this.currentTranscript) {
-        if (DEBUG) console.log(`${LOG_PREFIX} 📝 Final transcript: ${this.currentTranscript}`);
+      // Only emit accumulated model_turn text if output_transcription did NOT
+      // already provide the authoritative transcription for this turn.
+      // Emitting both causes duplicate/garbled text in the call transcript.
+      if (this.currentTranscript && !this.receivedOutputTranscription) {
+        if (DEBUG) console.log(`${LOG_PREFIX} 📝 Final transcript (from model_turn): ${this.currentTranscript}`);
         this.emit('transcript:agent', {
           text: this.currentTranscript,
           isFinal: true,
           timestamp: new Date(),
         });
-        this.currentTranscript = '';
+      } else if (this.currentTranscript && this.receivedOutputTranscription) {
+        if (DEBUG) console.log(`${LOG_PREFIX} 📝 Skipping model_turn transcript (output_transcription already emitted): ${this.currentTranscript}`);
       }
+      this.currentTranscript = '';
+      this.receivedOutputTranscription = false;
       this.emit('audio:done');
       this.setResponding(false, this.currentResponseId || undefined);
       this.currentResponseId = null;
@@ -1436,6 +1456,7 @@ Respond naturally to their question. If they asked "who is calling" or similar, 
     if (content.interrupted) {
       if (DEBUG) console.log(`${LOG_PREFIX} 🛑 Response interrupted`);
       this.currentTranscript = '';
+      this.receivedOutputTranscription = false;
 
       // CRITICAL FIX: Reset repetition tracking on interruption.
       // When Gemini is interrupted, the phrase it was saying got cut off.

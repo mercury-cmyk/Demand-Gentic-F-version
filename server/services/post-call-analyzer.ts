@@ -21,7 +21,7 @@ import { overrideSingleDisposition } from "./bulk-disposition-reanalyzer";
 import { recordTranscriptionResult } from "./transcription-monitor";
 import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
 import { getFreshAudioUrl } from "./recording-link-resolver";
-import { buildPostCallTranscriptWithSummary } from "./post-call-transcript-summary";
+import { buildPostCallTranscriptWithSummaryAsync } from "./post-call-transcript-summary";
 import {
   runLightweightDispositionTriage,
   runDeepAIAnalysis,
@@ -806,25 +806,25 @@ export async function runPostCallAnalysis(
       return result;
     }
 
-    // 🎙️ RECORDING READINESS CHECK: If recording is still uploading, bail early so the
+    // RECORDING READINESS CHECK: If recording is still uploading, bail early so the
     // caller can retry later. Without this, we'd burn Deepgram/AI credits on a recording
     // that doesn't exist in storage yet.
     const recordingStatus = session.recordingStatus;
     if (
-      !options?.geminiTranscript &&  // Only matters when we need Deepgram (no Gemini transcript)
       (recordingStatus === 'recording' || recordingStatus === 'uploading') &&
-      !session.recordingS3Key  // S3 key not yet backfilled → upload still in progress
+      !session.recordingS3Key  // S3 key not yet backfilled -> upload still in progress
     ) {
-      result.error = `Recording still ${recordingStatus} — will retry later`;
-      console.log(`${LOG_PREFIX} ⏳ ${result.error} for session ${callSessionId}`);
+      result.error = `Recording still ${recordingStatus} - will retry later`;
+      console.log(`${LOG_PREFIX} ${result.error} for session ${callSessionId}`);
       return result;
     }
 
-    // 🔥 CRITICAL: For live Gemini calls, use native transcript — skip Deepgram entirely
-    // Gemini Live provides built-in speaker attribution, no post-call processing needed
+    // Parse native Gemini live transcript once and hold it as a fallback.
+    // We still prefer recording-based post-call transcription when available.
     let structuredTranscript: StructuredTranscript | null = null;
+    let geminiFallbackTranscript: StructuredTranscript | null = null;
     if (options?.geminiTranscript && options.geminiTranscript.trim().length > 50) {
-      console.log(`${LOG_PREFIX} ✅ Using native Gemini Live transcript (${options.geminiTranscript.length} chars) — skipping Deepgram post-call processing`);
+      console.log(`${LOG_PREFIX} Native Gemini live transcript captured (${options.geminiTranscript.length} chars) - using as fallback only if recording transcription is unavailable`);
       // Parse Gemini transcript format: "Agent: text\nContact: text\n..."
       const lines = options.geminiTranscript.split('\n').filter(l => l.trim().length > 0);
       const utterances = lines.map((line, idx) => {
@@ -843,16 +843,15 @@ export async function runPostCallAnalysis(
       if (utterances.length > 0) {
         // NORMALIZE: Merge consecutive same-speaker chunks and deduplicate near-identical entries
         const normalizedUtterances = normalizeTranscriptUtterances(utterances);
-        console.log(`${LOG_PREFIX} 📊 Transcript normalization: ${utterances.length} raw → ${normalizedUtterances.length} normalized utterances`);
-        structuredTranscript = {
+        console.log(`${LOG_PREFIX} Transcript normalization: ${utterances.length} raw -> ${normalizedUtterances.length} normalized utterances`);
+        geminiFallbackTranscript = {
           text: options.geminiTranscript,
           utterances: normalizedUtterances,
         };
-        transcriptionMetricSource = "realtime_native";
       }
     }
 
-    // 2. Get audio URL for transcription (only if Gemini transcript not available)
+    // 2. Get audio URL for transcription
     let audioUrl: string | null = options?.gcsUri || null;
 
     // Prefer S3/GCS recording (our own recording is stereo — inbound + outbound)
@@ -977,6 +976,12 @@ export async function runPostCallAnalysis(
       }
     }
 
+    if ((!structuredTranscript || structuredTranscript.text.length < 10) && geminiFallbackTranscript) {
+      structuredTranscript = geminiFallbackTranscript;
+      transcriptionMetricSource = "realtime_native";
+      console.warn(`${LOG_PREFIX} Falling back to native Gemini transcript because recording-based transcription was unavailable`);
+    }
+
     if (!structuredTranscript || structuredTranscript.text.length < 10) {
       result.error = "No Deepgram post-call transcript available yet; recording may still be uploading. Will retry via background job.";
       console.warn(`${LOG_PREFIX} ${result.error}`);
@@ -989,7 +994,7 @@ export async function runPostCallAnalysis(
     result.turns = buildPrecisionTurns(structuredTranscript.utterances, agentSpeaker);
     result.metrics = computeTurnMetrics(result.turns);
     const plainTranscript = formatTranscript(result.turns);
-    const transcriptWithSummary = buildPostCallTranscriptWithSummary(
+    const transcriptWithSummary = await buildPostCallTranscriptWithSummaryAsync(
       plainTranscript,
       result.turns.map((t) => ({
         role: t.speaker,

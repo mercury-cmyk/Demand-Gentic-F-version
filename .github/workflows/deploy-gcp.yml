@@ -1,11 +1,9 @@
 name: Deploy to GCP Cloud Run
 
 on:
-  # Auto-deploy disabled — use deploy-gcloud.sh or Cloud Build instead
-  # push:
-  #   branches:
-  #     - main
-  #     - staging
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -32,8 +30,8 @@ jobs:
       - name: Validate and normalize GCP credentials
         id: prep-creds
         env:
-          GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY_JSON }}
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_SA_KEY_JSON: ${{ secrets['GCP_SA_KEY_JSON'] }}
+          GCP_SA_KEY: ${{ secrets['GCP_SA_KEY'] }}
         run: |
           set -euo pipefail
 
@@ -145,7 +143,17 @@ jobs:
       - name: Test health endpoint
         run: |
           curl -f -s "${{ needs.deploy.outputs.service_url }}/api/health" || exit 1
-      
+
       - name: Test readiness endpoint
         run: |
-          curl -f -s "${{ needs.deploy.outputs.service_url }}/api/ready" || exit 1
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -f -s "${{ needs.deploy.outputs.service_url }}/api/ready"; then
+              echo ""
+              echo "Ready after attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i: not ready yet, waiting 10s..."
+            sleep 10
+          done
+          echo "Service did not become ready after 100s"
+          exit 1

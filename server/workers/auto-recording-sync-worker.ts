@@ -9,7 +9,7 @@ import { submitStructuredTranscription } from '../services/deepgram-postcall-tra
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
 import { fetchTelnyxRecording } from '../services/telnyx-recordings';
-import { buildPostCallTranscriptWithSummary } from '../services/post-call-transcript-summary';
+import { buildPostCallTranscriptWithSummaryAsync } from '../services/post-call-transcript-summary';
 
 // Lazy Redis connection - only connect when worker is actually used
 let connection: Redis | null = null;
@@ -412,7 +412,7 @@ export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJob
         return { success: true, transcriptionFailed: true };
       }
 
-      const transcriptWithSummary = buildPostCallTranscriptWithSummary(
+      const transcriptWithSummary = await buildPostCallTranscriptWithSummaryAsync(
         transcriptionResult.transcript,
         (transcriptionResult.transcriptTurns || []).map((turn: any) => ({
           role: turn.role === 'agent' ? 'agent' : 'contact',

@@ -3937,8 +3937,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         // Gemini may send partial transcriptions, so we merge them
         const lastTranscript = session.transcripts[session.transcripts.length - 1];
         if (lastTranscript?.role === 'user') {
-          // Append to existing user transcript with a space
-          lastTranscript.text += ' ' + event.text;
+          // Merge incremental chunks without duplicating supersets/subsets
+          lastTranscript.text = mergeTranscriptChunk(lastTranscript.text, event.text);
         } else {
           // Start new user transcript
           session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
@@ -4084,8 +4084,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
           (session as any)._forceNewAgentTranscript = false;
         }
         if (lastTranscript?.role === 'assistant' && !forceNew) {
-          // Append to existing assistant transcript with a space
-          lastTranscript.text += ' ' + event.text;
+          // Merge incremental chunks without duplicating supersets/subsets
+          lastTranscript.text = mergeTranscriptChunk(lastTranscript.text, event.text);
           maybeRecordPurposeStart(session, lastTranscript.text);
         } else {
           // Start new assistant transcript
@@ -7060,6 +7060,33 @@ function formatCallSummary(summary: CallSummary): string {
   return lines.join("\n");
 }
 
+function mergeTranscriptChunk(existingText: string, incomingText: string): string {
+  const existing = existingText.trim();
+  const incoming = incomingText.trim();
+
+  if (!incoming) return existing;
+  if (!existing) return incoming;
+
+  if (existing.includes(incoming)) return existing;
+  if (incoming.includes(existing)) return incoming;
+
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^\w\s]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const normalizedExisting = normalize(existing);
+  const normalizedIncoming = normalize(incoming);
+
+  if (normalizedExisting === normalizedIncoming) {
+    return existing.length >= incoming.length ? existing : incoming;
+  }
+
+  return `${existing} ${incoming}`;
+}
+
 /**
  * Finalize in-session transcripts before persistence:
  * 1. Sort by timestamp (handles out-of-order arrival from provider)
@@ -7082,15 +7109,9 @@ function finalizeTranscripts(session: OpenAIRealtimeSession): void {
 
     const last = merged[merged.length - 1];
     if (last && last.role === entry.role) {
-      // Skip if new text is already contained in existing (exact substring dedup)
-      if (last.text.includes(trimmedText)) continue;
-      // If existing text is contained in new text, replace with the longer version
-      if (trimmedText.includes(last.text)) {
-        last.text = trimmedText;
-      } else {
-        // Append with space separator
-        last.text = last.text + ' ' + trimmedText;
-      }
+      const mergedText = mergeTranscriptChunk(last.text, trimmedText);
+      if (mergedText === last.text) continue;
+      last.text = mergedText;
     } else {
       merged.push({ role: entry.role, text: trimmedText, timestamp: entry.timestamp });
     }
@@ -10431,6 +10452,28 @@ async function buildSystemPrompt(
   isTestSession: boolean = false,
   provider: 'openai' | 'google' = 'google'  // Voice provider for prompt optimization (default: Gemini Live)
 ): Promise<string> {
+  // Unified Agent Architecture is default-on for voice foundational prompt source.
+  // Set VOICE_AGENT_USE_UNIFIED_ARCHITECTURE=false to force legacy fallback paths.
+  const { isUnifiedVoiceArchitectureEnabled } = await import('./agents/unified/architecture-mode');
+  const useUnifiedArchitecture = isUnifiedVoiceArchitectureEnabled();
+  let unifiedFoundationalPrompt: string | null = null;
+  let unifiedPromptVersion: string | null = null;
+  let unifiedPromptAgentVersion: string | null = null;
+
+  if (useUnifiedArchitecture) {
+    try {
+      const { getVoiceAgentFoundationalPrompt } = await import('./agents/unified/voice-agent-bridge');
+      const uaResult = await getVoiceAgentFoundationalPrompt();
+      if (uaResult?.source === 'unified_agent' && uaResult.foundationalPrompt?.trim()) {
+        unifiedFoundationalPrompt = uaResult.foundationalPrompt.trim();
+        unifiedPromptVersion = uaResult.versionHash;
+        unifiedPromptAgentVersion = uaResult.agentVersion;
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Failed to load Unified Agent foundational prompt, falling back:`, error);
+    }
+  }
+
   // Try to get provider-specific knowledge blocks first
   const providerKnowledge = await getProviderVoiceControlLayer(
     provider,
@@ -10717,7 +10760,68 @@ async function buildSystemPrompt(
   }
 
   // =====================================================================
-  // PATH 2: KNOWLEDGE BLOCKS PATH - Provider-specific prompt from knowledge blocks
+  // PATH 2: UNIFIED AGENT ARCHITECTURE PATH - canonical foundational source
+  // Uses UI-governed unified prompt sections + knowledge hub supplement.
+  // =====================================================================
+  if (unifiedFoundationalPrompt) {
+    console.log(`${LOG_PREFIX} Using Unified Agent foundational prompt source for ${provider}`);
+
+    let prompt = unifiedFoundationalPrompt;
+
+    // Layer campaign context from new fields if available
+    const campaignContextSection = buildCampaignContextSection({
+      objective: campaignConfig?.campaignObjective,
+      productInfo: campaignConfig?.productServiceInfo,
+      talkingPoints: campaignConfig?.talkingPoints,
+      targetAudience: campaignConfig?.targetAudienceDescription,
+      objections: campaignConfig?.campaignObjections,
+      successCriteria: campaignConfig?.successCriteria,
+      brief: campaignConfig?.campaignContextBrief,
+      campaignType: campaignConfig?.type,
+    });
+
+    if (campaignContextSection) {
+      prompt += `\n\n---\n\n${campaignContextSection}`;
+    }
+
+    if (accountContextSection) {
+      prompt += `\n\n---\n\n${accountContextSection}`;
+    }
+    if (callPlanContextSection) {
+      prompt += `\n\n---\n\n${callPlanContextSection}`;
+    }
+    if (problemIntelligenceSection) {
+      prompt += `\n\n---\n\n${problemIntelligenceSection}`;
+    }
+
+    const contactContextSection = buildContactContextSection(contactInfo);
+    if (contactContextSection) {
+      prompt += `\n\n---\n\n${contactContextSection}`;
+    }
+
+    prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
+
+    let finalPrompt = await buildAgentSystemPrompt(prompt);
+
+    if (provider === 'google') {
+      let geminiPreamble = buildGeminiCompliancePreamble();
+      const pronunciationGuide = buildPronunciationGuide(campaignConfig, contactInfo);
+      if (pronunciationGuide) {
+        geminiPreamble += pronunciationGuide;
+      }
+      geminiPreamble += buildBuyingSignalSection();
+      finalPrompt = geminiPreamble + finalPrompt;
+      console.log(`${LOG_PREFIX} Added Gemini compliance preamble (unified architecture path)`);
+    }
+
+    finalPrompt = applyVoiceLiftPromptContract(finalPrompt, campaignConfig, contactInfo, callAttemptId);
+    const tokenEstimate = estimateTokenCount(finalPrompt);
+    console.log(`${LOG_PREFIX} Using unified architecture prompt provider=${provider}, agentVersion=${unifiedPromptAgentVersion ?? 'unknown'}, promptVersion=${unifiedPromptVersion ?? 'unknown'} (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
+    return finalPrompt;
+  }
+
+  // =====================================================================
+  // PATH 3: KNOWLEDGE BLOCKS PATH - Provider-specific prompt from knowledge blocks
   // When knowledge blocks are available and have content, use them as the foundation
   // This allows prompts to be edited through the UI without code changes
   // =====================================================================
@@ -10791,7 +10895,7 @@ async function buildSystemPrompt(
   }
 
   // =====================================================================
-  // PATH 3: CANONICAL SYSTEM PROMPT STRUCTURE (Legacy fallback)
+  // PATH 4: CANONICAL SYSTEM PROMPT STRUCTURE (Legacy fallback)
   // This follows the required flow: Personality â†’ Environment â†’ Tone â†’ Goal â†’ Call Flow â†’ Guardrails
   // =====================================================================
 

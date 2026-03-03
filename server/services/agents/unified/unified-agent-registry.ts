@@ -20,6 +20,7 @@ import { unifiedMemoryAgent } from './unified-memory-agent';
 import { unifiedContentAgent } from './unified-content-agent';
 import { unifiedPipelineAgent } from './unified-pipeline-agent';
 import { learningPipeline, LearningPipelineService } from './learning-pipeline';
+import type { AgentRecommendation, PromptSection } from './types';
 
 // ==================== REGISTRY ====================
 
@@ -143,6 +144,50 @@ class UnifiedAgentRegistry {
 
   private constructor() {
     this.pipeline = learningPipeline;
+  }
+
+  private static readonly APPROVAL_GATED_SECTION_CATEGORIES = new Set<PromptSection['category']>([
+    'identity',
+    'compliance',
+    'behavioral_rules',
+    'state_machine',
+    'escalation',
+  ]);
+
+  private getRecommendationApprovalGate(
+    agent: IUnifiedAgent & UnifiedBaseAgent,
+    recommendation: AgentRecommendation
+  ): {
+    required: boolean;
+    reasons: string[];
+  } {
+    const reasons: string[] = [];
+
+    const mapping = agent.capabilityMappings.find(m =>
+      m.capabilityId === recommendation.capabilityId &&
+      m.promptSectionId === recommendation.targetPromptSectionId
+    );
+    if (mapping?.requiresApproval) {
+      reasons.push('capability mapping is marked requiresApproval');
+    }
+
+    const targetSection = agent.promptSections.find(s => s.id === recommendation.targetPromptSectionId);
+    if (targetSection && UnifiedAgentRegistry.APPROVAL_GATED_SECTION_CATEGORIES.has(targetSection.category)) {
+      reasons.push(`target section category '${targetSection.category}' is governance-gated`);
+    }
+
+    if (recommendation.impact?.riskLevel === 'high') {
+      reasons.push('impact risk level is high');
+    }
+
+    if ((recommendation.priorityScore || 0) >= 85) {
+      reasons.push(`priority score ${recommendation.priorityScore} >= 85`);
+    }
+
+    return {
+      required: reasons.length > 0,
+      reasons,
+    };
   }
 
   static getInstance(): UnifiedAgentRegistry {
@@ -423,6 +468,15 @@ class UnifiedAgentRegistry {
     const rec = recs.find(r => r.id === recommendationId);
     if (!rec) throw new Error(`Recommendation not found: ${recommendationId}`);
 
+    const approvalGate = this.getRecommendationApprovalGate(agent, rec);
+    if (approvalGate.required && rec.status !== 'approved') {
+      throw new Error(
+        `Recommendation ${recommendationId} requires explicit approval before apply. ` +
+        `Reasons: ${approvalGate.reasons.join('; ')}. ` +
+        `Current status: ${rec.status}.`
+      );
+    }
+
     // Add to agent's recommendations if not already there
     if (!agent.recommendations.find(r => r.id === recommendationId)) {
       agent.recommendations.push(rec);
@@ -440,6 +494,41 @@ class UnifiedAgentRegistry {
         const { invalidateVoiceAgentBridgeCache } = require('./voice-agent-bridge');
         invalidateVoiceAgentBridgeCache();
       } catch { /* bridge not loaded yet — safe to ignore */ }
+    }
+  }
+
+  /**
+   * Explicitly approve a recommendation before application.
+   */
+  approveAgentRecommendation(
+    agentType: UnifiedAgentType,
+    recommendationId: string,
+    approvedBy: string,
+    notes?: string
+  ): void {
+    const agent = this.getAgent(agentType);
+    if (!agent) throw new Error(`Agent not found: ${agentType}`);
+
+    const recs = this.pipeline.getRecommendations(agentType);
+    const rec = recs.find(r => r.id === recommendationId);
+    if (!rec) throw new Error(`Recommendation not found: ${recommendationId}`);
+
+    if (rec.status === 'applied') {
+      throw new Error(`Recommendation ${recommendationId} is already applied`);
+    }
+    if (rec.status === 'rejected') {
+      throw new Error(`Recommendation ${recommendationId} is rejected and cannot be approved`);
+    }
+
+    if (!agent.recommendations.find(r => r.id === recommendationId)) {
+      agent.recommendations.push(rec);
+    }
+
+    rec.status = 'approved';
+    rec.reviewedAt = new Date();
+    rec.reviewedBy = approvedBy;
+    if (notes && notes.trim()) {
+      rec.reviewNotes = notes.trim();
     }
   }
 

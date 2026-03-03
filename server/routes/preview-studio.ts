@@ -1309,7 +1309,9 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       },
     }).returning();
 
-    // Build the system prompt with full context (same as campaign test calls)
+    // Build the system prompt with full context (for UI visibility/metadata only).
+    // IMPORTANT: Phone test runtime must use canonical voice-dialer prompt assembly
+    // via unified call context, same as Campaign Test Calls.
     let promptResponse: { systemPrompt: string; firstMessage: string };
     let variantInfo: {
       variantId: string | null;
@@ -1349,9 +1351,13 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       promptResponse = await buildCustomOrAssembledPrompt();
     }
 
-    // Use custom prompts if provided, otherwise use assembled prompt
-    const finalSystemPrompt = customSystemPrompt || promptResponse.systemPrompt;
-    const finalFirstMessage = customFirstMessage || agentConfig?.firstMessage || promptResponse.firstMessage;
+    // Preview Studio phone tests MUST follow canonical runtime prompt assembly
+    // (same switch + knowledge source as Campaign Test Calls). We intentionally
+    // ignore custom prompt overrides for telephony runtime parity.
+    const hasRuntimeCustomPromptOverride = Boolean(customSystemPrompt?.trim() || customFirstMessage?.trim());
+    if (hasRuntimeCustomPromptOverride) {
+      console.log('[Preview Studio Phone Test] Ignoring custom runtime prompt overrides to keep parity with Campaign Test Calls');
+    }
 
     // Prepare voice selection
     let voice = 'marin';
@@ -1376,11 +1382,6 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       eagerness,
       max_tokens: maxTokens,
     } : undefined;
-
-    // Determine agent name based on context
-    const agentName = hasCustomPrompt
-      ? 'Custom Prompt Agent'
-      : (agentConfig?.systemPrompt ? 'Preview Agent' : 'Default Agent');
 
     // Build unified call context (same setup contract as campaign AI test calls)
     const unifiedContext = await buildUnifiedCallContext({
@@ -1409,11 +1410,9 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       });
     }
 
-    // Apply Preview Studio overrides (custom prompt/first message/voice)
-    unifiedContext.firstMessage = finalFirstMessage;
+    // Apply only runtime-safe overrides. Do NOT override system prompt or first
+    // message here; keep canonical behavior aligned with Campaign Test Calls.
     unifiedContext.voice = voice;
-    unifiedContext.agentName = agentName;
-    unifiedContext.systemPrompt = finalSystemPrompt;
     unifiedContext.provider = providerForSession;
 
     // system_prompt is stored in Redis (callSessionStore below) and retrieved by voice-dialer.
@@ -1449,10 +1448,10 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       agent_name: unifiedContext.agentName,
       organization_name: unifiedContext.organizationName,
       provider: unifiedContext.provider,
-      // Only store system_prompt when user explicitly provides a custom prompt.
-      // Without a custom prompt, the voice-dialer builds the full canonical prompt
-      // from campaign config at call time (same as production queue calls).
-      system_prompt: customSystemPrompt?.trim() ? customSystemPrompt.trim() : undefined,
+      // CRITICAL: Never store system_prompt for phone tests. This ensures
+      // voice-dialer always builds prompt from canonical campaign runtime context,
+      // matching Campaign Test Calls and respecting architecture switch mode.
+      system_prompt: undefined,
       // agent_settings intentionally omitted — voice-dialer resolves from campaign/agent config
       test_contact: {
         name: unifiedContext.contactName,
@@ -1564,7 +1563,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       callControlId,
       phoneNumber: normalizedPhone,
       campaignName: campaign.name,
-      agentName: agentConfig?.systemPrompt ? 'Custom Agent' : 'Preview Agent',
+      agentName: unifiedContext.agentName,
       voiceProvider,
     };
 

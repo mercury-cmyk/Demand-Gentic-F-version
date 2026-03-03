@@ -22,6 +22,7 @@ import {
   getOrBuildAccountCallBrief,
   getOrBuildParticipantCallPlan,
 } from "./account-call-service";
+import { buildCampaignBehaviorPolicySection } from "./agents/unified/campaign-behavior-policy";
 
 let openai: OpenAI | null = null;
 let gemini: GoogleGenerativeAI | null = null;
@@ -164,12 +165,16 @@ export interface CallContext {
   runId?: string; // Dialer run ID for unified tracking
   callAttemptId?: string; // Dialer call attempt ID for unified tracking
   // Campaign context for AI agent behavior
+  campaignType?: string; // e.g., content_syndication, appointment_setting
   organizationName?: string; // The organization name (NOT campaign name)
   campaignObjective?: string; // e.g., "Book qualified meetings with IT decision makers"
   successCriteria?: string; // e.g., "Meeting booked with decision maker"
   targetAudienceDescription?: string; // e.g., "CISOs at mid-market companies"
   productServiceInfo?: string; // Product/service details
   talkingPoints?: string[]; // Key points to mention
+  offerType?: string; // e.g., asset, meeting, demo, validation
+  funnelStage?: string; // e.g., awareness, consideration, decision
+  icpPersona?: string; // e.g., CISO, VP Marketing
   // Call flow configuration - state machine for AI agent execution
   callFlow?: any;
   // Max call duration in seconds - auto-hangup after this time
@@ -268,7 +273,8 @@ export class AiVoiceAgent extends EventEmitter {
     }
 
     // ---- Layer 1: Try Unified Agent Architecture foundational prompt ----
-    const useUA = process.env.VOICE_AGENT_USE_UNIFIED_ARCHITECTURE === 'true';
+    const { isUnifiedVoiceArchitectureEnabled } = await import('./agents/unified/architecture-mode');
+    const useUA = isUnifiedVoiceArchitectureEnabled();
     let uaResult: VoiceAgentBridgeResult | null = null;
 
     if (useUA) {
@@ -305,6 +311,21 @@ export class AiVoiceAgent extends EventEmitter {
       const scriptOverride = this.buildScriptOverride();
       if (scriptOverride) {
         prompt += `\n\n---\n\n${scriptOverride}`;
+      }
+
+      // Layer 3.5: Runtime campaign behavior policy (objective-driven)
+      const behaviorPolicy = buildCampaignBehaviorPolicySection({
+        campaignType: this.context.campaignType,
+        campaignObjective: this.context.campaignObjective,
+        successCriteria: this.context.successCriteria,
+        targetAudienceDescription: this.context.targetAudienceDescription,
+        productServiceInfo: this.context.productServiceInfo,
+        offerType: this.context.offerType,
+        funnelStage: this.context.funnelStage,
+        icpPersona: this.context.icpPersona,
+      });
+      if (behaviorPolicy) {
+        prompt += `\n\n---\n\n${behaviorPolicy}`;
       }
 
       // Layer 4: Account & Contact context
@@ -471,8 +492,19 @@ IMPORTANT:
 - If you don't understand something, ask for clarification
 - Log any key information the prospect shares for follow-up`;
 
+    const behaviorPolicy = buildCampaignBehaviorPolicySection({
+      campaignType: this.context.campaignType,
+      campaignObjective: this.context.campaignObjective,
+      successCriteria: this.context.successCriteria,
+      targetAudienceDescription: this.context.targetAudienceDescription,
+      productServiceInfo: this.context.productServiceInfo,
+      offerType: this.context.offerType,
+      funnelStage: this.context.funnelStage,
+      icpPersona: this.context.icpPersona,
+    });
+
     return ensureVoiceAgentControlLayer(
-      `${prompt}\n\n---\n\n${accountContextSection}\n\n---\n\n${callPlanContextSection}`
+      `${prompt}\n\n---\n\n${behaviorPolicy}\n\n---\n\n${accountContextSection}\n\n---\n\n${callPlanContextSection}`
     );
   }
 
