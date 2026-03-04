@@ -341,13 +341,14 @@ const MAILBOX_ENCRYPTION_KEY =
   process.env.MSFT_OAUTH_CLIENT_SECRET ??
   process.env.M365_CLIENT_SECRET ??
   M365_CLIENT_SECRET;
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? process.env.GOOGLE_AUTH_CLIENT_ID ?? process.env.GMAIL_CLIENT_ID ?? "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "";
+const GOOGLE_CLIENT_ID =
+  (process.env.GOOGLE_CLIENT_ID ?? process.env.GOOGLE_AUTH_CLIENT_ID ?? process.env.GMAIL_CLIENT_ID ?? "").trim();
+const GOOGLE_CLIENT_SECRET = (process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "").trim();
 const GOOGLE_SCOPES =
   process.env.GOOGLE_OAUTH_SCOPES ??
   "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events";
 const GOOGLE_REDIRECT_URI =
-  process.env.GOOGLE_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/google/callback`;
+  (process.env.GOOGLE_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/google/callback`).trim();
 
 type MicrosoftTokenSet = {
   accessToken: string;

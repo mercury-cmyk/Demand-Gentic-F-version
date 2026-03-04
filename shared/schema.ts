@@ -3631,6 +3631,359 @@ export const businessHoursConfig = pgTable("business_hours_config", {
   timezoneDayUniq: uniqueIndex("business_hours_config_timezone_day_uniq").on(table.timezone, table.dayOfWeek),
 }));
 
+// ========== TEAM ACTIVITY MANAGER SYSTEM ==========
+
+// User Status Enum
+export const userStatusEnum = pgEnum('user_status', [
+  'online',
+  'offline',
+  'away',
+  'busy',
+  'do_not_disturb'
+]);
+
+// Activity Type Enum
+export const activityTypeEnum = pgEnum('activity_type', [
+  'login',
+  'logout',
+  'view',
+  'create',
+  'update',
+  'delete',
+  'call',
+  'email',
+  'form_submission',
+  'report_generation',
+  'export',
+  'import',
+  'custom'
+]);
+
+// User Sessions - Track login/logout and session activity
+export const userSessions = pgTable("user_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").references(() => iamTeams.id, { onDelete: 'set null' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  sessionToken: varchar("session_token").notNull().unique(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  loginAt: timestamp("login_at").notNull().defaultNow(),
+  logoutAt: timestamp("logout_at"),
+  isActive: boolean("is_active").notNull().default(true),
+  lastActivityAt: timestamp("last_activity_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  userIdx: index("user_sessions_user_idx").on(table.userId),
+  teamIdx: index("user_sessions_team_idx").on(table.teamId),
+  orgIdx: index("user_sessions_org_idx").on(table.organizationId),
+  loginAtIdx: index("user_sessions_login_at_idx").on(table.loginAt),
+  isActiveIdx: index("user_sessions_active_idx").on(table.isActive),
+}));
+
+// User Real-time Status - Current online/offline status with presence tracking
+export const userStatus = pgTable("user_status", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").references(() => iamTeams.id, { onDelete: 'set null' }),
+  status: userStatusEnum("status").notNull().default('offline'),
+  statusMessage: text("status_message"),
+  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+  currentSessionId: varchar("current_session_id").references(() => userSessions.id, { onDelete: 'set null' }),
+  isAutoAway: boolean("is_auto_away").notNull().default(false),
+  awayStartedAt: timestamp("away_started_at"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("user_status_status_idx").on(table.status),
+  teamIdx: index("user_status_team_idx").on(table.teamId),
+  lastSeenIdx: index("user_status_last_seen_idx").on(table.lastSeenAt),
+}));
+
+// Team Member Activity - Track team member actions/interactions
+export const teamMemberActivity = pgTable("team_member_activity", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  activityType: activityTypeEnum("activity_type").notNull(),
+  module: text("module").notNull(), // 'campaigns', 'contacts', 'calls', 'emails', 'reports', etc.
+  entityType: text("entity_type"), // 'campaign', 'contact', 'call', 'email', etc.
+  entityId: varchar("entity_id"), // ID of the entity being acted upon
+  entityName: text("entity_name"), // Name/description of entity for display
+  description: text("description"), // Human-readable description
+  metadata: jsonb("metadata"), // Additional context (e.g., fields changed, values)
+  duration: integer("duration"), // Duration in seconds if applicable
+  ipAddress: text("ip_address"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  userIdx: index("team_member_activity_user_idx").on(table.userId),
+  teamIdx: index("team_member_activity_team_idx").on(table.teamId),
+  orgIdx: index("team_member_activity_org_idx").on(table.organizationId),
+  activityTypeIdx: index("team_member_activity_type_idx").on(table.activityType),
+  moduleIdx: index("team_member_activity_module_idx").on(table.module),
+  createdAtIdx: index("team_member_activity_created_at_idx").on(table.createdAt),
+  userTeamIdx: index("team_member_activity_user_team_idx").on(table.userId, table.teamId),
+}));
+
+// Module Time Tracking - Track time spent on different modules/features
+export const moduleTimeTracking = pgTable("module_time_tracking", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  module: text("module").notNull(), // 'campaigns', 'contacts', 'calls', 'emails', 'reports', 'dashboard', etc.
+  startTime: timestamp("start_time").notNull(),
+  endTime: timestamp("end_time"),
+  totalSeconds: integer("total_seconds"), // Calculated when session ends
+  subModule: text("sub_module"), // Nested module (e.g., 'campaign_analytics' under 'campaigns')
+  metadata: jsonb("metadata"), // Store context like campaign_id, contact_id, etc.
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  userIdx: index("module_time_tracking_user_idx").on(table.userId),
+  teamIdx: index("module_time_tracking_team_idx").on(table.teamId),
+  moduleIdx: index("module_time_tracking_module_idx").on(table.module),
+  startTimeIdx: index("module_time_tracking_start_time_idx").on(table.startTime),
+  isActiveIdx: index("module_time_tracking_active_idx").on(table.isActive),
+}));
+
+// Activity Summary - Aggregated daily activity stats for reporting
+export const activitySummary = pgTable("activity_summary", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  date: date("date").notNull(), // Date of summary (UTC)
+  loginCount: integer("login_count").notNull().default(0),
+  logoutCount: integer("logout_count").notNull().default(0),
+  sessionCount: integer("session_count").notNull().default(0),
+  totalOnlineSeconds: integer("total_online_seconds").notNull().default(0),
+  totalIdleSeconds: integer("total_idle_seconds").notNull().default(0),
+  activityCount: integer("activity_count").notNull().default(0),
+  campaignsWorked: integer("campaigns_worked").default(0),
+  contactsHandled: integer("contacts_handled").default(0),
+  callsMade: integer("calls_made").default(0),
+  emailsSent: integer("emails_sent").default(0),
+  moduleBreakdown: jsonb("module_breakdown"), // { 'campaigns': 3600, 'contacts': 1800, ...}
+  topModules: jsonb("top_modules"), // Array of { module, seconds }
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  userDateIdx: uniqueIndex("activity_summary_user_date_idx").on(table.userId, table.date),
+  teamIdx: index("activity_summary_team_idx").on(table.teamId),
+  dateIdx: index("activity_summary_date_idx").on(table.date),
+}));
+
+// CRM Interaction Log - Specific tracking of CRM-related interactions
+export const crmInteractionLog = pgTable("crm_interaction_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  interactionType: text("interaction_type").notNull(), // 'contact_view', 'contact_edit', 'contact_create', 'email_send', 'call_log', etc.
+  entityType: text("entity_type").notNull(), // 'contact', 'account', 'opportunity', 'email', 'call'
+  entityId: varchar("entity_id").notNull(),
+  entityName: text("entity_name"),
+  details: jsonb("details"), // Store additional info like field changes, call duration, etc.
+  duration: integer("duration"), // Duration in seconds for call/meeting
+  outcome: text("outcome"), // Result of interaction (e.g., 'success', 'failed', 'qualified')
+  linkedDocuments: jsonb("linked_documents"), // Reference to emails, calls, meetings
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  userIdx: index("crm_interaction_log_user_idx").on(table.userId),
+  teamIdx: index("crm_interaction_log_team_idx").on(table.teamId),
+  entityIdx: index("crm_interaction_log_entity_idx").on(table.entityType, table.entityId),
+  interactionTypeIdx: index("crm_interaction_log_type_idx").on(table.interactionType),
+  createdAtIdx: index("crm_interaction_log_created_at_idx").on(table.createdAt),
+}));
+
+// Communication Log - Track all team communications within the platform
+export const communicationLog = pgTable("communication_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  receiverId: varchar("receiver_id").references(() => users.id, { onDelete: 'set null' }), // Null for group msgs
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  communicationType: text("communication_type").notNull(), // 'message', 'comment', 'mention', 'call', 'video_conference'
+  subject: text("subject"),
+  content: text("content"),
+  isRead: boolean("is_read").notNull().default(false),
+  parentCommunicationId: varchar("parent_communication_id"), // For threading
+  attachments: jsonb("attachments"), // Array of file references
+  metadata: jsonb("metadata"), // Additional context
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  senderIdx: index("communication_log_sender_idx").on(table.senderId),
+  receiverIdx: index("communication_log_receiver_idx").on(table.receiverId),
+  teamIdx: index("communication_log_team_idx").on(table.teamId),
+  createdAtIdx: index("communication_log_created_at_idx").on(table.createdAt),
+}));
+
+// ========== END TEAM ACTIVITY MANAGER SYSTEM ==========
+
+// ========== TEAM MESSAGING & CALLS SYSTEM ==========
+
+// Chat Channels - Group messaging/channels
+export const chatChannels = pgTable("chat_channels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  name: text("name").notNull(),
+  description: text("description"),
+  channelType: text("channelType").notNull().default('general'), // 'general', 'private', 'direct'
+  createdById: varchar("created_by_id").notNull().references(() => users.id, { onDelete: 'set null' }),
+  isActive: boolean("is_active").notNull().default(true),
+  isArchived: boolean("is_archived").notNull().default(false),
+  metadata: jsonb("metadata"), // customization, notifications settings, etc.
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  teamIdx: index("chat_channels_team_idx").on(table.teamId),
+  typeIdx: index("chat_channels_type_idx").on(table.channelType),
+  createdAtIdx: index("chat_channels_created_at_idx").on(table.createdAt),
+}));
+
+// Chat Messages - Individual messages in channels or direct DMs
+export const chatMessages = pgTable("chat_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  channelId: varchar("channel_id").notNull().references(() => chatChannels.id, { onDelete: 'cascade' }),
+  senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  content: text("content").notNull(),
+  messageType: text("messageType").notNull().default('text'), // 'text', 'image', 'file', 'reaction', 'system'
+  parentMessageId: varchar("parent_message_id").references(() => chatMessages.id, { onDelete: 'cascade' }), // For threaded messages
+  attachmentIds: varchar("attachment_ids").array(), // References to file_uploads
+  reactions: jsonb("reactions"), // { '👍': [userId1, userId2], '❤️': [userId3] }
+  editedAt: timestamp("edited_at"),
+  editedBy: varchar("edited_by").references(() => users.id, { onDelete: 'set null' }),
+  isPinned: boolean("is_pinned").notNull().default(false),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  channelIdx: index("chat_messages_channel_idx").on(table.channelId),
+  senderIdx: index("chat_messages_sender_idx").on(table.senderId),
+  createdAtIdx: index("chat_messages_created_at_idx").on(table.createdAt),
+  parentIdx: index("chat_messages_parent_idx").on(table.parentMessageId),
+}));
+
+// Channel Members - Map users to channels
+export const channelMembers = pgTable("channel_members", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  channelId: varchar("channel_id").notNull().references(() => chatChannels.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text("role").notNull().default('member'), // 'owner', 'admin', 'member', 'guest'
+  lastReadAt: timestamp("last_read_at"),
+  isMuted: boolean("is_muted").notNull().default(false),
+  joinedAt: timestamp("joined_at").notNull().defaultNow(),
+}, (table) => ({
+  channelUserIdx: index("channel_members_channel_user_idx").on(table.channelId, table.userId),
+  userIdx: index("channel_members_user_idx").on(table.userId),
+  uniqueChannelUser: unique("unique_channel_member").on(table.channelId, table.userId),
+}));
+
+// Message Read Receipts - Track who read what
+export const messageReadReceipts = pgTable("message_read_receipts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar("message_id").notNull().references(() => chatMessages.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  readAt: timestamp("read_at").notNull().defaultNow(),
+}, (table) => ({
+  messageUserIdx: index("message_read_receipts_message_user_idx").on(table.messageId, table.userId),
+  uniqueMessageRead: unique("unique_message_read").on(table.messageId, table.userId),
+}));
+
+// Voice Calls - Track all voice calls
+export const voiceCalls = pgTable("voice_calls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  initiatorId: varchar("initiator_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  recipientIds: varchar("recipient_ids").array().notNull(), // Array of user IDs in call
+  channelId: varchar("channel_id").references(() => chatChannels.id, { onDelete: 'set null' }), // If called from channel
+  callType: text("callType").notNull().default('voice'), // 'voice', 'video'
+  status: text("status").notNull().default('ringing'), // 'ringing', 'active', 'missed', 'declined', 'ended'
+  callDuration: integer("call_duration"), // in seconds
+  startTime: timestamp("start_time"),
+  endTime: timestamp("end_time"),
+  recordingId: varchar("recording_id").references(() => callRecordings.id, { onDelete: 'set null' }),
+  meetingUrl: text("meeting_url"), // Zoom, Google Meet, etc.
+  metadata: jsonb("metadata"), // Additional context
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  teamIdx: index("voice_calls_team_idx").on(table.teamId),
+  initiatorIdx: index("voice_calls_initiator_idx").on(table.initiatorId),
+  statusIdx: index("voice_calls_status_idx").on(table.status),
+  createdAtIdx: index("voice_calls_created_at_idx").on(table.createdAt),
+}));
+
+// Call Recordings - Store call recording metadata
+export const callRecordings = pgTable("call_recordings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callId: varchar("call_id").notNull().references(() => voiceCalls.id, { onDelete: 'cascade' }),
+  recordingUrl: text("recording_url").notNull(), // Cloud Storage URL
+  recordingDuration: integer("recording_duration"), // in seconds
+  fileSize: bigint("file_size"), // in bytes
+  format: text("format").notNull().default('mp3'), // 'mp3', 'wav', 'webp'
+  transcriptId: varchar("transcript_id").references(() => callTranscripts.id, { onDelete: 'set null' }),
+  isPublic: boolean("is_public").notNull().default(false),
+  downloadCount: integer("download_count").default(0),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  callIdx: index("call_recordings_call_idx").on(table.callId),
+  createdAtIdx: index("call_recordings_created_at_idx").on(table.createdAt),
+}));
+
+// Call Transcripts - AI-generated transcripts
+export const callTranscripts = pgTable("call_transcripts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callId: varchar("call_id").notNull().references(() => voiceCalls.id, { onDelete: 'cascade' }),
+  transcriptText: text("transcript_text"),
+  transcriptJson: jsonb("transcript_json"), // Structured: [{ speaker: userId, text: string, timeStart, timeEnd }, ...]
+  summary: text("summary"),
+  keyPoints: text("key_points").array(),
+  sentiment: text("sentiment"), // 'positive', 'neutral', 'negative'
+  isPublic: boolean("is_public").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  callIdx: index("call_transcripts_call_idx").on(table.callId),
+}));
+
+// Call Participants - Track who participated and their status
+export const callParticipants = pgTable("call_participants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callId: varchar("call_id").notNull().references(() => voiceCalls.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  joinTime: timestamp("join_time"),
+  leaveTime: timestamp("leave_time"),
+  participationDuration: integer("participation_duration"), // in seconds
+  status: text("status").notNull().default('invited'), // 'invited', 'ringing', 'accepted', 'active', 'declined', 'left'
+  deviceType: text("device_type"), // 'phone', 'web', 'mobile'
+  mediaEnabled: jsonb("media_enabled"), // { audio: boolean, video: boolean }
+  metadata: jsonb("metadata"),
+}, (table) => ({
+  callIdx: index("call_participants_call_idx").on(table.callId),
+  userIdx: index("call_participants_user_idx").on(table.userId),
+  uniqueCallUser: unique("unique_call_participant").on(table.callId, table.userId),
+}));
+
+// File Uploads - Attachments in messages
+export const fileUploads = pgTable("file_uploads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  uploadedById: varchar("uploaded_by_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  fileName: text("file_name").notNull(),
+  fileType: text("file_type").notNull(), // 'image', 'document', 'video', 'audio', 'other'
+  fileSize: bigint("file_size").notNull(),
+  mimeType: text("mime_type").notNull(),
+  fileUrl: text("file_url").notNull(), // Cloud Storage URL
+  downloadCount: integer("download_count").default(0),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  uploaderIdx: index("file_uploads_uploader_idx").on(table.uploadedById),
+  typeIdx: index("file_uploads_type_idx").on(table.fileType),
+  createdAtIdx: index("file_uploads_created_at_idx").on(table.createdAt),
+}));
+
+// ========== END TEAM MESSAGING & CALLS SYSTEM ==========
+
 // ========== END DISPOSITION MANAGEMENT SYSTEM ==========
 
 // Campaign Orders (Client Portal)
@@ -5634,6 +5987,35 @@ export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 
 export type ActivityLog = typeof activityLog.$inferSelect;
 export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
+
+// Team Activity Manager exports
+export const insertUserSessionSchema = createInsertSchema(userSessions);
+export type UserSession = typeof userSessions.$inferSelect;
+export type InsertUserSession = z.infer<typeof insertUserSessionSchema>;
+
+export const insertUserStatusSchema = createInsertSchema(userStatus);
+export type UserStatusRecord = typeof userStatus.$inferSelect;
+export type InsertUserStatus = z.infer<typeof insertUserStatusSchema>;
+
+export const insertTeamMemberActivitySchema = createInsertSchema(teamMemberActivity);
+export type TeamMemberActivity = typeof teamMemberActivity.$inferSelect;
+export type InsertTeamMemberActivity = z.infer<typeof insertTeamMemberActivitySchema>;
+
+export const insertModuleTimeTrackingSchema = createInsertSchema(moduleTimeTracking);
+export type ModuleTimeTracking = typeof moduleTimeTracking.$inferSelect;
+export type InsertModuleTimeTracking = z.infer<typeof insertModuleTimeTrackingSchema>;
+
+export const insertActivitySummarySchema = createInsertSchema(activitySummary);
+export type ActivitySummary = typeof activitySummary.$inferSelect;
+export type InsertActivitySummary = z.infer<typeof insertActivitySummarySchema>;
+
+export const insertCrmInteractionLogSchema = createInsertSchema(crmInteractionLog);
+export type CrmInteractionLog = typeof crmInteractionLog.$inferSelect;
+export type InsertCrmInteractionLog = z.infer<typeof insertCrmInteractionLogSchema>;
+
+export const insertCommunicationLogSchema = createInsertSchema(communicationLog);
+export type CommunicationLog = typeof communicationLog.$inferSelect;
+export type InsertCommunicationLog = z.infer<typeof insertCommunicationLogSchema>;
 
 export type SavedFilter = typeof savedFilters.$inferSelect;
 export type InsertSavedFilter = z.infer<typeof insertSavedFilterSchema>;
@@ -15006,3 +15388,44 @@ export const oiBatchJobs = pgTable("oi_batch_jobs", {
 export const insertOiBatchJobSchema = createInsertSchema(oiBatchJobs);
 export type OiBatchJob = typeof oiBatchJobs.$inferSelect;
 export type InsertOiBatchJob = typeof oiBatchJobs.$inferInsert;
+
+// ========== TEAM MESSAGING & CALLS TYPES ==========
+
+export const insertChatChannelSchema = createInsertSchema(chatChannels);
+export type ChatChannel = typeof chatChannels.$inferSelect;
+export type InsertChatChannel = z.infer<typeof insertChatChannelSchema>;
+
+export const insertChatMessageSchema = createInsertSchema(chatMessages);
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
+
+export const insertChannelMemberSchema = createInsertSchema(channelMembers);
+export type ChannelMember = typeof channelMembers.$inferSelect;
+export type InsertChannelMember = z.infer<typeof insertChannelMemberSchema>;
+
+export const insertMessageReadReceiptSchema = createInsertSchema(messageReadReceipts);
+export type MessageReadReceipt = typeof messageReadReceipts.$inferSelect;
+export type InsertMessageReadReceipt = z.infer<typeof insertMessageReadReceiptSchema>;
+
+export const insertVoiceCallSchema = createInsertSchema(voiceCalls);
+export type VoiceCall = typeof voiceCalls.$inferSelect;
+export type InsertVoiceCall = z.infer<typeof insertVoiceCallSchema>;
+
+export const insertCallRecordingSchema = createInsertSchema(callRecordings);
+export type CallRecording = typeof callRecordings.$inferSelect;
+export type InsertCallRecording = z.infer<typeof insertCallRecordingSchema>;
+
+export const insertCallTranscriptSchema = createInsertSchema(callTranscripts);
+export type CallTranscript = typeof callTranscripts.$inferSelect;
+export type InsertCallTranscript = z.infer<typeof insertCallTranscriptSchema>;
+
+export const insertCallParticipantSchema = createInsertSchema(callParticipants);
+export type CallParticipant = typeof callParticipants.$inferSelect;
+export type InsertCallParticipant = z.infer<typeof insertCallParticipantSchema>;
+
+export const insertFileUploadSchema = createInsertSchema(fileUploads);
+export type FileUpload = typeof fileUploads.$inferSelect;
+export type InsertFileUpload = z.infer<typeof insertFileUploadSchema>;
+
+// ========== END TEAM MESSAGING & CALLS TYPES ==========
+

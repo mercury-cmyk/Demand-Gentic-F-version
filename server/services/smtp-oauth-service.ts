@@ -20,6 +20,12 @@ import { smtpProviders } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-encryption-key-change-in-production";
+const GOOGLE_CLIENT_ID = (
+  process.env.GOOGLE_CLIENT_ID ||
+  process.env.GOOGLE_AUTH_CLIENT_ID ||
+  ""
+).trim();
+const GOOGLE_CLIENT_SECRET = (process.env.GOOGLE_CLIENT_SECRET || "").trim();
 
 // Google OAuth2 Configuration
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -76,7 +82,7 @@ export class SmtpOAuthService {
    */
   getGoogleAuthUrl(redirectUri: string, state?: string): string {
     const params = new URLSearchParams({
-      client_id: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
+      client_id: GOOGLE_CLIENT_ID,
       redirect_uri: redirectUri,
       response_type: "code",
       scope: GOOGLE_SCOPES.join(" "),
@@ -93,8 +99,8 @@ export class SmtpOAuthService {
    */
   async exchangeGoogleCode(code: string, redirectUri: string): Promise<OAuthTokens> {
     const params = new URLSearchParams({
-      client_id: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
       code,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
@@ -129,8 +135,8 @@ export class SmtpOAuthService {
     const refreshToken = this.decryptToken(encryptedRefreshToken);
 
     const params = new URLSearchParams({
-      client_id: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     });
@@ -349,8 +355,8 @@ export class SmtpOAuthService {
         auth: {
           type: "OAuth2",
           user: provider.emailAddress,
-          clientId: (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_AUTH_CLIENT_ID)!,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+          clientId: GOOGLE_CLIENT_ID,
+          clientSecret: GOOGLE_CLIENT_SECRET,
           refreshToken: this.decryptToken(provider.refreshTokenEncrypted!),
           accessToken,
         },
