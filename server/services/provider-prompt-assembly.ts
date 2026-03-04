@@ -30,7 +30,7 @@ import {
   estimateTokens,
   areKnowledgeBlocksInitialized,
 } from "./knowledge-block-service";
-import { buildUnifiedKnowledgePrompt } from "./unified-knowledge-hub";
+import { getVoiceAgentFoundationalPrompt } from "./agents/unified/voice-agent-bridge";
 
 // ==================== TYPES ====================
 
@@ -46,7 +46,7 @@ export interface AssembledProviderPrompt {
   prompt: string;
   totalTokens: number;
   provider: VoiceProvider;
-  source: "blocks" | "legacy";
+  source: "unified-agent" | "blocks" | "legacy" | "minimal-fallback";
   assembledAt: string;
   promptHash: string;
   blockVersions?: { blockId: number; name: string; version: number }[];
@@ -199,8 +199,8 @@ async function getCampaignKnowledgeOverrides(campaignId: string): Promise<{
  * Assemble provider-specific prompt for a campaign
  *
  * This is the main function that should be called by the dialers.
- * It uses the Unified Knowledge Hub as the primary source of truth,
- * with Knowledge Blocks as a future enhancement layer.
+ * It uses the Unified Agent Architecture as the primary source of truth,
+ * with Knowledge Blocks as backward-compatible fallback.
  */
 export async function assembleProviderPrompt(
   config: ProviderPromptConfig
@@ -208,22 +208,29 @@ export async function assembleProviderPrompt(
   const { provider, agentId, campaignId, useCondensedPrompt = true, includeRuntimeIdentity = true } = config;
   const assembledAt = new Date().toISOString();
 
-  // PRIMARY SOURCE: Unified Knowledge Hub (single source of truth)
+  // PRIMARY SOURCE: Unified Agent Architecture (single source of truth)
   try {
-    console.log(`[ProviderPromptAssembly] Using Unified Knowledge Hub (primary) for ${provider}`);
-    const prompt = await buildUnifiedKnowledgePrompt();
-    const promptHash = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+    const uaResult = await getVoiceAgentFoundationalPrompt();
+    if (uaResult?.source === 'unified_agent' && uaResult.foundationalPrompt?.trim()) {
+      const prompt = uaResult.foundationalPrompt.trim();
+      const promptHash = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
 
-    return {
-      prompt,
-      totalTokens: estimateTokens(prompt),
-      provider,
-      source: "unified-knowledge-hub",
-      assembledAt,
-      promptHash,
-    };
+      console.log(
+        `[ProviderPromptAssembly] Using Unified Agent prompt (primary) ` +
+        `agentVersion=${uaResult.agentVersion ?? 'unknown'} promptVersion=${uaResult.versionHash ?? 'unknown'}`
+      );
+
+      return {
+        prompt,
+        totalTokens: estimateTokens(prompt),
+        provider,
+        source: "unified-agent",
+        assembledAt,
+        promptHash,
+      };
+    }
   } catch (error) {
-    console.error(`[ProviderPromptAssembly] Unified Knowledge Hub failed, trying Knowledge Blocks:`, error);
+    console.error(`[ProviderPromptAssembly] Unified Agent prompt failed, trying Knowledge Blocks:`, error);
   }
 
   // FALLBACK: Knowledge Blocks system
@@ -307,59 +314,6 @@ export async function assembleProviderPrompt(
     totalTokens: estimateTokens(fallbackPrompt),
     provider,
     source: "minimal-fallback",
-    assembledAt,
-    promptHash,
-  };
-}
-
-/**
- * Assemble prompt using unified knowledge hub
- * Used as fallback when knowledge blocks are not available
- */
-async function assembleLegacyPrompt(
-  provider: VoiceProvider,
-  useCondensedPrompt: boolean,
-  assembledAt: string
-): Promise<AssembledProviderPrompt> {
-  // Get unified knowledge from the single source of truth
-  let prompt: string;
-  try {
-    prompt = await buildUnifiedKnowledgePrompt();
-  } catch (error) {
-    console.warn('[ProviderPromptAssembly] Failed to load unified knowledge, using minimal fallback:', error);
-    prompt = `## Core Agent Guidelines
-- Always verify identity before proceeding
-- Honor all DNC requests immediately
-- Be professional and respectful
-- End calls gracefully when requested`;
-  }
-
-  // Apply provider-specific formatting for legacy prompts
-  if (provider === "google") {
-    // Add critical preamble and wrap in tags for Gemini
-    // Gemini needs explicit instructions to prevent premature org name disclosure
-    const geminiPreamble = `<critical_instructions>
-## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
-
-1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
-2. **NEVER introduce yourself with your company name** at the start of the call.
-3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
-4. Do NOT assume, predict, or continue speaking after asking a question.
-5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
-6. The person must EXPLICITLY confirm their identity before you proceed with any context.
-</critical_instructions>
-
-`;
-    prompt = `${geminiPreamble}<system_instructions>\n${prompt}\n</system_instructions>`;
-  }
-
-  const promptHash = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
-
-  return {
-    prompt,
-    totalTokens: estimateTokens(prompt),
-    provider,
-    source: "legacy",
     assembledAt,
     promptHash,
   };

@@ -181,11 +181,13 @@ async function processPendingJob(): Promise<boolean> {
 
     if (submitResult.success) {
       // Mark submitted jobs as submitted
-      await db.execute(
-        sql`UPDATE transcription_regeneration_jobs
-         SET status = 'submitted', updated_at = NOW()
-         WHERE call_id = ANY(${batchCallIds})`
-      );
+      // Build IN clause using Drizzle sql.join — Drizzle sql template doesn't auto-convert JS arrays to PG arrays
+      if (batchCallIds.length > 0) {
+        const idList = sql.join(batchCallIds.map((id: string) => sql`${id}`), sql`, `);
+        await db.execute(
+          sql`UPDATE transcription_regeneration_jobs SET status = 'submitted', updated_at = NOW() WHERE call_id IN (${idList})`
+        );
+      }
 
       VERBOSE(`Batch submitted successfully: ${submitResult.analyzed} analyzed, ${submitResult.failed} failed`);
       return true;

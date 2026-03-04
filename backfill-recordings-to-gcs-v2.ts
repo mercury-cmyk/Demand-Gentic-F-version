@@ -145,10 +145,9 @@ async function backfillRecordingsToGCS(options: {
         
         const result = await storeCallSessionRecording(sessionId, recordingUrl);
         
-        if (result.s3Key) {
+        if (result) {
           stats.succeeded++;
-          const sizeMB = result.fileSizeBytes ? (result.fileSizeBytes / 1024 / 1024).toFixed(2) : '?';
-          console.log(`  \u2705 Stored in GCS: ${result.s3Key} (${sizeMB} MB)`);
+          console.log(`  \u2705 Stored in GCS: ${result}`);
         } else {
           stats.failed++;
           console.log(`  \u274c Failed - no S3 key returned`);

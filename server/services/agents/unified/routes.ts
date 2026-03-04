@@ -680,7 +680,6 @@ router.get('/:agentType/assembled-prompt', (req: Request, res: Response) => {
  *
  * This merges the agent's foundational prompt sections with:
  *  - Core Agent Identity (demand problem-solver, human-first warmth, authentic AI)
- *  - Unified Knowledge Hub (compliance, gatekeeper, dispositioning, etc.)
  *  - Organization-specific context (super org profile, compliance, policies)
  *  - Campaign & engagement learning summary
  */
@@ -714,7 +713,7 @@ router.get('/:agentType/assembled-prompt-with-oi', async (req: Request, res: Res
  *
  * Shows what the production voice agent would receive when the UA bridge
  * is active.  Includes layer breakdown, section list, token estimate,
- * version info, and Knowledge Hub supplement status.
+ * version info, and bridge source status.
  *
  * Use this before flipping VOICE_AGENT_USE_UNIFIED_ARCHITECTURE=true
  * to verify the assembled prompt is correct.
@@ -764,6 +763,7 @@ router.get('/voice/production-prompt-preview', async (req: Request, res: Respons
         versionHash: result.versionHash,
         sectionCount: result.sectionCount,
         hasKnowledgeHubSupplement: result.hasKnowledgeHubSupplement,
+        note: 'Knowledge Hub supplement is disabled when using Unified Agent Architecture as the sole knowledge source.',
       },
       prompt: {
         assembledPrompt: result.foundationalPrompt,
@@ -773,11 +773,10 @@ router.get('/voice/production-prompt-preview', async (req: Request, res: Respons
       sections,
       layers: [
         'Layer 1: UA Foundational Prompt (sections ordered by section_number)',
-        'Layer 2: Knowledge Hub supplement (non-overlapping categories)',
-        'Layer 3: Campaign Persona Override (injected at call time)',
-        'Layer 4: Campaign Script Overrides (injected at call time)',
-        'Layer 5: Account & Contact Context (injected at call time)',
-        'Layer 6: Voice Control Layer — ensureVoiceAgentControlLayer() (injected at call time)',
+        'Layer 2: Campaign Persona Override (injected at call time)',
+        'Layer 3: Campaign Script Overrides (injected at call time)',
+        'Layer 4: Account & Contact Context (injected at call time)',
+        'Layer 5: Voice Control Layer — ensureVoiceAgentControlLayer() (injected at call time)',
       ],
     });
   } catch (error: any) {

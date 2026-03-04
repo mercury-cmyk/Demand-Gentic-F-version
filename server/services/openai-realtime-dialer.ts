@@ -2767,7 +2767,7 @@ async function buildSystemPrompt(
   if (useUnifiedArchitecture) {
     foundationalPrompt = unifiedVoiceAgent.assembleFoundationalPrompt();
 
-    // Prefer bridge-assembled unified prompt (includes UI-managed sections + supplement).
+    // Prefer bridge-assembled unified prompt (UI-managed active sections).
     // Safe fallback remains the in-memory unified voice agent prompt.
     try {
       const { getVoiceAgentFoundationalPrompt } = await import('./agents/unified/voice-agent-bridge');
@@ -2861,7 +2861,9 @@ Before calling: say "Thanks for your patience—I'm connecting you with someone 
     prompt += `\n\n---\n\n${contactContextSection}`;
   }
 
-  const finalPrompt = await buildAgentSystemPrompt(prompt);
+  const finalPrompt = await buildAgentSystemPrompt(prompt, {
+    includeUnifiedKnowledge: false,
+  });
   const tokenEstimate = estimateTokenCount(finalPrompt);
   console.log(`${LOG_PREFIX} Using canonical system prompt with layered architecture (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
   return finalPrompt;

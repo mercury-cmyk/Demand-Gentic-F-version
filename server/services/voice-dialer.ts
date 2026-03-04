@@ -10392,14 +10392,14 @@ function buildPronunciationGuide(campaignConfig: any, contactInfo: any): string 
 }
 
 /**
- * Get provider-specific voice control layer from knowledge blocks or legacy constants
- * This function integrates with the new knowledge block system while maintaining backward compatibility.
+ * Get provider-specific voice control layer from unified agent architecture,
+ * knowledge blocks fallback, or legacy constants.
  */
 async function getProviderVoiceControlLayer(
   provider: 'openai' | 'google',
   campaignId: string | null,
   useCondensed: boolean = true
-): Promise<{ content: string; source: 'blocks' | 'legacy' }> {
+): Promise<{ content: string; source: 'unified-agent' | 'blocks' | 'legacy' }> {
   try {
     const assembled = await assembleProviderPrompt({
       provider,
@@ -10407,12 +10407,12 @@ async function getProviderVoiceControlLayer(
       useCondensedPrompt: useCondensed,
     });
 
-    if (assembled.source === 'blocks') {
-      console.log(`${LOG_PREFIX} Using knowledge blocks for ${provider} voice control (${assembled.totalTokens} tokens)`);
-      return { content: assembled.prompt, source: 'blocks' };
+    if (assembled.source === 'unified-agent' || assembled.source === 'blocks') {
+      console.log(`${LOG_PREFIX} Using ${assembled.source} for ${provider} voice control (${assembled.totalTokens} tokens)`);
+      return { content: assembled.prompt, source: assembled.source };
     }
   } catch (error) {
-    console.warn(`${LOG_PREFIX} Failed to get knowledge blocks for ${provider}, using legacy:`, error);
+    console.warn(`${LOG_PREFIX} Failed to get provider voice control layer for ${provider}, using legacy:`, error);
   }
 
   // Fallback to legacy
@@ -10481,9 +10481,11 @@ async function buildSystemPrompt(
     useCondensedPrompt
   );
 
-  const useKnowledgeBlocks = providerKnowledge.source === 'blocks' && providerKnowledge.content.length > 0;
-  if (useKnowledgeBlocks) {
-    console.log(`${LOG_PREFIX} Building prompt with knowledge blocks for ${provider}`);
+  const useProviderPromptLayer =
+    (providerKnowledge.source === 'blocks' || providerKnowledge.source === 'unified-agent') &&
+    providerKnowledge.content.length > 0;
+  if (useProviderPromptLayer) {
+    console.log(`${LOG_PREFIX} Building prompt with provider layer (${providerKnowledge.source}) for ${provider}`);
   }
 
   const contactId = contactInfo?.id;
@@ -10761,7 +10763,7 @@ async function buildSystemPrompt(
 
   // =====================================================================
   // PATH 2: UNIFIED AGENT ARCHITECTURE PATH - canonical foundational source
-  // Uses UI-governed unified prompt sections + knowledge hub supplement.
+  // Uses UI-governed unified prompt sections from unified agent architecture.
   // =====================================================================
   if (unifiedFoundationalPrompt) {
     console.log(`${LOG_PREFIX} Using Unified Agent foundational prompt source for ${provider}`);
@@ -10801,7 +10803,9 @@ async function buildSystemPrompt(
 
     prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
 
-    let finalPrompt = await buildAgentSystemPrompt(prompt);
+    let finalPrompt = await buildAgentSystemPrompt(prompt, {
+      includeUnifiedKnowledge: false,
+    });
 
     if (provider === 'google') {
       let geminiPreamble = buildGeminiCompliancePreamble();
@@ -10821,12 +10825,12 @@ async function buildSystemPrompt(
   }
 
   // =====================================================================
-  // PATH 3: KNOWLEDGE BLOCKS PATH - Provider-specific prompt from knowledge blocks
-  // When knowledge blocks are available and have content, use them as the foundation
-  // This allows prompts to be edited through the UI without code changes
+  // PATH 3: PROVIDER LAYER PATH - Unified agent/knowledge blocks sourced foundational prompt
+  // When provider layer content is available, use it as the foundation.
+  // This supports unified-agent-native prompts with backward-compatible blocks.
   // =====================================================================
-  if (useKnowledgeBlocks) {
-    console.log(`${LOG_PREFIX} Using provider-specific knowledge blocks path for ${provider}`);
+  if (useProviderPromptLayer) {
+    console.log(`${LOG_PREFIX} Using provider-specific layer path for ${provider} (source=${providerKnowledge.source})`);
 
     let prompt = providerKnowledge.content;
 
@@ -10872,7 +10876,9 @@ async function buildSystemPrompt(
     prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
 
     // Apply organization intelligence and training rules
-    let finalPrompt = await buildAgentSystemPrompt(prompt);
+    let finalPrompt = await buildAgentSystemPrompt(prompt, {
+      includeUnifiedKnowledge: false,
+    });
 
     // For Gemini: Add optimized compliance preamble (Google-recommended structure)
     if (provider === 'google') {
@@ -10890,7 +10896,7 @@ async function buildSystemPrompt(
 
     finalPrompt = applyVoiceLiftPromptContract(finalPrompt, campaignConfig, contactInfo, callAttemptId);
     const tokenEstimate = estimateTokenCount(finalPrompt);
-    console.log(`${LOG_PREFIX} Using knowledge blocks prompt with provider=${provider} (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
+    console.log(`${LOG_PREFIX} Using provider layer prompt source=${providerKnowledge.source} provider=${provider} (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
     return finalPrompt;
   }
 
@@ -11382,7 +11388,9 @@ Before calling: say "I understand you'd like to speak with someone directly. Let
   // Apply personality configuration (prepends personality/tone/conversation flow if configured)
   prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
 
-  let finalPrompt = await buildAgentSystemPrompt(prompt);
+  let finalPrompt = await buildAgentSystemPrompt(prompt, {
+    includeUnifiedKnowledge: false,
+  });
 
   // For Gemini: Add optimized compliance preamble (Google-recommended structure)
   // This preamble is identical across all 3 paths via buildGeminiCompliancePreamble()

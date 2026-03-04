@@ -2,8 +2,8 @@
  * Organization Intelligence Helper
  * Provides AI agents with access to organization profile and prompt optimization settings
  * 
- * IMPORTANT: All foundational knowledge is now sourced from the UNIFIED KNOWLEDGE HUB.
- * Organization-specific settings are supplementary context only.
+ * Foundational knowledge can be injected from the Unified Knowledge Hub when requested.
+ * Unified Agent Architecture callers can disable that injection and use agent-native sections.
  */
 
 import { db } from "../db";
@@ -579,12 +579,17 @@ ${existingPrompt}`;
  * Builds a system prompt with organization context and behavioral guidelines
  * Use this in AI agent prompts to ensure consistent behavior
  * 
- * ARCHITECTURE: Uses UNIFIED KNOWLEDGE HUB as the single source of truth.
- * All foundational knowledge (compliance, gatekeeper handling, voicemail,
- * dispositioning, etc.) comes from one centralized location.
- * Organization-specific settings are supplementary context only.
+ * By default, foundational knowledge is included from the Unified Knowledge Hub.
+ * Set options.includeUnifiedKnowledge=false when the base prompt already comes
+ * from Unified Agent Architecture prompt sections to avoid duplicated knowledge.
  */
-export async function buildAgentSystemPrompt(basePrompt: string): Promise<string> {
+export async function buildAgentSystemPrompt(
+  basePrompt: string,
+  options?: {
+    includeUnifiedKnowledge?: boolean;
+  }
+): Promise<string> {
+  const includeUnifiedKnowledge = options?.includeUnifiedKnowledge !== false;
   const settings = await getOrganizationPromptSettings();
   const profile = await getOrganizationProfile();
   const learningSummary = await getOrganizationLearningSummary();
@@ -638,28 +643,28 @@ You are not passive — you are strategically proactive. While you are always ki
 - **Performance-Aligned Focus**: Every conversation you have is aligned to the campaign objective — whether that is a qualified lead, a confirmed appointment, or a content delivery. You are measured by outcomes and you consistently work toward securing the defined deliverable while maintaining quality and integrity. You never force a low-quality outcome just to hit a number — every lead and appointment must meet the agreed qualification criteria.
 `);
 
-  // ==================== UNIFIED KNOWLEDGE HUB (SINGLE SOURCE OF TRUTH) ====================
-  // All foundational agent knowledge comes from the unified knowledge hub.
-  // This is the ONLY source for: compliance, gatekeeper handling, voicemail detection,
-  // dispositioning, call quality, conversation flow, objection handling, etc.
-  try {
-    const unifiedKnowledge = await buildUnifiedKnowledgePrompt();
-    promptParts.push(unifiedKnowledge);
-  } catch (error) {
-    console.error('[OrgIntelligence] Failed to load unified knowledge hub, using fallback:', error);
-    // Minimal fallback if unified knowledge hub is unavailable
-    promptParts.push(`
+  // ==================== FOUNDATIONAL KNOWLEDGE LAYER ====================
+  // Optional to avoid duplication when basePrompt is already from Unified Agent Architecture.
+  if (includeUnifiedKnowledge) {
+    try {
+      const unifiedKnowledge = await buildUnifiedKnowledgePrompt();
+      promptParts.push(unifiedKnowledge);
+    } catch (error) {
+      console.error('[OrgIntelligence] Failed to load unified knowledge hub, using fallback:', error);
+      // Minimal fallback if unified knowledge hub is unavailable
+      promptParts.push(`
 ## Core Agent Guidelines (Fallback)
 - Always verify identity before proceeding
 - Honor all DNC requests immediately
 - Be professional and respectful
 - End calls gracefully when requested
 `);
+    }
   }
 
   // ==================== ORGANIZATION-SPECIFIC CONTEXT (SUPPLEMENTARY) ====================
   // These are supplementary additions specific to this organization.
-  // They do NOT override the unified knowledge hub rules.
+  // They do NOT override foundational agent knowledge.
 
   // Add organization intelligence
   if (settings.orgIntelligence) {
@@ -680,7 +685,7 @@ You are not passive — you are strategically proactive. While you are always ki
     promptParts.push('\n## Campaign & Engagement Learnings\n' + learningSummary);
   }
 
-  // Add organization-specific compliance policy (supplements unified hub, does not replace)
+  // Add organization-specific compliance policy (supplementary)
   if (settings.compliancePolicy) {
     promptParts.push('\n## Additional Organization Compliance Requirements\n' + settings.compliancePolicy);
   }

@@ -4,7 +4,7 @@
  */
 
 import "./server/env.ts";
-import { Pool, sql } from '@neondatabase/serverless';
+import { Pool } from '@neondatabase/serverless';
 import ws from "ws";
 import { neonConfig } from '@neondatabase/serverless';
 
