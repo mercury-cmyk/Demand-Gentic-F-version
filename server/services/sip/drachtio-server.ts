@@ -30,6 +30,7 @@ import * as sdp from 'sdp-transform';
 // Configuration
 const DRACHTIO_HOST = (process.env.DRACHTIO_HOST || 'localhost').trim();
 const DRACHTIO_PORT = parseInt((process.env.DRACHTIO_PORT || '9022').trim());
+const DRACHTIO_SECRET = (process.env.DRACHTIO_SECRET || 'cymru').trim();
 const SIP_LISTEN_HOST = (process.env.SIP_LISTEN_HOST || '0.0.0.0').trim();
 const SIP_LISTEN_PORT = parseInt((process.env.SIP_LISTEN_PORT || '5060').trim());
 const PUBLIC_IP = (process.env.PUBLIC_IP || '').trim();
@@ -187,7 +188,7 @@ export class DrachtioSIPServer {
 
     try {
       log('Initializing Drachtio SIP Server...');
-      log(`Configuration: host=${DRACHTIO_HOST}, port=${DRACHTIO_PORT}, listenPort=${SIP_LISTEN_PORT}`);
+      log(`Configuration: host=${DRACHTIO_HOST}, port=${DRACHTIO_PORT}, secret=${DRACHTIO_SECRET ? 'set' : 'MISSING'}, listenPort=${SIP_LISTEN_PORT}`);
 
       if (!PUBLIC_IP) {
         logError('PUBLIC_IP not set - SDP will not include public address');
@@ -227,23 +228,25 @@ export class DrachtioSIPServer {
     if (!this.srf) return false;
 
     try {
-      // Check if the SRF has a valid socket for outbound requests
-      // The drachtio agent stores sockets in an internal map
+      // In outbound-connect mode, the SRF connection itself is the socket
+      // for UAC requests. If we're connected, we can make outbound calls.
+      if (this.isConnected) {
+        log('Drachtio connected - outbound calling available');
+        return true;
+      }
+
+      // Fallback: check internal sockets
       const agent = this.srf._agent;
-      if (!agent) {
-        log('No drachtio agent available');
-        return false;
+      if (agent) {
+        const sockets = agent._sockets;
+        if (sockets && sockets.size > 0) {
+          log(`Drachtio has ${sockets.size} socket(s) registered`);
+          return true;
+        }
       }
 
-      // Check if we have any registered sockets
-      const sockets = agent._sockets;
-      if (!sockets || sockets.size === 0) {
-        log('No sockets registered with drachtio agent');
-        return false;
-      }
-
-      log(`Drachtio has ${sockets.size} socket(s) registered`);
-      return true;
+      log('No outbound capability detected');
+      return false;
     } catch (error: any) {
       log(`Error checking outbound capability: ${error.message}`);
       return false;
@@ -253,33 +256,44 @@ export class DrachtioSIPServer {
   private async connectToDrachtio(): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        this.lastConnectionError = `Connection timeout to Drachtio at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`;
         reject(new Error(`Connection timeout to Drachtio at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`));
       }, 10000);
+
+      log(`Connecting to Drachtio at ${DRACHTIO_HOST}:${DRACHTIO_PORT} with secret=${DRACHTIO_SECRET ? '***' : 'MISSING'}`);
 
       this.srf.connect(
         {
           host: DRACHTIO_HOST,
           port: DRACHTIO_PORT,
+          secret: DRACHTIO_SECRET,
         },
-        () => {
+        (err: any, hostport: string) => {
           clearTimeout(timeout);
-          log(`Connected to Drachtio daemon at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`);
+          if (err) {
+            this.isConnected = false;
+            this.lastConnectionError = err?.message || String(err);
+            logError(`Drachtio authentication failed: ${err.message || err}`);
+            reject(err);
+            return;
+          }
+          this.isConnected = true;
+          this.lastConnectionError = null;
+          log(`Connected and authenticated to Drachtio daemon at ${DRACHTIO_HOST}:${DRACHTIO_PORT} (hostport: ${hostport})`);
           resolve();
-        },
-        (error: any) => {
-          clearTimeout(timeout);
-          reject(error);
         }
       );
 
       this.srf.on('error', (error: any) => {
         logError('Drachtio connection error', error);
         this.isConnected = false;
+        this.lastConnectionError = error?.message || String(error);
       });
 
       this.srf.on('disconnect', () => {
         log('Drachtio connection closed');
         this.isConnected = false;
+        this.lastConnectionError = 'Disconnected from drachtio daemon';
       });
     });
   }

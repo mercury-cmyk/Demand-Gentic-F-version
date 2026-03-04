@@ -80,19 +80,42 @@ export default function LeadDetailPage() {
   // Use fresh recording URL if available, otherwise fall back to stale URL
   const activeRecordingUrl = recordingUrlData?.url || lead?.recordingUrl;
 
+  const [bypassQualityCheck, setBypassQualityCheck] = React.useState(false);
+
   const approveMutation = useMutation({
     mutationFn: async () => {
       if (!user?.id) {
         throw new Error("User not authenticated");
       }
-      return await apiRequest('POST', `/api/leads/${id}/approve`, { approvedById: user.id });
+      return await apiRequest('POST', `/api/leads/${id}/approve`, { 
+        approvedById: user.id,
+        bypassQualityCheck
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/leads', id] });
+      setBypassQualityCheck(false); // Reset bypass flag
       toast({
         title: "Success",
-        description: "Lead approved successfully",
+        description: "Lead approved and moved to approved section",
       });
+    },
+    onError: (error: any) => {
+      // Check if error is due to quality requirements
+      if (error.errors && error.canBypass) {
+        toast({
+          title: "Quality Requirements Not Met",
+          description: `${error.message}\n\nMissing: ${error.errors.join(', ')}\n\nClick approve again to bypass.`,
+          variant: "default",
+        });
+        setBypassQualityCheck(true); // Set bypass for next attempt
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to approve lead",
+          variant: "destructive",
+        });
+      }
     },
   });
 

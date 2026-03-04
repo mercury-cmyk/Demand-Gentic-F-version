@@ -145,7 +145,7 @@ import {
   userIdSchema,
   leadIntakeSchema
 } from "./validation/schemas";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3, getPresignedDownloadUrl } from "./lib/storage";
@@ -5024,10 +5024,18 @@ export function registerRoutes(app: Express) {
 
   app.get("/api/campaigns", requireAuth, async (req, res) => {
     try {
+      console.log('[GET /api/campaigns] ========== START ==========');
+      console.log('[GET /api/campaigns] Initializing...', {
+        timestamp: new Date().toISOString(),
+        poolStats: pool.totalCount ? { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount } : 'unavailable'
+      });
+      
       const typeFilter = req.query.type as string | undefined;
+      console.log('[GET /api/campaigns] Query params:', { typeFilter });
+      
+      console.log('[GET /api/campaigns] Calling storage.getCampaigns()...');
       let campaigns = await storage.getCampaigns();
-
-      console.log(`[GET /api/campaigns] Total campaigns from DB: ${campaigns.length}`);
+      console.log(`[GET /api/campaigns] ✓ Query successful: ${campaigns.length} campaigns`);
 
       // Filter by type if specified
       if (typeFilter) {
@@ -5035,12 +5043,38 @@ export function registerRoutes(app: Express) {
         console.log(`[GET /api/campaigns] After type filter (${typeFilter}): ${campaigns.length}`);
       }
 
-      console.log(`[GET /api/campaigns] Returning ${campaigns.length} campaigns:`, campaigns.map(c => ({ id: c.id, name: c.name, type: c.type, status: c.status })));
+      const summary = campaigns.map(c => ({ id: c.id, name: c.name, type: c.type, status: c.status }));
+      console.log(`[GET /api/campaigns] Returning ${campaigns.length} campaigns`);
+      console.log('[GET /api/campaigns] Sample:', summary.slice(0, 2));
 
       res.json(campaigns);
+      console.log('[GET /api/campaigns] ========== SUCCESS ==========');
     } catch (error) {
-      console.error('[GET /api/campaigns] Error:', error);
-      res.status(500).json({ message: "Failed to fetch campaigns" });
+      console.log('[GET /api/campaigns] ========== ERROR ==========');
+      console.error('[GET /api/campaigns] Error caught:', {
+        name: (error as any)?.name,
+        constructor: (error as any)?.constructor?.name,
+        hasMessage: error instanceof Error,
+        timestamp: new Date().toISOString()
+      });
+      
+      const errorDetails = {
+        message: error instanceof Error ? error.message : String(error),
+        code: (error as any)?.code,
+        hint: (error as any)?.hint,
+        detail: (error as any)?.detail,
+        stack: error instanceof Error ? error.stack?.split('\n').slice(0, 5) : undefined,
+        fullError: String(error)
+      };
+      console.error('[GET /api/campaigns] ERROR DETAILS:', JSON.stringify(errorDetails, null, 2));
+      console.error('[GET /api/campaigns] Raw error:', error);
+      
+      res.status(500).json({ 
+        message: "Failed to fetch campaigns", 
+        error: errorDetails,
+        timestamp: new Date().toISOString()
+      });
+      console.log('[GET /api/campaigns] ========== ERROR RESPONSE SENT ==========');
     }
   });
 
@@ -10269,24 +10303,31 @@ export function registerRoutes(app: Express) {
   // QA Approve - moves lead to pending_pm_review for Project Management final review
   app.post("/api/leads/:id/approve", requireAuth, requireRole('admin', 'quality_analyst'), async (req, res) => {
     try {
-      const { approvedById } = req.body;
+      const { approvedById, bypassQualityCheck = false } = req.body;
       if (!approvedById) {
         return res.status(400).json({ message: "approvedById is required" });
       }
 
-      // STRICT QUALITY ENFORCEMENT
-      // Check for mandatory intelligence requirements (recording, transcript, AI analysis)
       const leadToCheck = await storage.getLead(req.params.id);
       if (!leadToCheck) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
+      // QUALITY ENFORCEMENT WITH BYPASS OPTION
+      // QA analysts can bypass quality checks for manual verification
+      // Check for mandatory intelligence requirements (recording, transcript, AI analysis)
       const qualityCheck = validateLeadQuality(leadToCheck);
-      if (!qualityCheck.valid) {
+      if (!qualityCheck.valid && !bypassQualityCheck) {
+        console.log(`[LEAD-APPROVE] Quality check failed for lead ${req.params.id}:`, qualityCheck.errors);
         return res.status(400).json({ 
-          message: "Cannot approve lead: Quality requirements not met", 
-          errors: qualityCheck.errors 
+          message: "Cannot approve lead: Quality requirements not met. You can bypass this check if manually verified.", 
+          errors: qualityCheck.errors,
+          canBypass: true
         });
+      }
+
+      if (bypassQualityCheck) {
+        console.log(`[LEAD-APPROVE] Quality check bypassed by QA for lead ${req.params.id}`);
       }
 
       const lead = await storage.approveLead(req.params.id, approvedById);
@@ -10294,9 +10335,9 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      // After QA approval, lead moves to pending_pm_review for Project Management
-      // No delivery happens until PM approves
-      console.log(`[LEAD-APPROVE] Lead ${req.params.id} QA approved, now pending PM review`);
+      // After QA approval, lead moves to approved status
+      // Lead is now visible in approved section and removed from pending review
+      console.log(`[LEAD-APPROVE] Lead ${req.params.id} QA approved by user ${approvedById} (qaStatus: ${lead.qaStatus})`);
 
       res.json(lead);
     } catch (error) {

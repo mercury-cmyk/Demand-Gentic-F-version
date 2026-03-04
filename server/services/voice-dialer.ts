@@ -7,6 +7,7 @@ import { eq, and, sql, ilike } from "drizzle-orm";
 import { processDisposition, updateContactSuppression } from "./disposition-engine";
 import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
 import { handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome } from "./number-pool-integration";
+import { releaseProspectLock, isProspectBusy } from "./active-call-tracker";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { applyAudioConfiguration } from "./audio-configuration";
 import {
@@ -8841,6 +8842,19 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     await releaseQueueLock(session.queueItemId);
   }
 
+  // CRITICAL: Release ActiveCallTracker lock acquired in orchestrator.
+  // Without this, callers/prospects remain blocked until watchdog stale cleanup.
+  if (session.calledNumber) {
+    try {
+      if (isProspectBusy(session.calledNumber)) {
+        releaseProspectLock(session.calledNumber, `voice_dialer_end_${outcome}`);
+        console.log(`${LOG_PREFIX} Released prospect lock for ${session.calledNumber}`);
+      }
+    } catch (lockErr) {
+      console.warn(`${LOG_PREFIX} Failed to release prospect lock for ${session.calledNumber}:`, lockErr);
+    }
+  }
+
   if (session.streamSid) {
     streamIdToCallId.delete(session.streamSid);
   }
@@ -12069,6 +12083,15 @@ setInterval(async () => {
     // Clean up sessions that are inactive but still in the map (memory leak prevention)
     if (!session.isActive && ageMs > 5 * 60 * 1000) {
       console.log(`${LOG_PREFIX} ðŸ§¹ Reaper: Removing stale inactive session ${callId} (age: ${Math.round(ageMs / 1000)}s)`);
+      if (session.calledNumber) {
+        try {
+          if (isProspectBusy(session.calledNumber)) {
+            releaseProspectLock(session.calledNumber, 'zombie_reaper_stale_inactive');
+          }
+        } catch (lockErr) {
+          console.warn(`${LOG_PREFIX} Reaper failed to release prospect lock for ${session.calledNumber}:`, lockErr);
+        }
+      }
       activeSessions.delete(callId);
       continue;
     }

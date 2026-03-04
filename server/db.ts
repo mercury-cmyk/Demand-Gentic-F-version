@@ -6,9 +6,19 @@ import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
 import * as schema from "../shared/schema.ts";
 
-neonConfig.webSocketConstructor = ws;
-
+// Configure Neon database connection transport
+// Use fetch in Cloud Run for better reliability, WebSocket locally
 const nodeEnv = (process.env.NODE_ENV || "development").toLowerCase();
+const isCloudRun = process.env.K_SERVICE !== undefined;
+
+// Always use WebSocket transport - more reliable than fetch for persistent connections
+neonConfig.webSocketConstructor = ws;
+if (isCloudRun || nodeEnv === "production") {
+  console.log('[DB] Using WebSocket transport (Cloud Run/Production)');
+} else {
+  console.log('[DB] Using WebSocket transport (Development)');
+}
+
 const strictIsolation = nodeEnv === "development" && process.env.STRICT_ENV_ISOLATION !== "false";
 
 function resolveDatabaseUrl(): { url: string; source: string } {
