@@ -27,6 +27,11 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 // sdp-transform removed — SDP is built as a plain string for maximum Telnyx compatibility
 
+// Media bridging imports
+import { getAudioEndpoint } from './sdp-parser';
+import { GeminiLiveSIPProvider, type GeminiLiveSIPProviderConfig } from '../gemini-live-sip-provider';
+import * as mediaBridgeClient from './media-bridge-client';
+
 // Configuration
 const DRACHTIO_HOST = (process.env.DRACHTIO_HOST || 'localhost').trim();
 const DRACHTIO_PORT = parseInt((process.env.DRACHTIO_PORT || '9022').trim());
@@ -171,8 +176,41 @@ class CallTracker extends EventEmitter {
 const callTracker = new CallTracker();
 
 /**
- * Drachtio SIP Server Manager
+ * Media provider tracking for cleanup
  */
+class MediaProviderTracker {
+  private providers: Map<string, GeminiLiveSIPProvider> = new Map();
+
+  set(callId: string, provider: GeminiLiveSIPProvider): void {
+    this.providers.set(callId, provider);
+    log(`Media provider registered for call ${callId}`);
+  }
+
+  get(callId: string): GeminiLiveSIPProvider | undefined {
+    return this.providers.get(callId);
+  }
+
+  async remove(callId: string): Promise<void> {
+    const provider = this.providers.get(callId);
+    if (provider) {
+      try {
+        await provider.stop();
+        this.providers.delete(callId);
+        log(`Media provider stopped and removed for call ${callId}`);
+      } catch (error) {
+        logError(`Error stopping media provider for ${callId}`, error);
+      }
+    }
+  }
+
+  getStats(): { activeProviders: number } {
+    return {
+      activeProviders: this.providers.size,
+    };
+  }
+}
+
+const mediaProviderTracker = new MediaProviderTracker();
 export class DrachtioSIPServer {
   private srf: any = null;
   private isInitialized = false;
@@ -359,16 +397,24 @@ export class DrachtioSIPServer {
         await this.setupMediaHandlers(call, rtpPort);
 
         // BYE handler (call termination)
-        req.on('bye', () => {
+        req.on('bye', async () => {
           log(`BYE received for call ${call.callId}`);
+          // Clean up media provider
+          await mediaProviderTracker.remove(call.callId);
+          // Release RTP port
           rtpPortManager.release(rtpPort);
+          // Remove call tracking
           callTracker.remove(call.callId);
         });
 
         // CANCEL handler
-        req.on('cancel', () => {
+        req.on('cancel', async () => {
           log(`CANCEL received for call ${call.callId}`);
+          // Clean up media provider
+          await mediaProviderTracker.remove(call.callId);
+          // Release RTP port
           rtpPortManager.release(rtpPort);
+          // Remove call tracking
           callTracker.remove(call.callId);
         });
       } catch (error) {
@@ -437,15 +483,82 @@ export class DrachtioSIPServer {
 
   /**
    * Setup media handlers for RTP/RTCP
+   * 
+   * This method creates and starts a Gemini Live SIP provider that:
+   * - Listens for incoming RTP packets on the allocated port
+   * - Transcodes G.711 audio to PCM for Gemini Live
+   * - Streams audio to Gemini Live API via WebSocket
+   * - Receives Gemini responses and transcodes back to G.711
+   * - Sends response audio back to the caller as RTP packets
    */
   private async setupMediaHandlers(call: DrachtioCall, rtpPort: number): Promise<void> {
-    log(`Setting up media handlers for call ${call.callId} on port ${rtpPort}`);
+    try {
+      log(`Setting up media handlers for call ${call.callId} on port ${rtpPort}`);
 
-    // TODO: Implement RTP packet handling
-    // - Listen on rtpPort (UDP)
-    // - Decode audio from RTP packets
-    // - Stream to media processor (Gemini, etc.)
-    // - Encode and send audio back via RTP
+      // Extract remote RTP endpoint from SDP
+      const remoteEndpoint = getAudioEndpoint(call.req.body);
+      if (!remoteEndpoint) {
+        throw new Error(`Could not parse audio endpoint from remote SDP for call ${call.callId}`);
+      }
+
+      log(`Remote RTP endpoint: ${remoteEndpoint.address}:${remoteEndpoint.port}`);
+
+      // Get Gemini API configuration
+      const geminiApiKey = process.env.GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        throw new Error('GEMINI_API_KEY environment variable not set');
+      }
+
+      // Build provider configuration
+      const providerConfig: GeminiLiveSIPProviderConfig = {
+        geminiApiKey,
+        model: process.env.GEMINI_MODEL || 'models/gemini-2.5-flash-native-audio-preview',
+        voiceName: process.env.GEMINI_VOICE_NAME || 'Puck',
+        systemPrompt: process.env.GEMINI_SYSTEM_PROMPT || 
+          'You are a helpful sales representative. ' +
+          'Be concise, professional, and focus on understanding the caller\'s needs. ' +
+          'Ask clarifying questions when needed. ' +
+          'Maintain a friendly, conversational tone.',
+      };
+
+      // Extract phone number from destination (if available)
+      // Used to detect G.711 format (mulaw vs alaw)
+      let toPhoneNumber: string | undefined;
+      try {
+        const toUri = call.to;
+        const match = toUri.match(/sip:([^@]+)[@:]/);
+        if (match) {
+          toPhoneNumber = match[1];
+        }
+      } catch (e) {
+        // Continue without phone number
+      }
+
+      // Create Gemini Live SIP provider
+      const provider = new GeminiLiveSIPProvider(
+        call.callId,
+        rtpPort,
+        remoteEndpoint.address,
+        remoteEndpoint.port,
+        providerConfig,
+        toPhoneNumber
+      );
+
+      // Start the provider
+      const started = await provider.start();
+      if (!started) {
+        throw new Error('Failed to start Gemini Live SIP provider');
+      }
+
+      // Track provider for cleanup
+      mediaProviderTracker.set(call.callId, provider);
+
+      log(`✓ Media handlers initialized for call ${call.callId}`);
+    } catch (error) {
+      logError(`Error setting up media handlers for call ${call.callId}`, error);
+      // Don't throw - call already has SDP response sent
+      // Provider will simply not be active for this call
+    }
   }
 
   /**
@@ -467,7 +580,7 @@ export class DrachtioSIPServer {
     onAudioReceived?: (audio: Buffer) => void;
     onCallStateChanged?: (state: string) => void;
     onCallEnded?: (reason: string) => void;
-  }): Promise<{ callId: string; success: boolean; error?: string }> {
+  }): Promise<{ callId: string; success: boolean; error?: string; rtpPort?: number; remoteAddress?: string; remotePort?: number }> {
     if (!this.isConnected || !this.srf) {
       return { callId: '', success: false, error: 'Drachtio not connected' };
     }
@@ -539,12 +652,29 @@ export class DrachtioSIPServer {
         throw uacError;
       }
 
+      // Extract remote RTP endpoint from 200 OK SDP
+      let remoteAddress = '';
+      let remoteRtpPort = 0;
+      try {
+        const remoteSdp = uac?.remote?.sdp || '';
+        if (remoteSdp) {
+          const endpoint = getAudioEndpoint(remoteSdp);
+          if (endpoint) {
+            remoteAddress = endpoint.address;
+            remoteRtpPort = endpoint.port;
+            log(`Remote RTP endpoint for ${callId}: ${remoteAddress}:${remoteRtpPort}`);
+          }
+        }
+      } catch (e) {
+        logError(`Could not parse remote SDP for ${callId}`, e);
+      }
+
       const call: DrachtioCall = {
         callId,
         callGuid: (uac as any)?.headers?.['call-id'] || `${Date.now()}-${Math.random()}`,
         from: options.from,
         to: options.to,
-        state: 'ringing',
+        state: 'answered',
         direction: 'outbound',
         startTime: new Date(),
         req: uac as any,
@@ -560,11 +690,13 @@ export class DrachtioSIPServer {
 
       // Handle call events
       if (uac) {
-        (uac as any).on('destroy', () => {
+        (uac as any).on('destroy', async () => {
           log(`Call ${callId} destroyed`);
           call.state = 'ended';
           call.endTime = new Date();
           if (rtpPort) rtpPortManager.release(rtpPort);
+          // Clean up media bridge on VM
+          mediaBridgeClient.destroyMediaBridge(callId).catch(() => {});
           if (options.onCallEnded) {
             options.onCallEnded('call_ended');
           }
@@ -572,11 +704,11 @@ export class DrachtioSIPServer {
       }
 
       if (options.onCallStateChanged) {
-        options.onCallStateChanged('ringing');
+        options.onCallStateChanged('answered');
       }
 
-      log(`Call ${callId} initiated successfully`);
-      return { callId, success: true };
+      log(`Call ${callId} initiated and answered (RTP port ${rtpPort}, remote ${remoteAddress}:${remoteRtpPort})`);
+      return { callId, success: true, rtpPort: rtpPort || undefined, remoteAddress: remoteAddress || undefined, remotePort: remoteRtpPort || undefined };
     } catch (error: any) {
       if (rtpPort) rtpPortManager.release(rtpPort);
       logError(`Failed to initiate call ${callId}: ${error.message}`, error);

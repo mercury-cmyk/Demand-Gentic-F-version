@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 
 interface ActivityLoggerOptions {
   teamId: string;
@@ -354,16 +354,16 @@ export function useCommunicationLogger(
  * Hook for fetching activity dashboard data
  */
 export function useActivityDashboard(teamId: string) {
-  const [dashboard, setDashboard] = React.useState<any>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<Error | null>(null);
+  const [dashboard, setDashboard] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  const fetch = useCallback(
+  const fetchDashboard = useCallback(
     async (days: number = 7) => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
+        const res = await window.fetch(
           `/api/team-activity/dashboard/${teamId}?days=${days}`,
           {
             headers: {
@@ -389,5 +389,5 @@ export function useActivityDashboard(teamId: string) {
     [teamId]
   );
 
-  return { dashboard, loading, error, fetch };
+  return { dashboard, loading, error, fetch: fetchDashboard };
 }

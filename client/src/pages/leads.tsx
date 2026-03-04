@@ -348,7 +348,7 @@ export default function LeadsPage() {
     },
   });
 
-  const [bypassQualityCheck, setBypassQualityCheck] = React.useState(false);
+  const [bypassQualityCheck, setBypassQualityCheck] = useState(false);
 
   const approveMutation = useMutation({
     mutationFn: async (id: string) => {

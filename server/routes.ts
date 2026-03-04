@@ -15550,6 +15550,48 @@ Provide JSON response with:
   app.use("/api/agent-defaults", agentDefaultsRouter);
   app.use("/api/voice-engine", voiceEngineRouter);
 
+  // ==================== MEDIA BRIDGE CALLBACK (from VM) ====================
+
+  app.post("/api/sip/media-bridge/callback", async (req, res) => {
+    try {
+      const { callId, action, data, secret } = req.body;
+      const BRIDGE_SECRET = process.env.MEDIA_BRIDGE_SECRET || 'bridge-secret';
+
+      if (secret !== BRIDGE_SECRET) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      console.log(`[MediaBridge Callback] ${action} for ${callId}`, data);
+
+      if (action === 'end_call') {
+        // End the SIP call via Drachtio
+        const { drachtioServer } = await import('./services/sip/drachtio-server');
+        try {
+          await drachtioServer.endCall(callId);
+          console.log(`[MediaBridge Callback] SIP call ${callId} ended`);
+        } catch (err) {
+          console.error(`[MediaBridge Callback] Failed to end SIP call ${callId}:`, err);
+        }
+      } else if (action === 'submit_disposition') {
+        // Process disposition via the disposition engine
+        const { processDisposition } = await import('./services/disposition-engine');
+        const disposition = data?.disposition || 'no_answer';
+        console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`);
+        // Note: callAttemptId is needed for disposition processing
+        // The media bridge context should include it if available
+        if (data?.callAttemptId) {
+          await processDisposition(data.callAttemptId, disposition, 'media_bridge');
+        }
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('[MediaBridge Callback] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ==================== KNOWLEDGE BLOCKS ====================
 
   app.use("/api/knowledge-blocks", knowledgeBlocksRouter);
