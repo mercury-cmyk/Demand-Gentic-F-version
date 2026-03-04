@@ -223,10 +223,19 @@ export function generateAgentSystemPrompt(config: CampaignConfiguration, basePro
   } else if (config.type === 'executive_dinner' || config.type === 'leadership_forum') {
     prompt += `- Maintain a high level of professionalism and deference, appropriate for speaking with senior executives.\n`;
   } else if (config.type === 'content_syndication') {
-    prompt += `- Keep this FIXED flow: (1) greeting, (2) role/company relevance check, (3) asset intro + 1-2 value points, (4) email confirmation, (5) explicit permission to send, (6) optional future-updates consent, (7) polite close.\n`;
-    prompt += `- The FRAMEWORK is fixed; only campaign context changes (asset title, topic, value points, organization details).\n`;
-    prompt += `- Keep discovery minimal. This is a content delivery conversation, not a deep qualification call.\n`;
-    prompt += `- Close politely and mention optional future updates only after consent is provided.\n`;
+    prompt += `- YOUR ONLY OBJECTIVE: Get the prospect to consent to receive the asset (whitepaper, guide, report, etc.) via email.\n`;
+    prompt += `- STRICT FLOW - DO NOT DEVIATE: (1) greeting, (2) confirm correct person + relevance check, (3) asset intro (title + brief description ONLY), (4) 1-2 specific value points, (5) ask for email confirmation, (6) get explicit permission to send, (7) polite close.\n`;
+    prompt += `- CRITICAL CONSTRAINTS:\n`;
+    prompt += `  * DO NOT ask about their current solution or products.\n`;
+    prompt += `  * DO NOT ask discovery questions about their problem/challenge.\n`;
+    prompt += `  * DO NOT try to qualify them on BANT, budget, timeline, decision-making, or buying intent.\n`;
+    prompt += `  * DO NOT pitch your company's solution or services.\n`;
+    prompt += `  * DO NOT try to solve their problem during this call.\n`;
+    prompt += `  * DO NOT ask follow-up questions beyond confirming email and consent.\n`;
+    prompt += `- The FRAMEWORK is fixed; only campaign context changes (asset title, topic, value points, organization name).\n`;
+    prompt += `- Asset description should be 1 sentence max: "{{asset_title}} covers {{brief_topic}}".\n`;
+    prompt += `- Close immediately after consent is given. Do NOT continue the conversation.\n`;
+    prompt += `- If they say "no" to receiving the asset, thank them and end the call politely.\n`;
   } else if (config.type === 'lead_qualification') {
     prompt += `- Run structured discovery: one question at a time, listen fully, and capture specific evidence.\n`;
     prompt += `- Keep it conversational, not interrogative. Use short acknowledgments between questions.\n`;

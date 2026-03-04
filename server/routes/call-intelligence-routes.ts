@@ -2735,6 +2735,37 @@ router.get("/regeneration/progress", requireAuth, requireRole('admin', 'manager'
 });
 
 /**
+ * POST /api/call-intelligence/regeneration/reset
+ * Reset failed/stuck jobs back to pending so they can be retried
+ */
+router.post("/regeneration/reset", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { statuses = ['failed', 'in_progress', 'submitted'] } = req.body as { statuses?: string[] };
+    const allowed = ['failed', 'in_progress', 'submitted'];
+    const toReset = statuses.filter(s => allowed.includes(s));
+
+    if (toReset.length === 0) {
+      return res.status(400).json({ error: "No valid statuses to reset" });
+    }
+
+    const statusList = sql.join(toReset.map(s => sql`${s}`), sql`, `);
+    const result = await db.execute(
+      sql`UPDATE transcription_regeneration_jobs
+          SET status = 'pending', attempts = 0, error = NULL, completed_at = NULL
+          WHERE status IN (${statusList})`
+    ) as any;
+
+    const resetCount = result.rowCount ?? result.changes ?? 0;
+    console.log(`[CallIntelligence] Reset ${resetCount} regeneration jobs (statuses: ${toReset.join(', ')}) back to pending`);
+
+    res.json({ success: true, data: { resetCount, statuses: toReset } });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error resetting regeneration jobs:", error);
+    res.status(500).json({ error: "Failed to reset jobs" });
+  }
+});
+
+/**
  * GET /api/call-intelligence/regeneration/jobs
  * List regeneration jobs with filtering and pagination
  */

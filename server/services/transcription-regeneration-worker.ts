@@ -11,6 +11,7 @@
 
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { generateToken } from "../auth";
 
 interface RegenerationJobConfig {
   // How many jobs to process in parallel (default: 3)
@@ -32,12 +33,25 @@ interface RegenerationJobConfig {
 const DEFAULT_CONFIG: RegenerationJobConfig = {
   concurrency: 8,
   maxRetries: 3,
-  batchSize: 100,
+  batchSize: 50,
   batchDelayMs: 1000,
   strategy: 'auto',
   apiEndpoint: process.env.BASE_URL || 'https://demandgentic.ai',
   verbose: true,
 };
+
+/**
+ * Generate a valid JWT for internal worker → API calls.
+ * The regeneration endpoint requires requireAuth + requireRole('admin'),
+ * so we mint a short-lived admin token for the system worker.
+ */
+function getInternalAuthToken(): string {
+  return generateToken(
+    { id: 'system-worker', username: 'system-worker', email: 'system@internal', role: 'admin' } as any,
+    ['admin'],
+    '1h',
+  );
+}
 
 let isRunning = false;
 let activeJobsCount = 0;
@@ -82,7 +96,7 @@ async function submitBatch(callIds: string[], attempt: number = 1): Promise<{ su
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.API_TOKEN || ''}`,
+        'Authorization': `Bearer ${getInternalAuthToken()}`,
       },
       body: payload,
     });

@@ -23,6 +23,7 @@ import {
   getOrBuildParticipantCallPlan,
 } from "./account-call-service";
 import { buildCampaignBehaviorPolicySection } from "./agents/unified/campaign-behavior-policy";
+import { getCampaignConfiguration, generateAgentSystemPrompt } from "./campaign-configuration";
 
 let openai: OpenAI | null = null;
 let gemini: GoogleGenerativeAI | null = null;
@@ -330,6 +331,15 @@ export class AiVoiceAgent extends EventEmitter {
       });
       if (behaviorPolicy) {
         prompt += `\n\n---\n\n${behaviorPolicy}`;
+      }
+
+      // Layer 3.6: Campaign configuration system prompt (campaign-type-specific constraints)
+      if (this.context.campaignType) {
+        const config = getCampaignConfiguration(this.context.campaignType);
+        if (config) {
+          const campaignConfigPrompt = generateAgentSystemPrompt(config, undefined);
+          prompt += `\n\n---\n\n## Campaign Type Specific Instructions\n${campaignConfigPrompt}`;
+        }
       }
 
       // Layer 4: Account & Contact context
