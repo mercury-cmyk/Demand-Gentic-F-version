@@ -586,7 +586,7 @@ async function resetStuckItems(): Promise<number> {
 
     return resetCount;
   } catch (error: any) {
-    console.error('[AI Orchestrator] WATCHDOG error:', error?.message || error, error?.stack?.split('\n').slice(0, 3).join('\n'));
+    console.error('[AI Orchestrator] WATCHDOG error:', error?.message || (typeof error === 'object' ? JSON.stringify(error) : String(error)), error?.stack?.split('\n').slice(0, 3).join('\n'));
     return 0;
   }
 }
@@ -2095,7 +2095,7 @@ async function orchestratorTick(): Promise<OrchestratorJobResult> {
       message: `Processed ${processedCampaigns}/${campaigns.length} campaigns, global slots left: ${availableGlobalSlots}`
     };
   } catch (error: any) {
-    const errMsg = error?.message || String(error);
+    const errMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
     console.error('[AI Orchestrator] Tick error:', errMsg, error?.stack?.split('\n').slice(0, 3).join('\n'));
     return { processed: false, message: errMsg };
   }
