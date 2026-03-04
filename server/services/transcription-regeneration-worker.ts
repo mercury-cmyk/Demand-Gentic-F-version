@@ -30,10 +30,10 @@ interface RegenerationJobConfig {
 }
 
 const DEFAULT_CONFIG: RegenerationJobConfig = {
-  concurrency: 3,
+  concurrency: 8,
   maxRetries: 3,
-  batchSize: 50,
-  batchDelayMs: 2000,
+  batchSize: 100,
+  batchDelayMs: 1000,
   strategy: 'auto',
   apiEndpoint: process.env.BASE_URL || 'https://demandgentic.ai',
   verbose: true,

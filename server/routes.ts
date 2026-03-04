@@ -16670,6 +16670,41 @@ Provide JSON response with:
     return { transcript: trimmed, transcriptTurns: undefined };
   };
 
+  const coercePositiveSeconds = (value: unknown): number | null => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return Math.round(num);
+  };
+
+  const normalizeConversationDurationSec = (
+    rawDurationSec: unknown,
+    recordingDurationSec: unknown,
+    startedAt?: Date | null,
+    endedAt?: Date | null,
+  ): number | undefined => {
+    const raw = coercePositiveSeconds(rawDurationSec);
+    const recording = coercePositiveSeconds(recordingDurationSec);
+
+    let derivedFromTimestamps: number | null = null;
+    if (startedAt && endedAt) {
+      const elapsedMs = endedAt.getTime() - startedAt.getTime();
+      if (Number.isFinite(elapsedMs) && elapsedMs > 0) {
+        derivedFromTimestamps = Math.round(elapsedMs / 1000);
+      }
+    }
+
+    // Prefer recording duration when available (actual audio length),
+    // then endedAt-startedAt, then raw stored duration.
+    const candidates = [recording, derivedFromTimestamps, raw]
+      .filter((v): v is number => typeof v === 'number' && v > 0);
+
+    if (candidates.length === 0) return undefined;
+
+    // Treat <= 8h as plausible for display; if none plausible, keep priority order.
+    const plausible = candidates.find((v) => v <= 8 * 60 * 60);
+    return plausible ?? candidates[0];
+  };
+
   // Get all conversations for QA review (call sessions AND test calls with transcripts)
   app.get("/api/qa/conversations", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -16730,6 +16765,7 @@ Provide JSON response with:
             disposition: callSessions.aiDisposition,
             agentType: callSessions.agentType,
             duration: callSessions.durationSec,
+            recordingDurationSec: callSessions.recordingDurationSec,
             transcript: callSessions.aiTranscript,
             analysis: callSessions.aiAnalysis,
             recordingUrl: callSessions.recordingUrl,
@@ -16737,6 +16773,8 @@ Provide JSON response with:
             recordingStatus: callSessions.recordingStatus,
             telnyxRecordingId: callSessions.telnyxRecordingId,
             toNumberE164: callSessions.toNumberE164,
+            startedAt: callSessions.startedAt,
+            endedAt: callSessions.endedAt,
             createdAt: callSessions.startedAt,
             aiAgentSettings: campaigns.aiAgentSettings,
           })
@@ -16792,6 +16830,12 @@ Provide JSON response with:
             recordingS3Key: session.recordingS3Key,
             recordingUrl: session.recordingUrl,
           });
+          const normalizedDurationSec = normalizeConversationDurationSec(
+            session.duration,
+            session.recordingDurationSec,
+            session.startedAt,
+            session.endedAt,
+          );
 
           // Extract issues from analysis if available
           // HANDLE BOTH FORMATS: Old (nested under conversationQuality) and new (flat)
@@ -16873,7 +16917,7 @@ Provide JSON response with:
             disposition: session.disposition || undefined,
             agentType: session.agentType,
             agentName,
-            duration: session.duration || undefined,
+            duration: normalizedDurationSec,
             transcript: normalized.transcript,
             transcriptTurns: normalized.transcriptTurns,
             analysis: normalizedAnalysis,

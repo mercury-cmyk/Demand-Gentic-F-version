@@ -20,13 +20,13 @@ import { eq, lt, and, inArray, sql } from 'drizzle-orm';
 // - Reduced from 60s to 120s for transcription (less aggressive)
 // - Reduced from 90s to 120s for analysis (batch smaller, run less often)
 // - This allows connection pool to recover between runs
-const TRANSCRIPTION_JOB_INTERVAL = 120000; // Every 120 seconds (was 60s)
+const TRANSCRIPTION_JOB_INTERVAL = parseInt(process.env.TRANSCRIPTION_JOB_INTERVAL_MS || '60000', 10); // Every 60s — parallel pool completes batches in ~10-15s
 const AI_ANALYSIS_JOB_INTERVAL = 120000; // Every 120 seconds (was 90s)
 const LOCK_SWEEPER_INTERVAL = 600000; // Every 10 minutes (was 5 min)
 const TELNYX_RECORDING_SYNC_INTERVAL = 300000; // Every 5 minutes - auto-fetch last 24h recordings
 const JOURNEY_ACTION_INTERVAL = 60000; // Every 60 seconds
 const MERCURY_OUTBOX_INTERVAL = 60000; // Every 60 seconds — flush queued Mercury emails
-const LONG_CALL_RECOVERY_INTERVAL = 600000; // Every 10 minutes — priority recovery for long calls
+const LONG_CALL_RECOVERY_INTERVAL = parseInt(process.env.LONG_CALL_RECOVERY_INTERVAL_MS || '300000', 10); // Every 5 min — parallel pool is much faster
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */

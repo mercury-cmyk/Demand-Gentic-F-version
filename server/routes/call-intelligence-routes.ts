@@ -2427,15 +2427,17 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
           // ── GCS Priority: Resolve S3 key from linked call_session ──
           let gcsKeyFromSession: string | null = null;
           try {
-            const [linkedSession] = await db
-              .select({ recordingS3Key: callSessions.recordingS3Key, recordingUrl: callSessions.recordingUrl })
-              .from(callSessions)
-              .where(eq(callSessions.callAttemptId, callId))
-              .limit(1);
-            if (linkedSession?.recordingS3Key) {
-              gcsKeyFromSession = linkedSession.recordingS3Key;
-            } else if (linkedSession?.recordingUrl) {
-              gcsKeyFromSession = extractGcsKeyFromRecordingUrl(linkedSession.recordingUrl);
+            if (attempt.telnyxCallId) {
+              const [linkedSession] = await db
+                .select({ recordingS3Key: callSessions.recordingS3Key, recordingUrl: callSessions.recordingUrl })
+                .from(callSessions)
+                .where(eq(callSessions.telnyxCallId, attempt.telnyxCallId))
+                .limit(1);
+              if (linkedSession?.recordingS3Key) {
+                gcsKeyFromSession = linkedSession.recordingS3Key;
+              } else if (linkedSession?.recordingUrl) {
+                gcsKeyFromSession = extractGcsKeyFromRecordingUrl(linkedSession.recordingUrl);
+              }
             }
           } catch { /* no linked session */ }
 
@@ -2745,25 +2747,24 @@ router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager'), a
     const offset = (pageNum - 1) * pageSize;
 
     // Get jobs
-    let jobsSql = "SELECT * FROM transcription_regeneration_jobs";
-    const params: any[] = [];
-    
+    let jobsQuery;
     if (status && typeof status === "string") {
-      jobsSql += " WHERE status = $1";
-      params.push(status);
+      jobsQuery = sql`SELECT * FROM transcription_regeneration_jobs WHERE status = ${status} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
+    } else {
+      jobsQuery = sql`SELECT * FROM transcription_regeneration_jobs ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
     }
-    
-    jobsSql += " ORDER BY created_at DESC LIMIT " + pageSize + " OFFSET " + offset;
 
-    const jobsResult = await db.execute(sql.raw(jobsSql)) as any;
+    const jobsResult = await db.execute(jobsQuery) as any;
 
     // Get total count
-    let countSql = "SELECT COUNT(*) as total FROM transcription_regeneration_jobs";
+    let countQuery;
     if (status && typeof status === "string") {
-      countSql += " WHERE status = $1";
+      countQuery = sql`SELECT COUNT(*) as total FROM transcription_regeneration_jobs WHERE status = ${status}`;
+    } else {
+      countQuery = sql`SELECT COUNT(*) as total FROM transcription_regeneration_jobs`;
     }
 
-    const countResult = await db.execute(sql.raw(countSql, params)) as any;
+    const countResult = await db.execute(countQuery) as any;
     const total = Number(countResult.rows?.[0]?.total) || 0;
     const pages = Math.ceil(total / pageSize);
 
