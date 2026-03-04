@@ -256,22 +256,33 @@ export async function submitStructuredTranscription(
   const attempts: string[] = [];
 
   const inferredS3Key = options?.recordingS3Key || extractStorageKeyFromUrl(audioUrl);
-  if (!inferredS3Key) {
-    const message = `${LOG_PREFIX} Missing recordingS3Key - GCS presigned URL is required`;
-    if (options?.throwOnError) {
-      throw new Error(message);
+
+  // Strategy 1: Try GCS presigned URL from S3 key
+  if (inferredS3Key) {
+    const s3RefreshedUrl = await getRefreshedUrlFromS3(inferredS3Key);
+    if (s3RefreshedUrl && !attempts.includes(s3RefreshedUrl)) {
+      attempts.push(s3RefreshedUrl);
     }
-    console.error(message);
-    return null;
   }
 
-  const s3RefreshedUrl = await getRefreshedUrlFromS3(inferredS3Key);
-  if (s3RefreshedUrl && !attempts.includes(s3RefreshedUrl)) {
-    attempts.push(s3RefreshedUrl);
+  // Strategy 2: Try Telnyx recording URL via call ID
+  if (attempts.length === 0 && options?.telnyxCallId) {
+    const telnyxUrl = await getRefreshedUrlFromTelnyx(options.telnyxCallId);
+    if (telnyxUrl && !attempts.includes(telnyxUrl)) {
+      console.log(`${LOG_PREFIX} Using Telnyx recording URL for transcription`);
+      attempts.push(telnyxUrl);
+    }
+  }
+
+  // Strategy 3: If the original audioUrl is a publicly accessible HTTPS URL
+  // (not GCS internal, not gs://), use it directly — covers Telnyx download URLs
+  if (attempts.length === 0 && /^https?:\/\//i.test(audioUrl) && !audioUrl.startsWith('gcs-internal://') && !audioUrl.startsWith('gs://')) {
+    console.log(`${LOG_PREFIX} Using direct HTTPS URL for Deepgram: ${audioUrl.slice(0, 100)}...`);
+    attempts.push(audioUrl);
   }
 
   if (attempts.length === 0) {
-    const message = `${LOG_PREFIX} Unable to resolve GCS presigned URL for key ${inferredS3Key}`;
+    const message = `${LOG_PREFIX} Unable to resolve any usable audio URL (s3Key=${inferredS3Key || 'none'}, audioUrl=${audioUrl.slice(0, 80)})`;
     if (options?.throwOnError) {
       throw new Error(message);
     }
@@ -320,4 +331,106 @@ export async function transcribeFromRecording(
     transcript,
     wordCount: transcript.split(/\s+/).filter(Boolean).length,
   };
+}
+
+/**
+ * Submit raw audio buffer directly to Deepgram for transcription.
+ * Bypasses all presigned URL logic — used when GCS signBlob permission is missing
+ * but the service account can still download the file directly.
+ */
+export async function submitToDeepgramBuffer(audioBuffer: Buffer, mimetype?: string): Promise<string | null> {
+  if (!DEEPGRAM_API_KEY) {
+    console.error("[Deepgram-Buffer] DEEPGRAM_API_KEY not set");
+    return null;
+  }
+  if (!audioBuffer || audioBuffer.length < 1000) {
+    console.warn("[Deepgram-Buffer] Audio buffer too small:", audioBuffer?.length);
+    return null;
+  }
+
+  const contentType = mimetype || detectAudioMimeType(audioBuffer);
+  console.log(`[Deepgram-Buffer] Submitting ${audioBuffer.length} bytes (${contentType}) to Deepgram...`);
+
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const query = new URLSearchParams({
+        model: DEEPGRAM_MODEL,
+        language: DEEPGRAM_LANGUAGE,
+        punctuate: "true",
+        smart_format: "true",
+        diarize: "true",
+        utterances: "true",
+        paragraphs: "true",
+        filler_words: "false",
+      });
+
+      const response = await fetch(`${DEEPGRAM_API_BASE}/listen?${query.toString()}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${DEEPGRAM_API_KEY}`,
+          "Content-Type": contentType,
+        },
+        body: new Uint8Array(audioBuffer),
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => "");
+        console.error(`[Deepgram-Buffer] HTTP ${response.status} (attempt ${attempt}/${MAX_RETRIES}): ${errBody.slice(0, 200)}`);
+        if (response.status === 429 || response.status >= 500) {
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+          continue;
+        }
+        return null;
+      }
+
+      const data = (await response.json()) as any;
+      const channels = data?.results?.channels;
+      if (!channels || channels.length === 0) {
+        console.warn("[Deepgram-Buffer] No channels in response");
+        return null;
+      }
+
+      // Build transcript from utterances (diarized) if available
+      const utterances = data?.results?.utterances;
+      if (utterances && utterances.length > 0) {
+        const formatted = utterances
+          .filter((u: any) => typeof u?.transcript === "string" && u.transcript.trim().length > 0)
+          .map((u: any) => {
+            const speaker = mapSpeakerLabel(u.speaker, u.channel);
+            return `${speaker}: ${(u.transcript || "").trim()}`;
+          })
+          .join("\n");
+        console.log(`[Deepgram-Buffer] ✅ ${formatted.length} chars from ${utterances.length} utterances`);
+        return formatted;
+      }
+
+      // Fallback to channel alternative
+      const alt = channels[0]?.alternatives?.[0];
+      if (alt?.transcript) {
+        const transcript = alt.transcript.trim();
+        console.log(`[Deepgram-Buffer] ✅ ${transcript.length} chars (channel fallback)`);
+        return transcript;
+      }
+
+      console.warn("[Deepgram-Buffer] No transcript in response");
+      return null;
+    } catch (e: any) {
+      console.error(`[Deepgram-Buffer] Attempt ${attempt}/${MAX_RETRIES} error:`, e.message);
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+      }
+    }
+  }
+  return null;
+}
+
+/** Detect MIME type from audio buffer header bytes */
+function detectAudioMimeType(buffer: Buffer): string {
+  if (buffer.length < 4) return "audio/mpeg";
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return "audio/wav";
+  if (buffer[0] === 0x4f && buffer[1] === 0x67 && buffer[2] === 0x67 && buffer[3] === 0x53) return "audio/ogg";
+  if (buffer[0] === 0x66 && buffer[1] === 0x4c && buffer[2] === 0x61 && buffer[3] === 0x43) return "audio/flac";
+  if ((buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) return "audio/mpeg";
+  return "audio/mpeg";
 }

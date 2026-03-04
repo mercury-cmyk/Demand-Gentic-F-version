@@ -326,42 +326,45 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
 
     let telnyxResponse: Response;
 
-    if (callEngine === 'livekit') {
-      // ── LiveKit SIP path: Telnyx Call Control → SIP bridge → LiveKit room ──
-      const LIVEKIT_SIP_URI = process.env.LIVEKIT_SIP_URI;
-      const BASE_URL = process.env.BASE_URL || `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost:5000'}`;
+    if (callEngine === 'sip') {
+      // ── Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live ──
+      const { isReady: isSipReady, initiateAiCall: initiateSipCall } = await import("../services/sip");
 
-      if (!LIVEKIT_SIP_URI) {
-        return res.status(422).json({ success: false, message: "LIVEKIT_SIP_URI not configured. Switch to TeXML or set the env var." });
+      if (!isSipReady()) {
+        console.warn(`[Campaign Test Call] SIP engine selected but not ready — falling back to TeXML`);
+        // Fall through to TeXML below
+      } else {
+        console.log("=".repeat(60));
+        console.log(`[Campaign Test Call] SIP DIRECT ENGINE (Drachtio)`);
+        console.log(`[Campaign Test Call] Target: ${normalizedPhone}`);
+        console.log(`[Campaign Test Call] From: ${fromNumber}`);
+        console.log(`[Campaign Test Call] International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
+        console.log("=".repeat(60));
+
+        const sipResult = await initiateSipCall({
+          toNumber: normalizedPhone,
+          fromNumber,
+          campaignId,
+          contactId: '',
+          queueItemId: '',
+          voiceName: 'Puck',
+        });
+
+        if (!sipResult.success) {
+          return res.status(500).json({ success: false, message: sipResult.error || 'SIP call failed' });
+        }
+
+        return res.json({
+          success: true,
+          message: 'Test call initiated via Direct SIP',
+          callId: sipResult.callId,
+          callControlId: sipResult.callControlId,
+          engine: 'sip',
+        });
       }
+    }
 
-      console.log("=".repeat(60));
-      console.log(`[Campaign Test Call] 🔧 LIVEKIT SIP ENGINE`);
-      console.log(`[Campaign Test Call] SIP URI: ${LIVEKIT_SIP_URI}`);
-      console.log(`[Campaign Test Call] Webhook: ${BASE_URL}/api/webhooks/telnyx-livekit`);
-      console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
-      console.log(`[Campaign Test Call] 🌍 International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
-      console.log("=".repeat(60));
-
-      // Use Telnyx Call Control API (same as outbound-service.ts)
-      telnyxResponse = await fetch('https://api.telnyx.com/v2/calls', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({
-          to: normalizedPhone,
-          from: fromNumber,
-          connection_id: process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID,
-          webhook_url: `${BASE_URL}/api/webhooks/telnyx-livekit`,
-          webhook_url_method: 'POST',
-          client_state: clientStateB64,
-          answering_machine_detection: 'detect',
-          answering_machine_detection_config: { total_analysis_time_millis: 3500 },
-        }),
-      });
-    } else {
+    {
       // ── TeXML path (default) ──
       // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
       // DEVELOPMENT: Use ngrok tunnel (PUBLIC_WEBHOOK_HOST) - this is set by dev-with-ngrok.ts

@@ -18,8 +18,38 @@ import {
 } from "../services/call-intelligence-logger";
 import { resolvePlayableRecordingUrl } from "../lib/recording-url-policy";
 import { BUCKET, getPresignedDownloadUrl } from "../lib/storage";
+import { Storage } from '@google-cloud/storage';
 
 const router = Router();
+
+// GCS client for direct file download (bypasses presigned URL signing)
+let gcsDirectStorage: InstanceType<typeof Storage> | null = null;
+try {
+  const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+  const GCS_KEY_FILE = process.env.GCS_KEY_FILE;
+  gcsDirectStorage = new Storage({
+    projectId: GCS_PROJECT_ID,
+    ...(GCS_KEY_FILE ? { keyFilename: GCS_KEY_FILE } : {}),
+  });
+} catch (e) {
+  console.warn('[CallIntelligence] GCS Storage init failed — Strategy F unavailable:', (e as Error).message);
+}
+
+/**
+ * Download audio directly from GCS using service account read access.
+ * Bypasses presigned URL generation entirely — works even without signBlob permission.
+ */
+async function downloadGcsAudioAsBuffer(gcsKey: string): Promise<Buffer | null> {
+  if (!gcsDirectStorage || !gcsKey || !BUCKET) return null;
+  try {
+    const [buffer] = await gcsDirectStorage.bucket(BUCKET).file(gcsKey).download();
+    console.log(`[GCS-Direct] Downloaded ${gcsKey} (${buffer.length} bytes)`);
+    return buffer;
+  } catch (e: any) {
+    console.warn(`[GCS-Direct] Failed to download ${gcsKey}:`, e.message);
+    return null;
+  }
+}
 
 function extractGcsKeyFromRecordingUrl(recordingUrl: string | null | undefined): string | null {
   if (!recordingUrl) return null;
@@ -60,6 +90,23 @@ function extractGcsKeyFromRecordingUrl(recordingUrl: string | null | undefined):
   }
 
   return null;
+}
+
+const DIALER_DISPOSITIONS = [
+  "voicemail",
+  "not_interested",
+  "invalid_data",
+  "qualified_lead",
+  "do_not_call",
+  "no_answer",
+  "needs_review",
+  "callback_requested",
+] as const;
+
+type DialerDisposition = (typeof DIALER_DISPOSITIONS)[number];
+
+function isDialerDisposition(value: unknown): value is DialerDisposition {
+  return typeof value === "string" && (DIALER_DISPOSITIONS as readonly string[]).includes(value);
 }
 
 /**
@@ -448,7 +495,9 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
     }
 
     if (disposition && disposition !== "all") {
-      dialerConditions.push(eq(dialerCallAttempts.disposition, disposition as string));
+      if (isDialerDisposition(disposition)) {
+        dialerConditions.push(eq(dialerCallAttempts.disposition, disposition));
+      }
     }
 
     if (hasTranscript === "true") {
@@ -1265,13 +1314,12 @@ router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager',
     // Run analysis
     const analysis = await analyzeConversationQuality({
       transcript: callSession.aiTranscript,
+      interactionType: 'live_call',
+      analysisStage: 'post_call',
       disposition: callSession.aiDisposition || undefined,
-      campaign: campaignDetails ? {
-        name: campaignDetails.name,
-        objective: (campaignDetails as any).campaignObjective,
-        context: (campaignDetails as any).campaignContextBrief,
-        talkingPoints: (campaignDetails as any).talkingPoints,
-      } : undefined,
+      campaignId: campaignDetails?.id,
+      campaignName: campaignDetails?.name,
+      campaignObjective: (campaignDetails as any)?.campaignObjective,
     });
 
     if (!analysis) {
@@ -1292,10 +1340,10 @@ router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager',
         objectionHandlingScore: analysis.qualityDimensions?.objectionHandling,
         qualificationScore: analysis.qualityDimensions?.qualification,
         closingScore: analysis.qualityDimensions?.closing,
-        sentiment: analysis.sentiment,
-        engagementLevel: analysis.engagementLevel,
-        identityConfirmed: analysis.identityConfirmed,
-        qualificationMet: analysis.qualificationMet,
+        sentiment: analysis.learningSignals?.sentiment,
+        engagementLevel: analysis.learningSignals?.engagementLevel,
+        identityConfirmed: analysis.qualificationAssessment?.metCriteria ?? false,
+        qualificationMet: analysis.qualificationAssessment?.metCriteria ?? false,
         issues: analysis.issues,
         recommendations: analysis.recommendations,
         breakdowns: analysis.breakdowns,
@@ -1481,20 +1529,41 @@ router.get("/stats", requireAuth, async (req, res) => {
 
 /**
  * GET /api/call-intelligence/transcription-health
- * Daily breakdown of transcription coverage for calls with recordings > 30s
+ * Breakdown of transcription coverage for calls with recordings.
+ * Supports daily/weekly/monthly period, campaign filter, date range, duration range.
  */
 router.get("/transcription-health", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
-    const days = Math.min(30, Math.max(1, parseInt(req.query.days as string, 10) || 14));
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days as string, 10) || 14));
     const minDuration = Math.max(0, parseInt(req.query.minDuration as string, 10) || 30);
+    const maxDuration = req.query.maxDuration ? Math.max(0, parseInt(req.query.maxDuration as string, 10)) : null;
+    const period = (['daily', 'weekly', 'monthly'].includes(req.query.period as string)) ? req.query.period as string : 'daily';
+    const campaignId = req.query.campaignId as string;
+    const hasCampaignFilter = campaignId && campaignId !== 'all';
 
-    // Compute cutoff date in JS to avoid INTERVAL * param issues
-    const cutoffDate = new Date(Date.now() - days * 86400000);
+    // Date range: explicit or derived from days
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - days * 86400000);
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
 
-    // Daily breakdown from call_sessions
+    // Period grouping SQL expression
+    const periodExpr = period === 'weekly' ? sql`DATE_TRUNC('week', started_at)` :
+                       period === 'monthly' ? sql`DATE_TRUNC('month', started_at)` :
+                       sql`DATE(started_at)`;
+    const dialerPeriodExpr = period === 'weekly' ? sql`DATE_TRUNC('week', call_started_at)` :
+                             period === 'monthly' ? sql`DATE_TRUNC('month', call_started_at)` :
+                             sql`DATE(call_started_at)`;
+
+    const durationFilter = maxDuration
+      ? sql`AND COALESCE(duration_sec, 0) > ${minDuration} AND COALESCE(duration_sec, 0) <= ${maxDuration}`
+      : sql`AND COALESCE(duration_sec, 0) > ${minDuration}`;
+    const dialerDurationFilter = maxDuration
+      ? sql`AND COALESCE(call_duration_seconds, 0) > ${minDuration} AND COALESCE(call_duration_seconds, 0) <= ${maxDuration}`
+      : sql`AND COALESCE(call_duration_seconds, 0) > ${minDuration}`;
+
+    // Breakdown from call_sessions
     const sessionsDaily = await db.execute(sql`
       SELECT
-        DATE(started_at) AS day,
+        ${periodExpr} AS day,
         count(*) AS total,
         count(CASE WHEN ai_transcript IS NOT NULL AND length(ai_transcript) >= 20 THEN 1 END) AS with_transcript,
         count(CASE WHEN ai_transcript IS NULL OR length(ai_transcript) < 20 THEN 1 END) AS missing_transcript,
@@ -1503,33 +1572,39 @@ router.get("/transcription-health", requireAuth, requireRole('admin', 'manager',
         ) THEN 1 END) AS with_analysis,
         count(CASE WHEN NOT EXISTS (
           SELECT 1 FROM call_quality_records cqr WHERE cqr.call_session_id = call_sessions.id
-        ) THEN 1 END) AS missing_analysis
+        ) THEN 1 END) AS missing_analysis,
+        COALESCE(ROUND(AVG(COALESCE(duration_sec, 0))), 0) AS avg_duration
       FROM call_sessions
-      WHERE started_at >= ${cutoffDate}
+      WHERE started_at >= ${startDate}
+        AND started_at <= ${endDate}
         AND (recording_url IS NOT NULL OR recording_s3_key IS NOT NULL)
-        AND COALESCE(duration_sec, 0) > ${minDuration}
-      GROUP BY DATE(started_at)
+        ${durationFilter}
+        AND (${hasCampaignFilter ? sql`campaign_id = ${campaignId}` : sql`TRUE`})
+      GROUP BY ${periodExpr}
       ORDER BY day DESC
     `);
 
-    // Daily breakdown from dialer_call_attempts
+    // Breakdown from dialer_call_attempts
     const dialerDaily = await db.execute(sql`
       SELECT
-        DATE(call_started_at) AS day,
+        ${dialerPeriodExpr} AS day,
         count(*) AS total,
         count(CASE WHEN (full_transcript IS NOT NULL AND length(full_transcript) >= 20)
                      OR (ai_transcript IS NOT NULL AND length(ai_transcript) >= 20) THEN 1 END) AS with_transcript,
         count(CASE WHEN (full_transcript IS NULL OR length(full_transcript) < 20)
-                   AND (ai_transcript IS NULL OR length(ai_transcript) < 20) THEN 1 END) AS missing_transcript
+                   AND (ai_transcript IS NULL OR length(ai_transcript) < 20) THEN 1 END) AS missing_transcript,
+        COALESCE(ROUND(AVG(COALESCE(call_duration_seconds, 0))), 0) AS avg_duration
       FROM dialer_call_attempts
-      WHERE call_started_at >= ${cutoffDate}
+      WHERE call_started_at >= ${startDate}
+        AND call_started_at <= ${endDate}
         AND recording_url IS NOT NULL
-        AND COALESCE(call_duration_seconds, 0) > ${minDuration}
-      GROUP BY DATE(call_started_at)
+        ${dialerDurationFilter}
+        AND (${hasCampaignFilter ? sql`campaign_id = ${campaignId}` : sql`TRUE`})
+      GROUP BY ${dialerPeriodExpr}
       ORDER BY day DESC
     `);
 
-    // Merge into a single map by day
+    // Merge into a single map by period bucket
     const dailyMap = new Map<string, {
       day: string;
       totalRecordings: number;
@@ -1537,23 +1612,24 @@ router.get("/transcription-health", requireAuth, requireRole('admin', 'manager',
       missingTranscript: number;
       withAnalysis: number;
       missingAnalysis: number;
+      avgDuration: number;
+      _avgCount: number;
     }>();
 
     for (const row of sessionsDaily.rows) {
       const dayStr = new Date(row.day as string).toISOString().split('T')[0];
       const entry = dailyMap.get(dayStr) || {
-        day: dayStr,
-        totalRecordings: 0,
-        withTranscript: 0,
-        missingTranscript: 0,
-        withAnalysis: 0,
-        missingAnalysis: 0,
+        day: dayStr, totalRecordings: 0, withTranscript: 0, missingTranscript: 0,
+        withAnalysis: 0, missingAnalysis: 0, avgDuration: 0, _avgCount: 0,
       };
-      entry.totalRecordings += parseInt(row.total as string);
+      const total = parseInt(row.total as string);
+      entry.totalRecordings += total;
       entry.withTranscript += parseInt(row.with_transcript as string);
       entry.missingTranscript += parseInt(row.missing_transcript as string);
       entry.withAnalysis += parseInt(row.with_analysis as string);
       entry.missingAnalysis += parseInt(row.missing_analysis as string);
+      entry.avgDuration = ((entry.avgDuration * entry._avgCount) + (parseInt(row.avg_duration as string) * total)) / (entry._avgCount + total);
+      entry._avgCount += total;
       dailyMap.set(dayStr, entry);
     }
 
@@ -1561,52 +1637,140 @@ router.get("/transcription-health", requireAuth, requireRole('admin', 'manager',
       if (!row.day) continue;
       const dayStr = new Date(row.day as string).toISOString().split('T')[0];
       const entry = dailyMap.get(dayStr) || {
-        day: dayStr,
-        totalRecordings: 0,
-        withTranscript: 0,
-        missingTranscript: 0,
-        withAnalysis: 0,
-        missingAnalysis: 0,
+        day: dayStr, totalRecordings: 0, withTranscript: 0, missingTranscript: 0,
+        withAnalysis: 0, missingAnalysis: 0, avgDuration: 0, _avgCount: 0,
       };
-      entry.totalRecordings += parseInt(row.total as string);
+      const total = parseInt(row.total as string);
+      entry.totalRecordings += total;
       entry.withTranscript += parseInt(row.with_transcript as string);
       entry.missingTranscript += parseInt(row.missing_transcript as string);
+      entry.avgDuration = ((entry.avgDuration * entry._avgCount) + (parseInt(row.avg_duration as string) * total)) / (entry._avgCount + total);
+      entry._avgCount += total;
       dailyMap.set(dayStr, entry);
     }
 
-    const daily = Array.from(dailyMap.values()).sort((a, b) => b.day.localeCompare(a.day));
+    const daily = Array.from(dailyMap.values())
+      .map(({ _avgCount, ...rest }) => ({ ...rest, avgDuration: Math.round(rest.avgDuration) }))
+      .sort((a, b) => b.day.localeCompare(a.day));
 
-    // Calculate summary totals
-    const last7 = daily.filter(d => {
-      const diff = (Date.now() - new Date(d.day).getTime()) / 86400000;
-      return diff <= 7;
-    });
-    const summary = {
-      last7Days: {
-        totalRecordings: last7.reduce((s, d) => s + d.totalRecordings, 0),
-        withTranscript: last7.reduce((s, d) => s + d.withTranscript, 0),
-        missingTranscript: last7.reduce((s, d) => s + d.missingTranscript, 0),
-        withAnalysis: last7.reduce((s, d) => s + d.withAnalysis, 0),
-        missingAnalysis: last7.reduce((s, d) => s + d.missingAnalysis, 0),
-        coveragePercent: 0,
-      },
-      last14Days: {
-        totalRecordings: daily.reduce((s, d) => s + d.totalRecordings, 0),
-        withTranscript: daily.reduce((s, d) => s + d.withTranscript, 0),
-        missingTranscript: daily.reduce((s, d) => s + d.missingTranscript, 0),
-        withAnalysis: daily.reduce((s, d) => s + d.withAnalysis, 0),
-        missingAnalysis: daily.reduce((s, d) => s + d.missingAnalysis, 0),
-        coveragePercent: 0,
-      },
+    // Calculate summary totals for the full range
+    const totalSummary = {
+      totalRecordings: daily.reduce((s, d) => s + d.totalRecordings, 0),
+      withTranscript: daily.reduce((s, d) => s + d.withTranscript, 0),
+      missingTranscript: daily.reduce((s, d) => s + d.missingTranscript, 0),
+      withAnalysis: daily.reduce((s, d) => s + d.withAnalysis, 0),
+      missingAnalysis: daily.reduce((s, d) => s + d.missingAnalysis, 0),
+      coveragePercent: 0,
+      avgDuration: daily.length > 0 ? Math.round(daily.reduce((s, d) => s + d.avgDuration * d.totalRecordings, 0) / Math.max(1, daily.reduce((s, d) => s + d.totalRecordings, 0))) : 0,
     };
-    summary.last7Days.coveragePercent = summary.last7Days.totalRecordings > 0
-      ? Math.round((summary.last7Days.withTranscript / summary.last7Days.totalRecordings) * 100)
-      : 0;
-    summary.last14Days.coveragePercent = summary.last14Days.totalRecordings > 0
-      ? Math.round((summary.last14Days.withTranscript / summary.last14Days.totalRecordings) * 100)
-      : 0;
+    totalSummary.coveragePercent = totalSummary.totalRecordings > 0
+      ? Math.round((totalSummary.withTranscript / totalSummary.totalRecordings) * 100) : 0;
 
-    res.json({ success: true, data: { daily, summary, minDuration } });
+    // Also compute last7/last14 for backward compat
+    const last7 = daily.filter(d => (Date.now() - new Date(d.day).getTime()) / 86400000 <= 7);
+    const last7Summary = {
+      totalRecordings: last7.reduce((s, d) => s + d.totalRecordings, 0),
+      withTranscript: last7.reduce((s, d) => s + d.withTranscript, 0),
+      missingTranscript: last7.reduce((s, d) => s + d.missingTranscript, 0),
+      withAnalysis: last7.reduce((s, d) => s + d.withAnalysis, 0),
+      missingAnalysis: last7.reduce((s, d) => s + d.missingAnalysis, 0),
+      coveragePercent: 0,
+    };
+    last7Summary.coveragePercent = last7Summary.totalRecordings > 0
+      ? Math.round((last7Summary.withTranscript / last7Summary.totalRecordings) * 100) : 0;
+
+    // Per-campaign breakdown
+    const sessionsByCampaign = await db.execute(sql`
+      SELECT
+        cs.campaign_id,
+        c.name AS campaign_name,
+        count(*) AS total,
+        count(CASE WHEN cs.ai_transcript IS NOT NULL AND length(cs.ai_transcript) >= 20 THEN 1 END) AS with_transcript,
+        count(CASE WHEN cs.ai_transcript IS NULL OR length(cs.ai_transcript) < 20 THEN 1 END) AS missing_transcript,
+        COALESCE(ROUND(AVG(COALESCE(cs.duration_sec, 0))), 0) AS avg_duration
+      FROM call_sessions cs
+      LEFT JOIN campaigns c ON cs.campaign_id = c.id
+      WHERE cs.started_at >= ${startDate}
+        AND cs.started_at <= ${endDate}
+        AND (cs.recording_url IS NOT NULL OR cs.recording_s3_key IS NOT NULL)
+        ${durationFilter}
+        AND cs.campaign_id IS NOT NULL
+      GROUP BY cs.campaign_id, c.name
+    `);
+
+    const dialerByCampaign = await db.execute(sql`
+      SELECT
+        dca.campaign_id,
+        c.name AS campaign_name,
+        count(*) AS total,
+        count(CASE WHEN (dca.full_transcript IS NOT NULL AND length(dca.full_transcript) >= 20)
+                     OR (dca.ai_transcript IS NOT NULL AND length(dca.ai_transcript) >= 20) THEN 1 END) AS with_transcript,
+        count(CASE WHEN (dca.full_transcript IS NULL OR length(dca.full_transcript) < 20)
+                   AND (dca.ai_transcript IS NULL OR length(dca.ai_transcript) < 20) THEN 1 END) AS missing_transcript,
+        COALESCE(ROUND(AVG(COALESCE(dca.call_duration_seconds, 0))), 0) AS avg_duration
+      FROM dialer_call_attempts dca
+      LEFT JOIN campaigns c ON dca.campaign_id = c.id
+      WHERE dca.call_started_at >= ${startDate}
+        AND dca.call_started_at <= ${endDate}
+        AND dca.recording_url IS NOT NULL
+        ${dialerDurationFilter}
+        AND dca.campaign_id IS NOT NULL
+      GROUP BY dca.campaign_id, c.name
+    `);
+
+    const campaignMap = new Map<string, {
+      campaignId: string; campaignName: string;
+      totalRecordings: number; withTranscript: number; missingTranscript: number;
+      coveragePercent: number; avgDuration: number; _avgCount: number;
+    }>();
+
+    for (const row of [...sessionsByCampaign.rows, ...dialerByCampaign.rows]) {
+      const cid = row.campaign_id as string;
+      const entry = campaignMap.get(cid) || {
+        campaignId: cid, campaignName: (row.campaign_name as string) || 'Unknown',
+        totalRecordings: 0, withTranscript: 0, missingTranscript: 0,
+        coveragePercent: 0, avgDuration: 0, _avgCount: 0,
+      };
+      const total = parseInt(row.total as string);
+      entry.totalRecordings += total;
+      entry.withTranscript += parseInt(row.with_transcript as string);
+      entry.missingTranscript += parseInt(row.missing_transcript as string);
+      if (!entry.campaignName || entry.campaignName === 'Unknown') entry.campaignName = (row.campaign_name as string) || 'Unknown';
+      entry.avgDuration = ((entry.avgDuration * entry._avgCount) + (parseInt(row.avg_duration as string) * total)) / (entry._avgCount + total);
+      entry._avgCount += total;
+      campaignMap.set(cid, entry);
+    }
+
+    const byCampaign = Array.from(campaignMap.values())
+      .map(({ _avgCount, ...rest }) => ({
+        ...rest,
+        avgDuration: Math.round(rest.avgDuration),
+        coveragePercent: rest.totalRecordings > 0 ? Math.round((rest.withTranscript / rest.totalRecordings) * 100) : 0,
+      }))
+      .sort((a, b) => b.totalRecordings - a.totalRecordings);
+
+    res.json({
+      success: true,
+      data: {
+        daily,
+        summary: {
+          total: totalSummary,
+          last7Days: last7Summary,
+          last14Days: {
+            totalRecordings: daily.reduce((s, d) => s + d.totalRecordings, 0),
+            withTranscript: daily.reduce((s, d) => s + d.withTranscript, 0),
+            missingTranscript: daily.reduce((s, d) => s + d.missingTranscript, 0),
+            withAnalysis: daily.reduce((s, d) => s + d.withAnalysis, 0),
+            missingAnalysis: daily.reduce((s, d) => s + d.missingAnalysis, 0),
+            coveragePercent: totalSummary.coveragePercent,
+          },
+        },
+        byCampaign,
+        period,
+        minDuration,
+        maxDuration: maxDuration || undefined,
+      },
+    });
   } catch (error) {
     console.error("[CallIntelligence] Error fetching transcription health:", error);
     res.status(500).json({ error: "Failed to fetch transcription health" });
@@ -1615,7 +1779,8 @@ router.get("/transcription-health", requireAuth, requireRole('admin', 'manager',
 
 /**
  * GET /api/call-intelligence/transcription-gaps
- * List calls with recordings > 30s but missing transcript or analysis
+ * List calls with recordings but missing transcript or analysis.
+ * Supports duration range, sorting, date range, pagination.
  */
 router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
   try {
@@ -1623,10 +1788,13 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
     const offset = (page - 1) * limit;
     const minDuration = Math.max(0, parseInt(req.query.minDuration as string, 10) || 30);
+    const maxDuration = req.query.maxDuration ? Math.max(0, parseInt(req.query.maxDuration as string, 10)) : null;
     const campaignId = req.query.campaignId as string;
     const startDate = req.query.startDate as string;
     const endDate = req.query.endDate as string;
     const gapType = (req.query.gapType as string) || 'all'; // 'transcript', 'analysis', 'all'
+    const sortBy = (['date', 'duration', 'campaign'].includes(req.query.sortBy as string)) ? req.query.sortBy as string : 'date';
+    const sortOrder = req.query.sortOrder === 'asc' ? 'asc' : 'desc';
 
     // Compute date range in JS
     const since = startDate ? new Date(startDate) : new Date(Date.now() - 14 * 86400000);
@@ -1648,13 +1816,27 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
     // Campaign filter
     const hasCampaignFilter = campaignId && campaignId !== 'all';
 
+    // Duration range filter
+    const csDurationFilter = maxDuration
+      ? sql`AND COALESCE(cs.duration_sec, 0) > ${minDuration} AND COALESCE(cs.duration_sec, 0) <= ${maxDuration}`
+      : sql`AND COALESCE(cs.duration_sec, 0) > ${minDuration}`;
+    const dcaDurationFilter = maxDuration
+      ? sql`AND COALESCE(dca.call_duration_seconds, 0) > ${minDuration} AND COALESCE(dca.call_duration_seconds, 0) <= ${maxDuration}`
+      : sql`AND COALESCE(dca.call_duration_seconds, 0) > ${minDuration}`;
+
+    // Sort expression for call_sessions
+    const csOrderBy = sortBy === 'duration' ? sql`cs.duration_sec` :
+                      sortBy === 'campaign' ? sql`c.name` :
+                      sql`cs.started_at`;
+    const csOrderDir = sortOrder === 'asc' ? sql`ASC NULLS LAST` : sql`DESC NULLS LAST`;
+
     const countResult = await db.execute(sql`
       SELECT count(*) AS total
       FROM call_sessions cs
       WHERE cs.started_at >= ${since}
         AND cs.started_at <= ${until}
         AND (cs.recording_url IS NOT NULL OR cs.recording_s3_key IS NOT NULL)
-        AND COALESCE(cs.duration_sec, 0) > ${minDuration}
+        ${csDurationFilter}
         AND (${hasCampaignFilter ? sql`cs.campaign_id = ${campaignId}` : sql`TRUE`})
         AND ${gapFilter}
     `);
@@ -1684,14 +1866,18 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
       WHERE cs.started_at >= ${since}
         AND cs.started_at <= ${until}
         AND (cs.recording_url IS NOT NULL OR cs.recording_s3_key IS NOT NULL)
-        AND COALESCE(cs.duration_sec, 0) > ${minDuration}
+        ${csDurationFilter}
         AND (${hasCampaignFilter ? sql`cs.campaign_id = ${campaignId}` : sql`TRUE`})
         AND ${gapFilter}
-      ORDER BY cs.started_at DESC
+      ORDER BY ${csOrderBy} ${csOrderDir}
       LIMIT ${limit} OFFSET ${offset}
     `);
 
     // Also get dialer_call_attempts gaps
+    const dcaOrderBy = sortBy === 'duration' ? sql`dca.call_duration_seconds` :
+                       sortBy === 'campaign' ? sql`c.name` :
+                       sql`dca.call_started_at`;
+
     const dialerRows = await db.execute(sql`
       SELECT
         dca.id,
@@ -1716,31 +1902,49 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
       WHERE dca.call_started_at >= ${since}
         AND dca.call_started_at <= ${until}
         AND dca.recording_url IS NOT NULL
-        AND COALESCE(dca.call_duration_seconds, 0) > ${minDuration}
+        ${dcaDurationFilter}
         AND (${hasCampaignFilter ? sql`dca.campaign_id = ${campaignId}` : sql`TRUE`})
         AND (
           (dca.full_transcript IS NULL OR length(dca.full_transcript) < 20)
           AND (dca.ai_transcript IS NULL OR length(dca.ai_transcript) < 20)
         )
-      ORDER BY dca.call_started_at DESC
+      ORDER BY ${dcaOrderBy} ${csOrderDir}
       LIMIT ${limit}
     `);
 
+    // Count dialer gaps too
+    const dialerCountResult = await db.execute(sql`
+      SELECT count(*) AS total
+      FROM dialer_call_attempts dca
+      WHERE dca.call_started_at >= ${since}
+        AND dca.call_started_at <= ${until}
+        AND dca.recording_url IS NOT NULL
+        ${dcaDurationFilter}
+        AND (${hasCampaignFilter ? sql`dca.campaign_id = ${campaignId}` : sql`TRUE`})
+        AND (
+          (dca.full_transcript IS NULL OR length(dca.full_transcript) < 20)
+          AND (dca.ai_transcript IS NULL OR length(dca.ai_transcript) < 20)
+        )
+    `);
+    const dialerTotal = parseInt(dialerCountResult.rows[0]?.total as string) || 0;
+
     // Merge and sort results
-    const allGaps = [...rows.rows, ...dialerRows.rows]
-      .sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
-      .slice(0, limit)
-      .map((row: any) => {
-        // Resolve recording URLs to playable/canonical form
-        const playableUrl = resolvePlayableRecordingUrl({
-          recordingUrl: row.recording_url,
-          recordingS3Key: row.recording_s3_key,
-        });
-        return {
-          ...row,
-          recording_url: playableUrl || row.recording_url, // Use playable URL or fallback to raw
-        };
-      });
+    const sortFn = (a: any, b: any) => {
+      if (sortBy === 'duration') {
+        const da = Number(a.duration_sec) || 0, db2 = Number(b.duration_sec) || 0;
+        return sortOrder === 'asc' ? da - db2 : db2 - da;
+      }
+      if (sortBy === 'campaign') {
+        const ca = (a.campaign_name || '').toLowerCase(), cb = (b.campaign_name || '').toLowerCase();
+        return sortOrder === 'asc' ? ca.localeCompare(cb) : cb.localeCompare(ca);
+      }
+      return sortOrder === 'asc'
+        ? new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+        : new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+    };
+
+    const allGaps = [...rows.rows, ...dialerRows.rows].sort(sortFn).slice(0, limit);
+    const grandTotal = total + dialerTotal;
 
     res.json({
       success: true,
@@ -1749,8 +1953,8 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
         pagination: {
           page,
           limit,
-          total: total + (dialerRows.rows?.length || 0),
-          totalPages: Math.ceil((total + (dialerRows.rows?.length || 0)) / limit),
+          total: grandTotal,
+          totalPages: Math.ceil(grandTotal / limit),
         },
       },
     });
@@ -1761,13 +1965,215 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
 });
 
 /**
+ * GET /api/call-intelligence/transcription-calls
+ * List ALL calls (transcribed + untranscribed) with transcription status for the Call Explorer tab.
+ * Supports filtering by transcription status, campaign, date range, duration, and sorting.
+ */
+router.get("/transcription-calls", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+    const offset = (page - 1) * limit;
+    const minDuration = Math.max(0, parseInt(req.query.minDuration as string, 10) || 30);
+    const maxDuration = req.query.maxDuration ? Math.max(0, parseInt(req.query.maxDuration as string, 10)) : null;
+    const campaignId = req.query.campaignId as string;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    const transcriptionStatus = (req.query.transcriptionStatus as string) || 'all'; // 'all', 'transcribed', 'missing'
+    const sortBy = (['date', 'duration', 'campaign'].includes(req.query.sortBy as string)) ? req.query.sortBy as string : 'date';
+    const sortOrder = req.query.sortOrder === 'asc' ? 'asc' : 'desc';
+
+    const since = startDate ? new Date(startDate) : new Date(Date.now() - 7 * 86400000);
+    const until = endDate ? new Date(endDate) : new Date();
+
+    console.log('[CallIntelligence] /transcription-calls params:', { page, limit, offset, minDuration, maxDuration, since: since.toISOString(), until: until.toISOString(), transcriptionStatus, campaignId: campaignId || 'none', sortBy, sortOrder });
+
+    const hasCampaignFilter = campaignId && campaignId !== 'all';
+
+    // Duration filters
+    const csDurationFilter = maxDuration
+      ? sql`AND COALESCE(cs.duration_sec, 0) > ${minDuration} AND COALESCE(cs.duration_sec, 0) <= ${maxDuration}`
+      : sql`AND COALESCE(cs.duration_sec, 0) > ${minDuration}`;
+    const dcaDurationFilter = maxDuration
+      ? sql`AND COALESCE(dca.call_duration_seconds, 0) > ${minDuration} AND COALESCE(dca.call_duration_seconds, 0) <= ${maxDuration}`
+      : sql`AND COALESCE(dca.call_duration_seconds, 0) > ${minDuration}`;
+
+    // Transcription status filter for call_sessions
+    let csTranscriptFilter = sql`TRUE`;
+    if (transcriptionStatus === 'transcribed') {
+      csTranscriptFilter = sql`(cs.ai_transcript IS NOT NULL AND length(cs.ai_transcript) >= 20)`;
+    } else if (transcriptionStatus === 'missing') {
+      csTranscriptFilter = sql`(cs.ai_transcript IS NULL OR length(cs.ai_transcript) < 20)`;
+    }
+
+    // Transcription status filter for dialer
+    let dcaTranscriptFilter = sql`TRUE`;
+    if (transcriptionStatus === 'transcribed') {
+      dcaTranscriptFilter = sql`(
+        (dca.full_transcript IS NOT NULL AND length(dca.full_transcript) >= 20)
+        OR (dca.ai_transcript IS NOT NULL AND length(dca.ai_transcript) >= 20)
+      )`;
+    } else if (transcriptionStatus === 'missing') {
+      dcaTranscriptFilter = sql`(
+        (dca.full_transcript IS NULL OR length(dca.full_transcript) < 20)
+        AND (dca.ai_transcript IS NULL OR length(dca.ai_transcript) < 20)
+      )`;
+    }
+
+    // Sort expressions
+    const csOrderBy = sortBy === 'duration' ? sql`cs.duration_sec` :
+                      sortBy === 'campaign' ? sql`c.name` :
+                      sql`cs.started_at`;
+    const csOrderDir = sortOrder === 'asc' ? sql`ASC NULLS LAST` : sql`DESC NULLS LAST`;
+
+    // Count call_sessions — counts are ALWAYS unfiltered by transcript status so status cards show global totals
+    const csCountResult = await db.execute(sql`
+      SELECT count(*) AS total,
+             count(*) FILTER (WHERE cs.ai_transcript IS NOT NULL AND length(cs.ai_transcript) >= 20) AS transcribed,
+             count(*) FILTER (WHERE cs.ai_transcript IS NULL OR length(cs.ai_transcript) < 20) AS missing
+      FROM call_sessions cs
+      WHERE cs.started_at >= ${since}
+        AND cs.started_at <= ${until}
+        AND (cs.recording_url IS NOT NULL OR cs.recording_s3_key IS NOT NULL)
+        ${csDurationFilter}
+        AND (${hasCampaignFilter ? sql`cs.campaign_id = ${campaignId}` : sql`TRUE`})
+    `);
+
+    // Count dialer_call_attempts — counts are ALWAYS unfiltered by transcript status
+    const dcaCountResult = await db.execute(sql`
+      SELECT count(*) AS total,
+             count(*) FILTER (WHERE (dca.full_transcript IS NOT NULL AND length(dca.full_transcript) >= 20)
+                                 OR (dca.ai_transcript IS NOT NULL AND length(dca.ai_transcript) >= 20)) AS transcribed,
+             count(*) FILTER (WHERE (dca.full_transcript IS NULL OR length(dca.full_transcript) < 20)
+                                AND (dca.ai_transcript IS NULL OR length(dca.ai_transcript) < 20)) AS missing
+      FROM dialer_call_attempts dca
+      WHERE dca.call_started_at >= ${since}
+        AND dca.call_started_at <= ${until}
+        AND dca.recording_url IS NOT NULL
+        ${dcaDurationFilter}
+        AND (${hasCampaignFilter ? sql`dca.campaign_id = ${campaignId}` : sql`TRUE`})
+    `);
+
+    const csTotal = parseInt(csCountResult.rows[0]?.total as string) || 0;
+    const dcaTotal = parseInt(dcaCountResult.rows[0]?.total as string) || 0;
+    const grandTotal = csTotal + dcaTotal;
+    const totalTranscribed = (parseInt(csCountResult.rows[0]?.transcribed as string) || 0)
+                           + (parseInt(dcaCountResult.rows[0]?.transcribed as string) || 0);
+    const totalMissing = (parseInt(csCountResult.rows[0]?.missing as string) || 0)
+                       + (parseInt(dcaCountResult.rows[0]?.missing as string) || 0);
+
+    // Fetch call_sessions rows
+    const csRows = await db.execute(sql`
+      SELECT
+        cs.id,
+        'call_sessions' AS source_table,
+        cs.to_number_e164 AS phone_number,
+        cs.from_number,
+        cs.campaign_id,
+        c.name AS campaign_name,
+        cs.duration_sec,
+        cs.started_at,
+        cs.agent_type,
+        cs.recording_url,
+        cs.recording_s3_key,
+        cs.telnyx_call_id,
+        cs.telnyx_recording_id,
+        cs.recording_status,
+        CASE WHEN cs.ai_transcript IS NOT NULL AND length(cs.ai_transcript) >= 20 THEN 'completed' ELSE 'missing' END AS transcript_status,
+        CASE WHEN EXISTS (SELECT 1 FROM call_quality_records cqr WHERE cqr.call_session_id = cs.id) THEN 'completed' ELSE 'missing' END AS analysis_status
+      FROM call_sessions cs
+      LEFT JOIN campaigns c ON cs.campaign_id = c.id
+      WHERE cs.started_at >= ${since}
+        AND cs.started_at <= ${until}
+        AND (cs.recording_url IS NOT NULL OR cs.recording_s3_key IS NOT NULL)
+        ${csDurationFilter}
+        AND (${hasCampaignFilter ? sql`cs.campaign_id = ${campaignId}` : sql`TRUE`})
+        AND ${csTranscriptFilter}
+      ORDER BY ${csOrderBy} ${csOrderDir}
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    // Fetch dialer rows
+    const dcaOrderBy = sortBy === 'duration' ? sql`dca.call_duration_seconds` :
+                       sortBy === 'campaign' ? sql`c.name` :
+                       sql`dca.call_started_at`;
+
+    const dcaRows = await db.execute(sql`
+      SELECT
+        dca.id,
+        'dialer_call_attempts' AS source_table,
+        dca.phone_dialed AS phone_number,
+        dca.from_did AS from_number,
+        dca.campaign_id,
+        c.name AS campaign_name,
+        dca.call_duration_seconds AS duration_sec,
+        dca.call_started_at AS started_at,
+        dca.agent_type,
+        dca.recording_url,
+        NULL AS recording_s3_key,
+        dca.telnyx_call_id,
+        dca.telnyx_recording_id,
+        NULL AS recording_status,
+        CASE WHEN (dca.full_transcript IS NOT NULL AND length(dca.full_transcript) >= 20)
+                  OR (dca.ai_transcript IS NOT NULL AND length(dca.ai_transcript) >= 20) THEN 'completed' ELSE 'missing' END AS transcript_status,
+        'n/a' AS analysis_status
+      FROM dialer_call_attempts dca
+      LEFT JOIN campaigns c ON dca.campaign_id = c.id
+      WHERE dca.call_started_at >= ${since}
+        AND dca.call_started_at <= ${until}
+        AND dca.recording_url IS NOT NULL
+        ${dcaDurationFilter}
+        AND (${hasCampaignFilter ? sql`dca.campaign_id = ${campaignId}` : sql`TRUE`})
+        AND ${dcaTranscriptFilter}
+      ORDER BY ${dcaOrderBy} ${csOrderDir}
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    console.log('[CallIntelligence] /transcription-calls results:', { csRows: csRows.rows.length, dcaRows: dcaRows.rows.length, grandTotal, totalTranscribed, totalMissing });
+
+    // Merge and sort, then paginate
+    const sortFn = (a: any, b: any) => {
+      if (sortBy === 'duration') {
+        const da = Number(a.duration_sec) || 0, db2 = Number(b.duration_sec) || 0;
+        return sortOrder === 'asc' ? da - db2 : db2 - da;
+      }
+      if (sortBy === 'campaign') {
+        const ca = (a.campaign_name || '').toLowerCase(), cb = (b.campaign_name || '').toLowerCase();
+        return sortOrder === 'asc' ? ca.localeCompare(cb) : cb.localeCompare(ca);
+      }
+      return sortOrder === 'asc'
+        ? new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+        : new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+    };
+
+    const allCalls = [...csRows.rows, ...dcaRows.rows].sort(sortFn).slice(0, limit);
+
+    res.json({
+      success: true,
+      data: {
+        calls: allCalls,
+        counts: {
+          total: grandTotal,
+          transcribed: totalTranscribed,
+          missing: totalMissing,
+        },
+        pagination: {
+          page,
+          limit,
+          total: grandTotal,
+          totalPages: Math.ceil(grandTotal / limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[CallIntelligence] Error fetching transcription calls:", error);
+    res.status(500).json({ error: "Failed to fetch transcription calls" });
+  }
+});
+
+/**
  * POST /api/call-intelligence/transcription-gaps/regenerate
- * Trigger re-transcription for selected calls using Telnyx phone lookup or recording URL.
- * Newly generated transcripts go through full post-call analysis pipeline which:
- *  - Performs disposition analysis
- *  - Updates disposition if high-confidence
- *  - Creates analysis records
- *  - Logs to call intelligence dashboard in real-time
+ * Trigger re-transcription for selected calls using Telnyx phone lookup or recording URL
  */
 router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
@@ -1784,8 +2190,7 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
       return res.status(400).json({ error: "Maximum 50 calls per batch" });
     }
 
-    const results = { queued: 0, succeeded: 0, failed: 0, analyzed: 0, errors: [] as string[] };
-    const { runPostCallAnalysis } = await import("../services/post-call-analyzer");
+    const results = { queued: 0, succeeded: 0, failed: 0, errors: [] as string[] };
 
     // Process each call
     for (const callId of callIds) {
@@ -1801,10 +2206,6 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             toNumberE164: callSessions.toNumberE164,
             fromNumber: callSessions.fromNumber,
             startedAt: callSessions.startedAt,
-            durationSec: callSessions.durationSec,
-            campaignId: callSessions.campaignId,
-            contactId: callSessions.contactId,
-            aiDisposition: callSessions.aiDisposition,
           })
           .from(callSessions)
           .where(eq(callSessions.id, callId))
@@ -1812,78 +2213,181 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
 
         if (session) {
           let audioUrl: string | null = null;
+          const RG = `[Regenerate][${callId}]`;
+          console.log(`${RG} call_session found — s3Key=${session.recordingS3Key || 'none'}, recUrl=${(session.recordingUrl || '').slice(0, 80)}, telnyxRecId=${session.telnyxRecordingId || 'none'}, telnyxCallId=${session.telnyxCallId || 'none'}`);
 
-          // Strategy: auto or recording_url — try existing recording first
-          if (strategy !== 'telnyx_phone_lookup') {
-            const { getFreshAudioUrl } = await import("../services/recording-link-resolver");
-            audioUrl = await getFreshAudioUrl(callId);
+          // ── Strategy A: Presign from recordingS3Key ──
+          if (!audioUrl && strategy !== 'telnyx_phone_lookup' && session.recordingS3Key) {
+            try {
+              const presigned = await getPresignedDownloadUrl(session.recordingS3Key);
+              if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
+                audioUrl = presigned;
+                console.log(`${RG} Strategy A (presign s3Key) succeeded`);
+              } else {
+                console.log(`${RG} Strategy A returned non-usable URL: ${(presigned || '').slice(0, 60)}`);
+              }
+            } catch (e: any) {
+              console.log(`${RG} Strategy A failed: ${e.message}`);
+            }
           }
 
-          // Strategy: auto or telnyx_phone_lookup — search by phone number
+          // ── Strategy B: Extract GCS key from recordingUrl and presign ──
+          if (!audioUrl && strategy !== 'telnyx_phone_lookup' && session.recordingUrl) {
+            try {
+              const gcsKey = extractGcsKeyFromRecordingUrl(session.recordingUrl);
+              if (gcsKey) {
+                const presigned = await getPresignedDownloadUrl(gcsKey);
+                if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
+                  audioUrl = presigned;
+                  console.log(`${RG} Strategy B (presign extracted key) succeeded`);
+                } else {
+                  console.log(`${RG} Strategy B returned non-usable URL: ${(presigned || '').slice(0, 60)}`);
+                }
+              }
+            } catch (e: any) {
+              console.log(`${RG} Strategy B failed: ${e.message}`);
+            }
+          }
+
+          // ── Strategy C: Full Telnyx priority chain (gcsOnly: false) ──
+          if (!audioUrl && strategy !== 'recording_url') {
+            try {
+              const { getPlayableRecordingLink } = await import("../services/recording-link-resolver");
+              const result = await getPlayableRecordingLink(callId, { gcsOnly: false });
+              if (result?.url && !result.url.startsWith('gcs-internal://') && !result.url.startsWith('gs://')) {
+                audioUrl = result.url;
+                console.log(`${RG} Strategy C (getPlayableRecordingLink gcsOnly=false, source=${result.source}) succeeded`);
+              } else if (result?.url) {
+                console.log(`${RG} Strategy C returned non-usable URL (source=${result.source}): ${result.url.slice(0, 60)}`);
+              } else {
+                console.log(`${RG} Strategy C returned null`);
+              }
+            } catch (e: any) {
+              console.log(`${RG} Strategy C failed: ${e.message}`);
+            }
+          }
+
+          // ── Strategy D: Raw HTTPS recordingUrl (e.g. Telnyx download URL) ──
+          if (!audioUrl && session.recordingUrl && /^https?:\/\//i.test(session.recordingUrl) && !session.recordingUrl.startsWith('gcs-internal://')) {
+            audioUrl = session.recordingUrl;
+            console.log(`${RG} Strategy D (raw HTTPS recordingUrl) used`);
+          }
+
+          // ── Strategy E: Telnyx phone search (±2 hours) ──
           if (!audioUrl && strategy !== 'recording_url') {
             const phoneNumber = session.toNumberE164 || session.fromNumber;
             if (phoneNumber && session.startedAt) {
-              const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
-              const searchStart = new Date(session.startedAt);
-              searchStart.setMinutes(searchStart.getMinutes() - 30);
-              const searchEnd = new Date(session.startedAt);
-              searchEnd.setMinutes(searchEnd.getMinutes() + 30);
+              try {
+                const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
+                const searchStart = new Date(session.startedAt);
+                searchStart.setMinutes(searchStart.getMinutes() - 120);
+                const searchEnd = new Date(session.startedAt);
+                searchEnd.setMinutes(searchEnd.getMinutes() + 120);
 
-              const recordings = await searchRecordingsByDialedNumber(phoneNumber, searchStart, searchEnd);
-              const completed = recordings.find(r => r.status === 'completed');
-              if (completed) {
-                audioUrl = completed.download_urls?.mp3 || completed.download_urls?.wav || null;
-                // Backfill telnyx IDs
-                if (completed.id || completed.call_control_id) {
-                  await db.update(callSessions).set({
-                    telnyxRecordingId: completed.id,
-                    telnyxCallId: completed.call_control_id,
-                    recordingUrl: audioUrl,
-                  } as any).where(eq(callSessions.id, callId));
+                console.log(`${RG} Strategy E: searching Telnyx by phone ${phoneNumber} (±2h window)`);
+                const recordings = await searchRecordingsByDialedNumber(phoneNumber, searchStart, searchEnd);
+                const completed = recordings.find(r => r.status === 'completed');
+                if (completed) {
+                  audioUrl = completed.download_urls?.mp3 || completed.download_urls?.wav || null;
+                  console.log(`${RG} Strategy E found recording: ${audioUrl ? 'yes' : 'no'}`);
+                  // Backfill telnyx IDs
+                  if (audioUrl && (completed.id || completed.call_control_id)) {
+                    await db.update(callSessions).set({
+                      telnyxRecordingId: completed.id,
+                      telnyxCallId: completed.call_control_id,
+                      recordingUrl: audioUrl,
+                    } as any).where(eq(callSessions.id, callId));
+                  }
+                } else {
+                  console.log(`${RG} Strategy E: no completed recordings found (${recordings.length} total)`);
                 }
+              } catch (e: any) {
+                console.log(`${RG} Strategy E failed: ${e.message}`);
               }
             }
           }
 
-          if (audioUrl) {
-            // Trigger transcription
-            const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
-            const transcriptResult = await transcribeFromRecording(audioUrl, { telnyxCallId: session.telnyxCallId || undefined });
-
-            if (transcriptResult?.transcript && transcriptResult.transcript.length >= 20) {
-              await db.update(callSessions).set({
-                aiTranscript: transcriptResult.transcript,
-              } as any).where(eq(callSessions.id, callId));
-              results.succeeded++;
-
-              // ✅ NEW: Run full post-call analysis pipeline to update disposition and create analysis records
-              // This ensures newly regenerated transcripts are analyzed in real-time
-              try {
-                const analysisResult = await runPostCallAnalysis(callId, {
-                  campaignId: session.campaignId || undefined,
-                  contactId: session.contactId || undefined,
-                  callDurationSec: session.durationSec || 0,
-                  disposition: session.aiDisposition || undefined,
-                });
-
-                if (analysisResult.success) {
-                  results.analyzed++;
-                  console.log(`[CallIntelligence] ✅ Regenerated call ${callId} analyzed and disposition updated in real-time`);
-                } else {
-                  console.warn(`[CallIntelligence] ⚠️ Analysis failed for regenerated call ${callId}: ${analysisResult.error}`);
-                  // Don't fail the overall result — transcript was regenerated successfully
-                }
-              } catch (analysisErr: any) {
-                console.warn(`[CallIntelligence] ⚠️ Error running post-call analysis for ${callId}: ${analysisErr.message}`);
-                // Don't fail the result — transcription was successful
+          // ── Strategy F: Direct GCS download → buffer transcription ──
+          let audioBuffer: Buffer | null = null;
+          if (!audioUrl) {
+            const gcsKey = session.recordingS3Key || extractGcsKeyFromRecordingUrl(session.recordingUrl);
+            if (gcsKey) {
+              console.log(`${RG} Strategy F: direct GCS download for key ${gcsKey}`);
+              audioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
+              if (audioBuffer && audioBuffer.length > 1000) {
+                console.log(`${RG} Strategy F ✓ downloaded ${audioBuffer.length} bytes`);
+              } else {
+                console.log(`${RG} Strategy F ✗ buffer ${audioBuffer ? audioBuffer.length : 0} bytes`);
+                audioBuffer = null;
               }
             } else {
+              console.log(`${RG} Strategy F ✗ no GCS key available`);
+            }
+          }
+
+          // ── Final guard ──
+          if (audioUrl && (audioUrl.startsWith('gcs-internal://') || audioUrl.startsWith('gs://'))) {
+            console.log(`${RG} GUARD: rejecting ${audioUrl.slice(0, 60)} — extracting key for Strategy F`);
+            if (!audioBuffer) {
+              const guardKey = extractGcsKeyFromRecordingUrl(audioUrl);
+              if (guardKey) {
+                audioBuffer = await downloadGcsAudioAsBuffer(guardKey);
+                if (audioBuffer && audioBuffer.length > 1000) {
+                  console.log(`${RG} GUARD→F ✓ downloaded ${audioBuffer.length} bytes`);
+                } else {
+                  audioBuffer = null;
+                }
+              }
+            }
+            audioUrl = null;
+          }
+
+          // ── TRANSCRIBE ──
+          if (audioBuffer) {
+            try {
+              console.log(`${RG} Sending ${audioBuffer.length} bytes to Deepgram buffer API...`);
+              const { submitToDeepgramBuffer } = await import("../services/deepgram-postcall-transcription");
+              const transcript = await submitToDeepgramBuffer(audioBuffer);
+              if (transcript && transcript.length >= 20) {
+                await db.update(callSessions).set({ aiTranscript: transcript } as any).where(eq(callSessions.id, callId));
+                results.succeeded++;
+                console.log(`${RG} ✅ Buffer transcription succeeded (${transcript.length} chars)`);
+              } else {
+                results.failed++;
+                results.errors.push(`${callId}: Buffer transcription empty/short (${transcript?.length || 0} chars)`);
+                console.log(`${RG} ❌ Buffer transcription empty/short`);
+              }
+            } catch (e: any) {
               results.failed++;
-              results.errors.push(`${callId}: Transcription returned empty or too short`);
+              results.errors.push(`${callId}: Deepgram buffer error: ${e.message}`);
+              console.log(`${RG} ❌ Deepgram buffer error: ${e.message}`);
+            }
+          } else if (audioUrl) {
+            try {
+              console.log(`${RG} Sending URL to Deepgram: ${audioUrl.slice(0, 100)}...`);
+              const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
+              const transcriptResult = await transcribeFromRecording(audioUrl, {
+                telnyxCallId: session.telnyxCallId || undefined,
+                recordingS3Key: session.recordingS3Key || undefined,
+              });
+              if (transcriptResult?.transcript && transcriptResult.transcript.length >= 20) {
+                await db.update(callSessions).set({ aiTranscript: transcriptResult.transcript } as any).where(eq(callSessions.id, callId));
+                results.succeeded++;
+                console.log(`${RG} ✅ URL transcription succeeded (${transcriptResult.transcript.length} chars)`);
+              } else {
+                results.failed++;
+                results.errors.push(`${callId}: URL transcription empty/short`);
+                console.log(`${RG} ❌ URL transcription empty/short`);
+              }
+            } catch (e: any) {
+              results.failed++;
+              results.errors.push(`${callId}: Deepgram URL error: ${e.message}`);
+              console.log(`${RG} ❌ Deepgram URL error: ${e.message}`);
             }
           } else {
             results.failed++;
-            results.errors.push(`${callId}: No recording URL found`);
+            results.errors.push(`${callId}: No recording found (all strategies A-F exhausted)`);
+            console.log(`${RG} ❌ All strategies exhausted — no audio source`);
           }
           results.queued++;
           continue;
@@ -1903,80 +2407,96 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
           .limit(1);
 
         if (attempt) {
-          const { attemptFallbackTranscription } = await import("../services/transcription-reliability");
+          const RG = `[Regenerate][${callId}]`;
+          console.log(`${RG} dialer_call_attempt found — recUrl=${(attempt.recordingUrl || '').slice(0, 80)}, telnyxCallId=${attempt.telnyxCallId || 'none'}, phone=${attempt.phoneDialed || 'none'}`);
 
-          // For phone lookup strategy, try finding the recording first
-          if (strategy === 'telnyx_phone_lookup' || strategy === 'auto') {
-            if (!attempt.recordingUrl && attempt.phoneDialed && attempt.callStartedAt) {
-              const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
-              const searchStart = new Date(attempt.callStartedAt);
-              searchStart.setMinutes(searchStart.getMinutes() - 30);
-              const searchEnd = new Date(attempt.callStartedAt);
-              searchEnd.setMinutes(searchEnd.getMinutes() + 30);
+          // Sanitize: if recordingUrl is gcs-internal:// or gs://, try direct GCS download
+          let usableRecordingUrl = attempt.recordingUrl ?? null;
+          let dialerAudioBuffer: Buffer | null = null;
+          if (usableRecordingUrl && (usableRecordingUrl.startsWith('gcs-internal://') || usableRecordingUrl.startsWith('gs://'))) {
+            const gcsKey = extractGcsKeyFromRecordingUrl(usableRecordingUrl);
+            if (gcsKey) {
+              console.log(`${RG} Dialer: direct GCS download for ${gcsKey}`);
+              dialerAudioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
+              if (dialerAudioBuffer && dialerAudioBuffer.length > 1000) {
+                console.log(`${RG} Dialer GCS download ✓ ${dialerAudioBuffer.length} bytes`);
+              } else {
+                dialerAudioBuffer = null;
+              }
+            }
+            usableRecordingUrl = null;
+          }
 
-              const recordings = await searchRecordingsByDialedNumber(attempt.phoneDialed, searchStart, searchEnd);
-              const completed = recordings.find(r => r.status === 'completed');
-              if (completed) {
-                const downloadUrl = completed.download_urls?.mp3 || completed.download_urls?.wav;
-                if (downloadUrl) {
-                  await db.update(dialerCallAttempts).set({
-                    recordingUrl: downloadUrl,
-                    telnyxCallId: completed.call_control_id,
-                    telnyxRecordingId: completed.id,
-                    updatedAt: new Date(),
-                  }).where(eq(dialerCallAttempts.id, callId));
-                  // Update local ref for transcription
-                  (attempt as any).recordingUrl = downloadUrl;
+          // For phone lookup strategy, try finding the recording first (±2h window)
+          if (!usableRecordingUrl && !dialerAudioBuffer && (strategy === 'telnyx_phone_lookup' || strategy === 'auto')) {
+            if (attempt.phoneDialed && attempt.callStartedAt) {
+              try {
+                const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
+                const searchStart = new Date(attempt.callStartedAt);
+                searchStart.setMinutes(searchStart.getMinutes() - 120);
+                const searchEnd = new Date(attempt.callStartedAt);
+                searchEnd.setMinutes(searchEnd.getMinutes() + 120);
+
+                console.log(`${RG} Searching Telnyx by phone ${attempt.phoneDialed} (±2h window)`);
+                const recordings = await searchRecordingsByDialedNumber(attempt.phoneDialed, searchStart, searchEnd);
+                const completed = recordings.find(r => r.status === 'completed');
+                if (completed) {
+                  const downloadUrl = completed.download_urls?.mp3 || completed.download_urls?.wav;
+                  if (downloadUrl) {
+                    await db.update(dialerCallAttempts).set({
+                      recordingUrl: downloadUrl,
+                      telnyxCallId: completed.call_control_id,
+                      telnyxRecordingId: completed.id,
+                      updatedAt: new Date(),
+                    }).where(eq(dialerCallAttempts.id, callId));
+                    usableRecordingUrl = downloadUrl;
+                    console.log(`${RG} Telnyx phone search found recording`);
+                  }
+                } else {
+                  console.log(`${RG} Telnyx phone search: no completed recordings (${recordings.length} total)`);
                 }
+              } catch (e: any) {
+                console.log(`${RG} Telnyx phone search failed: ${e.message}`);
               }
             }
           }
 
-          const transcriptionResult = await attemptFallbackTranscription(callId, attempt.recordingUrl ?? null, attempt.telnyxCallId);
-          results.queued++;
-          if (transcriptionResult.success) {
-            results.succeeded++;
-
-            // ✅ NEW: Run full post-call analysis pipeline for dialer call attempts
+          // If we have a buffer from GCS, transcribe directly
+          if (dialerAudioBuffer) {
             try {
-              // Get call session associated with this attempt for campaign/contact context
-              const [relatedSession] = await db
-                .select({
-                  id: callSessions.id,
-                  durationSec: callSessions.durationSec,
-                  campaignId: callSessions.campaignId,
-                  contactId: callSessions.contactId,
-                  aiDisposition: callSessions.aiDisposition,
-                })
-                .from(callSessions)
-                .where(eq(callSessions.id, callId))
-                .limit(1);
-
-              const campaignId = relatedSession?.campaignId;
-              const contactId = relatedSession?.contactId;
-              const durationSec = relatedSession?.durationSec || 0;
-              const disposition = relatedSession?.aiDisposition;
-
-              const analysisResult = await runPostCallAnalysis(callId, {
-                callAttemptId: attempt.id,
-                campaignId: campaignId || undefined,
-                contactId: contactId || undefined,
-                callDurationSec: durationSec,
-                disposition: disposition || undefined,
-              });
-
-              if (analysisResult.success) {
-                results.analyzed++;
-                console.log(`[CallIntelligence] ✅ Regenerated dialer attempt ${callId} analyzed and disposition updated in real-time`);
+              console.log(`${RG} Dialer: sending ${dialerAudioBuffer.length} bytes to Deepgram buffer API`);
+              const { submitToDeepgramBuffer } = await import("../services/deepgram-postcall-transcription");
+              const transcript = await submitToDeepgramBuffer(dialerAudioBuffer);
+              if (transcript && transcript.length >= 20) {
+                await db.update(dialerCallAttempts).set({ fullTranscript: transcript, updatedAt: new Date() }).where(eq(dialerCallAttempts.id, callId));
+                results.succeeded++;
+                console.log(`${RG} ✅ Dialer buffer transcription succeeded (${transcript.length} chars)`);
               } else {
-                console.warn(`[CallIntelligence] ⚠️ Analysis failed for regenerated dialer attempt ${callId}: ${analysisResult.error}`);
+                results.failed++;
+                results.errors.push(`${callId}: Dialer buffer transcription empty/short`);
+                console.log(`${RG} ❌ Dialer buffer transcription empty/short`);
               }
-            } catch (analysisErr: any) {
-              console.warn(`[CallIntelligence] ⚠️ Error running post-call analysis for dialer attempt ${callId}: ${analysisErr.message}`);
+            } catch (e: any) {
+              results.failed++;
+              results.errors.push(`${callId}: Dialer buffer error: ${e.message}`);
+              console.log(`${RG} ❌ Dialer buffer error: ${e.message}`);
             }
+            results.queued++;
+            continue;
+          }
+
+          // Fall back to attemptFallbackTranscription with usable URL
+          console.log(`${RG} Calling attemptFallbackTranscription with url=${usableRecordingUrl ? usableRecordingUrl.slice(0, 60) : 'null'}`);
+          const { attemptFallbackTranscription } = await import("../services/transcription-reliability");
+          const result = await attemptFallbackTranscription(callId, usableRecordingUrl, attempt.telnyxCallId);
+          results.queued++;
+          if (result.success) {
+            results.succeeded++;
+            console.log(`${RG} ✅ Dialer transcription succeeded`);
           } else {
             results.failed++;
-            results.errors.push(`${callId}: ${transcriptionResult.error || 'Unknown error'}`);
+            results.errors.push(`${callId}: ${result.error || 'Unknown error'}`);
+            console.log(`${RG} ❌ Dialer transcription failed: ${result.error || 'Unknown'}`);
           }
           continue;
         }
@@ -1994,252 +2514,13 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
       data: {
         queued: results.queued,
         succeeded: results.succeeded,
-        analyzed: results.analyzed,
         failed: results.failed,
-        message: `Processed ${results.queued} calls: ${results.succeeded} transcripts regenerated, ${results.analyzed} analyzed with updated dispositions in real-time`,
         errors: results.errors.slice(0, 20), // Limit error details
       },
     });
   } catch (error: any) {
     console.error("[CallIntelligence] Error regenerating transcriptions:", error);
     res.status(500).json({ error: "Failed to regenerate transcriptions" });
-  }
-});
-
-/**
- * POST /api/call-intelligence/regeneration/worker/start
- * Start the background transcription regeneration worker
- */
-router.post("/regeneration/worker/start", requireAuth, requireRole('admin'), async (req, res) => {
-  try {
-    const { startWorker } = await import("../services/transcription-regeneration-worker");
-    startWorker();
-    const { getStatus } = await import("../services/transcription-regeneration-worker");
-    const status = await getStatus();
-    res.json({
-      success: true,
-      message: "Transcription regeneration worker started",
-      status,
-    });
-  } catch (error: any) {
-    console.error("[CallIntelligence] Error starting worker:", error);
-    res.status(500).json({ error: "Failed to start worker" });
-  }
-});
-
-/**
- * POST /api/call-intelligence/regeneration/worker/stop
- * Stop the background transcription regeneration worker
- */
-router.post("/regeneration/worker/stop", requireAuth, requireRole('admin'), async (req, res) => {
-  try {
-    const { stopWorker, getStatus } = await import("../services/transcription-regeneration-worker");
-    stopWorker();
-    const status = await getStatus();
-    res.json({
-      success: true,
-      message: "Transcription regeneration worker stopped",
-      status,
-    });
-  } catch (error: any) {
-    console.error("[CallIntelligence] Error stopping worker:", error);
-    res.status(500).json({ error: "Failed to stop worker" });
-  }
-});
-
-/**
- * GET /api/call-intelligence/regeneration/worker/status
- * Get current worker status and job statistics
- */
-router.get("/regeneration/worker/status", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
-  try {
-    const { getStatus } = await import("../services/transcription-regeneration-worker");
-    const status = await getStatus();
-    res.json({
-      success: true,
-      data: status,
-    });
-  } catch (error: any) {
-    console.error("[CallIntelligence] Error fetching worker status:", error);
-    res.status(500).json({ error: "Failed to fetch worker status" });
-  }
-});
-
-/**
- * POST /api/call-intelligence/regeneration/worker/config
- * Update worker configuration (concurrency, batch size, strategy, etc.)
- */
-router.post("/regeneration/worker/config", requireAuth, requireRole('admin'), async (req, res) => {
-  try {
-    const { concurrency, batchSize, batchDelayMs, strategy, verbose } = req.body;
-    const { updateConfig, getStatus } = await import("../services/transcription-regeneration-worker");
-
-    // Validate config values
-    const newConfig: any = {};
-    if (concurrency !== undefined) {
-      newConfig.concurrency = Math.min(10, Math.max(1, parseInt(concurrency, 10)));
-    }
-    if (batchSize !== undefined) {
-      newConfig.batchSize = Math.min(50, Math.max(1, parseInt(batchSize, 10)));
-    }
-    if (batchDelayMs !== undefined) {
-      newConfig.batchDelayMs = Math.max(100, parseInt(batchDelayMs, 10));
-    }
-    if (strategy !== undefined) {
-      if (['telnyx_phone_lookup', 'recording_url', 'auto'].includes(strategy)) {
-        newConfig.strategy = strategy;
-      }
-    }
-    if (verbose !== undefined) {
-      newConfig.verbose = Boolean(verbose);
-    }
-
-    updateConfig(newConfig);
-    const status = await getStatus();
-
-    res.json({
-      success: true,
-      message: "Configuration updated",
-      data: {
-        updatedConfig: newConfig,
-        currentStatus: status,
-      },
-    });
-  } catch (error: any) {
-    console.error("[CallIntelligence] Error updating config:", error);
-    res.status(500).json({ error: "Failed to update configuration" });
-  }
-});
-
-/**
- * GET /api/call-intelligence/regeneration/progress
- * Get overall regeneration progress across all jobs
- */
-router.get("/regeneration/progress", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
-  try {
-    const [result] = await db.execute(sql`
-      SELECT
-        status,
-        COUNT(*) as count,
-        COUNT(CASE WHEN attempts > 0 THEN 1 END) as attempted,
-        COUNT(CASE WHEN error IS NOT NULL THEN 1 END) as with_error
-      FROM transcription_regeneration_jobs
-      GROUP BY status
-    `);
-
-    const stats = {
-      pending: 0,
-      inProgress: 0,
-      submitted: 0,
-      completed: 0,
-      failed: 0,
-      total: 0,
-      progressPercent: 0,
-      estimatedRemainingMinutes: 0,
-    };
-
-    if (result.rows) {
-      for (const row of result.rows) {
-        const count = parseInt(row.count as string) || 0;
-        stats.total += count;
-
-        switch (row.status) {
-          case 'pending':
-            stats.pending = count;
-            break;
-          case 'in_progress':
-            stats.inProgress = count;
-            break;
-          case 'submitted':
-            stats.submitted = count;
-            break;
-          case 'completed':
-            stats.completed = count;
-            break;
-          case 'failed':
-            stats.failed = count;
-            break;
-        }
-      }
-    }
-
-    // Calculate progress
-    if (stats.total > 0) {
-      stats.progressPercent = Math.round(
-        ((stats.submitted + stats.completed) / stats.total) * 100
-      );
-      // Rough estimate: ~2 calls per minute based on API rate limiting + analysis
-      const remaining = stats.pending + stats.inProgress;
-      stats.estimatedRemainingMinutes = Math.ceil(remaining / 2);
-    }
-
-    res.json({
-      success: true,
-      data: stats,
-    });
-  } catch (error: any) {
-    console.error("[CallIntelligence] Error fetching regeneration progress:", error);
-    res.status(500).json({ error: "Failed to fetch progress" });
-  }
-});
-
-/**
- * GET /api/call-intelligence/regeneration/jobs
- * List regeneration jobs with filters and pagination
- */
-router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
-  try {
-    const status = req.query.status as string | undefined;
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
-    const offset = Math.max(0, (parseInt(req.query.page as string, 10) || 1) - 1) * limit;
-    const sortBy = req.query.sortBy as string || 'created_at';
-    const sortDir = (req.query.sortDir as string || 'DESC').toUpperCase();
-
-    let whereClause = sql`TRUE`;
-    if (status && status !== 'all') {
-      whereClause = sql`status = ${status}`;
-    }
-
-    const [jobs] = await db.execute(sql`
-      SELECT
-        id,
-        call_id,
-        source,
-        status,
-        attempts,
-        error,
-        created_at,
-        completed_at
-      FROM transcription_regeneration_jobs
-      WHERE ${whereClause}
-      ORDER BY ${sql.raw(sortBy)} ${sql.raw(sortDir)}
-      LIMIT ${limit}
-      OFFSET ${offset}
-    `);
-
-    const [countResult] = await db.execute(sql`
-      SELECT COUNT(*) as total
-      FROM transcription_regeneration_jobs
-      WHERE ${whereClause}
-    `);
-
-    const total = parseInt(countResult.rows[0]?.total as string || '0');
-
-    res.json({
-      success: true,
-      data: {
-        jobs: jobs.rows || [],
-        pagination: {
-          page: Math.floor(offset / limit) + 1,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
-        },
-      },
-    });
-  } catch (error: any) {
-    console.error("[CallIntelligence] Error fetching jobs:", error);
-    res.status(500).json({ error: "Failed to fetch jobs" });
   }
 });
 

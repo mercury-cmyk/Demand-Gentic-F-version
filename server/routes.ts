@@ -13,7 +13,6 @@ import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAu
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
 import webhooksRouter from "./routes/webhooks";
-import livekitWebhookRouter from "./routes/livekit-webhook";
 import voiceEngineRouter from "./routes/voice-engine-routes";
 import queueRouter from "./routes/queue-routes";
 import filterOptionsRouter from "./routes/filter-options-routes";
@@ -14109,9 +14108,6 @@ export function registerRoutes(app: Express) {
 
   // Alias for Telnyx AI voice webhooks without auth (Call Control can post here)
   app.use("/api/telemarketing/webhooks", webhooksRouter);
-
-  // ==================== LIVEKIT WEBHOOKS (Room & Participant Lifecycle) ====================
-  app.use("/webhook", livekitWebhookRouter);
 
   // ==================== CAMPAIGN CONTENT LINKS (Resources Centre Integration) ====================
 
