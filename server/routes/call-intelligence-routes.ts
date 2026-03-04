@@ -2915,12 +2915,24 @@ router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager'), a
   }
 });
 
+// Admin backfill auth: accepts either Bearer JWT (admin role) or X-Backfill-Secret header
+function backfillAuth(req: any, res: any, next: any) {
+  const backfillSecret = (req.headers['x-backfill-secret'] || '').toString().trim();
+  const expectedSecret = (process.env.MEDIA_BRIDGE_SECRET || '').toString().trim();
+  if (backfillSecret && expectedSecret && backfillSecret === expectedSecret) {
+    req.user = { id: 'backfill-admin', role: 'admin', tenantId: 'system' };
+    return next();
+  }
+  // Fall back to normal auth
+  return requireAuth(req, res, () => requireRole('admin')(req, res, next));
+}
+
 /**
  * POST /api/call-intelligence/backfill-analysis
  * Backfill missing quality analysis for calls that have transcripts
  * but no call_quality_records entry.
  */
-router.post("/backfill-analysis", requireAuth, requireRole('admin'), async (req, res) => {
+router.post("/backfill-analysis", backfillAuth, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
     const dryRun = req.query.dryRun === 'true';
@@ -3061,7 +3073,7 @@ router.post("/backfill-analysis", requireAuth, requireRole('admin'), async (req,
  * Backfill missing transcripts for calls that have recordings but no transcript.
  * Uses the same multi-strategy approach as the regeneration endpoint.
  */
-router.post("/backfill-transcripts", requireAuth, requireRole('admin'), async (req, res) => {
+router.post("/backfill-transcripts", backfillAuth, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
     const dryRun = req.query.dryRun === 'true';

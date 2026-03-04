@@ -611,11 +611,15 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
         }
 
         // Trigger post-call analysis with captured transcript
-        if (session.callContext.callAttemptId && session.callContext.leadId) {
+        console.log(`[RTP Bridge] Checking post-call analysis conditions - callAttemptId: ${session.callContext.callAttemptId}, contactId: ${session.callContext.contactId}, turns: ${session.transcriptTurns.length}`);
+        
+        if (session.callContext.callAttemptId && session.callContext.contactId) {
           const callDuration = Math.floor((Date.now() - session.metrics.startTime) / 1000);
+          console.log(`[RTP Bridge] ✅ Triggering post-call analysis with ${session.transcriptTurns.length} transcript turns`);
+          
           processSIPPostCallAnalysis({
             callAttemptId: session.callContext.callAttemptId,
-            leadId: session.callContext.leadId,
+            leadId: session.callContext.contactId,
             campaignId: session.callContext.campaignId || '',
             contactName: session.callContext.contactName || session.callContext.contactFirstName,
             disposition: canonicalDisposition,
@@ -623,6 +627,8 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
             callDurationSeconds: callDuration,
             agentNotes: notes,
           }).catch((err) => console.error(`[RTP Bridge] Post-call analysis failed:`, err));
+        } else {
+          console.warn(`[RTP Bridge] ⚠️ Post-call analysis SKIPPED - missing required fields`);
         }
 
         response = { success: true, disposition: canonicalDisposition };
