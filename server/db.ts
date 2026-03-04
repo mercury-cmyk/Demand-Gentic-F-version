@@ -11,14 +11,25 @@ import * as schema from "../shared/schema.ts";
 const nodeEnv = (process.env.NODE_ENV || "development").toLowerCase();
 const isCloudRun = process.env.K_SERVICE !== undefined;
 
-// Always use WebSocket transport - more reliable than fetch for persistent connections
+
+// Use WebSocket transport everywhere — fetch transport fails when Neon compute is waking up
+// The ws library works in both Cloud Run and local development
 neonConfig.webSocketConstructor = ws;
 if (isCloudRun || nodeEnv === "production") {
-  console.log('[DB] Using WebSocket transport (Cloud Run/Production)');
+  // Also configure fetch endpoint as fallback for Neon's internal retry mechanism
+  neonConfig.fetchEndpoint = (host) => {
+    try {
+      const url = new URL(host);
+      return `https://${url.hostname}/sql`;
+    } catch {
+      const hostOnly = host.split('://')[1]?.split(':')[0] || host;
+      return `https://${hostOnly}/sql`;
+    }
+  };
+  console.log('[DB] Using WebSocket transport with fetch fallback (Cloud Run/Production)');
 } else {
   console.log('[DB] Using WebSocket transport (Development)');
 }
-
 const strictIsolation = nodeEnv === "development" && process.env.STRICT_ENV_ISOLATION !== "false";
 
 function resolveDatabaseUrl(): { url: string; source: string } {

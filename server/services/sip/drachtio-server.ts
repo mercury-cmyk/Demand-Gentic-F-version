@@ -25,7 +25,7 @@
 import Srf from 'drachtio-srf';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import * as sdp from 'sdp-transform';
+// sdp-transform removed — SDP is built as a plain string for maximum Telnyx compatibility
 
 // Configuration
 const DRACHTIO_HOST = (process.env.DRACHTIO_HOST || 'localhost').trim();
@@ -402,117 +402,35 @@ export class DrachtioSIPServer {
   }
 
   /**
-   * Generate SDP with ICE candidates and DTLS
+   * Generate standard SIP SDP for PSTN/Telnyx trunk
+   * Uses plain RTP/AVP with G.711 codecs — no WebRTC attributes (ICE, DTLS, SRTP)
    */
   private generateSDP(options: {
     port: number;
     remoteSdp?: string;
     callId: string;
   }): string {
-    const { port, remoteSdp, callId } = options;
+    const { port, callId } = options;
     const listenAddr = PUBLIC_IP || SIP_LISTEN_HOST;
+    const sessionId = Math.floor(Math.random() * 1e10);
 
-    const sdpObj = {
-      version: 0,
-      origin: {
-        username: 'drachtio',
-        sessionId: Math.random() * 1e10,
-        sessionVersion: 0,
-        netType: 'IN',
-        ipVer: 4,
-        address: listenAddr,
-      },
-      name: `Call ${callId}`,
-      timing: { start: 0, stop: 0 },
-      media: [
-        {
-          type: 'audio',
-          port,
-          protocol: 'RTP/SAVP', // RTP with SRTP
-          payloads: [111, 126, 0, 8, 97, 98],
-          rtp: [
-            { payload: 111, codec: 'OPUS', rate: 48000, encoding: 2 },
-            { payload: 126, codec: 'telephone-event', rate: 8000 },
-            { payload: 0, codec: 'PCMU', rate: 8000 },
-            { payload: 8, codec: 'PCMA', rate: 8000 },
-            { payload: 97, codec: 'iLBC', rate: 8000 },
-            { payload: 98, codec: 'iLBC', rate: 8000 },
-          ],
-          fmtp: [
-            { payload: 126, config: '0-15' },
-            { payload: 97, config: 'mode=20' },
-            { payload: 98, config: 'mode=30' },
-          ],
-          iceUfrag: this.generateUfrag(),
-          icePwd: this.generatePwd(),
-          candidates: this.generateICECandidates(listenAddr, port),
-          fingerprint: {
-            type: 'sha-256',
-            hash: this.generateDTLSFingerprint(),
-          },
-          setup: 'passive',
-          rtcpMux: 'yes',
-        } as any,
-      ],
-      groups: [
-        {
-          type: 'BUNDLE',
-          mids: '0',
-        },
-      ],
-    } as any;
-
-    return sdp.write(sdpObj);
-  }
-
-  /**
-   * Generate ICE candidates
-   */
-  private generateICECandidates(
-    address: string,
-    port: number
-  ): Array<{ foundation: string; component: number; transport: string; priority: number; ip: string; port: number; type: string }> {
-    const candidates: Array<any> = [
-      {
-        foundation: '1',
-        component: 1,
-        transport: 'udp',
-        priority: 2130706431,
-        ip: address,
-        port,
-        type: 'host',
-      },
+    // Build standard SIP SDP manually for maximum compatibility with Telnyx
+    const lines = [
+      'v=0',
+      `o=drachtio ${sessionId} 1 IN IP4 ${listenAddr}`,
+      `s=DemandGentic ${callId}`,
+      `c=IN IP4 ${listenAddr}`,
+      't=0 0',
+      `m=audio ${port} RTP/AVP 0 8 101`,
+      'a=rtpmap:0 PCMU/8000',
+      'a=rtpmap:8 PCMA/8000',
+      'a=rtpmap:101 telephone-event/8000',
+      'a=fmtp:101 0-15',
+      'a=ptime:20',
+      'a=sendrecv',
     ];
 
-    // Add STUN reflexive candidates if STUN servers available
-    if (STUN_SERVERS.length > 0) {
-      candidates.push({
-        foundation: '2',
-        component: 1,
-        transport: 'udp',
-        priority: 2130706431,
-        ip: address,
-        port,
-        type: 'srflx',
-        raddr: address,
-        rport: port,
-      });
-    }
-
-    return candidates;
-  }
-
-  private generateUfrag(): string {
-    return Math.random().toString(36).substr(2, 16);
-  }
-
-  private generatePwd(): string {
-    return Math.random().toString(36).substr(2, 24);
-  }
-
-  private generateDTLSFingerprint(): string {
-    // In production, use actual DTLS certificate fingerprint
-    return 'F2:B7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7';
+    return lines.join('\r\n') + '\r\n';
   }
 
   /**
