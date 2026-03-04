@@ -28,11 +28,11 @@ import { v4 as uuidv4 } from 'uuid';
 import * as sdp from 'sdp-transform';
 
 // Configuration
-const DRACHTIO_HOST = process.env.DRACHTIO_HOST || 'localhost';
-const DRACHTIO_PORT = parseInt(process.env.DRACHTIO_PORT || '9022');
-const SIP_LISTEN_HOST = process.env.SIP_LISTEN_HOST || '0.0.0.0';
-const SIP_LISTEN_PORT = parseInt(process.env.SIP_LISTEN_PORT || '5060');
-const PUBLIC_IP = process.env.PUBLIC_IP || '';
+const DRACHTIO_HOST = (process.env.DRACHTIO_HOST || 'localhost').trim();
+const DRACHTIO_PORT = parseInt((process.env.DRACHTIO_PORT || '9022').trim());
+const SIP_LISTEN_HOST = (process.env.SIP_LISTEN_HOST || '0.0.0.0').trim();
+const SIP_LISTEN_PORT = parseInt((process.env.SIP_LISTEN_PORT || '5060').trim());
+const PUBLIC_IP = (process.env.PUBLIC_IP || '').trim();
 const RTP_PORT_MIN = parseInt(process.env.RTP_PORT_MIN || '10000');
 const RTP_PORT_MAX = parseInt(process.env.RTP_PORT_MAX || '20000');
 
