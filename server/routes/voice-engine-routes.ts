@@ -14,6 +14,18 @@ const telnyxHeaders = () => ({
   "Content-Type": "application/json",
 });
 
+function isEnabledFlag(value?: string): boolean {
+  if (!value) return false;
+  return ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+function getSipMissingRequirements(): string[] {
+  const missing: string[] = [];
+  if (!isEnabledFlag(process.env.USE_SIP_CALLING)) missing.push('USE_SIP_CALLING=true');
+  if (!(process.env.DRACHTIO_HOST || '').trim()) missing.push('DRACHTIO_HOST');
+  return missing;
+}
+
 /**
  * GET /api/voice-engine/config
  * Returns current call engine setting and provider readiness status
@@ -23,7 +35,10 @@ router.get("/config", requireAuth, async (req: Request, res: Response) => {
     const defaults = await db.select().from(agentDefaults).limit(1);
     const config = defaults[0];
 
-    const sipReady = process.env.USE_SIP_CALLING === 'true';
+    const sipEnabled = isEnabledFlag(process.env.USE_SIP_CALLING);
+    const hasDrachtioHost = !!(process.env.DRACHTIO_HOST || '').trim();
+    const hasPublicIp = !!(process.env.PUBLIC_IP || '').trim();
+    const sipReady = sipEnabled && hasDrachtioHost;
 
     const texmlReady = !!(
       process.env.TELNYX_API_KEY &&
@@ -34,9 +49,9 @@ router.get("/config", requireAuth, async (req: Request, res: Response) => {
       activeEngine: config?.defaultCallEngine || 'texml',
       sip: {
         ready: sipReady,
-        hasDrachtioHost: !!process.env.DRACHTIO_HOST,
-        hasPublicIp: !!process.env.PUBLIC_IP,
-        sipEnabled: process.env.USE_SIP_CALLING === 'true',
+        hasDrachtioHost,
+        hasPublicIp,
+        sipEnabled,
       },
       texml: {
         ready: texmlReady,
@@ -63,9 +78,10 @@ router.put("/config", requireAuth, async (req: Request, res: Response) => {
     }
 
     if (engine === 'sip') {
-      if (process.env.USE_SIP_CALLING !== 'true') {
+      const missing = getSipMissingRequirements();
+      if (missing.length > 0) {
         return res.status(422).json({
-          message: 'Cannot switch to SIP: USE_SIP_CALLING is not enabled. Set USE_SIP_CALLING=true in environment.',
+          message: `Cannot switch to SIP: missing ${missing.join(' and ')}.`,
         });
       }
     }

@@ -54,6 +54,23 @@ interface NumbersResponse {
   totals: { sip: number; texml: number; unassigned: number };
 }
 
+function getSipAvailabilityIssue(config?: VoiceEngineConfig): string | null {
+  if (!config) return null;
+
+  const missing: string[] = [];
+  if (!config.sip.sipEnabled) missing.push('USE_SIP_CALLING=true');
+  if (!config.sip.hasDrachtioHost) missing.push('DRACHTIO_HOST');
+
+  if (missing.length === 0) {
+    return null;
+  }
+
+  const requirements = missing.join(' and ');
+  const productionHint = config.sip.hasPublicIp ? '' : ' PUBLIC_IP is also recommended for production SIP traffic.';
+
+  return `SIP is not ready. Configure ${requirements} before switching.${productionHint}`;
+}
+
 function StatusDot({ ok }: { ok: boolean }) {
   return ok ? (
     <CheckCircle className="h-4 w-4 text-green-500" />
@@ -172,14 +189,16 @@ export default function VoiceEngineControlCenter() {
   });
 
   const activeEngine = config?.activeEngine || 'texml';
+  const sipAvailabilityIssue = getSipAvailabilityIssue(config);
+  const canSwitchToSip = !sipAvailabilityIssue;
 
   function handleSelect(engine: 'texml' | 'sip') {
     if (engine === activeEngine) return;
     // Prevent switching to SIP when it's not ready
-    if (engine === 'sip' && !config?.sip.ready) {
+    if (engine === 'sip' && !canSwitchToSip) {
       toast({
         title: 'SIP not available',
-        description: 'SIP calling is not enabled. Set USE_SIP_CALLING=true and configure Drachtio before switching.',
+        description: sipAvailabilityIssue || 'SIP is not ready yet. Configure SIP prerequisites before switching.',
         variant: 'destructive',
       });
       return;
@@ -298,11 +317,12 @@ export default function VoiceEngineControlCenter() {
                 'transition-all border-2',
                 activeEngine === 'sip'
                   ? 'border-green-500 bg-green-50/50 dark:bg-green-950/20 cursor-pointer'
-                  : !config?.sip.ready
-                    ? 'border-transparent opacity-60 cursor-not-allowed'
+                  : !canSwitchToSip
+                    ? 'border-transparent opacity-60 cursor-not-allowed pointer-events-none'
                     : 'border-transparent hover:border-muted-foreground/20 cursor-pointer'
               )}
-              onClick={() => handleSelect('sip')}
+              onClick={canSwitchToSip ? () => handleSelect('sip') : undefined}
+              aria-disabled={!canSwitchToSip}
             >
               <CardHeader>
                 <div className="flex items-start gap-3">
@@ -317,6 +337,9 @@ export default function VoiceEngineControlCenter() {
                     <CardDescription className="mt-1">
                       Direct SIP trunk. Lowest latency, lowest cost. Falls back to TeXML if unavailable.
                     </CardDescription>
+                    {!canSwitchToSip && sipAvailabilityIssue && (
+                      <p className="mt-2 text-xs text-muted-foreground">{sipAvailabilityIssue}</p>
+                    )}
                     <div className="flex items-center gap-2 mt-2">
                       {activeEngine === 'sip' && <Badge variant="outline" className="text-xs">Active</Badge>}
                       <Badge variant="secondary" className="text-xs">{numbersData?.totals.sip ?? '?'} numbers</Badge>

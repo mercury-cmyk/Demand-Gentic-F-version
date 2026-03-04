@@ -22,7 +22,8 @@ import {
   date,
   decimal,
   vector,
-  json // Import json type
+  json, // Import json type
+  bigint
 } from "drizzle-orm/pg-core";
 
 export const orderStatusEnum = pgEnum('order_status', [
@@ -3919,7 +3920,7 @@ export const callRecordings = pgTable("call_recordings", {
   callId: varchar("call_id").notNull().references(() => voiceCalls.id, { onDelete: 'cascade' }),
   recordingUrl: text("recording_url").notNull(), // Cloud Storage URL
   recordingDuration: integer("recording_duration"), // in seconds
-  fileSize: bigint("file_size"), // in bytes
+  fileSize: bigint("file_size", { mode: 'bigint' }), // in bytes
   format: text("format").notNull().default('mp3'), // 'mp3', 'wav', 'webp'
   transcriptId: varchar("transcript_id").references(() => callTranscripts.id, { onDelete: 'set null' }),
   isPublic: boolean("is_public").notNull().default(false),
@@ -3970,7 +3971,7 @@ export const fileUploads = pgTable("file_uploads", {
   uploadedById: varchar("uploaded_by_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
   fileName: text("file_name").notNull(),
   fileType: text("file_type").notNull(), // 'image', 'document', 'video', 'audio', 'other'
-  fileSize: bigint("file_size").notNull(),
+  fileSize: bigint("file_size", { mode: 'bigint' }).notNull(),
   mimeType: text("mime_type").notNull(),
   fileUrl: text("file_url").notNull(), // Cloud Storage URL
   downloadCount: integer("download_count").default(0),
