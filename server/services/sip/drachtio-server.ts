@@ -603,8 +603,9 @@ export class DrachtioSIPServer {
 
     // SIP trunk configuration from environment
     const sipTrunkHost = process.env.SIP_TRUNK_HOST || 'sip.telnyx.com';
-    const sipUsername = process.env.SIP_USERNAME || process.env.TELNYX_SIP_USERNAME || '';
-    const sipPassword = process.env.SIP_PASSWORD || process.env.TELNYX_SIP_PASSWORD || '';
+    const stripBOM = (s: string) => s.replace(/^\uFEFF/, '');
+    const sipUsername = stripBOM((process.env.SIP_USERNAME || process.env.TELNYX_SIP_USERNAME || '').trim());
+    const sipPassword = stripBOM((process.env.SIP_PASSWORD || process.env.TELNYX_SIP_PASSWORD || '').trim());
 
     try {
       rtpPort = rtpPortManager.allocate();
@@ -617,7 +618,7 @@ export class DrachtioSIPServer {
       // Build SIP URI for Telnyx trunk
       const requestUri = `sip:${toNumber}@${sipTrunkHost}`;
 
-      log(`Initiating outbound call ${callId} to ${requestUri}`);
+      log(`Initiating outbound call ${callId} to ${requestUri} (auth: ${sipUsername ? sipUsername : 'none'})`);
 
       // Create UAC (User Agent Client) to send INVITE
       const uacOptions = {

@@ -32,6 +32,7 @@ import {
 } from '@shared/schema';
 import { requireAuth } from '../auth';
 import { requireFeatureFlag, isFeatureEnabled } from '../feature-flags';
+import { getCanonicalPortalBaseUrl } from '../lib/canonical-portal-url';
 import {
   mercuryEmailService,
   notificationService,
@@ -42,11 +43,7 @@ import {
 import { generateJSON } from '../services/vertex-ai';
 import { smtpOAuthService } from '../services/smtp-oauth-service';
 
-const DEFAULT_PORTAL_BASE_URL =
-  process.env.CLIENT_PORTAL_BASE_URL ||
-  process.env.APP_BASE_URL ||
-  process.env.MSFT_OAUTH_APP_URL ||
-  'https://demandgentic.ai';
+const DEFAULT_PORTAL_BASE_URL = getCanonicalPortalBaseUrl();
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SMTP OAUTH CALLBACK ROUTER (public — no auth, Google/Microsoft redirect here)
@@ -1123,12 +1120,11 @@ mercuryRouter.post('/invitations/send',
   requireFeatureFlag('smtp_email_enabled'),
   async (req: Request, res: Response) => {
     try {
-      const portalBaseUrl = req.body.portalBaseUrl || DEFAULT_PORTAL_BASE_URL;
       const adminUserId = (req as any).user?.userId || 'unknown';
 
       const result = await bulkInvitationService.sendBulkInvitations({
         adminUserId,
-        portalBaseUrl,
+        portalBaseUrl: DEFAULT_PORTAL_BASE_URL,
       });
 
       console.log(`[Mercury/Routes] Bulk invite: queued=${result.totalQueued}, skipped=${result.totalSkipped}, admin=${adminUserId}`);

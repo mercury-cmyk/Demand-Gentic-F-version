@@ -11,6 +11,7 @@ import {
 } from '@shared/schema';
 import { z } from 'zod';
 import { requireAuth } from '../auth';
+import { buildCanonicalPortalUrl } from '../lib/canonical-portal-url';
 import { notificationService as mercuryNotificationService } from '../services/mercury';
 
 const router = Router();
@@ -344,7 +345,7 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
         approvedBy: userId || '',
         approvedQuantity: String(updated.approvedQuantity || updated.requestedQuantity),
         adminNotes: adminNotes || '',
-        portalLink: `${process.env.CLIENT_PORTAL_BASE_URL || 'https://app.demandgentic.ai'}/client-portal/orders/${updated.id}`,
+        portalLink: buildCanonicalPortalUrl(`/client-portal/orders/${updated.id}`),
       },
     }).catch(err => {
       console.error('[CLIENT PORTAL ORDERS] Mercury campaign_order_approved error:', err.message);
@@ -423,7 +424,7 @@ router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
         orderTitle: metadata.title || updated.orderNumber,
         rejectionReason: rejectionReason || 'No reason provided',
         rejectedAt: formatDate(new Date()),
-        portalLink: `${process.env.CLIENT_PORTAL_BASE_URL || 'https://app.demandgentic.ai'}/client-portal/orders/${updated.id}`,
+        portalLink: buildCanonicalPortalUrl(`/client-portal/orders/${updated.id}`),
       },
     }).catch(err => {
       console.error('[CLIENT PORTAL ORDERS] Mercury campaign_order_rejected error:', err.message);

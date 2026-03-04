@@ -6,6 +6,16 @@
 # 3. demandgentic-email (Email Sync & Validation)
 # ============================================
 
+# NOTE: Architecture is now consolidated to a single Cloud Run service.
+# This script remains for emergency rollback/testing only.
+# To force legacy multi-service deployment, set ALLOW_MULTI_SERVICE=true.
+if ($env:ALLOW_MULTI_SERVICE -ne "true") {
+  Write-Host "[deploy-multi-service] Legacy multi-service deploy is disabled by default."
+  Write-Host "[deploy-multi-service] Running unified deployment via deploy-final-v2.ps1..."
+  & "$PSScriptRoot\deploy-final-v2.ps1"
+  exit $LASTEXITCODE
+}
+
 $PROJECT_ID = $env:GCP_PROJECT_ID
 if ([string]::IsNullOrWhiteSpace($PROJECT_ID)) {
   $PROJECT_ID = (gcloud config get-value project 2>$null).Trim()
