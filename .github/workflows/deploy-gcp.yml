@@ -127,7 +127,8 @@ jobs:
             --cpu=4 \
             --timeout=900 \
             --cpu-boost \
-            --concurrency=150
+            --concurrency=150 \
+            --clear-vpc-connector
 
       - name: Deploy Analysis Service (Email + Analysis Jobs)
         run: |
@@ -144,8 +145,9 @@ jobs:
             --cpu=2 \
             --timeout=1800 \
             --cpu-boost \
-            --concurrency=30
-      
+            --concurrency=30 \
+            --clear-vpc-connector
+
       - name: Get service URL
         id: get-url
         run: |
