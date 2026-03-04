@@ -22,7 +22,6 @@ import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
 import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
-import { processSIPPostCallAnalysis, type SIPTranscriptTurn } from './sip-post-call-handler';
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -123,7 +122,13 @@ interface BridgeSession {
   maxReconnectAttempts: number;
   maxDurationTimer: NodeJS.Timeout | null;
   // Transcript capture for post-call analysis
-  transcriptTurns: SIPTranscriptTurn[];
+  transcriptTurns: TranscriptTurn[];
+}
+
+interface TranscriptTurn {
+  speaker: 'agent' | 'contact';
+  text: string;
+  timestamp?: number;
 }
 
 interface CallContext {
@@ -202,6 +207,24 @@ function getQueueStatusFromDisposition(disposition: CanonicalDisposition): 'queu
   }
 }
 
+function buildPlainTranscript(turns: TranscriptTurn[]): string | undefined {
+  if (!Array.isArray(turns) || turns.length === 0) {
+    return undefined;
+  }
+
+  const lines = turns
+    .map((turn) => {
+      const text = String(turn?.text ?? '').trim();
+      if (!text) return null;
+      const speaker = turn.speaker === 'agent' ? 'Agent' : 'Contact';
+      return `${speaker}: ${text}`;
+    })
+    .filter(Boolean) as string[];
+
+  const transcript = lines.join('\n').trim();
+  return transcript || undefined;
+}
+
 /**
  * Build system prompt for Gemini
  */
@@ -245,6 +268,24 @@ ${context.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
 5. Present relevant information
 6. Propose next steps
 7. Close professionally
+
+## VOICEMAIL / IVR FAST-EXIT (CRITICAL)
+If you hear ANY automation/mailbox cue, stop immediately.
+Examples:
+- "leave a message", "after the beep", "after the tone", "voicemail", "mailbox"
+- "the person you are trying to reach is not available"
+- menu prompts: "press 1", "press 2", "to disconnect", "main menu"
+- repeated prompts, beep loops, or long silence loops
+
+Action:
+1. Call \`submit_disposition\` with "voicemail"
+2. Immediately call \`end_call\`
+
+Do NOT leave a message. Do NOT continue script/discovery on automation.
+
+## SILENCE GUARD
+If connected but no meaningful human response after your opening (~8-10 seconds),
+end quickly with "no_answer" (unless voicemail cue exists, then use "voicemail").
 
 ## RECORDING CALL OUTCOME
 
@@ -594,8 +635,23 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     if (session.callContext.callAttemptId && !session.dispositionProcessed) {
       try {
         const canonicalDisposition = mapToCanonicalDisposition(disposition);
-        await processDisposition(session.callContext.callAttemptId, canonicalDisposition, 'sip_gemini');
+        const transcript = buildPlainTranscript(session.transcriptTurns);
+        const dispositionResult = await processDisposition(
+          session.callContext.callAttemptId,
+          canonicalDisposition,
+          'sip_gemini',
+          {
+            transcript,
+            structuredTranscript: { turns: session.transcriptTurns },
+          }
+        );
         session.dispositionProcessed = true;
+
+        console.log(
+          `[RTP Bridge] Disposition processed for ${session.callContext.callAttemptId}` +
+          ` | leadId=${dispositionResult.leadId || 'none'}` +
+          ` | transcriptChars=${transcript?.length || 0}`
+        );
 
         // Update queue item
         if (session.callContext.queueItemId) {
@@ -610,26 +666,7 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
           console.log(`[RTP Bridge] Queue item ${session.callContext.queueItemId} updated to ${queueStatus}`);
         }
 
-        // Trigger post-call analysis with captured transcript
-        console.log(`[RTP Bridge] Checking post-call analysis conditions - callAttemptId: ${session.callContext.callAttemptId}, contactId: ${session.callContext.contactId}, turns: ${session.transcriptTurns.length}`);
-        
-        if (session.callContext.callAttemptId && session.callContext.contactId) {
-          const callDuration = Math.floor((Date.now() - session.metrics.startTime) / 1000);
-          console.log(`[RTP Bridge] ✅ Triggering post-call analysis with ${session.transcriptTurns.length} transcript turns`);
-          
-          processSIPPostCallAnalysis({
-            callAttemptId: session.callContext.callAttemptId,
-            leadId: session.callContext.contactId,
-            campaignId: session.callContext.campaignId || '',
-            contactName: session.callContext.contactName || session.callContext.contactFirstName,
-            disposition: canonicalDisposition,
-            turnTranscript: session.transcriptTurns,
-            callDurationSeconds: callDuration,
-            agentNotes: notes,
-          }).catch((err) => console.error(`[RTP Bridge] Post-call analysis failed:`, err));
-        } else {
-          console.warn(`[RTP Bridge] ⚠️ Post-call analysis SKIPPED - missing required fields`);
-        }
+        console.log(`[RTP Bridge] ✅ Disposition saved; centralized post-call analyzer scheduling delegated to disposition engine`);
 
         response = { success: true, disposition: canonicalDisposition };
       } catch (err) {
@@ -779,7 +816,11 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
     }
 
     try {
-      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback');
+      const transcript = buildPlainTranscript(session.transcriptTurns);
+      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
+        transcript,
+        structuredTranscript: { turns: session.transcriptTurns },
+      });
       session.dispositionProcessed = true;
 
       if (session.callContext.queueItemId) {

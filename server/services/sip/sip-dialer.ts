@@ -169,6 +169,25 @@ ${params.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
 6. Propose next steps
 7. Close professionally
 
+## VOICEMAIL / IVR FAST-EXIT (CRITICAL)
+If you hear ANY automation or mailbox cue, do NOT continue the script.
+Examples:
+- "leave a message", "after the beep", "after the tone", "voicemail", "mailbox"
+- "the person you are trying to reach is not available"
+- menu prompts like "press 1", "press 2", "to disconnect", "main menu"
+- repeated automated prompts or beep/silence loops
+
+When detected, IMMEDIATELY:
+1. Call \`submit_disposition\` with "voicemail"
+2. Call \`end_call\` with reason "voicemail detected"
+
+Never leave a voicemail message. Never continue discovery/pitch on automation.
+
+## SILENCE GUARD
+If call is connected but there is no meaningful human response:
+- after your opening and ~8-10 seconds of silence/looping audio, end quickly
+- use "no_answer" only for pure silence/ringing with no mailbox cue
+
 ## RECORDING CALL OUTCOME
 
 BEFORE ending any call, you MUST call \`submit_disposition\` with the outcome:
@@ -246,6 +265,10 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
           callerNumberId: params.callerNumberId,
           phoneNumber: params.toNumber,
           callAttemptId: params.callAttemptId,
+          // Safety hints for the SIP media bridge runtime
+          voicemailAutoHangup: true,
+          voicemailSilenceGuardMs: 10000,
+          voicemailBeepLoopGuard: true,
         },
         maxDurationSeconds: params.maxCallDurationSeconds,
       });
