@@ -33,7 +33,7 @@ async function main() {
 
     console.log("\nDatabase connection: OK");
   } catch (error) {
-    console.error("Database error:", error.message);
+    console.error("Database error:", error instanceof Error ? error.message : error);
   } finally {
     await pool.end();
   }
