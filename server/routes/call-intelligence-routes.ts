@@ -2173,7 +2173,8 @@ router.get("/transcription-calls", requireAuth, requireRole('admin', 'manager', 
 
 /**
  * POST /api/call-intelligence/transcription-gaps/regenerate
- * Trigger re-transcription for selected calls using Telnyx phone lookup or recording URL
+ * Trigger re-transcription for selected calls.
+ * Priority: GCS presigned URL → GCS buffer download → Telnyx fallback
  */
 router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
@@ -2216,8 +2217,8 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
           const RG = `[Regenerate][${callId}]`;
           console.log(`${RG} call_session found — s3Key=${session.recordingS3Key || 'none'}, recUrl=${(session.recordingUrl || '').slice(0, 80)}, telnyxRecId=${session.telnyxRecordingId || 'none'}, telnyxCallId=${session.telnyxCallId || 'none'}`);
 
-          // ── Strategy A: Presign from recordingS3Key ──
-          if (!audioUrl && strategy !== 'telnyx_phone_lookup' && session.recordingS3Key) {
+          // ── Strategy A: Presign from recordingS3Key (ALWAYS first — GCS is authoritative) ──
+          if (!audioUrl && session.recordingS3Key) {
             try {
               const presigned = await getPresignedDownloadUrl(session.recordingS3Key);
               if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
@@ -2231,8 +2232,8 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             }
           }
 
-          // ── Strategy B: Extract GCS key from recordingUrl and presign ──
-          if (!audioUrl && strategy !== 'telnyx_phone_lookup' && session.recordingUrl) {
+          // ── Strategy B: Extract GCS key from recordingUrl and presign (ALWAYS — GCS is authoritative) ──
+          if (!audioUrl && session.recordingUrl) {
             try {
               const gcsKey = extractGcsKeyFromRecordingUrl(session.recordingUrl);
               if (gcsKey) {
@@ -2249,32 +2250,60 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             }
           }
 
-          // ── Strategy C: Full Telnyx priority chain (gcsOnly: false) ──
-          if (!audioUrl && strategy !== 'recording_url') {
+          // ── Strategy C: Recording link resolver (GCS-only first) ──
+          if (!audioUrl) {
             try {
               const { getPlayableRecordingLink } = await import("../services/recording-link-resolver");
-              const result = await getPlayableRecordingLink(callId, { gcsOnly: false });
+              const result = await getPlayableRecordingLink(callId, { gcsOnly: true });
               if (result?.url && !result.url.startsWith('gcs-internal://') && !result.url.startsWith('gs://')) {
                 audioUrl = result.url;
-                console.log(`${RG} Strategy C (getPlayableRecordingLink gcsOnly=false, source=${result.source}) succeeded`);
-              } else if (result?.url) {
-                console.log(`${RG} Strategy C returned non-usable URL (source=${result.source}): ${result.url.slice(0, 60)}`);
+                console.log(`${RG} Strategy C (getPlayableRecordingLink gcsOnly=true, source=${result.source}) succeeded`);
               } else {
-                console.log(`${RG} Strategy C returned null`);
+                console.log(`${RG} Strategy C (GCS-only): ${result?.url ? 'non-usable URL' : 'null'}`);
               }
             } catch (e: any) {
               console.log(`${RG} Strategy C failed: ${e.message}`);
             }
           }
 
-          // ── Strategy D: Raw HTTPS recordingUrl (e.g. Telnyx download URL) ──
-          if (!audioUrl && session.recordingUrl && /^https?:\/\//i.test(session.recordingUrl) && !session.recordingUrl.startsWith('gcs-internal://')) {
-            audioUrl = session.recordingUrl;
-            console.log(`${RG} Strategy D (raw HTTPS recordingUrl) used`);
+          // ── Strategy D: Direct GCS download → buffer transcription (before Telnyx) ──
+          let audioBuffer: Buffer | null = null;
+          if (!audioUrl) {
+            const gcsKey = session.recordingS3Key || extractGcsKeyFromRecordingUrl(session.recordingUrl);
+            if (gcsKey) {
+              console.log(`${RG} Strategy D: direct GCS download for key ${gcsKey}`);
+              audioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
+              if (audioBuffer && audioBuffer.length > 1000) {
+                console.log(`${RG} Strategy D ✓ downloaded ${audioBuffer.length} bytes`);
+              } else {
+                console.log(`${RG} Strategy D ✗ buffer ${audioBuffer ? audioBuffer.length : 0} bytes`);
+                audioBuffer = null;
+              }
+            }
           }
 
-          // ── Strategy E: Telnyx phone search (±2 hours) ──
-          if (!audioUrl && strategy !== 'recording_url') {
+          // ── Strategy E: Telnyx fallback via recording link resolver (only if no GCS audio) ──
+          if (!audioUrl && !audioBuffer && strategy !== 'recording_url') {
+            try {
+              const { getPlayableRecordingLink } = await import("../services/recording-link-resolver");
+              const result = await getPlayableRecordingLink(callId, { gcsOnly: false });
+              if (result?.url && !result.url.startsWith('gcs-internal://') && !result.url.startsWith('gs://')) {
+                audioUrl = result.url;
+                console.log(`${RG} Strategy E (getPlayableRecordingLink gcsOnly=false, source=${result.source}) succeeded`);
+              }
+            } catch (e: any) {
+              console.log(`${RG} Strategy E failed: ${e.message}`);
+            }
+          }
+
+          // ── Strategy F: Raw HTTPS recordingUrl (e.g. Telnyx download URL) ──
+          if (!audioUrl && !audioBuffer && session.recordingUrl && /^https?:\/\//i.test(session.recordingUrl) && !session.recordingUrl.startsWith('gcs-internal://')) {
+            audioUrl = session.recordingUrl;
+            console.log(`${RG} Strategy F (raw HTTPS recordingUrl) used`);
+          }
+
+          // ── Strategy G: Telnyx phone search (±2 hours — last resort) ──
+          if (!audioUrl && !audioBuffer && strategy !== 'recording_url') {
             const phoneNumber = session.toNumberE164 || session.fromNumber;
             if (phoneNumber && session.startedAt) {
               try {
@@ -2284,12 +2313,12 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
                 const searchEnd = new Date(session.startedAt);
                 searchEnd.setMinutes(searchEnd.getMinutes() + 120);
 
-                console.log(`${RG} Strategy E: searching Telnyx by phone ${phoneNumber} (±2h window)`);
+                console.log(`${RG} Strategy G: searching Telnyx by phone ${phoneNumber} (±2h window)`);
                 const recordings = await searchRecordingsByDialedNumber(phoneNumber, searchStart, searchEnd);
                 const completed = recordings.find(r => r.status === 'completed');
                 if (completed) {
                   audioUrl = completed.download_urls?.mp3 || completed.download_urls?.wav || null;
-                  console.log(`${RG} Strategy E found recording: ${audioUrl ? 'yes' : 'no'}`);
+                  console.log(`${RG} Strategy G found recording: ${audioUrl ? 'yes' : 'no'}`);
                   // Backfill telnyx IDs
                   if (audioUrl && (completed.id || completed.call_control_id)) {
                     await db.update(callSessions).set({
@@ -2299,41 +2328,23 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
                     } as any).where(eq(callSessions.id, callId));
                   }
                 } else {
-                  console.log(`${RG} Strategy E: no completed recordings found (${recordings.length} total)`);
+                  console.log(`${RG} Strategy G: no completed recordings found (${recordings.length} total)`);
                 }
               } catch (e: any) {
-                console.log(`${RG} Strategy E failed: ${e.message}`);
+                console.log(`${RG} Strategy G failed: ${e.message}`);
               }
-            }
-          }
-
-          // ── Strategy F: Direct GCS download → buffer transcription ──
-          let audioBuffer: Buffer | null = null;
-          if (!audioUrl) {
-            const gcsKey = session.recordingS3Key || extractGcsKeyFromRecordingUrl(session.recordingUrl);
-            if (gcsKey) {
-              console.log(`${RG} Strategy F: direct GCS download for key ${gcsKey}`);
-              audioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
-              if (audioBuffer && audioBuffer.length > 1000) {
-                console.log(`${RG} Strategy F ✓ downloaded ${audioBuffer.length} bytes`);
-              } else {
-                console.log(`${RG} Strategy F ✗ buffer ${audioBuffer ? audioBuffer.length : 0} bytes`);
-                audioBuffer = null;
-              }
-            } else {
-              console.log(`${RG} Strategy F ✗ no GCS key available`);
             }
           }
 
           // ── Final guard ──
           if (audioUrl && (audioUrl.startsWith('gcs-internal://') || audioUrl.startsWith('gs://'))) {
-            console.log(`${RG} GUARD: rejecting ${audioUrl.slice(0, 60)} — extracting key for Strategy F`);
+            console.log(`${RG} GUARD: rejecting ${audioUrl.slice(0, 60)} — extracting key for GCS buffer`);
             if (!audioBuffer) {
               const guardKey = extractGcsKeyFromRecordingUrl(audioUrl);
               if (guardKey) {
                 audioBuffer = await downloadGcsAudioAsBuffer(guardKey);
                 if (audioBuffer && audioBuffer.length > 1000) {
-                  console.log(`${RG} GUARD→F ✓ downloaded ${audioBuffer.length} bytes`);
+                  console.log(`${RG} GUARD→GCS ✓ downloaded ${audioBuffer.length} bytes`);
                 } else {
                   audioBuffer = null;
                 }
@@ -2386,7 +2397,7 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             }
           } else {
             results.failed++;
-            results.errors.push(`${callId}: No recording found (all strategies A-F exhausted)`);
+            results.errors.push(`${callId}: No recording found (all strategies A-G exhausted)`);
             console.log(`${RG} ❌ All strategies exhausted — no audio source`);
           }
           results.queued++;
@@ -2410,24 +2421,71 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
           const RG = `[Regenerate][${callId}]`;
           console.log(`${RG} dialer_call_attempt found — recUrl=${(attempt.recordingUrl || '').slice(0, 80)}, telnyxCallId=${attempt.telnyxCallId || 'none'}, phone=${attempt.phoneDialed || 'none'}`);
 
-          // Sanitize: if recordingUrl is gcs-internal:// or gs://, try direct GCS download
-          let usableRecordingUrl = attempt.recordingUrl ?? null;
+          let usableRecordingUrl: string | null = null;
           let dialerAudioBuffer: Buffer | null = null;
-          if (usableRecordingUrl && (usableRecordingUrl.startsWith('gcs-internal://') || usableRecordingUrl.startsWith('gs://'))) {
-            const gcsKey = extractGcsKeyFromRecordingUrl(usableRecordingUrl);
+
+          // ── GCS Priority: Resolve S3 key from linked call_session ──
+          let gcsKeyFromSession: string | null = null;
+          try {
+            const [linkedSession] = await db
+              .select({ recordingS3Key: callSessions.recordingS3Key, recordingUrl: callSessions.recordingUrl })
+              .from(callSessions)
+              .where(eq(callSessions.callAttemptId, callId))
+              .limit(1);
+            if (linkedSession?.recordingS3Key) {
+              gcsKeyFromSession = linkedSession.recordingS3Key;
+            } else if (linkedSession?.recordingUrl) {
+              gcsKeyFromSession = extractGcsKeyFromRecordingUrl(linkedSession.recordingUrl);
+            }
+          } catch { /* no linked session */ }
+
+          // ── Strategy 1: Presign GCS key from linked session ──
+          if (gcsKeyFromSession) {
+            try {
+              const presigned = await getPresignedDownloadUrl(gcsKeyFromSession);
+              if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
+                usableRecordingUrl = presigned;
+                console.log(`${RG} Dialer Strategy 1 (presign session GCS key) succeeded`);
+              }
+            } catch (e: any) {
+              console.log(`${RG} Dialer Strategy 1 failed: ${e.message}`);
+            }
+          }
+
+          // ── Strategy 2: Extract GCS key from attempt's own recordingUrl ──
+          if (!usableRecordingUrl) {
+            const attemptRecUrl = attempt.recordingUrl ?? null;
+            if (attemptRecUrl) {
+              const gcsKey = extractGcsKeyFromRecordingUrl(attemptRecUrl);
+              if (gcsKey) {
+                try {
+                  const presigned = await getPresignedDownloadUrl(gcsKey);
+                  if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
+                    usableRecordingUrl = presigned;
+                    console.log(`${RG} Dialer Strategy 2 (presign attempt GCS key) succeeded`);
+                  }
+                } catch (e: any) {
+                  console.log(`${RG} Dialer Strategy 2 presign failed: ${e.message}`);
+                }
+              }
+            }
+          }
+
+          // ── Strategy 3: Direct GCS buffer download (before Telnyx) ──
+          if (!usableRecordingUrl) {
+            const gcsKey = gcsKeyFromSession || extractGcsKeyFromRecordingUrl(attempt.recordingUrl);
             if (gcsKey) {
-              console.log(`${RG} Dialer: direct GCS download for ${gcsKey}`);
+              console.log(`${RG} Dialer Strategy 3: direct GCS download for ${gcsKey}`);
               dialerAudioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
               if (dialerAudioBuffer && dialerAudioBuffer.length > 1000) {
-                console.log(`${RG} Dialer GCS download ✓ ${dialerAudioBuffer.length} bytes`);
+                console.log(`${RG} Dialer Strategy 3 ✓ ${dialerAudioBuffer.length} bytes`);
               } else {
                 dialerAudioBuffer = null;
               }
             }
-            usableRecordingUrl = null;
           }
 
-          // For phone lookup strategy, try finding the recording first (±2h window)
+          // ── Strategy 4: Telnyx phone search (±2h window — only if no GCS audio) ──
           if (!usableRecordingUrl && !dialerAudioBuffer && (strategy === 'telnyx_phone_lookup' || strategy === 'auto')) {
             if (attempt.phoneDialed && attempt.callStartedAt) {
               try {

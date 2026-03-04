@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: RegenerationJobConfig = {
   maxRetries: 3,
   batchSize: 50,
   batchDelayMs: 2000,
-  strategy: 'telnyx_phone_lookup',
+  strategy: 'auto',
   apiEndpoint: process.env.BASE_URL || 'https://demandgentic.ai',
   verbose: true,
 };
@@ -157,7 +157,7 @@ async function processPendingJob(): Promise<boolean> {
     // Mark as in-progress
     await db.execute(
       sql`UPDATE transcription_regeneration_jobs
-       SET status = 'in_progress', attempts = attempts + 1, updated_at = NOW()
+       SET status = 'in_progress', attempts = attempts + 1
        WHERE id = ${job.id}`
     );
 
@@ -185,7 +185,7 @@ async function processPendingJob(): Promise<boolean> {
       if (batchCallIds.length > 0) {
         const idList = sql.join(batchCallIds.map((id: string) => sql`${id}`), sql`, `);
         await db.execute(
-          sql`UPDATE transcription_regeneration_jobs SET status = 'submitted', updated_at = NOW() WHERE call_id IN (${idList})`
+          sql`UPDATE transcription_regeneration_jobs SET status = 'submitted' WHERE call_id IN (${idList})`
         );
       }
 
@@ -198,14 +198,14 @@ async function processPendingJob(): Promise<boolean> {
       if (newAttempts >= config.maxRetries) {
         await db.execute(
           sql`UPDATE transcription_regeneration_jobs
-           SET status = 'failed', attempts = ${newAttempts}, error = ${submitResult.error || 'Submission failed'}, updated_at = NOW()
+           SET status = 'failed', attempts = ${newAttempts}, error = ${submitResult.error || 'Submission failed'}, completed_at = NOW()
            WHERE id = ${job.id}`
         );
         ERR(`Job ${job.id} failed after ${newAttempts} attempts`);
       } else {
         await db.execute(
           sql`UPDATE transcription_regeneration_jobs
-           SET status = 'pending', attempts = ${newAttempts}, updated_at = NOW()
+           SET status = 'pending', attempts = ${newAttempts}
            WHERE id = ${job.id}`
         );
         VERBOSE(`Job ${job.id} reset to pending for retry (attempt ${newAttempts}/${config.maxRetries})`);
