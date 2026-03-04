@@ -417,7 +417,7 @@ router.get('/:agentType/recommendations', (req: Request, res: Response) => {
     const minPriority = req.query.minPriority ? parseInt(req.query.minPriority as string) : undefined;
     const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
 
-    const recommendations = learningPipeline.getRecommendations(agentType, {
+    const recommendations = unifiedAgentRegistry.getAgentRecommendations(agentType, {
       status: status as any,
       category: category as any,
       minPriority,

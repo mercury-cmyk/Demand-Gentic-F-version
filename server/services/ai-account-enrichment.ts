@@ -6,8 +6,8 @@ import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { withAiConcurrency } from "../lib/ai-concurrency";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
   timeout: 120_000,
   maxRetries: 2,
 });
@@ -82,7 +82,7 @@ If information is not available, use null for that field. Be conservative with c
     );
 
     const completion = await withAiConcurrency(() => openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
+      model: 'deepseek-chat',
       messages: [
         {
           role: 'system',
@@ -304,7 +304,7 @@ Return JSON format:
     );
 
     const completion = await withAiConcurrency(() => openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'deepseek-chat',
       messages: [
         {
           role: 'system',

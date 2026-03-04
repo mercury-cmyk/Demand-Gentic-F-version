@@ -1,10 +1,10 @@
 /**
  * AI Project Orchestrator
  * Converts natural language input into structured project and campaign data
- * Uses GPT-4o for intelligent extraction with confidence scoring
+ * Uses DeepSeek for intelligent extraction with confidence scoring
  */
 
-// OpenAI is loaded lazily to allow running without AI credentials
+import OpenAI from 'openai';
 import { z } from 'zod';
 
 // Zod schema for AI extraction validation
@@ -50,8 +50,8 @@ export async function extractProjectFromNaturalLanguage(
   const startTime = Date.now();
   
   try {
-    const hasOpenAI = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
-    if (!hasOpenAI) {
+    const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
+    if (!hasDeepSeek) {
       return {
         extractedData: {},
         confidenceScore: 0,
@@ -59,25 +59,33 @@ export async function extractProjectFromNaturalLanguage(
         modelUsed: 'disabled',
         processingTime: Date.now() - startTime,
         validationErrors: [],
-        validationWarnings: ['OpenAI not configured: set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY']
+        validationWarnings: ['DeepSeek not configured: set DEEPSEEK_API_KEY']
       };
     }
-    const openai = await import('../lib/' + 'openai').then(m => m.default);
-    // GPT-4o with structured outputs using function calling
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const deepseek = new OpenAI({
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+      timeout: 120_000,
+      maxRetries: 2,
+    });
+    const completion = await deepseek.chat.completions.create({
+      model: 'deepseek-chat',
       messages: [
         {
           role: 'system',
           content: `You are an expert B2B CRM assistant that extracts structured project and campaign data from natural language descriptions.
+Always respond with valid JSON only. No markdown, no code fences, no explanation outside the JSON.
 
-Your task is to analyze the user's request and extract:
-1. **Project Details**: Name, client, budget, timeline
-2. **Target Audience**: Job titles, industries, company size, geography
-3. **Channels**: Email, call, verification campaigns
-4. **Commercials**: Volume, cost per lead, total budget
-5. **Delivery**: How leads should be delivered (API, Excel, Dashboard, SFTP, Email)
-6. **Special Requirements**: Any compliance, timeline, or custom needs
+Your task is to analyze the user's request and extract a JSON object with these fields:
+- projectName (string): Name or title of the project
+- clientName (string): Client or company name
+- targetAudience (object): { jobTitles: string[], industries: string[], companySize: { min: number, max: number }, geography: string[] }
+- channels (string[]): Campaign channels, valid values: "email", "call", "verification", "combo"
+- volume (number): Target number of leads
+- costPerLead (number): Cost per lead in dollars
+- timeline (object): { start: string (ISO date), end: string (ISO date) }
+- deliveryMethods (string[]): Valid values: "dashboard", "excel", "api", "email", "sftp"
+- specialRequirements (string[]): Any special requirements or custom needs
 
 Be conservative in your extraction:
 - Only extract information that is explicitly stated or can be reasonably inferred
@@ -85,109 +93,27 @@ Be conservative in your extraction:
 - For geography, use standard country/region names
 - For job titles, use standard business titles (CFO, CEO, Marketing Director, etc.)
 - For company size, use employee count ranges
-
-If information is unclear or missing, leave those fields empty rather than guessing.`,
+- If information is unclear or missing, omit those fields rather than guessing.`,
         },
         {
           role: 'user',
           content: prompt,
         },
       ],
-      functions: [
-        {
-          name: 'extract_project_data',
-          description: 'Extract structured project and campaign data from natural language description',
-          parameters: {
-            type: 'object',
-            properties: {
-              projectName: {
-                type: 'string',
-                description: 'Name or title of the project',
-              },
-              clientName: {
-                type: 'string',
-                description: 'Client or company name',
-              },
-              targetAudience: {
-                type: 'object',
-                properties: {
-                  jobTitles: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Target job titles (e.g., CFO, CEO, Marketing Director)',
-                  },
-                  industries: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Target industries or sectors',
-                  },
-                  companySize: {
-                    type: 'object',
-                    properties: {
-                      min: { type: 'number', description: 'Minimum employee count' },
-                      max: { type: 'number', description: 'Maximum employee count' },
-                    },
-                  },
-                  geography: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Target countries or regions',
-                  },
-                },
-              },
-              channels: {
-                type: 'array',
-                items: {
-                  type: 'string',
-                  enum: ['email', 'call', 'verification', 'combo'],
-                },
-                description: 'Campaign channels to use',
-              },
-              volume: {
-                type: 'number',
-                description: 'Target number of leads',
-              },
-              costPerLead: {
-                type: 'number',
-                description: 'Cost per lead in dollars',
-              },
-              timeline: {
-                type: 'object',
-                properties: {
-                  start: { type: 'string', description: 'Start date (ISO format or relative like "next week")' },
-                  end: { type: 'string', description: 'End date (ISO format or relative)' },
-                },
-              },
-              deliveryMethods: {
-                type: 'array',
-                items: {
-                  type: 'string',
-                  enum: ['dashboard', 'excel', 'api', 'email', 'sftp'],
-                },
-                description: 'How leads should be delivered',
-              },
-              specialRequirements: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Any special requirements, compliance needs, or custom requests',
-              },
-            },
-          },
-        },
-      ],
-      function_call: { name: 'extract_project_data' },
-      temperature: 0.1, // Low temperature for consistent extraction
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
     });
 
     const processingTime = Date.now() - startTime;
 
-    // Parse function call response
-    const functionCall = completion.choices[0]?.message?.function_call;
-    if (!functionCall || functionCall.name !== 'extract_project_data') {
-      throw new Error('AI failed to call extraction function');
-    }
+    const responseText = completion.choices[0]?.message?.content || '{}';
+    let cleaned = responseText.trim();
+    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
+    if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
+    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+    cleaned = cleaned.trim();
 
-    const rawExtractedData = JSON.parse(functionCall.arguments);
+    const rawExtractedData = JSON.parse(cleaned);
     
     // Validate with Zod
     let extractedData = extractedProjectDataSchema.parse(rawExtractedData);
@@ -218,7 +144,7 @@ If information is unclear or missing, leave those fields empty rather than guess
       extractedData,
       confidenceScore,
       confidenceLevel,
-      modelUsed: 'gpt-4o',
+      modelUsed: 'deepseek-chat',
       processingTime,
       validationErrors,
       validationWarnings,

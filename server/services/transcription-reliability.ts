@@ -25,6 +25,11 @@ const TRANSCRIPTION_CHECK_DELAY_MS = 60000; // Wait 60s after call ends before c
 const MIN_CALL_DURATION_FOR_TRANSCRIPT = 5; // Minimum seconds for a call to have transcript
 const TRANSCRIPT_MIN_LENGTH = 20; // Minimum characters for a valid transcript
 
+// Long-call thresholds — calls above these durations get extra protection
+const LONG_CALL_DURATION_SEC = 25; // Calls >25s are "long" and must never be missed
+const LONG_CALL_UPLOAD_WAIT_MS = 120_000; // Wait up to 2 min for recording upload on long calls
+const LONG_CALL_UPLOAD_POLL_MS = 5_000; // Poll every 5s during upload wait
+
 interface TranscriptionStatus {
   hasTranscript: boolean;
   transcriptSource: 'gemini_live' | 'fallback_stt' | 'none';
@@ -341,6 +346,7 @@ export async function processMissingTranscripts(): Promise<{
 
     let skippedTooShort = 0;
     let skippedUploading = 0;
+    let skippedTooRecent = 0;
 
     for (const call of callsWithoutTranscripts) {
       // Skip calls whose recording is still being uploaded
@@ -363,11 +369,26 @@ export async function processMissingTranscripts(): Promise<{
       }
 
       // Calculate call duration
+      let callDurationSec = 0;
       if (call.callStartedAt && call.callEndedAt) {
-        const durationSec = (new Date(call.callEndedAt).getTime() - new Date(call.callStartedAt).getTime()) / 1000;
+        callDurationSec = (new Date(call.callEndedAt).getTime() - new Date(call.callStartedAt).getTime()) / 1000;
 
-        if (durationSec < MIN_CALL_DURATION_FOR_TRANSCRIPT) {
+        if (callDurationSec < MIN_CALL_DURATION_FOR_TRANSCRIPT) {
           skippedTooShort++;
+          continue;
+        }
+      }
+
+      // Duration-aware delay: long calls need more time for recording upload
+      // Short calls (<30s): 60s delay (default)
+      // Medium calls (30-120s): 3 min delay
+      // Long calls (>120s): 5 min delay
+      if (call.callEndedAt) {
+        const minutesSinceEnd = (Date.now() - new Date(call.callEndedAt).getTime()) / 60_000;
+        const requiredDelayMin = callDurationSec > 120 ? 5 : callDurationSec > 30 ? 3 : 1;
+
+        if (minutesSinceEnd < requiredDelayMin) {
+          skippedTooRecent++;
           continue;
         }
       }
@@ -393,6 +414,9 @@ export async function processMissingTranscripts(): Promise<{
     }
     if (skippedTooShort > 0) {
       console.log(`${LOG_PREFIX} Skipped ${skippedTooShort} calls shorter than ${MIN_CALL_DURATION_FOR_TRANSCRIPT}s`);
+    }
+    if (skippedTooRecent > 0) {
+      console.log(`${LOG_PREFIX} Skipped ${skippedTooRecent} long calls that ended too recently (waiting for upload)`);
     }
     console.log(`${LOG_PREFIX} Completed: ${stats.processed} processed, ${stats.succeeded} succeeded, ${stats.failed} failed`);
     return stats;
@@ -566,6 +590,60 @@ async function logTranscriptionActivity(
 }
 
 /**
+ * For long calls (>25s), wait for recording upload to finish before attempting fallback.
+ * Returns the S3 key (and therefore a usable presigned URL) once the recording is stored,
+ * or null if it times out or no linked session exists.
+ */
+async function waitForRecordingUpload(callAttemptId: string, callDurationSec: number): Promise<string | null> {
+  if (callDurationSec < LONG_CALL_DURATION_SEC) return null; // only for long calls
+
+  try {
+    const [attempt] = await db
+      .select({ callSessionId: dialerCallAttempts.callSessionId })
+      .from(dialerCallAttempts)
+      .where(eq(dialerCallAttempts.id, callAttemptId))
+      .limit(1);
+
+    if (!attempt?.callSessionId) return null;
+
+    const deadline = Date.now() + LONG_CALL_UPLOAD_WAIT_MS;
+    let polls = 0;
+
+    while (Date.now() < deadline) {
+      const [session] = await db
+        .select({
+          recordingStatus: callSessions.recordingStatus,
+          recordingS3Key: callSessions.recordingS3Key,
+        })
+        .from(callSessions)
+        .where(eq(callSessions.id, attempt.callSessionId))
+        .limit(1);
+
+      if (!session) break;
+
+      if (session.recordingStatus === 'stored' && session.recordingS3Key) {
+        console.log(`${LOG_PREFIX} ✅ Long-call recording ready for ${callAttemptId} after ${polls * (LONG_CALL_UPLOAD_POLL_MS / 1000)}s`);
+        return session.recordingS3Key;
+      }
+
+      if (session.recordingStatus === 'failed') {
+        console.warn(`${LOG_PREFIX} Recording failed for long call ${callAttemptId} — will still attempt Telnyx fallback`);
+        break;
+      }
+
+      polls++;
+      await new Promise(resolve => setTimeout(resolve, LONG_CALL_UPLOAD_POLL_MS));
+    }
+
+    console.warn(`${LOG_PREFIX} ⏰ Timed out waiting for recording upload on long call ${callAttemptId}`);
+  } catch (err: any) {
+    console.warn(`${LOG_PREFIX} Error waiting for recording upload:`, err?.message);
+  }
+
+  return null;
+}
+
+/**
  * Ensure transcript exists for a call
  * Call this at the end of each call as a safety net
  */
@@ -603,14 +681,30 @@ export async function ensureTranscript(
     .select({
       recordingUrl: dialerCallAttempts.recordingUrl,
       telnyxCallId: dialerCallAttempts.telnyxCallId,
+      callStartedAt: dialerCallAttempts.callStartedAt,
+      callEndedAt: dialerCallAttempts.callEndedAt,
+      callDurationSeconds: dialerCallAttempts.callDurationSeconds,
     })
     .from(dialerCallAttempts)
     .where(eq(dialerCallAttempts.id, callAttemptId))
     .limit(1);
 
-  if (attempt?.recordingUrl || attempt?.telnyxCallId) {
-    console.log(`${LOG_PREFIX} No real-time transcript - attempting fallback from recording`);
-    return await attemptFallbackTranscription(callAttemptId, attempt.recordingUrl ?? null, attempt.telnyxCallId);
+  if (attempt) {
+    // For long calls, wait for recording upload to finish before attempting fallback
+    const callDuration = attempt.callDurationSeconds
+      || (attempt.callStartedAt && attempt.callEndedAt
+        ? Math.round((new Date(attempt.callEndedAt).getTime() - new Date(attempt.callStartedAt).getTime()) / 1000)
+        : 0);
+
+    if (callDuration >= LONG_CALL_DURATION_SEC) {
+      console.log(`${LOG_PREFIX} 🔒 Long call detected (${callDuration}s) — waiting for recording upload before fallback`);
+      await waitForRecordingUpload(callAttemptId, callDuration);
+    }
+
+    if (attempt.recordingUrl || attempt.telnyxCallId) {
+      console.log(`${LOG_PREFIX} No real-time transcript - attempting fallback from recording`);
+      return await attemptFallbackTranscription(callAttemptId, attempt.recordingUrl ?? null, attempt.telnyxCallId);
+    }
   }
 
   console.warn(`${LOG_PREFIX} No transcript and no recording URL available`);
@@ -640,10 +734,170 @@ export async function markForBackgroundTranscription(callAttemptId: string): Pro
   }
 }
 
+/**
+ * Priority cron job: Aggressively find and transcribe long calls (>25s) missing transcripts.
+ *
+ * This targets the most valuable missing transcripts — real conversations that should
+ * never be lost. Uses multiple strategies:
+ * 1. Recording URL from S3/GCS (if available)
+ * 2. Telnyx phone lookup (searches by dialed number + time window)
+ * 3. Telnyx call control ID lookup
+ *
+ * Run this on a schedule (e.g., every 10 minutes) to catch stragglers.
+ */
+export async function processLongCallMissingTranscripts(): Promise<{
+  processed: number;
+  succeeded: number;
+  failed: number;
+  alreadyMarked: number;
+}> {
+  console.log(`${LOG_PREFIX} 🔒 Starting priority long-call transcript recovery (>=${LONG_CALL_DURATION_SEC}s)...`);
+
+  const stats = { processed: 0, succeeded: 0, failed: 0, alreadyMarked: 0 };
+
+  try {
+    // Find long calls from last 7 days without valid transcripts
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // Allow enough time for recording upload (5 min for long calls)
+    const uploadGracePeriod = new Date(Date.now() - 5 * 60 * 1000);
+
+    const longCallsMissingTranscripts = await db
+      .select({
+        id: dialerCallAttempts.id,
+        recordingUrl: dialerCallAttempts.recordingUrl,
+        telnyxCallId: dialerCallAttempts.telnyxCallId,
+        callStartedAt: dialerCallAttempts.callStartedAt,
+        callEndedAt: dialerCallAttempts.callEndedAt,
+        callDurationSeconds: dialerCallAttempts.callDurationSeconds,
+        fullTranscript: dialerCallAttempts.fullTranscript,
+        phoneDialed: dialerCallAttempts.phoneDialed,
+        callSessionId: dialerCallAttempts.callSessionId,
+      })
+      .from(dialerCallAttempts)
+      .where(
+        and(
+          // Missing or system-marked transcript (not a real conversation)
+          or(
+            isNull(dialerCallAttempts.fullTranscript),
+            sql`${dialerCallAttempts.fullTranscript} = '[PENDING_FALLBACK_TRANSCRIPTION]'`,
+            sql`${dialerCallAttempts.fullTranscript} LIKE '[SYSTEM:%'`
+          ),
+          // Call ended before grace period
+          isNotNull(dialerCallAttempts.callEndedAt),
+          lt(dialerCallAttempts.callEndedAt, uploadGracePeriod),
+          // Recent enough to still find recordings
+          gt(dialerCallAttempts.callEndedAt, sevenDaysAgo),
+          // Long call (>25s) — the valuable ones we must not lose
+          or(
+            gt(dialerCallAttempts.callDurationSeconds, LONG_CALL_DURATION_SEC),
+            // Fallback: compute from timestamps if callDurationSeconds is null
+            sql`EXTRACT(EPOCH FROM (${dialerCallAttempts.callEndedAt} - ${dialerCallAttempts.callStartedAt})) > ${LONG_CALL_DURATION_SEC}`
+          )
+        )
+      )
+      .orderBy(sql`${dialerCallAttempts.callEndedAt} DESC`)
+      .limit(100); // Process up to 100 long calls per run
+
+    console.log(`${LOG_PREFIX} 🔒 Found ${longCallsMissingTranscripts.length} long calls without transcripts`);
+
+    for (const call of longCallsMissingTranscripts) {
+      // Skip calls already permanently marked as system failures (404/expired/etc)
+      // EXCEPT re-process [SYSTEM: No recording available] — those might now have recordings
+      const transcript = call.fullTranscript || '';
+      if (transcript.startsWith('[SYSTEM:') && !transcript.includes('No recording available')) {
+        stats.alreadyMarked++;
+        continue;
+      }
+
+      stats.processed++;
+
+      try {
+        // Strategy 1: Try existing recording URL or Telnyx call ID
+        let result = await attemptFallbackTranscription(
+          call.id,
+          call.recordingUrl ?? null,
+          call.telnyxCallId
+        );
+
+        // Strategy 2: If that failed and we have a call session, try S3 key
+        if (!result.success && call.callSessionId) {
+          try {
+            const [session] = await db
+              .select({
+                recordingS3Key: callSessions.recordingS3Key,
+                recordingUrl: callSessions.recordingUrl,
+              })
+              .from(callSessions)
+              .where(eq(callSessions.id, call.callSessionId))
+              .limit(1);
+
+            if (session?.recordingS3Key || session?.recordingUrl) {
+              const urlToTry = session.recordingUrl || call.recordingUrl;
+              if (urlToTry) {
+                result = await attemptFallbackTranscription(call.id, urlToTry, call.telnyxCallId);
+              }
+            }
+          } catch {
+            // Non-critical — continue to next strategy
+          }
+        }
+
+        // Strategy 3: If still failed and we have phone number, try Telnyx phone lookup
+        if (!result.success && call.phoneDialed && call.callStartedAt) {
+          try {
+            const { searchRecordingsByDialedNumber } = await import('./telnyx-recordings');
+            const searchStart = new Date(call.callStartedAt);
+            searchStart.setMinutes(searchStart.getMinutes() - 30);
+            const searchEnd = new Date(call.callEndedAt || call.callStartedAt);
+            searchEnd.setMinutes(searchEnd.getMinutes() + 30);
+
+            const recordings = await searchRecordingsByDialedNumber(
+              call.phoneDialed,
+              searchStart,
+              searchEnd
+            );
+
+            const completed = recordings.find(r => r.status === 'completed');
+            if (completed) {
+              const downloadUrl = completed.download_urls?.mp3 || completed.download_urls?.wav;
+              if (downloadUrl) {
+                console.log(`${LOG_PREFIX} 🔒 Phone lookup found recording for ${call.id}`);
+                result = await attemptFallbackTranscription(call.id, downloadUrl, completed.call_control_id);
+              }
+            }
+          } catch (err: any) {
+            console.warn(`${LOG_PREFIX} Phone lookup failed for ${call.id}:`, err?.message);
+          }
+        }
+
+        if (result.success) {
+          stats.succeeded++;
+          console.log(`${LOG_PREFIX} 🔒 ✅ Long call ${call.id} transcribed successfully`);
+        } else {
+          stats.failed++;
+        }
+      } catch (err: any) {
+        console.error(`${LOG_PREFIX} Error processing long call ${call.id}:`, err?.message);
+        stats.failed++;
+      }
+
+      // Delay between calls to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    console.log(`${LOG_PREFIX} 🔒 Long-call recovery complete: ${stats.processed} processed, ${stats.succeeded} succeeded, ${stats.failed} failed, ${stats.alreadyMarked} already marked`);
+    return stats;
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} Error in long-call recovery:`, error);
+    return stats;
+  }
+}
+
 export default {
   checkTranscriptStatus,
   attemptFallbackTranscription,
   processMissingTranscripts,
+  processLongCallMissingTranscripts,
   verifyTranscriptQuality,
   getTranscriptionStats,
   ensureTranscript,

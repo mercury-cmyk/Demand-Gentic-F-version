@@ -248,6 +248,7 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
         temperature: 0.3,
         maxTokens: 2000,
         label: "qa-analyzer",
+        preferredProvider: "deepseek",
       });
     } catch (analysisError: any) {
       console.error('[AI-QA] Deep Think analysis failed:', analysisError.message);

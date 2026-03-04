@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
+import { TranscriptionWorkerControl } from './transcription-worker-control';
 import {
   Table,
   TableBody,
@@ -98,6 +99,7 @@ interface TranscriptionGap {
 export default function TranscriptionHealthView({ campaigns }: { campaigns: Array<{ id: string; name: string }> }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const campaignNameById = new Map(campaigns.map((c) => [c.id, c.name]));
   const [selectedGapIds, setSelectedGapIds] = useState<Set<string>>(new Set());
   const [gapCampaignFilter, setGapCampaignFilter] = useState('all');
   const [gapTypeFilter, setGapTypeFilter] = useState('all');
@@ -110,8 +112,46 @@ export default function TranscriptionHealthView({ campaigns }: { campaigns: Arra
   }>({
     queryKey: ['/api/call-intelligence/transcription-health'],
     queryFn: async () => {
-      const response = await apiRequest('GET', '/api/call-intelligence/transcription-health?days=14&minDuration=30');
-      return response.json();
+      try {
+        const response = await apiRequest('GET', '/api/call-intelligence/transcription-health?days=14&minDuration=30');
+        return response.json();
+      } catch (error) {
+        const isNotFound = error instanceof Error && error.message.startsWith('404:');
+        if (!isNotFound) throw error;
+
+        const legacyResponse = await apiRequest('GET', '/api/transcription/health');
+        const legacy = await legacyResponse.json();
+        const totalRecordings = Number(legacy?.last24Hours?.callsWithRecording || 0);
+        const withTranscript = Number(legacy?.last24Hours?.callsWithTranscript || 0);
+        const missingTranscript = Math.max(0, totalRecordings - withTranscript);
+        const coveragePercent = totalRecordings > 0 ? Math.round((withTranscript / totalRecordings) * 100) : 0;
+
+        return {
+          success: true,
+          data: {
+            daily: [],
+            summary: {
+              last7Days: {
+                totalRecordings,
+                withTranscript,
+                missingTranscript,
+                withAnalysis: 0,
+                missingAnalysis: 0,
+                coveragePercent,
+              },
+              last14Days: {
+                totalRecordings,
+                withTranscript,
+                missingTranscript,
+                withAnalysis: 0,
+                missingAnalysis: 0,
+                coveragePercent,
+              },
+            },
+            minDuration: 30,
+          },
+        };
+      }
     },
     refetchInterval: 60000,
   });
@@ -126,10 +166,63 @@ export default function TranscriptionHealthView({ campaigns }: { campaigns: Arra
   }>({
     queryKey: ['/api/call-intelligence/transcription-gaps', gapCampaignFilter, gapTypeFilter],
     queryFn: async () => {
-      const params = new URLSearchParams({ limit: '50', gapType: gapTypeFilter });
-      if (gapCampaignFilter !== 'all') params.set('campaignId', gapCampaignFilter);
-      const response = await apiRequest('GET', `/api/call-intelligence/transcription-gaps?${params}`);
-      return response.json();
+      try {
+        const params = new URLSearchParams({ limit: '50', gapType: gapTypeFilter });
+        if (gapCampaignFilter !== 'all') params.set('campaignId', gapCampaignFilter);
+        const response = await apiRequest('GET', `/api/call-intelligence/transcription-gaps?${params}`);
+        return response.json();
+      } catch (error) {
+        const isNotFound = error instanceof Error && error.message.startsWith('404:');
+        if (!isNotFound) throw error;
+
+        if (gapTypeFilter === 'analysis') {
+          return {
+            success: true,
+            data: {
+              gaps: [],
+              pagination: { page: 1, limit: 50, total: 0, totalPages: 0 },
+            },
+          };
+        }
+
+        const legacyResponse = await apiRequest('GET', '/api/transcription/calls-without-transcripts?limit=50');
+        const legacy = await legacyResponse.json();
+        const legacyCalls = Array.isArray(legacy?.calls) ? legacy.calls : [];
+
+        const mapped: TranscriptionGap[] = legacyCalls
+          .map((call: any) => ({
+            id: String(call.id),
+            source_table: 'dialer_call_attempts',
+            phone_number: call.phoneDialed || '',
+            from_number: '',
+            campaign_id: call.campaignId || '',
+            campaign_name: call.campaignId ? (campaignNameById.get(call.campaignId) || 'Unknown Campaign') : 'Unknown Campaign',
+            duration_sec: Number(call.durationSec || 0),
+            started_at: call.startedAt || '',
+            agent_type: 'ai',
+            recording_url: call.recordingUrl || '',
+            recording_s3_key: '',
+            telnyx_call_id: '',
+            telnyx_recording_id: '',
+            recording_status: call.hasRecording ? 'stored' : 'missing',
+            transcript_status: 'missing',
+            analysis_status: 'n/a',
+          }))
+          .filter((gap: TranscriptionGap) => gapCampaignFilter === 'all' || gap.campaign_id === gapCampaignFilter);
+
+        return {
+          success: true,
+          data: {
+            gaps: mapped,
+            pagination: {
+              page: 1,
+              limit: 50,
+              total: mapped.length,
+              totalPages: mapped.length > 0 ? 1 : 0,
+            },
+          },
+        };
+      }
     },
     refetchInterval: 60000,
   });
@@ -140,11 +233,41 @@ export default function TranscriptionHealthView({ campaigns }: { campaigns: Arra
   // Regeneration mutation
   const regenerateMutation = useMutation({
     mutationFn: async ({ callIds, strategy }: { callIds: string[]; strategy: string }) => {
-      const response = await apiRequest('POST', '/api/call-intelligence/transcription-gaps/regenerate', {
-        callIds,
-        strategy,
-      });
-      return response.json();
+      try {
+        const response = await apiRequest('POST', '/api/call-intelligence/transcription-gaps/regenerate', {
+          callIds,
+          strategy,
+        });
+        return response.json();
+      } catch (error) {
+        const isNotFound = error instanceof Error && error.message.startsWith('404:');
+        if (!isNotFound) throw error;
+
+        const settled = await Promise.allSettled(
+          callIds.map(async (id) => {
+            const response = await apiRequest('POST', `/api/transcription/retry/${id}`);
+            return response.json();
+          }),
+        );
+
+        const succeeded = settled.filter((s) => s.status === 'fulfilled').length;
+        const failed = settled.length - succeeded;
+        const errors = settled
+          .filter((s) => s.status === 'rejected')
+          .map((s) => (s as PromiseRejectedResult).reason instanceof Error
+            ? (s as PromiseRejectedResult).reason.message
+            : String((s as PromiseRejectedResult).reason));
+
+        return {
+          success: true,
+          data: {
+            queued: callIds.length,
+            succeeded,
+            failed,
+            errors,
+          },
+        };
+      }
     },
     onSuccess: (data) => {
       const result = data.data;
@@ -200,6 +323,9 @@ export default function TranscriptionHealthView({ campaigns }: { campaigns: Arra
 
   return (
     <div className="space-y-4">
+      {/* Worker Control Panel */}
+      <TranscriptionWorkerControl />
+
       {/* Summary Cards */}
       {health && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

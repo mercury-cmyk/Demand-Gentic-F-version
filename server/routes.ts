@@ -9904,13 +9904,13 @@ export function registerRoutes(app: Express) {
       if (qaStatus && qaStatus !== "") {
         const normalizedQaStatus = String(qaStatus).trim();
         if (normalizedQaStatus === 'approved') {
-          // Backward-compatible: include PM-pending approvals with approved leads.
+          // Backward-compatible: include PM-pending + published leads with approved leads.
           filtered = filtered.filter(
-            l => l.qaStatus === 'approved' || l.qaStatus === 'pending_pm_review'
+            l => l.qaStatus === 'approved' || l.qaStatus === 'pending_pm_review' || l.qaStatus === 'published'
           );
         } else if (normalizedQaStatus === 'pending_review' || normalizedQaStatus === 'in_review') {
           // Accept legacy query params from older dashboard filters.
-          filtered = filtered.filter(l => l.qaStatus === 'under_review');
+          filtered = filtered.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review' || l.qaStatus === 'Pending Review');
         } else {
           filtered = filtered.filter(l => l.qaStatus === normalizedQaStatus);
         }

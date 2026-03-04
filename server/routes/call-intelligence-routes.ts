@@ -1729,7 +1729,18 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
     // Merge and sort results
     const allGaps = [...rows.rows, ...dialerRows.rows]
       .sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
-      .slice(0, limit);
+      .slice(0, limit)
+      .map((row: any) => {
+        // Resolve recording URLs to playable/canonical form
+        const playableUrl = resolvePlayableRecordingUrl({
+          recordingUrl: row.recording_url,
+          recordingS3Key: row.recording_s3_key,
+        });
+        return {
+          ...row,
+          recording_url: playableUrl || row.recording_url, // Use playable URL or fallback to raw
+        };
+      });
 
     res.json({
       success: true,
@@ -1751,7 +1762,12 @@ router.get("/transcription-gaps", requireAuth, requireRole('admin', 'manager', '
 
 /**
  * POST /api/call-intelligence/transcription-gaps/regenerate
- * Trigger re-transcription for selected calls using Telnyx phone lookup or recording URL
+ * Trigger re-transcription for selected calls using Telnyx phone lookup or recording URL.
+ * Newly generated transcripts go through full post-call analysis pipeline which:
+ *  - Performs disposition analysis
+ *  - Updates disposition if high-confidence
+ *  - Creates analysis records
+ *  - Logs to call intelligence dashboard in real-time
  */
 router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
@@ -1768,7 +1784,8 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
       return res.status(400).json({ error: "Maximum 50 calls per batch" });
     }
 
-    const results = { queued: 0, succeeded: 0, failed: 0, errors: [] as string[] };
+    const results = { queued: 0, succeeded: 0, failed: 0, analyzed: 0, errors: [] as string[] };
+    const { runPostCallAnalysis } = await import("../services/post-call-analyzer");
 
     // Process each call
     for (const callId of callIds) {
@@ -1784,6 +1801,10 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             toNumberE164: callSessions.toNumberE164,
             fromNumber: callSessions.fromNumber,
             startedAt: callSessions.startedAt,
+            durationSec: callSessions.durationSec,
+            campaignId: callSessions.campaignId,
+            contactId: callSessions.contactId,
+            aiDisposition: callSessions.aiDisposition,
           })
           .from(callSessions)
           .where(eq(callSessions.id, callId))
@@ -1834,6 +1855,28 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
                 aiTranscript: transcriptResult.transcript,
               } as any).where(eq(callSessions.id, callId));
               results.succeeded++;
+
+              // ✅ NEW: Run full post-call analysis pipeline to update disposition and create analysis records
+              // This ensures newly regenerated transcripts are analyzed in real-time
+              try {
+                const analysisResult = await runPostCallAnalysis(callId, {
+                  campaignId: session.campaignId || undefined,
+                  contactId: session.contactId || undefined,
+                  callDurationSec: session.durationSec || 0,
+                  disposition: session.aiDisposition || undefined,
+                });
+
+                if (analysisResult.success) {
+                  results.analyzed++;
+                  console.log(`[CallIntelligence] ✅ Regenerated call ${callId} analyzed and disposition updated in real-time`);
+                } else {
+                  console.warn(`[CallIntelligence] ⚠️ Analysis failed for regenerated call ${callId}: ${analysisResult.error}`);
+                  // Don't fail the overall result — transcript was regenerated successfully
+                }
+              } catch (analysisErr: any) {
+                console.warn(`[CallIntelligence] ⚠️ Error running post-call analysis for ${callId}: ${analysisErr.message}`);
+                // Don't fail the result — transcription was successful
+              }
             } else {
               results.failed++;
               results.errors.push(`${callId}: Transcription returned empty or too short`);
@@ -1889,13 +1932,51 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             }
           }
 
-          const result = await attemptFallbackTranscription(callId, attempt.recordingUrl ?? null, attempt.telnyxCallId);
+          const transcriptionResult = await attemptFallbackTranscription(callId, attempt.recordingUrl ?? null, attempt.telnyxCallId);
           results.queued++;
-          if (result.success) {
+          if (transcriptionResult.success) {
             results.succeeded++;
+
+            // ✅ NEW: Run full post-call analysis pipeline for dialer call attempts
+            try {
+              // Get call session associated with this attempt for campaign/contact context
+              const [relatedSession] = await db
+                .select({
+                  id: callSessions.id,
+                  durationSec: callSessions.durationSec,
+                  campaignId: callSessions.campaignId,
+                  contactId: callSessions.contactId,
+                  aiDisposition: callSessions.aiDisposition,
+                })
+                .from(callSessions)
+                .where(eq(callSessions.id, callId))
+                .limit(1);
+
+              const campaignId = relatedSession?.campaignId;
+              const contactId = relatedSession?.contactId;
+              const durationSec = relatedSession?.durationSec || 0;
+              const disposition = relatedSession?.aiDisposition;
+
+              const analysisResult = await runPostCallAnalysis(callId, {
+                callAttemptId: attempt.id,
+                campaignId: campaignId || undefined,
+                contactId: contactId || undefined,
+                callDurationSec: durationSec,
+                disposition: disposition || undefined,
+              });
+
+              if (analysisResult.success) {
+                results.analyzed++;
+                console.log(`[CallIntelligence] ✅ Regenerated dialer attempt ${callId} analyzed and disposition updated in real-time`);
+              } else {
+                console.warn(`[CallIntelligence] ⚠️ Analysis failed for regenerated dialer attempt ${callId}: ${analysisResult.error}`);
+              }
+            } catch (analysisErr: any) {
+              console.warn(`[CallIntelligence] ⚠️ Error running post-call analysis for dialer attempt ${callId}: ${analysisErr.message}`);
+            }
           } else {
             results.failed++;
-            results.errors.push(`${callId}: ${result.error || 'Unknown error'}`);
+            results.errors.push(`${callId}: ${transcriptionResult.error || 'Unknown error'}`);
           }
           continue;
         }
@@ -1913,13 +1994,252 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
       data: {
         queued: results.queued,
         succeeded: results.succeeded,
+        analyzed: results.analyzed,
         failed: results.failed,
+        message: `Processed ${results.queued} calls: ${results.succeeded} transcripts regenerated, ${results.analyzed} analyzed with updated dispositions in real-time`,
         errors: results.errors.slice(0, 20), // Limit error details
       },
     });
   } catch (error: any) {
     console.error("[CallIntelligence] Error regenerating transcriptions:", error);
     res.status(500).json({ error: "Failed to regenerate transcriptions" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/start
+ * Start the background transcription regeneration worker
+ */
+router.post("/regeneration/worker/start", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { startWorker } = await import("../services/transcription-regeneration-worker");
+    startWorker();
+    const { getStatus } = await import("../services/transcription-regeneration-worker");
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Transcription regeneration worker started",
+      status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error starting worker:", error);
+    res.status(500).json({ error: "Failed to start worker" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/stop
+ * Stop the background transcription regeneration worker
+ */
+router.post("/regeneration/worker/stop", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { stopWorker, getStatus } = await import("../services/transcription-regeneration-worker");
+    stopWorker();
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Transcription regeneration worker stopped",
+      status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error stopping worker:", error);
+    res.status(500).json({ error: "Failed to stop worker" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/worker/status
+ * Get current worker status and job statistics
+ */
+router.get("/regeneration/worker/status", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const { getStatus } = await import("../services/transcription-regeneration-worker");
+    const status = await getStatus();
+    res.json({
+      success: true,
+      data: status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching worker status:", error);
+    res.status(500).json({ error: "Failed to fetch worker status" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/config
+ * Update worker configuration (concurrency, batch size, strategy, etc.)
+ */
+router.post("/regeneration/worker/config", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { concurrency, batchSize, batchDelayMs, strategy, verbose } = req.body;
+    const { updateConfig, getStatus } = await import("../services/transcription-regeneration-worker");
+
+    // Validate config values
+    const newConfig: any = {};
+    if (concurrency !== undefined) {
+      newConfig.concurrency = Math.min(10, Math.max(1, parseInt(concurrency, 10)));
+    }
+    if (batchSize !== undefined) {
+      newConfig.batchSize = Math.min(50, Math.max(1, parseInt(batchSize, 10)));
+    }
+    if (batchDelayMs !== undefined) {
+      newConfig.batchDelayMs = Math.max(100, parseInt(batchDelayMs, 10));
+    }
+    if (strategy !== undefined) {
+      if (['telnyx_phone_lookup', 'recording_url', 'auto'].includes(strategy)) {
+        newConfig.strategy = strategy;
+      }
+    }
+    if (verbose !== undefined) {
+      newConfig.verbose = Boolean(verbose);
+    }
+
+    updateConfig(newConfig);
+    const status = await getStatus();
+
+    res.json({
+      success: true,
+      message: "Configuration updated",
+      data: {
+        updatedConfig: newConfig,
+        currentStatus: status,
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error updating config:", error);
+    res.status(500).json({ error: "Failed to update configuration" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/progress
+ * Get overall regeneration progress across all jobs
+ */
+router.get("/regeneration/progress", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
+  try {
+    const [result] = await db.execute(sql`
+      SELECT
+        status,
+        COUNT(*) as count,
+        COUNT(CASE WHEN attempts > 0 THEN 1 END) as attempted,
+        COUNT(CASE WHEN error IS NOT NULL THEN 1 END) as with_error
+      FROM transcription_regeneration_jobs
+      GROUP BY status
+    `);
+
+    const stats = {
+      pending: 0,
+      inProgress: 0,
+      submitted: 0,
+      completed: 0,
+      failed: 0,
+      total: 0,
+      progressPercent: 0,
+      estimatedRemainingMinutes: 0,
+    };
+
+    if (result.rows) {
+      for (const row of result.rows) {
+        const count = parseInt(row.count as string) || 0;
+        stats.total += count;
+
+        switch (row.status) {
+          case 'pending':
+            stats.pending = count;
+            break;
+          case 'in_progress':
+            stats.inProgress = count;
+            break;
+          case 'submitted':
+            stats.submitted = count;
+            break;
+          case 'completed':
+            stats.completed = count;
+            break;
+          case 'failed':
+            stats.failed = count;
+            break;
+        }
+      }
+    }
+
+    // Calculate progress
+    if (stats.total > 0) {
+      stats.progressPercent = Math.round(
+        ((stats.submitted + stats.completed) / stats.total) * 100
+      );
+      // Rough estimate: ~2 calls per minute based on API rate limiting + analysis
+      const remaining = stats.pending + stats.inProgress;
+      stats.estimatedRemainingMinutes = Math.ceil(remaining / 2);
+    }
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching regeneration progress:", error);
+    res.status(500).json({ error: "Failed to fetch progress" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/jobs
+ * List regeneration jobs with filters and pagination
+ */
+router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager', 'qa_analyst'), async (req, res) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+    const offset = Math.max(0, (parseInt(req.query.page as string, 10) || 1) - 1) * limit;
+    const sortBy = req.query.sortBy as string || 'created_at';
+    const sortDir = (req.query.sortDir as string || 'DESC').toUpperCase();
+
+    let whereClause = sql`TRUE`;
+    if (status && status !== 'all') {
+      whereClause = sql`status = ${status}`;
+    }
+
+    const [jobs] = await db.execute(sql`
+      SELECT
+        id,
+        call_id,
+        source,
+        status,
+        attempts,
+        error,
+        created_at,
+        completed_at
+      FROM transcription_regeneration_jobs
+      WHERE ${whereClause}
+      ORDER BY ${sql.raw(sortBy)} ${sql.raw(sortDir)}
+      LIMIT ${limit}
+      OFFSET ${offset}
+    `);
+
+    const [countResult] = await db.execute(sql`
+      SELECT COUNT(*) as total
+      FROM transcription_regeneration_jobs
+      WHERE ${whereClause}
+    `);
+
+    const total = parseInt(countResult.rows[0]?.total as string || '0');
+
+    res.json({
+      success: true,
+      data: {
+        jobs: jobs.rows || [],
+        pagination: {
+          page: Math.floor(offset / limit) + 1,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching jobs:", error);
+    res.status(500).json({ error: "Failed to fetch jobs" });
   }
 });
 

@@ -190,6 +190,68 @@ class UnifiedAgentRegistry {
     };
   }
 
+  private buildRecommendationView(
+    agent: IUnifiedAgent & UnifiedBaseAgent,
+    recommendation: AgentRecommendation
+  ) {
+    const targetSection = agent.promptSections.find(s => s.id === recommendation.targetPromptSectionId);
+    const targetCapability = agent.capabilities.find(c => c.id === recommendation.capabilityId);
+    const approvalGate = this.getRecommendationApprovalGate(agent, recommendation);
+
+    return {
+      id: recommendation.id,
+      title: recommendation.title,
+      description: recommendation.description,
+      category: recommendation.category,
+      priorityScore: recommendation.priorityScore,
+      status: recommendation.status,
+
+      targetSectionId: recommendation.targetPromptSectionId,
+      targetSectionName: targetSection?.name || null,
+      targetSectionCategory: targetSection?.category || null,
+      targetCapabilityId: recommendation.capabilityId,
+      targetCapabilityName: targetCapability?.name || null,
+
+      impact: recommendation.impact,
+      proposedChange: recommendation.proposedChange,
+      evidence: recommendation.evidence,
+      evidenceCount: recommendation.evidence?.length || 0,
+
+      createdAt: recommendation.createdAt,
+      reviewedAt: recommendation.reviewedAt,
+      reviewedBy: recommendation.reviewedBy,
+      reviewNotes: recommendation.reviewNotes,
+      appliedVersion: recommendation.appliedVersion,
+
+      governance: {
+        requiresExplicitApproval: approvalGate.required,
+        approvalReasons: approvalGate.reasons,
+        canApplyDirectly: !approvalGate.required || recommendation.status === 'approved',
+      },
+    };
+  }
+
+  /**
+   * Get recommendations for an agent with full payload + governance metadata.
+   */
+  getAgentRecommendations(
+    agentType: UnifiedAgentType,
+    options?: {
+      status?: AgentRecommendation['status'];
+      category?: import('./types').RecommendationCategory;
+      minPriority?: number;
+      limit?: number;
+    }
+  ) {
+    const agent = this.getAgent(agentType);
+    if (!agent) {
+      throw new Error(`Agent not found: ${agentType}`);
+    }
+
+    const recommendations = this.pipeline.getRecommendations(agentType, options);
+    return recommendations.map(r => this.buildRecommendationView(agent, r));
+  }
+
   static getInstance(): UnifiedAgentRegistry {
     if (!UnifiedAgentRegistry.instance) {
       UnifiedAgentRegistry.instance = new UnifiedAgentRegistry();
@@ -398,18 +460,7 @@ class UnifiedAgentRegistry {
       // Learning Pipeline
       learningPipeline: {
         state: pipelineState || null,
-        recommendations: recommendations.map(r => ({
-          id: r.id,
-          title: r.title,
-          category: r.category,
-          priorityScore: r.priorityScore,
-          status: r.status,
-          targetSectionId: r.targetPromptSectionId,
-          targetCapabilityId: r.capabilityId,
-          impact: r.impact,
-          createdAt: r.createdAt,
-          reviewedAt: r.reviewedAt,
-        })),
+        recommendations: recommendations.map(r => this.buildRecommendationView(agent, r)),
         recentAnalyses: analysisHistory.slice(-5),
       },
 

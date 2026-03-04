@@ -5,6 +5,8 @@ const DEEPGRAM_API_KEY = (process.env.DEEPGRAM_API_KEY || "").trim();
 const DEEPGRAM_API_BASE = "https://api.deepgram.com/v1";
 const DEEPGRAM_MODEL = process.env.DEEPGRAM_POSTCALL_MODEL || "nova-2-phonecall";
 const DEEPGRAM_LANGUAGE = process.env.DEEPGRAM_POSTCALL_LANGUAGE || "en-US";
+/** Timeout for Deepgram transcription requests — long calls produce large audio files that take time to process */
+const DEEPGRAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface TranscriptionAudioSourceOptions {
   telnyxCallId?: string | null;
@@ -176,14 +178,28 @@ async function submitToDeepgram(audioUrl: string): Promise<StructuredTranscript 
     filler_words: "false",
   });
 
-  const response = await fetch(`${DEEPGRAM_API_BASE}/listen?${query.toString()}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Token ${DEEPGRAM_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ url: audioUrl }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEEPGRAM_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${DEEPGRAM_API_BASE}/listen?${query.toString()}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${DEEPGRAM_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url: audioUrl }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error(`Deepgram transcription timed out after ${DEEPGRAM_TIMEOUT_MS / 1000}s — audio file may be too large`);
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
