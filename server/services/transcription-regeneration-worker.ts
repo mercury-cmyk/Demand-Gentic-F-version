@@ -9,8 +9,6 @@
  * - Respects API rate limits and resource constraints
  */
 
-import pkg from "pg";
-const { Pool } = pkg;
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -128,57 +126,54 @@ async function submitBatch(callIds: string[], attempt: number = 1): Promise<{ su
  * Process a single pending job
  */
 async function processPendingJob(): Promise<boolean> {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
   try {
     // First, check if the table exists
-    const tableCheckResult = await pool.query(
-      `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'transcription_regeneration_jobs')`
+    const tableCheckResult = await db.execute(
+      sql`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'transcription_regeneration_jobs')`
     );
-    const tableExists = tableCheckResult.rows[0]?.exists || false;
+    const tableExists = (tableCheckResult as any).rows?.[0]?.exists || (tableCheckResult as any)[0]?.exists || false;
 
     if (!tableExists) {
-      // Table doesn't exist yet, worker cannot process jobs
       VERBOSE(`Table transcription_regeneration_jobs does not exist - worker is idle`);
       return false;
     }
 
     // Get next pending job
-    const jobResult = await pool.query(
-      `SELECT id, call_id, source, attempts 
-       FROM transcription_regeneration_jobs 
-       WHERE status = 'pending' 
-       ORDER BY created_at ASC 
-       LIMIT 1 
+    const jobResult = await db.execute(
+      sql`SELECT id, call_id, source, attempts
+       FROM transcription_regeneration_jobs
+       WHERE status = 'pending'
+       ORDER BY created_at ASC
+       LIMIT 1
        FOR UPDATE SKIP LOCKED`
     );
-    const job = jobResult.rows[0];
+    const rows = (jobResult as any).rows || jobResult;
+    const job = rows[0];
 
     if (!job) {
       return false; // No pending jobs
     }
 
     // Mark as in-progress
-    await pool.query(
-      `UPDATE transcription_regeneration_jobs 
+    await db.execute(
+      sql`UPDATE transcription_regeneration_jobs
        SET status = 'in_progress', attempts = attempts + 1, updated_at = NOW()
-       WHERE id = $1`,
-      [job.id]
+       WHERE id = ${job.id}`
     );
 
     VERBOSE(`Processing job ${job.id} (${job.source}): ${job.call_id}`);
 
     // Get next batch of pending jobs to submit together
-    const batch = await pool.query(
-      `SELECT call_id 
-       FROM transcription_regeneration_jobs 
-       WHERE (status = 'pending' OR (status = 'in_progress' AND attempts < $1))
-       ORDER BY created_at ASC 
-       LIMIT $2`,
-      [config.maxRetries, config.batchSize]
+    const batch = await db.execute(
+      sql`SELECT call_id
+       FROM transcription_regeneration_jobs
+       WHERE (status = 'pending' OR (status = 'in_progress' AND attempts < ${config.maxRetries}))
+       ORDER BY created_at ASC
+       LIMIT ${config.batchSize}`
     );
 
-    const batchCallIds = batch.rows.map((r: any) => r.call_id);
+    const batchRows = (batch as any).rows || batch;
+    const batchCallIds = batchRows.map((r: any) => r.call_id);
     VERBOSE(`Batch for submission: ${batchCallIds.length} calls`);
 
     // Submit batch
@@ -186,11 +181,10 @@ async function processPendingJob(): Promise<boolean> {
 
     if (submitResult.success) {
       // Mark submitted jobs as submitted
-      await pool.query(
-        `UPDATE transcription_regeneration_jobs 
+      await db.execute(
+        sql`UPDATE transcription_regeneration_jobs
          SET status = 'submitted', updated_at = NOW()
-         WHERE call_id = ANY($1)`,
-        [batchCallIds]
+         WHERE call_id = ANY(${batchCallIds})`
       );
 
       VERBOSE(`Batch submitted successfully: ${submitResult.analyzed} analyzed, ${submitResult.failed} failed`);
@@ -198,34 +192,28 @@ async function processPendingJob(): Promise<boolean> {
     } else {
       // Increment attempts
       const newAttempts = job.attempts + 1;
-      
+
       if (newAttempts >= config.maxRetries) {
-        // Mark as failed
-        await pool.query(
-          `UPDATE transcription_regeneration_jobs 
-           SET status = 'failed', attempts = $1, error = $2, updated_at = NOW()
-           WHERE id = $3`,
-          [newAttempts, submitResult.error || 'Submission failed', job.id]
+        await db.execute(
+          sql`UPDATE transcription_regeneration_jobs
+           SET status = 'failed', attempts = ${newAttempts}, error = ${submitResult.error || 'Submission failed'}, updated_at = NOW()
+           WHERE id = ${job.id}`
         );
         ERR(`Job ${job.id} failed after ${newAttempts} attempts`);
       } else {
-        // Reset to pending for retry
-        await pool.query(
-          `UPDATE transcription_regeneration_jobs 
-           SET status = 'pending', attempts = $1, updated_at = NOW()
-           WHERE id = $2`,
-          [newAttempts, job.id]
+        await db.execute(
+          sql`UPDATE transcription_regeneration_jobs
+           SET status = 'pending', attempts = ${newAttempts}, updated_at = NOW()
+           WHERE id = ${job.id}`
         );
         VERBOSE(`Job ${job.id} reset to pending for retry (attempt ${newAttempts}/${config.maxRetries})`);
       }
-      
+
       return false;
     }
   } catch (err: any) {
     ERR(`Error processing job: ${err.message}`);
     return false;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -306,101 +294,49 @@ async function getStatus(): Promise<{
     total: number;
   };
 }> {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const defaultStats = {
+    running: isRunning,
+    activeJobs: activeJobsCount,
+    config,
+    jobStats: { pending: 0, inProgress: 0, submitted: 0, completed: 0, failed: 0, total: 0 },
+  };
 
   try {
-    // First, check if the table exists
-    const tableCheckResult = await pool.query(
-      `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'transcription_regeneration_jobs')`
+    // Check if the table exists
+    const tableCheckResult = await db.execute(
+      sql`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'transcription_regeneration_jobs')`
     );
-    const tableExists = tableCheckResult.rows[0]?.exists || false;
+    const tableExists = (tableCheckResult as any).rows?.[0]?.exists || (tableCheckResult as any)[0]?.exists || false;
 
-    // Return default stats if table doesn't exist
     if (!tableExists) {
-      LOG(`⚠️ Table transcription_regeneration_jobs does not exist. Run 'npx tsx prepare-transcription-regeneration.ts' to initialize.`);
-      return {
-        running: isRunning,
-        activeJobs: activeJobsCount,
-        config,
-        jobStats: {
-          pending: 0,
-          inProgress: 0,
-          submitted: 0,
-          completed: 0,
-          failed: 0,
-          total: 0,
-        },
-      };
+      return defaultStats;
     }
 
-    const statsResult = await pool.query(
-      `SELECT 
-        status,
-        COUNT(*) as count
-      FROM transcription_regeneration_jobs
-      GROUP BY status`
+    const statsResult = await db.execute(
+      sql`SELECT status, COUNT(*) as count FROM transcription_regeneration_jobs GROUP BY status`
     );
-    const stats = statsResult.rows;
+    const stats = (statsResult as any).rows || statsResult;
 
-    const jobStats = {
-      pending: 0,
-      inProgress: 0,
-      submitted: 0,
-      completed: 0,
-      failed: 0,
-      total: 0,
-    };
+    const jobStats = { pending: 0, inProgress: 0, submitted: 0, completed: 0, failed: 0, total: 0 };
 
     if (stats && Array.isArray(stats)) {
       for (const row of stats) {
         const count = parseInt(row.count || 0);
         jobStats.total += count;
-
         switch (row.status) {
-          case 'pending':
-            jobStats.pending = count;
-            break;
-          case 'in_progress':
-            jobStats.inProgress = count;
-            break;
-          case 'submitted':
-            jobStats.submitted = count;
-            break;
-          case 'completed':
-            jobStats.completed = count;
-            break;
-          case 'failed':
-            jobStats.failed = count;
-            break;
+          case 'pending': jobStats.pending = count; break;
+          case 'in_progress': jobStats.inProgress = count; break;
+          case 'submitted': jobStats.submitted = count; break;
+          case 'completed': jobStats.completed = count; break;
+          case 'failed': jobStats.failed = count; break;
         }
       }
     }
 
-    return {
-      running: isRunning,
-      activeJobs: activeJobsCount,
-      config,
-      jobStats,
-    };
+    return { running: isRunning, activeJobs: activeJobsCount, config, jobStats };
   } catch (err: any) {
     ERR(`Error getting status: ${err.message}`);
-    // Return safe default instead of throwing to prevent 500 errors
-    LOG(`Returning default status due to error`);
-    return {
-      running: isRunning,
-      activeJobs: activeJobsCount,
-      config,
-      jobStats: {
-        pending: 0,
-        inProgress: 0,
-        submitted: 0,
-        completed: 0,
-        failed: 0,
-        total: 0,
-      },
-    };
-  } finally {
-    await pool.end();
+    return defaultStats;
   }
 }
 
