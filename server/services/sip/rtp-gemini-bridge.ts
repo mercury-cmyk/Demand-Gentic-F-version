@@ -100,6 +100,9 @@ const GEMINI_VOICES = [
 /**
  * Bridge session for a single call
  */
+// Hard max call duration — 5 minutes, no exceptions
+const MAX_CALL_DURATION_SECONDS = 300;
+
 interface BridgeSession {
   callId: string;
   geminiWs: WebSocket | null;
@@ -115,6 +118,7 @@ interface BridgeSession {
   metrics: AudioMetrics;
   reconnectAttempts: number;
   maxReconnectAttempts: number;
+  maxDurationTimer: NodeJS.Timeout | null;
 }
 
 interface CallContext {
@@ -294,15 +298,33 @@ export async function createBridgeSession(params: {
     },
     reconnectAttempts: 0,
     maxReconnectAttempts: 3,
+    maxDurationTimer: null,
   };
 
   bridgeSessions.set(callId, session);
+
+  // Schedule hard max call duration (5 min)
+  const maxDurationSec = Math.min(
+    Number(context.maxCallDurationSeconds) > 0 ? Number(context.maxCallDurationSeconds) : MAX_CALL_DURATION_SECONDS,
+    MAX_CALL_DURATION_SECONDS
+  );
+  session.maxDurationTimer = setTimeout(async () => {
+    console.warn(`[RTP Bridge] MAX CALL DURATION (${maxDurationSec}s) reached for ${callId} — forcing hangup`);
+    try {
+      sipClient.endCall(callId, `Max call duration ${maxDurationSec}s reached`);
+    } catch (err) {
+      console.error(`[RTP Bridge] Failed to end call ${callId} on max duration:`, err);
+    }
+    await closeBridgeSession(callId);
+  }, maxDurationSec * 1000);
+  session.maxDurationTimer.unref?.();
 
   // Connect to Gemini
   try {
     await connectToGemini(session);
     return { success: true };
   } catch (error: any) {
+    if (session.maxDurationTimer) clearTimeout(session.maxDurationTimer);
     bridgeSessions.delete(callId);
     return { success: false, error: error.message };
   }
@@ -361,61 +383,72 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
     ws.on('open', () => {
       console.log(`[RTP Bridge] Connected to Gemini for call ${session.callId}`);
 
-      // Send setup message - IMPORTANT: Use correct model name format
-      const setupMessage = {
-        setup: {
-          model: getModelName(),
-          tools: [
-            {
-              function_declarations: [
-                {
-                  name: 'submit_disposition',
-                  description: 'Submit call outcome/disposition',
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      disposition: {
-                        type: 'string',
-                        description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
-                      },
-                      notes: { type: 'string', description: 'Brief notes about the call' },
-                    },
-                    required: ['disposition'],
-                  },
-                },
-                {
-                  name: 'end_call',
-                  description: 'End the phone call gracefully',
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      reason: { type: 'string', description: 'Reason for ending call' },
-                    },
-                    required: ['reason'],
-                  },
-                },
-              ],
-            },
-          ],
-          generation_config: {
-            response_modalities: ['AUDIO'],
-            speech_config: {
-              voice_config: {
-                prebuilt_voice_config: {
-                  // For Vertex AI Gemini Live, use supported voice names from GEMINI_VOICES array
-                  // Fallback to 'Puck' if voice is not in the supported list
-                  voice_name: GEMINI_VOICES.includes(session.voiceName)
-                    ? session.voiceName
-                    : 'Puck',
-                },
+      // Send setup message — Vertex AI requires camelCase, Google AI Studio requires snake_case.
+      // Sending wrong casing causes silent setup rejection (WebSocket closes without setup_complete).
+      const voice = GEMINI_VOICES.includes(session.voiceName) ? session.voiceName : 'Puck';
+
+      const functionDecls = [
+        {
+          name: 'submit_disposition',
+          description: 'Submit call outcome/disposition',
+          parameters: {
+            type: 'object',
+            properties: {
+              disposition: {
+                type: 'string',
+                description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
               },
+              notes: { type: 'string', description: 'Brief notes about the call' },
             },
-          },
-          system_instruction: {
-            parts: [{ text: session.systemPrompt }],
+            required: ['disposition'],
           },
         },
-      };
+        {
+          name: 'end_call',
+          description: 'End the phone call gracefully',
+          parameters: {
+            type: 'object',
+            properties: {
+              reason: { type: 'string', description: 'Reason for ending call' },
+            },
+            required: ['reason'],
+          },
+        },
+      ];
+
+      const setupPayload: Record<string, unknown> = { model: getModelName() };
+
+      if (USE_VERTEX_AI) {
+        // Vertex AI (aiplatform.googleapis.com) — camelCase
+        setupPayload.tools = [{ functionDeclarations: functionDecls }];
+        setupPayload.generationConfig = {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voice },
+            },
+          },
+        };
+        setupPayload.systemInstruction = {
+          parts: [{ text: session.systemPrompt }],
+        };
+      } else {
+        // Google AI Studio (generativelanguage.googleapis.com) — snake_case
+        setupPayload.tools = [{ function_declarations: functionDecls }];
+        setupPayload.generation_config = {
+          response_modalities: ['AUDIO'],
+          speech_config: {
+            voice_config: {
+              prebuilt_voice_config: { voice_name: voice },
+            },
+          },
+        };
+        setupPayload.system_instruction = {
+          parts: [{ text: session.systemPrompt }],
+        };
+      }
+
+      const setupMessage = { setup: setupPayload };
 
       console.log(`[RTP Bridge] Sending setup with model: ${setupMessage.setup.model}`);
       ws.send(JSON.stringify(setupMessage));
@@ -546,19 +579,12 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     response = { success: true, message: 'Call ended' };
   }
 
-  // Send function response back to Gemini
+  // Send function response back to Gemini (camelCase for Vertex AI, snake_case for AI Studio)
   if (session.geminiWs?.readyState === WebSocket.OPEN) {
-    session.geminiWs.send(JSON.stringify({
-      tool_response: {
-        function_responses: [
-          {
-            name: call.name,
-            id: call.id,
-            response,
-          },
-        ],
-      },
-    }));
+    const msg = USE_VERTEX_AI
+      ? { toolResponse: { functionResponses: [{ name: call.name, id: call.id, response }] } }
+      : { tool_response: { function_responses: [{ name: call.name, id: call.id, response }] } };
+    session.geminiWs.send(JSON.stringify(msg));
   }
 }
 
@@ -580,12 +606,11 @@ function trySendOpeningMessage(session: BridgeSession): void {
 After speaking, STOP and WAIT for their response.`;
 
   if (session.geminiWs?.readyState === WebSocket.OPEN) {
-    session.geminiWs.send(JSON.stringify({
-      client_content: {
-        turns: [{ role: 'user', parts: [{ text: openingMessage }] }],
-        turn_complete: true,
-      },
-    }));
+    // camelCase for Vertex AI, snake_case for AI Studio
+    const msg = USE_VERTEX_AI
+      ? { clientContent: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turnComplete: true } }
+      : { client_content: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turn_complete: true } };
+    session.geminiWs.send(JSON.stringify(msg));
     console.log(`[RTP Bridge] Opening message sent for call ${session.callId}`);
   }
 }
@@ -613,15 +638,12 @@ export function handleSipAudio(callId: string, g711Audio: Buffer): void {
   // Transcode G.711 to PCM 16kHz
   const pcmBuffer = g711ToPcm16k(g711Audio, session.g711Format);
 
-  // Send to Gemini
-  session.geminiWs.send(JSON.stringify({
-    realtime_input: {
-      media_chunks: [{
-        data: pcmBuffer.toString('base64'),
-        mime_type: 'audio/pcm;rate=16000',
-      }],
-    },
-  }));
+  // Send to Gemini (camelCase for Vertex AI, snake_case for AI Studio)
+  const audioData = pcmBuffer.toString('base64');
+  const audioMsg = USE_VERTEX_AI
+    ? { realtimeInput: { mediaChunks: [{ data: audioData, mimeType: 'audio/pcm;rate=16000' }] } }
+    : { realtime_input: { media_chunks: [{ data: audioData, mime_type: 'audio/pcm;rate=16000' }] } };
+  session.geminiWs.send(JSON.stringify(audioMsg));
 
   session.metrics.audioChunksSent++;
   session.metrics.totalBytesSent += pcmBuffer.length;
@@ -706,6 +728,11 @@ export async function closeBridgeSession(callId: string): Promise<void> {
     } catch (statsErr) {
       console.error(`[RTP Bridge] Failed to update number pool stats:`, statsErr);
     }
+  }
+
+  if (session.maxDurationTimer) {
+    clearTimeout(session.maxDurationTimer);
+    session.maxDurationTimer = null;
   }
 
   if (session.geminiWs) {
