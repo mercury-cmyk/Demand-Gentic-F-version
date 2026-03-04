@@ -1733,6 +1733,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             })(),
             callerNumberId: callerIdResult.numberId,
             callerNumberDecisionId: callerIdResult.decisionId,
+            callAttemptId: callAttemptId || undefined,
           });
 
           if (!sipResult.success) {

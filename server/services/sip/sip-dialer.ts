@@ -51,6 +51,8 @@ export interface InitiateCallParams {
   // Number pool tracking
   callerNumberId?: string | null;
   callerNumberDecisionId?: string | null;
+  // Call attempt tracking (for disposition processing)
+  callAttemptId?: string | null;
 }
 
 /**
@@ -243,6 +245,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
           queueItemId: params.queueItemId,
           callerNumberId: params.callerNumberId,
           phoneNumber: params.toNumber,
+          callAttemptId: params.callAttemptId,
         },
         maxDurationSeconds: params.maxCallDurationSeconds,
       });

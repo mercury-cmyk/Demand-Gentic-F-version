@@ -216,6 +216,10 @@ interface BridgeSession {
   packetsReceived: number;
   packetsSent: number;
 
+  // Transcript tracking
+  transcript: { role: 'agent' | 'contact'; text: string; ts: number }[];
+  lastDisposition: string | null;
+
   // Timers
   maxDurationTimer: NodeJS.Timeout | null;
 }
@@ -266,6 +270,9 @@ async function createSession(params: {
     packetsReceived: 0,
     packetsSent: 0,
 
+    transcript: [],
+    lastDisposition: null,
+
     maxDurationTimer: null,
   };
 
@@ -291,7 +298,15 @@ async function createSession(params: {
   const maxSec = Math.min(params.maxDurationSeconds || 300, 300);
   session.maxDurationTimer = setTimeout(() => {
     log(`Max duration (${maxSec}s) reached for ${params.callId} — forcing cleanup`);
-    callbackToCloudRun(params.callId, 'end_call', { reason: `Max duration ${maxSec}s reached` });
+    const transcript = buildTranscriptString(session);
+    callbackToCloudRun(params.callId, 'end_call', {
+      reason: `Max duration ${maxSec}s reached`,
+      callAttemptId: session.context?.callAttemptId || null,
+      transcript,
+      callDurationSeconds: maxSec,
+      disposition: session.lastDisposition,
+      context: session.context,
+    });
     destroySession(params.callId);
   }, maxSec * 1000);
 
@@ -543,6 +558,11 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         const modelTurn = serverContent?.modelTurn;
         if (modelTurn?.parts) {
           for (const part of modelTurn.parts) {
+            // Capture text parts as agent transcript
+            if (part.text) {
+              session.transcript.push({ role: 'agent', text: part.text, ts: Date.now() });
+            }
+
             const inlineData = part.inlineData;
             if (inlineData?.data) {
               const pcm24k = Buffer.from(inlineData.data, 'base64');
@@ -557,6 +577,16 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
               }
             }
           }
+        }
+
+        // Capture output transcription (Gemini may provide text of what it said)
+        if (serverContent?.outputTranscription?.text) {
+          session.transcript.push({ role: 'agent', text: serverContent.outputTranscription.text, ts: Date.now() });
+        }
+
+        // Capture input transcription (Gemini's transcription of caller speech)
+        if (serverContent?.inputTranscription?.text) {
+          session.transcript.push({ role: 'contact', text: serverContent.inputTranscription.text, ts: Date.now() });
         }
 
         // Tool calls
@@ -620,13 +650,32 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
 
   let response: any = { success: true };
 
+  // Build transcript string and call duration for callbacks
+  const callDurationSeconds = Math.round((Date.now() - session.startTime) / 1000);
+  const transcriptStr = buildTranscriptString(session);
+  const callAttemptId = session.context?.callAttemptId || null;
+
   if (call.name === 'submit_disposition') {
-    // Callback to Cloud Run to process disposition
-    await callbackToCloudRun(session.callId, 'submit_disposition', call.args || {});
+    session.lastDisposition = call.args?.disposition || null;
+    // Include transcript + duration + callAttemptId in callback
+    await callbackToCloudRun(session.callId, 'submit_disposition', {
+      ...(call.args || {}),
+      callAttemptId,
+      transcript: transcriptStr,
+      callDurationSeconds,
+      context: session.context,
+    });
     response = { success: true, disposition: call.args?.disposition };
   } else if (call.name === 'end_call') {
-    // Callback to Cloud Run to end the SIP call
-    await callbackToCloudRun(session.callId, 'end_call', call.args || {});
+    // Include transcript + duration + callAttemptId in end_call callback
+    await callbackToCloudRun(session.callId, 'end_call', {
+      ...(call.args || {}),
+      callAttemptId,
+      transcript: transcriptStr,
+      callDurationSeconds,
+      disposition: session.lastDisposition,
+      context: session.context,
+    });
     response = { success: true, message: 'Call ended' };
 
     // Delay cleanup slightly to allow Gemini to finish speaking
@@ -642,6 +691,16 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     };
     session.geminiWs.send(JSON.stringify(toolResponse));
   }
+}
+
+// ==================== TRANSCRIPT HELPERS ====================
+
+function buildTranscriptString(session: BridgeSession): string {
+  if (session.transcript.length === 0) return '';
+
+  return session.transcript
+    .map(t => `${t.role === 'agent' ? 'Agent' : 'Contact'}: ${t.text}`)
+    .join('\n');
 }
 
 // ==================== CLOUD RUN CALLBACKS ====================

@@ -15562,7 +15562,9 @@ Provide JSON response with:
         return;
       }
 
-      console.log(`[MediaBridge Callback] ${action} for ${callId}`, data);
+      // Extract callAttemptId from top-level or context fallback
+      const callAttemptId = data?.callAttemptId || data?.context?.callAttemptId || null;
+      console.log(`[MediaBridge Callback] ${action} for ${callId} (callAttemptId: ${callAttemptId})`, data);
 
       if (action === 'end_call') {
         // End the SIP call via Drachtio
@@ -15573,15 +15575,51 @@ Provide JSON response with:
         } catch (err) {
           console.error(`[MediaBridge Callback] Failed to end SIP call ${callId}:`, err);
         }
+        // If end_call includes disposition + transcript, process it
+        if (callAttemptId && data?.disposition) {
+          const { processDisposition } = await import('./services/disposition-engine');
+          console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}`, {
+            hasTranscript: !!data?.transcript,
+            callDurationSeconds: data?.callDurationSeconds,
+          });
+          if (data?.callDurationSeconds) {
+            try {
+              await db.update(dialerCallAttempts)
+                .set({ callDurationSeconds: data.callDurationSeconds, updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, callAttemptId));
+            } catch (durErr) {
+              console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
+            }
+          }
+          await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
+            transcript: data?.transcript || undefined,
+            structuredTranscript: data?.structuredTranscript || undefined,
+          });
+        }
       } else if (action === 'submit_disposition') {
         // Process disposition via the disposition engine
         const { processDisposition } = await import('./services/disposition-engine');
         const disposition = data?.disposition || 'no_answer';
-        console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`);
-        // Note: callAttemptId is needed for disposition processing
-        // The media bridge context should include it if available
-        if (data?.callAttemptId) {
-          await processDisposition(data.callAttemptId, disposition, 'media_bridge');
+        console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`, {
+          hasTranscript: !!data?.transcript,
+          callDurationSeconds: data?.callDurationSeconds,
+          callAttemptId,
+        });
+        if (callAttemptId) {
+          // Update call attempt with duration from media bridge
+          if (data?.callDurationSeconds) {
+            try {
+              await db.update(dialerCallAttempts)
+                .set({ callDurationSeconds: data.callDurationSeconds, updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, callAttemptId));
+            } catch (durErr) {
+              console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
+            }
+          }
+          await processDisposition(callAttemptId, disposition, 'media_bridge', {
+            transcript: data?.transcript || undefined,
+            structuredTranscript: data?.structuredTranscript || undefined,
+          });
         }
       }
 

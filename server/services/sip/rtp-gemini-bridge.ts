@@ -110,6 +110,8 @@ interface BridgeSession {
   setupComplete: boolean;
   callAnswered: boolean;
   openingMessageSent: boolean;
+  contactHasSpoken: boolean;  // Track if contact spoke first
+  listeningTimeout: NodeJS.Timeout | null;  // Fallback timeout for greeting
   dispositionProcessed: boolean;
   voiceName: string;
   systemPrompt: string;
@@ -284,6 +286,8 @@ export async function createBridgeSession(params: {
     setupComplete: false,
     callAnswered: false,
     openingMessageSent: false,
+    contactHasSpoken: false,
+    listeningTimeout: null,
     dispositionProcessed: false,
     voiceName: voiceName || GEMINI_VOICES[0],
     systemPrompt: buildSystemPrompt(context, voiceName || GEMINI_VOICES[0], callId),
@@ -325,6 +329,7 @@ export async function createBridgeSession(params: {
     return { success: true };
   } catch (error: any) {
     if (session.maxDurationTimer) clearTimeout(session.maxDurationTimer);
+    if (session.listeningTimeout) clearTimeout(session.listeningTimeout);
     bridgeSessions.delete(callId);
     return { success: false, error: error.message };
   }
@@ -474,14 +479,23 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           console.log(`[RTP Bridge] Gemini setup complete for call ${session.callId}`);
           resolve();
 
-          // Try to send opening message if call is answered
-          trySendOpeningMessage(session);
+          // Start listening period - wait for contact to speak first
+          if (session.callAnswered) {
+            startListeningPeriod(session);
+          }
           return;
         }
 
         // Handle audio output from Gemini (check multiple response formats)
         const serverContent = response.serverContent || response.server_content;
         const modelTurn = serverContent?.modelTurn || serverContent?.model_turn;
+        
+        // Detect if this is a response to contact speech (indicates contact spoke)
+        // This happens when we receive model output without having sent opening message
+        if (modelTurn && !session.contactHasSpoken && !session.openingMessageSent) {
+          detectContactSpeech(session);
+        }
+        
         if (modelTurn?.parts) {
           for (const part of modelTurn.parts) {
             const inlineData = part.inlineData || part.inline_data;
@@ -589,14 +603,20 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
 }
 
 /**
- * Try to send opening message when conditions are met
+ * Send opening message after contact speaks or timeout
  */
-function trySendOpeningMessage(session: BridgeSession): void {
+function sendOpeningMessage(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) {
     return;
   }
 
   session.openingMessageSent = true;
+  
+  // Clear listening timeout if it exists
+  if (session.listeningTimeout) {
+    clearTimeout(session.listeningTimeout);
+    session.listeningTimeout = null;
+  }
 
   const contactName = session.callContext.contactName || session.callContext.contactFirstName || 'there';
   const openingText = `Hello, may I please speak with ${contactName}?`;
@@ -611,8 +631,43 @@ After speaking, STOP and WAIT for their response.`;
       ? { clientContent: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turnComplete: true } }
       : { client_content: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turn_complete: true } };
     session.geminiWs.send(JSON.stringify(msg));
-    console.log(`[RTP Bridge] Opening message sent for call ${session.callId}`);
+    console.log(`[RTP Bridge] Opening message sent for call ${session.callId} (triggered by: ${session.contactHasSpoken ? 'contact speech' : 'timeout'})`);
   }
+}
+
+/**
+ * Detect when contact speaks and trigger opening message
+ */
+function detectContactSpeech(session: BridgeSession): void {
+  if (session.contactHasSpoken || session.openingMessageSent) {
+    return;
+  }
+  
+  session.contactHasSpoken = true;
+  console.log(`[RTP Bridge] Contact speech detected for call ${session.callId} - sending opening message`);
+  sendOpeningMessage(session);
+}
+
+/**
+ * Start listening period - wait for contact to speak first, with fallback timeout
+ */
+function startListeningPeriod(session: BridgeSession): void {
+  if (session.openingMessageSent || session.listeningTimeout) {
+    return;
+  }
+
+  // Wait 3 seconds for contact to speak
+  // If they don't speak, send greeting anyway (they may be waiting for us)
+  const LISTENING_TIMEOUT_MS = 3000;
+  
+  console.log(`[RTP Bridge] Starting listening period for call ${session.callId} (${LISTENING_TIMEOUT_MS}ms)`);
+  
+  session.listeningTimeout = setTimeout(() => {
+    if (!session.contactHasSpoken && !session.openingMessageSent) {
+      console.log(`[RTP Bridge] Listening timeout - contact didn't speak, sending greeting for call ${session.callId}`);
+      sendOpeningMessage(session);
+    }
+  }, LISTENING_TIMEOUT_MS);
 }
 
 /**
@@ -628,7 +683,11 @@ export function handleSipAudio(callId: string, g711Audio: Buffer): void {
   if (!session.callAnswered) {
     session.callAnswered = true;
     console.log(`[RTP Bridge] Call ${callId} answered (received audio)`);
-    trySendOpeningMessage(session);
+    
+    // Start listening period if setup is complete
+    if (session.setupComplete) {
+      startListeningPeriod(session);
+    }
   }
 
   if (!session.setupComplete) {
@@ -733,6 +792,11 @@ export async function closeBridgeSession(callId: string): Promise<void> {
   if (session.maxDurationTimer) {
     clearTimeout(session.maxDurationTimer);
     session.maxDurationTimer = null;
+  }
+
+  if (session.listeningTimeout) {
+    clearTimeout(session.listeningTimeout);
+    session.listeningTimeout = null;
   }
 
   if (session.geminiWs) {

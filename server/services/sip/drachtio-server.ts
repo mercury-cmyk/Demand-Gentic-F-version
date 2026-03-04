@@ -733,9 +733,19 @@ export class DrachtioSIPServer {
       throw new Error(`Call not found: ${callId}`);
     }
 
-    // Send BYE
+    // Send BYE via dialog destroy
     if (call.req) {
-      call.req.bye();
+      try {
+        if (typeof call.req.destroy === 'function') {
+          call.req.destroy();
+        } else if (typeof call.req.bye === 'function') {
+          call.req.bye();
+        } else {
+          log(`Cannot end call ${callId}: dialog has no destroy/bye method`);
+        }
+      } catch (err: any) {
+        log(`Error sending BYE for ${callId}: ${err.message}`);
+      }
     }
 
     callTracker.remove(callId);
