@@ -210,7 +210,11 @@ export class LogStreamingService {
         // Only broadcast if there are connected clients
         if (self.wss.clients.size > 0) {
           const message = args
-            .map((a: any) => (typeof a === 'string' ? a : JSON.stringify(a)))
+            .map((a: any) => {
+              if (typeof a === 'string') return a;
+              if (a instanceof Error) return `${a.message}${a.stack ? '\n' + a.stack.split('\n').slice(1, 3).join('\n') : ''}`;
+              try { return JSON.stringify(a); } catch { return String(a); }
+            })
             .join(' ');
           // Skip internal log-streaming messages to avoid infinite recursion
           if (message.includes('[LogStreaming]') || message.includes('log stream')) return;
