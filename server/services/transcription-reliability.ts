@@ -190,8 +190,30 @@ export async function attemptFallbackTranscription(
       };
     }
 
+    // Resolve S3 key from linked call session (gives Deepgram a presigned GCS URL)
+    let recordingS3Key: string | null = null;
+    try {
+      const [attemptForS3] = await db
+        .select({ callSessionId: dialerCallAttempts.callSessionId })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, callAttemptId))
+        .limit(1);
+
+      if (attemptForS3?.callSessionId) {
+        const [session] = await db
+          .select({ recordingS3Key: callSessions.recordingS3Key })
+          .from(callSessions)
+          .where(eq(callSessions.id, attemptForS3.callSessionId))
+          .limit(1);
+
+        recordingS3Key = session?.recordingS3Key || null;
+      }
+    } catch {
+      // Non-critical — proceed without S3 key
+    }
+
     // Use Deepgram post-call transcription for fallback
-    const result = await transcribeFromRecording(urlToUse, { telnyxCallId });
+    const result = await transcribeFromRecording(urlToUse, { telnyxCallId, recordingS3Key });
 
     if (result && result.transcript && result.transcript.length > TRANSCRIPT_MIN_LENGTH) {
       // Save the fallback transcript

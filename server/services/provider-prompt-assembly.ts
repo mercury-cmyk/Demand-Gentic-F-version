@@ -199,8 +199,8 @@ async function getCampaignKnowledgeOverrides(campaignId: string): Promise<{
  * Assemble provider-specific prompt for a campaign
  *
  * This is the main function that should be called by the dialers.
- * It assembles the full prompt from knowledge blocks with provider-specific
- * formatting, or falls back to legacy constants if blocks don't exist.
+ * It uses the Unified Knowledge Hub as the primary source of truth,
+ * with Knowledge Blocks as a future enhancement layer.
  */
 export async function assembleProviderPrompt(
   config: ProviderPromptConfig
@@ -208,77 +208,108 @@ export async function assembleProviderPrompt(
   const { provider, agentId, campaignId, useCondensedPrompt = true, includeRuntimeIdentity = true } = config;
   const assembledAt = new Date().toISOString();
 
-  // Check if knowledge blocks are initialized
-  const blocksInitialized = await areKnowledgeBlocksInitialized();
-
-  if (!blocksInitialized) {
-    // Fall back to legacy constants
-    console.log(`[ProviderPromptAssembly] Knowledge blocks not initialized, using legacy constants for ${provider}`);
-    return await assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
-  }
-
+  // PRIMARY SOURCE: Unified Knowledge Hub (single source of truth)
   try {
-    // Get all active blocks ordered by layer
-    const allBlocks = await getKnowledgeBlocks({ activeOnly: true });
-
-    if (!allBlocks || allBlocks.length === 0) {
-      console.log(`[ProviderPromptAssembly] No active blocks found, using legacy constants for ${provider}`);
-      return await assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
-    }
-
-    // Get campaign-specific overrides if campaignId provided
-    let campaignOverrides: Awaited<ReturnType<typeof getCampaignKnowledgeOverrides>> | null = null;
-    if (campaignId) {
-      campaignOverrides = await getCampaignKnowledgeOverrides(campaignId);
-    }
-
-    // Filter blocks based on campaign config
-    const filteredBlocks = allBlocks.filter((block) => {
-      if (campaignOverrides?.disabledBlocks.has(block.id)) {
-        return false;
-      }
-      return true;
-    });
-
-    // Apply content overrides
-    const blocksWithOverrides = filteredBlocks.map((block) => {
-      const override = campaignOverrides?.contentOverrides.get(block.id);
-      if (override) {
-        return { ...block, content: override };
-      }
-      return block;
-    });
-
-    // Get provider-specific overrides
-    const providerOverrides = provider === "openai"
-      ? campaignOverrides?.openaiOverrides ?? new Map()
-      : campaignOverrides?.googleOverrides ?? new Map();
-
-    // Format for specific provider
-    const prompt = provider === "openai"
-      ? formatForOpenAI(blocksWithOverrides, providerOverrides)
-      : formatForGoogle(blocksWithOverrides, providerOverrides);
-
-    // Generate hash
+    console.log(`[ProviderPromptAssembly] Using Unified Knowledge Hub (primary) for ${provider}`);
+    const prompt = await buildUnifiedKnowledgePrompt();
     const promptHash = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
 
     return {
       prompt,
       totalTokens: estimateTokens(prompt),
       provider,
-      source: "blocks",
+      source: "unified-knowledge-hub",
       assembledAt,
       promptHash,
-      blockVersions: blocksWithOverrides.map((b) => ({
-        blockId: b.id,
-        name: b.name,
-        version: b.version,
-      })),
     };
   } catch (error) {
-    console.error(`[ProviderPromptAssembly] Error assembling from blocks:`, error);
-    return await assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
+    console.error(`[ProviderPromptAssembly] Unified Knowledge Hub failed, trying Knowledge Blocks:`, error);
   }
+
+  // FALLBACK: Knowledge Blocks system
+  const blocksInitialized = await areKnowledgeBlocksInitialized();
+
+  if (blocksInitialized) {
+    try {
+      console.log(`[ProviderPromptAssembly] Using Knowledge Blocks (fallback) for ${provider}`);
+      // Get all active blocks ordered by layer
+      const allBlocks = await getKnowledgeBlocks({ activeOnly: true });
+
+      if (allBlocks && allBlocks.length > 0) {
+
+        // Get campaign-specific overrides if campaignId provided
+        let campaignOverrides: Awaited<ReturnType<typeof getCampaignKnowledgeOverrides>> | null = null;
+        if (campaignId) {
+          campaignOverrides = await getCampaignKnowledgeOverrides(campaignId);
+        }
+
+        // Filter blocks based on campaign config
+        const filteredBlocks = allBlocks.filter((block) => {
+          if (campaignOverrides?.disabledBlocks.has(block.id)) {
+            return false;
+          }
+          return true;
+        });
+
+        // Apply content overrides
+        const blocksWithOverrides = filteredBlocks.map((block) => {
+          const override = campaignOverrides?.contentOverrides.get(block.id);
+          if (override) {
+            return { ...block, content: override };
+          }
+          return block;
+        });
+
+        // Get provider-specific overrides
+        const providerOverrides = provider === "openai"
+          ? campaignOverrides?.openaiOverrides ?? new Map()
+          : campaignOverrides?.googleOverrides ?? new Map();
+
+        // Format for specific provider
+        const prompt = provider === "openai"
+          ? formatForOpenAI(blocksWithOverrides, providerOverrides)
+          : formatForGoogle(blocksWithOverrides, providerOverrides);
+
+        // Generate hash
+        const promptHash = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+
+        return {
+          prompt,
+          totalTokens: estimateTokens(prompt),
+          provider,
+          source: "blocks",
+          assembledAt,
+          promptHash,
+          blockVersions: blocksWithOverrides.map((b) => ({
+            blockId: b.id,
+            name: b.name,
+            version: b.version,
+          })),
+        };
+      }
+    } catch (error) {
+      console.error(`[ProviderPromptAssembly] Knowledge Blocks failed:`, error);
+    }
+  }
+
+  // FINAL FALLBACK: Minimal safe prompt
+  console.warn('[ProviderPromptAssembly] All knowledge sources failed, using minimal fallback');
+  const fallbackPrompt = `## Core Agent Guidelines
+- Always verify identity before proceeding
+- Be professional and respectful
+- Handle objections with empathy
+- Respect time and decisions`;
+  
+  const promptHash = createHash("sha256").update(fallbackPrompt).digest("hex").slice(0, 16);
+  
+  return {
+    prompt: fallbackPrompt,
+    totalTokens: estimateTokens(fallbackPrompt),
+    provider,
+    source: "minimal-fallback",
+    assembledAt,
+    promptHash,
+  };
 }
 
 /**
