@@ -20,17 +20,26 @@ export const CAMPAIGN_CONFIGURATIONS: Record<string, CampaignConfiguration> = {
   content_syndication: {
     type: "content_syndication",
     label: "Content Syndication",
-    purpose: "Run a consistent content-delivery call flow where the framework stays fixed but campaign context (asset/topic/value details) can change.",
+    purpose: "Pure content distribution call. The ONLY objective is to deliver an asset to the contact. Success = they have said yes to receiving content via email. This is NOT a sales call, NOT a qualification call, NOT a discovery call. It is purely transactional content delivery.",
     agentFocus: [
-      "Fixed step-by-step call framework",
-      "Dynamic campaign context insertion",
-      "Email confirmation and explicit consent"
+      "Strict 7-step call framework (no deviation)",
+      "Introduce asset concisely with 1-2 value hooks only",
+      "Confirm email and get explicit consent to send",
+      "Close immediately after consent - conversation ends"
+    ],
+    requirements: [
+      "Follow the EXACT 7-step flow: (1) greeting/rapport, (2) role/company confirmation, (3) asset intro, (4) value preview, (5) email confirmation, (6) permission request, (7) close",
+      "NO discovery questions allowed",
+      "NO problem investigation allowed",
+      "NO sales pitch allowed",
+      "NO qualification allowed",
+      "NO follow-up questions after consent is given"
     ],
     successCriteria: [
-      "Prospect confirms contact email",
-      "Prospect gives permission to receive the asset"
+      "Prospect confirms they are the correct person and correct email",
+      "Prospect explicitly says yes to receiving the asset"
     ],
-    openingMessageTemplate: "Hello, this is {{agent_name}} calling on behalf of {{company_name}}. How are you today? I believe I'm speaking with the {{contact.jobTitle}} at {{contact.companyName}}. I'm calling because we have a free {{asset_type}} called \"{{asset_title}}\" about {{asset_topic}}. It covers {{value_point_1}}, {{value_point_2}}, and more. I have your email as {{contact.email}}. Is that correct? Great — may I send you a copy?"
+    openingMessageTemplate: "Hello, this is {{agent_name}} calling on behalf of {{company_name}}. How are you today? I have you down as {{contact.jobTitle}} at {{contact.companyName}} — is that right? Great. The reason for the call is we have a free {{asset_type}} called \"{{asset_title}}\" that covers {{asset_topic}}. One thing that really stands out is it shows {{value_point_1}}. I have your email as {{contact.email}}. Can I send that across?"
   },
   live_webinar: {
     type: "live_webinar",

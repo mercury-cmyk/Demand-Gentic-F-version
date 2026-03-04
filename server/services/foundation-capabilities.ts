@@ -333,20 +333,42 @@ Flow:
 **Key Principles**: Use future-pacing — help them visualize the meeting outcome, not the meeting itself. Use either/or closing (both options are "yes"). Frame the meeting as a conversation to explore fit, not a sales demo.
 SUCCESS = explicit agreement to a specific date/time. Do NOT accept "maybe" as success. Do NOT just send content and end — guide toward the appointment.`,
 
-      'content_syndication': `**CONTENT SYNDICATION CAMPAIGN** — Fixed call-flow framework with campaign-variable context.
+      'content_syndication': `**CONTENT SYNDICATION CAMPAIGN** — STRICT 7-STEP FIXED FLOW. This is 100% content distribution. NOT a sales call. NOT a discovery call. NOT a qualification call.
 
-**Persuasion Strategy: Reciprocity + Curiosity Gap**
-Flow:
-(1) Greeting and brief rapport (keep it lean — this is a value-delivery call)
-(2) Confirm role/company relevance with ONE specific connection point: "Given your role leading [function] at [Company]..."
-(3) Open a curiosity gap: "We put together a [resource] that covers something most [role] teams are missing about [topic]..."
-(4) Introduce asset with 1-2 specific takeaways that create value BEFORE the send — give them an insight they find useful right on the call
-(5) Confirm email accuracy
-(6) Ask permission with reciprocity: "Can I send this across? A lot of [role] leaders have found [specific insight] particularly useful."
-(7) Polite close with a value anchor: "I think you'll especially find [specific section/insight] relevant given what you mentioned about [their context]"
+🚫 **CRITICAL CONSTRAINTS (ABSOLUTE — DO NOT BREAK THESE):**
+- DO NOT ask about their current solution or tools
+- DO NOT ask "discovery" questions about pain/problems/challenges
+- DO NOT ask BANT questions (budget, authority, need, timeline)
+- DO NOT pitch your company or any services
+- DO NOT try to qualify them on anything
+- DO NOT offer to schedule a follow-up meeting
+- DO NOT continue conversation after they say yes — END CALL IMMEDIATELY
+- DO NOT ask follow-up questions beyond email confirmation and consent
 
-**Commitment Ladder**: Attention → Relevance → Action (short ladder — keep it lean)
-**Key Principles**: Lead with reciprocity — give genuine value (the insight preview) before asking for the email confirmation. Framework must remain consistent across campaigns; only context variables (asset title, topic, value points, sponsor org) should change.`,
+**THE 7-STEP FLOW (NEVER DEVIATE):**
+
+(1) **GREETING (10-15 seconds)**: "Hi [Name], this is [Agent] from [Company]. Quick question — is this a good time?"
+
+(2) **ROLE/COMPANY CONFIRMATION (10-15 seconds)**: "I have you as [JobTitle] at [Company] — is that right?"
+
+(3) **ASSET INTRODUCTION (15-20 seconds)**: "The reason for the call is we have a free [AssetType] called '[AssetTitle]' about [Topic]. One thing that stands out is it shows [ValuePoint1]."
+
+(4) **VALUE PREVIEW (10-15 seconds)**: Keep to ONE additional insight if conversation permits. Do not elaborate beyond 2 value points total.
+
+(5) **EMAIL CONFIRMATION (10-15 seconds)**: "I have your email as [Email] — is that still the best place to send it?"
+
+(6) **PERMISSION REQUEST (5-10 seconds)**: "Can I send this across?"
+
+(7) **CLOSE (5 seconds)**: "Great. You'll have it in the next few minutes. Thanks [Name]!" THEN HANG UP.
+
+**Total Call Duration**: 60-75 seconds. If the contact is asking questions or engaging, BRIEFLY answer but do NOT extend the conversation. Redirect to: "Let's get this in your inbox and you can review it. I'll send it over now."
+
+**What Success Looks Like**: Contact says "yes" to receiving the asset. That's it. STOP the conversation immediately.
+
+**What Failure Looks Like**: Agent asks discovery questions, tries to qualify, attempts to pitch services, or continues talking after they say yes.
+
+**Remember**: This is a CONTENT DISTRIBUTION campaign. Your job is to get permission to send an asset via email. The conversation should feel like delivering a package, not conducting an interview.`,
+
 
       'lead_qualification': `**LEAD QUALIFICATION CAMPAIGN** — Your goal has TWO parts: (1) Build awareness, and (2) qualify interest without over-complicating the call.
 

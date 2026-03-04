@@ -1097,8 +1097,8 @@ export class TelnyxAiBridge extends EventEmitter {
     const basePollInterval = 1000; // 1 second
     const mediaPollInterval = 5000; // Reduce polling when media is connected
     const maxPollInterval = 10000;
-    const pollTimeoutMs = 5000;
-    const jitterMs = 250;
+    const pollTimeoutMs = 15000; // Increased from 5s to 15s for high-load resilience
+    const jitterMs = 500; // Increased from 250 to reduce thundering herd during errors
     let hasSpoken = false;
     let consecutiveErrors = 0;
 
@@ -1108,12 +1108,13 @@ export class TelnyxAiBridge extends EventEmitter {
         return baseInterval;
       }
 
+      // Exponential backoff capped at 30s to prevent hammering API during outages
       const backoff = Math.min(
-        maxPollInterval,
-        baseInterval * Math.pow(2, Math.min(consecutiveErrors, 4))
+        30000, // Cap at 30s during heavy backoff
+        baseInterval * Math.pow(2, Math.min(consecutiveErrors, 5))
       );
       const jitter = Math.floor(Math.random() * jitterMs);
-      return backoff + jitter;
+      return Math.min(backoff + jitter, 30000);
     };
 
     const poll = async () => {
@@ -1218,12 +1219,14 @@ export class TelnyxAiBridge extends EventEmitter {
             this.activeCalls.delete(callId);
             return;
           }
-          console.log(`[TelnyxAiBridge] Poll error: ${response.status}`);
+          console.warn(`[TelnyxAiBridge] Poll error: ${response.status} for call ${callId} (consecutive errors: ${consecutiveErrors}). Retrying with backoff...`);
           consecutiveErrors++;
           const activeCall = this.activeCalls.get(callId);
           const hasMediaConnection = activeCall?.mediaWs !== null;
           const isAnsweredViaWebhook = activeCall?.isAnswered === true;
-          setTimeout(poll, getPollDelay(hasMediaConnection, isAnsweredViaWebhook));
+          const delayMs = getPollDelay(hasMediaConnection, isAnsweredViaWebhook);
+          console.log(`[TelnyxAiBridge] Retry scheduled in ${delayMs}ms (attempt ${attempts + 1}/${effectiveMaxAttempts})`);
+          setTimeout(poll, delayMs);
           return;
         }
 

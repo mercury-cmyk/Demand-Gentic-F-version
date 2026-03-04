@@ -8644,7 +8644,7 @@ export function registerRoutes(app: Express) {
    */
   app.get("/api/users/me/telephony", requireAuth, async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = (req as any).user?.userId;
       if (!userId) return res.status(401).json({ message: "Not authenticated" });
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
@@ -8664,7 +8664,7 @@ export function registerRoutes(app: Express) {
    */
   app.put("/api/users/me/telephony", requireAuth, async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = (req as any).user?.userId;
       if (!userId) return res.status(401).json({ message: "Not authenticated" });
       const { callbackPhone, sipExtension } = req.body;
       await storage.updateUser(userId, {

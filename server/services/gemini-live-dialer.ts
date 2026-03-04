@@ -604,6 +604,11 @@ Examples: "Hello?", "Hi", "Yeah?", "Good morning", "Who's this?"
 - "Hi, am I speaking with [Contact Name]?"
 - Or: "Hello, may I speak with [Contact Name]?"
 
+**⚠️ CRITICAL: Say your opening identity question ONLY ONCE.** Do NOT repeat the exact same question if they don't respond clearly the first time.
+- If they say "What?" or "Sorry?" → Say: "I'm looking for [Contact Name] — is this them?" (different phrasing)
+- If still unclear → Ask an open question: "Can you tell me your name?" (shift approach)
+**You must change your wording if the first attempt doesn't work. Repeating the EXACT SAME SENTENCE indicates a technical problem, not a communication problem.**
+
 **"Hello?" is NOT identity confirmation. Do NOT say "Great, thanks for confirming" as your first response.**
 
 ### SCENARIO B: They answer BY STATING THEIR NAME
@@ -681,12 +686,42 @@ Examples of early questions:
 **⚠️ NEVER go silent when asked a direct question. ALWAYS respond immediately with a conversational answer.**
 **⚠️ Silence after identity confirmation = CRITICAL FAILURE**
 
+## AUDIO QUALITY & CLARITY (CRITICAL)
+
+### Handling Unclear/Garbled Contact Speech
+
+If the contact's response is unclear, muffled, or appears corrupted in the transcript:
+1. **Acknowledge politely**: "I'm sorry, I didn't quite catch that — could you say that again?"
+2. **Wait for one retry**
+3. **If STILL unclear**: "Let me try that once more. I want to make sure I understand..." then ask your question again, but CHANGE your wording
+4. **If three attempts fail**: Say "I apologize for the difficulty. Is there a better time to reach you?" then end the call with "no_answer"
+
+**⚠️ DO NOT repeat the same phrase verbatim three times in a row.** This indicates a technical issue, not a comprehension issue.
+
+### If Contact Says "Sorry, Say Again?" or "What?"
+
+This means they didn't hear you clearly. Your response:
+1. **Do NOT repeat your entire opening message verbatim**
+2. **Say exactly once**: "Can you hear me clearly now?" 
+3. **Wait for their response** (they'll say "yes" or "no")
+4. **Then continue**: If yes, proceed with identity confirmation. If no, troubleshoot: "Let me try speaking up a bit. Am I clearer now?"
+
+### CRITICAL: NO ENDLESS LOOPS
+
+You must NEVER repeat the same opening question MORE THAN TWICE without changing your approach. If you said "Hi, am I speaking with Steven?" and they didn't seem to understand or said "what?", your next attempt must be DIFFERENT:
+- FIRST attempt: "Hi, am I speaking with Steven?"
+- SECOND attempt: "I'm looking for Steven — is this him?"
+- THIRD+ attempt: "I seem to be having trouble hearing you. Can you tell me your name?" (shift to an open-ended question)
+
+**If the transcript shows repetition of the same phrase, STOP and switch approaches immediately.**
+
 ## AUDIO RECOVERY (MANDATORY)
 
-If the contact repeatedly says "hello?" or indicates they cannot hear you:
-1. Say exactly: "I apologize, can you hear me clearly now?"
-2. If they confirm, restart crisply: "Hello, may I please speak with ${context.contactName || '[the contact]'}?"
-3. Do NOT end the call after a single failed exchange.
+If the contact indicates they cannot hear you clearly:
+1. Say: "I apologize, I want to make sure you can hear me clearly. Can you hear me okay now?"
+2. If they confirm yes, continue your opening
+3. If they say no/unclear, say: "Let me speak a bit louder. [Re-ask your opening in a stronger, clearer voice, but with different wording]"
+4. Do NOT repeat the exact same phrase more than twice
 
 
 ---
@@ -2584,14 +2619,15 @@ Instructions:
           systemInstruction: {
             parts: [{ text: systemPrompt }]
           },
-          // VAD configuration: Conservative silence detection to prevent
-          // mid-sentence cutoffs and false turn triggers
+          // VAD configuration: Balanced silence detection for natural turn-taking
+          // CRITICAL: Do NOT use LOW sensitivity - it's TOO aggressive and causes false triggers
+          // Use MEDIUM for better accuracy, detect actual speech not artifacts
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,
-              startOfSpeechSensitivity: 'LOW',
-              endOfSpeechSensitivity: 'LOW',
-              silenceDuration: 2.0,
+              startOfSpeechSensitivity: 'MEDIUM',
+              endOfSpeechSensitivity: 'MEDIUM',
+              silenceDuration: 1.0, // 1.0 second - faster response time, feels natural
             },
           },
         }
@@ -2669,14 +2705,15 @@ Instructions:
           system_instruction: {
             parts: [{ text: systemPrompt }]
           },
-          // VAD configuration: Conservative silence detection to prevent
-          // mid-sentence cutoffs and false turn triggers
+          // VAD configuration: Balanced silence detection for natural turn-taking
+          // CRITICAL: Do NOT use LOW sensitivity - it's TOO aggressive and causes false triggers
+          // Use MEDIUM for better accuracy, detect actual speech not artifacts
           realtime_input_config: {
             automatic_activity_detection: {
               disabled: false,
-              start_of_speech_sensitivity: 'LOW',
-              end_of_speech_sensitivity: 'LOW',
-              silence_duration: 1.5,
+              start_of_speech_sensitivity: 'MEDIUM',
+              end_of_speech_sensitivity: 'MEDIUM',
+              silence_duration: 1.0, // 1.0 second - faster response time, feels natural
             },
           },
         }

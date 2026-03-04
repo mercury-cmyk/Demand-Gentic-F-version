@@ -42,6 +42,7 @@ const REDIS_URL = getRedisUrl();
 
 // Global connection state
 let redisConnection: IORedis | undefined;
+let redisSubscriber: IORedis | undefined; // Separate connection for subscribers (required by BullMQ)
 
 function shouldLogQueueWarnings(): boolean {
   return process.env.NODE_ENV === 'production' || process.env.LOG_QUEUE_WARNINGS === 'true';
@@ -116,6 +117,43 @@ async function initializeRedisConnection(): Promise<IORedis | undefined> {
   }
 }
 
+/**
+ * Initialize separate subscriber connection for QueueEvents
+ * Required by BullMQ; cannot share subscriber connection with regular commands
+ */
+async function initializeSubscriberConnection(): Promise<IORedis | undefined> {
+  if (!isRedisConfigured() || !REDIS_URL || !redisConnection) {
+    return undefined;
+  }
+
+  try {
+    const options = getRedisConnectionOptions();
+    const subscriber = new IORedis(REDIS_URL, {
+      ...options,
+      lazyConnect: true,
+    });
+
+    subscriber.on('error', (err) => {
+      if (!err.message?.includes('ETIMEDOUT') && !err.message?.includes('ECONNREFUSED')) {
+        console.error('[Queue:Subscriber] Error:', err.message);
+      }
+    });
+
+    await subscriber.connect();
+    
+    if (subscriber.status === 'ready' || subscriber.status === 'connect') {
+      console.log('[Queue:Subscriber] Subscriber connection established');
+      return subscriber;
+    } else {
+      console.warn(`[Queue:Subscriber] Status: ${subscriber.status}`);
+      return undefined;
+    }
+  } catch (error) {
+    console.warn(`[Queue:Subscriber] Failed to initialize: ${(error as Error).message}`);
+    return undefined;
+  }
+}
+
 // Connection initialization state
 let connectionInitialized = false;
 let connectionInitPromise: Promise<IORedis | undefined> | null = null;
@@ -133,17 +171,27 @@ async function ensureRedisInitialized(): Promise<IORedis | undefined> {
     return connectionInitPromise;
   }
   
-  connectionInitPromise = initializeRedisConnection();
-  try {
-    redisConnection = await connectionInitPromise;
-    connectionInitialized = true;
-    return redisConnection;
-  } catch (err) {
-    console.error('[Queue] Redis initialization failed:', err);
-    connectionInitialized = true; // Mark as initialized (to failed state)
-    redisConnection = undefined;
-    return undefined;
-  }
+  connectionInitPromise = (async () => {
+    try {
+      redisConnection = await initializeRedisConnection();
+      connectionInitialized = true;
+      
+      // Initialize subscriber connection after main connection is ready
+      if (redisConnection) {
+        redisSubscriber = await initializeSubscriberConnection();
+      }
+      
+      return redisConnection;
+    } catch (err) {
+      console.error('[Queue] Redis initialization failed:', err);
+      connectionInitialized = true; // Mark as initialized (to failed state)
+      redisConnection = undefined;
+      redisSubscriber = undefined;
+      return undefined;
+    }
+  })();
+  
+  return connectionInitPromise;
 }
 
 // Start Redis initialization in background (non-blocking)
@@ -224,16 +272,18 @@ export function createQueue<T = any>(
     if (shouldLogQueueWarnings()) {
       console.warn(`[Queue] Queue "${queueName}" created without Redis - jobs will not persist`);
     }
-    // Return a mock queue that logs warnings
     return null;
   }
 
-  // Create a DEDICATED connection for this queue to prevent "Command queue state error"
-  // Sharing connections between queues/workers can cause command/reply desynchronization
-  const connection = new IORedis(redisUrl, {
-    ...getRedisConnectionOptions(),
-    maxRetriesPerRequest: null // Required for BullMQ
-  });
+  // Use shared connection pool instead of creating new connections per queue
+  // This prevents connection pool exhaustion at Redis Labs
+  const connection = getRedisConnection();
+  if (!connection) {
+    if (shouldLogQueueWarnings()) {
+      console.warn(`[Queue] Redis not yet connected for queue "${queueName}"`);
+    }
+    return null;
+  }
 
   return new Queue<T>(queueName, {
     connection,
@@ -278,12 +328,14 @@ export function createWorker<T = any>(
     return null;
   }
 
-  // Create a DEDICATED connection for this worker to prevent blocking issues
-  // BullMQ workers use blocking commands (BRPOP) which lock the connection
-  const connection = new IORedis(redisUrl, {
-    ...getRedisConnectionOptions(),
-    maxRetriesPerRequest: null // Ensure this is set for BullMQ
-  });
+  // Use shared connection pool - BullMQ workers can share connections efficiently
+  const connection = getRedisConnection();
+  if (!connection) {
+    if (shouldLogQueueWarnings()) {
+      console.warn(`[Queue] Redis not yet connected for worker "${queueName}"`);
+    }
+    return null;
+  }
 
   // Build worker options conditionally to avoid passing undefined values to BullMQ
   const workerConfig: any = {
@@ -344,15 +396,18 @@ export function createQueueEvents(queueName: string): QueueEvents | null {
     return null;
   }
 
-  // QueueEvents require a dedicated connection (Subscriber mode)
-  // Reusing a shared connection would break other operations
-  const connection = new IORedis(redisUrl, {
-    ...getRedisConnectionOptions(),
-    maxRetriesPerRequest: null
-  });
+  // Use shared subscriber connection instead of creating new connections per queue
+  const subscriber = redisSubscriber || getRedisConnection();
+  
+  if (!subscriber) {
+    if (shouldLogQueueWarnings()) {
+      console.warn(`[Queue:Events] No subscriber connection for queue "${queueName}"`);
+    }
+    return null;
+  }
 
   return new QueueEvents(queueName, {
-    connection,
+    connection: subscriber,
   });
 }
 
@@ -360,8 +415,21 @@ export function createQueueEvents(queueName: string): QueueEvents | null {
  * Gracefully close all Redis connections
  */
 export async function closeQueueConnections(): Promise<void> {
+  if (redisSubscriber) {
+    try {
+      await redisSubscriber.quit();
+      console.log('[Queue] Subscriber connection closed');
+    } catch (err) {
+      console.warn('[Queue] Error closing subscriber:', err);
+    }
+  }
+  
   if (redisConnection) {
-    await redisConnection.quit();
-    console.log('[Queue] Redis connection closed');
+    try {
+      await redisConnection.quit();
+      console.log('[Queue] Main Redis connection closed');
+    } catch (err) {
+      console.warn('[Queue] Error closing main connection:', err);
+    }
   }
 }
