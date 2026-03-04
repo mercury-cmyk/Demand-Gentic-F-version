@@ -2524,4 +2524,207 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
   }
 });
 
+/**
+ * POST /api/call-intelligence/regeneration/worker/start
+ * Start the background transcription regeneration worker
+ */
+router.post("/regeneration/worker/start", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { startWorker } = await import("../services/transcription-regeneration-worker");
+    startWorker();
+    const { getStatus } = await import("../services/transcription-regeneration-worker");
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Transcription regeneration worker started",
+      data: status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error starting worker:", error);
+    res.status(500).json({ error: "Failed to start worker" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/stop
+ * Stop the background transcription regeneration worker
+ */
+router.post("/regeneration/worker/stop", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { stopWorker, getStatus } = await import("../services/transcription-regeneration-worker");
+    stopWorker();
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Transcription regeneration worker stopped",
+      data: status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error stopping worker:", error);
+    res.status(500).json({ error: "Failed to stop worker" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/worker/status
+ * Get current worker status and job statistics
+ */
+router.get("/regeneration/worker/status", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const { getStatus } = await import("../services/transcription-regeneration-worker");
+    const status = await getStatus();
+    res.json({
+      success: true,
+      data: status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching worker status:", error);
+    res.status(500).json({ error: "Failed to fetch worker status" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/config
+ * Update worker configuration (concurrency, batch size, strategy, etc.)
+ */
+router.post("/regeneration/worker/config", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { concurrency, batchSize, batchDelayMs, strategy, maxRetries, verbose } = req.body;
+
+    // Validate inputs
+    if (concurrency !== undefined && (concurrency < 1 || concurrency > 10)) {
+      return res.status(400).json({ error: "Concurrency must be between 1 and 10" });
+    }
+    if (batchSize !== undefined && (batchSize < 1 || batchSize > 50)) {
+      return res.status(400).json({ error: "Batch size must be between 1 and 50" });
+    }
+    if (batchDelayMs !== undefined && batchDelayMs < 100) {
+      return res.status(400).json({ error: "Batch delay must be at least 100ms" });
+    }
+
+    const { updateConfig, getStatus } = await import("../services/transcription-regeneration-worker");
+    const newConfig = { concurrency, batchSize, batchDelayMs, strategy, maxRetries, verbose };
+    updateConfig(newConfig);
+
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Configuration updated successfully",
+      data: {
+        updatedConfig: newConfig,
+        currentStatus: status,
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error updating worker config:", error);
+    res.status(500).json({ error: "Failed to update configuration" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/progress
+ * Get overall regeneration progress and statistics
+ */
+router.get("/regeneration/progress", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const result = await db.execute(sql.raw(`
+      SELECT status, COUNT(*) as count 
+      FROM transcription_regeneration_jobs 
+      GROUP BY status
+    `)) as any;
+
+    const stats = {
+      pending: 0,
+      inProgress: 0,
+      submitted: 0,
+      completed: 0,
+      failed: 0,
+      total: 0,
+    };
+
+    result.rows?.forEach((row: any) => {
+      const count = Number(row.count) || 0;
+      stats.total += count;
+      if (row.status === "pending") stats.pending = count;
+      else if (row.status === "in_progress") stats.inProgress = count;
+      else if (row.status === "submitted") stats.submitted = count;
+      else if (row.status === "completed") stats.completed = count;
+      else if (row.status === "failed") stats.failed = count;
+    });
+
+    const progressPercent = stats.total > 0
+      ? Math.round(((stats.completed + stats.submitted) / stats.total) * 100)
+      : 0;
+
+    // Estimate remaining time: ~2 calls/minute processing rate
+    const remaining = stats.pending + stats.inProgress;
+    const estimatedRemainingMinutes = Math.ceil(remaining / 2);
+
+    res.json({
+      success: true,
+      data: {
+        ...stats,
+        progressPercent,
+        estimatedRemainingMinutes,
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching regeneration progress:", error);
+    res.status(500).json({ error: "Failed to fetch progress" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/jobs
+ * List regeneration jobs with filtering and pagination
+ */
+router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const { status, limit = 50, page = 1 } = req.query;
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
+    const offset = (pageNum - 1) * pageSize;
+
+    // Get jobs
+    let jobsSql = "SELECT * FROM transcription_regeneration_jobs";
+    const params: any[] = [];
+    
+    if (status && typeof status === "string") {
+      jobsSql += " WHERE status = $1";
+      params.push(status);
+    }
+    
+    jobsSql += " ORDER BY created_at DESC LIMIT " + pageSize + " OFFSET " + offset;
+
+    const jobsResult = await db.execute(sql.raw(jobsSql)) as any;
+
+    // Get total count
+    let countSql = "SELECT COUNT(*) as total FROM transcription_regeneration_jobs";
+    if (status && typeof status === "string") {
+      countSql += " WHERE status = $1";
+    }
+
+    const countResult = await db.execute(sql.raw(countSql, params)) as any;
+    const total = Number(countResult.rows?.[0]?.total) || 0;
+    const pages = Math.ceil(total / pageSize);
+
+    res.json({
+      success: true,
+      data: {
+        jobs: jobsResult.rows || [],
+        pagination: {
+          page: pageNum,
+          limit: pageSize,
+          total,
+          pages,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching regeneration jobs:", error);
+    res.status(500).json({ error: "Failed to fetch jobs" });
+  }
+});
+
 export default router;
