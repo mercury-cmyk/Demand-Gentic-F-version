@@ -2089,10 +2089,10 @@ export function registerRoutes(app: Express) {
 
   // ==================== MAILBOX & EMAIL ACTIVITIES ====================
 
-  // Get all mailbox accounts
+  // Get mailbox accounts for the current user
   app.get("/api/mailbox-accounts", requireAuth, async (req, res) => {
     try {
-      const mailboxes = await storage.getAllMailboxAccounts();
+      const mailboxes = await storage.getMailboxAccountsByUserId(req.user!.userId);
       res.json(mailboxes);
     } catch (error) {
       console.error("Failed to fetch mailbox accounts:", error);
@@ -2650,7 +2650,7 @@ export function registerRoutes(app: Express) {
     try {
       const { m365SyncService } = await import("./services/m365-sync-service");
       const userId = req.user!.userId;
-      const mailboxAccount = await storage.getMailboxAccount(userId, "microsoft365");
+      const mailboxAccount = await storage.getMailboxAccount(userId, MAILBOX_PROVIDER);
 
       if (!mailboxAccount) {
         return res.status(404).json({ error: "No connected Microsoft 365 account found" });
@@ -2668,7 +2668,7 @@ export function registerRoutes(app: Express) {
   app.get("/api/oauth/microsoft/activities", requireAuth, async (req, res) => {
     try {
       const userId = req.user!.userId;
-      const mailboxAccount = await storage.getMailboxAccount(userId, "microsoft365");
+      const mailboxAccount = await storage.getMailboxAccount(userId, MAILBOX_PROVIDER);
 
       if (!mailboxAccount) {
         return res.status(404).json({ error: "No connected Microsoft 365 account found" });

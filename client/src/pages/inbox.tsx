@@ -81,6 +81,14 @@ interface GmailConnectionStatus {
   lastSyncAt?: string;
 }
 
+interface M365ConnectionStatus {
+  connected: boolean;
+  mailboxEmail?: string;
+  displayName?: string;
+  connectedAt?: string;
+  lastSyncAt?: string;
+}
+
 interface TrackingStats {
   opens: number;
   uniqueOpens: number;
@@ -127,7 +135,17 @@ export default function InboxPage() {
     queryKey: ['/api/oauth/google/status'],
   });
 
+  // M365 connection status
+  const { data: m365Status, isLoading: m365StatusLoading } = useQuery<M365ConnectionStatus>({
+    queryKey: ['/api/oauth/microsoft/status'],
+  });
+
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnectingM365, setIsConnectingM365] = useState(false);
+
+  // Attachment state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
 
   // Gmail OAuth popup connect handler
   const handleConnectGmail = useCallback(async () => {
@@ -207,6 +225,86 @@ export default function InboxPage() {
     },
     onError: () => {
       toast({ title: "Sync Failed", description: "Failed to sync Gmail emails.", variant: "destructive" });
+    },
+  });
+
+  // M365/Outlook OAuth popup connect handler
+  const handleConnectM365 = useCallback(async () => {
+    setIsConnectingM365(true);
+    try {
+      const res = await apiRequest("GET", "/api/oauth/microsoft/authorize");
+      const { authUrl } = await res.json();
+
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.innerWidth - width) / 2;
+      const top = window.screenY + (window.innerHeight - height) / 2;
+      const popup = window.open(
+        authUrl,
+        "m365-oauth",
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
+      );
+
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === "oauth-success" && event.data?.provider === "microsoft") {
+          window.removeEventListener("message", handleMessage);
+          setIsConnectingM365(false);
+          queryClient.invalidateQueries({ queryKey: ["/api/oauth/microsoft/status"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/mailbox-accounts"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/inbox/messages"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/inbox/stats"] });
+          toast({ title: "Outlook Connected", description: "Your Microsoft 365 account has been connected successfully." });
+        }
+        if (event.data?.type === "oauth-error" && event.data?.provider === "microsoft") {
+          window.removeEventListener("message", handleMessage);
+          setIsConnectingM365(false);
+          toast({ title: "Connection Failed", description: event.data.error || "Failed to connect Outlook account.", variant: "destructive" });
+        }
+      };
+      window.addEventListener("message", handleMessage);
+
+      const checkClosed = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(checkClosed);
+          window.removeEventListener("message", handleMessage);
+          setIsConnectingM365(false);
+        }
+      }, 1000);
+    } catch (error) {
+      setIsConnectingM365(false);
+      toast({ title: "Connection Failed", description: "Failed to initiate Outlook connection.", variant: "destructive" });
+    }
+  }, [toast]);
+
+  // M365 disconnect mutation
+  const disconnectM365Mutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/oauth/microsoft/disconnect");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/microsoft/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/mailbox-accounts"] });
+      toast({ title: "Outlook Disconnected", description: "Your Microsoft 365 account has been disconnected." });
+    },
+    onError: () => {
+      toast({ title: "Disconnect Failed", description: "Failed to disconnect Outlook account.", variant: "destructive" });
+    },
+  });
+
+  // M365 sync mutation
+  const syncM365Mutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/oauth/microsoft/sync");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/sent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/microsoft/status"] });
+      toast({ title: "Sync Complete", description: "Outlook emails have been synced." });
+    },
+    onError: () => {
+      toast({ title: "Sync Failed", description: "Failed to sync Outlook emails.", variant: "destructive" });
     },
   });
 
@@ -544,6 +642,7 @@ export default function InboxPage() {
     setAiAnalysis(null);
     setSelectedSignatureId(null);
     setSelectedMailboxId(null);
+    setAttachments([]);
     lastInjectedSignatureRef.current = null;
   };
 
@@ -718,13 +817,13 @@ export default function InboxPage() {
         { label: "Inbox" },
       ]}
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Gmail connection status indicator */}
           {gmailStatus?.connected && (
-            <div className="flex items-center gap-2 mr-2">
+            <div className="flex items-center gap-1 mr-1">
               <Badge variant="outline" className="gap-1.5 text-xs font-normal py-1 px-2">
                 <div className="h-2 w-2 rounded-full bg-green-500" />
-                {gmailStatus.mailboxEmail}
+                Gmail: {gmailStatus.mailboxEmail}
                 {gmailStatus.lastSyncAt && (
                   <span className="text-muted-foreground ml-1">
                     synced {formatDistanceToNow(new Date(gmailStatus.lastSyncAt), { addSuffix: true })}
@@ -765,6 +864,54 @@ export default function InboxPage() {
               Connect Gmail
             </Button>
           )}
+
+          {/* M365/Outlook connection status indicator */}
+          {m365Status?.connected && (
+            <div className="flex items-center gap-1 mr-1">
+              <Badge variant="outline" className="gap-1.5 text-xs font-normal py-1 px-2">
+                <div className="h-2 w-2 rounded-full bg-blue-500" />
+                Outlook: {m365Status.mailboxEmail}
+                {m365Status.lastSyncAt && (
+                  <span className="text-muted-foreground ml-1">
+                    synced {formatDistanceToNow(new Date(m365Status.lastSyncAt), { addSuffix: true })}
+                  </span>
+                )}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => syncM365Mutation.mutate()}
+                disabled={syncM365Mutation.isPending}
+                title="Sync Outlook now"
+                data-testid="button-sync-m365"
+              >
+                <RefreshCw className={cn("h-4 w-4", syncM365Mutation.isPending && "animate-spin")} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => disconnectM365Mutation.mutate()}
+                disabled={disconnectM365Mutation.isPending}
+                title="Disconnect Outlook"
+                data-testid="button-disconnect-m365"
+              >
+                <Unlink className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
+          )}
+          {!m365Status?.connected && !m365StatusLoading && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleConnectM365}
+              disabled={isConnectingM365}
+              data-testid="button-connect-m365-header"
+            >
+              {isConnectingM365 ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
+              Connect Outlook
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"
@@ -818,21 +965,37 @@ export default function InboxPage() {
                     <div className="flex-1">
                       <h4 className="font-semibold text-sm mb-1">No Mailbox Connected</h4>
                       <p className="text-sm text-muted-foreground mb-3">
-                        Connect your Gmail account to send emails directly from the inbox.
+                        Connect your email account to send emails directly from the inbox.
                       </p>
-                      <Button
-                        size="sm"
-                        onClick={handleConnectGmail}
-                        disabled={isConnecting}
-                        data-testid="button-connect-gmail-composer"
-                      >
-                        {isConnecting ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Link2 className="h-4 w-4 mr-2" />
-                        )}
-                        Connect Gmail
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={handleConnectGmail}
+                          disabled={isConnecting}
+                          data-testid="button-connect-gmail-composer"
+                        >
+                          {isConnecting ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Link2 className="h-4 w-4 mr-2" />
+                          )}
+                          Connect Gmail
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleConnectM365}
+                          disabled={isConnectingM365}
+                          data-testid="button-connect-m365-composer"
+                        >
+                          {isConnectingM365 ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Link2 className="h-4 w-4 mr-2" />
+                          )}
+                          Connect Outlook
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -960,6 +1123,32 @@ export default function InboxPage() {
               />
             </div>
 
+            {/* Attachment Chips */}
+            {attachments.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Attachments</Label>
+                <div className="flex flex-wrap gap-2">
+                  {attachments.map((file, index) => (
+                    <Badge key={`${file.name}-${index}`} variant="secondary" className="gap-1.5 pr-1">
+                      <Paperclip className="h-3 w-3" />
+                      <span className="text-xs max-w-[150px] truncate">{file.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        ({(file.size / 1024).toFixed(0)}KB)
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-4 w-4 ml-1 hover:bg-destructive/20"
+                        onClick={() => setAttachments(prev => prev.filter((_, i) => i !== index))}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* AI Analysis Results */}
             {showAiAnalysis && aiAnalysis && (
               <Card className="border-primary/20 bg-primary/5">
@@ -1081,15 +1270,30 @@ export default function InboxPage() {
           {/* Footer Actions */}
           <div className="flex items-center justify-between px-6 py-4 bg-muted/30 flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                multiple
+                onChange={(e) => {
+                  if (e.target.files) {
+                    setAttachments(prev => [...prev, ...Array.from(e.target.files!)]);
+                  }
+                  e.target.value = '';
+                }}
+              />
               <Button
                 variant="ghost"
                 size="sm"
-                disabled
+                onClick={() => fileInputRef.current?.click()}
                 data-testid="button-attach-file"
                 className="text-muted-foreground"
               >
                 <Paperclip className="h-4 w-4 mr-2" />
                 Attach
+                {attachments.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 text-xs h-5 px-1.5">{attachments.length}</Badge>
+                )}
               </Button>
               <Button
                 variant="outline"
@@ -1241,10 +1445,10 @@ export default function InboxPage() {
                     ) : (
                       <>
                         <h3 className="text-lg font-semibold mb-2">Your Inbox is Empty</h3>
-                        {!gmailStatus?.connected ? (
+                        {!gmailStatus?.connected && !m365Status?.connected ? (
                           <>
                             <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-                              Connect your Gmail account to sync and send emails directly from within the CRM
+                              Connect your email account to sync and send emails directly from within the CRM
                             </p>
                             <div className="flex flex-col gap-3 items-center">
                               <Button
@@ -1260,23 +1464,51 @@ export default function InboxPage() {
                                 )}
                                 Connect Gmail
                               </Button>
+                              <Button
+                                variant="outline"
+                                size="lg"
+                                onClick={handleConnectM365}
+                                disabled={isConnectingM365}
+                                data-testid="button-connect-m365-empty"
+                              >
+                                {isConnectingM365 ? (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Mail className="h-4 w-4 mr-2" />
+                                )}
+                                Connect Outlook
+                              </Button>
                             </div>
                           </>
                         ) : (
                           <>
                             <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-                              Your Gmail is connected. Sync your emails to see them here.
+                              Your email is connected. Sync your emails to see them here.
                             </p>
                             <div className="flex flex-col gap-3 items-center">
-                              <Button
-                                size="lg"
-                                onClick={() => syncGmailMutation.mutate()}
-                                disabled={syncGmailMutation.isPending}
-                                data-testid="button-sync-gmail-empty"
-                              >
-                                <RefreshCw className={cn("h-4 w-4 mr-2", syncGmailMutation.isPending && "animate-spin")} />
-                                Sync Gmail Now
-                              </Button>
+                              {gmailStatus?.connected && (
+                                <Button
+                                  size="lg"
+                                  onClick={() => syncGmailMutation.mutate()}
+                                  disabled={syncGmailMutation.isPending}
+                                  data-testid="button-sync-gmail-empty"
+                                >
+                                  <RefreshCw className={cn("h-4 w-4 mr-2", syncGmailMutation.isPending && "animate-spin")} />
+                                  Sync Gmail Now
+                                </Button>
+                              )}
+                              {m365Status?.connected && (
+                                <Button
+                                  size="lg"
+                                  variant={gmailStatus?.connected ? "outline" : "default"}
+                                  onClick={() => syncM365Mutation.mutate()}
+                                  disabled={syncM365Mutation.isPending}
+                                  data-testid="button-sync-m365-empty"
+                                >
+                                  <RefreshCw className={cn("h-4 w-4 mr-2", syncM365Mutation.isPending && "animate-spin")} />
+                                  Sync Outlook Now
+                                </Button>
+                              )}
                               <Button
                                 variant="outline"
                                 size="sm"

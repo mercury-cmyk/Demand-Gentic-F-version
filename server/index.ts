@@ -760,9 +760,8 @@ if (isMainModule) {
     }
 
     if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'email') {
-      // M365 email sync - Only start if enabled (DISABLED by default for performance)
-      // Enable M365 auto-sync for production email inbox
-      const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true';
+      // M365 email sync - Enabled by default, set ENABLE_M365_SYNC=false to disable
+      const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC !== 'false';
       if (ENABLE_M365_SYNC) {
         const { startM365SyncJob } = await import("./jobs/m365-sync-job");
         startM365SyncJob();
@@ -770,8 +769,8 @@ if (isMainModule) {
         console.log("[M365SyncJob] AUTO-SYNC DISABLED - Use manual trigger API endpoint");
       }
 
-      // Gmail email sync - Only start if enabled
-      const ENABLE_GMAIL_SYNC = process.env.ENABLE_GMAIL_SYNC === 'true';
+      // Gmail email sync - Enabled by default, set ENABLE_GMAIL_SYNC=false to disable
+      const ENABLE_GMAIL_SYNC = process.env.ENABLE_GMAIL_SYNC !== 'false';
       if (ENABLE_GMAIL_SYNC) {
         const { startGmailSyncJob } = await import("./jobs/gmail-sync-job");
         startGmailSyncJob();

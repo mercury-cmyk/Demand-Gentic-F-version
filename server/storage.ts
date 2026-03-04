@@ -1,6 +1,6 @@
 // Storage layer - referenced from blueprint:javascript_database
 import crypto from "node:crypto";
-import { eq, sql, and, or, isNull, isNotNull, like, ilike, gte, lte, gt, lt, desc, inArray } from "drizzle-orm";
+import { eq, sql, and, or, not, isNull, isNotNull, like, ilike, gte, lte, gt, lt, desc, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "./db";
 import { buildFilterQuery, buildSuppressionFilter } from "./filter-builder";
@@ -549,6 +549,7 @@ export interface IStorage {
   getMailboxAccount(userId: string, provider: string): Promise<MailboxAccount | undefined>;
   getMailboxAccountById(id: string): Promise<MailboxAccount | undefined>;
   getAllMailboxAccounts(provider?: string): Promise<MailboxAccount[]>;
+  getMailboxAccountsByUserId(userId: string): Promise<MailboxAccount[]>;
   createMailboxAccount(account: InsertMailboxAccount & { id?: string }): Promise<MailboxAccount>;
   updateMailboxAccount(id: string, account: Partial<InsertMailboxAccount>): Promise<MailboxAccount | undefined>;
   
@@ -5521,6 +5522,22 @@ export class DatabaseStorage implements IStorage {
     }
     
     // Map database fields to frontend interface
+    return records.map(record => ({
+      id: record.id,
+      mailboxEmail: record.mailboxEmail || '',
+      mailboxName: record.displayName || record.mailboxEmail || 'Unknown',
+      provider: record.provider,
+      isActive: record.status === 'connected',
+      lastSyncAt: record.lastSyncAt ? record.lastSyncAt.toISOString() : undefined,
+    }));
+  }
+
+  async getMailboxAccountsByUserId(userId: string): Promise<any[]> {
+    const records = await db
+      .select()
+      .from(mailboxAccounts)
+      .where(and(eq(mailboxAccounts.userId, userId), not(eq(mailboxAccounts.status, 'disconnected'))));
+
     return records.map(record => ({
       id: record.id,
       mailboxEmail: record.mailboxEmail || '',

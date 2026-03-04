@@ -1,5 +1,8 @@
 import CryptoJS from "crypto-js";
 import { storage } from "../storage";
+import { db } from "../db";
+import { dealConversations } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import type { MailboxAccount } from "@shared/schema";
 import { emailTrackingService } from "../lib/email-tracking-service";
 
@@ -163,6 +166,43 @@ export class GmailSyncService {
     return false;
   }
 
+  /**
+   * Recursively extract HTML (or plain text) body from a Gmail MIME payload.
+   * Prefers text/html; falls back to text/plain.
+   */
+  private extractBodyFromParts(payload?: GmailMessagePart): string | null {
+    if (!payload) return null;
+
+    // Single-part message (no sub-parts)
+    if (!payload.parts || payload.parts.length === 0) {
+      if (payload.body?.data) {
+        const decoded = Buffer.from(payload.body.data, "base64url").toString("utf-8");
+        return decoded;
+      }
+      return null;
+    }
+
+    // Multi-part: look for text/html first, then text/plain
+    let htmlBody: string | null = null;
+    let plainBody: string | null = null;
+
+    const walk = (parts: GmailMessagePart[]) => {
+      for (const part of parts) {
+        if (part.mimeType === "text/html" && part.body?.data && !htmlBody) {
+          htmlBody = Buffer.from(part.body.data, "base64url").toString("utf-8");
+        } else if (part.mimeType === "text/plain" && part.body?.data && !plainBody) {
+          plainBody = Buffer.from(part.body.data, "base64url").toString("utf-8");
+        }
+        if (part.parts) {
+          walk(part.parts);
+        }
+      }
+    };
+
+    walk(payload.parts);
+    return htmlBody || plainBody;
+  }
+
   private async fetchMessage(accessToken: string, messageId: string): Promise<GmailMessage> {
     const response = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
@@ -243,16 +283,52 @@ export class GmailSyncService {
     const uniqueParticipants = participantEmails.filter((email, index, arr) => arr.indexOf(email) === index);
     const timestamp = message.internalDate ? new Date(Number(message.internalDate)) : new Date();
 
-    const conversation = await storage.createDealConversation({
-      opportunityId: null,
-      subject: subjectHeader || "(No Subject)",
-      threadId: message.threadId ? `gmail:${message.threadId}` : null,
-      participantEmails: uniqueParticipants,
-      messageCount: 1,
-      lastMessageAt: timestamp,
-      direction,
-      status: "active",
-    });
+    // Extract full HTML body from MIME payload
+    const bodyContent = this.extractBodyFromParts(message.payload as GmailMessagePart);
+
+    // Thread grouping: reuse existing conversation if same Gmail threadId
+    const threadId = message.threadId ? `gmail:${message.threadId}` : null;
+    let conversation: { id: string };
+
+    if (threadId) {
+      // Look up existing conversation by threadId
+      const [existingConv] = await db
+        .select()
+        .from(dealConversations)
+        .where(eq(dealConversations.threadId, threadId))
+        .limit(1);
+
+      if (existingConv) {
+        conversation = existingConv;
+        // Update conversation metadata
+        await storage.updateDealConversation(existingConv.id, {
+          lastMessageAt: timestamp,
+          messageCount: (existingConv.messageCount || 0) + 1,
+        });
+      } else {
+        conversation = await storage.createDealConversation({
+          opportunityId: null,
+          subject: subjectHeader || "(No Subject)",
+          threadId,
+          participantEmails: uniqueParticipants,
+          messageCount: 1,
+          lastMessageAt: timestamp,
+          direction,
+          status: "active",
+        });
+      }
+    } else {
+      conversation = await storage.createDealConversation({
+        opportunityId: null,
+        subject: subjectHeader || "(No Subject)",
+        threadId: null,
+        participantEmails: uniqueParticipants,
+        messageCount: 1,
+        lastMessageAt: timestamp,
+        direction,
+        status: "active",
+      });
+    }
 
     await storage.createDealMessage({
       conversationId: conversation.id,
@@ -263,7 +339,7 @@ export class GmailSyncService {
       ccEmails: ccParsed.map((recipient) => recipient.address),
       subject: subjectHeader || "(No Subject)",
       bodyPreview: message.snippet?.substring(0, 500) || null,
-      bodyContent: null,
+      bodyContent,
       direction,
       messageStatus: "delivered",
       sentAt: timestamp,
