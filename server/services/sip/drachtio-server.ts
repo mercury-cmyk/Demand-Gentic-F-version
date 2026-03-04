@@ -490,8 +490,8 @@ export class DrachtioSIPServer {
 
     // SIP trunk configuration from environment
     const sipTrunkHost = process.env.SIP_TRUNK_HOST || 'sip.telnyx.com';
-    const sipUsername = process.env.SIP_USERNAME || '';
-    const sipPassword = process.env.SIP_PASSWORD || '';
+    const sipUsername = process.env.SIP_USERNAME || process.env.TELNYX_SIP_USERNAME || '';
+    const sipPassword = process.env.SIP_PASSWORD || process.env.TELNYX_SIP_PASSWORD || '';
 
     try {
       rtpPort = rtpPortManager.allocate();
