@@ -8636,7 +8636,149 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // ==================== USER TELEPHONY SETTINGS ====================
+
+  /**
+   * GET /api/users/me/telephony
+   * Returns the current user's telephony settings (callback phone, SIP extension)
+   */
+  app.get("/api/users/me/telephony", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) return res.status(401).json({ message: "Not authenticated" });
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      res.json({
+        callbackPhone: (user as any).callbackPhone || null,
+        sipExtension: (user as any).sipExtension || null,
+      });
+    } catch (error) {
+      console.error("[Telephony] Failed to get user telephony settings:", error);
+      res.status(500).json({ message: "Failed to load telephony settings" });
+    }
+  });
+
+  /**
+   * PUT /api/users/me/telephony
+   * Updates the current user's telephony settings
+   */
+  app.put("/api/users/me/telephony", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) return res.status(401).json({ message: "Not authenticated" });
+      const { callbackPhone, sipExtension } = req.body;
+      await storage.updateUser(userId, {
+        callbackPhone: callbackPhone || null,
+        sipExtension: sipExtension || null,
+      } as any);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Telephony] Failed to update user telephony settings:", error);
+      res.status(500).json({ message: "Failed to save telephony settings" });
+    }
+  });
+
   // ==================== SIP TRUNK CONFIGURATION (WebRTC) ====================
+
+  /**
+   * GET /api/sip-trunks
+   * Returns all SIP trunk configurations
+   */
+  app.get("/api/sip-trunks", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const configs = await storage.getSipTrunkConfigs();
+      res.json(configs);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to list configs:", error);
+      res.status(500).json({ message: "Failed to fetch SIP trunk configurations" });
+    }
+  });
+
+  /**
+   * POST /api/sip-trunks
+   * Create a new SIP trunk configuration
+   */
+  app.post("/api/sip-trunks", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const config = await storage.createSipTrunkConfig(req.body);
+      res.status(201).json(config);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to create config:", error);
+      res.status(500).json({ message: "Failed to create SIP trunk configuration" });
+    }
+  });
+
+  /**
+   * PATCH /api/sip-trunks/:id
+   * Update an existing SIP trunk configuration
+   */
+  app.patch("/api/sip-trunks/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const config = await storage.updateSipTrunkConfig(req.params.id, req.body);
+      if (!config) return res.status(404).json({ message: "SIP trunk configuration not found" });
+      res.json(config);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to update config:", error);
+      res.status(500).json({ message: "Failed to update SIP trunk configuration" });
+    }
+  });
+
+  /**
+   * DELETE /api/sip-trunks/:id
+   * Delete a SIP trunk configuration
+   */
+  app.delete("/api/sip-trunks/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteSipTrunkConfig(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to delete config:", error);
+      res.status(500).json({ message: "Failed to delete SIP trunk configuration" });
+    }
+  });
+
+  /**
+   * POST /api/sip-trunks/:id/set-default
+   * Set a SIP trunk as the default
+   */
+  app.post("/api/sip-trunks/:id/set-default", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.setDefaultSipTrunk(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to set default:", error);
+      res.status(500).json({ message: "Failed to set default SIP trunk" });
+    }
+  });
+
+  /**
+   * POST /api/sip-trunks/import-env
+   * Import SIP trunk config from environment variables
+   */
+  app.post("/api/sip-trunks/import-env", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const sipUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
+      const sipPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
+      if (!sipUsername || !sipPassword) {
+        return res.status(422).json({ message: "No SIP credentials found in environment (TELNYX_SIP_USERNAME/TELNYX_SIP_PASSWORD)" });
+      }
+      const config = await storage.createSipTrunkConfig({
+        name: "Imported from Environment",
+        provider: "telnyx",
+        sipUsername,
+        sipPassword,
+        sipDomain: process.env.TELNYX_SIP_DOMAIN || "sip.telnyx.com",
+        connectionId: process.env.TELNYX_WEBRTC_CREDENTIAL_ID || process.env.TELNYX_SIP_CONNECTION_ID || null,
+        callerIdNumber: process.env.TELNYX_FROM_NUMBER || null,
+        isActive: true,
+        isDefault: true,
+      });
+      res.status(201).json(config);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to import from env:", error);
+      res.status(500).json({ message: "Failed to import SIP trunk from environment" });
+    }
+  });
 
   /**
    * GET /api/sip-trunks/default

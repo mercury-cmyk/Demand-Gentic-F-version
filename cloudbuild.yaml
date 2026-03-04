@@ -27,20 +27,20 @@ steps:
       - '--all-tags'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}'
 
-  # Deploy demandgentic-api (Demand Intake + Voice)
+  # Deploy demandgentic-voice (Call Intelligence + Recording Management)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
       - 'run'
       - 'deploy'
-      - 'demandgentic-api'
+      - 'demandgentic-voice'
       - '--image'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:${_IMAGE_TAG}'
       - '--region'
       - '${_REGION}'
       - '--platform'
       - 'managed'
-      - '--allow-unauthenticated'
+      - '--no-allow-unauthenticated'
       - '--cpu'
       - '4'
       - '--memory'
@@ -52,7 +52,7 @@ steps:
       - '--port'
       - '8080'
       - '--timeout'
-      - '900'
+      - '3600'
       - '--concurrency'
       - '150'
       - '--cpu-boost'

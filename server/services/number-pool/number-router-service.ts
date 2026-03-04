@@ -34,6 +34,8 @@ export interface NumberSelectionRequest {
   prospectRegion?: string;
   prospectTimezone?: string;
   excludeNumberIds?: string[];
+  /** Call engine override. If omitted, auto-detected from agentDefaults.defaultCallEngine */
+  callEngine?: 'texml' | 'sip';
 }
 
 export interface NumberSelectionResult {
@@ -332,15 +334,58 @@ export function isNumberPoolEnabled(): boolean {
 // ==================== INTERNAL FUNCTIONS ====================
 
 /**
+ * Resolve the Telnyx connection ID for the active call engine.
+ * Maps engine type to the correct connection so the pool only returns
+ * numbers provisioned on that connection.
+ *
+ * Returns null if no filtering should be applied (unknown engine or no config).
+ */
+async function resolveConnectionIdForEngine(engine?: 'texml' | 'sip'): Promise<string | null> {
+  let activeEngine = engine;
+
+  // Auto-detect from DB if not explicitly passed
+  if (!activeEngine) {
+    try {
+      const { agentDefaults } = await import("@shared/schema");
+      const [defaults] = await db.select({ defaultCallEngine: agentDefaults.defaultCallEngine }).from(agentDefaults).limit(1);
+      activeEngine = (defaults?.defaultCallEngine as 'texml' | 'sip') || 'texml';
+    } catch {
+      activeEngine = 'texml';
+    }
+  }
+
+  if (activeEngine === 'sip') {
+    return process.env.TELNYX_SIP_CONNECTION_ID || process.env.TELNYX_CONNECTION_ID || null;
+  }
+  // TeXML: use the TeXML app ID (numbers are assigned to it on Telnyx)
+  return process.env.TELNYX_TEXML_APP_ID || null;
+}
+
+/**
  * Get eligible number pool based on assignments.
  * Results are cached for POOL_CACHE_TTL_MS to avoid per-call DB round-trips.
  * The pool (active numbers + reputation + assignments) rarely changes mid-campaign.
+ *
+ * Connection-aware: filters numbers by telnyxConnectionId matching the active call engine
+ * so SIP calls only pick SIP-provisioned numbers and TeXML calls only pick TeXML numbers.
  */
 async function getEligiblePool(request: NumberSelectionRequest): Promise<EligibleNumber[]> {
-  // Check cache — keyed on campaignId + agentId since assignments differ
-  const cacheKey = `${request.campaignId}|${request.virtualAgentId || ''}`;
+  // Resolve connection ID for the active engine
+  const connectionId = await resolveConnectionIdForEngine(request.callEngine);
+
+  // Check cache — keyed on campaignId + agentId + connectionId since assignments differ
+  const cacheKey = `${request.campaignId}|${request.virtualAgentId || ''}|${connectionId || ''}`;
   if (_poolCache && _poolCache.key === cacheKey && (Date.now() - _poolCache.cachedAt) < POOL_CACHE_TTL_MS) {
     return _poolCache.pool;
+  }
+
+  // Build WHERE conditions
+  const whereConditions = [eq(telnyxNumbers.status, 'active')];
+
+  // Filter by connection ID if resolved (connection-aware pool)
+  if (connectionId) {
+    whereConditions.push(eq(telnyxNumbers.telnyxConnectionId, connectionId));
+    console.log(`[NumberRouter] Filtering pool by connection ${connectionId} (engine: ${request.callEngine || 'auto'})`);
   }
 
   // Get all active numbers with their reputation and assignments
@@ -372,7 +417,7 @@ async function getEligiblePool(request: NumberSelectionRequest): Promise<Eligibl
         )
       )
     )
-    .where(eq(telnyxNumbers.status, 'active'));
+    .where(and(...whereConditions));
 
   // Deduplicate and merge priorities
   const numberMap = new Map<string, EligibleNumber>();

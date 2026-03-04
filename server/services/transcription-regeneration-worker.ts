@@ -131,8 +131,20 @@ async function processPendingJob(): Promise<boolean> {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
   try {
+    // First, check if the table exists
+    const tableCheckResult = await pool.query(
+      `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'transcription_regeneration_jobs')`
+    );
+    const tableExists = tableCheckResult.rows[0]?.exists || false;
+
+    if (!tableExists) {
+      // Table doesn't exist yet, worker cannot process jobs
+      VERBOSE(`Table transcription_regeneration_jobs does not exist - worker is idle`);
+      return false;
+    }
+
     // Get next pending job
-    const [job] = await pool.query(
+    const jobResult = await pool.query(
       `SELECT id, call_id, source, attempts 
        FROM transcription_regeneration_jobs 
        WHERE status = 'pending' 
@@ -140,6 +152,7 @@ async function processPendingJob(): Promise<boolean> {
        LIMIT 1 
        FOR UPDATE SKIP LOCKED`
     );
+    const job = jobResult.rows[0];
 
     if (!job) {
       return false; // No pending jobs
@@ -296,13 +309,38 @@ async function getStatus(): Promise<{
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
   try {
-    const [stats] = await pool.query(
+    // First, check if the table exists
+    const tableCheckResult = await pool.query(
+      `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'transcription_regeneration_jobs')`
+    );
+    const tableExists = tableCheckResult.rows[0]?.exists || false;
+
+    // Return default stats if table doesn't exist
+    if (!tableExists) {
+      LOG(`⚠️ Table transcription_regeneration_jobs does not exist. Run 'npx tsx prepare-transcription-regeneration.ts' to initialize.`);
+      return {
+        running: isRunning,
+        activeJobs: activeJobsCount,
+        config,
+        jobStats: {
+          pending: 0,
+          inProgress: 0,
+          submitted: 0,
+          completed: 0,
+          failed: 0,
+          total: 0,
+        },
+      };
+    }
+
+    const statsResult = await pool.query(
       `SELECT 
         status,
         COUNT(*) as count
       FROM transcription_regeneration_jobs
       GROUP BY status`
     );
+    const stats = statsResult.rows;
 
     const jobStats = {
       pending: 0,
@@ -313,8 +351,8 @@ async function getStatus(): Promise<{
       total: 0,
     };
 
-    if (stats && Array.isArray(stats.rows)) {
-      for (const row of stats.rows) {
+    if (stats && Array.isArray(stats)) {
+      for (const row of stats) {
         const count = parseInt(row.count || 0);
         jobStats.total += count;
 
@@ -344,9 +382,23 @@ async function getStatus(): Promise<{
       config,
       jobStats,
     };
-  } catch (err) {
-    ERR(`Error getting status: ${err}`);
-    throw err;
+  } catch (err: any) {
+    ERR(`Error getting status: ${err.message}`);
+    // Return safe default instead of throwing to prevent 500 errors
+    LOG(`Returning default status due to error`);
+    return {
+      running: isRunning,
+      activeJobs: activeJobsCount,
+      config,
+      jobStats: {
+        pending: 0,
+        inProgress: 0,
+        submitted: 0,
+        completed: 0,
+        failed: 0,
+        total: 0,
+      },
+    };
   } finally {
     await pool.end();
   }

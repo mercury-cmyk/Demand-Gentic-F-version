@@ -734,21 +734,26 @@ router.post("/telnyx", async (req, res) => {
 
       console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL (leads: ${updatedLeads.length}, calls: ${updatedCalls.length}, sessions: ${updatedSessions.length}, callAttempts: ${updatedCallAttempts.length})`);
 
-      // Store recordings permanently in S3 (async, don't block webhook response)
+      // Store recordings permanently in GCS (async, don't block webhook response)
+      // CRITICAL: This downloads from Telnyx and uploads to our GCS bucket for permanent storage
       if (isRecordingStorageEnabled()) {
-        // Import storeCallSessionRecording for call_sessions S3 storage
+        // Import storeCallSessionRecording for call_sessions GCS storage
         const { storeCallSessionRecording } = await import('../services/recording-storage');
+
+        console.log(`[Telnyx Webhook] 🔄 Initiating GCS storage for ${updatedLeads.length} lead(s) and ${updatedSessions.length} session(s)...`);
 
         // Store lead recordings in background (with single retry on failure)
         for (const lead of updatedLeads) {
-          storeRecordingFromWebhook(lead.id, recordingUrl).catch(async (err) => {
-            console.error(`[Telnyx Webhook] Failed to store recording for lead ${lead.id}, retrying in 10s:`, err);
+          storeRecordingFromWebhook(lead.id, recordingUrl).then(() => {
+            console.log(`[Telnyx Webhook] ✅ GCS storage succeeded for lead ${lead.id}`);
+          }).catch(async (err) => {
+            console.error(`[Telnyx Webhook] ❌ Failed to store recording for lead ${lead.id} (will retry in 10s):`, err.message);
             setTimeout(async () => {
               try {
                 await storeRecordingFromWebhook(lead.id, recordingUrl);
                 console.log(`[Telnyx Webhook] ✅ Retry succeeded for lead ${lead.id}`);
-              } catch (retryErr) {
-                console.error(`[Telnyx Webhook] ❌ Retry also failed for lead ${lead.id}:`, retryErr);
+              } catch (retryErr: any) {
+                console.error(`[Telnyx Webhook] ❌❌ FINAL FAILURE for lead ${lead.id}:`, retryErr.message);
               }
             }, 10000);
           });
@@ -756,20 +761,22 @@ router.post("/telnyx", async (req, res) => {
 
         // Store call session recordings in background (with single retry on failure)
         for (const session of updatedSessions) {
-          storeCallSessionRecording(session.id, recordingUrl).catch(async (err) => {
-            console.error(`[Telnyx Webhook] Failed to store recording for session ${session.id}, retrying in 10s:`, err);
+          storeCallSessionRecording(session.id, recordingUrl).then(() => {
+            console.log(`[Telnyx Webhook] ✅ GCS storage succeeded for session ${session.id}`);
+          }).catch(async (err) => {
+            console.error(`[Telnyx Webhook] ❌ Failed to store recording for session ${session.id} (will retry in 10s):`, err.message);
             setTimeout(async () => {
               try {
                 await storeCallSessionRecording(session.id, recordingUrl);
                 console.log(`[Telnyx Webhook] ✅ Retry succeeded for session ${session.id}`);
-              } catch (retryErr) {
-                console.error(`[Telnyx Webhook] ❌ Retry also failed for session ${session.id}:`, retryErr);
+              } catch (retryErr: any) {
+                console.error(`[Telnyx Webhook] ❌❌ FINAL FAILURE for session ${session.id}:`, retryErr.message);
               }
             }, 10000);
           });
         }
-
-        console.log(`[Telnyx Webhook] Initiated S3 storage for ${updatedLeads.length} lead(s) and ${updatedSessions.length} session(s)`);
+      } else {
+        console.warn(`[Telnyx Webhook] ⚠️ GCS storage is DISABLED - recordings will only have Telnyx URLs (will expire)`);
       }
 
       // TRANSCRIPTION FALLBACK: Trigger transcription for call attempts missing transcripts
