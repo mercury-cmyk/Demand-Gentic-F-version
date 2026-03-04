@@ -325,12 +325,14 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
     const callInfo = getInternationalCallInfo(normalizedPhone);
 
     let telnyxResponse: Response;
+    let sipFallbackReason: string | undefined;
 
     if (callEngine === 'sip') {
       // ── Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live ──
       const { isReady: isSipReady, initiateAiCall: initiateSipCall } = await import("../services/sip");
 
       if (!isSipReady()) {
+        sipFallbackReason = 'SIP engine not ready';
         console.warn(`[Campaign Test Call] SIP engine selected but not ready — falling back to TeXML`);
         // Fall through to TeXML below
       } else {
@@ -350,17 +352,18 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
           voiceName: 'Puck',
         });
 
-        if (!sipResult.success) {
-          return res.status(500).json({ success: false, message: sipResult.error || 'SIP call failed' });
+        if (sipResult.success) {
+          return res.json({
+            success: true,
+            message: 'Test call initiated via Direct SIP',
+            callId: sipResult.callId,
+            callControlId: sipResult.callControlId,
+            engine: 'sip',
+          });
         }
 
-        return res.json({
-          success: true,
-          message: 'Test call initiated via Direct SIP',
-          callId: sipResult.callId,
-          callControlId: sipResult.callControlId,
-          engine: 'sip',
-        });
+        sipFallbackReason = sipResult.error || 'SIP call failed';
+        console.warn(`[Campaign Test Call] SIP initiation failed (${sipFallbackReason}) — falling back to TeXML`);
       }
     }
 
@@ -504,6 +507,9 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
       message: callInfo.isInternational
         ? `Test call initiated to ${callInfo.region} (+${callInfo.countryCode}) - your phone should ring shortly. Using ${callInfo.codec === 'PCMA' ? 'A-law' : 'µ-law'} codec with Krisp noise suppression.`
         : "Test call initiated - your phone should ring shortly",
+      engine: sipFallbackReason ? 'texml_fallback' : 'texml',
+      fallbackFrom: sipFallbackReason ? 'sip' : undefined,
+      fallbackReason: sipFallbackReason,
       testCallId,
       callControlId,
       phoneNumber: normalizedPhone,

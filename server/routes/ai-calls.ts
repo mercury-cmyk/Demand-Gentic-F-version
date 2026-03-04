@@ -371,31 +371,43 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
     }
 
     try {
-      let callId: string;
+      let callId: string | undefined;
       let callControlId: string | undefined;
+      let usedEngine: 'sip' | 'texml' = 'texml';
+      let sipFallbackReason: string | undefined;
 
-      if (callEngine === 'sip' && sipDialer.isReady()) {
-        // Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live
-        console.log(`[AI Calls] Using Direct SIP engine for call to ${phoneNumber}`);
-        const result = await sipDialer.initiateAiCall({
-          toNumber: phoneNumber,
-          fromNumber,
-          campaignId,
-          contactId: contactId!,
-          queueItemId: queueItemId || '',
-          voiceName: aiSettings.persona?.voice || 'Puck',
-          contactName: context.contactFirstName || 'there',
-          contactFirstName: context.contactFirstName || 'there',
-          contactJobTitle: context.contactJobTitle || 'Decision Maker',
-          accountName: context.accountName || 'your company',
-          campaignName: context.campaignName,
-        });
-        if (!result.success) {
-          throw new Error(result.error || 'SIP call initiation failed');
+      if (callEngine === 'sip') {
+        if (!sipDialer.isReady()) {
+          sipFallbackReason = 'SIP engine not ready';
+          console.warn(`[AI Calls] SIP engine selected but not ready - falling back to TeXML`);
+        } else {
+          // Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live
+          console.log(`[AI Calls] Using Direct SIP engine for call to ${phoneNumber}`);
+          const result = await sipDialer.initiateAiCall({
+            toNumber: phoneNumber,
+            fromNumber,
+            campaignId,
+            contactId: contactId!,
+            queueItemId: queueItemId || '',
+            voiceName: aiSettings.persona?.voice || 'Puck',
+            contactName: context.contactFirstName || 'there',
+            contactFirstName: context.contactFirstName || 'there',
+            contactJobTitle: context.contactJobTitle || 'Decision Maker',
+            accountName: context.accountName || 'your company',
+            campaignName: context.campaignName,
+          });
+          if (!result.success) {
+            sipFallbackReason = result.error || 'SIP call initiation failed';
+            console.warn(`[AI Calls] SIP call failed (${sipFallbackReason}) - falling back to TeXML`);
+          } else {
+            callId = result.callId!;
+            callControlId = result.callControlId;
+            usedEngine = 'sip';
+          }
         }
-        callId = result.callId!;
-        callControlId = result.callControlId;
-      } else {
+      }
+
+      if (!callId) {
         // TeXML path (default): Telnyx TeXML → Gemini Live WebSocket
         // Also used as fallback when SIP engine is selected but not ready
         const result = await bridge.initiateAiCall(
@@ -406,13 +418,20 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         );
         callId = result.callId;
         callControlId = result.callControlId;
+        usedEngine = 'texml';
+      }
+
+      if (!callId) {
+        throw new Error('Failed to initiate call via SIP and TeXML');
       }
 
       res.json({
         success: true,
         callId,
         callControlId,
-        engine: callEngine,
+        engine: usedEngine,
+        fallbackFrom: usedEngine === 'texml' && callEngine === 'sip' ? 'sip' : undefined,
+        fallbackReason: usedEngine === 'texml' && callEngine === 'sip' ? sipFallbackReason : undefined,
         message: "AI call initiated successfully",
       });
     } catch (error) {
