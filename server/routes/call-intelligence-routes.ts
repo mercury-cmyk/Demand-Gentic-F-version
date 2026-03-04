@@ -2374,6 +2374,7 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
               console.log(`${RG} ❌ Deepgram buffer error: ${e.message}`);
             }
           } else if (audioUrl) {
+            let urlTranscriptionOk = false;
             try {
               console.log(`${RG} Sending URL to Deepgram: ${audioUrl.slice(0, 100)}...`);
               const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
@@ -2384,16 +2385,68 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
               if (transcriptResult?.transcript && transcriptResult.transcript.length >= 20) {
                 await db.update(callSessions).set({ aiTranscript: transcriptResult.transcript } as any).where(eq(callSessions.id, callId));
                 results.succeeded++;
+                urlTranscriptionOk = true;
                 console.log(`${RG} ✅ URL transcription succeeded (${transcriptResult.transcript.length} chars)`);
               } else {
-                results.failed++;
-                results.errors.push(`${callId}: URL transcription empty/short`);
-                console.log(`${RG} ❌ URL transcription empty/short`);
+                console.log(`${RG} ⚠️ URL transcription empty/short — will try Telnyx phone fallback`);
               }
             } catch (e: any) {
-              results.failed++;
-              results.errors.push(`${callId}: Deepgram URL error: ${e.message}`);
-              console.log(`${RG} ❌ Deepgram URL error: ${e.message}`);
+              console.log(`${RG} ⚠️ Deepgram URL error: ${e.message} — will try Telnyx phone fallback`);
+            }
+
+            // ── Telnyx phone search fallback after URL transcription failure (old GCS bucket 404s) ──
+            if (!urlTranscriptionOk) {
+              let fallbackDone = false;
+              const phoneNumber = session.toNumberE164 || session.fromNumber;
+              if (phoneNumber && session.startedAt) {
+                try {
+                  const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
+                  const searchStart = new Date(session.startedAt);
+                  searchStart.setMinutes(searchStart.getMinutes() - 120);
+                  const searchEnd = new Date(session.startedAt);
+                  searchEnd.setMinutes(searchEnd.getMinutes() + 120);
+
+                  console.log(`${RG} Telnyx phone fallback: searching by ${phoneNumber} (±2h window)`);
+                  const recordings = await searchRecordingsByDialedNumber(phoneNumber, searchStart, searchEnd);
+                  const completed = recordings.find(r => r.status === 'completed');
+                  if (completed) {
+                    const telnyxAudioUrl = completed.download_urls?.mp3 || completed.download_urls?.wav || null;
+                    if (telnyxAudioUrl) {
+                      console.log(`${RG} Telnyx phone fallback: found recording, sending to Deepgram...`);
+                      // Backfill telnyx IDs
+                      if (completed.id || completed.call_control_id) {
+                        await db.update(callSessions).set({
+                          telnyxRecordingId: completed.id,
+                          telnyxCallId: completed.call_control_id,
+                          recordingUrl: telnyxAudioUrl,
+                        } as any).where(eq(callSessions.id, callId));
+                      }
+                      const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
+                      const fallbackResult = await transcribeFromRecording(telnyxAudioUrl, {
+                        telnyxCallId: session.telnyxCallId || completed.call_control_id || undefined,
+                      });
+                      if (fallbackResult?.transcript && fallbackResult.transcript.length >= 20) {
+                        await db.update(callSessions).set({ aiTranscript: fallbackResult.transcript } as any).where(eq(callSessions.id, callId));
+                        results.succeeded++;
+                        fallbackDone = true;
+                        console.log(`${RG} ✅ Telnyx phone fallback transcription succeeded (${fallbackResult.transcript.length} chars)`);
+                      }
+                    }
+                  } else {
+                    console.log(`${RG} Telnyx phone fallback: no completed recordings found (${recordings.length} total)`);
+                  }
+                } catch (e: any) {
+                  console.log(`${RG} Telnyx phone fallback failed: ${e.message}`);
+                }
+              } else {
+                console.log(`${RG} Telnyx phone fallback: no phone number or startedAt available`);
+              }
+
+              if (!fallbackDone) {
+                results.failed++;
+                results.errors.push(`${callId}: All transcription attempts failed (URL 404 + Telnyx fallback)`);
+                console.log(`${RG} ❌ All transcription attempts failed`);
+              }
             }
           } else {
             results.failed++;
@@ -2554,9 +2607,54 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             results.succeeded++;
             console.log(`${RG} ✅ Dialer transcription succeeded`);
           } else {
-            results.failed++;
-            results.errors.push(`${callId}: ${result.error || 'Unknown error'}`);
-            console.log(`${RG} ❌ Dialer transcription failed: ${result.error || 'Unknown'}`);
+            // ── Telnyx phone search fallback after GCS URL failure (old bucket 404s) ──
+            let dialerFallbackDone = false;
+            if (attempt.phoneDialed && attempt.callStartedAt && (strategy === 'telnyx_phone_lookup' || strategy === 'auto')) {
+              try {
+                const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
+                const searchStart = new Date(attempt.callStartedAt);
+                searchStart.setMinutes(searchStart.getMinutes() - 120);
+                const searchEnd = new Date(attempt.callStartedAt);
+                searchEnd.setMinutes(searchEnd.getMinutes() + 120);
+
+                console.log(`${RG} Dialer Telnyx phone fallback: searching by ${attempt.phoneDialed} (±2h window)`);
+                const recordings = await searchRecordingsByDialedNumber(attempt.phoneDialed, searchStart, searchEnd);
+                const completed = recordings.find(r => r.status === 'completed');
+                if (completed) {
+                  const downloadUrl = completed.download_urls?.mp3 || completed.download_urls?.wav;
+                  if (downloadUrl) {
+                    await db.update(dialerCallAttempts).set({
+                      recordingUrl: downloadUrl,
+                      telnyxCallId: completed.call_control_id,
+                      telnyxRecordingId: completed.id,
+                      updatedAt: new Date(),
+                    }).where(eq(dialerCallAttempts.id, callId));
+
+                    const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
+                    const fallbackResult = await transcribeFromRecording(downloadUrl, {
+                      telnyxCallId: completed.call_control_id || undefined,
+                    });
+                    if (fallbackResult?.transcript && fallbackResult.transcript.length >= 20) {
+                      await db.update(dialerCallAttempts).set({ fullTranscript: fallbackResult.transcript, updatedAt: new Date() }).where(eq(dialerCallAttempts.id, callId));
+                      results.succeeded++;
+                      results.failed--; // undo the increment below
+                      dialerFallbackDone = true;
+                      console.log(`${RG} ✅ Dialer Telnyx phone fallback transcription succeeded (${fallbackResult.transcript.length} chars)`);
+                    }
+                  }
+                } else {
+                  console.log(`${RG} Dialer Telnyx phone fallback: no completed recordings (${recordings.length} total)`);
+                }
+              } catch (e: any) {
+                console.log(`${RG} Dialer Telnyx phone fallback failed: ${e.message}`);
+              }
+            }
+
+            if (!dialerFallbackDone) {
+              results.failed++;
+              results.errors.push(`${callId}: ${result.error || 'Unknown error'}`);
+              console.log(`${RG} ❌ Dialer transcription failed: ${result.error || 'Unknown'}`);
+            }
           }
           continue;
         }
