@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SettingsLayout } from '@/components/settings/settings-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
@@ -16,17 +15,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { CheckCircle, XCircle, Radio, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface VoiceEngineConfig {
-  activeEngine: 'texml' | 'livekit';
-  livekit: {
+  activeEngine: 'texml' | 'sip';
+  sip: {
     ready: boolean;
-    url: string | null;
-    sipUri: string | null;
-    hasApiKey: boolean;
-    hasApiSecret: boolean;
+    hasDrachtioHost: boolean;
+    hasPublicIp: boolean;
+    sipEnabled: boolean;
   };
   texml: {
     ready: boolean;
@@ -46,7 +44,7 @@ function StatusDot({ ok }: { ok: boolean }) {
 export default function VoiceEngineControlCenter() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [pendingEngine, setPendingEngine] = useState<'texml' | 'livekit' | null>(null);
+  const [pendingEngine, setPendingEngine] = useState<'texml' | 'sip' | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const { data: config, isLoading } = useQuery<VoiceEngineConfig>({
@@ -58,7 +56,7 @@ export default function VoiceEngineControlCenter() {
   });
 
   const switchMutation = useMutation({
-    mutationFn: async (engine: 'texml' | 'livekit') => {
+    mutationFn: async (engine: 'texml' | 'sip') => {
       const res = await apiRequest('PUT', '/api/voice-engine/config', { engine });
       if (!res.ok) {
         const err = await res.json();
@@ -70,7 +68,7 @@ export default function VoiceEngineControlCenter() {
       queryClient.invalidateQueries({ queryKey: ['/api/voice-engine/config'] });
       toast({
         title: 'Voice engine updated',
-        description: `Switched to ${data.activeEngine === 'livekit' ? 'LiveKit SIP' : 'Telnyx TeXML'}. New calls will use this engine.`,
+        description: `Switched to ${data.activeEngine === 'sip' ? 'Direct SIP (Drachtio)' : 'Telnyx TeXML'}. New calls will use this engine.`,
       });
     },
     onError: (error: Error) => {
@@ -84,7 +82,7 @@ export default function VoiceEngineControlCenter() {
 
   const activeEngine = config?.activeEngine || 'texml';
 
-  function handleSelect(engine: 'texml' | 'livekit') {
+  function handleSelect(engine: 'texml' | 'sip') {
     if (engine === activeEngine) return;
     setPendingEngine(engine);
     setConfirmOpen(true);
@@ -101,7 +99,7 @@ export default function VoiceEngineControlCenter() {
   return (
     <SettingsLayout
       title="Voice Engine"
-      description="Control which call engine handles AI voice calls. Switch safely between Telnyx TeXML and LiveKit SIP."
+      description="Control which call engine handles AI voice calls. Switch safely between Telnyx TeXML and Direct SIP (Drachtio)."
     >
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
@@ -117,8 +115,8 @@ export default function VoiceEngineControlCenter() {
                   <CardTitle>Active Engine</CardTitle>
                   <CardDescription>All new AI calls will use this engine</CardDescription>
                 </div>
-                <Badge variant={activeEngine === 'livekit' ? 'default' : 'secondary'} className="text-sm px-3 py-1">
-                  {activeEngine === 'livekit' ? 'LiveKit SIP' : 'Telnyx TeXML'}
+                <Badge variant={activeEngine === 'sip' ? 'default' : 'secondary'} className="text-sm px-3 py-1">
+                  {activeEngine === 'sip' ? 'Direct SIP' : 'Telnyx TeXML'}
                 </Badge>
               </div>
             </CardHeader>
@@ -174,30 +172,30 @@ export default function VoiceEngineControlCenter() {
               </CardContent>
             </Card>
 
-            {/* LiveKit SIP Card */}
+            {/* Direct SIP Card */}
             <Card
               className={cn(
                 'cursor-pointer transition-all border-2',
-                activeEngine === 'livekit'
+                activeEngine === 'sip'
                   ? 'border-green-500 bg-green-50/50 dark:bg-green-950/20'
                   : 'border-transparent hover:border-muted-foreground/20'
               )}
-              onClick={() => handleSelect('livekit')}
+              onClick={() => handleSelect('sip')}
             >
               <CardHeader>
                 <div className="flex items-start gap-3">
                   <div className={cn(
                     'mt-0.5 h-5 w-5 rounded-full border-2 flex items-center justify-center',
-                    activeEngine === 'livekit' ? 'border-green-500' : 'border-muted-foreground/40'
+                    activeEngine === 'sip' ? 'border-green-500' : 'border-muted-foreground/40'
                   )}>
-                    {activeEngine === 'livekit' && <div className="h-2.5 w-2.5 rounded-full bg-green-500" />}
+                    {activeEngine === 'sip' && <div className="h-2.5 w-2.5 rounded-full bg-green-500" />}
                   </div>
                   <div className="flex-1">
-                    <CardTitle className="text-base">LiveKit SIP</CardTitle>
+                    <CardTitle className="text-base">Direct SIP (Drachtio)</CardTitle>
                     <CardDescription className="mt-1">
-                      Real-time SIP bridge with sub-second latency. LiveKit handles VAD, echo cancellation, and transcoding.
+                      Direct SIP trunk calling via Drachtio. Lowest latency, lowest cost. RTP audio streams directly to Gemini Live.
                     </CardDescription>
-                    {activeEngine === 'livekit' && (
+                    {activeEngine === 'sip' && (
                       <Badge variant="outline" className="mt-2 text-xs">Active</Badge>
                     )}
                   </div>
@@ -206,24 +204,20 @@ export default function VoiceEngineControlCenter() {
               <CardContent>
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <StatusDot ok={config?.livekit.hasApiKey || false} />
-                    <span className="text-muted-foreground">LiveKit API Key</span>
+                    <StatusDot ok={config?.sip.sipEnabled || false} />
+                    <span className="text-muted-foreground">SIP Calling Enabled</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <StatusDot ok={config?.livekit.hasApiSecret || false} />
-                    <span className="text-muted-foreground">LiveKit API Secret</span>
+                    <StatusDot ok={config?.sip.hasDrachtioHost || false} />
+                    <span className="text-muted-foreground">Drachtio Host</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <StatusDot ok={!!config?.livekit.url} />
-                    <span className="text-muted-foreground">LiveKit URL</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusDot ok={!!config?.livekit.sipUri} />
-                    <span className="text-muted-foreground">SIP URI</span>
+                    <StatusDot ok={config?.sip.hasPublicIp || false} />
+                    <span className="text-muted-foreground">Public IP</span>
                   </div>
                   <div className="flex items-center gap-2 pt-1">
-                    <Badge variant={config?.livekit.ready ? 'default' : 'destructive'} className="text-xs">
-                      {config?.livekit.ready ? 'Ready' : 'Not Configured'}
+                    <Badge variant={config?.sip.ready ? 'default' : 'destructive'} className="text-xs">
+                      {config?.sip.ready ? 'Ready' : 'Not Configured'}
                     </Badge>
                   </div>
                 </div>
@@ -239,12 +233,12 @@ export default function VoiceEngineControlCenter() {
             <CardContent>
               <div className="grid md:grid-cols-2 gap-6 text-sm text-muted-foreground">
                 <div>
-                  <p className="font-medium text-foreground mb-1">Telnyx TeXML</p>
+                  <p className="font-medium text-foreground mb-1">Telnyx TeXML (Default)</p>
                   <p>Telnyx initiates the call and streams RTP audio bidirectionally to Gemini Live via WebSocket. Proven, production-grade path.</p>
                 </div>
                 <div>
-                  <p className="font-medium text-foreground mb-1">LiveKit SIP</p>
-                  <p>Telnyx dials the prospect, then bridges to a LiveKit room via SIP. The LiveKit agent (Gemini) joins the room for real-time conversation.</p>
+                  <p className="font-medium text-foreground mb-1">Direct SIP (Drachtio)</p>
+                  <p>Drachtio SIP server handles signaling directly. RTP audio streams to Gemini Live with lowest latency and no intermediary costs. Falls back to TeXML if SIP is unavailable.</p>
                 </div>
               </div>
             </CardContent>
@@ -259,8 +253,9 @@ export default function VoiceEngineControlCenter() {
             <AlertDialogTitle>Switch Voice Engine?</AlertDialogTitle>
             <AlertDialogDescription>
               This will route all new AI calls through{' '}
-              <strong>{pendingEngine === 'livekit' ? 'LiveKit SIP' : 'Telnyx TeXML'}</strong>.
+              <strong>{pendingEngine === 'sip' ? 'Direct SIP (Drachtio)' : 'Telnyx TeXML'}</strong>.
               Existing in-progress calls will not be affected.
+              {pendingEngine === 'sip' && ' If SIP is unavailable, calls will automatically fall back to TeXML.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

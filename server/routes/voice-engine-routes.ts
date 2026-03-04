@@ -15,12 +15,7 @@ router.get("/config", requireAuth, async (req: Request, res: Response) => {
     const defaults = await db.select().from(agentDefaults).limit(1);
     const config = defaults[0];
 
-    const livekitReady = !!(
-      process.env.LIVEKIT_URL &&
-      process.env.LIVEKIT_API_KEY &&
-      process.env.LIVEKIT_API_SECRET &&
-      process.env.LIVEKIT_SIP_URI
-    );
+    const sipReady = process.env.USE_SIP_CALLING === 'true';
 
     const texmlReady = !!(
       process.env.TELNYX_API_KEY &&
@@ -29,12 +24,11 @@ router.get("/config", requireAuth, async (req: Request, res: Response) => {
 
     res.json({
       activeEngine: config?.defaultCallEngine || 'texml',
-      livekit: {
-        ready: livekitReady,
-        url: process.env.LIVEKIT_URL ? '***configured***' : null,
-        sipUri: process.env.LIVEKIT_SIP_URI ? '***configured***' : null,
-        hasApiKey: !!process.env.LIVEKIT_API_KEY,
-        hasApiSecret: !!process.env.LIVEKIT_API_SECRET,
+      sip: {
+        ready: sipReady,
+        hasDrachtioHost: !!process.env.DRACHTIO_HOST,
+        hasPublicIp: !!process.env.PUBLIC_IP,
+        sipEnabled: process.env.USE_SIP_CALLING === 'true',
       },
       texml: {
         ready: texmlReady,
@@ -56,22 +50,15 @@ router.put("/config", requireAuth, async (req: Request, res: Response) => {
   try {
     const { engine } = req.body;
 
-    if (!engine || !['texml', 'livekit'].includes(engine)) {
-      return res.status(400).json({ message: "engine must be 'texml' or 'livekit'" });
+    if (!engine || !['texml', 'sip'].includes(engine)) {
+      return res.status(400).json({ message: "engine must be 'texml' or 'sip'" });
     }
 
-    // Validate LiveKit env vars before allowing switch
-    if (engine === 'livekit') {
-      const missing: string[] = [];
-      if (!process.env.LIVEKIT_URL) missing.push('LIVEKIT_URL');
-      if (!process.env.LIVEKIT_API_KEY) missing.push('LIVEKIT_API_KEY');
-      if (!process.env.LIVEKIT_API_SECRET) missing.push('LIVEKIT_API_SECRET');
-      if (!process.env.LIVEKIT_SIP_URI) missing.push('LIVEKIT_SIP_URI');
-
-      if (missing.length > 0) {
+    // Validate SIP env vars before allowing switch
+    if (engine === 'sip') {
+      if (process.env.USE_SIP_CALLING !== 'true') {
         return res.status(422).json({
-          message: `Cannot switch to LiveKit: missing environment variables: ${missing.join(', ')}`,
-          missing,
+          message: 'Cannot switch to SIP: USE_SIP_CALLING is not enabled. Set USE_SIP_CALLING=true in environment.',
         });
       }
     }

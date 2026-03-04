@@ -20,7 +20,6 @@
     "audit:files": "tsx scripts/audit-active-files.ts",
     "verify:unified-voice-readonly": "tsx scripts/verify-unified-voice-readonly.ts",
     "start:gemini-relay": "tsx server/gemini-relay.ts",
-    "start:livekit-agent": "tsx server/services/livekit/worker.ts dev",
     "vector:backfill": "tsx scripts/backfill-vector-documents.ts",
     "recordings:backfill:showcase": "tsx scripts/backfill-showcase-recordings.ts"
     ,"queue:invalid-lrn": "tsx scripts/cleanup-invalid-lrn-queue.ts"
@@ -47,9 +46,6 @@
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
-    "@livekit/agents": "^1.0.39",
-    "@livekit/agents-plugin-google": "^1.0.39",
-    "@livekit/agents-plugin-silero": "^1.0.39",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
     "@openai/agents": "^0.3.7",
@@ -135,7 +131,6 @@
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.3",
     "libphonenumber-js": "^1.12.24",
-    "livekit-server-sdk": "^2.15.0",
     "lucide-react": "^0.453.0",
     "mailgun.js": "^12.6.0",
     "mammoth": "^1.11.0",
