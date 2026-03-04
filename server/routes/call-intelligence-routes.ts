@@ -2915,26 +2915,22 @@ router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager'), a
   }
 });
 
-// Admin backfill auth: accepts either Bearer JWT (admin role) or X-Backfill-Secret header
-function backfillAuth(req: any, res: any, next: any) {
-  const backfillSecret = (req.headers['x-backfill-secret'] || '').toString().trim();
-  const expectedSecret = (process.env.MEDIA_BRIDGE_SECRET || '').toString().trim();
-  if (backfillSecret && expectedSecret && backfillSecret === expectedSecret) {
-    req.user = { id: 'backfill-admin', role: 'admin', tenantId: 'system' };
-    return next();
-  }
-  // Fall back to normal auth
-  return requireAuth(req, res, () => requireRole('admin')(req, res, next));
-}
-
 /**
  * POST /api/call-intelligence/backfill-analysis
  * Backfill missing quality analysis for calls that have transcripts
  * but no call_quality_records entry.
+ * Auth: body.secret must match MEDIA_BRIDGE_SECRET
+ * Processes SYNCHRONOUSLY — keeps HTTP connection alive until done.
+ * Use limit=50 (default) to stay within Cloud Run timeout.
  */
-router.post("/backfill-analysis", backfillAuth, async (req, res) => {
+router.post("/backfill-analysis", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+    const { secret } = req.body || {};
+    const expectedSecret = (process.env.MEDIA_BRIDGE_SECRET || '').trim();
+    if (!secret || !expectedSecret || secret.trim() !== expectedSecret) {
+      return res.status(401).json({ error: 'Invalid secret' });
+    }
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
     const dryRun = req.query.dryRun === 'true';
     const minDuration = parseInt(req.query.minDuration as string) || 35;
 
@@ -2978,21 +2974,16 @@ router.post("/backfill-analysis", backfillAuth, async (req, res) => {
       });
     }
 
-    // Process in background — send response immediately
-    res.json({
-      success: true,
-      message: `Processing ${rows.length} calls in background`,
-      totalFound: rows.length,
-    });
-
-    // Background processing
+    // Process SYNCHRONOUSLY — keep connection alive
     const { analyzeConversationQuality } = await import("../services/conversation-quality-analyzer");
     const { logCallIntelligence } = await import("../services/call-intelligence-logger");
 
     let succeeded = 0;
     let failed = 0;
+    const errors: string[] = [];
 
-    for (const row of rows) {
+    for (let idx = 0; idx < rows.length; idx++) {
+      const row = rows[idx];
       try {
         const transcript = row.ai_transcript || '';
         if (transcript.length < 20) continue;
@@ -3019,6 +3010,7 @@ router.post("/backfill-analysis", backfillAuth, async (req, res) => {
 
         if ((result as any).status === 'error' || !result.overallScore) {
           failed++;
+          errors.push(`${row.id}: analysis returned error/no score`);
           continue;
         }
 
@@ -3033,7 +3025,6 @@ router.post("/backfill-analysis", backfillAuth, async (req, res) => {
 
         if (logResult.success) {
           succeeded++;
-          // Also update aiAnalysis on the session
           await db.update(callSessions)
             .set({
               aiAnalysis: {
@@ -3048,18 +3039,30 @@ router.post("/backfill-analysis", backfillAuth, async (req, res) => {
             .where(eq(callSessions.id, row.id));
         } else {
           failed++;
+          errors.push(`${row.id}: logCallIntelligence failed — ${logResult.error}`);
         }
 
-        // Small delay to avoid overwhelming the AI service
-        await new Promise(r => setTimeout(r, 200));
+        if ((idx + 1) % 10 === 0) {
+          console.log(`[BackfillAnalysis] Progress: ${idx + 1}/${rows.length} (${succeeded} ok, ${failed} fail)`);
+        }
 
+        await new Promise(r => setTimeout(r, 200));
       } catch (err: any) {
         failed++;
+        errors.push(`${row.id}: ${err.message}`);
         console.error(`[BackfillAnalysis] Error ${row.id}: ${err.message}`);
       }
     }
 
     console.log(`[BackfillAnalysis] DONE: ${succeeded} succeeded, ${failed} failed out of ${rows.length}`);
+
+    return res.json({
+      success: true,
+      totalFound: rows.length,
+      succeeded,
+      failed,
+      errors: errors.slice(0, 20),
+    });
   } catch (error: any) {
     console.error("[BackfillAnalysis] Error:", error);
     if (!res.headersSent) {
@@ -3072,9 +3075,16 @@ router.post("/backfill-analysis", backfillAuth, async (req, res) => {
  * POST /api/call-intelligence/backfill-transcripts
  * Backfill missing transcripts for calls that have recordings but no transcript.
  * Uses the same multi-strategy approach as the regeneration endpoint.
+ * Processes SYNCHRONOUSLY — keeps HTTP connection alive until done.
+ * Use limit=100 (default) to stay within Cloud Run timeout.
  */
-router.post("/backfill-transcripts", backfillAuth, async (req, res) => {
+router.post("/backfill-transcripts", async (req, res) => {
   try {
+    const { secret } = req.body || {};
+    const expectedSecret = (process.env.MEDIA_BRIDGE_SECRET || '').trim();
+    if (!secret || !expectedSecret || secret.trim() !== expectedSecret) {
+      return res.status(401).json({ error: 'Invalid secret' });
+    }
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
     const dryRun = req.query.dryRun === 'true';
     const minDuration = parseInt(req.query.minDuration as string) || 35;
@@ -3129,27 +3139,21 @@ router.post("/backfill-transcripts", backfillAuth, async (req, res) => {
       });
     }
 
-    // Send response immediately, process in background
-    res.json({
-      success: true,
-      message: `Processing ${rows.length} calls in background`,
-      totalFound: rows.length,
-      sources: { hasGcs, hasUrl, hasTelnyxId },
-    });
-
-    // Background processing
+    // Process SYNCHRONOUSLY — keep connection alive
     const { getPresignedDownloadUrl: presign, downloadGcsAudioAsBuffer: downloadBuffer } = await import("../services/gcs-recording-storage");
     const { transcribeFromRecording, submitToDeepgramBuffer } = await import("../services/deepgram-postcall-transcription");
 
     let succeeded = 0;
     let failed = 0;
+    const errors: string[] = [];
 
     const extractGcsKey = (url: string) => {
       const match = url.match(/\/([^/]+\/recordings\/[^?]+)/);
       return match ? match[1] : null;
     };
 
-    for (const row of rows) {
+    for (let idx = 0; idx < rows.length; idx++) {
+      const row = rows[idx];
       try {
         let audioUrl: string | null = null;
         let audioBuffer: Buffer | null = null;
@@ -3200,6 +3204,7 @@ router.post("/backfill-transcripts", backfillAuth, async (req, res) => {
             succeeded++;
           } else {
             failed++;
+            errors.push(`${row.id}: buffer transcript empty/short`);
           }
         } else if (audioUrl) {
           const result = await transcribeFromRecording(audioUrl, {
@@ -3211,19 +3216,35 @@ router.post("/backfill-transcripts", backfillAuth, async (req, res) => {
             succeeded++;
           } else {
             failed++;
+            errors.push(`${row.id}: URL transcript empty/short`);
           }
         } else {
           failed++;
+          errors.push(`${row.id}: no audio source found`);
+        }
+
+        if ((idx + 1) % 10 === 0) {
+          console.log(`[BackfillTranscripts] Progress: ${idx + 1}/${rows.length} (${succeeded} ok, ${failed} fail)`);
         }
 
         await new Promise(r => setTimeout(r, 300));
       } catch (err: any) {
         failed++;
+        errors.push(`${row.id}: ${err.message}`);
         console.error(`[BackfillTranscripts] Error ${row.id}: ${err.message}`);
       }
     }
 
     console.log(`[BackfillTranscripts] DONE: ${succeeded} succeeded, ${failed} failed out of ${rows.length}`);
+
+    return res.json({
+      success: true,
+      totalFound: rows.length,
+      succeeded,
+      failed,
+      sources: { hasGcs, hasUrl, hasTelnyxId },
+      errors: errors.slice(0, 20),
+    });
   } catch (error: any) {
     console.error("[BackfillTranscripts] Error:", error);
     if (!res.headersSent) {
