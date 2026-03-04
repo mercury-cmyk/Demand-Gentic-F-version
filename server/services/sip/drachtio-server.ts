@@ -414,6 +414,8 @@ export class DrachtioSIPServer {
     const listenAddr = PUBLIC_IP || SIP_LISTEN_HOST;
     const sessionId = Math.floor(Math.random() * 1e10);
 
+    log(`SDP: listenAddr=${listenAddr} (PUBLIC_IP=${PUBLIC_IP || 'NOT SET'}, SIP_LISTEN_HOST=${SIP_LISTEN_HOST}), port=${port}`);
+
     // Build standard SIP SDP manually for maximum compatibility with Telnyx
     const lines = [
       'v=0',
