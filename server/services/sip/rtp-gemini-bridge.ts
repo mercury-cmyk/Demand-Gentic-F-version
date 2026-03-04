@@ -22,6 +22,7 @@ import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
 import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
+import { processSIPPostCallAnalysis, type SIPTranscriptTurn } from './sip-post-call-handler';
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -121,6 +122,8 @@ interface BridgeSession {
   reconnectAttempts: number;
   maxReconnectAttempts: number;
   maxDurationTimer: NodeJS.Timeout | null;
+  // Transcript capture for post-call analysis
+  transcriptTurns: SIPTranscriptTurn[];
 }
 
 interface CallContext {
@@ -303,6 +306,7 @@ export async function createBridgeSession(params: {
     reconnectAttempts: 0,
     maxReconnectAttempts: 3,
     maxDurationTimer: null,
+    transcriptTurns: [],
   };
 
   bridgeSessions.set(callId, session);
@@ -486,8 +490,36 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           return;
         }
 
-        // Handle audio output from Gemini (check multiple response formats)
+        // Capture agent output transcription (what AI agent is saying)
         const serverContent = response.serverContent || response.server_content;
+        const outputTranscription = serverContent?.outputTranscription || serverContent?.output_transcription;
+        if (outputTranscription?.text && typeof outputTranscription.text === 'string') {
+          const text = outputTranscription.text.trim();
+          if (text && !session.transcriptTurns.some(t => t.speaker === 'agent' && t.text === text)) {
+            session.transcriptTurns.push({
+              speaker: 'agent',
+              text,
+              timestamp: Date.now() - session.metrics.startTime,
+            });
+            console.log(`[RTP Bridge] Agent transcript: ${text.substring(0, 100)}...`);
+          }
+        }
+
+        // Capture contact input transcription (what the contact is saying)
+        const inputTranscription = serverContent?.inputTranscription || serverContent?.input_transcription;
+        if (inputTranscription?.text && typeof inputTranscription.text === 'string') {
+          const text = inputTranscription.text.trim();
+          if (text && !session.transcriptTurns.some(t => t.speaker === 'contact' && t.text === text)) {
+            session.transcriptTurns.push({
+              speaker: 'contact',
+              text,
+              timestamp: Date.now() - session.metrics.startTime,
+            });
+            console.log(`[RTP Bridge] Contact transcript: ${text.substring(0, 100)}...`);
+          }
+        }
+
+        // Handle audio output from Gemini (check multiple response formats)
         const modelTurn = serverContent?.modelTurn || serverContent?.model_turn;
         
         // Detect if this is a response to contact speech (indicates contact spoke)
@@ -576,6 +608,21 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
             })
             .where(eq(campaignQueue.id, session.callContext.queueItemId));
           console.log(`[RTP Bridge] Queue item ${session.callContext.queueItemId} updated to ${queueStatus}`);
+        }
+
+        // Trigger post-call analysis with captured transcript
+        if (session.callContext.callAttemptId && session.callContext.leadId) {
+          const callDuration = Math.floor((Date.now() - session.metrics.startTime) / 1000);
+          processSIPPostCallAnalysis({
+            callAttemptId: session.callContext.callAttemptId,
+            leadId: session.callContext.leadId,
+            campaignId: session.callContext.campaignId || '',
+            contactName: session.callContext.contactName || session.callContext.contactFirstName,
+            disposition: canonicalDisposition,
+            turnTranscript: session.transcriptTurns,
+            callDurationSeconds: callDuration,
+            agentNotes: notes,
+          }).catch((err) => console.error(`[RTP Bridge] Post-call analysis failed:`, err));
         }
 
         response = { success: true, disposition: canonicalDisposition };
