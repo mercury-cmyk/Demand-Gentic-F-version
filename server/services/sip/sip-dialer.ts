@@ -3,19 +3,24 @@
  *
  * This is the main entry point for SIP-based calling.
  * It integrates:
- * - Drachtio SIP Server for call signaling (primary)
- * - RTP Bridge for audio streaming to Gemini
+ * - Drachtio SIP Server for call signaling
+ * - Media Bridge on VM for RTP ↔ Gemini audio bridging
  * - Campaign orchestrator integration
  *
- * Replaces the API-based calling in telnyx-ai-bridge.ts
+ * Architecture:
+ * - Cloud Run handles SIP signaling via Drachtio daemon (TCP 9022)
+ * - Drachtio VM runs the media bridge (RTP UDP + Gemini WebSocket)
+ * - Cloud Run tells the VM media bridge to create/destroy sessions via HTTP
  *
  * Note: Database operations (call attempts, sessions) are handled by the
  * campaign orchestrator. This module only handles SIP signaling and audio.
  */
 
 import * as rtpBridge from './rtp-gemini-bridge';
+import * as mediaBridgeClient from './media-bridge-client';
 import { drachtioServer } from './drachtio-server';
 import { v4 as uuidv4 } from 'uuid';
+import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
 
 // Feature flag for SIP calling
 const USE_SIP_CALLING = process.env.USE_SIP_CALLING === 'true';
@@ -46,6 +51,8 @@ export interface InitiateCallParams {
   // Number pool tracking
   callerNumberId?: string | null;
   callerNumberDecisionId?: string | null;
+  // Call attempt tracking (for disposition processing)
+  callAttemptId?: string | null;
 }
 
 /**
@@ -78,6 +85,18 @@ export async function initializeSipDialer(): Promise<boolean> {
       console.warn('[SIP Dialer] Drachtio initialization failed - SIP calls may not work');
     }
 
+    // Check media bridge availability
+    if (mediaBridgeClient.isMediaBridgeConfigured()) {
+      const health = await mediaBridgeClient.getMediaBridgeHealth();
+      if (health.available) {
+        console.log('[SIP Dialer] Media bridge available on VM');
+      } else {
+        console.warn(`[SIP Dialer] Media bridge not reachable: ${health.error}`);
+      }
+    } else {
+      console.warn('[SIP Dialer] Media bridge not configured (MEDIA_BRIDGE_HOST / PUBLIC_IP not set)');
+    }
+
     console.log('[SIP Dialer] Initialized successfully');
     return true;
   } catch (error) {
@@ -108,10 +127,94 @@ export function isReady(): boolean {
 }
 
 /**
+ * Build system prompt for the media bridge Gemini session
+ */
+function buildSystemPrompt(params: InitiateCallParams, callId: string): string {
+  const voiceName = params.voiceName || 'Puck';
+  const orgRef = params.organizationName || 'DemandGentic.ai By Pivotal B2B';
+
+  const personaProfile = resolveGeminiPersonaProfile({ voiceName, sessionId: callId });
+
+  let prompt = `${personaProfile.prompt}
+
+## YOUR IDENTITY
+
+You are an AI voice assistant from ${orgRef}.
+
+${params.contactName ? `**The person you are calling:** ${params.contactName}` : ''}
+${params.contactJobTitle ? `**Job Title:** ${params.contactJobTitle}` : ''}
+${params.accountName ? `**Company:** ${params.accountName}` : ''}
+
+**Opening:**
+"Hello, may I please speak with ${params.contactName || 'the contact'}?"
+
+${params.campaignObjective ? `## INTERNAL OBJECTIVE (DO NOT SAY TO PROSPECT)
+${params.campaignObjective}
+` : ''}
+
+${params.productServiceInfo ? `## WHAT TO SAY ABOUT YOUR OFFERING
+${params.productServiceInfo}
+` : ''}
+
+${params.talkingPoints?.length ? `## KEY TALKING POINTS
+${params.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
+` : ''}
+
+## CALL FLOW
+1. Confirm identity
+2. Introduce yourself and ${orgRef}
+3. Explain why you're calling (value to them)
+4. Ask questions to understand their needs
+5. Present relevant information
+6. Propose next steps
+7. Close professionally
+
+## VOICEMAIL / IVR FAST-EXIT (CRITICAL)
+If you hear ANY automation or mailbox cue, do NOT continue the script.
+Examples:
+- "leave a message", "after the beep", "after the tone", "voicemail", "mailbox"
+- "the person you are trying to reach is not available"
+- menu prompts like "press 1", "press 2", "to disconnect", "main menu"
+- repeated automated prompts or beep/silence loops
+
+When detected, IMMEDIATELY:
+1. Call \`submit_disposition\` with "voicemail"
+2. Call \`end_call\` with reason "voicemail detected"
+
+Never leave a voicemail message. Never continue discovery/pitch on automation.
+
+## SILENCE GUARD
+If call is connected but there is no meaningful human response:
+- after your opening and ~8-10 seconds of silence/looping audio, end quickly
+- use "no_answer" only for pure silence/ringing with no mailbox cue
+
+## RECORDING CALL OUTCOME
+
+BEFORE ending any call, you MUST call \`submit_disposition\` with the outcome:
+- "qualified_lead" - prospect interested
+- "not_interested" - prospect declined
+- "do_not_call" - requested removal
+- "voicemail" - reached voicemail
+- "no_answer" - no answer / callback requested
+- "invalid_data" - wrong number
+
+## ENDING THE CALL
+
+When conversation is over:
+1. Call \`submit_disposition\` with outcome
+2. Call \`end_call\` to hang up
+`;
+
+  return prompt;
+}
+
+/**
  * Initiate an AI voice call via SIP
  *
- * Note: Database operations are handled by the campaign orchestrator.
- * This function only handles SIP signaling and audio bridging.
+ * Flow:
+ * 1. Initiate SIP call via Drachtio → waits for call to be answered
+ * 2. After answer, create media bridge on VM with RTP port + remote endpoint
+ * 3. Media bridge handles RTP ↔ Gemini bidirectional audio
  */
 export async function initiateAiCall(params: InitiateCallParams): Promise<CallResult> {
   const callId = uuidv4();
@@ -119,58 +222,67 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
   console.log(`[SIP Dialer] Initiating call ${callId} to ${params.toNumber}`);
 
   try {
-    // Create RTP bridge session for Gemini first
-    const bridgeResult = await rtpBridge.createBridgeSession({
-      callId,
-      toNumber: params.toNumber,
-      fromNumber: params.fromNumber,
-      voiceName: params.voiceName,
-      context: {
-        contactName: params.contactName,
-        contactFirstName: params.contactFirstName,
-        contactJobTitle: params.contactJobTitle,
-        accountName: params.accountName,
-        organizationName: params.organizationName,
-        campaignName: params.campaignName,
-        campaignObjective: params.campaignObjective,
-        productServiceInfo: params.productServiceInfo,
-        talkingPoints: params.talkingPoints,
-        queueItemId: params.queueItemId,
-        campaignId: params.campaignId,
-        contactId: params.contactId,
-        maxCallDurationSeconds: params.maxCallDurationSeconds,
-        phoneNumber: params.toNumber,
-        callerNumberId: params.callerNumberId,
-      },
-    });
-
-    if (!bridgeResult.success) {
-      throw new Error(`Failed to create bridge session: ${bridgeResult.error}`);
-    }
-
-    // Initiate SIP call via Drachtio
+    // Step 1: Initiate SIP call via Drachtio (returns when call is answered)
     const sipResult = await drachtioServer.initiateCall({
       to: params.toNumber,
       from: params.fromNumber,
       campaignId: params.campaignId,
       contactId: params.contactId,
       queueItemId: params.queueItemId,
-      onAudioReceived: (audio: Buffer) => {
-        // Forward RTP audio to Gemini bridge
-        rtpBridge.handleSipAudio(callId, audio);
-      },
       onCallStateChanged: (state: string) => {
         console.log(`[SIP Dialer] Call ${callId} state: ${state}`);
       },
       onCallEnded: async (reason: string) => {
         console.log(`[SIP Dialer] Call ${callId} ended: ${reason}`);
-        // Close bridge session (async to update number pool stats)
+        // Destroy media bridge on VM
+        await mediaBridgeClient.destroyMediaBridge(sipResult.callId || callId);
+        // Also close any legacy bridge session
         await rtpBridge.closeBridgeSession(callId);
       },
     });
 
     if (!sipResult.success) {
       throw new Error(`Failed to initiate SIP call: ${sipResult.error}`);
+    }
+
+    // Step 2: Create media bridge on VM for RTP ↔ Gemini
+    if (mediaBridgeClient.isMediaBridgeConfigured() && sipResult.rtpPort && sipResult.remoteAddress && sipResult.remotePort) {
+      const systemPrompt = buildSystemPrompt(params, sipResult.callId);
+
+      const bridgeResult = await mediaBridgeClient.createMediaBridge({
+        callId: sipResult.callId,
+        rtpPort: sipResult.rtpPort,
+        remoteAddress: sipResult.remoteAddress,
+        remotePort: sipResult.remotePort,
+        systemPrompt,
+        voiceName: params.voiceName,
+        toPhoneNumber: params.toNumber,
+        contactName: params.contactName || params.contactFirstName,
+        context: {
+          campaignId: params.campaignId,
+          contactId: params.contactId,
+          queueItemId: params.queueItemId,
+          callerNumberId: params.callerNumberId,
+          phoneNumber: params.toNumber,
+          callAttemptId: params.callAttemptId,
+          // Safety hints for the SIP media bridge runtime
+          voicemailAutoHangup: true,
+          voicemailSilenceGuardMs: 10000,
+          voicemailBeepLoopGuard: true,
+        },
+        maxDurationSeconds: params.maxCallDurationSeconds,
+      });
+
+      if (bridgeResult.success) {
+        console.log(`[SIP Dialer] Media bridge created for ${sipResult.callId}`);
+      } else {
+        console.error(`[SIP Dialer] Media bridge creation failed: ${bridgeResult.error}`);
+        // Call is still connected — just no audio. Log but don't fail the call.
+      }
+    } else if (!mediaBridgeClient.isMediaBridgeConfigured()) {
+      console.warn(`[SIP Dialer] Media bridge not configured — call ${sipResult.callId} has no audio path`);
+    } else {
+      console.warn(`[SIP Dialer] Missing media info for ${sipResult.callId} — no media bridge created`);
     }
 
     console.log(`[SIP Dialer] Call ${callId} initiated successfully`);
@@ -184,7 +296,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
     console.error(`[SIP Dialer] Failed to initiate call ${callId}:`, error);
 
     // Clean up on failure
-    await rtpBridge.closeBridgeSession(callId);
+    mediaBridgeClient.destroyMediaBridge(callId).catch(() => {});
 
     return {
       success: false,
@@ -200,7 +312,10 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
 export async function endCall(callId: string, reason?: string): Promise<boolean> {
   console.log(`[SIP Dialer] Ending call ${callId}: ${reason}`);
 
-  // Close bridge session
+  // Destroy media bridge on VM
+  mediaBridgeClient.destroyMediaBridge(callId).catch(() => {});
+
+  // Close legacy bridge session
   rtpBridge.closeBridgeSession(callId);
 
   // End SIP call via Drachtio

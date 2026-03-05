@@ -80,7 +80,7 @@ export default function LeadDetailPage() {
   // Use fresh recording URL if available, otherwise fall back to stale URL
   const activeRecordingUrl = recordingUrlData?.url || lead?.recordingUrl;
 
-  const [bypassQualityCheck, setBypassQualityCheck] = React.useState(false);
+  const [bypassQualityCheck, setBypassQualityCheck] = useState(false);
 
   const approveMutation = useMutation({
     mutationFn: async () => {

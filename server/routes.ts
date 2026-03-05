@@ -150,6 +150,7 @@ import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3, getPresignedDownloadUrl } from "./lib/storage";
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from "./lib/recording-url-policy";
+import { buildCanonicalPortalUrl, getCanonicalPortalBaseUrl } from "./lib/canonical-portal-url";
 import * as schema from "@shared/schema";
 import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, callQualityRecords, passwordResetTokens, clientUsers, type InsertMailboxAccount, type Account } from "@shared/schema";
 import { transactionalEmailService } from "./services/transactional-email-service";
@@ -1424,11 +1425,10 @@ export function registerRoutes(app: Express) {
         expiresAt,
       });
 
-      // Build reset link — client resets go to app subdomain, admin resets use main domain
-      const resetBaseUrl = type === 'client'
-        ? (process.env.CLIENT_PORTAL_BASE_URL || process.env.APP_BASE_URL || 'https://demandgentic.ai')
-        : (process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000');
-      const resetLink = `${resetBaseUrl}/reset-password?token=${token}&type=${type}`;
+      // Build reset link — client resets go to canonical portal domain
+      const resetLink = type === 'client'
+        ? buildCanonicalPortalUrl(`/reset-password?token=${token}&type=${type}`)
+        : `${process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000'}/reset-password?token=${token}&type=${type}`;
 
       // Send email via transactional email service
       const resetEmailResult = await transactionalEmailService.triggerPasswordResetEmail(email.toLowerCase(), resetLink, "1 hour");
@@ -15549,6 +15549,86 @@ Provide JSON response with:
   app.use("/api/agent-panel/orders", agentPanelOrdersRouter); // Mount order flow routes
   app.use("/api/agent-defaults", agentDefaultsRouter);
   app.use("/api/voice-engine", voiceEngineRouter);
+
+  // ==================== MEDIA BRIDGE CALLBACK (from VM) ====================
+
+  app.post("/api/sip/media-bridge/callback", async (req, res) => {
+    try {
+      const { callId, action, data, secret } = req.body;
+      const BRIDGE_SECRET = process.env.MEDIA_BRIDGE_SECRET || 'bridge-secret';
+
+      if (secret !== BRIDGE_SECRET) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      // Extract callAttemptId from top-level or context fallback
+      const callAttemptId = data?.callAttemptId || data?.context?.callAttemptId || null;
+      console.log(`[MediaBridge Callback] ${action} for ${callId} (callAttemptId: ${callAttemptId})`, data);
+
+      if (action === 'end_call') {
+        // End the SIP call via Drachtio
+        const { drachtioServer } = await import('./services/sip/drachtio-server');
+        try {
+          await drachtioServer.endCall(callId);
+          console.log(`[MediaBridge Callback] SIP call ${callId} ended`);
+        } catch (err) {
+          console.error(`[MediaBridge Callback] Failed to end SIP call ${callId}:`, err);
+        }
+        // If end_call includes disposition + transcript, process it
+        if (callAttemptId && data?.disposition) {
+          const { processDisposition } = await import('./services/disposition-engine');
+          console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}`, {
+            hasTranscript: !!data?.transcript,
+            callDurationSeconds: data?.callDurationSeconds,
+          });
+          if (data?.callDurationSeconds) {
+            try {
+              await db.update(dialerCallAttempts)
+                .set({ callDurationSeconds: data.callDurationSeconds, updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, callAttemptId));
+            } catch (durErr) {
+              console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
+            }
+          }
+          await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
+            transcript: data?.transcript || undefined,
+            structuredTranscript: data?.structuredTranscript || undefined,
+          });
+        }
+      } else if (action === 'submit_disposition') {
+        // Process disposition via the disposition engine
+        const { processDisposition } = await import('./services/disposition-engine');
+        const disposition = data?.disposition || 'no_answer';
+        console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`, {
+          hasTranscript: !!data?.transcript,
+          callDurationSeconds: data?.callDurationSeconds,
+          callAttemptId,
+        });
+        if (callAttemptId) {
+          // Update call attempt with duration from media bridge
+          if (data?.callDurationSeconds) {
+            try {
+              await db.update(dialerCallAttempts)
+                .set({ callDurationSeconds: data.callDurationSeconds, updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, callAttemptId));
+            } catch (durErr) {
+              console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
+            }
+          }
+          await processDisposition(callAttemptId, disposition, 'media_bridge', {
+            transcript: data?.transcript || undefined,
+            structuredTranscript: data?.structuredTranscript || undefined,
+          });
+        }
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('[MediaBridge Callback] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // ==================== KNOWLEDGE BLOCKS ====================
 

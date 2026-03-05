@@ -203,7 +203,7 @@ export function getGeminiSessionStats() {
 // ABSOLUTE SAFETY TIMEOUT: Kill any call that's been alive longer than this, regardless of state.
 // Prevents zombie calls (e.g., 131min "No Answer" calls) when Telnyx streams stay open
 // but no audio arrives and maxCallDuration timer never starts.
-const ABSOLUTE_CALL_SAFETY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes hard limit
+const ABSOLUTE_CALL_SAFETY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes hard limit
 
 // AMD (Answering Machine Detection) constants
 // NOTE: TeXML endpoint no longer triggers AMD, so this is mostly a backup timeout
@@ -1236,15 +1236,15 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     return Math.min(Math.floor(parsed), 300);
   }
 
-  function getEffectiveMaxCallDurationSeconds(): number | null {
-    return parseMaxCallDurationSeconds(callContext.maxCallDurationSeconds);
+  // Always enforce a max call duration — default 300s (5 min) if not explicitly set
+  function getEffectiveMaxCallDurationSeconds(): number {
+    return parseMaxCallDurationSeconds(callContext.maxCallDurationSeconds) ?? 300;
   }
 
   function startMaxCallDurationTimer(): void {
     if (maxCallDurationTimer) return;
 
     const maxDurationSeconds = getEffectiveMaxCallDurationSeconds();
-    if (!maxDurationSeconds) return;
 
     const maxDurationMs = maxDurationSeconds * 1000;
     console.log(`[Gemini Live] ⏱️ Starting max call duration timer: ${maxDurationSeconds}s`);

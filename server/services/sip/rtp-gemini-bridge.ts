@@ -100,6 +100,9 @@ const GEMINI_VOICES = [
 /**
  * Bridge session for a single call
  */
+// Hard max call duration — 5 minutes, no exceptions
+const MAX_CALL_DURATION_SECONDS = 300;
+
 interface BridgeSession {
   callId: string;
   geminiWs: WebSocket | null;
@@ -107,6 +110,8 @@ interface BridgeSession {
   setupComplete: boolean;
   callAnswered: boolean;
   openingMessageSent: boolean;
+  contactHasSpoken: boolean;  // Track if contact spoke first
+  listeningTimeout: NodeJS.Timeout | null;  // Fallback timeout for greeting
   dispositionProcessed: boolean;
   voiceName: string;
   systemPrompt: string;
@@ -115,6 +120,15 @@ interface BridgeSession {
   metrics: AudioMetrics;
   reconnectAttempts: number;
   maxReconnectAttempts: number;
+  maxDurationTimer: NodeJS.Timeout | null;
+  // Transcript capture for post-call analysis
+  transcriptTurns: TranscriptTurn[];
+}
+
+interface TranscriptTurn {
+  speaker: 'agent' | 'contact';
+  text: string;
+  timestamp?: number;
 }
 
 interface CallContext {
@@ -193,6 +207,24 @@ function getQueueStatusFromDisposition(disposition: CanonicalDisposition): 'queu
   }
 }
 
+function buildPlainTranscript(turns: TranscriptTurn[]): string | undefined {
+  if (!Array.isArray(turns) || turns.length === 0) {
+    return undefined;
+  }
+
+  const lines = turns
+    .map((turn) => {
+      const text = String(turn?.text ?? '').trim();
+      if (!text) return null;
+      const speaker = turn.speaker === 'agent' ? 'Agent' : 'Contact';
+      return `${speaker}: ${text}`;
+    })
+    .filter(Boolean) as string[];
+
+  const transcript = lines.join('\n').trim();
+  return transcript || undefined;
+}
+
 /**
  * Build system prompt for Gemini
  */
@@ -237,6 +269,24 @@ ${context.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
 6. Propose next steps
 7. Close professionally
 
+## VOICEMAIL / IVR FAST-EXIT (CRITICAL)
+If you hear ANY automation/mailbox cue, stop immediately.
+Examples:
+- "leave a message", "after the beep", "after the tone", "voicemail", "mailbox"
+- "the person you are trying to reach is not available"
+- menu prompts: "press 1", "press 2", "to disconnect", "main menu"
+- repeated prompts, beep loops, or long silence loops
+
+Action:
+1. Call \`submit_disposition\` with "voicemail"
+2. Immediately call \`end_call\`
+
+Do NOT leave a message. Do NOT continue script/discovery on automation.
+
+## SILENCE GUARD
+If connected but no meaningful human response after your opening (~8-10 seconds),
+end quickly with "no_answer" (unless voicemail cue exists, then use "voicemail").
+
 ## RECORDING CALL OUTCOME
 
 BEFORE ending any call, you MUST call \`submit_disposition\` with the outcome:
@@ -280,6 +330,8 @@ export async function createBridgeSession(params: {
     setupComplete: false,
     callAnswered: false,
     openingMessageSent: false,
+    contactHasSpoken: false,
+    listeningTimeout: null,
     dispositionProcessed: false,
     voiceName: voiceName || GEMINI_VOICES[0],
     systemPrompt: buildSystemPrompt(context, voiceName || GEMINI_VOICES[0], callId),
@@ -294,15 +346,35 @@ export async function createBridgeSession(params: {
     },
     reconnectAttempts: 0,
     maxReconnectAttempts: 3,
+    maxDurationTimer: null,
+    transcriptTurns: [],
   };
 
   bridgeSessions.set(callId, session);
+
+  // Schedule hard max call duration (5 min)
+  const maxDurationSec = Math.min(
+    Number(context.maxCallDurationSeconds) > 0 ? Number(context.maxCallDurationSeconds) : MAX_CALL_DURATION_SECONDS,
+    MAX_CALL_DURATION_SECONDS
+  );
+  session.maxDurationTimer = setTimeout(async () => {
+    console.warn(`[RTP Bridge] MAX CALL DURATION (${maxDurationSec}s) reached for ${callId} — forcing hangup`);
+    try {
+      sipClient.endCall(callId, `Max call duration ${maxDurationSec}s reached`);
+    } catch (err) {
+      console.error(`[RTP Bridge] Failed to end call ${callId} on max duration:`, err);
+    }
+    await closeBridgeSession(callId);
+  }, maxDurationSec * 1000);
+  session.maxDurationTimer.unref?.();
 
   // Connect to Gemini
   try {
     await connectToGemini(session);
     return { success: true };
   } catch (error: any) {
+    if (session.maxDurationTimer) clearTimeout(session.maxDurationTimer);
+    if (session.listeningTimeout) clearTimeout(session.listeningTimeout);
     bridgeSessions.delete(callId);
     return { success: false, error: error.message };
   }
@@ -361,61 +433,72 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
     ws.on('open', () => {
       console.log(`[RTP Bridge] Connected to Gemini for call ${session.callId}`);
 
-      // Send setup message - IMPORTANT: Use correct model name format
-      const setupMessage = {
-        setup: {
-          model: getModelName(),
-          tools: [
-            {
-              function_declarations: [
-                {
-                  name: 'submit_disposition',
-                  description: 'Submit call outcome/disposition',
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      disposition: {
-                        type: 'string',
-                        description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
-                      },
-                      notes: { type: 'string', description: 'Brief notes about the call' },
-                    },
-                    required: ['disposition'],
-                  },
-                },
-                {
-                  name: 'end_call',
-                  description: 'End the phone call gracefully',
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      reason: { type: 'string', description: 'Reason for ending call' },
-                    },
-                    required: ['reason'],
-                  },
-                },
-              ],
-            },
-          ],
-          generation_config: {
-            response_modalities: ['AUDIO'],
-            speech_config: {
-              voice_config: {
-                prebuilt_voice_config: {
-                  // For Vertex AI Gemini Live, use supported voice names from GEMINI_VOICES array
-                  // Fallback to 'Puck' if voice is not in the supported list
-                  voice_name: GEMINI_VOICES.includes(session.voiceName)
-                    ? session.voiceName
-                    : 'Puck',
-                },
+      // Send setup message — Vertex AI requires camelCase, Google AI Studio requires snake_case.
+      // Sending wrong casing causes silent setup rejection (WebSocket closes without setup_complete).
+      const voice = GEMINI_VOICES.includes(session.voiceName) ? session.voiceName : 'Puck';
+
+      const functionDecls = [
+        {
+          name: 'submit_disposition',
+          description: 'Submit call outcome/disposition',
+          parameters: {
+            type: 'object',
+            properties: {
+              disposition: {
+                type: 'string',
+                description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
               },
+              notes: { type: 'string', description: 'Brief notes about the call' },
             },
-          },
-          system_instruction: {
-            parts: [{ text: session.systemPrompt }],
+            required: ['disposition'],
           },
         },
-      };
+        {
+          name: 'end_call',
+          description: 'End the phone call gracefully',
+          parameters: {
+            type: 'object',
+            properties: {
+              reason: { type: 'string', description: 'Reason for ending call' },
+            },
+            required: ['reason'],
+          },
+        },
+      ];
+
+      const setupPayload: Record<string, unknown> = { model: getModelName() };
+
+      if (USE_VERTEX_AI) {
+        // Vertex AI (aiplatform.googleapis.com) — camelCase
+        setupPayload.tools = [{ functionDeclarations: functionDecls }];
+        setupPayload.generationConfig = {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voice },
+            },
+          },
+        };
+        setupPayload.systemInstruction = {
+          parts: [{ text: session.systemPrompt }],
+        };
+      } else {
+        // Google AI Studio (generativelanguage.googleapis.com) — snake_case
+        setupPayload.tools = [{ function_declarations: functionDecls }];
+        setupPayload.generation_config = {
+          response_modalities: ['AUDIO'],
+          speech_config: {
+            voice_config: {
+              prebuilt_voice_config: { voice_name: voice },
+            },
+          },
+        };
+        setupPayload.system_instruction = {
+          parts: [{ text: session.systemPrompt }],
+        };
+      }
+
+      const setupMessage = { setup: setupPayload };
 
       console.log(`[RTP Bridge] Sending setup with model: ${setupMessage.setup.model}`);
       ws.send(JSON.stringify(setupMessage));
@@ -441,14 +524,51 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           console.log(`[RTP Bridge] Gemini setup complete for call ${session.callId}`);
           resolve();
 
-          // Try to send opening message if call is answered
-          trySendOpeningMessage(session);
+          // Start listening period - wait for contact to speak first
+          if (session.callAnswered) {
+            startListeningPeriod(session);
+          }
           return;
         }
 
-        // Handle audio output from Gemini (check multiple response formats)
+        // Capture agent output transcription (what AI agent is saying)
         const serverContent = response.serverContent || response.server_content;
+        const outputTranscription = serverContent?.outputTranscription || serverContent?.output_transcription;
+        if (outputTranscription?.text && typeof outputTranscription.text === 'string') {
+          const text = outputTranscription.text.trim();
+          if (text && !session.transcriptTurns.some(t => t.speaker === 'agent' && t.text === text)) {
+            session.transcriptTurns.push({
+              speaker: 'agent',
+              text,
+              timestamp: Date.now() - session.metrics.startTime,
+            });
+            console.log(`[RTP Bridge] Agent transcript: ${text.substring(0, 100)}...`);
+          }
+        }
+
+        // Capture contact input transcription (what the contact is saying)
+        const inputTranscription = serverContent?.inputTranscription || serverContent?.input_transcription;
+        if (inputTranscription?.text && typeof inputTranscription.text === 'string') {
+          const text = inputTranscription.text.trim();
+          if (text && !session.transcriptTurns.some(t => t.speaker === 'contact' && t.text === text)) {
+            session.transcriptTurns.push({
+              speaker: 'contact',
+              text,
+              timestamp: Date.now() - session.metrics.startTime,
+            });
+            console.log(`[RTP Bridge] Contact transcript: ${text.substring(0, 100)}...`);
+          }
+        }
+
+        // Handle audio output from Gemini (check multiple response formats)
         const modelTurn = serverContent?.modelTurn || serverContent?.model_turn;
+        
+        // Detect if this is a response to contact speech (indicates contact spoke)
+        // This happens when we receive model output without having sent opening message
+        if (modelTurn && !session.contactHasSpoken && !session.openingMessageSent) {
+          detectContactSpeech(session);
+        }
+        
         if (modelTurn?.parts) {
           for (const part of modelTurn.parts) {
             const inlineData = part.inlineData || part.inline_data;
@@ -515,8 +635,23 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     if (session.callContext.callAttemptId && !session.dispositionProcessed) {
       try {
         const canonicalDisposition = mapToCanonicalDisposition(disposition);
-        await processDisposition(session.callContext.callAttemptId, canonicalDisposition, 'sip_gemini');
+        const transcript = buildPlainTranscript(session.transcriptTurns);
+        const dispositionResult = await processDisposition(
+          session.callContext.callAttemptId,
+          canonicalDisposition,
+          'sip_gemini',
+          {
+            transcript,
+            structuredTranscript: { turns: session.transcriptTurns },
+          }
+        );
         session.dispositionProcessed = true;
+
+        console.log(
+          `[RTP Bridge] Disposition processed for ${session.callContext.callAttemptId}` +
+          ` | leadId=${dispositionResult.leadId || 'none'}` +
+          ` | transcriptChars=${transcript?.length || 0}`
+        );
 
         // Update queue item
         if (session.callContext.queueItemId) {
@@ -530,6 +665,8 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
             .where(eq(campaignQueue.id, session.callContext.queueItemId));
           console.log(`[RTP Bridge] Queue item ${session.callContext.queueItemId} updated to ${queueStatus}`);
         }
+
+        console.log(`[RTP Bridge] ✅ Disposition saved; centralized post-call analyzer scheduling delegated to disposition engine`);
 
         response = { success: true, disposition: canonicalDisposition };
       } catch (err) {
@@ -546,31 +683,30 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     response = { success: true, message: 'Call ended' };
   }
 
-  // Send function response back to Gemini
+  // Send function response back to Gemini (camelCase for Vertex AI, snake_case for AI Studio)
   if (session.geminiWs?.readyState === WebSocket.OPEN) {
-    session.geminiWs.send(JSON.stringify({
-      tool_response: {
-        function_responses: [
-          {
-            name: call.name,
-            id: call.id,
-            response,
-          },
-        ],
-      },
-    }));
+    const msg = USE_VERTEX_AI
+      ? { toolResponse: { functionResponses: [{ name: call.name, id: call.id, response }] } }
+      : { tool_response: { function_responses: [{ name: call.name, id: call.id, response }] } };
+    session.geminiWs.send(JSON.stringify(msg));
   }
 }
 
 /**
- * Try to send opening message when conditions are met
+ * Send opening message after contact speaks or timeout
  */
-function trySendOpeningMessage(session: BridgeSession): void {
+function sendOpeningMessage(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) {
     return;
   }
 
   session.openingMessageSent = true;
+  
+  // Clear listening timeout if it exists
+  if (session.listeningTimeout) {
+    clearTimeout(session.listeningTimeout);
+    session.listeningTimeout = null;
+  }
 
   const contactName = session.callContext.contactName || session.callContext.contactFirstName || 'there';
   const openingText = `Hello, may I please speak with ${contactName}?`;
@@ -580,14 +716,48 @@ function trySendOpeningMessage(session: BridgeSession): void {
 After speaking, STOP and WAIT for their response.`;
 
   if (session.geminiWs?.readyState === WebSocket.OPEN) {
-    session.geminiWs.send(JSON.stringify({
-      client_content: {
-        turns: [{ role: 'user', parts: [{ text: openingMessage }] }],
-        turn_complete: true,
-      },
-    }));
-    console.log(`[RTP Bridge] Opening message sent for call ${session.callId}`);
+    // camelCase for Vertex AI, snake_case for AI Studio
+    const msg = USE_VERTEX_AI
+      ? { clientContent: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turnComplete: true } }
+      : { client_content: { turns: [{ role: 'user', parts: [{ text: openingMessage }] }], turn_complete: true } };
+    session.geminiWs.send(JSON.stringify(msg));
+    console.log(`[RTP Bridge] Opening message sent for call ${session.callId} (triggered by: ${session.contactHasSpoken ? 'contact speech' : 'timeout'})`);
   }
+}
+
+/**
+ * Detect when contact speaks and trigger opening message
+ */
+function detectContactSpeech(session: BridgeSession): void {
+  if (session.contactHasSpoken || session.openingMessageSent) {
+    return;
+  }
+  
+  session.contactHasSpoken = true;
+  console.log(`[RTP Bridge] Contact speech detected for call ${session.callId} - sending opening message`);
+  sendOpeningMessage(session);
+}
+
+/**
+ * Start listening period - wait for contact to speak first, with fallback timeout
+ */
+function startListeningPeriod(session: BridgeSession): void {
+  if (session.openingMessageSent || session.listeningTimeout) {
+    return;
+  }
+
+  // Wait 3 seconds for contact to speak
+  // If they don't speak, send greeting anyway (they may be waiting for us)
+  const LISTENING_TIMEOUT_MS = 3000;
+  
+  console.log(`[RTP Bridge] Starting listening period for call ${session.callId} (${LISTENING_TIMEOUT_MS}ms)`);
+  
+  session.listeningTimeout = setTimeout(() => {
+    if (!session.contactHasSpoken && !session.openingMessageSent) {
+      console.log(`[RTP Bridge] Listening timeout - contact didn't speak, sending greeting for call ${session.callId}`);
+      sendOpeningMessage(session);
+    }
+  }, LISTENING_TIMEOUT_MS);
 }
 
 /**
@@ -603,7 +773,11 @@ export function handleSipAudio(callId: string, g711Audio: Buffer): void {
   if (!session.callAnswered) {
     session.callAnswered = true;
     console.log(`[RTP Bridge] Call ${callId} answered (received audio)`);
-    trySendOpeningMessage(session);
+    
+    // Start listening period if setup is complete
+    if (session.setupComplete) {
+      startListeningPeriod(session);
+    }
   }
 
   if (!session.setupComplete) {
@@ -613,15 +787,12 @@ export function handleSipAudio(callId: string, g711Audio: Buffer): void {
   // Transcode G.711 to PCM 16kHz
   const pcmBuffer = g711ToPcm16k(g711Audio, session.g711Format);
 
-  // Send to Gemini
-  session.geminiWs.send(JSON.stringify({
-    realtime_input: {
-      media_chunks: [{
-        data: pcmBuffer.toString('base64'),
-        mime_type: 'audio/pcm;rate=16000',
-      }],
-    },
-  }));
+  // Send to Gemini (camelCase for Vertex AI, snake_case for AI Studio)
+  const audioData = pcmBuffer.toString('base64');
+  const audioMsg = USE_VERTEX_AI
+    ? { realtimeInput: { mediaChunks: [{ data: audioData, mimeType: 'audio/pcm;rate=16000' }] } }
+    : { realtime_input: { media_chunks: [{ data: audioData, mime_type: 'audio/pcm;rate=16000' }] } };
+  session.geminiWs.send(JSON.stringify(audioMsg));
 
   session.metrics.audioChunksSent++;
   session.metrics.totalBytesSent += pcmBuffer.length;
@@ -645,7 +816,11 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
     }
 
     try {
-      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback');
+      const transcript = buildPlainTranscript(session.transcriptTurns);
+      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
+        transcript,
+        structuredTranscript: { turns: session.transcriptTurns },
+      });
       session.dispositionProcessed = true;
 
       if (session.callContext.queueItemId) {
@@ -706,6 +881,16 @@ export async function closeBridgeSession(callId: string): Promise<void> {
     } catch (statsErr) {
       console.error(`[RTP Bridge] Failed to update number pool stats:`, statsErr);
     }
+  }
+
+  if (session.maxDurationTimer) {
+    clearTimeout(session.maxDurationTimer);
+    session.maxDurationTimer = null;
+  }
+
+  if (session.listeningTimeout) {
+    clearTimeout(session.listeningTimeout);
+    session.listeningTimeout = null;
   }
 
   if (session.geminiWs) {

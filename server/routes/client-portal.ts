@@ -63,6 +63,7 @@ import clientPortalAnalyticsRouter from './client-portal-analytics';
 import clientCampaignPlannerRouter from './client-campaign-planner-routes';
 import clientJourneyPipelineRouter from './client-journey-pipeline-routes';
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
+import { buildCanonicalPortalUrl, getCanonicalPortalBaseUrl } from '../lib/canonical-portal-url';
 import { getRecordingUrl } from '../services/recording-storage';
 import { getPlayableRecordingLink } from '../services/recording-link-resolver';
 
@@ -94,11 +95,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-p
 const JWT_EXPIRES_IN = "7d";
 const CLIENT_RECORDING_STREAM_TOKEN_TTL_SECONDS = 15 * 60;
 const LIGHTCAST_UKEF_2026_CUTOFF = new Date('2026-01-01T00:00:00.000Z');
-const PORTAL_BASE_URL =
-  process.env.CLIENT_PORTAL_BASE_URL ||
-  process.env.APP_BASE_URL ||
-  process.env.MSFT_OAUTH_APP_URL ||
-  "";
+const PORTAL_BASE_URL = getCanonicalPortalBaseUrl();
 const ENABLE_ARGYLE_DEMO_CAMPAIGN = process.env.ENABLE_ARGYLE_DEMO_CAMPAIGN === 'true';
 
 export function isUkefCampaignName(name: string | null | undefined): boolean {
@@ -383,11 +380,7 @@ function normalizeDomains(input: unknown): string[] {
 }
 
 function buildJoinUrl(slug: string) {
-  if (PORTAL_BASE_URL) {
-    const baseUrl = PORTAL_BASE_URL.replace(/\/$/, '');
-    return baseUrl + '/client-portal/join/' + slug;
-  }
-  return '/client-portal/join/' + slug;
+  return `${PORTAL_BASE_URL}/client-portal/join/${slug}`;
 }
 
 function generateClientToken(clientUser: typeof clientUsers.$inferSelect, isOwner = false): string {
@@ -4039,9 +4032,7 @@ router.post('/admin/clients/:clientId/users/:userId/send-password-reset', requir
       expiresAt,
     });
 
-    const requestBaseUrl = `${req.protocol}://${req.get('host')}`;
-    const baseUrl = (PORTAL_BASE_URL || requestBaseUrl || 'http://localhost:5000').replace(/\/$/, '');
-    const resetLink = `${baseUrl}/reset-password?token=${token}&type=client`;
+    const resetLink = buildCanonicalPortalUrl(`/reset-password?token=${token}&type=client`);
 
     const resetEmailResult = await transactionalEmailService.triggerPasswordResetEmail(email, resetLink, '1 hour');
     if (!resetEmailResult.success) {

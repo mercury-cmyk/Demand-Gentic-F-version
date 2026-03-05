@@ -4,6 +4,7 @@ import mercuryRouter, { seedDefaultTemplates, seedDefaultRules } from "./mercury
 import transactionalTemplatesRouter from "./transactional-templates";
 import { requireAuth, requireRole, hashPassword } from "../auth";
 import { requireFeatureFlag } from "../feature-flags";
+import { getCanonicalPortalBaseUrl, buildCanonicalPortalUrl } from "../lib/canonical-portal-url";
 import { bulkInvitationService } from "../services/mercury/invitation-service";
 import { z } from "zod";
 import { db } from "../db";
@@ -24,11 +25,7 @@ import { eq } from "drizzle-orm";
  *   /invitations        — Single-user invitation preview, send, accept (public)
  */
 const router = Router();
-const DEFAULT_PORTAL_BASE_URL =
-  process.env.CLIENT_PORTAL_BASE_URL ||
-  process.env.APP_BASE_URL ||
-  process.env.MSFT_OAUTH_APP_URL ||
-  "https://demandgentic.ai";
+const DEFAULT_PORTAL_BASE_URL = getCanonicalPortalBaseUrl();
 
 // =============================================================================
 // PUBLIC ROUTES (No authentication required — accessed by invited users)
@@ -173,12 +170,10 @@ router.post("/onboarding/seed-templates", async (req: Request, res: Response) =>
 
 const sendSingleSchema = z.object({
   clientUserId: z.string().min(1, "clientUserId is required"),
-  portalBaseUrl: z.string().optional(),
 });
 
 const resendSingleSchema = z.object({
   clientUserId: z.string().min(1, "clientUserId is required"),
-  portalBaseUrl: z.string().optional(),
 });
 
 const revokeInviteSchema = z.object({
@@ -190,7 +185,6 @@ const revokeInviteSchema = z.object({
 
 const previewSchema = z.object({
   clientUserId: z.string().min(1, "clientUserId is required"),
-  portalBaseUrl: z.string().optional(),
 });
 
 async function logInvitationActivity(params: {
@@ -231,7 +225,7 @@ router.post("/invitations/preview", async (req: Request, res: Response) => {
 
     const preview = await bulkInvitationService.previewInvitationEmail({
       clientUserId,
-      portalBaseUrl: baseUrl,
+      portalBaseUrl: buildCanonicalPortalUrl('/').replace(/\/$/, ''),
     });
 
     if (!preview) {
@@ -261,14 +255,13 @@ router.post(
         return res.status(400).json({ error: parsed.error.errors[0].message });
       }
 
-      const { clientUserId, portalBaseUrl } = parsed.data;
-      const baseUrl = portalBaseUrl || DEFAULT_PORTAL_BASE_URL;
+      const { clientUserId } = parsed.data;
       const adminUserId = (req as any).user?.userId || "unknown";
 
       const result = await bulkInvitationService.sendSingleInvitation({
         clientUserId,
         adminUserId,
-        portalBaseUrl: baseUrl,
+        portalBaseUrl: buildCanonicalPortalUrl('/').replace(/\/$/, ''),
       });
 
       if (!result.success) {

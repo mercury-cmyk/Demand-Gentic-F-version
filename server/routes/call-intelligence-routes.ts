@@ -2915,4 +2915,342 @@ router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager'), a
   }
 });
 
+/**
+ * POST /api/call-intelligence/backfill-analysis
+ * Backfill missing quality analysis for calls that have transcripts
+ * but no call_quality_records entry.
+ * Auth: body.secret must match MEDIA_BRIDGE_SECRET
+ * Processes SYNCHRONOUSLY — keeps HTTP connection alive until done.
+ * Use limit=50 (default) to stay within Cloud Run timeout.
+ */
+router.post("/backfill-analysis", async (req, res) => {
+  try {
+    const { secret } = req.body || {};
+    const expectedSecret = (process.env.MEDIA_BRIDGE_SECRET || '').trim();
+    if (!secret || !expectedSecret || secret.trim() !== expectedSecret) {
+      return res.status(401).json({ error: 'Invalid secret' });
+    }
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const dryRun = req.query.dryRun === 'true';
+    const minDuration = parseInt(req.query.minDuration as string) || 35;
+
+    console.log(`[BackfillAnalysis] Starting (limit=${limit}, dryRun=${dryRun}, minDuration=${minDuration}s)`);
+
+    // Find call_sessions with transcript but no call_quality_records
+    const missing = await db.execute(sql`
+      SELECT
+        cs.id,
+        cs.ai_transcript,
+        cs.duration_sec,
+        cs.ai_disposition,
+        cs.campaign_id,
+        cs.contact_id,
+        cs.started_at
+      FROM call_sessions cs
+      WHERE cs.ai_transcript IS NOT NULL
+        AND length(cs.ai_transcript) >= 20
+        AND COALESCE(cs.duration_sec, 0) > ${minDuration}
+        AND NOT EXISTS (
+          SELECT 1 FROM call_quality_records cqr WHERE cqr.call_session_id = cs.id
+        )
+      ORDER BY cs.started_at DESC
+      LIMIT ${limit}
+    `);
+
+    const rows = missing.rows as any[];
+    console.log(`[BackfillAnalysis] Found ${rows.length} calls needing analysis`);
+
+    if (dryRun) {
+      return res.json({
+        success: true,
+        dryRun: true,
+        totalFound: rows.length,
+        sample: rows.slice(0, 5).map(r => ({
+          id: r.id,
+          durationSec: r.duration_sec,
+          transcriptLength: (r.ai_transcript || '').length,
+          campaignId: r.campaign_id,
+        })),
+      });
+    }
+
+    // Process SYNCHRONOUSLY — keep connection alive
+    const { analyzeConversationQuality } = await import("../services/conversation-quality-analyzer");
+    const { logCallIntelligence } = await import("../services/call-intelligence-logger");
+
+    let succeeded = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (let idx = 0; idx < rows.length; idx++) {
+      const row = rows[idx];
+      try {
+        const transcript = row.ai_transcript || '';
+        if (transcript.length < 20) continue;
+
+        // Find matching dialer_call_attempt
+        let dialerCallAttemptId: string | null = null;
+        try {
+          const [attempt] = await db
+            .select({ id: dialerCallAttempts.id })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.callSessionId, row.id))
+            .limit(1);
+          if (attempt) dialerCallAttemptId = attempt.id;
+        } catch (_) {}
+
+        const result = await analyzeConversationQuality({
+          transcript,
+          interactionType: 'live_call',
+          analysisStage: 'post_call',
+          callDurationSeconds: row.duration_sec || 0,
+          disposition: row.ai_disposition || undefined,
+          campaignId: row.campaign_id || undefined,
+        });
+
+        if ((result as any).status === 'error' || !result.overallScore) {
+          failed++;
+          errors.push(`${row.id}: analysis returned error/no score`);
+          continue;
+        }
+
+        const logResult = await logCallIntelligence({
+          callSessionId: row.id,
+          dialerCallAttemptId: dialerCallAttemptId || undefined,
+          campaignId: row.campaign_id || undefined,
+          contactId: row.contact_id || undefined,
+          qualityAnalysis: result,
+          fullTranscript: transcript,
+        });
+
+        if (logResult.success) {
+          succeeded++;
+          await db.update(callSessions)
+            .set({
+              aiAnalysis: {
+                conversationQuality: {
+                  overallScore: result.overallScore,
+                  summary: result.summary,
+                  qualityDimensions: result.qualityDimensions,
+                  metadata: result.metadata,
+                }
+              }
+            } as any)
+            .where(eq(callSessions.id, row.id));
+        } else {
+          failed++;
+          errors.push(`${row.id}: logCallIntelligence failed — ${logResult.error}`);
+        }
+
+        if ((idx + 1) % 10 === 0) {
+          console.log(`[BackfillAnalysis] Progress: ${idx + 1}/${rows.length} (${succeeded} ok, ${failed} fail)`);
+        }
+
+        await new Promise(r => setTimeout(r, 200));
+      } catch (err: any) {
+        failed++;
+        errors.push(`${row.id}: ${err.message}`);
+        console.error(`[BackfillAnalysis] Error ${row.id}: ${err.message}`);
+      }
+    }
+
+    console.log(`[BackfillAnalysis] DONE: ${succeeded} succeeded, ${failed} failed out of ${rows.length}`);
+
+    return res.json({
+      success: true,
+      totalFound: rows.length,
+      succeeded,
+      failed,
+      errors: errors.slice(0, 20),
+    });
+  } catch (error: any) {
+    console.error("[BackfillAnalysis] Error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+/**
+ * POST /api/call-intelligence/backfill-transcripts
+ * Backfill missing transcripts for calls that have recordings but no transcript.
+ * Uses the same multi-strategy approach as the regeneration endpoint.
+ * Processes SYNCHRONOUSLY — keeps HTTP connection alive until done.
+ * Use limit=100 (default) to stay within Cloud Run timeout.
+ */
+router.post("/backfill-transcripts", async (req, res) => {
+  try {
+    const { secret } = req.body || {};
+    const expectedSecret = (process.env.MEDIA_BRIDGE_SECRET || '').trim();
+    if (!secret || !expectedSecret || secret.trim() !== expectedSecret) {
+      return res.status(401).json({ error: 'Invalid secret' });
+    }
+    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+    const dryRun = req.query.dryRun === 'true';
+    const minDuration = parseInt(req.query.minDuration as string) || 35;
+
+    console.log(`[BackfillTranscripts] Starting (limit=${limit}, dryRun=${dryRun}, minDuration=${minDuration}s)`);
+
+    const missing = await db.execute(sql`
+      SELECT
+        cs.id,
+        cs.recording_url,
+        cs.recording_s3_key,
+        cs.telnyx_call_id,
+        cs.telnyx_recording_id,
+        cs.to_number_e164,
+        cs.from_number,
+        cs.started_at,
+        cs.duration_sec,
+        cs.campaign_id
+      FROM call_sessions cs
+      WHERE (cs.recording_url IS NOT NULL OR cs.recording_s3_key IS NOT NULL)
+        AND (cs.ai_transcript IS NULL OR length(cs.ai_transcript) < 20)
+        AND COALESCE(cs.duration_sec, 0) > ${minDuration}
+        AND COALESCE(cs.duration_sec, 0) <= 600
+      ORDER BY cs.started_at DESC
+      LIMIT ${limit}
+    `);
+
+    const rows = missing.rows as any[];
+    console.log(`[BackfillTranscripts] Found ${rows.length} calls needing transcription`);
+
+    // Stats
+    let hasGcs = 0, hasUrl = 0, hasTelnyxId = 0;
+    for (const row of rows) {
+      if (row.recording_s3_key) hasGcs++;
+      if (row.recording_url) hasUrl++;
+      if (row.telnyx_call_id || row.telnyx_recording_id) hasTelnyxId++;
+    }
+
+    if (dryRun) {
+      return res.json({
+        success: true,
+        dryRun: true,
+        totalFound: rows.length,
+        sources: { hasGcs, hasUrl, hasTelnyxId },
+        sample: rows.slice(0, 5).map(r => ({
+          id: r.id,
+          durationSec: r.duration_sec,
+          hasGcsKey: !!r.recording_s3_key,
+          hasUrl: !!r.recording_url,
+          hasTelnyxId: !!(r.telnyx_call_id || r.telnyx_recording_id),
+        })),
+      });
+    }
+
+    // Process SYNCHRONOUSLY — keep connection alive
+    const { getPresignedDownloadUrl: presign, downloadGcsAudioAsBuffer: downloadBuffer } = await import("../services/gcs-recording-storage");
+    const { transcribeFromRecording, submitToDeepgramBuffer } = await import("../services/deepgram-postcall-transcription");
+
+    let succeeded = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    const extractGcsKey = (url: string) => {
+      const match = url.match(/\/([^/]+\/recordings\/[^?]+)/);
+      return match ? match[1] : null;
+    };
+
+    for (let idx = 0; idx < rows.length; idx++) {
+      const row = rows[idx];
+      try {
+        let audioUrl: string | null = null;
+        let audioBuffer: Buffer | null = null;
+
+        // Strategy A: Presign from GCS key
+        if (row.recording_s3_key) {
+          try {
+            const p = await presign(row.recording_s3_key);
+            if (p && !p.startsWith('gcs-internal://') && !p.startsWith('gs://')) audioUrl = p;
+          } catch (_) {}
+        }
+
+        // Strategy B: Extract GCS key from URL
+        if (!audioUrl && row.recording_url) {
+          const key = extractGcsKey(row.recording_url);
+          if (key) {
+            try {
+              const p = await presign(key);
+              if (p && !p.startsWith('gcs-internal://') && !p.startsWith('gs://')) audioUrl = p;
+            } catch (_) {}
+          }
+        }
+
+        // Strategy C: Direct GCS buffer
+        if (!audioUrl) {
+          const key = row.recording_s3_key || extractGcsKey(row.recording_url || '');
+          if (key) {
+            try {
+              audioBuffer = await downloadBuffer(key);
+              if (!audioBuffer || audioBuffer.length < 1000) audioBuffer = null;
+            } catch (_) { audioBuffer = null; }
+          }
+        }
+
+        // Strategy D: Raw HTTPS URL
+        if (!audioUrl && !audioBuffer && row.recording_url && /^https?:\/\//i.test(row.recording_url)) {
+          audioUrl = row.recording_url;
+        }
+
+        // Guard
+        if (audioUrl && (audioUrl.startsWith('gcs-internal://') || audioUrl.startsWith('gs://'))) audioUrl = null;
+
+        // Transcribe
+        if (audioBuffer) {
+          const transcript = await submitToDeepgramBuffer(audioBuffer);
+          if (transcript && transcript.length >= 20) {
+            await db.update(callSessions).set({ aiTranscript: transcript } as any).where(eq(callSessions.id, row.id));
+            succeeded++;
+          } else {
+            failed++;
+            errors.push(`${row.id}: buffer transcript empty/short`);
+          }
+        } else if (audioUrl) {
+          const result = await transcribeFromRecording(audioUrl, {
+            telnyxCallId: row.telnyx_call_id || undefined,
+            recordingS3Key: row.recording_s3_key || undefined,
+          });
+          if (result?.transcript && result.transcript.length >= 20) {
+            await db.update(callSessions).set({ aiTranscript: result.transcript } as any).where(eq(callSessions.id, row.id));
+            succeeded++;
+          } else {
+            failed++;
+            errors.push(`${row.id}: URL transcript empty/short`);
+          }
+        } else {
+          failed++;
+          errors.push(`${row.id}: no audio source found`);
+        }
+
+        if ((idx + 1) % 10 === 0) {
+          console.log(`[BackfillTranscripts] Progress: ${idx + 1}/${rows.length} (${succeeded} ok, ${failed} fail)`);
+        }
+
+        await new Promise(r => setTimeout(r, 300));
+      } catch (err: any) {
+        failed++;
+        errors.push(`${row.id}: ${err.message}`);
+        console.error(`[BackfillTranscripts] Error ${row.id}: ${err.message}`);
+      }
+    }
+
+    console.log(`[BackfillTranscripts] DONE: ${succeeded} succeeded, ${failed} failed out of ${rows.length}`);
+
+    return res.json({
+      success: true,
+      totalFound: rows.length,
+      succeeded,
+      failed,
+      sources: { hasGcs, hasUrl, hasTelnyxId },
+      errors: errors.slice(0, 20),
+    });
+  } catch (error: any) {
+    console.error("[BackfillTranscripts] Error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
 export default router;

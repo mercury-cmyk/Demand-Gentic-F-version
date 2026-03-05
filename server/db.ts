@@ -57,7 +57,7 @@ const resolvedDb = resolveDatabaseUrl();
 let databaseUrl = resolvedDb.url;
 let dbConfigError: string | null = null;
 
-if (strictIsolation && nodeEnv !== "production") {
+if (strictIsolation) {
   if (!process.env.DATABASE_URL_DEV) {
     dbConfigError = "DATABASE_URL_DEV is required in development mode when STRICT_ENV_ISOLATION is enabled.";
   } else if (

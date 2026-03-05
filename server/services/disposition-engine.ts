@@ -217,6 +217,122 @@ function resolveCallbackAtForDisposition(callData?: DispositionCallData): Date {
   return new Date(Date.now() + 60 * 60 * 1000);
 }
 
+function extractTranscriptFromCallData(callData?: DispositionCallData): string | undefined {
+  const directTranscript = typeof callData?.transcript === 'string' ? callData.transcript.trim() : '';
+  if (directTranscript) {
+    return directTranscript;
+  }
+
+  const structured = callData?.structuredTranscript as any;
+  if (!structured) {
+    return undefined;
+  }
+
+  const turns = Array.isArray(structured)
+    ? structured
+    : Array.isArray(structured?.turns)
+      ? structured.turns
+      : Array.isArray(structured?.utterances)
+        ? structured.utterances
+        : [];
+
+  if (!turns.length) {
+    return undefined;
+  }
+
+  const lines = turns
+    .map((turn: any) => {
+      const text = String(turn?.text ?? '').trim();
+      if (!text) return null;
+
+      const rawSpeaker = String(turn?.speaker ?? turn?.role ?? '').toLowerCase();
+      const speakerLabel =
+        rawSpeaker.includes('agent') || rawSpeaker.includes('assistant')
+          ? 'Agent'
+          : rawSpeaker.includes('contact') || rawSpeaker.includes('user') || rawSpeaker.includes('prospect')
+            ? 'Contact'
+            : 'Speaker';
+
+      return `${speakerLabel}: ${text}`;
+    })
+    .filter(Boolean) as string[];
+
+  const normalized = lines.join('\n').trim();
+  return normalized || undefined;
+}
+
+function schedulePostCallAnalyzerForAttempt(
+  callAttemptId: string,
+  disposition: CanonicalDisposition,
+  fallbackTranscript?: string,
+): void {
+  const retryDelaysMs = [0, 15_000, 45_000, 120_000];
+
+  const trySchedule = async (attemptIndex: number): Promise<void> => {
+    try {
+      const [attempt] = await db
+        .select({
+          callSessionId: dialerCallAttempts.callSessionId,
+          fullTranscript: dialerCallAttempts.fullTranscript,
+          aiTranscript: dialerCallAttempts.aiTranscript,
+          campaignId: dialerCallAttempts.campaignId,
+          contactId: dialerCallAttempts.contactId,
+          callDurationSeconds: dialerCallAttempts.callDurationSeconds,
+          disposition: dialerCallAttempts.disposition,
+        })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, callAttemptId))
+        .limit(1);
+
+      if (!attempt) {
+        console.warn(`[DispositionEngine] Cannot schedule post-call analyzer: call attempt not found (${callAttemptId})`);
+        return;
+      }
+
+      if (attempt.callSessionId) {
+        const { schedulePostCallAnalysis } = await import('./post-call-analyzer');
+        const transcriptForFallback = (attempt.fullTranscript || attempt.aiTranscript || fallbackTranscript || '').trim();
+
+        schedulePostCallAnalysis(attempt.callSessionId, {
+          callAttemptId,
+          campaignId: attempt.campaignId || undefined,
+          contactId: attempt.contactId || undefined,
+          callDurationSec: attempt.callDurationSeconds || undefined,
+          disposition: (attempt.disposition || disposition) as string | undefined,
+          geminiTranscript: transcriptForFallback || undefined,
+        });
+
+        console.log(`[DispositionEngine] 📊 Scheduled post-call analyzer for attempt ${callAttemptId} (session ${attempt.callSessionId})`);
+        return;
+      }
+
+      if (attemptIndex + 1 < retryDelaysMs.length) {
+        const retryDelay = retryDelaysMs[attemptIndex + 1];
+        console.log(`[DispositionEngine] ⏳ callSessionId missing for ${callAttemptId}; retrying post-call analyzer scheduling in ${Math.round(retryDelay / 1000)}s`);
+        setTimeout(() => {
+          void trySchedule(attemptIndex + 1);
+        }, retryDelay);
+        return;
+      }
+
+      console.warn(`[DispositionEngine] ⚠️ Skipping post-call analyzer for ${callAttemptId}: callSessionId unavailable after retries`);
+    } catch (scheduleError) {
+      console.error(`[DispositionEngine] Failed scheduling post-call analyzer for ${callAttemptId}:`, scheduleError);
+
+      if (attemptIndex + 1 < retryDelaysMs.length) {
+        const retryDelay = retryDelaysMs[attemptIndex + 1];
+        setTimeout(() => {
+          void trySchedule(attemptIndex + 1);
+        }, retryDelay);
+      }
+    }
+  };
+
+  setTimeout(() => {
+    void trySchedule(0);
+  }, retryDelaysMs[0]);
+}
+
 /**
  * Process a disposition for a call attempt
  * This is the SINGLE entry point for all disposition processing
@@ -358,6 +474,12 @@ export async function processDisposition(
 
     // Update dialer run statistics
     await updateDialerRunStats(callAttempt.dialerRunId, finalDisposition);
+
+    // Queue post-call analyzer for all dispositions (SIP + TeXML)
+    // This guarantees analyzer chaining even when transcript arrives via in-session/native paths.
+    const transcriptFromCallData = extractTranscriptFromCallData(callData);
+    schedulePostCallAnalyzerForAttempt(callAttemptId, finalDisposition, transcriptFromCallData);
+    result.actions.push('Queued post-call analyzer scheduling');
 
     // Track call quality metrics for number reputation (anti-spam)
     // Uses the outbound caller ID number (fromDid/callerNumberId), NOT the prospect's phone
@@ -627,6 +749,34 @@ async function processQualifiedLead(
 
     setImmediate(async () => {
       try {
+        let transcriptForAnalysis = (transcript || '').trim();
+
+        // SIP/native transcript fallback: if transcript wasn't passed through callData,
+        // pull in-session transcript already stored on the call attempt.
+        if (!transcriptForAnalysis) {
+          const [attemptTranscript] = await db
+            .select({
+              fullTranscript: dialerCallAttempts.fullTranscript,
+              aiTranscript: dialerCallAttempts.aiTranscript,
+            })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.id, callAttempt.id))
+            .limit(1);
+
+          transcriptForAnalysis = (attemptTranscript?.fullTranscript || attemptTranscript?.aiTranscript || '').trim();
+
+          if (transcriptForAnalysis) {
+            await db.update(leads)
+              .set({
+                transcript: transcriptForAnalysis,
+                updatedAt: new Date(),
+              })
+              .where(eq(leads.id, leadIdForAsync));
+
+            console.log(`[DispositionEngine] 📝 Using in-session transcript fallback for lead ${leadIdForAsync} (${transcriptForAnalysis.length} chars)`);
+          }
+        }
+
         // Step 1: Download recording to GCS IMMEDIATELY to prevent URL expiration
         // Telnyx presigned URLs expire in ~10 minutes
         if (isRecordingStorageEnabled() && recordingUrlForAsync) {
@@ -647,7 +797,7 @@ async function processQualifiedLead(
         // If we already have the transcript from the live session, we might want to skip this
         // or regenerate it for higher quality?
         // Let's rely on the live transcript if available, otherwise transcribe
-        if (!transcript) {
+        if (!transcriptForAnalysis) {
             console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
             const transcribed = await transcribeLeadCall(leadIdForAsync);
             
@@ -658,7 +808,7 @@ async function processQualifiedLead(
             }
         } else {
             // If we have transcript, we can still run analysis
-            console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync} (using live transcript)`);
+          console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync} (using in-session transcript)`);
             // We need to ensure analyzeCall can work with existing transcript
             // calling analyzeCall will likely re-read the lead and find the transcript
             await analyzeCall(leadIdForAsync);

@@ -14,7 +14,7 @@
  */
 
 import { db } from '../db';
-import { dialerCallAttempts, callSessions, activityLog } from '@shared/schema';
+import { dialerCallAttempts, callSessions, activityLog, leads } from '@shared/schema';
 import { eq, and, or, isNull, isNotNull, gt, lt, sql, inArray } from 'drizzle-orm';
 import { transcribeFromRecording } from './deepgram-postcall-transcription';
 import { transcribeBatchParallel, BatchTranscriptionItem } from './transcription-pool';
@@ -47,6 +47,83 @@ interface TranscriptionResult {
   wordCount?: number;
   durationMs?: number;
   error?: string;
+}
+
+async function triggerAnalysisAfterTranscript(
+  callAttemptId: string,
+  transcriptText?: string
+): Promise<void> {
+  try {
+    const [attempt] = await db
+      .select({
+        callSessionId: dialerCallAttempts.callSessionId,
+        campaignId: dialerCallAttempts.campaignId,
+        contactId: dialerCallAttempts.contactId,
+        callDurationSeconds: dialerCallAttempts.callDurationSeconds,
+        disposition: dialerCallAttempts.disposition,
+        fullTranscript: dialerCallAttempts.fullTranscript,
+        aiTranscript: dialerCallAttempts.aiTranscript,
+      })
+      .from(dialerCallAttempts)
+      .where(eq(dialerCallAttempts.id, callAttemptId))
+      .limit(1);
+
+    if (!attempt) {
+      return;
+    }
+
+    const transcript = (transcriptText || attempt.fullTranscript || attempt.aiTranscript || '').trim();
+
+    if (attempt.callSessionId) {
+      const { schedulePostCallAnalysis } = await import('./post-call-analyzer');
+
+      schedulePostCallAnalysis(attempt.callSessionId, {
+        callAttemptId,
+        campaignId: attempt.campaignId || undefined,
+        contactId: attempt.contactId || undefined,
+        callDurationSec: attempt.callDurationSeconds || undefined,
+        disposition: attempt.disposition || undefined,
+        geminiTranscript: transcript || undefined,
+      });
+
+      console.log(`${LOG_PREFIX} 📊 Scheduled post-call analyzer after transcription for attempt ${callAttemptId} (session ${attempt.callSessionId})`);
+    }
+
+    const [lead] = await db
+      .select({
+        id: leads.id,
+        transcript: leads.transcript,
+        aiScore: leads.aiScore,
+      })
+      .from(leads)
+      .where(eq(leads.callAttemptId, callAttemptId))
+      .limit(1);
+
+    if (!lead?.id) {
+      return;
+    }
+
+    if (!lead.transcript && transcript) {
+      await db.update(leads)
+        .set({
+          transcript,
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, lead.id));
+    }
+
+    const { analyzeCall } = await import('./call-quality-analyzer');
+    await analyzeCall(lead.id);
+
+    if (!lead.aiScore) {
+      const { analyzeLeadQualification } = await import('./ai-qa-analyzer');
+      await analyzeLeadQualification(lead.id);
+    }
+
+    console.log(`${LOG_PREFIX} ✅ Triggered lead analyzers after transcription for lead ${lead.id}`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to trigger analysis after transcription for ${callAttemptId}:`, error);
+  }
 }
 
 /**
@@ -234,6 +311,8 @@ export async function attemptFallbackTranscription(
         wordCount: result.transcript.split(/\s+/).length,
         refreshedVia: telnyxCallId ? 'telnyx_possible' : 'none',
       });
+
+      await triggerAnalysisAfterTranscript(callAttemptId, result.transcript);
 
       return {
         success: true,
@@ -444,6 +523,8 @@ export async function processMissingTranscripts(): Promise<{
             transcriptLength: result.transcript.length,
             wordCount: result.wordCount || result.transcript.split(/\s+/).length,
           });
+
+          await triggerAnalysisAfterTranscript(result.callAttemptId, result.transcript);
         } else {
           stats.failed++;
         }
@@ -874,6 +955,7 @@ export async function processLongCallMissingTranscripts(): Promise<{
           await db.update(dialerCallAttempts)
             .set({ fullTranscript: result.transcript, updatedAt: new Date() })
             .where(eq(dialerCallAttempts.id, result.callAttemptId));
+            await triggerAnalysisAfterTranscript(result.callAttemptId, result.transcript);
           console.log(`${LOG_PREFIX} 🔒 ✅ Long call ${result.callAttemptId} transcribed (${result.provider})`);
         } else {
           failedCallIds.push(result.callAttemptId);
@@ -953,6 +1035,7 @@ export async function processLongCallMissingTranscripts(): Promise<{
               await db.update(dialerCallAttempts)
                 .set({ fullTranscript: result.transcript, updatedAt: new Date() })
                 .where(eq(dialerCallAttempts.id, result.callAttemptId));
+              await triggerAnalysisAfterTranscript(result.callAttemptId, result.transcript);
               console.log(`${LOG_PREFIX} 🔒 ✅ Long call ${result.callAttemptId} transcribed on retry (${result.provider})`);
             } else {
               stats.failed++;
