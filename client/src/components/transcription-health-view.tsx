@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { TranscriptionWorkerControl } from './transcription-worker-control';
+import { BatchTranscriptionPanel } from './batch-transcription-panel';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -362,6 +363,10 @@ export default function TranscriptionHealthView({ campaigns }: { campaigns: Arra
             {callCounts && callCounts.missing > 0 && (
               <Badge variant="destructive" className="text-[9px] ml-1 px-1 py-0 h-4">{callCounts.missing}</Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="batch-backfill" className="flex items-center gap-1.5 text-xs h-7 px-3">
+            <Sparkles className="h-3.5 w-3.5" />
+            Bulk Backfill
           </TabsTrigger>
         </TabsList>
 
@@ -1053,6 +1058,13 @@ export default function TranscriptionHealthView({ campaigns }: { campaigns: Arra
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ═══════════════════════════════════════════════════════════════
+            TAB 3: BULK BACKFILL
+            ═══════════════════════════════════════════════════════════════ */}
+        <TabsContent value="batch-backfill" className="space-y-4 mt-4">
+          <BatchTranscriptionPanel campaigns={campaigns} />
         </TabsContent>
     </Tabs>
   );

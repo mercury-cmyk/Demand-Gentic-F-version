@@ -138,6 +138,7 @@ export function startBackgroundJobs() {
   console.log(`[Background Jobs]   ✓ Transcription: ${ENABLE_TRANSCRIPTION ? 'ENABLED (every 120s)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ AI Analysis: ${ENABLE_AI_ANALYSIS ? 'ENABLED (every 120s)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ Telnyx Recording Sync: ${ENABLE_TELNYX_RECORDING_SYNC ? 'ENABLED (every 5min, last 10min window)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   ✓ Batch Transcription Sweep: ${ENABLE_TRANSCRIPTION ? `ENABLED (every ${BATCH_TRANSCRIPTION_SWEEP_INTERVAL / 60000}min, up to ${20} calls)` : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
