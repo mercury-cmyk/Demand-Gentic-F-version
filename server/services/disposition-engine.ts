@@ -24,6 +24,7 @@ import {
   qcWorkQueue,
   recycleJobs,
   activityLog,
+  callSessions,
   type CanonicalDisposition,
   type CampaignContactState
 } from "@shared/schema";
@@ -321,10 +322,23 @@ function schedulePostCallAnalyzerForAttempt(
         if (hasAudioLocator) {
           console.log(`[DispositionEngine] 🎙️ Gemini transcript missing for SIP call ${callAttemptId} — trying Deepgram fallback on recording`);
           try {
+            // Resolve S3 key from linked call session for GCS presigned URL generation
+            let recordingS3Key: string | undefined;
+            if (attempt.callSessionId) {
+              try {
+                const [session] = await db
+                  .select({ recordingS3Key: callSessions.recordingS3Key })
+                  .from(callSessions)
+                  .where(eq(callSessions.id, attempt.callSessionId))
+                  .limit(1);
+                recordingS3Key = session?.recordingS3Key || undefined;
+              } catch { /* Non-critical */ }
+            }
             const audioUrl = recordingSource || '';
             const { transcribeFromRecording } = await import('./deepgram-postcall-transcription');
             const deepgramResult = await transcribeFromRecording(audioUrl, {
               telnyxCallId: attempt.telnyxCallId || undefined,
+              recordingS3Key,
             });
             if (deepgramResult && deepgramResult.transcript && deepgramResult.transcript.length > 10) {
               sipTranscript = deepgramResult.transcript;

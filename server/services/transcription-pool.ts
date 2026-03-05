@@ -238,6 +238,15 @@ export async function transcribeWithPool(
     preferredProvider?: string;
   }
 ): Promise<(TranscriptionProviderResult & { provider: string }) | null> {
+  // Early exit: if there's no usable audio locator at all, don't penalize providers
+  const hasUrl = !!recordingUrl && recordingUrl.length > 5 && !recordingUrl.startsWith('gcs-internal://');
+  const hasS3Key = !!options?.recordingS3Key;
+  const hasTelnyxId = !!options?.telnyxCallId;
+  if (!hasUrl && !hasS3Key && !hasTelnyxId) {
+    console.warn(`${LOG_PREFIX} Skipping — no usable audio locator (url=${!!recordingUrl}, s3Key=${hasS3Key}, telnyxId=${hasTelnyxId})`);
+    return null;
+  }
+
   // Pick provider
   let provider: TranscriptionProvider | null = null;
 
@@ -294,11 +303,11 @@ export async function transcribeWithPool(
 // ── Batch Parallel Processing ──
 
 async function transcribeSingleItem(item: BatchTranscriptionItem): Promise<BatchTranscriptionResult> {
-  if (!item.recordingUrl && !item.telnyxCallId) {
+  if (!item.recordingUrl && !item.telnyxCallId && !item.recordingS3Key) {
     return {
       callAttemptId: item.callAttemptId,
       success: false,
-      error: 'No recording URL or Telnyx call ID',
+      error: 'No recording URL, S3 key, or Telnyx call ID',
     };
   }
 

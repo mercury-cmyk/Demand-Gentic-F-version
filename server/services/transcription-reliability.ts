@@ -413,33 +413,34 @@ export async function processMissingTranscripts(): Promise<{
     console.log(`${LOG_PREFIX} Found ${callsWithoutTranscripts.length} calls without transcripts`);
 
     // Check which call sessions are still uploading recordings — skip those
+    // Also collect recordingS3Key for each call so providers can resolve GCS URIs
     const callSessionIds = callsWithoutTranscripts
       .map(c => c.id)
       .filter(Boolean);
 
     const uploadingSessionIds = new Set<string>();
+    const s3KeyByAttemptId = new Map<string, string>();
     if (callSessionIds.length > 0) {
       try {
-        // Look up recording status for linked call sessions
+        // Look up recording status + S3 key for linked call sessions
         const sessions = await db
           .select({
-            id: callSessions.id,
+            attemptId: dialerCallAttempts.id,
+            sessionId: callSessions.id,
             recordingStatus: callSessions.recordingStatus,
+            recordingS3Key: callSessions.recordingS3Key,
           })
           .from(callSessions)
           .innerJoin(dialerCallAttempts, eq(dialerCallAttempts.callSessionId, callSessions.id))
-          .where(
-            and(
-              inArray(dialerCallAttempts.id, callSessionIds),
-              or(
-                eq(callSessions.recordingStatus, 'recording'),
-                eq(callSessions.recordingStatus, 'uploading')
-              )
-            )
-          );
+          .where(inArray(dialerCallAttempts.id, callSessionIds));
 
         for (const s of sessions) {
-          uploadingSessionIds.add(s.id);
+          if (s.recordingStatus === 'recording' || s.recordingStatus === 'uploading') {
+            uploadingSessionIds.add(s.sessionId);
+          }
+          if (s.recordingS3Key) {
+            s3KeyByAttemptId.set(s.attemptId, s.recordingS3Key);
+          }
         }
       } catch {
         // Non-critical — proceed without filter
@@ -498,12 +499,13 @@ export async function processMissingTranscripts(): Promise<{
         callAttemptId: call.id,
         recordingUrl: call.recordingUrl ?? null,
         telnyxCallId: call.telnyxCallId ?? null,
+        recordingS3Key: s3KeyByAttemptId.get(call.id) ?? null,
       });
     }
 
     // Process eligible calls in parallel via multi-provider pool
     if (batchItems.length > 0) {
-      console.log(`${LOG_PREFIX} Submitting ${batchItems.length} calls to parallel transcription pool`);
+      console.log(`${LOG_PREFIX} Submitting ${batchItems.length} calls to parallel transcription pool (${s3KeyByAttemptId.size} with S3 keys)`);
       const batchResults = await transcribeBatchParallel(batchItems, 10, 200);
 
       // Save results to DB sequentially (protects connection pool)
@@ -923,6 +925,30 @@ export async function processLongCallMissingTranscripts(): Promise<{
     console.log(`${LOG_PREFIX} 🔒 Found ${longCallsMissingTranscripts.length} long calls without transcripts`);
 
     // Phase 1: Build primary batch from eligible calls
+    // Bulk-fetch S3 keys for all calls with linked sessions
+    const longCallIds = longCallsMissingTranscripts.map(c => c.id).filter(Boolean);
+    const longCallS3Keys = new Map<string, string>();
+    if (longCallIds.length > 0) {
+      try {
+        const sessionRows = await db
+          .select({
+            attemptId: dialerCallAttempts.id,
+            recordingS3Key: callSessions.recordingS3Key,
+          })
+          .from(callSessions)
+          .innerJoin(dialerCallAttempts, eq(dialerCallAttempts.callSessionId, callSessions.id))
+          .where(
+            and(
+              inArray(dialerCallAttempts.id, longCallIds),
+              isNotNull(callSessions.recordingS3Key)
+            )
+          );
+        for (const row of sessionRows) {
+          if (row.recordingS3Key) longCallS3Keys.set(row.attemptId, row.recordingS3Key);
+        }
+      } catch { /* Non-critical */ }
+    }
+
     const primaryBatch: BatchTranscriptionItem[] = [];
     const callMap = new Map<string, typeof longCallsMissingTranscripts[number]>();
 
@@ -938,6 +964,7 @@ export async function processLongCallMissingTranscripts(): Promise<{
         callAttemptId: call.id,
         recordingUrl: call.recordingUrl ?? null,
         telnyxCallId: call.telnyxCallId ?? null,
+        recordingS3Key: longCallS3Keys.get(call.id) ?? null,
       });
     }
 
@@ -975,6 +1002,7 @@ export async function processLongCallMissingTranscripts(): Promise<{
           let altTelnyxId: string | null = call.telnyxCallId ?? null;
 
           // Strategy 2: Try S3 key from linked session
+          let altS3Key: string | null = longCallS3Keys.get(callId) ?? null;
           if (call.callSessionId) {
             try {
               const [session] = await db
@@ -988,6 +1016,9 @@ export async function processLongCallMissingTranscripts(): Promise<{
 
               if (session?.recordingUrl) {
                 altUrl = session.recordingUrl;
+              }
+              if (session?.recordingS3Key) {
+                altS3Key = session.recordingS3Key;
               }
             } catch { /* Non-critical */ }
           }
@@ -1015,11 +1046,12 @@ export async function processLongCallMissingTranscripts(): Promise<{
             }
           }
 
-          if (altUrl) {
+          if (altUrl || altS3Key) {
             retryBatch.push({
               callAttemptId: callId,
               recordingUrl: altUrl,
               telnyxCallId: altTelnyxId,
+              recordingS3Key: altS3Key,
             });
           } else {
             stats.failed++;
