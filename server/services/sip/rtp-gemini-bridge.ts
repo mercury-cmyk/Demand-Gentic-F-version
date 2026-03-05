@@ -539,30 +539,51 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         }
 
         // Capture agent output transcription (what AI agent is saying)
+        // Merge consecutive agent turns within 3s to avoid fragmented word-by-word entries
         const serverContent = response.serverContent || response.server_content;
         const outputTranscription = serverContent?.outputTranscription || serverContent?.output_transcription;
         if (outputTranscription?.text && typeof outputTranscription.text === 'string') {
           const text = outputTranscription.text.trim();
-          if (text && !session.transcriptTurns.some(t => t.speaker === 'agent' && t.text === text)) {
-            session.transcriptTurns.push({
-              speaker: 'agent',
-              text,
-              timestamp: Date.now() - session.metrics.startTime,
-            });
+          if (text) {
+            const lastTurn = session.transcriptTurns[session.transcriptTurns.length - 1];
+            const now = Date.now() - session.metrics.startTime;
+            if (lastTurn && lastTurn.speaker === 'agent' && (now - lastTurn.timestamp) < 3000) {
+              // Merge into previous agent entry (same turn, within 3s)
+              if (!lastTurn.text.includes(text)) {
+                lastTurn.text = (lastTurn.text + ' ' + text).trim();
+                lastTurn.timestamp = now;
+              }
+            } else if (!lastTurn || lastTurn.speaker !== 'agent' || lastTurn.text !== text) {
+              session.transcriptTurns.push({
+                speaker: 'agent',
+                text,
+                timestamp: now,
+              });
+            }
             console.log(`[RTP Bridge] Agent transcript: ${text.substring(0, 100)}...`);
           }
         }
 
         // Capture contact input transcription (what the contact is saying)
+        // Merge consecutive contact turns within 3s to avoid fragmented entries
         const inputTranscription = serverContent?.inputTranscription || serverContent?.input_transcription;
         if (inputTranscription?.text && typeof inputTranscription.text === 'string') {
           const text = inputTranscription.text.trim();
-          if (text && !session.transcriptTurns.some(t => t.speaker === 'contact' && t.text === text)) {
-            session.transcriptTurns.push({
-              speaker: 'contact',
-              text,
-              timestamp: Date.now() - session.metrics.startTime,
-            });
+          if (text) {
+            const lastTurn = session.transcriptTurns[session.transcriptTurns.length - 1];
+            const now = Date.now() - session.metrics.startTime;
+            if (lastTurn && lastTurn.speaker === 'contact' && (now - lastTurn.timestamp) < 3000) {
+              if (!lastTurn.text.includes(text)) {
+                lastTurn.text = (lastTurn.text + ' ' + text).trim();
+                lastTurn.timestamp = now;
+              }
+            } else if (!lastTurn || lastTurn.speaker !== 'contact' || lastTurn.text !== text) {
+              session.transcriptTurns.push({
+                speaker: 'contact',
+                text,
+                timestamp: now,
+              });
+            }
             console.log(`[RTP Bridge] Contact transcript: ${text.substring(0, 100)}...`);
           }
         }

@@ -828,7 +828,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   // Get current in-progress count (watchdog handles truly stuck items)
   const inProgressCount = await getInProgressCount(campaignId);
   const { defaultMax } = await getConcurrencyLimits();
-  const maxConcurrent = (aiSettings as any).maxConcurrentCalls || defaultMax;
+  // Always use the global max — per-campaign overrides disabled to ensure max capacity
+  const maxConcurrent = defaultMax;
   const campaignSlots = Math.max(0, maxConcurrent - inProgressCount);
   const requestedSlots = typeof options?.maxNewCalls === 'number'
     ? Math.max(0, Math.floor(options.maxNewCalls))

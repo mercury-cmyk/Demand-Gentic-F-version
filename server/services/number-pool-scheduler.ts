@@ -137,10 +137,14 @@ async function activateAllNumbersOnStartup(): Promise<void> {
     // 4. Invalidate pool cache so next query picks up fresh data
     invalidatePoolCache();
 
-    // 5. Ensure call engine is set to SIP
-    await db.update(agentDefaults).set({ defaultCallEngine: 'sip' });
+    // 5. Ensure call engine is SIP and max concurrent is 50
+    await db.update(agentDefaults).set({
+      defaultCallEngine: 'sip',
+      defaultMaxConcurrentCalls: 50,
+      globalMaxConcurrentCalls: 50,
+    });
 
-    console.log(`[NumberPoolScheduler] Startup activation: ${activated.length} numbers activated, all cooldowns cleared, all locks released, call engine set to SIP`);
+    console.log(`[NumberPoolScheduler] Startup activation: ${activated.length} numbers activated, all cooldowns cleared, all locks released, call engine=SIP, maxConcurrent=50`);
   } catch (err) {
     console.error('[NumberPoolScheduler] Startup activation error:', err);
   }
