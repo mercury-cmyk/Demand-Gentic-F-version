@@ -1,4 +1,4 @@
-import { getPresignedDownloadUrl, isS3Configured } from "../lib/storage";
+import { getPresignedDownloadUrl, isS3Configured, readFromGCS } from "../lib/storage";
 
 const LOG_PREFIX = "[Deepgram-PostCall]";
 const DEEPGRAM_API_KEY = (process.env.DEEPGRAM_API_KEY || "").trim();
@@ -303,6 +303,45 @@ export async function submitStructuredTranscription(
     } catch (error) {
       lastError = error;
       console.warn(`${LOG_PREFIX} Transcription attempt failed: ${getErrorMessage(error)}`);
+    }
+  }
+
+  // Strategy 4: Direct GCS download + buffer upload (when signBlob is unavailable)
+  // The service account can read GCS objects directly even without signing permissions
+  if (inferredS3Key && isS3Configured()) {
+    try {
+      console.log(`${LOG_PREFIX} Attempting direct GCS download for buffer transcription: ${inferredS3Key}`);
+      const { stream, contentType } = await readFromGCS(inferredS3Key);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const audioBuffer = Buffer.concat(chunks);
+      if (audioBuffer.length >= 1000) {
+        const plainTranscript = await submitToDeepgramBuffer(audioBuffer, contentType);
+        if (plainTranscript && plainTranscript.length > 20) {
+          console.log(`${LOG_PREFIX} GCS buffer transcription succeeded: ${plainTranscript.length} chars`);
+          // Convert plain transcript to structured format
+          return {
+            text: plainTranscript,
+            utterances: plainTranscript.split('\n')
+              .filter(line => line.trim().length > 0)
+              .map((line, i) => {
+                const match = line.match(/^(agent|contact):\s*(.+)/i);
+                return {
+                  speaker: match ? match[1].toLowerCase() : 'contact',
+                  text: match ? match[2].trim() : line.trim(),
+                  start: i,
+                  end: i,
+                };
+              }),
+          };
+        }
+      } else {
+        console.warn(`${LOG_PREFIX} GCS audio buffer too small (${audioBuffer.length} bytes) — skipping`);
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} GCS direct download fallback failed: ${getErrorMessage(error)}`);
     }
   }
 
