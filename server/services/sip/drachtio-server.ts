@@ -720,17 +720,7 @@ export class DrachtioSIPServer {
         this.canMakeOutboundCalls = false;
       }
 
-      const statusCode = Number(error?.status || error?.statusCode || 0);
-      const rawResponse = typeof error?.raw === 'string'
-        ? error.raw.replace(/\s+/g, ' ').trim().slice(0, 400)
-        : '';
-      const messageParts = [
-        error?.message || 'SIP call initiation failed',
-        statusCode ? `status=${statusCode}` : '',
-        rawResponse ? `raw=${rawResponse}` : '',
-      ].filter(Boolean);
-
-      return { callId, success: false, error: messageParts.join(' | ') };
+      return { callId, success: false, error: error.message };
     }
   }
 

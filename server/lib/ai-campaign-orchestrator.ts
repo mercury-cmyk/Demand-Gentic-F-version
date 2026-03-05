@@ -149,48 +149,6 @@ let GLOBAL_MAX_CONCURRENT_CALLS = ENV_GLOBAL_MAX_CONCURRENT_CALLS;
 const TELNYX_ACCOUNT_DISABLED_CODE = 10010; // "Account is disabled D17"
 const TELNYX_FATAL_ERROR_CODES = [10010]; // Account-level policy/status errors
 
-function classifySipNonSuccessError(message: string): {
-  detail: string;
-  isWhitelist: boolean;
-  isRateLimit: boolean;
-  isAccountDisabled: boolean;
-} | null {
-  const normalized = String(message || '');
-  const lower = normalized.toLowerCase();
-
-  if (!lower.includes('sip non-success response')) {
-    return null;
-  }
-
-  const isRateLimit =
-    lower.includes('rate limit exceeded') ||
-    lower.includes('pricing rate') ||
-    lower.includes(' d24');
-
-  const isWhitelist =
-    lower.includes('whitelist') ||
-    lower.includes('associated countries') ||
-    lower.includes(' d13') ||
-    lower.includes('valid lrn') ||
-    lower.includes(' d50');
-
-  const isAccountDisabled =
-    lower.includes('account is disabled') ||
-    lower.includes(' d17');
-
-  if (!isRateLimit && !isWhitelist && !isAccountDisabled) {
-    return null;
-  }
-
-  return {
-    detail: normalized,
-    // Rate limiting in SIP responses is also emitted via whitelist policy paths
-    isWhitelist: isWhitelist || isRateLimit,
-    isRateLimit,
-    isAccountDisabled,
-  };
-}
-
 /**
  * Check if an error indicates a Telnyx account-level issue that requires pausing
  * Returns the error code and detail if it's a fatal error, null otherwise
@@ -199,37 +157,6 @@ function isTelnyxFatalError(error: any): { code: number; detail: string; isWhite
   if (!error || !error.message) return null;
 
   const message = String(error.message);
-
-  // Handle SIP trunk non-success responses (e.g. 403 D24 rate cap, D13 country whitelist)
-  const sipClassification = classifySipNonSuccessError(message);
-  if (sipClassification) {
-    if (sipClassification.isRateLimit) {
-      return {
-        code: 10010,
-        detail: sipClassification.detail,
-        isWhitelist: true,
-        isRateLimit: true,
-      };
-    }
-
-    if (sipClassification.isWhitelist) {
-      return {
-        code: 10010,
-        detail: sipClassification.detail,
-        isWhitelist: true,
-        isRateLimit: false,
-      };
-    }
-
-    if (sipClassification.isAccountDisabled) {
-      return {
-        code: 10010,
-        detail: sipClassification.detail,
-        isWhitelist: false,
-        isRateLimit: false,
-      };
-    }
-  }
 
   // Check for our enriched error format from telnyx-ai-bridge.ts
   if (message.includes('Telnyx Whitelist Error:')) {
@@ -1961,14 +1888,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           return { success: false, itemId: item.id, error, hourlyLimitReached: true };
         }
 
-        const failureMessage = String(error?.message || error || 'unknown');
-        console.error(`[AI Orchestrator] Failed to initiate call for ${item.id}:`, failureMessage);
-
-        const isSip403Failure = /sip non-success response:\s*403/i.test(failureMessage);
-        const retryDelayMinutes = isSip403Failure ? 10 : 2;
-        if (isSip403Failure) {
-          console.warn(`[AI Orchestrator] Applying longer backoff (${retryDelayMinutes}m) for SIP 403 failure on queue item ${item.id}`);
-        }
+        console.error(`[AI Orchestrator] Failed to initiate call for ${item.id}:`, error?.message || error);
 
         // IMMEDIATE ERROR RECOVERY: Reset the queue item for retry
         // This prevents slots from being consumed by failed initiations
@@ -1976,8 +1896,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           await db.execute(sql`
             UPDATE campaign_queue
             SET status = 'queued',
-                next_attempt_at = NOW() + make_interval(mins => ${retryDelayMinutes}),
-                enqueued_reason = COALESCE(enqueued_reason, '') || '|init_fail:' || ${failureMessage.substring(0, 50)},
+                next_attempt_at = NOW() + INTERVAL '2 minutes',
+                enqueued_reason = COALESCE(enqueued_reason, '') || '|init_fail:' || ${String(error?.message || 'unknown').substring(0, 50)},
                 updated_at = NOW()
             WHERE id = ${item.id}
           `);
