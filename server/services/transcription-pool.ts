@@ -389,6 +389,24 @@ export async function transcribeBatchParallel(
   return results;
 }
 
+// ── Circuit Breaker Reset ──
+
+/**
+ * Reset all circuit breakers so the next batch starts fresh.
+ * Call this at the beginning of each batch run to prevent
+ * stale circuit state from blocking all providers permanently.
+ */
+export function resetAllCircuitBreakers(): void {
+  for (const provider of ALL_PROVIDERS) {
+    const h = healthMap.get(provider.name);
+    if (h && h.isCircuitOpen) {
+      console.log(`${LOG_PREFIX} Resetting circuit breaker for ${provider.name} (was open with ${h.consecutiveFailures} consecutive failures)`);
+      h.consecutiveFailures = 0;
+      h.isCircuitOpen = false;
+    }
+  }
+}
+
 // ── Pool Status / Observability ──
 
 export function getPoolStatus(): {
