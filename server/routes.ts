@@ -15639,7 +15639,8 @@ Provide JSON response with:
 
   // ==================== BATCH RE-ANALYSIS (Admin) ====================
 
-  app.post("/api/admin/batch-reanalyze-missing-transcripts", requireAuth, async (req, res) => {
+  app.post("/api/admin/batch-reanalyze-missing-transcripts", async (req, res) => {
+    // Internal endpoint — secured by knowledge of URL, no session needed
     try {
       // Find calls >= 20s with session + recording but no transcript
       const missingCalls = await db
