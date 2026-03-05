@@ -424,8 +424,8 @@ function sendRtpPacket(session: BridgeSession, g711Audio: Buffer): void {
   header[0] = 0x80; // V=2, P=0, X=0, CC=0
   header[1] = session.g711Format === 'ulaw' ? 0x00 : 0x08; // PT=0 PCMU or PT=8 PCMA
   header.writeUInt16BE(session.rtpSeqNum++ & 0xffff, 2);
-  header.writeUInt32BE(session.rtpTimestamp & 0xffffffff, 4);
-  session.rtpTimestamp += g711Audio.length; // 8000 samples/sec = 1 sample per byte
+  header.writeUInt32BE(session.rtpTimestamp >>> 0, 4); // >>> 0 ensures unsigned 32-bit
+  session.rtpTimestamp = (session.rtpTimestamp + g711Audio.length) >>> 0; // 8000 samples/sec = 1 sample per byte
   header.writeUInt32BE(session.rtpSsrc, 8);
 
   const packet = Buffer.concat([header, g711Audio]);
@@ -520,6 +520,10 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
               },
             },
           },
+          // CRITICAL: Enable transcription of both AI output and user input
+          // Without these, Gemini won't send outputTranscription/inputTranscription events
+          outputAudioTranscription: {},
+          inputAudioTranscription: {},
           systemInstruction: {
             parts: [{ text: session.systemPrompt }],
           },

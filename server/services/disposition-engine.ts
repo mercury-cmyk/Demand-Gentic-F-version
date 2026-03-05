@@ -281,6 +281,7 @@ function schedulePostCallAnalyzerForAttempt(
           disposition: dialerCallAttempts.disposition,
           recordingUrl: dialerCallAttempts.recordingUrl,
           recordingS3Key: dialerCallAttempts.recordingS3Key,
+          telnyxCallId: dialerCallAttempts.telnyxCallId,
         })
         .from(dialerCallAttempts)
         .where(eq(dialerCallAttempts.id, callAttemptId))
@@ -316,10 +317,12 @@ function schedulePostCallAnalyzerForAttempt(
       // exists, transcribe via Deepgram as a fallback.
       if ((!sipTranscript || sipTranscript.length <= 10) && (attempt.callDurationSeconds || 0) >= 20) {
         const recordingSource = attempt.recordingS3Key || attempt.recordingUrl;
-        if (recordingSource) {
+        const hasAudioLocator = !!(recordingSource || attempt.telnyxCallId);
+
+        if (hasAudioLocator) {
           console.log(`[DispositionEngine] 🎙️ Gemini transcript missing for SIP call ${callAttemptId} — trying Deepgram fallback on recording`);
           try {
-            let audioUrl = recordingSource;
+            let audioUrl = recordingSource || '';
             // If S3 key, generate a presigned download URL
             if (attempt.recordingS3Key) {
               const { getPresignedDownloadUrl, isS3Configured } = await import('../lib/storage');
@@ -329,7 +332,10 @@ function schedulePostCallAnalyzerForAttempt(
               }
             }
             const { transcribeFromRecording } = await import('./deepgram-postcall-transcription');
-            const deepgramResult = await transcribeFromRecording(audioUrl);
+            const deepgramResult = await transcribeFromRecording(audioUrl, {
+              telnyxCallId: attempt.telnyxCallId || undefined,
+              recordingS3Key: attempt.recordingS3Key || undefined,
+            });
             if (deepgramResult && deepgramResult.transcript && deepgramResult.transcript.length > 10) {
               sipTranscript = deepgramResult.transcript;
               console.log(`[DispositionEngine] ✅ Deepgram fallback transcription succeeded: ${sipTranscript.length} chars`);
@@ -541,6 +547,10 @@ export async function processDisposition(
       disposition: finalDisposition,
       updatedAt: new Date(),
     };
+    const callDataRecordingUrl = typeof callData?.recordingUrl === 'string' ? callData.recordingUrl.trim() : '';
+    if (callDataRecordingUrl) {
+      dispositionUpdate.recordingUrl = callDataRecordingUrl;
+    }
     if (sipTranscript) {
       dispositionUpdate.aiTranscript = sipTranscript;
       dispositionUpdate.fullTranscript = sipTranscript;
