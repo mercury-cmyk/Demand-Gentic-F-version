@@ -12,10 +12,19 @@
 import { db } from "../db";
 import { leads, dialerCallAttempts, activityLog, campaigns } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import OpenAI from "openai";
 
 const LOG_PREFIX = "[TelnyxTranscription]";
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY || "";
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
+
+// OpenAI-compatible Telnyx STT client
+const telnyxStt = TELNYX_API_KEY
+  ? new OpenAI({
+      apiKey: TELNYX_API_KEY,
+      baseURL: "https://api.telnyx.com/v2/ai",
+    })
+  : null;
 
 // ==================== TYPES ====================
 
@@ -154,6 +163,9 @@ export async function enableCallTranscription(
   options: {
     language?: string;
     interimResults?: boolean;
+    transcriptionEngine?: "A" | "B"; // "A" = Google STT, "B" = Telnyx STT
+    transcriptionTracks?: "inbound" | "outbound" | "both";
+    enableNoiseSuppression?: boolean;
   } = {}
 ): Promise<boolean> {
   if (!TELNYX_API_KEY) {
@@ -162,6 +174,11 @@ export async function enableCallTranscription(
   }
 
   try {
+    // Enable noise suppression first for better transcription accuracy
+    if (options.enableNoiseSuppression !== false) {
+      await enableNoiseSuppression(callControlId);
+    }
+
     const response = await fetch(
       `${TELNYX_API_BASE}/calls/${callControlId}/actions/transcription_start`,
       {
@@ -173,6 +190,8 @@ export async function enableCallTranscription(
         body: JSON.stringify({
           language: options.language || "en",
           interim_results: options.interimResults !== false,
+          transcription_engine: options.transcriptionEngine || "A",
+          transcription_tracks: options.transcriptionTracks || "both",
         }),
       }
     );
@@ -183,10 +202,43 @@ export async function enableCallTranscription(
       return false;
     }
 
-    console.log(`${LOG_PREFIX} ✅ Real-time transcription enabled for call ${callControlId}`);
+    console.log(`${LOG_PREFIX} ✅ Real-time transcription enabled for call ${callControlId} (engine=${options.transcriptionEngine || "A"}, tracks=${options.transcriptionTracks || "both"})`);
     return true;
   } catch (error) {
     console.error(`${LOG_PREFIX} Error enabling transcription:`, error);
+    return false;
+  }
+}
+
+/**
+ * Enable noise suppression on a call for better transcription accuracy
+ */
+async function enableNoiseSuppression(callControlId: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `${TELNYX_API_BASE}/calls/${callControlId}/actions/suppression_start`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TELNYX_API_KEY}`,
+        },
+        body: JSON.stringify({
+          direction: "both",
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(`${LOG_PREFIX} Noise suppression failed (non-critical): ${response.status} - ${errorText}`);
+      return false;
+    }
+
+    console.log(`${LOG_PREFIX} 🔇 Noise suppression enabled for call ${callControlId}`);
+    return true;
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Noise suppression error (non-critical):`, error);
     return false;
   }
 }
@@ -228,142 +280,187 @@ export async function disableCallTranscription(callControlId: string): Promise<b
 // ==================== POST-CALL TRANSCRIPTION ====================
 
 /**
- * Transcribe a recording using Telnyx's AI transcription API
- * This is used for post-call transcription from recording URLs
+ * Transcribe a recording using Telnyx's OpenAI-compatible STT API
+ * Downloads the recording file and sends it directly for transcription.
+ * Falls back to the legacy audio_url API if file download fails.
  */
 export async function transcribeRecording(recordingUrl: string): Promise<TranscriptionResult> {
   if (!TELNYX_API_KEY) {
-    return {
-      success: false,
-      text: "",
-      segments: [],
-      wordCount: 0,
-      durationSeconds: 0,
-      speakerCount: 0,
-      confidence: 0,
-      provider: "telnyx",
-      error: "TELNYX_API_KEY not configured",
-    };
+    return emptyResult("TELNYX_API_KEY not configured");
   }
 
   try {
     console.log(`${LOG_PREFIX} 🎤 Submitting recording for transcription: ${recordingUrl.substring(0, 50)}...`);
 
-    // Telnyx AI Transcription API
-    const response = await fetch(`${TELNYX_API_BASE}/ai/transcribe`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${TELNYX_API_KEY}`,
-      },
-      body: JSON.stringify({
-        audio_url: recordingUrl,
-        language: "en",
-        // Enable speaker diarization
-        diarize: true,
-        // Return word-level timestamps
-        timestamps: "word",
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`${LOG_PREFIX} Transcription API error: ${response.status} - ${errorText}`);
-
-      return {
-        success: false,
-        text: "",
-        segments: [],
-        wordCount: 0,
-        durationSeconds: 0,
-        speakerCount: 0,
-        confidence: 0,
-        provider: "telnyx",
-        error: `API error: ${response.status}`,
-      };
-    }
-
-    const result = await response.json();
-    const data = result.data || result;
-
-    // Parse transcription response
-    const text = data.text || data.transcript || "";
-    const segments: TranscriptionSegment[] = [];
-
-    // Parse speaker-diarized segments if available
-    if (data.utterances && Array.isArray(data.utterances)) {
-      for (const utterance of data.utterances) {
-        segments.push({
-          speaker: mapSpeakerLabel(utterance.speaker),
-          text: utterance.text || "",
-          startTime: utterance.start * 1000 || 0,
-          endTime: utterance.end * 1000 || 0,
-          confidence: utterance.confidence || 0.9,
-        });
-      }
-    } else if (data.words && Array.isArray(data.words)) {
-      // Build segments from word-level data
-      let currentSegment: TranscriptionSegment | null = null;
-      for (const word of data.words) {
-        if (!currentSegment || currentSegment.speaker !== mapSpeakerLabel(word.speaker)) {
-          if (currentSegment) {
-            segments.push(currentSegment);
-          }
-          currentSegment = {
-            speaker: mapSpeakerLabel(word.speaker),
-            text: word.word || word.text || "",
-            startTime: word.start * 1000 || 0,
-            endTime: word.end * 1000 || 0,
-            confidence: word.confidence || 0.9,
-          };
-        } else {
-          currentSegment.text += " " + (word.word || word.text || "");
-          currentSegment.endTime = word.end * 1000 || currentSegment.endTime;
-        }
-      }
-      if (currentSegment) {
-        segments.push(currentSegment);
+    // Primary: OpenAI-compatible file upload API (more reliable, handles expired URLs)
+    if (telnyxStt) {
+      try {
+        const result = await transcribeViaOpenAiSdk(recordingUrl);
+        if (result.success) return result;
+        console.warn(`${LOG_PREFIX} OpenAI-compatible API failed, falling back to legacy API: ${result.error}`);
+      } catch (sdkErr) {
+        console.warn(`${LOG_PREFIX} OpenAI SDK error, falling back to legacy API:`, sdkErr);
       }
     }
 
-    const durationSeconds = data.audio_duration || data.duration || 0;
-    const wordCount = text.split(/\s+/).filter(Boolean).length;
-    const speakerCount = new Set(segments.map((s) => s.speaker)).size || 2;
-    const avgConfidence =
-      segments.length > 0
-        ? segments.reduce((sum, s) => sum + s.confidence, 0) / segments.length
-        : data.confidence || 0.9;
-
-    console.log(
-      `${LOG_PREFIX} ✅ Transcription completed | Words: ${wordCount} | Duration: ${durationSeconds}s | Confidence: ${(avgConfidence * 100).toFixed(1)}%`
-    );
-
-    return {
-      success: true,
-      text,
-      segments,
-      wordCount,
-      durationSeconds,
-      speakerCount,
-      confidence: avgConfidence,
-      provider: "telnyx",
-    };
+    // Fallback: Legacy audio_url API (works if recording URL is still valid)
+    return await transcribeViaLegacyApi(recordingUrl);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error(`${LOG_PREFIX} Transcription error:`, error);
-
-    return {
-      success: false,
-      text: "",
-      segments: [],
-      wordCount: 0,
-      durationSeconds: 0,
-      speakerCount: 0,
-      confidence: 0,
-      provider: "telnyx",
-      error: errorMessage,
-    };
+    return emptyResult(errorMessage);
   }
+}
+
+/**
+ * Transcribe using Telnyx's OpenAI-compatible audio.transcriptions.create() API
+ * Downloads the recording first, then sends the file buffer directly.
+ */
+async function transcribeViaOpenAiSdk(recordingUrl: string): Promise<TranscriptionResult> {
+  // Download the recording file
+  const mediaResponse = await fetch(recordingUrl);
+  if (!mediaResponse.ok) {
+    return emptyResult(`Failed to download recording: ${mediaResponse.status}`);
+  }
+
+  const arrayBuffer = await mediaResponse.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  // Determine file extension from content-type or URL
+  const contentType = mediaResponse.headers.get("content-type") || "";
+  const ext = contentType.includes("wav") ? "wav" : "mp3";
+  const file = new File([buffer], `recording.${ext}`, { type: contentType || `audio/${ext}` });
+
+  console.log(`${LOG_PREFIX} Downloaded recording (${(buffer.length / 1024).toFixed(0)}KB), sending to Telnyx STT...`);
+
+  const transcription = await telnyxStt!.audio.transcriptions.create({
+    model: "distil-whisper/distil-large-v2",
+    file,
+  });
+
+  const text = transcription.text || "";
+  if (!text.trim()) {
+    return emptyResult("Empty transcription returned");
+  }
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+
+  console.log(`${LOG_PREFIX} ✅ Transcription completed (OpenAI SDK) | Words: ${wordCount}`);
+
+  return {
+    success: true,
+    text,
+    segments: [], // OpenAI-compatible API returns plain text; diarization not available
+    wordCount,
+    durationSeconds: 0,
+    speakerCount: 2,
+    confidence: 0.9,
+    provider: "telnyx",
+  };
+}
+
+/**
+ * Transcribe using the legacy Telnyx /ai/transcribe endpoint with audio_url
+ * Supports speaker diarization and word-level timestamps.
+ */
+async function transcribeViaLegacyApi(recordingUrl: string): Promise<TranscriptionResult> {
+  const response = await fetch(`${TELNYX_API_BASE}/ai/transcribe`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TELNYX_API_KEY}`,
+    },
+    body: JSON.stringify({
+      audio_url: recordingUrl,
+      language: "en",
+      diarize: true,
+      timestamps: "word",
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`${LOG_PREFIX} Legacy transcription API error: ${response.status} - ${errorText}`);
+    return emptyResult(`API error: ${response.status}`);
+  }
+
+  const result = await response.json();
+  const data = result.data || result;
+
+  const text = data.text || data.transcript || "";
+  const segments: TranscriptionSegment[] = [];
+
+  // Parse speaker-diarized segments if available
+  if (data.utterances && Array.isArray(data.utterances)) {
+    for (const utterance of data.utterances) {
+      segments.push({
+        speaker: mapSpeakerLabel(utterance.speaker),
+        text: utterance.text || "",
+        startTime: utterance.start * 1000 || 0,
+        endTime: utterance.end * 1000 || 0,
+        confidence: utterance.confidence || 0.9,
+      });
+    }
+  } else if (data.words && Array.isArray(data.words)) {
+    let currentSegment: TranscriptionSegment | null = null;
+    for (const word of data.words) {
+      if (!currentSegment || currentSegment.speaker !== mapSpeakerLabel(word.speaker)) {
+        if (currentSegment) {
+          segments.push(currentSegment);
+        }
+        currentSegment = {
+          speaker: mapSpeakerLabel(word.speaker),
+          text: word.word || word.text || "",
+          startTime: word.start * 1000 || 0,
+          endTime: word.end * 1000 || 0,
+          confidence: word.confidence || 0.9,
+        };
+      } else {
+        currentSegment.text += " " + (word.word || word.text || "");
+        currentSegment.endTime = word.end * 1000 || currentSegment.endTime;
+      }
+    }
+    if (currentSegment) {
+      segments.push(currentSegment);
+    }
+  }
+
+  const durationSeconds = data.audio_duration || data.duration || 0;
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const speakerCount = new Set(segments.map((s) => s.speaker)).size || 2;
+  const avgConfidence =
+    segments.length > 0
+      ? segments.reduce((sum, s) => sum + s.confidence, 0) / segments.length
+      : data.confidence || 0.9;
+
+  console.log(
+    `${LOG_PREFIX} ✅ Transcription completed (legacy API) | Words: ${wordCount} | Duration: ${durationSeconds}s | Confidence: ${(avgConfidence * 100).toFixed(1)}%`
+  );
+
+  return {
+    success: true,
+    text,
+    segments,
+    wordCount,
+    durationSeconds,
+    speakerCount,
+    confidence: avgConfidence,
+    provider: "telnyx",
+  };
+}
+
+function emptyResult(error: string): TranscriptionResult {
+  return {
+    success: false,
+    text: "",
+    segments: [],
+    wordCount: 0,
+    durationSeconds: 0,
+    speakerCount: 0,
+    confidence: 0,
+    provider: "telnyx",
+    error,
+  };
 }
 
 /**
@@ -610,6 +707,8 @@ export function handleTranscriptionWebhook(
       transcript: string;
       is_final: boolean;
       confidence: number;
+      leg?: "self" | "other"; // "self" = outbound (agent), "other" = inbound (prospect)
+      track?: "inbound" | "outbound";
     };
   }
 ): void {
@@ -618,12 +717,16 @@ export function handleTranscriptionWebhook(
   switch (eventType) {
     case "call.transcription":
       if (payload.transcription_data) {
-        const { transcript, is_final, confidence } = payload.transcription_data;
+        const { transcript, is_final, confidence, leg, track } = payload.transcription_data;
 
         // Only process final transcriptions for segments
         if (is_final && transcript) {
+          // Determine speaker from track/leg info when transcription_tracks="both"
+          // "self"/"outbound" = our side (AI agent), "other"/"inbound" = prospect
+          const speaker = determineSpeaker(leg, track);
+
           addTranscriptSegment(callControlId, {
-            speaker: "prospect", // Telnyx transcription captures user speech
+            speaker,
             text: transcript,
             startTime: Date.now(),
             endTime: Date.now(),
@@ -637,6 +740,21 @@ export function handleTranscriptionWebhook(
       console.log(`${LOG_PREFIX} Transcription stopped for call ${callControlId}`);
       break;
   }
+}
+
+/**
+ * Determine speaker from Telnyx transcription track/leg metadata
+ */
+function determineSpeaker(
+  leg?: "self" | "other" | string,
+  track?: "inbound" | "outbound" | string
+): "agent" | "prospect" | "unknown" {
+  // "self" leg or "outbound" track = our side (AI agent making the call)
+  if (leg === "self" || track === "outbound") return "agent";
+  // "other" leg or "inbound" track = the other party (prospect)
+  if (leg === "other" || track === "inbound") return "prospect";
+  // Fallback: if no track info, assume prospect (original behavior)
+  return "prospect";
 }
 
 // ==================== BACKGROUND PROCESSING ====================

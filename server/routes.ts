@@ -48,6 +48,7 @@ import dispositionIntelligenceRouter from './routes/disposition-intelligence-rou
 import showcaseCallsRouter from './routes/showcase-calls-routes';
 import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes';
 import dispositionDeepReanalysisRouter from './routes/disposition-deep-reanalysis-routes';
+import batchTranscriptionRouter from './routes/batch-transcription-routes';
 import queueIntelligenceRouter from './routes/queue-intelligence-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import intelligenceRoutes from './routes/intelligence-routes';
@@ -15639,8 +15640,8 @@ Provide JSON response with:
 
   // ==================== BATCH RE-ANALYSIS (Admin) ====================
 
-  app.post("/api/admin/batch-reanalyze-missing-transcripts", async (req, res) => {
-    // Internal endpoint — secured by knowledge of URL, no session needed
+  app.post("/api/admin/batch-reanalyze-missing-transcripts", requireAuth, async (req, res) => {
+    // Admin-only endpoint for batch reanalysis of calls missing transcripts
     try {
       // Find calls >= 20s with session + recording but no transcript
       const missingCalls = await db
@@ -16057,6 +16058,7 @@ Provide JSON response with:
   app.use('/api/showcase-calls', showcaseCallsRouter);
   app.use('/api/disposition-reanalysis', dispositionReanalysisRouter);
   app.use('/api/disposition-deep-reanalysis', dispositionDeepReanalysisRouter);
+  app.use('/api/batch-transcription', batchTranscriptionRouter);
   app.use(queueIntelligenceRouter);
 
   // AI Project Creation
