@@ -22,6 +22,10 @@ import {
 import {
   recalculateAllReputations,
 } from './number-pool/reputation-engine';
+import { db } from '../db';
+import { telnyxNumbers, numberCooldowns } from '@shared/number-pool-schema';
+import { ne, eq } from 'drizzle-orm';
+import { forceReleaseAllNumbers, invalidatePoolCache } from './number-pool/number-router-service';
 
 // ==================== TYPES ====================
 
@@ -101,6 +105,43 @@ const TASK_DEFINITIONS = {
   },
 };
 
+// ==================== STARTUP ACTIVATION ====================
+
+/**
+ * On startup: activate all non-retired numbers, clear cooldowns, release locks.
+ * Ensures the pool starts at maximum capacity every time the server boots.
+ */
+async function activateAllNumbersOnStartup(): Promise<void> {
+  try {
+    // 1. Activate all non-retired numbers
+    const activated = await db
+      .update(telnyxNumbers)
+      .set({
+        status: 'active',
+        statusReason: 'startup-auto-activated',
+        statusChangedAt: new Date(),
+      })
+      .where(ne(telnyxNumbers.status, 'retired'))
+      .returning({ id: telnyxNumbers.id });
+
+    // 2. Clear all active cooldowns
+    await db
+      .update(numberCooldowns)
+      .set({ isActive: false, endedEarlyAt: new Date() })
+      .where(eq(numberCooldowns.isActive, true));
+
+    // 3. Release all in-memory number locks
+    forceReleaseAllNumbers();
+
+    // 4. Invalidate pool cache so next query picks up fresh data
+    invalidatePoolCache();
+
+    console.log(`[NumberPoolScheduler] Startup activation: ${activated.length} numbers activated, all cooldowns cleared, all locks released`);
+  } catch (err) {
+    console.error('[NumberPoolScheduler] Startup activation error:', err);
+  }
+}
+
 // ==================== SCHEDULER FUNCTIONS ====================
 
 /**
@@ -119,6 +160,12 @@ export function initializeScheduler(): void {
   }
 
   console.log('[NumberPoolScheduler] Initializing scheduled tasks...');
+
+  // On startup: activate ALL numbers, clear ALL cooldowns, release ALL locks.
+  // This ensures the pool starts fresh with maximum availability.
+  activateAllNumbersOnStartup().catch(err => {
+    console.error('[NumberPoolScheduler] Startup activation failed:', err);
+  });
 
   for (const [name, definition] of Object.entries(TASK_DEFINITIONS)) {
     registerTask(name, definition.intervalMs, definition.handler);

@@ -256,9 +256,8 @@ export async function selectNumber(
  */
 export function releaseNumber(numberId: string): void {
   // Enforce gap between calls on the same number.
-  // Reduced from 30s to 10s: 30s was starving small pools (N numbers × 30s = very low throughput).
-  // 10s is sufficient to prevent carrier-flagged "robo-dialer" burst patterns.
-  const COMPULSORY_DELAY_MS = 10000;
+  // 30s gap per user request — consistent dialing with minimal restriction.
+  const COMPULSORY_DELAY_MS = 30000;
 
   const lockedAt = numbersInUse.get(numberId);
   const lockDurationSec = lockedAt ? Math.round((Date.now() - lockedAt) / 1000) : 0;
