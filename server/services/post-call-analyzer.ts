@@ -450,7 +450,7 @@ CRITICAL RULES:
 
     let raw: any;
     try {
-      raw = await deepAnalyze(prompt, { temperature: 0.2, maxTokens: 4096, label: "post-call" });
+      raw = await deepAnalyze(prompt, { temperature: 0.2, maxTokens: 4096, label: "post-call", preferredProvider: "deepseek" });
     } catch (routerError: any) {
       console.warn(`${LOG_PREFIX} AI evaluation failed (all providers): ${routerError.message}`);
       // Fallback or return partial data? returning null for now to indicate failure to process this step

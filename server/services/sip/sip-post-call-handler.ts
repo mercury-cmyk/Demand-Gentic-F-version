@@ -10,10 +10,9 @@
  */
 
 import { db } from '../../db';
-import { leads, dialerCallAttempts, callSessions, callQualityRecords } from '@shared/schema';
-import { eq, and } from 'drizzle-orm';
+import { leads, dialerCallAttempts } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 import { buildPostCallTranscriptWithSummaryAsync } from '../post-call-transcript-summary';
-import { logCallIntelligence } from '../call-intelligence-logger';
 import { recordTranscriptionResult } from '../transcription-monitor';
 
 const LOG_PREFIX = '[SIPPostCallHandler]';
@@ -26,7 +25,7 @@ export interface SIPTranscriptTurn {
 
 export interface SIPPostCallData {
   callAttemptId: string;
-  leadId: string;
+  leadId?: string;
   campaignId: string;
   contactName?: string;
   disposition: string;
@@ -53,13 +52,17 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
       data.campaignId
     );
 
-    // Step 3: Save transcript and summary to lead record
-    await saveLeadCallData(
-      data.leadId,
-      plainTranscript,
-      callSummary,
-      callDescription
-    );
+    // Step 3: Save transcript and summary to lead record (skip if no leadId — e.g., no_answer/voicemail)
+    if (data.leadId) {
+      await saveLeadCallData(
+        data.leadId,
+        plainTranscript,
+        callSummary,
+        callDescription
+      );
+    } else {
+      console.log(`${LOG_PREFIX} No leadId — skipping lead data save for call attempt ${data.callAttemptId}`);
+    }
 
     // Step 4: Update call attempt with transcript summary
     await updateCallAttemptWithTranscript(
@@ -68,30 +71,14 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
       callSummary
     );
 
-    // Step 5: Record transcription result
+    // Step 5: Record transcription result in metrics tracker
     const turnMetrics = calculateTurnMetrics(data.turnTranscript);
-    await recordTranscriptionResult({
-      leadId: data.leadId,
-      success: true,
-      transcript: plainTranscript,
-      summary: callSummary,
-      turnsInfo: turnMetrics,
-      source: 'sip_gemini',
-    });
+    if (data.callAttemptId) {
+      recordTranscriptionResult(data.callAttemptId, 'realtime_native', data.callAttemptId);
+    }
 
-    // Step 6: Log to call intelligence for learning
-    await logCallIntelligence({
-      leadId: data.leadId,
-      campaignId: data.campaignId,
-      agentType: 'ai',
-      callType: 'sip_gemini',
-      transcript: plainTranscript,
-      summary: callSummary,
-      description: callDescription,
-      disposition: data.disposition,
-      turnMetrics,
-      notes: data.agentNotes || '',
-    });
+    // Step 6: Log summary to console (call-intelligence logger requires callSessionId + qualityAnalysis)
+    console.log(`${LOG_PREFIX} Call intelligence: disposition=${data.disposition} turns=${turnMetrics.totalTurns} agentRatio=${turnMetrics.agentTalkRatio.toFixed(2)} notes=${data.agentNotes || 'none'}`);
 
     console.log(`${LOG_PREFIX} ✅ Post-call analysis complete for call attempt ${data.callAttemptId}`);
   } catch (error: any) {
@@ -120,8 +107,9 @@ async function buildStructuredTranscript(
 
   const plainTranscript = lines.join('\n');
 
-  // Generate summary using AI
-  const summaryResult = await buildPostCallTranscriptWithSummaryAsync(plainTranscript, turns, {
+  // Generate summary using AI — map speaker→role for SummaryTranscriptTurn compatibility
+  const summaryTurns = turns.map(t => ({ role: t.speaker as 'agent' | 'contact', text: t.text, timeOffset: t.timestamp }));
+  const summaryResult = await buildPostCallTranscriptWithSummaryAsync(plainTranscript, summaryTurns, {
     durationSec: durationSeconds,
     maxWords: 200,
   });
@@ -221,8 +209,7 @@ async function saveLeadCallData(
       .update(leads)
       .set({
         transcript: transcript || null,
-        transcriptSummary: summary || null,
-        transcriptDescription: description || null,
+        structuredTranscript: { summary: summary || null, description: description || null },
         updatedAt: new Date(),
       })
       .where(eq(leads.id, leadId));

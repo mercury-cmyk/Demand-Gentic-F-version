@@ -3140,7 +3140,8 @@ router.post("/backfill-transcripts", async (req, res) => {
     }
 
     // Process SYNCHRONOUSLY — keep connection alive
-    const { getPresignedDownloadUrl: presign, downloadGcsAudioAsBuffer: downloadBuffer } = await import("../services/gcs-recording-storage");
+    const presign = getPresignedDownloadUrl;
+    const downloadBuffer = downloadGcsAudioAsBuffer;
     const { transcribeFromRecording, submitToDeepgramBuffer } = await import("../services/deepgram-postcall-transcription");
 
     let succeeded = 0;

@@ -186,6 +186,7 @@ Rules:
     temperature: 0.1,
     deep: false,
     label: 'post-call-summary',
+    preferredProvider: 'deepseek',
   });
 }
 

@@ -18,9 +18,11 @@ import { campaignQueue, type CanonicalDisposition } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from '../voice-providers/audio-transcoder';
 import { processDisposition } from '../disposition-engine';
+import { processSIPPostCallAnalysis } from './sip-post-call-handler';
 import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
+import { callSessions, dialerCallAttempts } from '@shared/schema';
 import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
 
 // Gemini API configuration
@@ -668,6 +670,24 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
 
         console.log(`[RTP Bridge] ✅ Disposition saved; centralized post-call analyzer scheduling delegated to disposition engine`);
 
+        // Trigger SIP post-call analysis (transcript summary, lead update, call intelligence)
+        try {
+          const durationSec = Math.round((Date.now() - session.metrics.startTime) / 1000);
+          await processSIPPostCallAnalysis({
+            callAttemptId: session.callContext.callAttemptId,
+            leadId: dispositionResult.leadId,
+            campaignId: session.callContext.campaignId || '',
+            contactName: session.callContext.contactName || session.callContext.contactFirstName,
+            disposition: canonicalDisposition,
+            turnTranscript: session.transcriptTurns,
+            callDurationSeconds: durationSec,
+            agentNotes: notes || '',
+          });
+          console.log(`[RTP Bridge] 📝 SIP post-call analysis completed for ${session.callContext.callAttemptId}`);
+        } catch (postCallErr) {
+          console.error(`[RTP Bridge] SIP post-call analysis failed (non-fatal):`, postCallErr);
+        }
+
         response = { success: true, disposition: canonicalDisposition };
       } catch (err) {
         console.error(`[RTP Bridge] Failed to process disposition:`, err);
@@ -817,7 +837,7 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
 
     try {
       const transcript = buildPlainTranscript(session.transcriptTurns);
-      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
+      const dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
         transcript,
         structuredTranscript: { turns: session.transcriptTurns },
       });
@@ -832,6 +852,23 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
             enqueuedReason: reason,
           })
           .where(eq(campaignQueue.id, session.callContext.queueItemId));
+      }
+
+      // Trigger SIP post-call analysis on fallback disposition path
+      try {
+        await processSIPPostCallAnalysis({
+          callAttemptId: session.callContext.callAttemptId,
+          leadId: dispResult.leadId,
+          campaignId: session.callContext.campaignId || '',
+          contactName: session.callContext.contactName || session.callContext.contactFirstName,
+          disposition,
+          turnTranscript: session.transcriptTurns,
+          callDurationSeconds: Math.round(durationSec),
+          agentNotes: `Fallback: ${reason}`,
+        });
+        console.log(`[RTP Bridge] 📝 Fallback post-call analysis completed`);
+      } catch (postCallErr) {
+        console.error(`[RTP Bridge] Fallback post-call analysis failed (non-fatal):`, postCallErr);
       }
     } catch (err) {
       console.error(`[RTP Bridge] Failed to process fallback disposition:`, err);
@@ -891,6 +928,30 @@ export async function closeBridgeSession(callId: string): Promise<void> {
   if (session.listeningTimeout) {
     clearTimeout(session.listeningTimeout);
     session.listeningTimeout = null;
+  }
+
+  // Persist Gemini Live transcript to call_sessions and dialer_call_attempts as safety net
+  if (session.transcriptTurns && session.transcriptTurns.length > 0) {
+    try {
+      const transcript = buildPlainTranscript(session.transcriptTurns);
+      if (transcript && transcript.length > 10) {
+        // Save to call_sessions.aiTranscript
+        await db.update(callSessions)
+          .set({ aiTranscript: transcript } as any)
+          .where(eq(callSessions.id, callId));
+
+        // Also save to dialer_call_attempts.aiTranscript if we have an attempt ID
+        if (session.callContext?.callAttemptId) {
+          await db.update(dialerCallAttempts)
+            .set({ aiTranscript: transcript } as any)
+            .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+        }
+
+        console.log(`[RTP Bridge] 📝 Persisted transcript (${transcript.length} chars) for session ${callId}`);
+      }
+    } catch (transcriptErr) {
+      console.error(`[RTP Bridge] Failed to persist transcript for ${callId}:`, transcriptErr);
+    }
   }
 
   if (session.geminiWs) {
