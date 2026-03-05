@@ -24,6 +24,7 @@ import {
 } from './number-pool/reputation-engine';
 import { db } from '../db';
 import { telnyxNumbers, numberCooldowns } from '@shared/number-pool-schema';
+import { agentDefaults } from '@shared/schema';
 import { ne, eq } from 'drizzle-orm';
 import { forceReleaseAllNumbers, invalidatePoolCache } from './number-pool/number-router-service';
 
@@ -136,7 +137,10 @@ async function activateAllNumbersOnStartup(): Promise<void> {
     // 4. Invalidate pool cache so next query picks up fresh data
     invalidatePoolCache();
 
-    console.log(`[NumberPoolScheduler] Startup activation: ${activated.length} numbers activated, all cooldowns cleared, all locks released`);
+    // 5. Ensure call engine is set to SIP
+    await db.update(agentDefaults).set({ defaultCallEngine: 'sip' });
+
+    console.log(`[NumberPoolScheduler] Startup activation: ${activated.length} numbers activated, all cooldowns cleared, all locks released, call engine set to SIP`);
   } catch (err) {
     console.error('[NumberPoolScheduler] Startup activation error:', err);
   }
