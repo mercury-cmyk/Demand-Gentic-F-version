@@ -10536,6 +10536,8 @@ export function registerRoutes(app: Express) {
 
       // ── Pass 2: Move pending-review leads based on AI qualification outcome ───────────
       // These are leads where AI analysis ran but qaStatus still reflects review queue states
+      // Use text comparison for qaStatus to safely support legacy "Pending Review"
+      // without causing enum-cast failures on modern qa_status enum deployments.
       const pendingReviewLeads = await db
         .select({
           id: leads.id,
@@ -10543,7 +10545,11 @@ export function registerRoutes(app: Express) {
           aiScore: leads.aiScore,
         })
         .from(leads)
-        .where(and(inArray(leads.qaStatus, ['new', 'under_review', 'Pending Review']), isNotNull(leads.aiQualificationStatus), baseWhere));
+        .where(and(
+          sql`${leads.qaStatus}::text IN ('new', 'under_review', 'Pending Review')`,
+          isNotNull(leads.aiQualificationStatus),
+          baseWhere,
+        ));
 
       let movedToApproved = 0;
       let movedToReview = 0;
