@@ -381,10 +381,10 @@ async function getEligiblePool(request: NumberSelectionRequest): Promise<Eligibl
   // Build WHERE conditions
   const whereConditions = [eq(telnyxNumbers.status, 'active')];
 
-  // Filter by connection ID if resolved (connection-aware pool)
+  // Connection filter DISABLED — all active numbers are eligible regardless of connection.
+  // This ensures numbers provisioned on any Telnyx connection (TeXML, SIP, etc.) can be used.
   if (connectionId) {
-    whereConditions.push(eq(telnyxNumbers.telnyxConnectionId, connectionId));
-    console.log(`[NumberRouter] Filtering pool by connection ${connectionId} (engine: ${request.callEngine || 'auto'})`);
+    console.log(`[NumberRouter] Connection ${connectionId} detected (engine: ${request.callEngine || 'auto'}) — filter DISABLED, using all active numbers`);
   }
 
   // Get all active numbers with their reputation and assignments
