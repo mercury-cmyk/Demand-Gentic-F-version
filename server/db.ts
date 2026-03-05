@@ -6,9 +6,30 @@ import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
 import * as schema from "../shared/schema.ts";
 
-neonConfig.webSocketConstructor = ws;
-
+// Configure Neon database connection transport
+// Use fetch in Cloud Run for better reliability, WebSocket locally
 const nodeEnv = (process.env.NODE_ENV || "development").toLowerCase();
+const isCloudRun = process.env.K_SERVICE !== undefined;
+
+
+// Use WebSocket transport everywhere — fetch transport fails when Neon compute is waking up
+// The ws library works in both Cloud Run and local development
+neonConfig.webSocketConstructor = ws;
+if (isCloudRun || nodeEnv === "production") {
+  // Also configure fetch endpoint as fallback for Neon's internal retry mechanism
+  neonConfig.fetchEndpoint = (host) => {
+    try {
+      const url = new URL(host);
+      return `https://${url.hostname}/sql`;
+    } catch {
+      const hostOnly = host.split('://')[1]?.split(':')[0] || host;
+      return `https://${hostOnly}/sql`;
+    }
+  };
+  console.log('[DB] Using WebSocket transport with fetch fallback (Cloud Run/Production)');
+} else {
+  console.log('[DB] Using WebSocket transport (Development)');
+}
 const strictIsolation = nodeEnv === "development" && process.env.STRICT_ENV_ISOLATION !== "false";
 
 function resolveDatabaseUrl(): { url: string; source: string } {
@@ -84,24 +105,24 @@ export { dbConfigError };
 
 // Ensure DATABASE_URL uses Neon's connection pooler for high concurrency
 // This prevents "too many connections" errors by using pooling infrastructure
-// Only add -pooler if it's not already present
-// Wait, disable automatic pooler injection as it breaks new AWS URLs
-const hasPooler = true; // Force skip injection for now to fix connection issues
-
-/*
+// The -pooler suffix routes through Neon's PgBouncer connection pool (recommended for serverless)
+const originalUrl = databaseUrl;
 const hasPooler = databaseUrl.includes('-pooler');
 
-if (!hasPooler && !dbConfigError) {
+// Enable Neon pooler for production to handle concurrent connections efficiently
+// This prevents WebSocket connection exhaustion and timeouts
+if (!hasPooler && !dbConfigError && nodeEnv === "production") {
   // Replace .region.neon.tech with -pooler.region.neon.tech
   databaseUrl = databaseUrl.replace(
     /\.([a-z0-9-]+)\.neon\.tech/,
     '-pooler.$1.neon.tech'
   );
+  console.log('[DB] Enabled Neon connection pooler (pgbouncer) for production');
 }
-*/
 
 if (!dbConfigError) {
-  console.log('[DB] Using Neon connection pooler:', hasPooler ? 'YES (already configured)' : 'YES (added -pooler)');
+  const poolStatus = databaseUrl.includes('-pooler') ? 'ENABLED (pooler)' : (nodeEnv === 'production' ? 'WARNING: DISABLED' : 'optional');
+  console.log(`[DB] Neon connection pooling: ${poolStatus}`);
 }
 
 const parseEnvInt = (value: string | undefined, fallback: number, allowZero = false) => {
@@ -118,19 +139,19 @@ const parseEnvInt = (value: string | undefined, fallback: number, allowZero = fa
   return parsed;
 };
 
-const DB_POOL_MAX = parseEnvInt(process.env.DB_POOL_MAX, 60);
-const DB_POOL_MIN = Math.min(parseEnvInt(process.env.DB_POOL_MIN, 6, true), DB_POOL_MAX);
-const DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_IDLE_TIMEOUT_MS, 30000);
-const DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_CONN_TIMEOUT_MS, 45000);
-const DB_POOL_MAX_USES = parseEnvInt(process.env.DB_POOL_MAX_USES, 10000);
-const DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.DB_POOL_KEEP_ALIVE_MS, 10000);
+const DB_POOL_MAX = parseEnvInt(process.env.DB_POOL_MAX, 20); // Reduced from 60 since pooler handles load
+const DB_POOL_MIN = Math.min(parseEnvInt(process.env.DB_POOL_MIN, 4, true), DB_POOL_MAX); // Reduced from 8
+const DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_IDLE_TIMEOUT_MS, 30000); // Reduced to 30s with pooler
+const DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_CONN_TIMEOUT_MS, 30000); // Reduced to 30s with pooler
+const DB_POOL_MAX_USES = parseEnvInt(process.env.DB_POOL_MAX_USES, 5000); // Keep frequent recycling
+const DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.DB_POOL_KEEP_ALIVE_MS, 10000); // Normal keep-alive
 
-const WORKER_DB_POOL_MAX = parseEnvInt(process.env.WORKER_DB_POOL_MAX, 30);
-const WORKER_DB_POOL_MIN = Math.min(parseEnvInt(process.env.WORKER_DB_POOL_MIN, 3, true), WORKER_DB_POOL_MAX);
-const WORKER_DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_IDLE_TIMEOUT_MS, 30000);
-const WORKER_DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_CONN_TIMEOUT_MS, 30000);
-const WORKER_DB_POOL_MAX_USES = parseEnvInt(process.env.WORKER_DB_POOL_MAX_USES, 10000);
-const WORKER_DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.WORKER_DB_POOL_KEEP_ALIVE_MS, 10000);
+const WORKER_DB_POOL_MAX = parseEnvInt(process.env.WORKER_DB_POOL_MAX, 15); // Reduced from 30
+const WORKER_DB_POOL_MIN = Math.min(parseEnvInt(process.env.WORKER_DB_POOL_MIN, 2, true), WORKER_DB_POOL_MAX); // Reduced from 4
+const WORKER_DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_IDLE_TIMEOUT_MS, 30000); // Reduced to 30s
+const WORKER_DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_CONN_TIMEOUT_MS, 30000); // Reduced to 30s
+const WORKER_DB_POOL_MAX_USES = parseEnvInt(process.env.WORKER_DB_POOL_MAX_USES, 5000); // Reduced from 10k
+const WORKER_DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.WORKER_DB_POOL_KEEP_ALIVE_MS, 10000); // Normal keep-alive
 
 
 // Production-optimized connection pool for 3M+ contacts scale
@@ -224,6 +245,8 @@ export async function withRetry<T>(
         error.message?.includes('pool') ||
         error.message?.includes('ETIMEDOUT') ||
         error.message?.includes('too many clients') ||
+        error.message?.includes('terminated') ||
+        error.message?.includes('unexpectedly') ||
         error.code === 'ECONNRESET' ||
         error.code === 'ETIMEDOUT';
       
@@ -249,12 +272,12 @@ export async function withRetry<T>(
         throw error;
       }
       
-      // Jittered exponential backoff per architect guidance
-      const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-      const jitter = Math.random() * 1000; // 0-1000ms random jitter
+      // Jittered exponential backoff - increased base for high-load scenarios
+      const baseDelay = Math.min(500 * Math.pow(2, attempt - 1), 10000); // Increased from 1000 * 2^x, 5000 cap
+      const jitter = Math.random() * 2000; // Increased jitter range to 2000ms
       const delay = baseDelay + jitter;
       
-      console.warn(`[DB] ${context} failed (attempt ${attempt}/${maxRetries}), retrying in ${delay.toFixed(0)}ms...`);
+      console.warn(`[DB] ${context} failed (attempt ${attempt}/${maxRetries}, error: ${error.message}), retrying in ${delay.toFixed(0)}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }

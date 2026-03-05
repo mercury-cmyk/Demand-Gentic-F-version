@@ -4,6 +4,7 @@ import { SettingsLayout } from '@/components/settings/settings-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
 import {
@@ -16,23 +17,58 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { CheckCircle, XCircle, Radio, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, ArrowRight, ArrowLeft, Phone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface VoiceEngineConfig {
-  activeEngine: 'texml' | 'livekit';
-  livekit: {
+  activeEngine: 'texml' | 'sip';
+  sip: {
     ready: boolean;
-    url: string | null;
-    sipUri: string | null;
-    hasApiKey: boolean;
-    hasApiSecret: boolean;
+    hasDrachtioHost: boolean;
+    hasPublicIp: boolean;
+    sipEnabled: boolean;
   };
   texml: {
     ready: boolean;
     hasApiKey: boolean;
     hasAppId: boolean;
   };
+}
+
+interface PoolNumber {
+  id: string;
+  phoneNumberE164: string;
+  telnyxConnectionId: string | null;
+  telnyxNumberId: string | null;
+  status: string;
+  region: string | null;
+  areaCode: string | null;
+}
+
+interface NumbersResponse {
+  sipConnectionId: string | null;
+  texmlConnectionId: string | null;
+  sip: PoolNumber[];
+  texml: PoolNumber[];
+  unassigned: PoolNumber[];
+  totals: { sip: number; texml: number; unassigned: number };
+}
+
+function getSipAvailabilityIssue(config?: VoiceEngineConfig): string | null {
+  if (!config) return null;
+
+  const missing: string[] = [];
+  if (!config.sip.sipEnabled) missing.push('USE_SIP_CALLING=true');
+  if (!config.sip.hasDrachtioHost) missing.push('DRACHTIO_HOST');
+
+  if (missing.length === 0) {
+    return null;
+  }
+
+  const requirements = missing.join(' and ');
+  const productionHint = config.sip.hasPublicIp ? '' : ' PUBLIC_IP is also recommended for production SIP traffic.';
+
+  return `SIP is not ready. Configure ${requirements} before switching.${productionHint}`;
 }
 
 function StatusDot({ ok }: { ok: boolean }) {
@@ -43,11 +79,52 @@ function StatusDot({ ok }: { ok: boolean }) {
   );
 }
 
+function NumberList({
+  numbers,
+  selected,
+  onToggle,
+  emptyText,
+}: {
+  numbers: PoolNumber[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  emptyText: string;
+}) {
+  if (numbers.length === 0) {
+    return <p className="text-sm text-muted-foreground italic py-2">{emptyText}</p>;
+  }
+  return (
+    <div className="space-y-1 max-h-64 overflow-y-auto">
+      {numbers.map((n) => (
+        <label
+          key={n.id}
+          className={cn(
+            'flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer hover:bg-muted/50 transition-colors',
+            selected.has(n.id) && 'bg-muted'
+          )}
+        >
+          <Checkbox
+            checked={selected.has(n.id)}
+            onCheckedChange={() => onToggle(n.id)}
+          />
+          <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="font-mono">{n.phoneNumberE164}</span>
+          {n.areaCode && (
+            <span className="text-xs text-muted-foreground">({n.areaCode})</span>
+          )}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export default function VoiceEngineControlCenter() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [pendingEngine, setPendingEngine] = useState<'texml' | 'livekit' | null>(null);
+  const [pendingEngine, setPendingEngine] = useState<'texml' | 'sip' | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [selectedTexml, setSelectedTexml] = useState<Set<string>>(new Set());
+  const [selectedSip, setSelectedSip] = useState<Set<string>>(new Set());
 
   const { data: config, isLoading } = useQuery<VoiceEngineConfig>({
     queryKey: ['/api/voice-engine/config'],
@@ -57,8 +134,16 @@ export default function VoiceEngineControlCenter() {
     },
   });
 
+  const { data: numbersData, isLoading: numbersLoading } = useQuery<NumbersResponse>({
+    queryKey: ['/api/voice-engine/numbers'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/voice-engine/numbers');
+      return res.json();
+    },
+  });
+
   const switchMutation = useMutation({
-    mutationFn: async (engine: 'texml' | 'livekit') => {
+    mutationFn: async (engine: 'texml' | 'sip') => {
       const res = await apiRequest('PUT', '/api/voice-engine/config', { engine });
       if (!res.ok) {
         const err = await res.json();
@@ -68,40 +153,96 @@ export default function VoiceEngineControlCenter() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/voice-engine/config'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/voice-engine/numbers'] });
       toast({
         title: 'Voice engine updated',
-        description: `Switched to ${data.activeEngine === 'livekit' ? 'LiveKit SIP' : 'Telnyx TeXML'}. New calls will use this engine.`,
+        description: `Switched to ${data.activeEngine === 'sip' ? 'Direct SIP (Drachtio)' : 'Telnyx TeXML'}. New calls will use this engine.`,
       });
     },
     onError: (error: Error) => {
+      toast({ title: 'Failed to switch engine', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const moveMutation = useMutation({
+    mutationFn: async ({ numberIds, targetConnection }: { numberIds: string[]; targetConnection: 'sip' | 'texml' }) => {
+      const res = await apiRequest('POST', '/api/voice-engine/numbers/move', { numberIds, targetConnection });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || 'Failed to move numbers');
+      }
+      return res.json();
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/voice-engine/numbers'] });
+      setSelectedTexml(new Set());
+      setSelectedSip(new Set());
       toast({
-        title: 'Failed to switch engine',
-        description: error.message,
-        variant: 'destructive',
+        title: `Moved ${data.moved} number${data.moved !== 1 ? 's' : ''}`,
+        description: `${data.moved} number${data.moved !== 1 ? 's' : ''} moved to ${variables.targetConnection === 'sip' ? 'SIP' : 'TeXML'} connection.${data.failed > 0 ? ` ${data.failed} failed.` : ''}`,
+        variant: data.failed > 0 ? 'destructive' : 'default',
       });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to move numbers', description: error.message, variant: 'destructive' });
     },
   });
 
   const activeEngine = config?.activeEngine || 'texml';
+  const sipAvailabilityIssue = getSipAvailabilityIssue(config);
+  const canSwitchToSip = !sipAvailabilityIssue;
 
-  function handleSelect(engine: 'texml' | 'livekit') {
+  function handleSelect(engine: 'texml' | 'sip') {
     if (engine === activeEngine) return;
+    // Prevent switching to SIP when it's not ready
+    if (engine === 'sip' && !canSwitchToSip) {
+      toast({
+        title: 'SIP not available',
+        description: sipAvailabilityIssue || 'SIP is not ready yet. Configure SIP prerequisites before switching.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setPendingEngine(engine);
     setConfirmOpen(true);
   }
 
   function handleConfirm() {
-    if (pendingEngine) {
-      switchMutation.mutate(pendingEngine);
-    }
+    if (pendingEngine) switchMutation.mutate(pendingEngine);
     setConfirmOpen(false);
     setPendingEngine(null);
+  }
+
+  function toggleTexml(id: string) {
+    setSelectedTexml(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSip(id: string) {
+    setSelectedSip(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function moveToSip() {
+    if (selectedTexml.size === 0) return;
+    moveMutation.mutate({ numberIds: Array.from(selectedTexml), targetConnection: 'sip' });
+  }
+
+  function moveToTexml() {
+    if (selectedSip.size === 0) return;
+    moveMutation.mutate({ numberIds: Array.from(selectedSip), targetConnection: 'texml' });
   }
 
   return (
     <SettingsLayout
       title="Voice Engine"
-      description="Control which call engine handles AI voice calls. Switch safely between Telnyx TeXML and LiveKit SIP."
+      description="Control which call engine handles AI voice calls and manage phone number pools for each connection."
     >
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
@@ -115,10 +256,10 @@ export default function VoiceEngineControlCenter() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Active Engine</CardTitle>
-                  <CardDescription>All new AI calls will use this engine</CardDescription>
+                  <CardDescription>All new AI calls will use this engine and its number pool</CardDescription>
                 </div>
-                <Badge variant={activeEngine === 'livekit' ? 'default' : 'secondary'} className="text-sm px-3 py-1">
-                  {activeEngine === 'livekit' ? 'LiveKit SIP' : 'Telnyx TeXML'}
+                <Badge variant={activeEngine === 'sip' ? 'default' : 'secondary'} className="text-sm px-3 py-1">
+                  {activeEngine === 'sip' ? 'Direct SIP' : 'Telnyx TeXML'}
                 </Badge>
               </div>
             </CardHeader>
@@ -147,11 +288,12 @@ export default function VoiceEngineControlCenter() {
                   <div className="flex-1">
                     <CardTitle className="text-base">Telnyx TeXML</CardTitle>
                     <CardDescription className="mt-1">
-                      Current production setup. Telnyx handles media streaming directly to Gemini Live via WebSocket.
+                      Production setup. Telnyx streams audio to Gemini Live via WebSocket.
                     </CardDescription>
-                    {activeEngine === 'texml' && (
-                      <Badge variant="outline" className="mt-2 text-xs">Active</Badge>
-                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                      {activeEngine === 'texml' && <Badge variant="outline" className="text-xs">Active</Badge>}
+                      <Badge variant="secondary" className="text-xs">{numbersData?.totals.texml ?? '?'} numbers</Badge>
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -165,88 +307,153 @@ export default function VoiceEngineControlCenter() {
                     <StatusDot ok={config?.texml.hasAppId || false} />
                     <span className="text-muted-foreground">TeXML App / Connection ID</span>
                   </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <Badge variant={config?.texml.ready ? 'default' : 'destructive'} className="text-xs">
-                      {config?.texml.ready ? 'Ready' : 'Not Configured'}
-                    </Badge>
-                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* LiveKit SIP Card */}
+            {/* Direct SIP Card */}
             <Card
               className={cn(
-                'cursor-pointer transition-all border-2',
-                activeEngine === 'livekit'
-                  ? 'border-green-500 bg-green-50/50 dark:bg-green-950/20'
-                  : 'border-transparent hover:border-muted-foreground/20'
+                'transition-all border-2',
+                activeEngine === 'sip'
+                  ? 'border-green-500 bg-green-50/50 dark:bg-green-950/20 cursor-pointer'
+                  : !canSwitchToSip
+                    ? 'border-transparent opacity-60 cursor-not-allowed pointer-events-none'
+                    : 'border-transparent hover:border-muted-foreground/20 cursor-pointer'
               )}
-              onClick={() => handleSelect('livekit')}
+              onClick={canSwitchToSip ? () => handleSelect('sip') : undefined}
+              aria-disabled={!canSwitchToSip}
             >
               <CardHeader>
                 <div className="flex items-start gap-3">
                   <div className={cn(
                     'mt-0.5 h-5 w-5 rounded-full border-2 flex items-center justify-center',
-                    activeEngine === 'livekit' ? 'border-green-500' : 'border-muted-foreground/40'
+                    activeEngine === 'sip' ? 'border-green-500' : 'border-muted-foreground/40'
                   )}>
-                    {activeEngine === 'livekit' && <div className="h-2.5 w-2.5 rounded-full bg-green-500" />}
+                    {activeEngine === 'sip' && <div className="h-2.5 w-2.5 rounded-full bg-green-500" />}
                   </div>
                   <div className="flex-1">
-                    <CardTitle className="text-base">LiveKit SIP</CardTitle>
+                    <CardTitle className="text-base">Direct SIP (Drachtio)</CardTitle>
                     <CardDescription className="mt-1">
-                      Real-time SIP bridge with sub-second latency. LiveKit handles VAD, echo cancellation, and transcoding.
+                      Direct SIP trunk. Lowest latency, lowest cost. Falls back to TeXML if unavailable.
                     </CardDescription>
-                    {activeEngine === 'livekit' && (
-                      <Badge variant="outline" className="mt-2 text-xs">Active</Badge>
+                    {!canSwitchToSip && sipAvailabilityIssue && (
+                      <p className="mt-2 text-xs text-muted-foreground">{sipAvailabilityIssue}</p>
                     )}
+                    <div className="flex items-center gap-2 mt-2">
+                      {activeEngine === 'sip' && <Badge variant="outline" className="text-xs">Active</Badge>}
+                      <Badge variant="secondary" className="text-xs">{numbersData?.totals.sip ?? '?'} numbers</Badge>
+                    </div>
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <StatusDot ok={config?.livekit.hasApiKey || false} />
-                    <span className="text-muted-foreground">LiveKit API Key</span>
+                    <StatusDot ok={config?.sip.sipEnabled || false} />
+                    <span className="text-muted-foreground">SIP Calling Enabled</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <StatusDot ok={config?.livekit.hasApiSecret || false} />
-                    <span className="text-muted-foreground">LiveKit API Secret</span>
+                    <StatusDot ok={config?.sip.hasDrachtioHost || false} />
+                    <span className="text-muted-foreground">Drachtio Host</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <StatusDot ok={!!config?.livekit.url} />
-                    <span className="text-muted-foreground">LiveKit URL</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusDot ok={!!config?.livekit.sipUri} />
-                    <span className="text-muted-foreground">SIP URI</span>
-                  </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <Badge variant={config?.livekit.ready ? 'default' : 'destructive'} className="text-xs">
-                      {config?.livekit.ready ? 'Ready' : 'Not Configured'}
-                    </Badge>
+                    <StatusDot ok={config?.sip.hasPublicIp || false} />
+                    <span className="text-muted-foreground">Public IP</span>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* How It Works */}
+          {/* Number Pool Management */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">How It Works</CardTitle>
+              <CardTitle className="text-base">Number Pool Management</CardTitle>
+              <CardDescription>
+                Move phone numbers between TeXML and SIP connections. Each engine only uses numbers assigned to its connection.
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid md:grid-cols-2 gap-6 text-sm text-muted-foreground">
-                <div>
-                  <p className="font-medium text-foreground mb-1">Telnyx TeXML</p>
-                  <p>Telnyx initiates the call and streams RTP audio bidirectionally to Gemini Live via WebSocket. Proven, production-grade path.</p>
+              {numbersLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-                <div>
-                  <p className="font-medium text-foreground mb-1">LiveKit SIP</p>
-                  <p>Telnyx dials the prospect, then bridges to a LiveKit room via SIP. The LiveKit agent (Gemini) joins the room for real-time conversation.</p>
+              ) : (
+                <div className="grid md:grid-cols-[1fr_auto_1fr] gap-4 items-start">
+                  {/* TeXML Numbers */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium">
+                        TeXML Pool
+                        <Badge variant="secondary" className="ml-2 text-xs">{numbersData?.totals.texml ?? 0}</Badge>
+                      </h4>
+                      {selectedTexml.size > 0 && (
+                        <span className="text-xs text-muted-foreground">{selectedTexml.size} selected</span>
+                      )}
+                    </div>
+                    <div className="border rounded-md p-2">
+                      <NumberList
+                        numbers={numbersData?.texml || []}
+                        selected={selectedTexml}
+                        onToggle={toggleTexml}
+                        emptyText="No numbers on TeXML connection"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Move Buttons */}
+                  <div className="flex flex-col items-center gap-2 pt-8">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={selectedTexml.size === 0 || moveMutation.isPending}
+                      onClick={moveToSip}
+                      title="Move selected to SIP"
+                    >
+                      {moveMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ArrowRight className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={selectedSip.size === 0 || moveMutation.isPending}
+                      onClick={moveToTexml}
+                      title="Move selected to TeXML"
+                    >
+                      {moveMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ArrowLeft className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* SIP Numbers */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium">
+                        SIP Pool
+                        <Badge variant="secondary" className="ml-2 text-xs">{numbersData?.totals.sip ?? 0}</Badge>
+                      </h4>
+                      {selectedSip.size > 0 && (
+                        <span className="text-xs text-muted-foreground">{selectedSip.size} selected</span>
+                      )}
+                    </div>
+                    <div className="border rounded-md p-2">
+                      <NumberList
+                        numbers={numbersData?.sip || []}
+                        selected={selectedSip}
+                        onToggle={toggleSip}
+                        emptyText="No numbers on SIP connection"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -259,8 +466,11 @@ export default function VoiceEngineControlCenter() {
             <AlertDialogTitle>Switch Voice Engine?</AlertDialogTitle>
             <AlertDialogDescription>
               This will route all new AI calls through{' '}
-              <strong>{pendingEngine === 'livekit' ? 'LiveKit SIP' : 'Telnyx TeXML'}</strong>.
+              <strong>{pendingEngine === 'sip' ? 'Direct SIP (Drachtio)' : 'Telnyx TeXML'}</strong>.
+              The number pool will automatically switch to use only{' '}
+              <strong>{pendingEngine === 'sip' ? 'SIP' : 'TeXML'}</strong> numbers.
               Existing in-progress calls will not be affected.
+              {pendingEngine === 'sip' && ' If SIP is unavailable, calls will automatically fall back to TeXML.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

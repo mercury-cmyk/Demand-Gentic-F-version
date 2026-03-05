@@ -36,46 +36,20 @@ class AiIntegrationConfigError extends Error {
   }
 }
 
-const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
 
-const openaiApiKey =
-  process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-
-function resolveOpenAiBaseUrl(): string {
-  const candidate =
-    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    OPENAI_DEFAULT_BASE_URL;
-
-  const trimmed = String(candidate || "").trim();
-  if (!trimmed) return OPENAI_DEFAULT_BASE_URL;
-
-  try {
-    const parsed = new URL(trimmed);
-    return parsed.toString().replace(/\/$/, "");
-  } catch {
-    console.warn(
-      `[GenerativeStudio] Invalid OpenAI base URL \"${trimmed}\". Falling back to ${OPENAI_DEFAULT_BASE_URL}.`
-    );
-    return OPENAI_DEFAULT_BASE_URL;
-  }
-}
-
-const openaiBaseUrl = resolveOpenAiBaseUrl();
-
-function assertOpenAiConfigured() {
-  if (!openaiApiKey) {
+function assertDeepSeekConfigured() {
+  if (!deepseekApiKey) {
     throw new AiIntegrationConfigError(
-      "OpenAI is not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY.",
-      "AI_OPENAI_KEY_MISSING",
+      "DeepSeek is not configured. Set DEEPSEEK_API_KEY.",
+      "AI_DEEPSEEK_KEY_MISSING",
     );
   }
 }
 
 const openai = new OpenAI({
-  // Guarded by assertOpenAiConfigured() before every call, but keep constructor safe.
-  apiKey: openaiApiKey || "missing",
-  baseURL: openaiBaseUrl,
+  apiKey: deepseekApiKey || "missing",
+  baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
   timeout: 120_000,
   maxRetries: 2,
 });
@@ -277,7 +251,7 @@ export async function generateLandingPage(params: LandingPageParams): Promise<Ge
 // ============================================================================
 
 export async function generateEmailTemplate(params: EmailTemplateParams): Promise<GenerationResult> {
-  assertOpenAiConfigured();
+  assertDeepSeekConfigured();
   const orgIntel = await assertOrganizationIntelligence(params.organizationId);
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
@@ -322,7 +296,7 @@ Output as JSON:
 }`;
 
   const completion = await withAiConcurrency(() => openai.chat.completions.create({
-    model: 'gpt-4.1-mini',
+    model: 'deepseek-chat',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -357,14 +331,14 @@ Output as JSON:
       organizationId: params.organizationId,
       clientProjectId: params.clientProjectId,
     },
-    aiModel: 'gpt-4.1-mini',
+    aiModel: 'deepseek-chat',
     tokensUsed,
     generationDurationMs: duration,
     ownerId: params.ownerId,
     tenantId: params.tenantId,
   }).returning();
 
-  return { projectId: project.id, content: result, tokensUsed, model: 'gpt-4.1-mini' };
+  return { projectId: project.id, content: result, tokensUsed, model: 'deepseek-chat' };
 }
 
 // ============================================================================
@@ -372,7 +346,7 @@ Output as JSON:
 // ============================================================================
 
 export async function generateBlogPost(params: BlogPostParams): Promise<GenerationResult> {
-  assertOpenAiConfigured();
+  assertDeepSeekConfigured();
   const orgIntel = await assertOrganizationIntelligence(params.organizationId);
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
@@ -424,7 +398,7 @@ Output as JSON:
 }`;
 
   const completion = await withAiConcurrency(() => openai.chat.completions.create({
-    model: 'gpt-4.1-mini',
+    model: 'deepseek-chat',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -462,14 +436,14 @@ Output as JSON:
       organizationId: params.organizationId,
       clientProjectId: params.clientProjectId,
     },
-    aiModel: 'gpt-4.1-mini',
+    aiModel: 'deepseek-chat',
     tokensUsed,
     generationDurationMs: duration,
     ownerId: params.ownerId,
     tenantId: params.tenantId,
   }).returning();
 
-  return { projectId: project.id, content: result, tokensUsed, model: 'gpt-4.1-mini' };
+  return { projectId: project.id, content: result, tokensUsed, model: 'deepseek-chat' };
 }
 
 // ============================================================================
@@ -477,7 +451,7 @@ Output as JSON:
 // ============================================================================
 
 export async function generateEbook(params: EbookParams): Promise<GenerationResult> {
-  assertOpenAiConfigured();
+  assertDeepSeekConfigured();
   const orgIntel = await assertOrganizationIntelligence(params.organizationId);
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
@@ -537,7 +511,7 @@ Output as JSON:
 }`;
 
   const completion = await withAiConcurrency(() => openai.chat.completions.create({
-    model: 'gpt-4.1-mini',
+    model: 'deepseek-chat',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -582,14 +556,14 @@ Output as JSON:
       organizationId: params.organizationId,
       clientProjectId: params.clientProjectId,
     },
-    aiModel: 'gpt-4.1-mini',
+    aiModel: 'deepseek-chat',
     tokensUsed,
     generationDurationMs: duration,
     ownerId: params.ownerId,
     tenantId: params.tenantId,
   }).returning();
 
-  return { projectId: project.id, content: result, tokensUsed, model: 'gpt-4.1-mini' };
+  return { projectId: project.id, content: result, tokensUsed, model: 'deepseek-chat' };
 }
 
 // ============================================================================
@@ -597,7 +571,7 @@ Output as JSON:
 // ============================================================================
 
 export async function generateSolutionBrief(params: SolutionBriefParams): Promise<GenerationResult> {
-  assertOpenAiConfigured();
+  assertDeepSeekConfigured();
   const orgIntel = await assertOrganizationIntelligence(params.organizationId);
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
@@ -654,7 +628,7 @@ Output as JSON:
 }`;
 
   const completion = await withAiConcurrency(() => openai.chat.completions.create({
-    model: 'gpt-4.1-mini',
+    model: 'deepseek-chat',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -696,14 +670,14 @@ Output as JSON:
       organizationId: params.organizationId,
       clientProjectId: params.clientProjectId,
     },
-    aiModel: 'gpt-4.1-mini',
+    aiModel: 'deepseek-chat',
     tokensUsed,
     generationDurationMs: duration,
     ownerId: params.ownerId,
     tenantId: params.tenantId,
   }).returning();
 
-  return { projectId: project.id, content: result, tokensUsed, model: 'gpt-4.1-mini' };
+  return { projectId: project.id, content: result, tokensUsed, model: 'deepseek-chat' };
 }
 
 // ============================================================================
@@ -716,7 +690,7 @@ export async function chat(params: ChatParams): Promise<{
   sessionId: string;
   tokensUsed: number;
 }> {
-  assertOpenAiConfigured();
+  assertDeepSeekConfigured();
   const sessionId = params.sessionId || (params.organizationId ? `${params.organizationId}::${crypto.randomUUID()}` : crypto.randomUUID());
 
   // Chat also requires OI context (soft enforcement: doesn't block, but enriches)
@@ -773,7 +747,7 @@ Output as JSON:
   messages.push({ role: 'user', content: params.message });
 
   const completion = await withAiConcurrency(() => openai.chat.completions.create({
-    model: 'gpt-4.1-mini',
+    model: 'deepseek-chat',
     messages,
     response_format: { type: 'json_object' },
     temperature: 0.8,
@@ -798,7 +772,7 @@ Output as JSON:
     role: 'assistant',
     content: result.reply || '',
     projectId: params.projectId,
-    model: 'gpt-4.1-mini',
+    model: 'deepseek-chat',
     tokensUsed,
     ownerId: params.ownerId,
   });
@@ -820,7 +794,7 @@ export async function refineContent(
   instructions: string,
   ownerId: string
 ): Promise<GenerationResult> {
-  assertOpenAiConfigured();
+  assertDeepSeekConfigured();
   const [project] = await db.select().from(generativeStudioProjects)
     .where(eq(generativeStudioProjects.id, projectId)).limit(1);
 
@@ -850,7 +824,7 @@ Output the refined content in the same format as the original. Return as JSON:
 }`;
 
   const completion = await withAiConcurrency(() => openai.chat.completions.create({
-    model: 'gpt-4.1-mini',
+    model: 'deepseek-chat',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -875,5 +849,5 @@ Output the refined content in the same format as the original. Return as JSON:
     })
     .where(eq(generativeStudioProjects.id, projectId));
 
-  return { projectId, content: result, tokensUsed, model: 'gpt-4.1-mini' };
+  return { projectId, content: result, tokensUsed, model: 'deepseek-chat' };
 }

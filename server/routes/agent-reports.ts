@@ -396,9 +396,9 @@ router.post("/leaderboard/refresh", requireAuth, async (req, res) => {
         agentId: leads.agentId,
         totalCalls: sql<number>`COUNT(DISTINCT ${leads.id})`.as('total_calls'),
         qualifiedLeads: sql<number>`COUNT(DISTINCT CASE WHEN ${leads.qaData}->>'ai_result' = 'Qualified' THEN ${leads.id} END)`.as('qualified_leads'),
-        acceptedLeads: sql<number>`COUNT(DISTINCT CASE WHEN ${leads.qaStatus} = 'Accepted' THEN ${leads.id} END)`.as('accepted_leads'),
-        rejectedLeads: sql<number>`COUNT(DISTINCT CASE WHEN ${leads.qaStatus} = 'Rejected' THEN ${leads.id} END)`.as('rejected_leads'),
-        pendingReview: sql<number>`COUNT(DISTINCT CASE WHEN ${leads.qaStatus} = 'Pending Review' THEN ${leads.id} END)`.as('pending_review'),
+        acceptedLeads: sql<number>`COUNT(DISTINCT CASE WHEN ${leads.qaStatus} IN ('approved', 'pending_pm_review', 'published', 'Accepted') THEN ${leads.id} END)`.as('accepted_leads'),
+        rejectedLeads: sql<number>`COUNT(DISTINCT CASE WHEN ${leads.qaStatus} IN ('rejected', 'returned', 'Rejected') THEN ${leads.id} END)`.as('rejected_leads'),
+        pendingReview: sql<number>`COUNT(DISTINCT CASE WHEN ${leads.qaStatus} IN ('new', 'under_review', 'Pending Review') THEN ${leads.id} END)`.as('pending_review'),
         avgCallDuration: sql<number>`AVG(${leads.callDuration})`.as('avg_call_duration'),
       })
       .from(leads)

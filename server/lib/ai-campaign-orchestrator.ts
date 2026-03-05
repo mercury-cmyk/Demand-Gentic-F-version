@@ -10,7 +10,6 @@ import { Queue, Worker, Job } from 'bullmq';
 import { createQueue, createWorker, isQueueAvailable, getRedisConnection } from './queue';
 import { storage } from '../storage';
 import { getTelnyxAiBridge } from '../services/telnyx-ai-bridge';
-import { startOutboundCall as startLiveKitCall } from '../services/livekit/outbound-service';
 import * as sipDialer from '../services/sip';
 import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
@@ -586,8 +585,8 @@ async function resetStuckItems(): Promise<number> {
     }
 
     return resetCount;
-  } catch (error) {
-    console.error('[AI Orchestrator] WATCHDOG error:', error);
+  } catch (error: any) {
+    console.error('[AI Orchestrator] WATCHDOG error:', error?.message || (typeof error === 'object' ? JSON.stringify(error) : String(error)), error?.stack?.split('\n').slice(0, 3).join('\n'));
     return 0;
   }
 }
@@ -1333,8 +1332,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   const callEngine = engineDefaults?.defaultCallEngine || 'texml';
   console.log(`[AI Orchestrator] Call engine from DB: "${engineDefaults?.defaultCallEngine}" → using: "${callEngine}"`);
 
-  const useSip = false; // legacy SIP path disabled
-  const bridge = callEngine === 'texml' ? getTelnyxAiBridge() : null;
+  // Enable SIP path when engine is set to 'sip' AND the SIP dialer is ready
+  const useSip = callEngine === 'sip' && sipDialer.isReady();
+  const bridge = !useSip ? getTelnyxAiBridge() : null;
 
   if (useSip) {
     console.log(`[AI Orchestrator] Using SIP-based calling for campaign ${campaignId}`);
@@ -1707,22 +1707,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         let callResult: any;
         let conversationId: string;
 
-        if (callEngine === 'livekit') {
-          // LiveKit SIP path: Telnyx Call Control → SIP bridge → LiveKit room → Gemini
-          console.log(`[AI Orchestrator] Using LiveKit SIP engine for call to ${phoneNumber}`);
-          const lkResult = await startLiveKitCall({
-            contactId: contactId || '',
-            campaignId,
-            queueItemId: item.id,
-            overridePhoneNumber: phoneNumber,
-            existingCallAttemptId: callAttemptId || undefined,
-          });
-
-          callResult = lkResult;
-          callInitiated = true;
-          conversationId = lkResult.callId || '';
-        } else if (useSip) {
-          // Legacy SIP path (disabled)
+        if (useSip) {
+          // Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live
+          console.log(`[AI Orchestrator] Using Direct SIP engine for call to ${phoneNumber}`);
           const sipResult = await sipDialer.initiateAiCall({
             toNumber: phoneNumber,
             fromNumber,
@@ -2107,9 +2094,10 @@ async function orchestratorTick(): Promise<OrchestratorJobResult> {
       callsInitiated: totalInitiated,
       message: `Processed ${processedCampaigns}/${campaigns.length} campaigns, global slots left: ${availableGlobalSlots}`
     };
-  } catch (error) {
-    console.error('[AI Orchestrator] Tick error:', error);
-    return { processed: false, message: String(error) };
+  } catch (error: any) {
+    const errMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
+    console.error('[AI Orchestrator] Tick error:', errMsg, error?.stack?.split('\n').slice(0, 3).join('\n'));
+    return { processed: false, message: errMsg };
   }
 }
 

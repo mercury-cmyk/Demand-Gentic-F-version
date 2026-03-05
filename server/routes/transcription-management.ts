@@ -20,6 +20,7 @@ import {
   getTranscriptionStats,
   ensureTranscript,
   processMissingTranscripts,
+  processLongCallMissingTranscripts,
 } from '../services/transcription-reliability';
 import {
   getTranscriptionHealthMetrics,
@@ -230,6 +231,30 @@ router.post('/process-missing', requireAuth, requireRole('admin'), async (req: R
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to process missing transcripts',
+    });
+  }
+});
+
+/**
+ * POST /api/transcription/process-long-calls
+ * Priority recovery: aggressively find and transcribe long calls (>25s) missing transcripts
+ */
+router.post('/process-long-calls', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    console.log('[Transcription API] Manual trigger: Priority long-call transcript recovery');
+
+    const result = await processLongCallMissingTranscripts();
+
+    res.json({
+      success: true,
+      message: `Long-call recovery complete: ${result.succeeded}/${result.processed} transcribed`,
+      result,
+    });
+  } catch (error: any) {
+    console.error('[Transcription API] Error in long-call recovery:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to process long-call transcripts',
     });
   }
 });

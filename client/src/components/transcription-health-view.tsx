@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { TranscriptionWorkerControl } from './transcription-worker-control';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -497,6 +498,9 @@ export default function TranscriptionHealthView({ campaigns }: { campaigns: Arra
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
       <FilterBar />
+
+      {/* Worker Control Panel */}
+      <TranscriptionWorkerControl />
 
         {/* ═══════════════════════════════════════════════════════════════
             TAB 1: STATISTICS & REPORTS

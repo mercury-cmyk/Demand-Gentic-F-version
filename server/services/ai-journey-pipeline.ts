@@ -6,7 +6,7 @@
  * recommendations based on previous call activity and Organization Intelligence.
  */
 
-import { generateJSON, generateText } from "./vertex-ai/vertex-client";
+import { deepSeekJSON } from "./deepseek-client";
 import { db } from "../db";
 import {
   clientJourneyLeads,
@@ -196,7 +196,7 @@ Generate a JSON response with:
 - keyPointsToAddress: 2-3 critical items to cover
 - toneGuidance: recommended tone and pacing`;
 
-  const result = await generateJSON<FollowUpContext>(prompt, {
+  const result = await deepSeekJSON<FollowUpContext>(prompt, {
     temperature: 0.7,
   });
 
@@ -257,7 +257,7 @@ Generate a JSON response with:
 - previewText: email preview text (under 100 chars)
 - bodyTheme: 2-3 word description of the email theme`;
 
-  const result = await generateJSON<FollowUpEmail>(prompt, {
+  const result = await deepSeekJSON<FollowUpEmail>(prompt, {
     temperature: 0.7,
   });
 
@@ -307,7 +307,7 @@ Generate a JSON response with:
 - reasoning: why this is the best next step (2-3 sentences)
 - suggestedContent: brief suggestion for the action content`;
 
-  const result = await generateJSON<NextActionRecommendation>(prompt, {
+  const result = await deepSeekJSON<NextActionRecommendation>(prompt, {
     temperature: 0.5,
   });
 

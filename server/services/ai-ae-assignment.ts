@@ -12,8 +12,8 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
   timeout: 120_000,
   maxRetries: 2,
 });
@@ -178,7 +178,7 @@ For each account, provide a JSON response with this structure:
 Consider workload balance as the primary factor. Return ONLY the JSON response.`;
 
       const completion = await openai.chat.completions.create({
-        model: 'gpt-4.1-mini',
+        model: 'deepseek-chat',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt }

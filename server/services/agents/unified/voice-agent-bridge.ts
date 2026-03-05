@@ -16,7 +16,6 @@
  */
 
 import type { UnifiedAgentType } from './types';
-import { buildUnifiedKnowledgePrompt, type KnowledgeCategory } from '../../unified-knowledge-hub';
 
 // ==================== TYPES ====================
 
@@ -31,7 +30,10 @@ export interface VoiceAgentBridgeResult {
   sectionCount: number;
   /** Where the prompt came from */
   source: 'unified_agent' | 'fallback';
-  /** Whether the Knowledge Hub supplement was appended */
+  /**
+   * Backward-compatible flag.
+   * Always false when Unified Agent Architecture is the sole prompt source.
+   */
   hasKnowledgeHubSupplement: boolean;
 }
 
@@ -52,42 +54,12 @@ export function invalidateVoiceAgentBridgeCache(): void {
   cachedAt = 0;
 }
 
-// ==================== KNOWLEDGE HUB DE-DUPLICATION ====================
-
-/**
- * Categories already covered by the UA voice agent's prompt sections.
- * When the UA path is active, these are excluded from the Knowledge Hub
- * to prevent prompt bloat from duplicated content.
- */
-const UA_COVERED_KNOWLEDGE_CATEGORIES: KnowledgeCategory[] = [
-  'compliance',
-  'gatekeeper_handling',
-  'objection_handling',
-  'tone_and_pacing',
-  'conversation_flow',
-  'identity_verification',
-  'call_dispositioning',
-];
-
-/**
- * Categories NOT covered by the UA voice sections.
- * These are still pulled from the Knowledge Hub as a supplement.
- */
-const KNOWLEDGE_HUB_SUPPLEMENT_CATEGORIES: KnowledgeCategory[] = [
-  'voicemail_detection',
-  'call_quality',
-  'dos_and_donts',
-  'call_control',
-  'learning_rules',
-];
-
 // ==================== BRIDGE FUNCTIONS ====================
 
 /**
  * Fetch the assembled foundational prompt from the Unified Voice Agent.
  *
- * Returns the full prompt built from all active UA prompt sections,
- * supplemented with non-overlapping Knowledge Hub categories.
+ * Returns the full prompt built from all active UA prompt sections.
  *
  * On ANY failure, returns { source: 'fallback', foundationalPrompt: null }
  * so the caller can fall back to its existing hardcoded prompt.
@@ -120,29 +92,13 @@ export async function getVoiceAgentFoundationalPrompt(): Promise<VoiceAgentBridg
       return buildFallbackResult();
     }
 
-    // Append non-overlapping Knowledge Hub sections
-    let hasKnowledgeHubSupplement = false;
-    let fullPrompt = foundationalPrompt;
-
-    try {
-      const supplement = await buildUnifiedKnowledgePrompt({
-        categories: KNOWLEDGE_HUB_SUPPLEMENT_CATEGORIES,
-      });
-      if (supplement && supplement.trim().length > 0) {
-        fullPrompt += `\n\n---\n\n${supplement}`;
-        hasKnowledgeHubSupplement = true;
-      }
-    } catch (err) {
-      console.warn('[VoiceAgentBridge] Failed to load Knowledge Hub supplement, continuing without it:', err);
-    }
-
     const result: VoiceAgentBridgeResult = {
-      foundationalPrompt: fullPrompt,
+      foundationalPrompt,
       versionHash: agent.promptVersion,
       agentVersion: agent.versionControl.currentVersion,
       sectionCount: activeSections.length,
       source: 'unified_agent',
-      hasKnowledgeHubSupplement,
+      hasKnowledgeHubSupplement: false,
     };
 
     // Cache the result

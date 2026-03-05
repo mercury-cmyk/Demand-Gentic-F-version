@@ -196,6 +196,21 @@ function SourceBadge({ source, isTestCall }: { source: string; isTestCall: boole
   return <Badge variant="outline">{sourceLabels[source] || source}</Badge>;
 }
 
+function formatConversationDuration(durationSec?: number | null): string {
+  if (!durationSec || durationSec <= 0) return "0:00";
+
+  const total = Math.floor(durationSec);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
 function ConversationCard({
   conversation,
   isSelected,
@@ -259,7 +274,7 @@ function ConversationCard({
           )}
           {conversation.duration && conversation.duration > 0 && (
             <span>
-              Duration: {Math.floor(conversation.duration / 60)}:{String(conversation.duration % 60).padStart(2, '0')}
+              Duration: {formatConversationDuration(conversation.duration)}
             </span>
           )}
         </div>

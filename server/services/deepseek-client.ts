@@ -57,6 +57,92 @@ export interface FunctionCall {
 }
 
 /**
+ * Get the raw OpenAI-compatible client (for services that need direct SDK access)
+ */
+export function getDeepSeekClient(): OpenAI {
+  return getClient();
+}
+
+/**
+ * Generate structured JSON with DeepSeek
+ */
+export async function deepSeekJSON<T>(
+  prompt: string,
+  options?: {
+    systemPrompt?: string;
+    temperature?: number;
+    maxTokens?: number;
+    model?: string;
+  }
+): Promise<T> {
+  if (!isDeepSeekConfigured()) {
+    throw new Error("DeepSeek is not configured");
+  }
+
+  const client = getClient();
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+
+  messages.push({
+    role: "system",
+    content: options?.systemPrompt || "You are an expert AI assistant. Always respond with valid JSON only. No markdown, no code fences, no explanation outside the JSON.",
+  });
+
+  messages.push({ role: "user", content: prompt });
+
+  const response = await client.chat.completions.create({
+    model: options?.model || "deepseek-chat",
+    messages,
+    temperature: options?.temperature ?? 0.3,
+    max_tokens: options?.maxTokens ?? 4096,
+    response_format: { type: "json_object" },
+  });
+
+  const text = response.choices[0]?.message?.content || "{}";
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+  if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+  if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+  cleaned = cleaned.trim();
+
+  return JSON.parse(cleaned) as T;
+}
+
+/**
+ * Generate plain text with DeepSeek
+ */
+export async function deepSeekText(
+  prompt: string,
+  options?: {
+    systemPrompt?: string;
+    temperature?: number;
+    maxTokens?: number;
+    model?: string;
+  }
+): Promise<string> {
+  if (!isDeepSeekConfigured()) {
+    throw new Error("DeepSeek is not configured");
+  }
+
+  const client = getClient();
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+
+  if (options?.systemPrompt) {
+    messages.push({ role: "system", content: options.systemPrompt });
+  }
+
+  messages.push({ role: "user", content: prompt });
+
+  const response = await client.chat.completions.create({
+    model: options?.model || "deepseek-chat",
+    messages,
+    temperature: options?.temperature ?? 0.7,
+    max_tokens: options?.maxTokens ?? 4096,
+  });
+
+  return response.choices[0]?.message?.content || "";
+}
+
+/**
  * Chat with DeepSeek
  */
 export async function deepSeekChat(
@@ -157,6 +243,9 @@ export async function deepSeekGenerateWithFunctions(
 
 export default {
   isDeepSeekConfigured,
+  getDeepSeekClient,
   deepSeekChat,
+  deepSeekJSON,
+  deepSeekText,
   deepSeekGenerateWithFunctions,
 };

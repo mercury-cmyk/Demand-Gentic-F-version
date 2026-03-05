@@ -35,6 +35,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   RefreshCw, Brain, Search, ArrowLeft, Phone, Building, Clock, FileText,
   Mic, BarChart3, AlertTriangle, Target, TrendingUp, ChevronLeft, ChevronRight,
+  Sparkles, Crosshair, Zap,
 } from 'lucide-react';
 import {
   ResizablePanelGroup,
@@ -90,6 +91,15 @@ interface PotentialLeadItem {
     missingIndicators: string[];
     deviations: string[];
   };
+  // Campaign-aware scoring fields
+  campaignObjective?: string | null;
+  campaignFitScore?: number | null;
+  campaignAlignmentScore?: number | null;
+  qualificationMet?: boolean;
+  intentStrength?: string | null;
+  outcomeCategory?: string | null;
+  suggestedDisposition?: string | null;
+  scoringSource?: 'lead_quality_ai' | 'call_quality_ai' | 'heuristic';
 }
 
 interface PotentialLeadsDiagnostics {
@@ -102,6 +112,9 @@ interface PotentialLeadsDiagnostics {
   skippedLowConfidence: number;
   skippedNotPotential: number;
   dispositionBreakdown: Array<{ disposition: string | null; count: number }>;
+  withLeadQualityAssessment?: number;
+  withCallQualityRecord?: number;
+  scoringSourceBreakdown?: { lead_quality_ai: number; call_quality_ai: number; heuristic: number };
 }
 
 interface PotentialLeadsResponse {
@@ -574,15 +587,47 @@ export default function PotentialLeadsPage() {
                             </>
                           )}
 
+                          {(diagnostics.withLeadQualityAssessment != null || diagnostics.withCallQualityRecord != null) && (
+                            <>
+                              <p className="font-medium text-foreground pt-2">AI Scoring Coverage:</p>
+                              <div className="grid grid-cols-2 gap-1">
+                                {diagnostics.withLeadQualityAssessment != null && (
+                                  <>
+                                    <span>Lead quality AI:</span>
+                                    <span className="font-medium">{diagnostics.withLeadQualityAssessment}</span>
+                                  </>
+                                )}
+                                {diagnostics.withCallQualityRecord != null && (
+                                  <>
+                                    <span>Call quality AI:</span>
+                                    <span className="font-medium">{diagnostics.withCallQualityRecord}</span>
+                                  </>
+                                )}
+                              </div>
+                              {diagnostics.scoringSourceBreakdown && (
+                                <div className="grid grid-cols-2 gap-1 pt-1">
+                                  <span>AI scored leads:</span>
+                                  <span className="font-medium text-blue-600">
+                                    {diagnostics.scoringSourceBreakdown.lead_quality_ai + diagnostics.scoringSourceBreakdown.call_quality_ai}
+                                  </span>
+                                  <span>Heuristic leads:</span>
+                                  <span className="font-medium text-gray-600">
+                                    {diagnostics.scoringSourceBreakdown.heuristic}
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          )}
+
                           {diagnostics.withTranscript === 0 && (
                             <p className="text-amber-600 pt-2">
-                              ⚠️ No calls have transcripts yet. Transcripts are required for lead detection.
+                              No calls have transcripts yet. Transcripts are required for lead detection.
                             </p>
                           )}
 
                           {diagnostics.withTranscript > 0 && diagnostics.withAnalysis === 0 && (
                             <p className="text-amber-600 pt-2">
-                              ⚠️ No calls have AI analysis. Run bulk analysis to improve detection.
+                              No calls have AI analysis. Run bulk analysis to improve detection.
                             </p>
                           )}
                         </div>
@@ -706,6 +751,18 @@ function PotentialLeadCard({
       ? 'text-yellow-600'
       : 'text-gray-500';
 
+  const intentColor = lead.intentStrength === 'strong'
+    ? 'bg-green-100 border-green-300 text-green-800'
+    : lead.intentStrength === 'moderate'
+      ? 'bg-yellow-100 border-yellow-300 text-yellow-800'
+      : 'bg-gray-100 border-gray-300 text-gray-600';
+
+  const isAIScored = lead.scoringSource === 'lead_quality_ai' || lead.scoringSource === 'call_quality_ai';
+
+  const hasSuggestedDispositionMismatch = lead.suggestedDisposition
+    && lead.disposition
+    && lead.suggestedDisposition.toLowerCase() !== lead.disposition.toLowerCase();
+
   return (
     <Card
       className={cn(
@@ -723,6 +780,17 @@ function PotentialLeadCard({
             {lead.agentType === 'ai' && (
               <Badge variant="secondary" className="text-[10px] px-1">AI</Badge>
             )}
+            {/* Scoring Source Badge */}
+            {isAIScored ? (
+              <Badge variant="outline" className="text-[10px] px-1 bg-blue-50 border-blue-300 text-blue-700">
+                <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                AI Scored
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] px-1 bg-gray-50 border-gray-300 text-gray-600">
+                Heuristic
+              </Badge>
+            )}
           </div>
           {/* Company */}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -731,7 +799,7 @@ function PotentialLeadCard({
           </div>
         </div>
 
-        {/* Confidence Badge */}
+        {/* Confidence + Campaign Fit */}
         <div className="flex flex-col items-end gap-1">
           <Badge
             variant="outline"
@@ -739,6 +807,12 @@ function PotentialLeadCard({
           >
             {lead.derivedConfidence}% confidence
           </Badge>
+          {lead.campaignFitScore != null && (
+            <Badge variant="outline" className="text-[10px] px-1.5 bg-indigo-50 border-indigo-300 text-indigo-700">
+              <Crosshair className="h-2.5 w-2.5 mr-0.5" />
+              {lead.campaignFitScore}% fit
+            </Badge>
+          )}
           {lead.disposition && (
             <Badge variant="outline" className="text-[10px] px-1">
               {lead.disposition.replace(/_/g, ' ')}
@@ -747,8 +821,42 @@ function PotentialLeadCard({
         </div>
       </div>
 
-      {/* Derived Outcome */}
-      {lead.derivedOutcome !== lead.disposition && (
+      {/* Campaign Objective */}
+      {lead.campaignObjective && (
+        <div className="mt-1.5 text-[10px] text-muted-foreground truncate">
+          <span className="font-medium">Objective:</span> {lead.campaignObjective}
+        </div>
+      )}
+
+      {/* Intent Strength + Outcome Category */}
+      {(lead.intentStrength || lead.outcomeCategory) && (
+        <div className="mt-1.5 flex items-center gap-1.5">
+          {lead.intentStrength && (
+            <Badge variant="outline" className={cn('text-[10px] px-1 py-0', intentColor)}>
+              <Zap className="h-2.5 w-2.5 mr-0.5" />
+              {lead.intentStrength} intent
+            </Badge>
+          )}
+          {lead.outcomeCategory && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0 bg-slate-50 border-slate-300 text-slate-700">
+              {lead.outcomeCategory.replace(/_/g, ' ')}
+            </Badge>
+          )}
+        </div>
+      )}
+
+      {/* Suggested Disposition (show both AI suggestion and mismatch) */}
+      {hasSuggestedDispositionMismatch ? (
+        <div className="mt-2 flex items-center gap-2 text-xs">
+          <span className="text-amber-600 font-medium flex items-center gap-0.5">
+            <AlertTriangle className="h-3 w-3" />
+            AI suggests:
+          </span>
+          <Badge variant="default" className="bg-amber-600 text-white text-[10px]">
+            {lead.suggestedDisposition!.replace(/_/g, ' ')}
+          </Badge>
+        </div>
+      ) : lead.derivedOutcome !== lead.disposition && (
         <div className="mt-2 flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">Suggested:</span>
           <Badge variant="default" className="bg-green-600 text-white text-[10px]">
@@ -774,7 +882,7 @@ function PotentialLeadCard({
       </div>
 
       {/* Indicators */}
-      <div className="mt-1.5 flex items-center gap-2">
+      <div className="mt-1.5 flex items-center gap-2 flex-wrap">
         {lead.hasTranscript && (
           <span className="flex items-center gap-0.5 text-[10px] text-green-600">
             <FileText className="h-2.5 w-2.5" />
@@ -793,21 +901,26 @@ function PotentialLeadCard({
             {lead.overallScore}
           </span>
         )}
+        {lead.campaignAlignmentScore != null && (
+          <span className="flex items-center gap-0.5 text-[10px] text-indigo-600">
+            <Target className="h-2.5 w-2.5" />
+            Align {lead.campaignAlignmentScore}%
+          </span>
+        )}
+        {lead.qualificationMet && (
+          <span className="flex items-center gap-0.5 text-[10px] text-green-700 font-medium">
+            Qualified
+          </span>
+        )}
         {lead.dispositionReview && !lead.dispositionReview.isAccurate && (
           <span className="flex items-center gap-0.5 text-[10px] text-amber-600">
             <AlertTriangle className="h-2.5 w-2.5" />
             Mismatch
           </span>
         )}
-        {!lead.hasAIAnalysis && (
-          <span className="flex items-center gap-0.5 text-[10px] text-purple-600">
-            <Target className="h-2.5 w-2.5" />
-            Heuristic
-          </span>
-        )}
       </div>
 
-      {/* Engagement Signals (for heuristic-detected leads) */}
+      {/* Engagement Signals */}
       {lead.engagementSignals && lead.engagementSignals.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {lead.engagementSignals.slice(0, 3).map((signal, idx) => (

@@ -3,6 +3,12 @@
  *
  * Endpoints for managing modular, versioned agent knowledge blocks.
  * Provides runtime visibility into what agents actually know.
+ * ⚠️ DEPRECATION NOTICE: Knowledge Blocks system is being phased out.
+ * Primary knowledge source is now Unified Knowledge Hub (/api/knowledge-hub).
+ * These endpoints remain for backward compatibility and prompt inspector UI.
+ * 
+ * For runtime agent prompts, use assembleProviderPrompt which prioritizes
+ * Unified Knowledge Hub as the single source of truth.
  */
 
 import { Router } from "express";

@@ -3,6 +3,17 @@
  * 
  * Manages centralized default configuration for all virtual agents.
  * These defaults are automatically applied to new agents unless overridden.
+ * ⚠️ DEPRECATION NOTICE:
+ * The following knowledge fields are deprecated:
+ * - defaultSystemPrompt: No longer used. Prompts now come from Unified Knowledge Hub.
+ * - defaultTrainingGuidelines: No longer used. Training comes from Unified Knowledge Hub.
+ * - defaultFirstMessage: No longer used. Messages defined in Unified Knowledge Hub.
+ * 
+ * ACTIVE OPERATIONAL FIELDS:
+ * - defaultVoiceProvider: Voice provider for new agents (google/openai)
+ * - defaultVoice: Default voice name for new agents
+ * - defaultMaxConcurrentCalls: Per-agent concurrent call limit
+ * - globalMaxConcurrentCalls: System-wide concurrent call limit
  */
 
 import { Router, Request, Response } from 'express';

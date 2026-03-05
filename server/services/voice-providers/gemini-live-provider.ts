@@ -241,13 +241,14 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             console.error(`${LOG_PREFIX} ❌ WebSocket closed BEFORE setup_complete! This means the setup message was likely rejected.`);
             console.error(`${LOG_PREFIX} 💡 Common causes: unsupported fields in setup, auth failure, model not available, quota exceeded`);
           }
+          const wasActive = this._isConnected || this.setupComplete;
           this.stopKeepalive();
           this.setConnected(false);
           this.setupComplete = false;
           this.ws = null;
 
           // Attempt automatic reconnection if the close was unexpected (mid-call)
-          if (this._isConnected || this.setupComplete) {
+          if (wasActive) {
             console.warn(`${LOG_PREFIX} ⚡ Unexpected close during active session — attempting reconnection...`);
             this.attemptReconnection();
           }
@@ -408,9 +409,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         this.auth = null;
       }
 
-      // Clean up stale state
+      // Clean up stale state — use terminate() to avoid hanging on unresponsive peer
       if (this.ws) {
-        try { this.ws.close(); } catch (_) {}
+        try { this.ws.terminate(); } catch (_) {}
         this.ws = null;
       }
       this.setupComplete = false;
@@ -431,8 +432,14 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       console.error(`${LOG_PREFIX} ❌ Reconnection attempt ${this.reconnectAttempts} failed:`, error.message);
       this.isReconnecting = false;
 
-      // Retry recursively
-      this.attemptReconnection();
+      // Schedule retry (non-recursive to avoid tight loops / stack buildup)
+      if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+        setTimeout(() => this.attemptReconnection(), 500);
+      } else {
+        console.error(`${LOG_PREFIX} ❌ All reconnection attempts exhausted after failure`);
+        this.emitError('connection_error', 'Connection lost after max reconnection attempts', false);
+        this.reconnectAttempts = 0;
+      }
     }
   }
 
@@ -460,7 +467,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     if (this.ws) {
       // Remove close listener to prevent reconnection trigger on intentional close
       this.ws.removeAllListeners('close');
-      this.ws.close();
+      this.ws.terminate(); // terminate() is immediate; close() can hang if peer is unresponsive
       this.ws = null;
     }
 

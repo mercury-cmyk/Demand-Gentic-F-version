@@ -13,7 +13,6 @@ import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAu
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
 import webhooksRouter from "./routes/webhooks";
-import livekitWebhookRouter from "./routes/livekit-webhook";
 import voiceEngineRouter from "./routes/voice-engine-routes";
 import queueRouter from "./routes/queue-routes";
 import filterOptionsRouter from "./routes/filter-options-routes";
@@ -146,7 +145,7 @@ import {
   userIdSchema,
   leadIntakeSchema
 } from "./validation/schemas";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3, getPresignedDownloadUrl } from "./lib/storage";
@@ -342,13 +341,14 @@ const MAILBOX_ENCRYPTION_KEY =
   process.env.MSFT_OAUTH_CLIENT_SECRET ??
   process.env.M365_CLIENT_SECRET ??
   M365_CLIENT_SECRET;
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? process.env.GOOGLE_AUTH_CLIENT_ID ?? process.env.GMAIL_CLIENT_ID ?? "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "";
+const GOOGLE_CLIENT_ID =
+  (process.env.GOOGLE_CLIENT_ID ?? process.env.GOOGLE_AUTH_CLIENT_ID ?? process.env.GMAIL_CLIENT_ID ?? "").trim();
+const GOOGLE_CLIENT_SECRET = (process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "").trim();
 const GOOGLE_SCOPES =
   process.env.GOOGLE_OAUTH_SCOPES ??
   "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events";
 const GOOGLE_REDIRECT_URI =
-  process.env.GOOGLE_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/google/callback`;
+  (process.env.GOOGLE_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/google/callback`).trim();
 
 type MicrosoftTokenSet = {
   accessToken: string;
@@ -5024,10 +5024,18 @@ export function registerRoutes(app: Express) {
 
   app.get("/api/campaigns", requireAuth, async (req, res) => {
     try {
+      console.log('[GET /api/campaigns] ========== START ==========');
+      console.log('[GET /api/campaigns] Initializing...', {
+        timestamp: new Date().toISOString(),
+        poolStats: pool.totalCount ? { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount } : 'unavailable'
+      });
+      
       const typeFilter = req.query.type as string | undefined;
+      console.log('[GET /api/campaigns] Query params:', { typeFilter });
+      
+      console.log('[GET /api/campaigns] Calling storage.getCampaigns()...');
       let campaigns = await storage.getCampaigns();
-
-      console.log(`[GET /api/campaigns] Total campaigns from DB: ${campaigns.length}`);
+      console.log(`[GET /api/campaigns] ✓ Query successful: ${campaigns.length} campaigns`);
 
       // Filter by type if specified
       if (typeFilter) {
@@ -5035,12 +5043,38 @@ export function registerRoutes(app: Express) {
         console.log(`[GET /api/campaigns] After type filter (${typeFilter}): ${campaigns.length}`);
       }
 
-      console.log(`[GET /api/campaigns] Returning ${campaigns.length} campaigns:`, campaigns.map(c => ({ id: c.id, name: c.name, type: c.type, status: c.status })));
+      const summary = campaigns.map(c => ({ id: c.id, name: c.name, type: c.type, status: c.status }));
+      console.log(`[GET /api/campaigns] Returning ${campaigns.length} campaigns`);
+      console.log('[GET /api/campaigns] Sample:', summary.slice(0, 2));
 
       res.json(campaigns);
+      console.log('[GET /api/campaigns] ========== SUCCESS ==========');
     } catch (error) {
-      console.error('[GET /api/campaigns] Error:', error);
-      res.status(500).json({ message: "Failed to fetch campaigns" });
+      console.log('[GET /api/campaigns] ========== ERROR ==========');
+      console.error('[GET /api/campaigns] Error caught:', {
+        name: (error as any)?.name,
+        constructor: (error as any)?.constructor?.name,
+        hasMessage: error instanceof Error,
+        timestamp: new Date().toISOString()
+      });
+      
+      const errorDetails = {
+        message: error instanceof Error ? error.message : String(error),
+        code: (error as any)?.code,
+        hint: (error as any)?.hint,
+        detail: (error as any)?.detail,
+        stack: error instanceof Error ? error.stack?.split('\n').slice(0, 5) : undefined,
+        fullError: String(error)
+      };
+      console.error('[GET /api/campaigns] ERROR DETAILS:', JSON.stringify(errorDetails, null, 2));
+      console.error('[GET /api/campaigns] Raw error:', error);
+      
+      res.status(500).json({ 
+        message: "Failed to fetch campaigns", 
+        error: errorDetails,
+        timestamp: new Date().toISOString()
+      });
+      console.log('[GET /api/campaigns] ========== ERROR RESPONSE SENT ==========');
     }
   });
 
@@ -8637,7 +8671,149 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // ==================== USER TELEPHONY SETTINGS ====================
+
+  /**
+   * GET /api/users/me/telephony
+   * Returns the current user's telephony settings (callback phone, SIP extension)
+   */
+  app.get("/api/users/me/telephony", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) return res.status(401).json({ message: "Not authenticated" });
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      res.json({
+        callbackPhone: (user as any).callbackPhone || null,
+        sipExtension: (user as any).sipExtension || null,
+      });
+    } catch (error) {
+      console.error("[Telephony] Failed to get user telephony settings:", error);
+      res.status(500).json({ message: "Failed to load telephony settings" });
+    }
+  });
+
+  /**
+   * PUT /api/users/me/telephony
+   * Updates the current user's telephony settings
+   */
+  app.put("/api/users/me/telephony", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) return res.status(401).json({ message: "Not authenticated" });
+      const { callbackPhone, sipExtension } = req.body;
+      await storage.updateUser(userId, {
+        callbackPhone: callbackPhone || null,
+        sipExtension: sipExtension || null,
+      } as any);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Telephony] Failed to update user telephony settings:", error);
+      res.status(500).json({ message: "Failed to save telephony settings" });
+    }
+  });
+
   // ==================== SIP TRUNK CONFIGURATION (WebRTC) ====================
+
+  /**
+   * GET /api/sip-trunks
+   * Returns all SIP trunk configurations
+   */
+  app.get("/api/sip-trunks", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const configs = await storage.getSipTrunkConfigs();
+      res.json(configs);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to list configs:", error);
+      res.status(500).json({ message: "Failed to fetch SIP trunk configurations" });
+    }
+  });
+
+  /**
+   * POST /api/sip-trunks
+   * Create a new SIP trunk configuration
+   */
+  app.post("/api/sip-trunks", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const config = await storage.createSipTrunkConfig(req.body);
+      res.status(201).json(config);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to create config:", error);
+      res.status(500).json({ message: "Failed to create SIP trunk configuration" });
+    }
+  });
+
+  /**
+   * PATCH /api/sip-trunks/:id
+   * Update an existing SIP trunk configuration
+   */
+  app.patch("/api/sip-trunks/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const config = await storage.updateSipTrunkConfig(req.params.id, req.body);
+      if (!config) return res.status(404).json({ message: "SIP trunk configuration not found" });
+      res.json(config);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to update config:", error);
+      res.status(500).json({ message: "Failed to update SIP trunk configuration" });
+    }
+  });
+
+  /**
+   * DELETE /api/sip-trunks/:id
+   * Delete a SIP trunk configuration
+   */
+  app.delete("/api/sip-trunks/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteSipTrunkConfig(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to delete config:", error);
+      res.status(500).json({ message: "Failed to delete SIP trunk configuration" });
+    }
+  });
+
+  /**
+   * POST /api/sip-trunks/:id/set-default
+   * Set a SIP trunk as the default
+   */
+  app.post("/api/sip-trunks/:id/set-default", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.setDefaultSipTrunk(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to set default:", error);
+      res.status(500).json({ message: "Failed to set default SIP trunk" });
+    }
+  });
+
+  /**
+   * POST /api/sip-trunks/import-env
+   * Import SIP trunk config from environment variables
+   */
+  app.post("/api/sip-trunks/import-env", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const sipUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
+      const sipPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
+      if (!sipUsername || !sipPassword) {
+        return res.status(422).json({ message: "No SIP credentials found in environment (TELNYX_SIP_USERNAME/TELNYX_SIP_PASSWORD)" });
+      }
+      const config = await storage.createSipTrunkConfig({
+        name: "Imported from Environment",
+        provider: "telnyx",
+        sipUsername,
+        sipPassword,
+        sipDomain: process.env.TELNYX_SIP_DOMAIN || "sip.telnyx.com",
+        connectionId: process.env.TELNYX_WEBRTC_CREDENTIAL_ID || process.env.TELNYX_SIP_CONNECTION_ID || null,
+        callerIdNumber: process.env.TELNYX_FROM_NUMBER || null,
+        isActive: true,
+        isDefault: true,
+      });
+      res.status(201).json(config);
+    } catch (error) {
+      console.error("[SIP-TRUNKS] Failed to import from env:", error);
+      res.status(500).json({ message: "Failed to import SIP trunk from environment" });
+    }
+  });
 
   /**
    * GET /api/sip-trunks/default
@@ -9904,13 +10080,13 @@ export function registerRoutes(app: Express) {
       if (qaStatus && qaStatus !== "") {
         const normalizedQaStatus = String(qaStatus).trim();
         if (normalizedQaStatus === 'approved') {
-          // Backward-compatible: include PM-pending approvals with approved leads.
+          // Backward-compatible: include PM-pending + published leads with approved leads.
           filtered = filtered.filter(
-            l => l.qaStatus === 'approved' || l.qaStatus === 'pending_pm_review'
+            l => l.qaStatus === 'approved' || l.qaStatus === 'pending_pm_review' || l.qaStatus === 'published'
           );
         } else if (normalizedQaStatus === 'pending_review' || normalizedQaStatus === 'in_review') {
           // Accept legacy query params from older dashboard filters.
-          filtered = filtered.filter(l => l.qaStatus === 'under_review');
+          filtered = filtered.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review' || l.qaStatus === 'Pending Review');
         } else {
           filtered = filtered.filter(l => l.qaStatus === normalizedQaStatus);
         }
@@ -10127,24 +10303,31 @@ export function registerRoutes(app: Express) {
   // QA Approve - moves lead to pending_pm_review for Project Management final review
   app.post("/api/leads/:id/approve", requireAuth, requireRole('admin', 'quality_analyst'), async (req, res) => {
     try {
-      const { approvedById } = req.body;
+      const { approvedById, bypassQualityCheck = false } = req.body;
       if (!approvedById) {
         return res.status(400).json({ message: "approvedById is required" });
       }
 
-      // STRICT QUALITY ENFORCEMENT
-      // Check for mandatory intelligence requirements (recording, transcript, AI analysis)
       const leadToCheck = await storage.getLead(req.params.id);
       if (!leadToCheck) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
+      // QUALITY ENFORCEMENT WITH BYPASS OPTION
+      // QA analysts can bypass quality checks for manual verification
+      // Check for mandatory intelligence requirements (recording, transcript, AI analysis)
       const qualityCheck = validateLeadQuality(leadToCheck);
-      if (!qualityCheck.valid) {
+      if (!qualityCheck.valid && !bypassQualityCheck) {
+        console.log(`[LEAD-APPROVE] Quality check failed for lead ${req.params.id}:`, qualityCheck.errors);
         return res.status(400).json({ 
-          message: "Cannot approve lead: Quality requirements not met", 
-          errors: qualityCheck.errors 
+          message: "Cannot approve lead: Quality requirements not met. You can bypass this check if manually verified.", 
+          errors: qualityCheck.errors,
+          canBypass: true
         });
+      }
+
+      if (bypassQualityCheck) {
+        console.log(`[LEAD-APPROVE] Quality check bypassed by QA for lead ${req.params.id}`);
       }
 
       const lead = await storage.approveLead(req.params.id, approvedById);
@@ -10152,9 +10335,9 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      // After QA approval, lead moves to pending_pm_review for Project Management
-      // No delivery happens until PM approves
-      console.log(`[LEAD-APPROVE] Lead ${req.params.id} QA approved, now pending PM review`);
+      // After QA approval, lead moves to approved status
+      // Lead is now visible in approved section and removed from pending review
+      console.log(`[LEAD-APPROVE] Lead ${req.params.id} QA approved by user ${approvedById} (qaStatus: ${lead.qaStatus})`);
 
       res.json(lead);
     } catch (error) {
@@ -14110,9 +14293,6 @@ export function registerRoutes(app: Express) {
   // Alias for Telnyx AI voice webhooks without auth (Call Control can post here)
   app.use("/api/telemarketing/webhooks", webhooksRouter);
 
-  // ==================== LIVEKIT WEBHOOKS (Room & Participant Lifecycle) ====================
-  app.use("/webhook", livekitWebhookRouter);
-
   // ==================== CAMPAIGN CONTENT LINKS (Resources Centre Integration) ====================
 
   // Get linked content for a campaign
@@ -16532,6 +16712,41 @@ Provide JSON response with:
     return { transcript: trimmed, transcriptTurns: undefined };
   };
 
+  const coercePositiveSeconds = (value: unknown): number | null => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return Math.round(num);
+  };
+
+  const normalizeConversationDurationSec = (
+    rawDurationSec: unknown,
+    recordingDurationSec: unknown,
+    startedAt?: Date | null,
+    endedAt?: Date | null,
+  ): number | undefined => {
+    const raw = coercePositiveSeconds(rawDurationSec);
+    const recording = coercePositiveSeconds(recordingDurationSec);
+
+    let derivedFromTimestamps: number | null = null;
+    if (startedAt && endedAt) {
+      const elapsedMs = endedAt.getTime() - startedAt.getTime();
+      if (Number.isFinite(elapsedMs) && elapsedMs > 0) {
+        derivedFromTimestamps = Math.round(elapsedMs / 1000);
+      }
+    }
+
+    // Prefer recording duration when available (actual audio length),
+    // then endedAt-startedAt, then raw stored duration.
+    const candidates = [recording, derivedFromTimestamps, raw]
+      .filter((v): v is number => typeof v === 'number' && v > 0);
+
+    if (candidates.length === 0) return undefined;
+
+    // Treat <= 8h as plausible for display; if none plausible, keep priority order.
+    const plausible = candidates.find((v) => v <= 8 * 60 * 60);
+    return plausible ?? candidates[0];
+  };
+
   // Get all conversations for QA review (call sessions AND test calls with transcripts)
   app.get("/api/qa/conversations", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -16592,6 +16807,7 @@ Provide JSON response with:
             disposition: callSessions.aiDisposition,
             agentType: callSessions.agentType,
             duration: callSessions.durationSec,
+            recordingDurationSec: callSessions.recordingDurationSec,
             transcript: callSessions.aiTranscript,
             analysis: callSessions.aiAnalysis,
             recordingUrl: callSessions.recordingUrl,
@@ -16599,6 +16815,8 @@ Provide JSON response with:
             recordingStatus: callSessions.recordingStatus,
             telnyxRecordingId: callSessions.telnyxRecordingId,
             toNumberE164: callSessions.toNumberE164,
+            startedAt: callSessions.startedAt,
+            endedAt: callSessions.endedAt,
             createdAt: callSessions.startedAt,
             aiAgentSettings: campaigns.aiAgentSettings,
           })
@@ -16654,6 +16872,12 @@ Provide JSON response with:
             recordingS3Key: session.recordingS3Key,
             recordingUrl: session.recordingUrl,
           });
+          const normalizedDurationSec = normalizeConversationDurationSec(
+            session.duration,
+            session.recordingDurationSec,
+            session.startedAt,
+            session.endedAt,
+          );
 
           // Extract issues from analysis if available
           // HANDLE BOTH FORMATS: Old (nested under conversationQuality) and new (flat)
@@ -16735,7 +16959,7 @@ Provide JSON response with:
             disposition: session.disposition || undefined,
             agentType: session.agentType,
             agentName,
-            duration: session.duration || undefined,
+            duration: normalizedDurationSec,
             transcript: normalized.transcript,
             transcriptTurns: normalized.transcriptTurns,
             analysis: normalizedAnalysis,
@@ -17173,7 +17397,7 @@ Provide JSON response with:
 
       console.log(`[Potential Leads DEBUG] After base filters: ${totalBeforeFilter} calls`);
 
-      // Query potential leads with pagination
+      // Query potential leads with pagination — JOIN QA tables for campaign-aware scoring
       const sessionsQuery = await db
         .select({
           id: callSessions.id,
@@ -17196,11 +17420,42 @@ Provide JSON response with:
           telnyxRecordingId: callSessions.telnyxRecordingId,
           toNumberE164: callSessions.toNumberE164,
           createdAt: callSessions.startedAt,
+          // Campaign context from wizard
+          campaignObjective: campaigns.campaignObjective,
+          successCriteria: campaigns.successCriteria,
+          campaignTalkingPoints: campaigns.talkingPoints,
+          qaParameters: campaigns.qaParameters,
+          // Call Quality Records (campaign-aware agent performance scoring)
+          cqrCampaignAlignmentScore: callQualityRecords.campaignAlignmentScore,
+          cqrQualificationMet: callQualityRecords.qualificationMet,
+          cqrQualificationScore: callQualityRecords.qualificationScore,
+          cqrExpectedDisposition: callQualityRecords.expectedDisposition,
+          cqrDispositionAccurate: callQualityRecords.dispositionAccurate,
+          cqrTalkingPointsCoverage: callQualityRecords.talkingPointsCoverageScore,
+          cqrEngagementLevel: callQualityRecords.engagementLevel,
+          cqrSentiment: callQualityRecords.sentiment,
+          cqrOverallScore: callQualityRecords.overallQualityScore,
+          // Lead Quality Assessments (campaign-aware lead qualification scoring)
+          lqaCampaignFitScore: leadQualityAssessments.campaignFitScore,
+          lqaLeadQualScore: leadQualityAssessments.leadQualificationScore,
+          lqaIntentStrength: leadQualityAssessments.intentStrength,
+          lqaOutcomeCategory: leadQualityAssessments.outcomeCategory,
+          lqaShouldCreateLead: leadQualityAssessments.shouldCreateLead,
+          lqaShouldSendToReview: leadQualityAssessments.shouldSendToReview,
+          lqaProspectInterested: leadQualityAssessments.prospectInterested,
+          lqaInterestEvidence: leadQualityAssessments.interestEvidence,
+          lqaQualificationCriteria: leadQualityAssessments.qualificationCriteria,
+          lqaSuggestedDisposition: leadQualityAssessments.suggestedDisposition,
+          lqaCampaignAlignmentNotes: leadQualityAssessments.campaignAlignmentNotes,
+          lqaJobTitleAlignment: leadQualityAssessments.jobTitleAlignment,
+          lqaPainPointAlignment: leadQualityAssessments.painPointAlignment,
         })
         .from(callSessions)
         .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
         .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
         .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .leftJoin(callQualityRecords, eq(callSessions.id, callQualityRecords.callSessionId))
+        .leftJoin(leadQualityAssessments, eq(callSessions.id, leadQualityAssessments.callSessionId))
         .where(whereClause)
         .orderBy(sortOrder === 'asc' ? asc(callSessions.startedAt) : desc(callSessions.startedAt))
         .limit(500); // Fetch more to allow filtering
@@ -17219,203 +17474,247 @@ Provide JSON response with:
         return 'one-sided';
       };
 
-      // Helper: Detect voicemail/IVR patterns in transcript
-      const isVoicemailOrIVR = (transcript: string | null, disposition: string | null): boolean => {
+      // Helper: Detect voicemail/IVR — QA-aware with pattern fallback
+      const isVoicemailOrIVR = (transcript: string | null, disposition: string | null, lqaOutcome: string | null): boolean => {
+        // Tier 1: If AI lead quality assessment already categorized it
+        if (lqaOutcome && ['voicemail', 'invalid'].includes(lqaOutcome)) return true;
+
         if (!transcript) return true;
         const lower = transcript.toLowerCase();
         const dispLower = (disposition || '').toLowerCase();
-        
-        // Disposition-based detection
-        if (['voicemail', 'no_answer', 'busy', 'ivr', 'machine'].includes(dispLower)) {
-          return true;
-        }
-        
-        // Content-based detection
+
+        if (['voicemail', 'no_answer', 'busy', 'ivr', 'machine'].includes(dispLower)) return true;
+
         const voicemailPatterns = [
-          'leave a message',
-          'leave your message',
-          'after the beep',
-          'after the tone',
-          'not available',
-          'press 1',
-          'press 2',
-          'for english',
-          'para español',
-          'main menu',
-          'directory',
-          'extension',
-          'mailbox',
-          'voicemail',
-          'please hold',
-          'your call is important',
-          'all representatives',
-          'currently unavailable',
+          'leave a message', 'leave your message', 'after the beep', 'after the tone',
+          'not available', 'press 1', 'press 2', 'for english', 'para español',
+          'main menu', 'directory', 'extension', 'mailbox', 'voicemail',
+          'please hold', 'your call is important', 'all representatives', 'currently unavailable',
         ];
-        
+
         const hasVoicemailPattern = voicemailPatterns.some(p => lower.includes(p));
-        
-        // If mostly one-sided and short lines, likely voicemail
         const lines = transcript.split('\n').filter(l => l.trim().length > 0);
         const hasAgent = lower.includes('agent:') || lower.includes('assistant:');
         const hasContact = lower.includes('contact:') || lower.includes('prospect:');
         const isOneSided = (hasAgent && !hasContact) || (!hasAgent && hasContact);
-        
+
         return hasVoicemailPattern || (isOneSided && lines.length < 5);
       };
 
-      // Helper: Detect positive engagement signals in transcript
-      const hasPositiveEngagement = (transcript: string | null): { hasSignals: boolean; signals: string[] } => {
-        if (!transcript) return { hasSignals: false, signals: [] };
-        const lower = transcript.toLowerCase();
+      // Helper: Campaign-aware engagement detection — uses AI evidence when available, falls back to campaign-specific keywords
+      const hasPositiveEngagement = (
+        transcript: string | null,
+        lqaInterestEvidence: any,
+        lqaQualCriteria: any,
+        lqaAlignmentNotes: any,
+        campaignTalkingPts: any,
+        campaignSuccessCrit: string | null,
+        campaignQaParams: any,
+      ): { hasSignals: boolean; signals: string[] } => {
         const signals: string[] = [];
-        
-        // Positive engagement indicators
-        const positivePatterns = [
+
+        // Tier 1: AI-analyzed interest evidence from lead quality assessment
+        if (Array.isArray(lqaInterestEvidence) && lqaInterestEvidence.length > 0) {
+          for (const ev of lqaInterestEvidence) {
+            const label = ev.signal || ev.type || 'Interest signal';
+            if (!signals.includes(label)) signals.push(label);
+          }
+        }
+
+        // Tier 1b: AI-analyzed qualification criteria met
+        if (Array.isArray(lqaQualCriteria)) {
+          for (const crit of lqaQualCriteria) {
+            if (crit.met && crit.criterion) {
+              const label = `Qualification: ${crit.criterion}`;
+              if (!signals.includes(label)) signals.push(label);
+            }
+          }
+        }
+
+        // Tier 1c: Campaign alignment notes with high scores
+        if (Array.isArray(lqaAlignmentNotes)) {
+          for (const note of lqaAlignmentNotes) {
+            if ((note.score || 0) >= 60 && note.aspect) {
+              const label = `Aligned: ${note.aspect}`;
+              if (!signals.includes(label)) signals.push(label);
+            }
+          }
+        }
+
+        // If AI already gave us signals, return early
+        if (signals.length >= 2) return { hasSignals: true, signals };
+
+        // Tier 2: Build campaign-specific keywords from wizard context
+        if (!transcript) return { hasSignals: signals.length >= 2, signals };
+        const lower = transcript.toLowerCase();
+
+        // Build dynamic patterns from campaign data
+        const dynamicPatterns: Array<{ pattern: string; signal: string }> = [];
+
+        // From successCriteria (e.g. "Meeting booked" → "meeting", "book")
+        if (campaignSuccessCrit) {
+          const words = campaignSuccessCrit.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+          for (const w of words) {
+            dynamicPatterns.push({ pattern: w, signal: `Success: ${campaignSuccessCrit}` });
+          }
+        }
+
+        // From talkingPoints
+        const talkingPts = Array.isArray(campaignTalkingPts) ? campaignTalkingPts : [];
+        for (const tp of talkingPts) {
+          if (typeof tp === 'string' && tp.length > 3) {
+            // Extract meaningful words (>3 chars) from talking point
+            const words = tp.toLowerCase().split(/\s+/).filter((w: string) => w.length > 4);
+            for (const w of words.slice(0, 3)) {
+              dynamicPatterns.push({ pattern: w, signal: `Discussed: ${tp.slice(0, 40)}` });
+            }
+          }
+        }
+
+        // From qaParameters qualification_questions acceptable_responses
+        const qaParams = campaignQaParams as any;
+        if (qaParams?.qualification_questions && Array.isArray(qaParams.qualification_questions)) {
+          for (const q of qaParams.qualification_questions) {
+            if (Array.isArray(q.acceptable_responses)) {
+              for (const resp of q.acceptable_responses) {
+                if (typeof resp === 'string' && resp.length > 2) {
+                  dynamicPatterns.push({ pattern: resp.toLowerCase(), signal: `Qualification: ${q.question?.slice(0, 40) || 'Q&A'}` });
+                }
+              }
+            }
+          }
+        }
+
+        // Generic fallback patterns (always included as baseline)
+        const genericPatterns = [
           { pattern: 'interested', signal: 'Expressed interest' },
           { pattern: 'tell me more', signal: 'Asked for more information' },
           { pattern: 'sounds good', signal: 'Positive response' },
-          { pattern: 'sounds interesting', signal: 'Showed interest' },
-          { pattern: 'what is the cost', signal: 'Asked about pricing' },
           { pattern: 'how much', signal: 'Asked about pricing' },
           { pattern: 'send me', signal: 'Requested information' },
-          { pattern: 'email me', signal: 'Requested follow-up' },
           { pattern: 'call me back', signal: 'Requested callback' },
           { pattern: 'schedule', signal: 'Discussed scheduling' },
           { pattern: 'meeting', signal: 'Discussed meeting' },
           { pattern: 'demo', signal: 'Requested demo' },
-          { pattern: 'yes', signal: 'Affirmative responses' },
-          { pattern: 'sure', signal: 'Affirmative responses' },
-          { pattern: 'okay', signal: 'Affirmative responses' },
           { pattern: 'decision maker', signal: 'Identified decision maker' },
           { pattern: 'budget', signal: 'Discussed budget' },
           { pattern: 'timeline', signal: 'Discussed timeline' },
         ];
-        
-        for (const { pattern, signal } of positivePatterns) {
+
+        const allPatterns = [...dynamicPatterns, ...genericPatterns];
+        for (const { pattern, signal } of allPatterns) {
           if (lower.includes(pattern) && !signals.includes(signal)) {
             signals.push(signal);
           }
         }
-        
+
         return { hasSignals: signals.length >= 2, signals };
       };
 
-      // Helper: Calculate derived confidence using HEURISTICS when AI analysis is missing
-      const getDerivedConfidence = (analysis: any, transcript: string | null, duration: number | null, disposition: string | null): number => {
+      // Helper: 3-tier campaign-aware confidence scoring
+      type ScoringSource = 'lead_quality_ai' | 'call_quality_ai' | 'heuristic';
+
+      const getDerivedConfidence = (
+        session: typeof sessionsQuery[number]
+      ): { confidence: number; scoringSource: ScoringSource } => {
         let confidence = 0;
-        
-        // If we have AI analysis, use it
-        if (analysis) {
-          const qualityData = analysis?.conversationQuality || analysis;
-          
-          // Base confidence from overall score
-          const overallScore = qualityData?.overallScore || 0;
-          confidence += Math.min(40, overallScore * 0.4);
-          
-          // Disposition mismatch bonus
-          const dispReview = qualityData?.dispositionReview;
-          if (dispReview && dispReview.isAccurate === false) {
-            confidence += 25;
-          }
-          
-          // Qualification signals
-          const qualAssessment = qualityData?.qualificationAssessment;
-          if (qualAssessment?.metCriteria || (qualAssessment?.successIndicators?.length || 0) >= 2) {
-            confidence += 20;
-          }
-          
-          // Engagement level bonus
-          if (qualityData?.learningSignals?.engagementLevel === 'high') {
-            confidence += 10;
-          }
-          if (qualityData?.learningSignals?.sentiment === 'positive') {
-            confidence += 5;
-          }
-        } else {
-          // HEURISTIC-BASED confidence when no AI analysis
-          
-          // Duration-based confidence (longer calls = more likely real conversation)
-          if (duration && duration >= 60) {
-            confidence += 30; // 1+ minute conversation
-          } else if (duration && duration >= 45) {
-            confidence += 20;
-          } else if (duration && duration >= 30) {
-            confidence += 10;
-          }
-          
-          // Transcript quality
-          const transcriptQuality = getTranscriptQuality(transcript);
-          if (transcriptQuality === 'two-sided') {
-            confidence += 25; // Bidirectional conversation is good signal
-          } else if (transcriptQuality === 'one-sided') {
-            confidence += 10;
-          }
-          
-          // Positive engagement signals in transcript
-          const { hasSignals, signals } = hasPositiveEngagement(transcript);
-          if (hasSignals) {
-            confidence += 20 + Math.min(15, signals.length * 3);
-          }
-          
-          // Not voicemail/IVR
-          if (!isVoicemailOrIVR(transcript, disposition)) {
-            confidence += 10;
-          }
-          
-          // Disposition suggests potential (callback requests, etc.)
-          const dispLower = (disposition || '').toLowerCase();
-          if (['callback', 'callback_requested', 'follow_up'].includes(dispLower)) {
-            confidence += 15;
-          }
+
+        // ── Tier 1: Lead Quality Assessment (best — campaign-aware AI scoring) ──
+        if (session.lqaCampaignFitScore != null) {
+          confidence = session.lqaCampaignFitScore;
+          if (session.lqaIntentStrength === 'strong') confidence += 15;
+          else if (session.lqaIntentStrength === 'moderate') confidence += 8;
+          if (session.lqaShouldCreateLead === true) confidence += 10;
+          if (session.lqaProspectInterested === true) confidence += 10;
+          const negOutcomes = ['voicemail', 'invalid', 'not_a_fit', 'dnc'];
+          if (session.lqaOutcomeCategory && negOutcomes.includes(session.lqaOutcomeCategory)) confidence -= 20;
+          return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'lead_quality_ai' };
         }
-        
-        return Math.min(100, confidence);
+
+        // ── Tier 2: Call Quality Records (good — campaign alignment + qualification) ──
+        if (session.cqrCampaignAlignmentScore != null || session.cqrQualificationScore != null) {
+          const alignment = session.cqrCampaignAlignmentScore || 0;
+          const qualification = session.cqrQualificationScore || 0;
+          confidence = Math.round((alignment + qualification) / 2);
+          if (session.cqrQualificationMet === true) confidence += 20;
+          if (session.cqrDispositionAccurate === false) confidence += 15;
+          if (session.cqrEngagementLevel === 'high') confidence += 10;
+          if (session.cqrSentiment === 'positive') confidence += 5;
+          return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'call_quality_ai' };
+        }
+
+        // ── Tier 3: Heuristic fallback (enhanced with campaign context) ──
+        const duration = session.duration;
+        if (duration && duration >= 60) confidence += 30;
+        else if (duration && duration >= 45) confidence += 20;
+        else if (duration && duration >= 30) confidence += 10;
+
+        const tQuality = getTranscriptQuality(session.transcript);
+        if (tQuality === 'two-sided') confidence += 25;
+        else if (tQuality === 'one-sided') confidence += 10;
+
+        const { hasSignals, signals } = hasPositiveEngagement(
+          session.transcript, null, null, null,
+          session.campaignTalkingPoints, session.successCriteria, session.qaParameters,
+        );
+        if (hasSignals) confidence += 20 + Math.min(15, signals.length * 3);
+        if (!isVoicemailOrIVR(session.transcript, session.disposition, null)) confidence += 10;
+
+        const dispLower = (session.disposition || '').toLowerCase();
+        if (['callback', 'callback_requested', 'follow_up'].includes(dispLower)) confidence += 15;
+
+        return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'heuristic' };
       };
 
-      // Helper: Determine derived outcome
-      const getDerivedOutcome = (analysis: any, transcript: string | null, currentDisposition: string | null): string => {
-        // If we have AI analysis with expected disposition, use it
-        if (analysis) {
-          const qualityData = analysis?.conversationQuality || analysis;
+      // Helper: Campaign-aware outcome derivation
+      const getDerivedOutcome = (session: typeof sessionsQuery[number]): string => {
+        // Tier 1: AI lead quality suggested disposition
+        if (session.lqaSuggestedDisposition) return session.lqaSuggestedDisposition;
+        // Tier 2: Call quality expected disposition
+        if (session.cqrExpectedDisposition) return session.cqrExpectedDisposition;
+        // Tier 3: AI lead quality outcome category
+        if (session.lqaOutcomeCategory) return session.lqaOutcomeCategory;
+
+        // Tier 4: Inline analysis
+        const analysisObj = session.analysis as any;
+        if (analysisObj) {
+          const qualityData = analysisObj?.conversationQuality || analysisObj;
           const dispReview = qualityData?.dispositionReview;
-          
-          if (dispReview?.expectedDisposition && dispReview?.expectedDisposition !== currentDisposition) {
+          if (dispReview?.expectedDisposition && dispReview.expectedDisposition !== session.disposition) {
             return dispReview.expectedDisposition;
           }
-          
-          const qualAssessment = qualityData?.qualificationAssessment;
-          if (qualAssessment?.metCriteria === true) {
-            return 'qualified_lead';
-          }
+          if (qualityData?.qualificationAssessment?.metCriteria === true) return 'qualified_lead';
         }
-        
-        // HEURISTIC-BASED derived outcome when no AI analysis
-        const { hasSignals } = hasPositiveEngagement(transcript);
-        if (hasSignals && !isVoicemailOrIVR(transcript, currentDisposition)) {
+
+        // Tier 5: Heuristic
+        const { hasSignals } = hasPositiveEngagement(
+          session.transcript, null, null, null,
+          session.campaignTalkingPoints, session.successCriteria, session.qaParameters,
+        );
+        if (hasSignals && !isVoicemailOrIVR(session.transcript, session.disposition, session.lqaOutcomeCategory)) {
           return 'potential_lead';
         }
-        
-        return currentDisposition || 'unknown';
+
+        return session.disposition || 'unknown';
       };
 
-      // Transform and filter to potential leads
+      // ════════ Transform and filter to potential leads ════════
       const potentialLeads: any[] = [];
       let skippedVoicemail = 0;
       let skippedLowConfidence = 0;
       let skippedNotPotential = 0;
+      const scoringSourceCounts = { lead_quality_ai: 0, call_quality_ai: 0, heuristic: 0 };
 
       for (const session of sessionsQuery) {
-        const analysisObj = session.analysis as any;
-        const qualityData = analysisObj?.conversationQuality || analysisObj;
         const transcriptQualityValue = getTranscriptQuality(session.transcript);
-        const derivedConfidence = getDerivedConfidence(analysisObj, session.transcript, session.duration, session.disposition);
-        const derivedOutcome = getDerivedOutcome(analysisObj, session.transcript, session.disposition);
-        
+        const { confidence: derivedConfidence, scoringSource } = getDerivedConfidence(session);
+        const derivedOutcome = getDerivedOutcome(session);
+
         // Filter: transcript quality
         if (transcriptQuality && transcriptQuality !== 'all') {
           if (transcriptQualityValue !== transcriptQuality) continue;
         }
-        
+
         // Filter: minimum confidence
         if (minConfidenceScore !== undefined && derivedConfidence < minConfidenceScore) {
           skippedLowConfidence++;
@@ -17423,41 +17722,64 @@ Provide JSON response with:
         }
 
         // Skip voicemail/IVR
-        if (isVoicemailOrIVR(session.transcript, session.disposition)) {
+        if (isVoicemailOrIVR(session.transcript, session.disposition, session.lqaOutcomeCategory)) {
           skippedVoicemail++;
           continue;
         }
-        
-        // NEW HEURISTIC-BASED POTENTIAL LEAD DETECTION:
-        // A call is a potential lead if:
-        // 1. Has AI analysis with disposition mismatch or qualification signals, OR
-        // 2. Duration >= 45s AND two-sided transcript AND positive engagement signals, OR
-        // 3. Confidence score >= 40 (from heuristics or AI)
-        
-        const dispReview = qualityData?.dispositionReview;
-        const hasAISignals = (
-          (dispReview?.isAccurate === false) ||
-          (qualityData?.qualificationAssessment?.metCriteria === true)
+
+        // ── Campaign-aligned potential lead gate ──
+        // 1. AI lead quality says create lead or send to review
+        const hasLeadQualitySignal = (
+          session.lqaShouldCreateLead === true ||
+          session.lqaShouldSendToReview === true
         );
-        
-        const { hasSignals: hasEngagement, signals: engagementSignals } = hasPositiveEngagement(session.transcript);
-        const hasHeuristicSignals = (
-          (session.duration || 0) >= 45 &&
-          transcriptQualityValue === 'two-sided' &&
-          hasEngagement
+        // 2. AI outcome is a positive category
+        const positiveOutcomes = ['qualified_lead', 'mql', 'sql', 'follow_up', 'callback'];
+        const hasPositiveOutcome = !!(session.lqaOutcomeCategory && positiveOutcomes.includes(session.lqaOutcomeCategory));
+        // 3. Strong/moderate intent with decent campaign fit
+        const hasIntentSignal = (
+          ['strong', 'moderate'].includes(session.lqaIntentStrength || '') &&
+          (session.lqaCampaignFitScore || 0) >= 40
         );
-        
+        // 4. Call quality: qualification met
+        const hasQualificationMet = session.cqrQualificationMet === true;
+        // 5. Call quality: disposition mismatch (review opportunity)
+        const hasDispositionMismatch = session.cqrDispositionAccurate === false;
+        // 6. Call quality: good campaign alignment + engagement
+        const hasCampaignAlignment = (
+          (session.cqrCampaignAlignmentScore || 0) >= 60 &&
+          ['high', 'medium'].includes(session.cqrEngagementLevel || '')
+        );
+        // 7. Heuristic confidence threshold (fallback)
         const hasConfidenceThreshold = derivedConfidence >= 40;
-        
-        const isPotentialLead = hasAISignals || hasHeuristicSignals || hasConfidenceThreshold;
-        
+
+        const { hasSignals: hasEngagement, signals: engagementSignals } = hasPositiveEngagement(
+          session.transcript,
+          session.lqaInterestEvidence,
+          session.lqaQualificationCriteria,
+          session.lqaCampaignAlignmentNotes,
+          session.campaignTalkingPoints,
+          session.successCriteria,
+          session.qaParameters,
+        );
+
+        const isPotentialLead = (
+          hasLeadQualitySignal || hasPositiveOutcome || hasIntentSignal ||
+          hasQualificationMet || hasDispositionMismatch || hasCampaignAlignment ||
+          hasConfidenceThreshold
+        );
+
         if (!isPotentialLead) {
           skippedNotPotential++;
           continue;
         }
 
+        scoringSourceCounts[scoringSource]++;
+
         const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact';
         const hasRecording = !!(session.recordingS3Key || session.recordingUrl || session.telnyxRecordingId);
+        const analysisObj = session.analysis as any;
+        const qualityData = analysisObj?.conversationQuality || analysisObj;
 
         potentialLeads.push({
           id: session.id,
@@ -17483,8 +17805,17 @@ Provide JSON response with:
           createdAt: session.createdAt?.toISOString() || new Date().toISOString(),
           // Analysis summary
           overallScore: qualityData?.overallScore,
-          dispositionReview: dispReview,
+          dispositionReview: qualityData?.dispositionReview,
           qualificationAssessment: qualityData?.qualificationAssessment,
+          // Campaign context & AI scoring (new fields)
+          campaignObjective: session.campaignObjective || null,
+          campaignFitScore: session.lqaCampaignFitScore || null,
+          campaignAlignmentScore: session.cqrCampaignAlignmentScore || null,
+          qualificationMet: session.cqrQualificationMet || session.lqaShouldCreateLead || false,
+          intentStrength: session.lqaIntentStrength || null,
+          outcomeCategory: session.lqaOutcomeCategory || null,
+          suggestedDisposition: session.lqaSuggestedDisposition || session.cqrExpectedDisposition || null,
+          scoringSource,
         });
       }
 
@@ -17494,6 +17825,7 @@ Provide JSON response with:
       const totalPages = Math.ceil(total / limitNum);
 
       console.log(`[Potential Leads] Results: ${totalBeforeFilter} base calls -> ${total} potential leads
+        Scoring: AI-LQ=${scoringSourceCounts.lead_quality_ai}, AI-CQ=${scoringSourceCounts.call_quality_ai}, Heuristic=${scoringSourceCounts.heuristic}
         Skipped: voicemail=${skippedVoicemail}, lowConfidence=${skippedLowConfidence}, notPotential=${skippedNotPotential}
         Returning page ${pageNum}/${totalPages}`);
 
@@ -17508,6 +17840,9 @@ Provide JSON response with:
         skippedLowConfidence,
         skippedNotPotential,
         dispositionBreakdown: dispositionBreakdown.slice(0, 5),
+        withLeadQualityAssessment: scoringSourceCounts.lead_quality_ai,
+        withCallQualityRecord: scoringSourceCounts.call_quality_ai + scoringSourceCounts.lead_quality_ai,
+        scoringSourceBreakdown: scoringSourceCounts,
       };
 
       res.json({

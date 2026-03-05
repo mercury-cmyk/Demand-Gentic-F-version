@@ -6,7 +6,7 @@
  * company size into actionable contact/account filter conditions.
  */
 
-import { generateJSON } from "./vertex-ai/vertex-client";
+import { deepSeekJSON } from "./deepseek-client";
 import { getFullOrganizationIntelligence } from "./unified-landing-page-engine";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import type { FilterGroup, FilterCondition } from "../../shared/filter-types";
@@ -157,12 +157,13 @@ Generate the FilterGroup JSON now. Focus on the ICP personas, target industries,
     input.organizationId
   );
 
-  // Call Vertex AI for structured JSON
-  const result = await generateJSON<{
+  // Call DeepSeek for structured JSON
+  const result = await deepSeekJSON<{
     filterGroup: { logic: string; conditions: Array<{ field: string; operator: string; values: (string | number)[] }> };
     reasoning: string;
     confidence: number;
   }>(userPrompt, {
+    systemPrompt: systemPrompt,
     temperature: 0.3,
     maxTokens: 2048,
   });
@@ -178,7 +179,7 @@ Generate the FilterGroup JSON now. Focus on the ICP personas, target industries,
     filterGroup,
     reasoning: result.reasoning || "Filters generated from Organization Intelligence ICP data.",
     confidence: Math.min(1, Math.max(0, result.confidence || 0.7)),
-    aiModel: "gemini-2.0-flash-001",
+    aiModel: "deepseek-chat",
     durationMs: Date.now() - startMs,
   };
 }

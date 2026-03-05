@@ -1,0 +1,23 @@
+steps:
+  # Step 1: Install dependencies
+  - name: 'node:18-alpine'
+    entrypoint: 'npm'
+    args: ['ci']
+    id: 'install-deps'
+
+  # Step 2: Run database migration
+  - name: 'node:18-alpine'
+    entrypoint: 'npm'
+    args: ['run', 'db:push']
+    id: 'run-migration'
+    env:
+      - 'DATABASE_URL=${_DATABASE_URL}'
+      - 'NODE_ENV=production'
+
+timeout: '1800s'
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'N1_HIGHCPU_8'
+
+substitutions:
+  _DATABASE_URL: '' # Will be provided at runtime

@@ -2173,7 +2173,8 @@ router.get("/transcription-calls", requireAuth, requireRole('admin', 'manager', 
 
 /**
  * POST /api/call-intelligence/transcription-gaps/regenerate
- * Trigger re-transcription for selected calls using Telnyx phone lookup or recording URL
+ * Trigger re-transcription for selected calls.
+ * Priority: GCS presigned URL → GCS buffer download → Telnyx fallback
  */
 router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   try {
@@ -2216,8 +2217,8 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
           const RG = `[Regenerate][${callId}]`;
           console.log(`${RG} call_session found — s3Key=${session.recordingS3Key || 'none'}, recUrl=${(session.recordingUrl || '').slice(0, 80)}, telnyxRecId=${session.telnyxRecordingId || 'none'}, telnyxCallId=${session.telnyxCallId || 'none'}`);
 
-          // ── Strategy A: Presign from recordingS3Key ──
-          if (!audioUrl && strategy !== 'telnyx_phone_lookup' && session.recordingS3Key) {
+          // ── Strategy A: Presign from recordingS3Key (ALWAYS first — GCS is authoritative) ──
+          if (!audioUrl && session.recordingS3Key) {
             try {
               const presigned = await getPresignedDownloadUrl(session.recordingS3Key);
               if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
@@ -2231,8 +2232,8 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             }
           }
 
-          // ── Strategy B: Extract GCS key from recordingUrl and presign ──
-          if (!audioUrl && strategy !== 'telnyx_phone_lookup' && session.recordingUrl) {
+          // ── Strategy B: Extract GCS key from recordingUrl and presign (ALWAYS — GCS is authoritative) ──
+          if (!audioUrl && session.recordingUrl) {
             try {
               const gcsKey = extractGcsKeyFromRecordingUrl(session.recordingUrl);
               if (gcsKey) {
@@ -2249,32 +2250,60 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             }
           }
 
-          // ── Strategy C: Full Telnyx priority chain (gcsOnly: false) ──
-          if (!audioUrl && strategy !== 'recording_url') {
+          // ── Strategy C: Recording link resolver (GCS-only first) ──
+          if (!audioUrl) {
             try {
               const { getPlayableRecordingLink } = await import("../services/recording-link-resolver");
-              const result = await getPlayableRecordingLink(callId, { gcsOnly: false });
+              const result = await getPlayableRecordingLink(callId, { gcsOnly: true });
               if (result?.url && !result.url.startsWith('gcs-internal://') && !result.url.startsWith('gs://')) {
                 audioUrl = result.url;
-                console.log(`${RG} Strategy C (getPlayableRecordingLink gcsOnly=false, source=${result.source}) succeeded`);
-              } else if (result?.url) {
-                console.log(`${RG} Strategy C returned non-usable URL (source=${result.source}): ${result.url.slice(0, 60)}`);
+                console.log(`${RG} Strategy C (getPlayableRecordingLink gcsOnly=true, source=${result.source}) succeeded`);
               } else {
-                console.log(`${RG} Strategy C returned null`);
+                console.log(`${RG} Strategy C (GCS-only): ${result?.url ? 'non-usable URL' : 'null'}`);
               }
             } catch (e: any) {
               console.log(`${RG} Strategy C failed: ${e.message}`);
             }
           }
 
-          // ── Strategy D: Raw HTTPS recordingUrl (e.g. Telnyx download URL) ──
-          if (!audioUrl && session.recordingUrl && /^https?:\/\//i.test(session.recordingUrl) && !session.recordingUrl.startsWith('gcs-internal://')) {
-            audioUrl = session.recordingUrl;
-            console.log(`${RG} Strategy D (raw HTTPS recordingUrl) used`);
+          // ── Strategy D: Direct GCS download → buffer transcription (before Telnyx) ──
+          let audioBuffer: Buffer | null = null;
+          if (!audioUrl) {
+            const gcsKey = session.recordingS3Key || extractGcsKeyFromRecordingUrl(session.recordingUrl);
+            if (gcsKey) {
+              console.log(`${RG} Strategy D: direct GCS download for key ${gcsKey}`);
+              audioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
+              if (audioBuffer && audioBuffer.length > 1000) {
+                console.log(`${RG} Strategy D ✓ downloaded ${audioBuffer.length} bytes`);
+              } else {
+                console.log(`${RG} Strategy D ✗ buffer ${audioBuffer ? audioBuffer.length : 0} bytes`);
+                audioBuffer = null;
+              }
+            }
           }
 
-          // ── Strategy E: Telnyx phone search (±2 hours) ──
-          if (!audioUrl && strategy !== 'recording_url') {
+          // ── Strategy E: Telnyx fallback via recording link resolver (only if no GCS audio) ──
+          if (!audioUrl && !audioBuffer && strategy !== 'recording_url') {
+            try {
+              const { getPlayableRecordingLink } = await import("../services/recording-link-resolver");
+              const result = await getPlayableRecordingLink(callId, { gcsOnly: false });
+              if (result?.url && !result.url.startsWith('gcs-internal://') && !result.url.startsWith('gs://')) {
+                audioUrl = result.url;
+                console.log(`${RG} Strategy E (getPlayableRecordingLink gcsOnly=false, source=${result.source}) succeeded`);
+              }
+            } catch (e: any) {
+              console.log(`${RG} Strategy E failed: ${e.message}`);
+            }
+          }
+
+          // ── Strategy F: Raw HTTPS recordingUrl (e.g. Telnyx download URL) ──
+          if (!audioUrl && !audioBuffer && session.recordingUrl && /^https?:\/\//i.test(session.recordingUrl) && !session.recordingUrl.startsWith('gcs-internal://')) {
+            audioUrl = session.recordingUrl;
+            console.log(`${RG} Strategy F (raw HTTPS recordingUrl) used`);
+          }
+
+          // ── Strategy G: Telnyx phone search (±2 hours — last resort) ──
+          if (!audioUrl && !audioBuffer && strategy !== 'recording_url') {
             const phoneNumber = session.toNumberE164 || session.fromNumber;
             if (phoneNumber && session.startedAt) {
               try {
@@ -2284,12 +2313,12 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
                 const searchEnd = new Date(session.startedAt);
                 searchEnd.setMinutes(searchEnd.getMinutes() + 120);
 
-                console.log(`${RG} Strategy E: searching Telnyx by phone ${phoneNumber} (±2h window)`);
+                console.log(`${RG} Strategy G: searching Telnyx by phone ${phoneNumber} (±2h window)`);
                 const recordings = await searchRecordingsByDialedNumber(phoneNumber, searchStart, searchEnd);
                 const completed = recordings.find(r => r.status === 'completed');
                 if (completed) {
                   audioUrl = completed.download_urls?.mp3 || completed.download_urls?.wav || null;
-                  console.log(`${RG} Strategy E found recording: ${audioUrl ? 'yes' : 'no'}`);
+                  console.log(`${RG} Strategy G found recording: ${audioUrl ? 'yes' : 'no'}`);
                   // Backfill telnyx IDs
                   if (audioUrl && (completed.id || completed.call_control_id)) {
                     await db.update(callSessions).set({
@@ -2299,41 +2328,23 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
                     } as any).where(eq(callSessions.id, callId));
                   }
                 } else {
-                  console.log(`${RG} Strategy E: no completed recordings found (${recordings.length} total)`);
+                  console.log(`${RG} Strategy G: no completed recordings found (${recordings.length} total)`);
                 }
               } catch (e: any) {
-                console.log(`${RG} Strategy E failed: ${e.message}`);
+                console.log(`${RG} Strategy G failed: ${e.message}`);
               }
-            }
-          }
-
-          // ── Strategy F: Direct GCS download → buffer transcription ──
-          let audioBuffer: Buffer | null = null;
-          if (!audioUrl) {
-            const gcsKey = session.recordingS3Key || extractGcsKeyFromRecordingUrl(session.recordingUrl);
-            if (gcsKey) {
-              console.log(`${RG} Strategy F: direct GCS download for key ${gcsKey}`);
-              audioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
-              if (audioBuffer && audioBuffer.length > 1000) {
-                console.log(`${RG} Strategy F ✓ downloaded ${audioBuffer.length} bytes`);
-              } else {
-                console.log(`${RG} Strategy F ✗ buffer ${audioBuffer ? audioBuffer.length : 0} bytes`);
-                audioBuffer = null;
-              }
-            } else {
-              console.log(`${RG} Strategy F ✗ no GCS key available`);
             }
           }
 
           // ── Final guard ──
           if (audioUrl && (audioUrl.startsWith('gcs-internal://') || audioUrl.startsWith('gs://'))) {
-            console.log(`${RG} GUARD: rejecting ${audioUrl.slice(0, 60)} — extracting key for Strategy F`);
+            console.log(`${RG} GUARD: rejecting ${audioUrl.slice(0, 60)} — extracting key for GCS buffer`);
             if (!audioBuffer) {
               const guardKey = extractGcsKeyFromRecordingUrl(audioUrl);
               if (guardKey) {
                 audioBuffer = await downloadGcsAudioAsBuffer(guardKey);
                 if (audioBuffer && audioBuffer.length > 1000) {
-                  console.log(`${RG} GUARD→F ✓ downloaded ${audioBuffer.length} bytes`);
+                  console.log(`${RG} GUARD→GCS ✓ downloaded ${audioBuffer.length} bytes`);
                 } else {
                   audioBuffer = null;
                 }
@@ -2363,6 +2374,7 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
               console.log(`${RG} ❌ Deepgram buffer error: ${e.message}`);
             }
           } else if (audioUrl) {
+            let urlTranscriptionOk = false;
             try {
               console.log(`${RG} Sending URL to Deepgram: ${audioUrl.slice(0, 100)}...`);
               const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
@@ -2373,20 +2385,72 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
               if (transcriptResult?.transcript && transcriptResult.transcript.length >= 20) {
                 await db.update(callSessions).set({ aiTranscript: transcriptResult.transcript } as any).where(eq(callSessions.id, callId));
                 results.succeeded++;
+                urlTranscriptionOk = true;
                 console.log(`${RG} ✅ URL transcription succeeded (${transcriptResult.transcript.length} chars)`);
               } else {
-                results.failed++;
-                results.errors.push(`${callId}: URL transcription empty/short`);
-                console.log(`${RG} ❌ URL transcription empty/short`);
+                console.log(`${RG} ⚠️ URL transcription empty/short — will try Telnyx phone fallback`);
               }
             } catch (e: any) {
-              results.failed++;
-              results.errors.push(`${callId}: Deepgram URL error: ${e.message}`);
-              console.log(`${RG} ❌ Deepgram URL error: ${e.message}`);
+              console.log(`${RG} ⚠️ Deepgram URL error: ${e.message} — will try Telnyx phone fallback`);
+            }
+
+            // ── Telnyx phone search fallback after URL transcription failure (old GCS bucket 404s) ──
+            if (!urlTranscriptionOk) {
+              let fallbackDone = false;
+              const phoneNumber = session.toNumberE164 || session.fromNumber;
+              if (phoneNumber && session.startedAt) {
+                try {
+                  const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
+                  const searchStart = new Date(session.startedAt);
+                  searchStart.setMinutes(searchStart.getMinutes() - 120);
+                  const searchEnd = new Date(session.startedAt);
+                  searchEnd.setMinutes(searchEnd.getMinutes() + 120);
+
+                  console.log(`${RG} Telnyx phone fallback: searching by ${phoneNumber} (±2h window)`);
+                  const recordings = await searchRecordingsByDialedNumber(phoneNumber, searchStart, searchEnd);
+                  const completed = recordings.find(r => r.status === 'completed');
+                  if (completed) {
+                    const telnyxAudioUrl = completed.download_urls?.mp3 || completed.download_urls?.wav || null;
+                    if (telnyxAudioUrl) {
+                      console.log(`${RG} Telnyx phone fallback: found recording, sending to Deepgram...`);
+                      // Backfill telnyx IDs
+                      if (completed.id || completed.call_control_id) {
+                        await db.update(callSessions).set({
+                          telnyxRecordingId: completed.id,
+                          telnyxCallId: completed.call_control_id,
+                          recordingUrl: telnyxAudioUrl,
+                        } as any).where(eq(callSessions.id, callId));
+                      }
+                      const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
+                      const fallbackResult = await transcribeFromRecording(telnyxAudioUrl, {
+                        telnyxCallId: session.telnyxCallId || completed.call_control_id || undefined,
+                      });
+                      if (fallbackResult?.transcript && fallbackResult.transcript.length >= 20) {
+                        await db.update(callSessions).set({ aiTranscript: fallbackResult.transcript } as any).where(eq(callSessions.id, callId));
+                        results.succeeded++;
+                        fallbackDone = true;
+                        console.log(`${RG} ✅ Telnyx phone fallback transcription succeeded (${fallbackResult.transcript.length} chars)`);
+                      }
+                    }
+                  } else {
+                    console.log(`${RG} Telnyx phone fallback: no completed recordings found (${recordings.length} total)`);
+                  }
+                } catch (e: any) {
+                  console.log(`${RG} Telnyx phone fallback failed: ${e.message}`);
+                }
+              } else {
+                console.log(`${RG} Telnyx phone fallback: no phone number or startedAt available`);
+              }
+
+              if (!fallbackDone) {
+                results.failed++;
+                results.errors.push(`${callId}: All transcription attempts failed (URL 404 + Telnyx fallback)`);
+                console.log(`${RG} ❌ All transcription attempts failed`);
+              }
             }
           } else {
             results.failed++;
-            results.errors.push(`${callId}: No recording found (all strategies A-F exhausted)`);
+            results.errors.push(`${callId}: No recording found (all strategies A-G exhausted)`);
             console.log(`${RG} ❌ All strategies exhausted — no audio source`);
           }
           results.queued++;
@@ -2410,24 +2474,73 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
           const RG = `[Regenerate][${callId}]`;
           console.log(`${RG} dialer_call_attempt found — recUrl=${(attempt.recordingUrl || '').slice(0, 80)}, telnyxCallId=${attempt.telnyxCallId || 'none'}, phone=${attempt.phoneDialed || 'none'}`);
 
-          // Sanitize: if recordingUrl is gcs-internal:// or gs://, try direct GCS download
-          let usableRecordingUrl = attempt.recordingUrl ?? null;
+          let usableRecordingUrl: string | null = null;
           let dialerAudioBuffer: Buffer | null = null;
-          if (usableRecordingUrl && (usableRecordingUrl.startsWith('gcs-internal://') || usableRecordingUrl.startsWith('gs://'))) {
-            const gcsKey = extractGcsKeyFromRecordingUrl(usableRecordingUrl);
+
+          // ── GCS Priority: Resolve S3 key from linked call_session ──
+          let gcsKeyFromSession: string | null = null;
+          try {
+            if (attempt.telnyxCallId) {
+              const [linkedSession] = await db
+                .select({ recordingS3Key: callSessions.recordingS3Key, recordingUrl: callSessions.recordingUrl })
+                .from(callSessions)
+                .where(eq(callSessions.telnyxCallId, attempt.telnyxCallId))
+                .limit(1);
+              if (linkedSession?.recordingS3Key) {
+                gcsKeyFromSession = linkedSession.recordingS3Key;
+              } else if (linkedSession?.recordingUrl) {
+                gcsKeyFromSession = extractGcsKeyFromRecordingUrl(linkedSession.recordingUrl);
+              }
+            }
+          } catch { /* no linked session */ }
+
+          // ── Strategy 1: Presign GCS key from linked session ──
+          if (gcsKeyFromSession) {
+            try {
+              const presigned = await getPresignedDownloadUrl(gcsKeyFromSession);
+              if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
+                usableRecordingUrl = presigned;
+                console.log(`${RG} Dialer Strategy 1 (presign session GCS key) succeeded`);
+              }
+            } catch (e: any) {
+              console.log(`${RG} Dialer Strategy 1 failed: ${e.message}`);
+            }
+          }
+
+          // ── Strategy 2: Extract GCS key from attempt's own recordingUrl ──
+          if (!usableRecordingUrl) {
+            const attemptRecUrl = attempt.recordingUrl ?? null;
+            if (attemptRecUrl) {
+              const gcsKey = extractGcsKeyFromRecordingUrl(attemptRecUrl);
+              if (gcsKey) {
+                try {
+                  const presigned = await getPresignedDownloadUrl(gcsKey);
+                  if (presigned && !presigned.startsWith('gcs-internal://') && !presigned.startsWith('gs://')) {
+                    usableRecordingUrl = presigned;
+                    console.log(`${RG} Dialer Strategy 2 (presign attempt GCS key) succeeded`);
+                  }
+                } catch (e: any) {
+                  console.log(`${RG} Dialer Strategy 2 presign failed: ${e.message}`);
+                }
+              }
+            }
+          }
+
+          // ── Strategy 3: Direct GCS buffer download (before Telnyx) ──
+          if (!usableRecordingUrl) {
+            const gcsKey = gcsKeyFromSession || extractGcsKeyFromRecordingUrl(attempt.recordingUrl);
             if (gcsKey) {
-              console.log(`${RG} Dialer: direct GCS download for ${gcsKey}`);
+              console.log(`${RG} Dialer Strategy 3: direct GCS download for ${gcsKey}`);
               dialerAudioBuffer = await downloadGcsAudioAsBuffer(gcsKey);
               if (dialerAudioBuffer && dialerAudioBuffer.length > 1000) {
-                console.log(`${RG} Dialer GCS download ✓ ${dialerAudioBuffer.length} bytes`);
+                console.log(`${RG} Dialer Strategy 3 ✓ ${dialerAudioBuffer.length} bytes`);
               } else {
                 dialerAudioBuffer = null;
               }
             }
-            usableRecordingUrl = null;
           }
 
-          // For phone lookup strategy, try finding the recording first (±2h window)
+          // ── Strategy 4: Telnyx phone search (±2h window — only if no GCS audio) ──
           if (!usableRecordingUrl && !dialerAudioBuffer && (strategy === 'telnyx_phone_lookup' || strategy === 'auto')) {
             if (attempt.phoneDialed && attempt.callStartedAt) {
               try {
@@ -2494,9 +2607,54 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
             results.succeeded++;
             console.log(`${RG} ✅ Dialer transcription succeeded`);
           } else {
-            results.failed++;
-            results.errors.push(`${callId}: ${result.error || 'Unknown error'}`);
-            console.log(`${RG} ❌ Dialer transcription failed: ${result.error || 'Unknown'}`);
+            // ── Telnyx phone search fallback after GCS URL failure (old bucket 404s) ──
+            let dialerFallbackDone = false;
+            if (attempt.phoneDialed && attempt.callStartedAt && (strategy === 'telnyx_phone_lookup' || strategy === 'auto')) {
+              try {
+                const { searchRecordingsByDialedNumber } = await import("../services/telnyx-recordings");
+                const searchStart = new Date(attempt.callStartedAt);
+                searchStart.setMinutes(searchStart.getMinutes() - 120);
+                const searchEnd = new Date(attempt.callStartedAt);
+                searchEnd.setMinutes(searchEnd.getMinutes() + 120);
+
+                console.log(`${RG} Dialer Telnyx phone fallback: searching by ${attempt.phoneDialed} (±2h window)`);
+                const recordings = await searchRecordingsByDialedNumber(attempt.phoneDialed, searchStart, searchEnd);
+                const completed = recordings.find(r => r.status === 'completed');
+                if (completed) {
+                  const downloadUrl = completed.download_urls?.mp3 || completed.download_urls?.wav;
+                  if (downloadUrl) {
+                    await db.update(dialerCallAttempts).set({
+                      recordingUrl: downloadUrl,
+                      telnyxCallId: completed.call_control_id,
+                      telnyxRecordingId: completed.id,
+                      updatedAt: new Date(),
+                    }).where(eq(dialerCallAttempts.id, callId));
+
+                    const { transcribeFromRecording } = await import("../services/deepgram-postcall-transcription");
+                    const fallbackResult = await transcribeFromRecording(downloadUrl, {
+                      telnyxCallId: completed.call_control_id || undefined,
+                    });
+                    if (fallbackResult?.transcript && fallbackResult.transcript.length >= 20) {
+                      await db.update(dialerCallAttempts).set({ fullTranscript: fallbackResult.transcript, updatedAt: new Date() }).where(eq(dialerCallAttempts.id, callId));
+                      results.succeeded++;
+                      results.failed--; // undo the increment below
+                      dialerFallbackDone = true;
+                      console.log(`${RG} ✅ Dialer Telnyx phone fallback transcription succeeded (${fallbackResult.transcript.length} chars)`);
+                    }
+                  }
+                } else {
+                  console.log(`${RG} Dialer Telnyx phone fallback: no completed recordings (${recordings.length} total)`);
+                }
+              } catch (e: any) {
+                console.log(`${RG} Dialer Telnyx phone fallback failed: ${e.message}`);
+              }
+            }
+
+            if (!dialerFallbackDone) {
+              results.failed++;
+              results.errors.push(`${callId}: ${result.error || 'Unknown error'}`);
+              console.log(`${RG} ❌ Dialer transcription failed: ${result.error || 'Unknown'}`);
+            }
           }
           continue;
         }
@@ -2521,6 +2679,239 @@ router.post("/transcription-gaps/regenerate", requireAuth, requireRole('admin', 
   } catch (error: any) {
     console.error("[CallIntelligence] Error regenerating transcriptions:", error);
     res.status(500).json({ error: "Failed to regenerate transcriptions" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/start
+ * Start the background transcription regeneration worker
+ */
+router.post("/regeneration/worker/start", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { startWorker } = await import("../services/transcription-regeneration-worker");
+    startWorker();
+    const { getStatus } = await import("../services/transcription-regeneration-worker");
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Transcription regeneration worker started",
+      data: status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error starting worker:", error);
+    res.status(500).json({ error: "Failed to start worker" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/stop
+ * Stop the background transcription regeneration worker
+ */
+router.post("/regeneration/worker/stop", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { stopWorker, getStatus } = await import("../services/transcription-regeneration-worker");
+    stopWorker();
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Transcription regeneration worker stopped",
+      data: status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error stopping worker:", error);
+    res.status(500).json({ error: "Failed to stop worker" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/worker/status
+ * Get current worker status and job statistics
+ */
+router.get("/regeneration/worker/status", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const { getStatus } = await import("../services/transcription-regeneration-worker");
+    const status = await getStatus();
+    res.json({
+      success: true,
+      data: status,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching worker status:", error);
+    res.status(500).json({ error: "Failed to fetch worker status" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/worker/config
+ * Update worker configuration (concurrency, batch size, strategy, etc.)
+ */
+router.post("/regeneration/worker/config", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { concurrency, batchSize, batchDelayMs, strategy, maxRetries, verbose } = req.body;
+
+    // Validate inputs
+    if (concurrency !== undefined && (concurrency < 1 || concurrency > 10)) {
+      return res.status(400).json({ error: "Concurrency must be between 1 and 10" });
+    }
+    if (batchSize !== undefined && (batchSize < 1 || batchSize > 50)) {
+      return res.status(400).json({ error: "Batch size must be between 1 and 50" });
+    }
+    if (batchDelayMs !== undefined && batchDelayMs < 100) {
+      return res.status(400).json({ error: "Batch delay must be at least 100ms" });
+    }
+
+    const { updateConfig, getStatus } = await import("../services/transcription-regeneration-worker");
+    const newConfig = { concurrency, batchSize, batchDelayMs, strategy, maxRetries, verbose };
+    updateConfig(newConfig);
+
+    const status = await getStatus();
+    res.json({
+      success: true,
+      message: "Configuration updated successfully",
+      data: {
+        updatedConfig: newConfig,
+        currentStatus: status,
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error updating worker config:", error);
+    res.status(500).json({ error: "Failed to update configuration" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/progress
+ * Get overall regeneration progress and statistics
+ */
+router.get("/regeneration/progress", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const result = await db.execute(sql.raw(`
+      SELECT status, COUNT(*) as count 
+      FROM transcription_regeneration_jobs 
+      GROUP BY status
+    `)) as any;
+
+    const stats = {
+      pending: 0,
+      inProgress: 0,
+      submitted: 0,
+      completed: 0,
+      failed: 0,
+      total: 0,
+    };
+
+    result.rows?.forEach((row: any) => {
+      const count = Number(row.count) || 0;
+      stats.total += count;
+      if (row.status === "pending") stats.pending = count;
+      else if (row.status === "in_progress") stats.inProgress = count;
+      else if (row.status === "submitted") stats.submitted = count;
+      else if (row.status === "completed") stats.completed = count;
+      else if (row.status === "failed") stats.failed = count;
+    });
+
+    const progressPercent = stats.total > 0
+      ? Math.round(((stats.completed + stats.submitted) / stats.total) * 100)
+      : 0;
+
+    // Estimate remaining time: ~2 calls/minute processing rate
+    const remaining = stats.pending + stats.inProgress;
+    const estimatedRemainingMinutes = Math.ceil(remaining / 2);
+
+    res.json({
+      success: true,
+      data: {
+        ...stats,
+        progressPercent,
+        estimatedRemainingMinutes,
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching regeneration progress:", error);
+    res.status(500).json({ error: "Failed to fetch progress" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/regeneration/reset
+ * Reset failed/stuck jobs back to pending so they can be retried
+ */
+router.post("/regeneration/reset", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { statuses = ['failed', 'in_progress', 'submitted'] } = req.body as { statuses?: string[] };
+    const allowed = ['failed', 'in_progress', 'submitted'];
+    const toReset = statuses.filter(s => allowed.includes(s));
+
+    if (toReset.length === 0) {
+      return res.status(400).json({ error: "No valid statuses to reset" });
+    }
+
+    const statusList = sql.join(toReset.map(s => sql`${s}`), sql`, `);
+    const result = await db.execute(
+      sql`UPDATE transcription_regeneration_jobs
+          SET status = 'pending', attempts = 0, error = NULL, completed_at = NULL
+          WHERE status IN (${statusList})`
+    ) as any;
+
+    const resetCount = result.rowCount ?? result.changes ?? 0;
+    console.log(`[CallIntelligence] Reset ${resetCount} regeneration jobs (statuses: ${toReset.join(', ')}) back to pending`);
+
+    res.json({ success: true, data: { resetCount, statuses: toReset } });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error resetting regeneration jobs:", error);
+    res.status(500).json({ error: "Failed to reset jobs" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/regeneration/jobs
+ * List regeneration jobs with filtering and pagination
+ */
+router.get("/regeneration/jobs", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const { status, limit = 50, page = 1 } = req.query;
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
+    const offset = (pageNum - 1) * pageSize;
+
+    // Get jobs
+    let jobsQuery;
+    if (status && typeof status === "string") {
+      jobsQuery = sql`SELECT * FROM transcription_regeneration_jobs WHERE status = ${status} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
+    } else {
+      jobsQuery = sql`SELECT * FROM transcription_regeneration_jobs ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
+    }
+
+    const jobsResult = await db.execute(jobsQuery) as any;
+
+    // Get total count
+    let countQuery;
+    if (status && typeof status === "string") {
+      countQuery = sql`SELECT COUNT(*) as total FROM transcription_regeneration_jobs WHERE status = ${status}`;
+    } else {
+      countQuery = sql`SELECT COUNT(*) as total FROM transcription_regeneration_jobs`;
+    }
+
+    const countResult = await db.execute(countQuery) as any;
+    const total = Number(countResult.rows?.[0]?.total) || 0;
+    const pages = Math.ceil(total / pageSize);
+
+    res.json({
+      success: true,
+      data: {
+        jobs: jobsResult.rows || [],
+        pagination: {
+          page: pageNum,
+          limit: pageSize,
+          total,
+          pages,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Error fetching regeneration jobs:", error);
+    res.status(500).json({ error: "Failed to fetch jobs" });
   }
 });
 

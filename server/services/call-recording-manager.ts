@@ -12,8 +12,16 @@ import { uploadCallSessionRecordingBuffer, isRecordingStorageEnabled } from './r
 import { db } from '../db';
 import { callSessions } from '../../shared/schema';
 import { eq } from 'drizzle-orm';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 const LOG_PREFIX = '[CallRecordingManager]';
+
+// Checkpoint configuration — saves audio to disk periodically to prevent total loss on crash
+const CHECKPOINT_INTERVAL_MS = 60_000; // Save checkpoint every 60 seconds
+const CHECKPOINT_MIN_DURATION_SEC = 25; // Only checkpoint calls longer than 25s
+const CHECKPOINT_DIR = path.join(os.tmpdir(), 'demandgentic-audio-checkpoints');
 
 // Recording state for each active call
 interface CallRecordingSession {
@@ -38,6 +46,11 @@ interface CallRecordingSession {
   // Recording settings
   isRecording: boolean;
   format: 'wav' | 'mp3';
+
+  // Checkpoint — periodic disk-based backup for crash recovery
+  checkpointTimer: ReturnType<typeof setInterval> | null;
+  checkpointPath: string | null;
+  lastCheckpointBytes: number;
 }
 
 // Active recording sessions by call ID
@@ -77,9 +90,17 @@ export function startRecording(
     lastActivityTime: new Date(),
     isRecording: true,
     format: 'wav', // WAV for lossless quality, can transcode to MP3 later
+    checkpointTimer: null,
+    checkpointPath: null,
+    lastCheckpointBytes: 0,
   };
 
   activeRecordings.set(callId, session);
+
+  // Start periodic checkpoint timer — saves audio to disk for crash recovery
+  session.checkpointTimer = setInterval(() => {
+    saveAudioCheckpoint(callId, session);
+  }, CHECKPOINT_INTERVAL_MS);
 
   // Mark recording as started in database
   db.update(callSessions)
@@ -134,6 +155,87 @@ export function recordOutboundAudio(callId: string, audioBuffer: Buffer): void {
 }
 
 /**
+ * Save audio checkpoint to disk for crash recovery.
+ * Only checkpoints if the call is long enough and there's new audio since last checkpoint.
+ */
+function saveAudioCheckpoint(callId: string, session: CallRecordingSession): void {
+  const durationSec = Math.round((Date.now() - session.startTime.getTime()) / 1000);
+  if (durationSec < CHECKPOINT_MIN_DURATION_SEC) return; // too short to bother
+
+  const totalBytes = session.inboundBytes + session.outboundBytes;
+  if (totalBytes <= session.lastCheckpointBytes) return; // no new audio
+
+  try {
+    // Ensure checkpoint directory exists
+    if (!fs.existsSync(CHECKPOINT_DIR)) {
+      fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
+    }
+
+    const checkpointFile = path.join(CHECKPOINT_DIR, `${session.callSessionId}.checkpoint`);
+
+    // Save metadata + raw audio chunk references as JSON
+    const metadata = {
+      callId,
+      callSessionId: session.callSessionId,
+      campaignId: session.campaignId,
+      contactId: session.contactId,
+      startTime: session.startTime.toISOString(),
+      durationSec,
+      inboundBytes: session.inboundBytes,
+      outboundBytes: session.outboundBytes,
+      inboundChunkCount: session.inboundAudioChunks.length,
+      outboundChunkCount: session.outboundAudioChunks.length,
+      checkpointTime: new Date().toISOString(),
+    };
+
+    // Save the full WAV to disk as a checkpoint
+    const wavBuffer = createWavFromMulaw(
+      session.inboundAudioChunks,
+      session.outboundAudioChunks,
+      session.inboundTimestamps,
+      session.outboundTimestamps,
+      session.startTime.getTime()
+    );
+
+    const wavFile = path.join(CHECKPOINT_DIR, `${session.callSessionId}.wav`);
+    fs.writeFileSync(wavFile, wavBuffer);
+    fs.writeFileSync(checkpointFile, JSON.stringify(metadata, null, 2));
+
+    session.checkpointPath = wavFile;
+    session.lastCheckpointBytes = totalBytes;
+
+    console.log(`${LOG_PREFIX} 💾 Checkpoint saved for call ${callId}: ${Math.round(wavBuffer.length / 1024)}KB (${durationSec}s)`);
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} Failed to save checkpoint for call ${callId}:`, err?.message);
+  }
+}
+
+/**
+ * Clean up checkpoint files for a call (called after successful upload)
+ */
+function cleanupCheckpoint(session: CallRecordingSession): void {
+  try {
+    const metaFile = path.join(CHECKPOINT_DIR, `${session.callSessionId}.checkpoint`);
+    const wavFile = path.join(CHECKPOINT_DIR, `${session.callSessionId}.wav`);
+
+    if (fs.existsSync(metaFile)) fs.unlinkSync(metaFile);
+    if (fs.existsSync(wavFile)) fs.unlinkSync(wavFile);
+  } catch {
+    // Non-critical — temp files will eventually be cleaned by OS
+  }
+}
+
+/**
+ * Stop checkpoint timer for a session
+ */
+function stopCheckpointTimer(session: CallRecordingSession): void {
+  if (session.checkpointTimer) {
+    clearInterval(session.checkpointTimer);
+    session.checkpointTimer = null;
+  }
+}
+
+/**
  * Stop recording and upload to cloud storage
  * Called when call ends
  */
@@ -145,6 +247,7 @@ export async function stopRecordingAndUpload(callId: string): Promise<string | n
   }
 
   session.isRecording = false;
+  stopCheckpointTimer(session);
   activeRecordings.delete(callId);
 
   const durationSec = Math.round((Date.now() - session.startTime.getTime()) / 1000);
@@ -196,18 +299,25 @@ export async function stopRecordingAndUpload(callId: string): Promise<string | n
 
     if (s3Key) {
       console.log(`${LOG_PREFIX} ✅ Recording uploaded for call ${callId}: ${s3Key}`);
+      cleanupCheckpoint(session);
       return s3Key;
     } else {
       console.error(`${LOG_PREFIX} ❌ Failed to upload recording for call ${callId}`);
+      // Keep checkpoint on disk — recovery process can use it
       return null;
     }
   } catch (error) {
     console.error(`${LOG_PREFIX} ❌ Error processing recording for call ${callId}:`, error);
-    
+
     await db.update(callSessions)
       .set({ recordingStatus: 'failed' })
       .where(eq(callSessions.id, session.callSessionId));
-    
+
+    // Keep checkpoint on disk — recovery process can use it
+    if (session.checkpointPath) {
+      console.log(`${LOG_PREFIX} 💾 Checkpoint preserved at ${session.checkpointPath} for crash recovery`);
+    }
+
     return null;
   }
 }
@@ -220,6 +330,7 @@ export function cancelRecording(callId: string): void {
   if (!session) return;
 
   session.isRecording = false;
+  stopCheckpointTimer(session);
   activeRecordings.delete(callId);
 
   console.log(`${LOG_PREFIX} Cancelled recording for call ${callId}`);
@@ -421,6 +532,82 @@ function createWavHeader(
   header.writeUInt32LE(dataSize, 40);
   
   return header;
+}
+
+// ============================================================================
+// CHECKPOINT RECOVERY — run on server startup to salvage audio from crashed calls
+// ============================================================================
+
+/**
+ * Recover and upload any audio checkpoints left from crashed calls.
+ * Call this during server startup to ensure no long-call audio is lost.
+ */
+export async function recoverAudioCheckpoints(): Promise<{ recovered: number; failed: number }> {
+  const stats = { recovered: 0, failed: 0 };
+
+  if (!fs.existsSync(CHECKPOINT_DIR)) return stats;
+
+  const checkpointFiles = fs.readdirSync(CHECKPOINT_DIR).filter(f => f.endsWith('.checkpoint'));
+  if (checkpointFiles.length === 0) return stats;
+
+  console.log(`${LOG_PREFIX} 🔄 Found ${checkpointFiles.length} audio checkpoint(s) from previous session — recovering...`);
+
+  for (const metaFile of checkpointFiles) {
+    try {
+      const metaPath = path.join(CHECKPOINT_DIR, metaFile);
+      const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      const wavFile = path.join(CHECKPOINT_DIR, `${metadata.callSessionId}.wav`);
+
+      if (!fs.existsSync(wavFile)) {
+        console.warn(`${LOG_PREFIX} Checkpoint WAV missing for ${metadata.callSessionId}, skipping`);
+        fs.unlinkSync(metaPath);
+        continue;
+      }
+
+      // Check if this session already has a recording (maybe it was uploaded before crash)
+      const [session] = await db
+        .select({ recordingStatus: callSessions.recordingStatus, recordingS3Key: callSessions.recordingS3Key })
+        .from(callSessions)
+        .where(eq(callSessions.id, metadata.callSessionId))
+        .limit(1);
+
+      if (session?.recordingS3Key && session.recordingStatus === 'stored') {
+        console.log(`${LOG_PREFIX} Session ${metadata.callSessionId} already has recording — cleaning up checkpoint`);
+        fs.unlinkSync(metaPath);
+        fs.unlinkSync(wavFile);
+        continue;
+      }
+
+      // Upload the checkpoint WAV
+      const wavBuffer = fs.readFileSync(wavFile);
+      console.log(`${LOG_PREFIX} 🔄 Uploading recovered audio for session ${metadata.callSessionId} (${Math.round(wavBuffer.length / 1024)}KB, ${metadata.durationSec}s)`);
+
+      const s3Key = await uploadCallSessionRecordingBuffer(
+        metadata.callSessionId,
+        metadata.campaignId,
+        wavBuffer,
+        'wav'
+      );
+
+      if (s3Key) {
+        console.log(`${LOG_PREFIX} ✅ Recovered recording uploaded: ${s3Key}`);
+        stats.recovered++;
+      } else {
+        console.error(`${LOG_PREFIX} ❌ Failed to upload recovered recording for ${metadata.callSessionId}`);
+        stats.failed++;
+      }
+
+      // Clean up checkpoint files
+      fs.unlinkSync(metaPath);
+      fs.unlinkSync(wavFile);
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} Error recovering checkpoint ${metaFile}:`, err?.message);
+      stats.failed++;
+    }
+  }
+
+  console.log(`${LOG_PREFIX} 🔄 Checkpoint recovery complete: ${stats.recovered} recovered, ${stats.failed} failed`);
+  return stats;
 }
 
 // ============================================================================

@@ -7,7 +7,7 @@ import { processPendingTranscriptions } from './google-transcription';
 import { processUnanalyzedLeads } from './ai-qa-analyzer';
 import { startEmailValidationJob } from '../jobs/email-validation-job';
 import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';
-import { processMissingTranscripts } from './transcription-reliability';
+import { processMissingTranscripts, processLongCallMissingTranscripts } from './transcription-reliability';
 import { syncTelnyxRecordingsToDatabase } from './telnyx-sync-service';
 import { executeDueJourneyActions } from './client-journey-automation';
 import { mercuryEmailService } from './mercury/email-service';
@@ -20,12 +20,13 @@ import { eq, lt, and, inArray, sql } from 'drizzle-orm';
 // - Reduced from 60s to 120s for transcription (less aggressive)
 // - Reduced from 90s to 120s for analysis (batch smaller, run less often)
 // - This allows connection pool to recover between runs
-const TRANSCRIPTION_JOB_INTERVAL = 120000; // Every 120 seconds (was 60s)
+const TRANSCRIPTION_JOB_INTERVAL = parseInt(process.env.TRANSCRIPTION_JOB_INTERVAL_MS || '60000', 10); // Every 60s — parallel pool completes batches in ~10-15s
 const AI_ANALYSIS_JOB_INTERVAL = 120000; // Every 120 seconds (was 90s)
 const LOCK_SWEEPER_INTERVAL = 600000; // Every 10 minutes (was 5 min)
 const TELNYX_RECORDING_SYNC_INTERVAL = 300000; // Every 5 minutes - auto-fetch last 24h recordings
 const JOURNEY_ACTION_INTERVAL = 60000; // Every 60 seconds
 const MERCURY_OUTBOX_INTERVAL = 60000; // Every 60 seconds — flush queued Mercury emails
+const LONG_CALL_RECOVERY_INTERVAL = parseInt(process.env.LONG_CALL_RECOVERY_INTERVAL_MS || '300000', 10); // Every 5 min — parallel pool is much faster
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -44,6 +45,7 @@ let lockSweeperInterval: NodeJS.Timeout | null = null;
 let telnyxSyncInterval: NodeJS.Timeout | null = null;
 let journeyActionInterval: NodeJS.Timeout | null = null;
 let mercuryOutboxInterval: NodeJS.Timeout | null = null;
+let longCallRecoveryInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
@@ -52,6 +54,7 @@ let isLockSweeperRunning = false;
 let isTelnyxSyncRunning = false;
 let isJourneyActionRunning = false;
 let isMercuryOutboxRunning = false;
+let isLongCallRecoveryRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -167,6 +170,27 @@ export function startBackgroundJobs() {
         isTranscriptionRunning = false;
       }
     }, TRANSCRIPTION_JOB_INTERVAL);
+  }
+
+  // Long-call priority recovery job — aggressively finds and transcribes long calls (>25s)
+  // that are missing transcripts. Runs every 10 minutes with multi-strategy fallback.
+  if (ENABLE_TRANSCRIPTION) {
+    longCallRecoveryInterval = setInterval(async () => {
+      if (isLongCallRecoveryRunning) {
+        return; // Skip if still running
+      }
+
+      isLongCallRecoveryRunning = true;
+      try {
+        await withJobTimeout('Long-Call Recovery', async () => {
+          await processLongCallMissingTranscripts();
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Long-call recovery job error:', error);
+      } finally {
+        isLongCallRecoveryRunning = false;
+      }
+    }, LONG_CALL_RECOVERY_INTERVAL);
   }
 
   // AI analysis processing job (optional)
@@ -369,6 +393,11 @@ export function stopBackgroundJobs() {
   if (mercuryOutboxInterval) {
     clearInterval(mercuryOutboxInterval);
     mercuryOutboxInterval = null;
+  }
+
+  if (longCallRecoveryInterval) {
+    clearInterval(longCallRecoveryInterval);
+    longCallRecoveryInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');

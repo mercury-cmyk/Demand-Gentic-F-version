@@ -25,14 +25,15 @@
 import Srf from 'drachtio-srf';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import * as sdp from 'sdp-transform';
+// sdp-transform removed — SDP is built as a plain string for maximum Telnyx compatibility
 
 // Configuration
-const DRACHTIO_HOST = process.env.DRACHTIO_HOST || 'localhost';
-const DRACHTIO_PORT = parseInt(process.env.DRACHTIO_PORT || '9022');
-const SIP_LISTEN_HOST = process.env.SIP_LISTEN_HOST || '0.0.0.0';
-const SIP_LISTEN_PORT = parseInt(process.env.SIP_LISTEN_PORT || '5060');
-const PUBLIC_IP = process.env.PUBLIC_IP || '';
+const DRACHTIO_HOST = (process.env.DRACHTIO_HOST || 'localhost').trim();
+const DRACHTIO_PORT = parseInt((process.env.DRACHTIO_PORT || '9022').trim());
+const DRACHTIO_SECRET = (process.env.DRACHTIO_SECRET || 'cymru').trim();
+const SIP_LISTEN_HOST = (process.env.SIP_LISTEN_HOST || '0.0.0.0').trim();
+const SIP_LISTEN_PORT = parseInt((process.env.SIP_LISTEN_PORT || '5060').trim());
+const PUBLIC_IP = (process.env.PUBLIC_IP || '').trim();
 const RTP_PORT_MIN = parseInt(process.env.RTP_PORT_MIN || '10000');
 const RTP_PORT_MAX = parseInt(process.env.RTP_PORT_MAX || '20000');
 
@@ -187,7 +188,7 @@ export class DrachtioSIPServer {
 
     try {
       log('Initializing Drachtio SIP Server...');
-      log(`Configuration: host=${DRACHTIO_HOST}, port=${DRACHTIO_PORT}, listenPort=${SIP_LISTEN_PORT}`);
+      log(`Configuration: host=${DRACHTIO_HOST}, port=${DRACHTIO_PORT}, secret=${DRACHTIO_SECRET ? 'set' : 'MISSING'}, listenPort=${SIP_LISTEN_PORT}`);
 
       if (!PUBLIC_IP) {
         logError('PUBLIC_IP not set - SDP will not include public address');
@@ -227,23 +228,25 @@ export class DrachtioSIPServer {
     if (!this.srf) return false;
 
     try {
-      // Check if the SRF has a valid socket for outbound requests
-      // The drachtio agent stores sockets in an internal map
+      // In outbound-connect mode, the SRF connection itself is the socket
+      // for UAC requests. If we're connected, we can make outbound calls.
+      if (this.isConnected) {
+        log('Drachtio connected - outbound calling available');
+        return true;
+      }
+
+      // Fallback: check internal sockets
       const agent = this.srf._agent;
-      if (!agent) {
-        log('No drachtio agent available');
-        return false;
+      if (agent) {
+        const sockets = agent._sockets;
+        if (sockets && sockets.size > 0) {
+          log(`Drachtio has ${sockets.size} socket(s) registered`);
+          return true;
+        }
       }
 
-      // Check if we have any registered sockets
-      const sockets = agent._sockets;
-      if (!sockets || sockets.size === 0) {
-        log('No sockets registered with drachtio agent');
-        return false;
-      }
-
-      log(`Drachtio has ${sockets.size} socket(s) registered`);
-      return true;
+      log('No outbound capability detected');
+      return false;
     } catch (error: any) {
       log(`Error checking outbound capability: ${error.message}`);
       return false;
@@ -253,33 +256,44 @@ export class DrachtioSIPServer {
   private async connectToDrachtio(): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        this.lastConnectionError = `Connection timeout to Drachtio at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`;
         reject(new Error(`Connection timeout to Drachtio at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`));
       }, 10000);
+
+      log(`Connecting to Drachtio at ${DRACHTIO_HOST}:${DRACHTIO_PORT} with secret=${DRACHTIO_SECRET ? '***' : 'MISSING'}`);
 
       this.srf.connect(
         {
           host: DRACHTIO_HOST,
           port: DRACHTIO_PORT,
+          secret: DRACHTIO_SECRET,
         },
-        () => {
+        (err: any, hostport: string) => {
           clearTimeout(timeout);
-          log(`Connected to Drachtio daemon at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`);
+          if (err) {
+            this.isConnected = false;
+            this.lastConnectionError = err?.message || String(err);
+            logError(`Drachtio authentication failed: ${err.message || err}`);
+            reject(err);
+            return;
+          }
+          this.isConnected = true;
+          this.lastConnectionError = null;
+          log(`Connected and authenticated to Drachtio daemon at ${DRACHTIO_HOST}:${DRACHTIO_PORT} (hostport: ${hostport})`);
           resolve();
-        },
-        (error: any) => {
-          clearTimeout(timeout);
-          reject(error);
         }
       );
 
       this.srf.on('error', (error: any) => {
         logError('Drachtio connection error', error);
         this.isConnected = false;
+        this.lastConnectionError = error?.message || String(error);
       });
 
       this.srf.on('disconnect', () => {
         log('Drachtio connection closed');
         this.isConnected = false;
+        this.lastConnectionError = 'Disconnected from drachtio daemon';
       });
     });
   }
@@ -388,117 +402,35 @@ export class DrachtioSIPServer {
   }
 
   /**
-   * Generate SDP with ICE candidates and DTLS
+   * Generate standard SIP SDP for PSTN/Telnyx trunk
+   * Uses plain RTP/AVP with G.711 codecs — no WebRTC attributes (ICE, DTLS, SRTP)
    */
   private generateSDP(options: {
     port: number;
     remoteSdp?: string;
     callId: string;
   }): string {
-    const { port, remoteSdp, callId } = options;
+    const { port, callId } = options;
     const listenAddr = PUBLIC_IP || SIP_LISTEN_HOST;
+    const sessionId = Math.floor(Math.random() * 1e10);
 
-    const sdpObj = {
-      version: 0,
-      origin: {
-        username: 'drachtio',
-        sessionId: Math.random() * 1e10,
-        sessionVersion: 0,
-        netType: 'IN',
-        ipVer: 4,
-        address: listenAddr,
-      },
-      name: `Call ${callId}`,
-      timing: { start: 0, stop: 0 },
-      media: [
-        {
-          type: 'audio',
-          port,
-          protocol: 'RTP/SAVP', // RTP with SRTP
-          payloads: [111, 126, 0, 8, 97, 98],
-          rtp: [
-            { payload: 111, codec: 'OPUS', rate: 48000, encoding: 2 },
-            { payload: 126, codec: 'telephone-event', rate: 8000 },
-            { payload: 0, codec: 'PCMU', rate: 8000 },
-            { payload: 8, codec: 'PCMA', rate: 8000 },
-            { payload: 97, codec: 'iLBC', rate: 8000 },
-            { payload: 98, codec: 'iLBC', rate: 8000 },
-          ],
-          fmtp: [
-            { payload: 126, config: '0-15' },
-            { payload: 97, config: 'mode=20' },
-            { payload: 98, config: 'mode=30' },
-          ],
-          iceUfrag: this.generateUfrag(),
-          icePwd: this.generatePwd(),
-          candidates: this.generateICECandidates(listenAddr, port),
-          fingerprint: {
-            type: 'sha-256',
-            hash: this.generateDTLSFingerprint(),
-          },
-          setup: 'passive',
-          rtcpMux: 'yes',
-        } as any,
-      ],
-      groups: [
-        {
-          type: 'BUNDLE',
-          mids: '0',
-        },
-      ],
-    } as any;
-
-    return sdp.write(sdpObj);
-  }
-
-  /**
-   * Generate ICE candidates
-   */
-  private generateICECandidates(
-    address: string,
-    port: number
-  ): Array<{ foundation: string; component: number; transport: string; priority: number; ip: string; port: number; type: string }> {
-    const candidates: Array<any> = [
-      {
-        foundation: '1',
-        component: 1,
-        transport: 'udp',
-        priority: 2130706431,
-        ip: address,
-        port,
-        type: 'host',
-      },
+    // Build standard SIP SDP manually for maximum compatibility with Telnyx
+    const lines = [
+      'v=0',
+      `o=drachtio ${sessionId} 1 IN IP4 ${listenAddr}`,
+      `s=DemandGentic ${callId}`,
+      `c=IN IP4 ${listenAddr}`,
+      't=0 0',
+      `m=audio ${port} RTP/AVP 0 8 101`,
+      'a=rtpmap:0 PCMU/8000',
+      'a=rtpmap:8 PCMA/8000',
+      'a=rtpmap:101 telephone-event/8000',
+      'a=fmtp:101 0-15',
+      'a=ptime:20',
+      'a=sendrecv',
     ];
 
-    // Add STUN reflexive candidates if STUN servers available
-    if (STUN_SERVERS.length > 0) {
-      candidates.push({
-        foundation: '2',
-        component: 1,
-        transport: 'udp',
-        priority: 2130706431,
-        ip: address,
-        port,
-        type: 'srflx',
-        raddr: address,
-        rport: port,
-      });
-    }
-
-    return candidates;
-  }
-
-  private generateUfrag(): string {
-    return Math.random().toString(36).substr(2, 16);
-  }
-
-  private generatePwd(): string {
-    return Math.random().toString(36).substr(2, 24);
-  }
-
-  private generateDTLSFingerprint(): string {
-    // In production, use actual DTLS certificate fingerprint
-    return 'F2:B7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7';
+    return lines.join('\r\n') + '\r\n';
   }
 
   /**

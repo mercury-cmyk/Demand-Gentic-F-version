@@ -348,26 +348,42 @@ export default function LeadsPage() {
     },
   });
 
+  const [bypassQualityCheck, setBypassQualityCheck] = React.useState(false);
+
   const approveMutation = useMutation({
     mutationFn: async (id: string) => {
       if (!user?.id) {
         throw new Error("User not authenticated");
       }
-      return await apiRequest('POST', `/api/leads/${id}/approve`, { approvedById: user.id });
+      return await apiRequest('POST', `/api/leads/${id}/approve`, { 
+        approvedById: user.id,
+        bypassQualityCheck 
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      setBypassQualityCheck(false); // Reset bypass flag
       toast({
         title: "Success",
-        description: "Lead approved successfully",
+        description: "Lead approved and moved to approved section",
       });
     },
-    onError: (error: Error) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to approve lead",
-        variant: "destructive",
-      });
+    onError: (error: any) => {
+      // Check if error is due to quality requirements
+      if (error.errors && error.canBypass) {
+        toast({
+          title: "Quality Requirements Not Met",
+          description: `${error.message}\n\nMissing: ${error.errors.join(', ')}\n\nClick approve again to bypass.`,
+          variant: "default",
+        });
+        setBypassQualityCheck(true); // Set bypass for next attempt
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to approve lead",
+          variant: "destructive",
+        });
+      }
     },
   });
 
@@ -938,6 +954,7 @@ export default function LeadsPage() {
     const config: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
       new: { variant: "secondary", label: "New" },
       under_review: { variant: "default", label: "Under Review" },
+      'Pending Review': { variant: "default", label: "Pending Review" },
       approved: { variant: "outline", label: "Approved" },
       pending_pm_review: { variant: "outline", label: "Approved (PM)" },
       rejected: { variant: "destructive", label: "Rejected" },
@@ -1062,9 +1079,9 @@ export default function LeadsPage() {
     if (filterCampaign && l.campaignId !== filterCampaign) return false;
     if (filterQAStatus) {
       if (filterQAStatus === 'approved') {
-        if (!isQaApprovedStatus(l.qaStatus)) return false;
+        if (!(isQaApprovedStatus(l.qaStatus) || l.qaStatus === 'published')) return false;
       } else if (filterQAStatus === 'pending_review' || filterQAStatus === 'in_review') {
-        if (l.qaStatus !== 'under_review') return false;
+        if (!(l.qaStatus === 'new' || l.qaStatus === 'under_review' || l.qaStatus === 'Pending Review')) return false;
       } else if (l.qaStatus !== filterQAStatus) {
         return false;
       }
@@ -1082,7 +1099,7 @@ export default function LeadsPage() {
     return true;
   });
 
-  const pendingLeads = filteredLeads.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review');
+  const pendingLeads = filteredLeads.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review' || l.qaStatus === 'Pending Review');
   const approvedLeads = filteredLeads.filter(l => isQaApprovedStatus(l.qaStatus) || l.qaStatus === 'published');
   const pmReviewLeads = filteredLeads.filter(l => isQaApprovedStatus(l.qaStatus));
   const rejectedLeads = filteredLeads.filter(l => l.qaStatus === 'rejected');

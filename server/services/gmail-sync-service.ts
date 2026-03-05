@@ -7,6 +7,8 @@ import type { MailboxAccount } from "@shared/schema";
 import { emailTrackingService } from "../lib/email-tracking-service";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-encryption-key-change-in-production";
+const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID ?? process.env.GOOGLE_AUTH_CLIENT_ID ?? "").trim();
+const GOOGLE_CLIENT_SECRET = (process.env.GOOGLE_CLIENT_SECRET ?? "").trim();
 
 interface GmailHeader {
   name: string;
@@ -69,8 +71,8 @@ export class GmailSyncService {
     const refreshToken = await this.decryptToken(mailboxAccount.refreshToken);
 
     const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID ?? process.env.GOOGLE_AUTH_CLIENT_ID ?? "",
-      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     });

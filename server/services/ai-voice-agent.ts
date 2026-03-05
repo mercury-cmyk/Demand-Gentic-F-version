@@ -23,9 +23,11 @@ import {
   getOrBuildParticipantCallPlan,
 } from "./account-call-service";
 import { buildCampaignBehaviorPolicySection } from "./agents/unified/campaign-behavior-policy";
+import { getCampaignConfiguration, generateAgentSystemPrompt } from "./campaign-configuration";
 
 let openai: OpenAI | null = null;
 let gemini: GoogleGenerativeAI | null = null;
+const ENABLE_VOICE_TURN_TELEMETRY = (process.env.VOICE_TURN_TELEMETRY ?? "true").toLowerCase() !== "false";
 
 function getOpenAI(): OpenAI {
   throw new Error("OpenAI provider is disabled for voice agents.");
@@ -204,6 +206,9 @@ export class AiVoiceAgent extends EventEmitter {
   private gatekeeperAttempts = 0;
   private conversationHistory: { role: "ai" | "human"; text: string }[] = [];
   private readonly MAX_CONVERSATION_HISTORY = 30; // Keep last 30 turns to limit token usage
+  private systemPromptPromise: Promise<string> | null = null;
+  private systemPromptBuildMs: number | null = null;
+  private turnCounter = 0;
   private callId: string;
 
   constructor(settings: AiAgentSettings, context: CallContext) {
@@ -326,6 +331,15 @@ export class AiVoiceAgent extends EventEmitter {
       });
       if (behaviorPolicy) {
         prompt += `\n\n---\n\n${behaviorPolicy}`;
+      }
+
+      // Layer 3.6: Campaign configuration system prompt (campaign-type-specific constraints)
+      if (this.context.campaignType) {
+        const config = getCampaignConfiguration(this.context.campaignType);
+        if (config) {
+          const campaignConfigPrompt = generateAgentSystemPrompt(config, undefined);
+          prompt += `\n\n---\n\n## Campaign Type Specific Instructions\n${campaignConfigPrompt}`;
+        }
       }
 
       // Layer 4: Account & Contact context
@@ -511,6 +525,11 @@ IMPORTANT:
   async startConversation(): Promise<void> {
     this.emit("conversation:started", this.callId);
     this.emit("conversation:phase", "opening");
+
+    // Warm prompt cache early to reduce first-turn latency
+    void this.getSystemPromptCached().catch((error) => {
+      console.warn("[AiVoiceAgent] Prompt prewarm failed:", error);
+    });
   }
 
   async processIncomingAudio(audioBuffer: Buffer): Promise<Buffer | null> {
@@ -537,24 +556,77 @@ IMPORTANT:
     }
 
     try {
-        const systemPrompt = await this.buildSystemPrompt();
+      const turnNumber = ++this.turnCounter;
+      const turnStartedAt = Date.now();
+      const promptCacheHit = this.systemPromptPromise !== null;
+      const systemPrompt = await this.getSystemPromptCached();
+      const runtimePrompt = `${systemPrompt}\n\n## TURN-LEVEL ANTI-REPETITION\n- Avoid repeating your immediately previous response verbatim.\n- If similar intent is needed, use fresh wording in 1-2 concise sentences.`;
+      const lastAiResponse = [...this.conversationHistory]
+        .reverse()
+        .find((m) => m.role === "ai")
+        ?.text || null;
       
       // Prune history to last N turns to prevent quadratic token growth
       const historyForApi = this.conversationHistory.length > this.MAX_CONVERSATION_HISTORY
         ? this.conversationHistory.slice(-this.MAX_CONVERSATION_HISTORY)
         : this.conversationHistory;
 
-      const aiResponse = await generateGeminiChatResponse(
-        systemPrompt,
+      const firstModelStartedAt = Date.now();
+      let aiResponse = await generateGeminiChatResponse(
+        runtimePrompt,
         historyForApi,
-        { maxTokens: 200, temperature: 0.7 }
+        { maxTokens: 200, temperature: 0.6 }
       );
+      const firstModelResponseMs = Date.now() - firstModelStartedAt;
+      let modelResponseMs = firstModelResponseMs;
+      let repeatRetryTriggered = false;
+      let retryModelResponseMs: number | null = null;
+
+      if (lastAiResponse && this.isNearDuplicateResponse(aiResponse, lastAiResponse)) {
+        repeatRetryTriggered = true;
+        console.warn("[AiVoiceAgent] Detected repeated response pattern, retrying with fresh wording.");
+        const retryHistory = [
+          ...historyForApi,
+          {
+            role: "human" as const,
+            text: "Please answer naturally in one or two fresh sentences and avoid repeating your previous wording.",
+          },
+        ];
+
+        const retryStartedAt = Date.now();
+        aiResponse = await generateGeminiChatResponse(
+          runtimePrompt,
+          retryHistory,
+          { maxTokens: 200, temperature: 0.45 }
+        );
+        retryModelResponseMs = Date.now() - retryStartedAt;
+        modelResponseMs = retryModelResponseMs;
+      }
+
+      aiResponse = this.dedupeRepeatedSentences(aiResponse);
+      if (!aiResponse.trim()) {
+        aiResponse = "Absolutely — could you share a little more so I can respond precisely?";
+      }
+
       this.conversationHistory.push({ role: "ai", text: aiResponse });
       // Trim stored history to prevent memory growth
       while (this.conversationHistory.length > this.MAX_CONVERSATION_HISTORY) {
         this.conversationHistory.shift();
       }
       this.emit("transcript:ai", aiResponse);
+
+      this.emitVoiceTurnTelemetry("voice_agent_turn_metrics", {
+        turn: turnNumber,
+        prompt_cache_hit: promptCacheHit,
+        prompt_build_ms: this.systemPromptBuildMs,
+        first_model_response_ms: firstModelResponseMs,
+        model_response_ms: modelResponseMs,
+        repeat_retry_triggered: repeatRetryTriggered,
+        repeat_retry_model_response_ms: retryModelResponseMs,
+        total_turn_ms: Date.now() - turnStartedAt,
+        history_turns_used: historyForApi.length,
+        output_chars: aiResponse.length,
+      });
 
       this.updatePhaseFromResponse(humanText, aiResponse);
 
@@ -563,6 +635,113 @@ IMPORTANT:
       this.emit("error", error as Error);
       throw error;
     }
+  }
+
+  private getSystemPromptCached(): Promise<string> {
+    if (!this.systemPromptPromise) {
+      const buildStartedAt = Date.now();
+      this.systemPromptPromise = this.buildSystemPrompt()
+        .then((prompt) => {
+          this.systemPromptBuildMs = Date.now() - buildStartedAt;
+          this.emitVoiceTurnTelemetry("voice_agent_prompt_cache", {
+            cache_state: "miss",
+            prompt_build_ms: this.systemPromptBuildMs,
+            prompt_chars: prompt.length,
+          });
+          return prompt;
+        })
+        .catch((error) => {
+          this.systemPromptPromise = null;
+          this.systemPromptBuildMs = null;
+          this.emitVoiceTurnTelemetry("voice_agent_prompt_cache", {
+            cache_state: "error",
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        });
+    }
+
+    return this.systemPromptPromise;
+  }
+
+  private emitVoiceTurnTelemetry(event: string, payload: Record<string, unknown>): void {
+    if (!ENABLE_VOICE_TURN_TELEMETRY) {
+      return;
+    }
+
+    try {
+      console.log(JSON.stringify({
+        event,
+        callId: this.callId,
+        campaignId: this.context.campaignId,
+        timestamp: new Date().toISOString(),
+        ...payload,
+      }));
+    } catch {
+      // Never break call flow because of telemetry logging
+    }
+  }
+
+  private normalizeForComparison(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  private isNearDuplicateResponse(current: string, previous: string): boolean {
+    const a = this.normalizeForComparison(current);
+    const b = this.normalizeForComparison(previous);
+
+    if (!a || !b) return false;
+    if (a === b) return true;
+
+    // Fast substring check for near-identical phrasing
+    if (a.length > 24 && (a.includes(b) || b.includes(a))) {
+      return true;
+    }
+
+    const aWords = new Set(a.split(" "));
+    const bWords = new Set(b.split(" "));
+    if (aWords.size === 0 || bWords.size === 0) return false;
+
+    let intersection = 0;
+    for (const word of aWords) {
+      if (bWords.has(word)) {
+        intersection++;
+      }
+    }
+
+    const union = new Set([...aWords, ...bWords]).size;
+    const jaccard = union > 0 ? intersection / union : 0;
+
+    return jaccard >= 0.82;
+  }
+
+  private dedupeRepeatedSentences(text: string): string {
+    const sentences = text
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (sentences.length <= 1) {
+      return text;
+    }
+
+    const seen = new Set<string>();
+    const unique: string[] = [];
+
+    for (const sentence of sentences) {
+      const normalized = this.normalizeForComparison(sentence);
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      unique.push(sentence);
+    }
+
+    return unique.join(" ").trim();
   }
 
   private detectGatekeeper(text: string): boolean {

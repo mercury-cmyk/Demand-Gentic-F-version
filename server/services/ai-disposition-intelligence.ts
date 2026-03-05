@@ -242,7 +242,7 @@ Generate a comprehensive coaching analysis based on the full ${totalAnalyzed}-ca
     console.log(`${LOG_PREFIX} Generating coaching for ${totalAnalyzed} calls (${calls.length} sampled) using Gemini 3 Deep Think...`);
 
     const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-    const parsed = await deepAnalyze<any>(fullPrompt, { temperature: 0.3, maxTokens: 6000, label: "disposition-intel" });
+    const parsed = await deepAnalyze<any>(fullPrompt, { temperature: 0.3, maxTokens: 6000, label: "disposition-intel", preferredProvider: "deepseek" });
     console.log(`${LOG_PREFIX} Coaching generated: ${parsed.topIssues?.length || 0} issues, ${parsed.recommendations?.length || 0} recommendations`);
 
     return {

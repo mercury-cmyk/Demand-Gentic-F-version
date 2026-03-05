@@ -1189,10 +1189,11 @@ export function ensureVoiceAgentControlLayer(prompt: string, useCondensed: boole
   // Skip if prompt already follows the CANONICAL STRUCTURE
   // (Personality → Environment → Tone → Goal → Call Flow Logic → Guardrails)
   // These prompts are self-contained and don't need the old 8-state machine layered on top
+  const hasCanonicalFlowSection = /##\s+Call\s+(Flow|Behavior)\s+Logic/i.test(trimmedPrompt);
   const hasCanonicalStructure =
     trimmedPrompt.includes('# Personality') &&
     trimmedPrompt.includes('# Goal') &&
-    trimmedPrompt.includes('## Call Flow Logic');
+    hasCanonicalFlowSection;
 
   if (hasCanonicalStructure) {
     // Prompt already follows canonical structure - return as-is

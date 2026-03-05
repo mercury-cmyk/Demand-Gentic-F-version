@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAuth, requireRole } from "../auth";
 import { storage } from "../storage";
 import { getTelnyxAiBridge, TelnyxCallEvent } from "../services/telnyx-ai-bridge";
-import { startOutboundCall as startLiveKitCall } from "../services/livekit/outbound-service";
+import * as sipDialer from "../services/sip";
 import { agentDefaults } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { isVoiceVariablePreflightError } from "../services/voice-variable-contract";
@@ -374,19 +374,30 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
       let callId: string;
       let callControlId: string | undefined;
 
-      if (callEngine === 'livekit') {
-        // LiveKit SIP path: Telnyx Call Control → SIP bridge → LiveKit room
-        console.log(`[AI Calls] Using LiveKit SIP engine for call to ${phoneNumber}`);
-        const result = await startLiveKitCall({
-          contactId: contactId!,
+      if (callEngine === 'sip' && sipDialer.isReady()) {
+        // Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live
+        console.log(`[AI Calls] Using Direct SIP engine for call to ${phoneNumber}`);
+        const result = await sipDialer.initiateAiCall({
+          toNumber: phoneNumber,
+          fromNumber,
           campaignId,
-          queueItemId,
-          overridePhoneNumber: phoneNumber,
+          contactId: contactId!,
+          queueItemId: queueItemId || '',
+          voiceName: aiSettings.persona?.voice || 'Puck',
+          contactName: context.contactFirstName || 'there',
+          contactFirstName: context.contactFirstName || 'there',
+          contactJobTitle: context.contactJobTitle || 'Decision Maker',
+          accountName: context.accountName || 'your company',
+          campaignName: context.campaignName,
         });
-        callId = result.callId;
-        callControlId = result.callId;
+        if (!result.success) {
+          throw new Error(result.error || 'SIP call initiation failed');
+        }
+        callId = result.callId!;
+        callControlId = result.callControlId;
       } else {
         // TeXML path (default): Telnyx TeXML → Gemini Live WebSocket
+        // Also used as fallback when SIP engine is selected but not ready
         const result = await bridge.initiateAiCall(
           phoneNumber,
           fromNumber,

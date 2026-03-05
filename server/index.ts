@@ -50,6 +50,8 @@ import { WebSocketServer, type WebSocket as WsWebSocket } from 'ws';
 const app = express();
 let server: http.Server | null = null;
 const SERVICE_ROLE = process.env.SERVICE_ROLE || 'all';
+const serviceRoles = new Set(SERVICE_ROLE.split(/[,+]/).map(r => r.trim()));
+const hasRole = (role: string) => serviceRoles.has('all') || serviceRoles.has(role);
 
 // Trust Replit proxy for accurate client IP detection (required for rate limiting)
 // Replit runs behind a reverse proxy that sets X-Forwarded-For header
@@ -231,24 +233,6 @@ if (isMainModule) {
     // blocks the event loop for 30-60s, preventing all HTTP responses.
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    // LiveKit Webhook Handler (Signed with LIVEKIT_WEBHOOK_SECRET or LIVEKIT_API_SECRET)
-    app.post('/webhook', async (req, res) => {
-      const { livekitWebhookHandler } = await import("./services/livekit/webhook");
-      return livekitWebhookHandler(req, res);
-    });
-
-    // Telnyx Webhook Handler for LiveKit Outbound Calls
-    app.post('/api/webhooks/telnyx-livekit', async (req, res) => {
-      try {
-        const { handleTelnyxEvent } = await import("./services/livekit/outbound-service");
-        await handleTelnyxEvent(req.body);
-        res.status(200).send('ok');
-      } catch (err) {
-        console.error('[Telnyx Webhook Error]', err);
-        res.status(500).send('error');
-      }
-    });
-
     // Register all application routes (this import is heavy — 560KB+ route file with many sub-imports)
     initPhase = 'loading_routes';
     log('Loading routes...');
@@ -304,6 +288,17 @@ if (isMainModule) {
     }
     */
 
+    // Recover audio checkpoints from crashed calls (non-blocking)
+    try {
+      const { recoverAudioCheckpoints } = await import("./services/call-recording-manager");
+      const recovery = await recoverAudioCheckpoints();
+      if (recovery.recovered > 0 || recovery.failed > 0) {
+        console.log(`[STARTUP] Audio checkpoint recovery: ${recovery.recovered} recovered, ${recovery.failed} failed`);
+      }
+    } catch (err) {
+      console.error('[STARTUP] Audio checkpoint recovery failed (non-blocking):', err);
+    }
+
     // Auto-sync prompt definitions to database (ensures prompts are available)
     try {
       const { syncPromptDefinitions } = await import("./services/prompt-management-service");
@@ -340,7 +335,7 @@ if (isMainModule) {
     }
 
     // Initialize Number Pool Scheduler (hourly/daily counter resets, cooldown processing, reputation recalc)
-    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'voice') {
+    if (hasRole('voice')) {
       try {
         const { initializeAlignedScheduler } = await import("./services/number-pool-scheduler");
         const { resetHourlyCounters } = await import("./services/number-pool/number-service");
@@ -436,25 +431,25 @@ if (isMainModule) {
       console.error('[STARTUP] Operations Hub WebSocket initialization failed (non-blocking):', err);
     }
     
-    // Initialize LiveKit Worker if explicitly enabled (SIP/WebRTC Bridge)
-    // Requires LIVEKIT_WORKER_ENABLED=true because the @livekit/rtc-node native module
-    // is not available on Alpine Linux (Cloud Run) and causes unhandled rejections on import.
-    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'voice') {
-      if (process.env.LIVEKIT_WORKER_ENABLED === 'true' && process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
-        (async () => {
-          try {
-            console.log('[STARTUP] 🚀 Initializing LiveKit Agent Worker...');
-            const { startLiveKitWorker } = await import("./services/livekit/worker");
-            await startLiveKitWorker();
-          } catch (err) {
-            console.error('[STARTUP] ❌ LiveKit Worker initialization failed:', err);
+    // Initialize SIP Dialer if enabled (Direct SIP trunk calling via Drachtio)
+    // Requires USE_SIP_CALLING=true and a running Drachtio daemon
+    if (hasRole('voice') && process.env.USE_SIP_CALLING === 'true') {
+      (async () => {
+        try {
+          console.log('[STARTUP] Initializing SIP Dialer (Drachtio)...');
+          const { initializeSipDialer } = await import("./services/sip");
+          const ready = await initializeSipDialer();
+          if (ready) {
+            console.log('[STARTUP] SIP Dialer initialized successfully');
+          } else {
+            console.warn('[STARTUP] SIP Dialer initialization returned false - SIP calls will fall back to TeXML');
           }
-        })();
-      } else if (process.env.LIVEKIT_URL && !process.env.LIVEKIT_WORKER_ENABLED) {
-        console.log('[STARTUP] ℹ️ LiveKit configured but worker disabled (set LIVEKIT_WORKER_ENABLED=true to enable)');
-      }
-    } else {
-      console.log(`[Startup] ⏭️ Skipping LiveKit Worker (Role: ${SERVICE_ROLE})`);
+        } catch (err) {
+          console.error('[STARTUP] SIP Dialer initialization failed (non-blocking):', err);
+        }
+      })();
+    } else if (process.env.USE_SIP_CALLING === 'true') {
+      console.log(`[Startup] Skipping SIP Dialer (Role: ${SERVICE_ROLE})`);
     }
 
     // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
@@ -628,7 +623,7 @@ if (isMainModule) {
     
     console.log(`\n[Startup] 🚀 Running with SERVICE_ROLE: ${SERVICE_ROLE.toUpperCase()}`);
 
-    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'analysis') {
+    if (hasRole('analysis')) {
       const { startBackgroundJobs } = await import("./services/background-jobs");
       if (hasRedis) {
         startBackgroundJobs();
@@ -688,7 +683,7 @@ if (isMainModule) {
       console.log(`[Startup] ⏭️ Skipping analysis/data queues (Role: ${SERVICE_ROLE})`);
     }
     
-    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'voice') {
+    if (hasRole('voice')) {
       // Initialize auto recording sync worker (BullMQ)
       if (hasRedis) {
         const { initializeAutoRecordingSyncWorker } = await import("./workers/auto-recording-sync-worker");
@@ -738,7 +733,7 @@ if (isMainModule) {
       console.log(`[Startup] ⏭️ Skipping voice orchestrator (Role: ${SERVICE_ROLE})`);
     }
 
-    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'analysis') {
+    if (hasRole('analysis')) {
       // Initialize Vertex AI Agentic CRM Operator
       if (process.env.USE_VERTEX_AI === 'true') {
         const { initializeVertexAI } = await import("./services/vertex-ai");
@@ -759,9 +754,10 @@ if (isMainModule) {
       }
     }
 
-    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'email') {
-      // M365 email sync - Enabled by default, set ENABLE_M365_SYNC=false to disable
-      const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC !== 'false';
+    if (hasRole('email')) {
+      // M365 email sync - Only start if enabled (DISABLED by default for performance)
+      // Enable M365 auto-sync for production email inbox
+      const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true';
       if (ENABLE_M365_SYNC) {
         const { startM365SyncJob } = await import("./jobs/m365-sync-job");
         startM365SyncJob();
@@ -801,7 +797,7 @@ if (isMainModule) {
       console.log(`[Startup] ⏭️ Skipping email sync/validation jobs (Role: ${SERVICE_ROLE})`);
     }
     
-    if (SERVICE_ROLE === 'all' || SERVICE_ROLE === 'analysis') {
+    if (hasRole('analysis')) {
       // Auto-resume stuck CSV upload jobs (with error handling and timeout)
       const { resumeStuckUploadJobs } = await import("./lib/upload-job-processor");
       setTimeout(async () => {

@@ -12,7 +12,13 @@
 
 import { createHash } from 'crypto';
 import type { AgentChannel, AgentKnowledgeSection, AgentExecutionInput, AgentExecutionOutput } from '../types';
-import { getSuperOrgOIContext } from '../../../lib/org-intelligence-helper';
+import {
+  getSuperOrgOIContext,
+  DEFAULT_ORG_INTELLIGENCE,
+  DEFAULT_COMPLIANCE_POLICY,
+  DEFAULT_PLATFORM_POLICIES,
+  DEFAULT_VOICE_DEFAULTS,
+} from '../../../lib/org-intelligence-helper';
 import type {
   IUnifiedAgent,
   UnifiedAgentType,
@@ -373,10 +379,9 @@ export abstract class UnifiedBaseAgent implements IUnifiedAgent {
    *
    * Layers merged from org-intelligence-helper:
   *  1. Core Agent Identity (demand problem-solver, human-first warmth, authentic AI)
-   *  2. Unified Knowledge Hub (compliance, gatekeeper, dispositioning, etc.)
-   *  3. Organization-specific context (super org profile, compliance, policies)
-   *  4. Campaign & engagement learning summary
-   *  5. Agent-type foundational prompt sections (from this.promptSections)
+    *  2. Organization-specific context (super org profile, compliance, policies)
+    *  3. Campaign & engagement learning summary
+    *  4. Agent-type foundational prompt sections (from this.promptSections)
    *
    * This makes OI a default dependency for every unified agent — no separate
    * injection step required.
@@ -392,7 +397,9 @@ export abstract class UnifiedBaseAgent implements IUnifiedAgent {
 
     try {
       const { buildAgentSystemPrompt } = await import('../../../lib/org-intelligence-helper');
-      const enrichedPrompt = await buildAgentSystemPrompt(foundationalPrompt);
+      const enrichedPrompt = await buildAgentSystemPrompt(foundationalPrompt, {
+        includeUnifiedKnowledge: false,
+      });
 
       return {
         prompt: enrichedPrompt,
@@ -417,6 +424,69 @@ export abstract class UnifiedBaseAgent implements IUnifiedAgent {
    * Execute — must be implemented by concrete unified agents
    */
   abstract execute(input: AgentExecutionInput): Promise<AgentExecutionOutput>;
+
+  /**
+   * Build the shared Organization Intelligence Helper knowledge section.
+   * This section should exist on every unified agent type.
+   */
+  static createOrganizationHelperKnowledgeSection(
+    agentType: UnifiedAgentType,
+    sectionNumber: number = 0
+  ): PromptSection {
+    const content = `## Organization Intelligence Helper Knowledge (Universal)
+
+This agent MUST align decisions, outputs, and behavior with Organization Intelligence Helper context.
+
+### Primary knowledge inputs (runtime)
+1. getOrganizationPromptSettings()
+   - orgIntelligence
+   - compliancePolicy
+   - platformPolicies
+   - agentVoiceDefaults
+2. getOrganizationProfile()
+   - identity
+   - offerings
+   - icp
+   - positioning
+   - outreach
+3. getOrganizationLearningSummary()
+   - recent engagement and campaign learnings
+
+### Fallback policy (if runtime org context is unavailable)
+Use these defaults from Organization Intelligence Helper:
+- DEFAULT_ORG_INTELLIGENCE
+- DEFAULT_COMPLIANCE_POLICY
+- DEFAULT_PLATFORM_POLICIES
+- DEFAULT_VOICE_DEFAULTS
+
+### Baseline reference snippets
+Org intelligence baseline:
+${DEFAULT_ORG_INTELLIGENCE}
+
+Compliance baseline:
+${DEFAULT_COMPLIANCE_POLICY}
+
+Platform policy baseline:
+${DEFAULT_PLATFORM_POLICIES}
+
+Voice defaults baseline:
+${DEFAULT_VOICE_DEFAULTS}
+
+### Enforcement
+- Never output content that conflicts with organization context.
+- If campaign instructions conflict with compliance policy, compliance policy wins.
+- If context is missing or ambiguous, use conservative defaults and stay compliant.
+- Keep messaging on-brand, human-first, and outcome-oriented.`;
+
+    return UnifiedBaseAgent.createPromptSection(
+      `org_helper_knowledge_${agentType}`,
+      'Organization Intelligence Helper Knowledge',
+      sectionNumber,
+      content,
+      'knowledge',
+      true
+    );
+  }
 
   /**
    * Create a helper to build a prompt section

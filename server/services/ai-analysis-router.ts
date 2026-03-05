@@ -38,10 +38,10 @@ interface AnalysisOptions {
 
 // Provider distribution: what percentage of traffic goes to each when all healthy
 // Default: 40% Vertex, 25% Claude, 25% DeepSeek, 10% OpenAI
-const VERTEX_WEIGHT = parseInt(process.env.AI_ROUTER_VERTEX_WEIGHT || "40", 10);
+const VERTEX_WEIGHT = parseInt(process.env.AI_ROUTER_VERTEX_WEIGHT || "20", 10);
 const CLAUDE_WEIGHT = parseInt(process.env.AI_ROUTER_CLAUDE_WEIGHT || "25", 10);
-const DEEPSEEK_WEIGHT = parseInt(process.env.AI_ROUTER_DEEPSEEK_WEIGHT || "25", 10);
-const OPENAI_WEIGHT = parseInt(process.env.AI_ROUTER_OPENAI_WEIGHT || "10", 10);
+const DEEPSEEK_WEIGHT = parseInt(process.env.AI_ROUTER_DEEPSEEK_WEIGHT || "50", 10);
+const OPENAI_WEIGHT = parseInt(process.env.AI_ROUTER_OPENAI_WEIGHT || "5", 10);
 
 // Vertex pressure threshold: if RPM > this % of max, shift load away
 const VERTEX_PRESSURE_THRESHOLD = 0.7;

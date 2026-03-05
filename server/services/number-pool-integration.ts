@@ -54,6 +54,8 @@ export interface CallerIdRequest {
   numberPoolConfig?: NumberPoolConfig;
   /** Optional call type label for metrics (e.g., ai_calls_initiate, preview_phone_test) */
   callType?: string;
+  /** Call engine override — filters numbers by Telnyx connection. Auto-detected from DB if omitted. */
+  callEngine?: 'texml' | 'sip';
 }
 
 export interface CallerIdResult {
@@ -202,6 +204,7 @@ export async function getCallerIdForCall(
       prospectNumber: request.prospectNumber,
       prospectRegion: request.prospectRegion,
       prospectTimezone: request.prospectTimezone,
+      callEngine: request.callEngine,
     });
 
     // If we got a pool number

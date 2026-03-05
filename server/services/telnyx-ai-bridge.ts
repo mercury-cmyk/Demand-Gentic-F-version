@@ -555,37 +555,53 @@ export class TelnyxAiBridge extends EventEmitter {
       phoneNumber = normalizedPhoneNumber;
       fromNumber = normalizedFromNumber;
 
-      // CHECK FOR LIVEKIT SWITCH (UI Setting or Global Env)
-      // This allows safe migration to the new stack without changing the orchestrator
-      const useLiveKit = (settings as any).voiceProvider === 'livekit' || process.env.VOICE_PROVIDER === 'livekit';
+      // CHECK FOR SIP SWITCH (UI Setting or Global Env)
+      // This allows safe A/B testing of direct SIP trunk calling via Drachtio
+      // without affecting the default TeXML path
+      const useSip = (settings as any).voiceProvider === 'sip' || process.env.VOICE_PROVIDER === 'sip';
 
-      if (useLiveKit) {
-        logger.debug(`[TelnyxAiBridge] 🔀 Switching to LiveKit for call to ${normalizedPhoneNumber}`);
+      if (useSip) {
+        logger.debug(`[TelnyxAiBridge] Switching to Direct SIP for call to ${normalizedPhoneNumber}`);
         try {
-          // Dynamic import to avoid circular dependencies
-          const { startOutboundCall } = await import('./livekit/outbound-service');
-          
-          const result = await startOutboundCall({
-            contactId: context.contactId!,
-            campaignId: context.campaignId!,
-            queueItemId: context.queueItemId,
-            overridePhoneNumber: normalizedPhoneNumber,
-            existingCallAttemptId: context.callAttemptId
-          });
+          const sipDialer = await import('./sip');
 
-          // Release locks immediately as we don't track LiveKit calls in this bridge's activeCalls map
-          // (LiveKit calls are stateless/handled by the worker)
-          this.releasePhoneNumber(normalizedPhoneNumber, 'livekit_handoff');
-          this.semaphore.release();
+          if (!sipDialer.isReady()) {
+            logger.warn('[TelnyxAiBridge] SIP dialer not ready, falling back to TeXML');
+          } else {
+            const result = await sipDialer.initiateAiCall({
+              toNumber: normalizedPhoneNumber,
+              fromNumber: normalizedFromNumber,
+              campaignId: context.campaignId!,
+              contactId: context.contactId!,
+              queueItemId: context.queueItemId || '',
+              voiceName: (settings as any).persona?.voice || 'Puck',
+              systemPrompt: (settings as any).systemPrompt,
+              contactName: [context.contactFirstName, context.contactLastName].filter(Boolean).join(' ').trim() || 'there',
+              contactFirstName: context.contactFirstName || 'there',
+              contactJobTitle: context.contactJobTitle || 'Decision Maker',
+              accountName: context.accountName || 'your company',
+              organizationName: context.organizationName,
+              campaignName: context.campaignName,
+              campaignObjective: context.campaignObjective,
+              productServiceInfo: context.productServiceInfo,
+              talkingPoints: context.talkingPoints,
+            });
 
-          return {
-            callId: result.attemptId, // Use attempt ID as internal reference
-            callControlId: result.callId // Telnyx Call Control ID
-          };
+            if (!result.success) {
+              throw new Error(result.error || 'SIP call initiation failed');
+            }
+
+            this.releasePhoneNumber(normalizedPhoneNumber, 'sip_handoff');
+            this.semaphore.release();
+
+            return {
+              callId: result.callId!,
+              callControlId: result.callControlId,
+            };
+          }
         } catch (err) {
-          console.error('[TelnyxAiBridge] LiveKit call failed:', err);
-          // Release locks on failure
-          this.releasePhoneNumber(normalizedPhoneNumber, 'livekit_failure');
+          console.error('[TelnyxAiBridge] SIP call failed:', err);
+          this.releasePhoneNumber(normalizedPhoneNumber, 'sip_failure');
           this.semaphore.release();
           throw err;
         }
@@ -1081,8 +1097,8 @@ export class TelnyxAiBridge extends EventEmitter {
     const basePollInterval = 1000; // 1 second
     const mediaPollInterval = 5000; // Reduce polling when media is connected
     const maxPollInterval = 10000;
-    const pollTimeoutMs = 5000;
-    const jitterMs = 250;
+    const pollTimeoutMs = 15000; // Increased from 5s to 15s for high-load resilience
+    const jitterMs = 500; // Increased from 250 to reduce thundering herd during errors
     let hasSpoken = false;
     let consecutiveErrors = 0;
 
@@ -1092,12 +1108,13 @@ export class TelnyxAiBridge extends EventEmitter {
         return baseInterval;
       }
 
+      // Exponential backoff capped at 30s to prevent hammering API during outages
       const backoff = Math.min(
-        maxPollInterval,
-        baseInterval * Math.pow(2, Math.min(consecutiveErrors, 4))
+        30000, // Cap at 30s during heavy backoff
+        baseInterval * Math.pow(2, Math.min(consecutiveErrors, 5))
       );
       const jitter = Math.floor(Math.random() * jitterMs);
-      return backoff + jitter;
+      return Math.min(backoff + jitter, 30000);
     };
 
     const poll = async () => {
@@ -1202,12 +1219,14 @@ export class TelnyxAiBridge extends EventEmitter {
             this.activeCalls.delete(callId);
             return;
           }
-          console.log(`[TelnyxAiBridge] Poll error: ${response.status}`);
+          console.warn(`[TelnyxAiBridge] Poll error: ${response.status} for call ${callId} (consecutive errors: ${consecutiveErrors}). Retrying with backoff...`);
           consecutiveErrors++;
           const activeCall = this.activeCalls.get(callId);
           const hasMediaConnection = activeCall?.mediaWs !== null;
           const isAnsweredViaWebhook = activeCall?.isAnswered === true;
-          setTimeout(poll, getPollDelay(hasMediaConnection, isAnsweredViaWebhook));
+          const delayMs = getPollDelay(hasMediaConnection, isAnsweredViaWebhook);
+          console.log(`[TelnyxAiBridge] Retry scheduled in ${delayMs}ms (attempt ${attempts + 1}/${effectiveMaxAttempts})`);
+          setTimeout(poll, delayMs);
           return;
         }
 
