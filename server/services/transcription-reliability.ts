@@ -509,6 +509,7 @@ export async function processMissingTranscripts(): Promise<{
       const batchResults = await transcribeBatchParallel(batchItems, 10, 200);
 
       // Save results to DB sequentially (protects connection pool)
+      let markedMissing = 0;
       for (const result of batchResults) {
         stats.processed++;
         if (result.success && result.transcript) {
@@ -529,7 +530,21 @@ export async function processMissingTranscripts(): Promise<{
           await triggerAnalysisAfterTranscript(result.callAttemptId, result.transcript);
         } else {
           stats.failed++;
+          // Permanently mark old calls (>3 days) that fail all providers — recordings are likely deleted
+          const failedCall = callsWithoutTranscripts.find(c => c.id === result.callAttemptId);
+          if (failedCall?.callEndedAt) {
+            const daysSinceEnd = (Date.now() - new Date(failedCall.callEndedAt).getTime()) / (24 * 60 * 60 * 1000);
+            if (daysSinceEnd > 3) {
+              await db.update(dialerCallAttempts)
+                .set({ fullTranscript: '[SYSTEM: Recording unavailable - transcription failed]', updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, result.callAttemptId));
+              markedMissing++;
+            }
+          }
         }
+      }
+      if (markedMissing > 0) {
+        console.log(`${LOG_PREFIX} Permanently marked ${markedMissing} calls with missing recordings`);
       }
     }
 
@@ -954,7 +969,7 @@ export async function processLongCallMissingTranscripts(): Promise<{
 
     for (const call of longCallsMissingTranscripts) {
       const transcript = call.fullTranscript || '';
-      if (transcript.startsWith('[SYSTEM:') && !transcript.includes('No recording available')) {
+      if (transcript.startsWith('[SYSTEM:')) {
         stats.alreadyMarked++;
         continue;
       }
@@ -1055,6 +1070,10 @@ export async function processLongCallMissingTranscripts(): Promise<{
             });
           } else {
             stats.failed++;
+            // No alternative sources found — permanently mark to stop retries
+            await db.update(dialerCallAttempts)
+              .set({ fullTranscript: '[SYSTEM: Recording unavailable - no audio source found]', updatedAt: new Date() })
+              .where(eq(dialerCallAttempts.id, callId));
           }
         }
 
@@ -1071,6 +1090,10 @@ export async function processLongCallMissingTranscripts(): Promise<{
               console.log(`${LOG_PREFIX} 🔒 ✅ Long call ${result.callAttemptId} transcribed on retry (${result.provider})`);
             } else {
               stats.failed++;
+              // All strategies exhausted — permanently mark to stop retries
+              await db.update(dialerCallAttempts)
+                .set({ fullTranscript: '[SYSTEM: Recording unavailable - all transcription strategies exhausted]', updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, result.callAttemptId));
             }
           }
         }
