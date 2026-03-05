@@ -45,6 +45,11 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
     // Step 1: Build structured transcript with speaker attribution
     const { plainTranscript, summary } = await buildStructuredTranscript(data.turnTranscript, data.callDurationSeconds);
 
+    if (!plainTranscript) {
+      console.log(`${LOG_PREFIX} No transcript content — skipping post-call analysis for ${data.callAttemptId}`);
+      return;
+    }
+
     // Step 2: Generate call summary and description
     const { callSummary, callDescription } = await generateCallAnalysis(
       plainTranscript,
@@ -53,13 +58,38 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
       data.campaignId
     );
 
-    // Step 3: Save transcript and summary to lead record
-    await saveLeadCallData(
-      data.leadId,
-      plainTranscript,
-      callSummary,
-      callDescription
-    );
+    // Step 3: Save transcript to lead record if one exists for this call attempt
+    // For SIP calls, leadId may actually be a contactId — look up the real lead
+    let resolvedLeadId: string | null = null;
+    if (data.leadId) {
+      // First try: look for a lead linked to this call attempt
+      const [leadByAttempt] = await db
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.callAttemptId, data.callAttemptId))
+        .limit(1);
+
+      if (leadByAttempt) {
+        resolvedLeadId = leadByAttempt.id;
+      } else {
+        // Second try: check if the passed leadId is actually a valid lead
+        const [leadById] = await db
+          .select({ id: leads.id })
+          .from(leads)
+          .where(eq(leads.id, data.leadId))
+          .limit(1);
+
+        if (leadById) {
+          resolvedLeadId = leadById.id;
+        }
+      }
+    }
+
+    if (resolvedLeadId) {
+      await saveLeadCallData(resolvedLeadId, plainTranscript, callSummary, callDescription);
+    } else {
+      console.log(`${LOG_PREFIX} No lead record found for call attempt ${data.callAttemptId} — skipping lead update (transcript saved to call attempt)`);
+    }
 
     // Step 4: Update call attempt with transcript summary
     await updateCallAttemptWithTranscript(
@@ -70,28 +100,36 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
 
     // Step 5: Record transcription result
     const turnMetrics = calculateTurnMetrics(data.turnTranscript);
-    await recordTranscriptionResult({
-      leadId: data.leadId,
-      success: true,
-      transcript: plainTranscript,
-      summary: callSummary,
-      turnsInfo: turnMetrics,
-      source: 'sip_gemini',
-    });
+    try {
+      await recordTranscriptionResult({
+        leadId: resolvedLeadId || data.leadId || data.callAttemptId,
+        success: true,
+        transcript: plainTranscript,
+        summary: callSummary,
+        turnsInfo: turnMetrics,
+        source: 'sip_gemini',
+      });
+    } catch (metricErr) {
+      console.warn(`${LOG_PREFIX} Failed to record transcription result:`, metricErr);
+    }
 
     // Step 6: Log to call intelligence for learning
-    await logCallIntelligence({
-      leadId: data.leadId,
-      campaignId: data.campaignId,
-      agentType: 'ai',
-      callType: 'sip_gemini',
-      transcript: plainTranscript,
-      summary: callSummary,
-      description: callDescription,
-      disposition: data.disposition,
-      turnMetrics,
-      notes: data.agentNotes || '',
-    });
+    try {
+      await logCallIntelligence({
+        leadId: resolvedLeadId || data.leadId || data.callAttemptId,
+        campaignId: data.campaignId,
+        agentType: 'ai',
+        callType: 'sip_gemini',
+        transcript: plainTranscript,
+        summary: callSummary,
+        description: callDescription,
+        disposition: data.disposition,
+        turnMetrics,
+        notes: data.agentNotes || '',
+      });
+    } catch (logErr) {
+      console.warn(`${LOG_PREFIX} Failed to log call intelligence:`, logErr);
+    }
 
     console.log(`${LOG_PREFIX} ✅ Post-call analysis complete for call attempt ${data.callAttemptId}`);
   } catch (error: any) {

@@ -20,6 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +101,7 @@ export default function LeadsPage() {
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState("#6366f1");
   const [showQAParameters, setShowQAParameters] = useState(false);
+  const [qualifiedLeadSyncEnabled, setQualifiedLeadSyncEnabled] = useState(false);
   const { toast} = useToast();
   const { user } = useAuth();
 
@@ -927,6 +929,39 @@ export default function LeadsPage() {
     },
   });
 
+  const syncQualifiedLeadsMutation = useMutation({
+    mutationFn: async (campaignId?: string) => {
+      const payload = campaignId ? { campaignId } : {};
+      const res = await apiRequest('POST', '/api/leads/backfill-qualified-status', payload);
+      return await res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+
+      const movedToApproved = Number(data?.movedToApproved || 0);
+      const movedToUnderReview = Number(data?.movedToUnderReview || 0);
+      const movedToRejected = Number(data?.movedToRejected || 0);
+      const summary = [
+        `${movedToApproved} moved to approved`,
+        `${movedToUnderReview} in review`,
+        `${movedToRejected} rejected`,
+      ].join(' · ');
+
+      toast({
+        title: "Qualified/Approved Sync Complete",
+        description: summary,
+      });
+    },
+    onError: (error: Error) => {
+      setQualifiedLeadSyncEnabled(false);
+      toast({
+        variant: "destructive",
+        title: "Sync Failed",
+        description: error.message || "Failed to sync qualified leads",
+      });
+    },
+  });
+
   const validateCompanyMutation = useMutation({
     mutationFn: async (leadId: string) => {
       return await apiRequest('POST', `/api/leads/${leadId}/validate-company`, {});
@@ -1180,6 +1215,13 @@ export default function LeadsPage() {
       return;
     }
     consolidatedProcessMutation.mutate(selectedCampaignForReeval);
+  };
+
+  const handleQualifiedLeadSyncToggle = (checked: boolean) => {
+    setQualifiedLeadSyncEnabled(checked);
+    if (checked) {
+      syncQualifiedLeadsMutation.mutate(filterCampaign || undefined);
+    }
   };
 
   const clearFilters = () => {
@@ -2246,6 +2288,29 @@ export default function LeadsPage() {
                     </>
                   )}
                 </Button>
+              </div>
+            </div>
+          )}
+
+          {!isAgentOnly && (
+            <div className="flex items-center justify-between gap-4 p-4 border rounded-lg bg-card/60">
+              <div>
+                <p className="text-sm font-medium">Qualified → Approved Sync</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Turn this on to move qualified and already-approved leads out of Pending Review{filterCampaign ? ' for the selected campaign' : ''}.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {syncQualifiedLeadsMutation.isPending && (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                )}
+                <Switch
+                  checked={qualifiedLeadSyncEnabled}
+                  onCheckedChange={handleQualifiedLeadSyncToggle}
+                  disabled={syncQualifiedLeadsMutation.isPending}
+                  data-testid="switch-qualified-approved-sync"
+                  aria-label="Sync qualified leads to approved"
+                />
               </div>
             </div>
           )}

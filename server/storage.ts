@@ -4030,6 +4030,7 @@ export class DatabaseStorage implements IStorage {
       .update(leads)
       .set({ 
         qaStatus: 'approved', 
+        aiQualificationStatus: 'qualified',
         approvedAt: new Date(),
         approvedById,
         updatedAt: new Date()

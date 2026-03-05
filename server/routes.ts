@@ -10507,9 +10507,9 @@ export function registerRoutes(app: Express) {
 
   // ==================== BACKFILL: Align lead statuses with QA quality outcomes ====================
   // 1. Leads with qaStatus='approved' → set aiQualificationStatus='qualified' if not already set
-  // 2. Leads with qaStatus='new' that have completed AI analysis → move to correct status
-  //    (approved / under_review / rejected) based on aiQualificationStatus + aiScore
-  app.post("/api/leads/backfill-qualified-status", requireAuth, requireRole('admin', 'quality_analyst'), async (req, res) => {
+  // 2. Pending-review leads with completed AI analysis → move to correct status
+  //    (qualified => approved, not_qualified low-score => rejected, otherwise under_review)
+  app.post("/api/leads/backfill-qualified-status", requireAuth, requireRole('admin', 'quality_analyst', 'campaign_manager'), async (req, res) => {
     try {
       const { campaignId } = req.body as { campaignId?: string };
 
@@ -10534,31 +10534,31 @@ export function registerRoutes(app: Express) {
         }
       }
 
-      // ── Pass 2: Move 'new' leads out of new based on AI quality outcome ───────────────
-      // These are leads where AI analysis ran but qaStatus was never updated from 'new'
-      const newLeads = await db
+      // ── Pass 2: Move pending-review leads based on AI qualification outcome ───────────
+      // These are leads where AI analysis ran but qaStatus still reflects review queue states
+      const pendingReviewLeads = await db
         .select({
           id: leads.id,
           aiQualificationStatus: leads.aiQualificationStatus,
           aiScore: leads.aiScore,
         })
         .from(leads)
-        .where(and(eq(leads.qaStatus, 'new'), isNotNull(leads.aiQualificationStatus), baseWhere));
+        .where(and(inArray(leads.qaStatus, ['new', 'under_review', 'Pending Review']), isNotNull(leads.aiQualificationStatus), baseWhere));
 
       let movedToApproved = 0;
       let movedToReview = 0;
       let movedToRejected = 0;
 
-      for (const lead of newLeads) {
+      for (const lead of pendingReviewLeads) {
         const score = Number(lead.aiScore ?? 0);
         const status = lead.aiQualificationStatus;
 
         let nextStatus: 'approved' | 'under_review' | 'rejected';
         let qaDecision: string;
 
-        if (status === 'qualified' && score >= 70) {
+        if (status === 'qualified') {
           nextStatus = 'approved';
-          qaDecision = `Backfill: Auto-approved — AI score ${score}/100`;
+          qaDecision = `Backfill: Auto-approved — AI marked as qualified (score ${score}/100)`;
           movedToApproved++;
         } else if (status === 'not_qualified' && score < 30) {
           nextStatus = 'rejected';
@@ -10578,7 +10578,8 @@ export function registerRoutes(app: Express) {
 
       const summary = {
         approvedLeadsBackfilledQualified: backfilledQualified,
-        newLeadsProcessed: newLeads.length,
+        pendingLeadsProcessed: pendingReviewLeads.length,
+        newLeadsProcessed: pendingReviewLeads.length,
         movedToApproved,
         movedToUnderReview: movedToReview,
         movedToRejected,
@@ -14993,7 +14994,7 @@ export function registerRoutes(app: Express) {
           "Step 3: Companies House Validation",
           "Step 4: AI QA Analysis & Auto-Decision"
         ],
-        note: "Processing follows the correct workflow sequence. AI will auto-approve qualified leads (score ≥ 70), auto-reject unqualified leads (score < 40), and flag borderline cases for review with clear reasons. Refresh the leads page to see results."
+        note: "Processing follows the correct workflow sequence. AI auto-approves leads marked as qualified, auto-rejects clearly unqualified leads, and flags borderline cases for review with clear reasons. Refresh the leads page to see results."
       });
     } catch (error) {
       console.error('Consolidated processing error:', error);

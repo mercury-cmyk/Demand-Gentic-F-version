@@ -327,21 +327,21 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       }
     };
 
-    // Determine qaStatus based on AI qualification status and score
+    // Determine qaStatus based on AI qualification status (score is informational)
     type QAStatusType = 'new' | 'under_review' | 'approved' | 'rejected' | 'returned' | 'published';
     let qaStatus: QAStatusType = (lead.qaStatus as QAStatusType) || 'under_review';
     let qaDecisionComment: string | null = null;
     
-    const minScore = qaParams.min_score || 70;
+    const referenceScore = qaParams.min_score || 70;
     const autoRejectThreshold = 30; // Balanced threshold - not too aggressive, not too permissive
     
-    // QUALITY GATE: Check call duration - short calls require manual review
+    // QUALITY NOTE: Track short calls for context (does not block qualified auto-approval)
     const MINIMUM_QUALIFIED_DURATION = 30; // seconds
     const callDuration = lead.callDuration || 0;
     const isShortDurationCall = callDuration < MINIMUM_QUALIFIED_DURATION && callDuration > 0;
     
     if (isShortDurationCall) {
-      console.warn(`[AI-QA] ⚠️ SHORT DURATION: Lead ${leadId} has call duration ${callDuration}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Forcing manual review.`);
+      console.warn(`[AI-QA] ⚠️ SHORT DURATION: Lead ${leadId} has call duration ${callDuration}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Adding QA warning note.`);
     }
     
     // =========================================================================
@@ -447,16 +447,18 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
     
     const hasPositiveEngagement = (hasCallbackSignal || hasInterestSignal) && !hasNegativeSignal;
     
-    // SHORT DURATION CALLS: Always require manual review regardless of AI score
-    if (isShortDurationCall) {
-      qaStatus = 'under_review';
-      qaDecisionComment = `⚠️ SHORT DURATION REVIEW: Call was only ${callDuration}s (minimum: ${MINIMUM_QUALIFIED_DURATION}s). AI Score: ${normalizedAnalysis.score}/100. Requires manual verification of qualification.`;
-      console.log(`[AI-QA] Lead ${leadId} FORCED REVIEW (short duration ${callDuration}s): ${qaDecisionComment}`);
-    } else if (normalizedAnalysis.qualification_status === 'qualified' && normalizedAnalysis.score >= minScore) {
-      // Auto-approve high-scoring qualified leads (only if not short duration)
+    if (normalizedAnalysis.qualification_status === 'qualified') {
+      // Always auto-approve qualified leads regardless of score
       qaStatus = 'approved';
-      qaDecisionComment = `Auto-approved: AI score ${normalizedAnalysis.score}/100 (threshold: ${minScore})`;
-      console.log(`[AI-QA] Lead ${leadId} AUTO-APPROVED with score ${normalizedAnalysis.score}`);
+      const shortDurationNote = isShortDurationCall
+        ? ` ⚠️ Short duration warning: ${callDuration}s (minimum recommended: ${MINIMUM_QUALIFIED_DURATION}s).`
+        : '';
+      qaDecisionComment = `Auto-approved: AI marked as qualified (score ${normalizedAnalysis.score}/100).${shortDurationNote}`;
+      console.log(`[AI-QA] Lead ${leadId} AUTO-APPROVED as qualified (score ${normalizedAnalysis.score})`);
+    } else if (isShortDurationCall) {
+      qaStatus = 'under_review';
+      qaDecisionComment = `⚠️ SHORT DURATION REVIEW: Call was only ${callDuration}s (minimum: ${MINIMUM_QUALIFIED_DURATION}s). AI status: ${normalizedAnalysis.qualification_status}, score: ${normalizedAnalysis.score}/100.`;
+      console.log(`[AI-QA] Lead ${leadId} FORCED REVIEW (short duration ${callDuration}s): ${qaDecisionComment}`);
     } else if (hasPositiveEngagement) {
       // Leads with callback/interest signals ALWAYS go to manual review regardless of score
       qaStatus = 'under_review';
@@ -481,8 +483,8 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       if (normalizedAnalysis.missing_info.length > 0) {
         reviewReasons.push(`Missing: ${normalizedAnalysis.missing_info.join(', ')}`);
       }
-      if (normalizedAnalysis.score >= 40 && normalizedAnalysis.score < minScore) {
-        reviewReasons.push(`Score ${normalizedAnalysis.score} below threshold ${minScore}`);
+      if (normalizedAnalysis.score >= 40 && normalizedAnalysis.score < referenceScore) {
+        reviewReasons.push(`Score ${normalizedAnalysis.score} below reference score ${referenceScore}`);
       }
       if (normalizedAnalysis.recommendations.length > 0) {
         reviewReasons.push(normalizedAnalysis.recommendations[0]); // Add first recommendation
@@ -686,7 +688,9 @@ Return JSON in this exact format:
 
 ## SCORING GUIDANCE:
 - Calculate final score as weighted average.
-- If score >= ${qaParams.min_score}, status is "qualified". If score < 40, status is "not_qualified". Otherwise "needs_review".
+- Set qualification_status from evidence and criteria fulfillment, not from a numeric score threshold.
+- The score is informational and should never be the sole gate for "qualified".
+- Use "needs_review" only when evidence is incomplete, contradictory, or unclear.
 - CRITICAL: A lead can only be "qualified" if it aligns with the Campaign Objective and meets the Success Criteria listed above. Even if individual scores are high, reject or flag for review if the call outcome does not match the campaign's stated success criteria.`;
 }
 

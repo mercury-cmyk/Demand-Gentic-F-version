@@ -100,8 +100,8 @@ const GEMINI_VOICES = [
 /**
  * Bridge session for a single call
  */
-// Hard max call duration — 5 minutes, no exceptions
-const MAX_CALL_DURATION_SECONDS = 300;
+// Hard max call duration — 4 minutes, no exceptions
+const MAX_CALL_DURATION_SECONDS = 240;
 
 interface BridgeSession {
   callId: string;
@@ -352,7 +352,7 @@ export async function createBridgeSession(params: {
 
   bridgeSessions.set(callId, session);
 
-  // Schedule hard max call duration (5 min)
+  // Schedule hard max call duration (4 min)
   const maxDurationSec = Math.min(
     Number(context.maxCallDurationSeconds) > 0 ? Number(context.maxCallDurationSeconds) : MAX_CALL_DURATION_SECONDS,
     MAX_CALL_DURATION_SECONDS
@@ -479,6 +479,10 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
             },
           },
         };
+        // CRITICAL: Enable transcription of both AI output and user input
+        // Without these, Gemini won't send outputTranscription/inputTranscription events
+        setupPayload.outputAudioTranscription = {};
+        setupPayload.inputAudioTranscription = {};
         setupPayload.systemInstruction = {
           parts: [{ text: session.systemPrompt }],
         };
@@ -493,6 +497,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
             },
           },
         };
+        // CRITICAL: Enable transcription of both AI output and user input
+        setupPayload.output_audio_transcription = {};
+        setupPayload.input_audio_transcription = {};
         setupPayload.system_instruction = {
           parts: [{ text: session.systemPrompt }],
         };

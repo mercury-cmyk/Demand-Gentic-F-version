@@ -176,7 +176,7 @@ ${campaignObjectiveSection}
 ## CUSTOM QUALIFICATION RULES:
 ${criteriaInstructions}
 
-${parsedRules.threshold_score ? `Minimum Passing Score: ${parsedRules.threshold_score}` : ""}
+${parsedRules.threshold_score ? `Reference Score Target (informational only): ${parsedRules.threshold_score}` : ""}
 
 ## CUSTOM QA FIELDS TO EXTRACT:
 ${customFieldsInstructions}
@@ -223,10 +223,11 @@ ${transcript}
 ## TASK:
 1. Extract all custom QA field values from the transcript and contact data
 2. Apply the qualification rules and calculate a score (0-100)
-3. Determine if the lead is "qualified", "not_qualified", or "needs_review"
+3. Determine if the lead is "qualified", "not_qualified", or "needs_review" based on evidence and rule fulfillment (not score threshold alone)
 4. Provide detailed reasoning for your assessment
 
 CRITICAL: A lead can only be "qualified" if it aligns with the Campaign Objective and meets the Success Criteria. Even if individual rule scores are high, reject or flag for review if the call outcome does not match the campaign's stated success criteria.
+CRITICAL: The numeric score is informational and must not be used as the sole qualification gate.
 
 Return your analysis in the following JSON format:
 {

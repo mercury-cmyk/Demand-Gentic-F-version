@@ -306,6 +306,43 @@ function schedulePostCallAnalyzerForAttempt(
         return;
       }
 
+      // SIP calls have no callSessionId — run SIP post-call handler directly
+      // when we have a transcript from the Gemini live session.
+      const sipTranscript = (attempt.fullTranscript || attempt.aiTranscript || fallbackTranscript || '').trim();
+      if (sipTranscript && sipTranscript.length > 10) {
+        console.log(`[DispositionEngine] 📞 SIP call detected (no callSessionId) — running SIP post-call handler for ${callAttemptId}`);
+        try {
+          const { processSIPPostCallAnalysis } = await import('./sip/sip-post-call-handler');
+          // Parse the plain transcript into turns
+          const turnTranscript = sipTranscript.split('\n')
+            .filter((l: string) => l.trim().length > 0)
+            .map((line: string) => {
+              const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+              if (match) {
+                return {
+                  speaker: (match[1].toLowerCase() === 'agent' ? 'agent' : 'contact') as 'agent' | 'contact',
+                  text: match[2].trim(),
+                };
+              }
+              return null;
+            })
+            .filter(Boolean) as Array<{ speaker: 'agent' | 'contact'; text: string }>;
+
+          await processSIPPostCallAnalysis({
+            callAttemptId,
+            leadId: attempt.contactId || '',
+            campaignId: attempt.campaignId || '',
+            disposition: (attempt.disposition || disposition) as string,
+            turnTranscript,
+            callDurationSeconds: attempt.callDurationSeconds || 0,
+          });
+          console.log(`[DispositionEngine] ✅ SIP post-call analysis completed for ${callAttemptId}`);
+        } catch (sipErr) {
+          console.error(`[DispositionEngine] SIP post-call analysis failed for ${callAttemptId}:`, sipErr);
+        }
+        return;
+      }
+
       if (attemptIndex + 1 < retryDelaysMs.length) {
         const retryDelay = retryDelaysMs[attemptIndex + 1];
         console.log(`[DispositionEngine] ⏳ callSessionId missing for ${callAttemptId}; retrying post-call analyzer scheduling in ${Math.round(retryDelay / 1000)}s`);
@@ -460,12 +497,20 @@ export async function processDisposition(
     }
 
     // Store the final disposition value (processed flag was already set atomically above)
+    // Also persist any SIP/Gemini transcript that arrived via callData so it's available
+    // for post-call analysis even without a callSessions record.
+    const sipTranscript = extractTranscriptFromCallData(callData);
+    const dispositionUpdate: Record<string, unknown> = {
+      disposition: finalDisposition,
+      updatedAt: new Date(),
+    };
+    if (sipTranscript) {
+      dispositionUpdate.aiTranscript = sipTranscript;
+      dispositionUpdate.fullTranscript = sipTranscript;
+    }
     await db
       .update(dialerCallAttempts)
-      .set({
-        disposition: finalDisposition,
-        updatedAt: new Date()
-      })
+      .set(dispositionUpdate)
       .where(eq(dialerCallAttempts.id, callAttemptId));
 
     // Update contact-level retry suppression

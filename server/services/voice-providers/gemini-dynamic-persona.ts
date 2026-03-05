@@ -9,11 +9,8 @@ export interface GeminiPersonaProfile {
   prompt: string;
 }
 
-const MALE_CORE = ['Gabriel', 'Elias', 'Daniel', 'Adam', 'Amir'] as const;
-const MALE_EXPANDED = ['Noah', 'Omar', 'Samuel', 'Isaac', 'Rayyan'] as const;
-
-const FEMALE_CORE = ['Sophia', 'Miriam', 'Layla', 'Aisha', 'Hannah'] as const;
-const FEMALE_EXPANDED = ['Zara', 'Nadia', 'Leila', 'Sara', 'Maryam'] as const;
+const MALE_NAME = 'Chris';
+const FEMALE_NAME = 'Christine';
 
 function hashString(input: string): number {
   let hash = 0;
@@ -21,11 +18,6 @@ function hashString(input: string): number {
     hash = (hash * 31 + input.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
-}
-
-function pickFromPool(seed: string, pool: readonly string[]): string {
-  const index = hashString(seed) % pool.length;
-  return pool[index];
 }
 
 export function resolveGeminiVoiceGender(voiceName?: string): GeminiPersonaGender {
@@ -37,9 +29,8 @@ export function resolveGeminiVoiceGender(voiceName?: string): GeminiPersonaGende
 export function resolveGeminiPersonaProfile(options: {
   voiceName?: string;
   sessionId: string;
-  includeExpandedPool?: boolean;
 }): GeminiPersonaProfile {
-  const { voiceName, sessionId, includeExpandedPool = true } = options;
+  const { voiceName, sessionId } = options;
   const voiceGender = resolveGeminiVoiceGender(voiceName);
 
   const gender: 'male' | 'female' =
@@ -51,11 +42,7 @@ export function resolveGeminiPersonaProfile(options: {
           ? 'male'
           : 'female';
 
-  const pool = gender === 'male'
-    ? [...MALE_CORE, ...(includeExpandedPool ? MALE_EXPANDED : [])]
-    : [...FEMALE_CORE, ...(includeExpandedPool ? FEMALE_EXPANDED : [])];
-
-  const name = pickFromPool(`${sessionId}:${voiceName || 'unknown'}:${gender}`, pool);
+  const name = gender === 'male' ? MALE_NAME : FEMALE_NAME;
 
   if (gender === 'male') {
     return {
