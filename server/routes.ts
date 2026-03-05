@@ -15637,6 +15637,60 @@ Provide JSON response with:
     }
   });
 
+  // ==================== BATCH RE-ANALYSIS (Admin) ====================
+
+  app.post("/api/admin/batch-reanalyze-missing-transcripts", requireAuth, async (req, res) => {
+    try {
+      // Find calls >= 20s with session + recording but no transcript
+      const missingCalls = await db
+        .select({
+          callAttemptId: dialerCallAttempts.id,
+          callSessionId: dialerCallAttempts.callSessionId,
+          campaignId: dialerCallAttempts.campaignId,
+          contactId: dialerCallAttempts.contactId,
+          duration: dialerCallAttempts.callDurationSeconds,
+          disposition: dialerCallAttempts.disposition,
+        })
+        .from(dialerCallAttempts)
+        .innerJoin(callSessions, eq(callSessions.id, dialerCallAttempts.callSessionId))
+        .where(
+          and(
+            sql`${dialerCallAttempts.callDurationSeconds} >= 20`,
+            sql`(${dialerCallAttempts.fullTranscript} IS NULL OR ${dialerCallAttempts.fullTranscript} = '')`,
+            sql`(${callSessions.recordingUrl} IS NOT NULL OR ${callSessions.recordingS3Key} IS NOT NULL)`,
+          )
+        );
+
+      console.log(`[BatchReanalyze] Found ${missingCalls.length} calls to reanalyze`);
+
+      if (missingCalls.length === 0) {
+        return res.json({ success: true, message: 'No calls need reanalysis', count: 0 });
+      }
+
+      // Schedule post-call analysis for each (async, don't block response)
+      const { schedulePostCallAnalysis } = await import('./services/post-call-analyzer');
+      let scheduled = 0;
+      for (const call of missingCalls) {
+        if (call.callSessionId) {
+          schedulePostCallAnalysis(call.callSessionId, {
+            callAttemptId: call.callAttemptId,
+            campaignId: call.campaignId || undefined,
+            contactId: call.contactId || undefined,
+            callDurationSec: call.duration || undefined,
+            disposition: (call.disposition || undefined) as string | undefined,
+          });
+          scheduled++;
+        }
+      }
+
+      console.log(`[BatchReanalyze] Scheduled ${scheduled} calls for post-call analysis`);
+      res.json({ success: true, found: missingCalls.length, scheduled, message: `Scheduled ${scheduled} calls for transcription and analysis` });
+    } catch (err: any) {
+      console.error('[BatchReanalyze] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ==================== KNOWLEDGE BLOCKS ====================
 
   app.use("/api/knowledge-blocks", knowledgeBlocksRouter);
