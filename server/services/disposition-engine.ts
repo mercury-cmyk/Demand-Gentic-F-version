@@ -279,6 +279,8 @@ function schedulePostCallAnalyzerForAttempt(
           contactId: dialerCallAttempts.contactId,
           callDurationSeconds: dialerCallAttempts.callDurationSeconds,
           disposition: dialerCallAttempts.disposition,
+          recordingUrl: dialerCallAttempts.recordingUrl,
+          recordingS3Key: dialerCallAttempts.recordingS3Key,
         })
         .from(dialerCallAttempts)
         .where(eq(dialerCallAttempts.id, callAttemptId))
@@ -306,9 +308,44 @@ function schedulePostCallAnalyzerForAttempt(
         return;
       }
 
-      // SIP calls have no callSessionId — run SIP post-call handler directly
-      // when we have a transcript from the Gemini live session.
-      const sipTranscript = (attempt.fullTranscript || attempt.aiTranscript || fallbackTranscript || '').trim();
+      // SIP calls have no callSessionId — run SIP post-call handler directly.
+      // Primary: use Gemini live transcript. Fallback: use Deepgram on recording.
+      let sipTranscript = (attempt.fullTranscript || attempt.aiTranscript || fallbackTranscript || '').trim();
+
+      // DEEPGRAM FALLBACK: If Gemini transcript is missing/too short but a recording
+      // exists, transcribe via Deepgram as a fallback.
+      if ((!sipTranscript || sipTranscript.length <= 10) && (attempt.callDurationSeconds || 0) >= 20) {
+        const recordingSource = attempt.recordingS3Key || attempt.recordingUrl;
+        if (recordingSource) {
+          console.log(`[DispositionEngine] 🎙️ Gemini transcript missing for SIP call ${callAttemptId} — trying Deepgram fallback on recording`);
+          try {
+            let audioUrl = recordingSource;
+            // If S3 key, generate a presigned download URL
+            if (attempt.recordingS3Key) {
+              const { getPresignedDownloadUrl, isS3Configured } = await import('../lib/storage');
+              if (isS3Configured()) {
+                const presigned = await getPresignedDownloadUrl(attempt.recordingS3Key, 24 * 60 * 60);
+                if (presigned) audioUrl = presigned;
+              }
+            }
+            const { transcribeFromRecording } = await import('./deepgram-postcall-transcription');
+            const deepgramResult = await transcribeFromRecording(audioUrl);
+            if (deepgramResult && deepgramResult.transcript && deepgramResult.transcript.length > 10) {
+              sipTranscript = deepgramResult.transcript;
+              console.log(`[DispositionEngine] ✅ Deepgram fallback transcription succeeded: ${sipTranscript.length} chars`);
+              // Persist the Deepgram transcript back to the call attempt
+              await db.update(dialerCallAttempts)
+                .set({ fullTranscript: sipTranscript, updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, callAttemptId));
+            } else {
+              console.warn(`[DispositionEngine] Deepgram fallback returned empty/short transcript for ${callAttemptId}`);
+            }
+          } catch (dgErr) {
+            console.error(`[DispositionEngine] Deepgram fallback transcription failed for ${callAttemptId}:`, dgErr);
+          }
+        }
+      }
+
       if (sipTranscript && sipTranscript.length > 10) {
         console.log(`[DispositionEngine] 📞 SIP call detected (no callSessionId) — running SIP post-call handler for ${callAttemptId}`);
         try {
