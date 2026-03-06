@@ -302,6 +302,11 @@ router.get('/organization-intelligence', async (req: Request, res: Response) => 
       })
       .from(clientOrganizationLinks)
       .where(eq(clientOrganizationLinks.clientAccountId, clientAccountId))
+      .orderBy(
+        desc(clientOrganizationLinks.isPrimary),
+        desc(clientOrganizationLinks.updatedAt),
+        desc(clientOrganizationLinks.createdAt),
+      )
       .limit(1);
 
     if (!orgLink) {

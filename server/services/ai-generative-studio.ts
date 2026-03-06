@@ -14,11 +14,9 @@ import {
 import { eq } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { withAiConcurrency } from "../lib/ai-concurrency";
-import { BRAND_VOICE, TAGLINE } from "@shared/brand-messaging";
 import {
   generateLandingPageHTML,
   assertOrganizationIntelligence as unifiedAssertOI,
-  getFullOrganizationIntelligence as unifiedGetFullOI,
   getBrandContext as unifiedGetBrandContext,
   resolveFieldValue as unifiedResolveFieldValue,
   type OrgIntelligenceContext,
@@ -53,6 +51,16 @@ const openai = new OpenAI({
   timeout: 120_000,
   maxRetries: 2,
 });
+
+const GENERIC_TONE_GUIDELINES: Record<string, string> = {
+  authoritative: "Lead with clarity, confidence, and credibility.",
+  bold: "Use decisive language and direct calls to action.",
+  conversational: "Sound natural, human, and easy to follow.",
+  empathetic: "Acknowledge audience pain points with care and relevance.",
+  friendly: "Keep the tone warm, approachable, and helpful.",
+  professional: "Stay polished, concise, and business-ready.",
+  technical: "Be precise, concrete, and technically credible.",
+};
 
 // ============================================================================
 // TYPES
@@ -127,20 +135,15 @@ function buildBaseContext(params: GenerationParams, orgContext?: string, orgInte
     parts.push(`=== ORGANIZATIONAL INTELLIGENCE (MANDATORY — all outputs must align with this) ===\n${orgContext}\n=== END ORGANIZATIONAL INTELLIGENCE ===`);
   }
 
-  // Inject brand voice guidelines from centralized brand messaging
-  parts.push(`Brand Voice Guidelines:
-- Brand Identity: ${TAGLINE.identity} — ${TAGLINE.primary}
-- Personality: ${BRAND_VOICE.personality.traits.join(', ')}
-- Avoid being: ${BRAND_VOICE.personality.antiTraits.join(', ')}
-- Key phrases to weave in naturally: ${BRAND_VOICE.keyPhrases.slice(0, 4).join('; ')}
-- Preferred vocabulary: ${BRAND_VOICE.vocabulary.preferred.slice(0, 10).join(', ')}
-- Words to avoid: ${BRAND_VOICE.vocabulary.avoid.slice(0, 8).join(', ')}`);
+  parts.push(`Brand Isolation Rules:
+- Use only the selected organization's brand identity, positioning, offerings, audience context, and visual language.
+- Do not introduce platform-default branding, other organizations, or generic cross-brand messaging.
+- If a detail is not present in Organization Intelligence or the optional brand kit, do not invent another brand source.`);
 
   // ── Tone: OI branding.tone is authoritative; user param is secondary override ──
   const effectiveTone = orgIntel?.tone || params.tone;
   if (effectiveTone) {
-    const toneKey = effectiveTone as keyof typeof BRAND_VOICE.toneGuidelines;
-    const toneGuidance = BRAND_VOICE.toneGuidelines[toneKey];
+    const toneGuidance = GENERIC_TONE_GUIDELINES[effectiveTone.toLowerCase()];
     if (toneGuidance) {
       parts.push(`Tone: ${effectiveTone}\nTone Guidance: ${toneGuidance}`);
     } else {
@@ -173,11 +176,16 @@ function buildBaseContext(params: GenerationParams, orgContext?: string, orgInte
 
 const resolveFieldValue = unifiedResolveFieldValue;
 
+function getProjectMetadataValue(project: any, key: string): string | undefined {
+  const metadata = (project?.metadata || {}) as Record<string, unknown>;
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 // ============================================================================
 // OI & HELPER FUNCTIONS — delegated to unified landing page engine
 // ============================================================================
 
-const getFullOrganizationIntelligence = unifiedGetFullOI;
 const assertOrganizationIntelligence = unifiedAssertOI;
 
 // ============================================================================
@@ -691,10 +699,9 @@ export async function chat(params: ChatParams): Promise<{
   tokensUsed: number;
 }> {
   assertDeepSeekConfigured();
-  const sessionId = params.sessionId || (params.organizationId ? `${params.organizationId}::${crypto.randomUUID()}` : crypto.randomUUID());
-
-  // Chat also requires OI context (soft enforcement: doesn't block, but enriches)
-  const orgIntel = await getFullOrganizationIntelligence(params.organizationId);
+  const orgIntel = await assertOrganizationIntelligence(params.organizationId);
+  const sessionId =
+    params.sessionId || `${params.organizationId}::${crypto.randomUUID()}`;
 
   // Get previous messages for context
   const previousMessages = params.sessionId
@@ -711,7 +718,7 @@ export async function chat(params: ChatParams): Promise<{
       `emails, blog posts, eBooks, and solution briefs. Use the organization's intelligence context  - including ` +
       `brand voice, ICP profiles, competitive positioning, industry knowledge, compliance policies, and campaign ` +
       `learnings  - to provide strategic content advice that aligns with the organization's go-to-market strategy ` +
-      `and resonates with their target audience. Always show recommendations tailored to the organization and campaign manager.`
+      `and resonates with their target audience. Never use platform-default or cross-organization branding.`
     );
   } catch {
     systemPrompt = '';
@@ -721,6 +728,11 @@ export async function chat(params: ChatParams): Promise<{
 
 ${orgIntel.raw ? `=== ORGANIZATIONAL INTELLIGENCE (MANDATORY CONTEXT) ===\n${orgIntel.raw}\n=== END ORGANIZATIONAL INTELLIGENCE ===\n` : ''}
 
+Brand Isolation Rules:
+- Base every response only on the selected organization's intelligence.
+- Do not use generic fallback messaging or introduce other organizations' branding.
+- If the user asks for ideas, keep them specific to this organization's positioning, audience, and tone.
+
 You are an AI content strategy assistant in the Generative Studio. Help users:
 - Brainstorm content ideas for landing pages, emails, blogs, eBooks, and solution briefs
 - Refine their content prompts before generation
@@ -729,7 +741,7 @@ You are an AI content strategy assistant in the Generative Studio. Help users:
 - Help with SEO and copywriting strategy
 
 Be concise, actionable, and creative. When appropriate, suggest which Generative Studio tool to use.
-Always provide 2-3 follow-up suggestions the user might want to explore. These suggestions MUST be tailored to the organization's intelligence context if available.
+Always provide 2-3 follow-up suggestions the user might want to explore. These suggestions MUST be tailored to the organization's intelligence context.
 
 Output as JSON:
 {
@@ -800,16 +812,29 @@ export async function refineContent(
 
   if (!project) throw new Error('Project not found');
 
+  const organizationId = getProjectMetadataValue(project, "organizationId");
+  const orgIntel = await assertOrganizationIntelligence(organizationId);
   const startTime = Date.now();
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('You are an expert content editor and refiner in Generative Studio. Improve and polish content while preserving intent. Use org intelligence context to keep content on-brand and aligned with organizational standards.');
+    systemPrompt = await buildAgentSystemPrompt(
+      'You are an expert content editor and refiner in Generative Studio. Improve and polish content while preserving intent. Keep every revision strictly aligned to the selected organization\'s intelligence, voice, and requirements.',
+    );
   } catch {
     systemPrompt = 'You are an expert content editor and refiner.';
   }
 
   const userPrompt = `Refine the following ${project.contentType} content based on these instructions.
+
+=== ORGANIZATIONAL INTELLIGENCE (MANDATORY CONTEXT) ===
+${orgIntel.raw}
+=== END ORGANIZATIONAL INTELLIGENCE ===
+
+Brand Isolation Rules:
+- Preserve and strengthen only this organization's branding, tone, terminology, and positioning.
+- Do not introduce platform-default messaging or any other organization's identity.
+- Maintain compliance with any forbidden terms or style constraints in the organization intelligence.
 
 Original Content:
 ${project.generatedContentHtml || project.generatedContent}

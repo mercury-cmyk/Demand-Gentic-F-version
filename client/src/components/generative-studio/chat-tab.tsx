@@ -55,20 +55,21 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const isDisabled = !organizationId;
+  const hasOrgIntel = !!iv(orgIntelligence?.identity?.legalName);
+  const isDisabled = !organizationId || !hasOrgIntel;
 
   const { data: sessionsData } = useQuery<{ sessions: Session[] }>({
     queryKey: [
       `/api/generative-studio/chat/sessions?organizationId=${organizationId || ""}`,
     ],
-    enabled: !!organizationId,
+    enabled: !!organizationId && hasOrgIntel,
   });
 
   const { data: messagesData } = useQuery<{ messages: Message[] }>({
     queryKey: [
       `/api/generative-studio/chat/sessions/${sessionId}?organizationId=${organizationId || ""}`,
     ],
-    enabled: !!sessionId && !!organizationId,
+    enabled: !!sessionId && !!organizationId && hasOrgIntel,
   });
 
   useEffect(() => {
@@ -81,7 +82,7 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
     setSessionId(null);
     setLocalMessages([]);
     setSuggestions([]);
-  }, [organizationId]);
+  }, [hasOrgIntel, organizationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -250,7 +251,9 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
                   {isDisabled && (
                     <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 mx-auto max-w-xs">
                       <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      Select an organization to start.
+                      {!organizationId
+                        ? "Select an organization to start."
+                        : "Complete Organizational Intelligence to unlock organization-exclusive chat."}
                     </div>
                   )}
                   {iv(orgIntelligence?.identity?.legalName) && (
@@ -258,12 +261,13 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
                       Powered by OI for {iv(orgIntelligence?.identity?.legalName)}
                     </p>
                   )}
-                  <div className="flex flex-wrap gap-2 justify-center mt-2">
-                    {iv(orgIntelligence?.identity?.legalName) ? [
+                  {hasOrgIntel && (
+                    <div className="flex flex-wrap gap-2 justify-center mt-2">
+                      {[
                       `Plan a blog series for ${iv(orgIntelligence?.identity?.legalName)}`,
                       `What makes a high-converting landing page for ${iv(orgIntelligence?.icp?.personas) || 'our target audience'}?`,
                       `Email subject lines for our ${iv(orgIntelligence?.offerings?.coreProducts) || 'product'} launch`,
-                    ].map((suggestion) => (
+                      ].map((suggestion) => (
                       <Badge
                         key={suggestion}
                         variant="outline"
@@ -272,21 +276,9 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
                       >
                         {suggestion}
                       </Badge>
-                    )) : [
-                      "Plan a blog series about AI in healthcare",
-                      "What makes a high-converting landing page?",
-                      "Email subject lines for a product launch",
-                    ].map((suggestion) => (
-                      <Badge
-                        key={suggestion}
-                        variant="outline"
-                        className="cursor-pointer hover:bg-accent py-1.5 px-3 text-xs font-normal"
-                        onClick={() => setInput(suggestion)}
-                      >
-                        {suggestion}
-                      </Badge>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -360,7 +352,7 @@ export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProp
         <div className="border-t p-3 bg-background">
           <div className="flex gap-2 items-end">
             <Textarea
-              placeholder="Ask about content strategy, ideas, or get help with your content..."
+              placeholder="Ask for organization-specific content strategy, ideas, or refinement help..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {

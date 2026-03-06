@@ -27,7 +27,7 @@ export interface VoicemailDetectionResult {
 export function normalizeVoicemailTranscript(text: string): string {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -64,6 +64,16 @@ const PHRASE_RULES: PhraseRule[] = [
     "tone will sound",
     "please leave it after the beep",
     "speak after the beep",
+    "после сигнала",
+    "после гудка",
+    "после звукового сигнала",
+    "после тонального сигнала",
+    "дождитесь сигнала",
+    "оставьте сообщение после сигнала",
+    "оставьте сообщение после гудка",
+    "запишите сообщение после сигнала",
+    "говорите после сигнала",
+    "можете оставить сообщение после сигнала",
   ].map((phrase) => ({ category: "beep_instruction", phrase, weight: 3 })),
   ...[
     "you have reached",
@@ -80,6 +90,10 @@ const PHRASE_RULES: PhraseRule[] = [
     "you ve reached the phone of",
     "reached the voicemail",
     "reached the mailbox",
+    "вы позвонили",
+    "вы дозвонились до",
+    "вас приветствует автоответчик",
+    "вас приветствует голосовая почта",
   ].map((phrase) => ({ category: "reached_pattern", phrase, weight: 3 })),
   ...[
     "voicemail",
@@ -107,6 +121,14 @@ const PHRASE_RULES: PhraseRule[] = [
     "your message will be recorded",
     "your message has been recorded",
     "please enter your password",
+    "автоответчик",
+    "голосовая почта",
+    "ящик голосовой почты",
+    "почтовый ящик",
+    "ваш звонок переадресован",
+    "ваш звонок переведен на автоответчик",
+    "абонент временно недоступен",
+    "не удалось принять ваш звонок",
   ].map((phrase) => ({ category: "system_message", phrase, weight: 3 })),
   ...[
     "i am not available",
@@ -146,6 +168,15 @@ const PHRASE_RULES: PhraseRule[] = [
     "not reachable at this time",
     "cannot be reached",
     "is not reachable",
+    "не могу ответить",
+    "не могу сейчас ответить",
+    "не могу принять ваш звонок",
+    "не могу подойти к телефону",
+    "сейчас недоступен",
+    "сейчас недоступна",
+    "в данный момент недоступен",
+    "в данный момент недоступна",
+    "абонент недоступен",
   ].map((phrase) => ({ category: "unavailable", phrase, weight: 2 })),
   ...[
     "leave your name",
@@ -191,6 +222,18 @@ const PHRASE_RULES: PhraseRule[] = [
     "leave me a message",
     "leave me your name",
     "leave me your number",
+    "оставьте сообщение",
+    "оставьте ваше сообщение",
+    "оставьте свой номер",
+    "оставьте номер телефона",
+    "оставьте ваше имя",
+    "оставьте имя и номер",
+    "запишите сообщение",
+    "сообщение после сигнала",
+    "я вам перезвоню",
+    "мы вам перезвоним",
+    "я перезвоню вам",
+    "перезвоню вам",
   ].map((phrase) => ({ category: "leave_info", phrase, weight: 2 })),
   ...[
     "press pound",
@@ -279,6 +322,12 @@ const REGEX_RULES: RegexRule[] = [
   },
   {
     category: "beep_instruction",
+    pattern: /(?:^|\s)после\s+(сигнала|гудка|тона)(?=\s|$|[.,!?])/ui,
+    weight: 3,
+    highPrecision: true,
+  },
+  {
+    category: "beep_instruction",
     pattern: /\bwhen\s+you\s+hear\s+the\s+(beep|tone)\b/i,
     weight: 3,
     highPrecision: true,
@@ -297,13 +346,31 @@ const REGEX_RULES: RegexRule[] = [
   },
   {
     category: "system_message",
+    pattern: /(?:^|\s)(автоответчик|голосов(?:ая|ой)\s+почт(?:а|ы)|почтов(?:ый|ого)\s+ящик)(?=\s|$|[.,!?])/ui,
+    weight: 3,
+    highPrecision: true,
+  },
+  {
+    category: "system_message",
     pattern: /\b(call\s+has\s+been\s+forwarded|forwarded\s+to\s+voicemail|automatic\s+voice\s+message\s+system)\b/i,
+    weight: 3,
+    highPrecision: true,
+  },
+  {
+    category: "system_message",
+    pattern: /(?:^|\s)(ваш\s+звонок\s+(?:переадресован|переведен)|абонент\s+(?:временно\s+)?недоступен)(?=\s|$|[.,!?])/ui,
     weight: 3,
     highPrecision: true,
   },
   {
     category: "leave_info",
     pattern: /\b(leave|record)\s+(a\s+|your\s+)?message\b/i,
+    weight: 3,
+    highPrecision: true,
+  },
+  {
+    category: "leave_info",
+    pattern: /(?:^|\s)(остав(?:ьте|ь)\s+(?:ваше\s+|свое\s+)?сообщение|запиш(?:ите|и)\s+сообщение)(?=\s|$|[.,!?])/ui,
     weight: 3,
     highPrecision: true,
   },
@@ -324,8 +391,18 @@ const REGEX_RULES: RegexRule[] = [
     weight: 2,
   },
   {
+    category: "unavailable",
+    pattern: /(?:^|\s)(не\s+могу\s+(?:ответить|принять\s+ваш\s+звонок)|сейчас\s+недоступ(?:ен|на)|в\s+данный\s+момент\s+недоступ(?:ен|на))(?=\s|$|[.,!?])/ui,
+    weight: 2,
+  },
+  {
     category: "leave_info",
     pattern: /\bleave\s+(your\s+)?(name|number|phone\s+number|contact\s+information|callback\s+number)\b/i,
+    weight: 2,
+  },
+  {
+    category: "leave_info",
+    pattern: /(?:^|\s)(остав(?:ьте|ь)\s+(?:ваше\s+|свое\s+)?(?:имя|номер|номер\s+телефона)|я\s+вам\s+перезвоню|мы\s+вам\s+перезвоним)(?=\s|$|[.,!?])/ui,
     weight: 2,
   },
   {

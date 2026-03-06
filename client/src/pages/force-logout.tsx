@@ -19,8 +19,11 @@ export default function ForceLogoutPage() {
     
     // Redirect to login after a brief delay
     setTimeout(() => {
-      window.location.href = "https://app.demandgentic.ai";
-      window.location.reload();
+      const targetPath = window.location.pathname.startsWith('/client-portal')
+        ? '/client-portal/login'
+        : '/login';
+      setLocation(targetPath);
+      window.location.assign(targetPath);
     }, 1500);
   }, [setLocation]);
 

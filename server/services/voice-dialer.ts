@@ -723,7 +723,7 @@ function recordVoicemailDetectedEvent(session: OpenAIRealtimeSession, source: st
 function normalizeTranscriptForComparison(text: string): string {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -731,6 +731,10 @@ function normalizeTranscriptForComparison(text: string): string {
 export function isExplicitCallbackRequestTranscript(transcript: string): boolean {
   const lower = normalizeTranscriptForComparison(transcript);
   if (!lower) return false;
+  if (isVoicemailCueTranscript(transcript)) return false;
+  if (isDtmfIvrCueTranscript(transcript)) return false;
+  if (isAutomatedCallScreenerTranscript(transcript)) return false;
+  if (isAutomatedVerbalGatekeeperPrompt(transcript)) return false;
 
   const callbackPatterns = [
     /\bcall me back\b/i,
@@ -1210,6 +1214,14 @@ export function setAmdResultForSession(callControlId: string, result: string, co
         console.log(`${LOG_PREFIX} ðŸ“  Machine detected via AMD for active session ${sessionId} - setting voicemail disposition`);
         session.detectedDisposition = 'voicemail';
         session.callOutcome = 'voicemail';
+        recordVoicemailDetectedEvent(session, "amd_webhook_machine");
+        if (session.isActive && !session.isEnding) {
+          setImmediate(() => {
+            endCall(session.callId, 'voicemail').catch((error) => {
+              console.error(`${LOG_PREFIX} Failed to end active session after AMD machine detection for ${session.callId}:`, error);
+            });
+          });
+        }
       }
       break;
     }
@@ -5555,58 +5567,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         // INTELLIGENT VOICEMAIL DETECTION - Check FIRST before anything else
         // This must run before we decide to ignore IVR audio
         if (audioType.type === 'ivr') {
-          const voicemailIndicators = [
-            // Standard voicemail greetings
-            'leave a message',
-            'leave your message',
-            'after the beep',
-            'after the tone',
-            'not available',
-            'cannot take your call',
-            'can\'t take your call',
-            'unable to answer',
-            'please leave',
-            'record your message',
-            'voicemail',
-            'mailbox',
-            'reached the voicemail',
-            'no one is available',
-            'at the tone please record',
-            'press pound when finished',
-            'beep',
-            // CRITICAL: Voicemail system error messages (these were causing false positives)
-            'we didn\'t get your message',
-            'we did not get your message',
-            'you were not speaking',
-            'because of a bad connection',
-            'to disconnect press',
-            'to disconnect, press',
-            'to record your message press',
-            'to record your message, press',
-            'system cannot process',
-            'please try again later',
-            'are you still there',
-            'sorry you were having trouble',
-            'sorry you are having trouble',
-            'maximum time permitted',
-            // Automated phone number readout
-            'is not available',
-            'your call has been forwarded',
-            'automatic voice message system',
-            'voice messaging system',
-            'automated voice messaging',
-            'forwarded to an automated',
-            // Common voicemail phrases
-            'i\'ll get back to you',
-            'i will get back to you',
-            'call you back',
-            'return your call',
-            'come to the phone',
-            'away from my phone',
-            'away from the phone',
-          ];
-
-          const isVoicemail = !isScreenerPrompt && voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
+          const isVoicemail = !isScreenerPrompt && isVoicemailCueTranscript(message.transcript);
           // CRITICAL: Override disposition if AI incorrectly set not_interested/no_answer/qualified_lead for voicemail
           // The transcript evidence should take precedence over AI's disposition
           // FIX: Include 'qualified_lead' to catch cases where AI mistakenly classifies voicemail as qualified

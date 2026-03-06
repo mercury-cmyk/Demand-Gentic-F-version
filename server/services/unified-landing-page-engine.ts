@@ -14,13 +14,11 @@ import { db } from "../db";
 import {
   campaignOrganizations,
   brandKits,
-  SUPER_ORG_ID,
 } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { chat as vertexChat } from "./vertex-ai/vertex-client";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { withAiConcurrency } from "../lib/ai-concurrency";
-import { BRAND_VOICE, TAGLINE } from "@shared/brand-messaging";
 
 // ============================================================================
 // TYPES
@@ -108,6 +106,15 @@ export interface LandingPageStructuredResult {
 // ============================================================================
 
 const VERTEX_LP_MODEL = 'gemini-2.0-flash-001';
+const GENERIC_TONE_GUIDELINES: Record<string, string> = {
+  authoritative: "Lead with clarity, confidence, and credibility.",
+  bold: "Use decisive language and direct calls to action.",
+  conversational: "Sound natural, human, and easy to follow.",
+  empathetic: "Acknowledge audience pain points with care and relevance.",
+  friendly: "Keep the tone warm, approachable, and helpful.",
+  professional: "Stay polished, concise, and business-ready.",
+  technical: "Be precise, concrete, and technically credible.",
+};
 
 // ============================================================================
 // HELPERS (extracted from ai-generative-studio.ts — canonical implementations)
@@ -309,17 +316,16 @@ export async function getFullOrganizationIntelligence(organizationId?: string): 
  * Throws if missing — generation MUST NOT proceed without OI.
  */
 export async function assertOrganizationIntelligence(organizationId?: string): Promise<OrgIntelligenceContext> {
-  // Default to super org when none provided
-  const effectiveOrgId = organizationId || SUPER_ORG_ID;
-
-  const ctx = await getFullOrganizationIntelligence(effectiveOrgId);
-  if (ctx.populated) return ctx;
-
-  // If the requested org has no OI, fall back to the super org's context
-  if (effectiveOrgId !== SUPER_ORG_ID) {
-    const superCtx = await getFullOrganizationIntelligence(SUPER_ORG_ID);
-    if (superCtx.populated) return superCtx;
+  const normalizedOrganizationId = organizationId?.trim();
+  if (!normalizedOrganizationId) {
+    throw Object.assign(
+      new Error("organizationId is required for organization-exclusive content generation."),
+      { statusCode: 400, code: "ORGANIZATION_REQUIRED" },
+    );
   }
+
+  const ctx = await getFullOrganizationIntelligence(normalizedOrganizationId);
+  if (ctx.populated) return ctx;
 
   throw Object.assign(
     new Error(
@@ -377,20 +383,15 @@ function buildBaseContext(params: BaseContextParams, orgContext: string, orgInte
     parts.push(`=== ORGANIZATIONAL INTELLIGENCE (MANDATORY — all outputs must align with this) ===\n${orgContext}\n=== END ORGANIZATIONAL INTELLIGENCE ===`);
   }
 
-  // Brand voice guidelines from centralized brand messaging
-  parts.push(`Brand Voice Guidelines:
-- Brand Identity: ${TAGLINE.identity} — ${TAGLINE.primary}
-- Personality: ${BRAND_VOICE.personality.traits.join(', ')}
-- Avoid being: ${BRAND_VOICE.personality.antiTraits.join(', ')}
-- Key phrases to weave in naturally: ${BRAND_VOICE.keyPhrases.slice(0, 4).join('; ')}
-- Preferred vocabulary: ${BRAND_VOICE.vocabulary.preferred.slice(0, 10).join(', ')}
-- Words to avoid: ${BRAND_VOICE.vocabulary.avoid.slice(0, 8).join(', ')}`);
+  parts.push(`Brand Isolation Rules:
+- Use only the selected organization's brand identity, positioning, offerings, audience context, and visual language.
+- Do not introduce platform-default branding, other organizations, or generic cross-brand messaging.
+- If a detail is not present in Organization Intelligence or the optional brand kit, do not invent another brand source.`);
 
   // Tone: OI branding.tone is authoritative; user param is secondary override
   const effectiveTone = orgIntel.tone || params.tone;
   if (effectiveTone) {
-    const toneKey = effectiveTone as keyof typeof BRAND_VOICE.toneGuidelines;
-    const toneGuidance = BRAND_VOICE.toneGuidelines[toneKey];
+    const toneGuidance = GENERIC_TONE_GUIDELINES[effectiveTone.toLowerCase()];
     if (toneGuidance) {
       parts.push(`Tone: ${effectiveTone}\nTone Guidance: ${toneGuidance}`);
     } else {
@@ -457,7 +458,7 @@ function buildCampaignContextBlock(ctx: CampaignContextBlock): string {
 // MASTER SYSTEM PROMPT — CONVERSION-FIRST DESIGN
 // ============================================================================
 
-const MASTER_LANDING_PAGE_SYSTEM_PROMPT = `You are an elite B2B landing page architect and conversion optimization specialist working within the DemandGentic.ai Creative Studio.
+const MASTER_LANDING_PAGE_SYSTEM_PROMPT = `You are an elite B2B landing page architect and conversion optimization specialist working within an organization-exclusive Creative Studio.
 
 YOUR MISSION: Create landing pages that convert. Every element must earn its place on the page.
 
@@ -471,6 +472,7 @@ You MUST use the Organization Intelligence context provided in every generation 
 - Product/service offerings (core products, use cases, problems solved)
 
 These are BINDING constraints, not suggestions. Your output must be verifiably aligned with OI.
+Never introduce platform-default or cross-organization branding.
 
 ## VISUAL DESIGN STANDARDS
 
@@ -526,7 +528,17 @@ These are BINDING constraints, not suggestions. Your output must be verifiably a
 - CSS custom properties for brand theming: --primary, --secondary, --accent, --text, --bg, --text-light
 - Semantic HTML5: <header>, <main>, <section>, <footer>
 - Accessible: proper heading hierarchy, form labels, alt text, focus states, WCAG AA color contrast
-- Performance-first: no heavy images, minimal animations, clean markup`;
+- Performance-first: no heavy images, minimal animations, clean markup
+- Do NOT include any JSON-LD, schema.org structured data, or <script type="application/ld+json"> blocks. These pages are lead capture forms, not product pages, and incomplete structured data triggers Google Search Console errors`;
+
+// ============================================================================
+// STRIP JSON-LD STRUCTURED DATA
+// ============================================================================
+
+function stripJsonLd(html: string): string {
+  if (!html) return html;
+  return html.replace(/<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, '');
+}
 
 // ============================================================================
 // LEAD CAPTURE FORM ENFORCEMENT
@@ -829,6 +841,9 @@ Make the HTML fully self-contained with inline styles and a <style> block for re
     console.error("[UnifiedLPEngine] Failed to parse Vertex AI HTML response:", rawJson.substring(0, 500));
     throw new Error("AI returned invalid JSON for landing page generation. Please try again.");
   }
+
+  // Post-process: strip any JSON-LD structured data (prevents Google rich result errors)
+  result.html = stripJsonLd(result.html || '');
 
   // Post-process: enforce lead capture form
   result.html = enforceLeadCaptureForm(result.html || '', resolvedThankYouUrl, resolvedAssetUrl);

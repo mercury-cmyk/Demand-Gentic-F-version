@@ -34,6 +34,11 @@ describe("isVoicemailCueTranscript", () => {
     expect(isVoicemailCueTranscript("You have reached the voice mail of Pat Oldenburg.")).toBe(true);
     expect(isVoicemailCueTranscript("I'm unavailable to take your call right now, please leave a message after the tone.")).toBe(true);
     expect(isVoicemailCueTranscript("Your call has been forwarded to voice mail.")).toBe(true);
+    expect(
+      isVoicemailCueTranscript(
+        "Здравствуйте. Я сейчас не могу ответить. Оставьте сообщение после сигнала, и я вам перезвоню."
+      )
+    ).toBe(true);
   });
 
   it("does not treat automated screening prompts as voicemail", () => {
@@ -105,5 +110,18 @@ describe("isExplicitCallbackRequestTranscript", () => {
   it("does not treat generic follow-up language as callback", () => {
     expect(isExplicitCallbackRequestTranscript("Thanks, we can follow up by email.")).toBe(false);
     expect(isExplicitCallbackRequestTranscript("This sounds interesting, send me details.")).toBe(false);
+  });
+
+  it("does not treat voicemail callback phrasing as callback", () => {
+    expect(
+      isExplicitCallbackRequestTranscript(
+        "Hi, you've reached Sarah. Leave a message after the beep and I'll call you back."
+      )
+    ).toBe(false);
+    expect(
+      isExplicitCallbackRequestTranscript(
+        "Здравствуйте. Я сейчас не могу ответить. Оставьте сообщение после сигнала, и я вам перезвоню."
+      )
+    ).toBe(false);
   });
 });

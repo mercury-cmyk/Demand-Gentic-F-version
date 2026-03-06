@@ -254,7 +254,7 @@ export default function ResourcesCentrePublic() {
             <a href="/about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">About</a>
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => window.location.href = "https://app.demandgentic.ai"}>
+            <Button variant="ghost" onClick={() => setLocation("/client-portal/login")}>
               Sign In
             </Button>
             <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
@@ -500,7 +500,7 @@ export default function ResourcesCentrePublic() {
             generate more qualified leads with AI-powered demand generation.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" className="bg-white text-violet-700 hover:bg-white/90" onClick={() => window.location.href = "https://app.demandgentic.ai"}>
+            <Button size="lg" className="bg-white text-violet-700 hover:bg-white/90" onClick={() => setLocation("/book/admin/demo")}>
               Schedule Strategy Call
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>

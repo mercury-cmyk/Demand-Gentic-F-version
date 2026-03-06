@@ -19,6 +19,7 @@ import { aiImageGenerationJobs, emailBuilderImages } from '../../shared/schema';
 import { eq } from 'drizzle-orm';
 import { uploadToS3, getPublicUrl, generateStorageKey } from '../lib/storage';
 import { getVertexConfig } from './vertex-ai/vertex-client';
+import { assertOrganizationIntelligence } from './unified-landing-page-engine';
 import crypto from 'crypto';
 
 // ==================== TYPES ====================
@@ -46,6 +47,8 @@ export interface ImageGenerationRequest {
   aspectRatio?: AspectRatio;
   numberOfImages?: number;
   requestedBy?: string;
+  organizationId?: string;
+  clientProjectId?: string;
   parameters?: {
     guidanceScale?: number;
     seed?: number;
@@ -70,6 +73,7 @@ export interface ImageGenerationResult {
   error?: string;
   durationMs?: number;
   estimatedCost?: number;
+  requestedBy?: string;
 }
 
 // ==================== STYLE PROMPTS ====================
@@ -127,7 +131,7 @@ class AIImageGenerator {
       await this.updateJobStatus(jobId, 'processing');
 
       // Build enhanced prompt with style
-      const enhancedPrompt = this.buildEnhancedPrompt(request);
+      const enhancedPrompt = await this.buildEnhancedPrompt(request);
 
       // Get dimensions for aspect ratio
       const dimensions = ASPECT_RATIO_DIMENSIONS[request.aspectRatio || '1:1'];
@@ -173,6 +177,7 @@ class AIImageGenerator {
         images,
         durationMs,
         estimatedCost,
+        requestedBy: request.requestedBy,
       };
     } catch (error: any) {
       console.error('[AIImageGenerator] Generation failed:', error);
@@ -186,6 +191,7 @@ class AIImageGenerator {
         status: 'failed',
         error: error.message,
         durationMs,
+        requestedBy: request.requestedBy,
       };
     }
   }
@@ -214,6 +220,7 @@ class AIImageGenerator {
       error: job.errorMessage || undefined,
       durationMs: job.durationMs || undefined,
       estimatedCost: job.estimatedCost || undefined,
+      requestedBy: job.requestedBy || undefined,
     };
   }
 
@@ -236,11 +243,20 @@ class AIImageGenerator {
 
   // ==================== PRIVATE METHODS ====================
 
-  private buildEnhancedPrompt(request: ImageGenerationRequest): string {
+  private async buildEnhancedPrompt(request: ImageGenerationRequest): Promise<string> {
     const parts: string[] = [];
 
-    // Add main prompt
-    parts.push(request.prompt);
+    if (request.organizationId) {
+      const orgIntel = await assertOrganizationIntelligence(request.organizationId);
+      parts.push('Create an organization-exclusive marketing image.');
+      parts.push(
+        'Use only the selected organization\'s brand identity, positioning, visual cues, and audience context.',
+      );
+      parts.push('Do not mix in platform branding or any other organization\'s colors, terminology, or motifs.');
+      parts.push(`Organization Intelligence:\n${orgIntel.raw}`);
+    }
+
+    parts.push(`Image Request: ${request.prompt}`);
 
     // Add style modifiers
     if (request.style && STYLE_PROMPTS[request.style]) {
@@ -394,6 +410,10 @@ class AIImageGenerator {
       aiGenerationId: jobId,
       aiStyle: request.style,
       altText: this.generateAltText(request.prompt),
+      tags: [
+        request.organizationId ? `organization:${request.organizationId}` : null,
+        request.clientProjectId ? `client_project:${request.clientProjectId}` : null,
+      ].filter((value): value is string => Boolean(value)),
       uploadedBy,
     });
 
@@ -436,7 +456,11 @@ class AIImageGenerator {
       aspectRatio: request.aspectRatio || '1:1',
       numberOfImages: request.numberOfImages || 1,
       model: this.model,
-      parameters: request.parameters,
+      parameters: {
+        ...(request.parameters || {}),
+        organizationId: request.organizationId,
+        clientProjectId: request.clientProjectId,
+      },
       status: 'pending',
       requestedBy: request.requestedBy,
     });

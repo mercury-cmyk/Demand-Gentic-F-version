@@ -28,6 +28,7 @@ import {
   getPromptSuggestions,
 } from '../services/ai-image-generator';
 import { getPresignedUploadUrl, getPublicUrl, deleteFromS3, getFromS3, generateStorageKey } from '../lib/storage';
+import { resolveScopedOrganizationId } from '../lib/client-organization-scope';
 import { requireDualAuth } from '../auth';
 import multer from 'multer';
 import crypto from 'crypto';
@@ -829,13 +830,22 @@ router.post('/images/generate', async (req: Request, res: Response) => {
       ]).optional(),
       aspectRatio: z.enum(['1:1', '16:9', '4:3', '3:4', '9:16', '3:2', '2:3']).optional(),
       numberOfImages: z.number().min(1).max(4).optional(),
+      organizationId: z.string().optional(),
+      clientProjectId: z.string().optional(),
     });
 
     const data = schema.parse(req.body);
+    const user = (req as any).user as any;
+    const organizationId = await resolveScopedOrganizationId({
+      tenantId: user?.tenantId,
+      requestedOrganizationId: data.organizationId,
+      requireOrganization: !!user?.tenantId,
+    });
 
     const result = await aiImageGenerator.generateImages({
       ...data,
-      requestedBy: (req as any).user?.id,
+      organizationId,
+      requestedBy: user?.id,
     });
 
     res.json(result);
@@ -844,7 +854,11 @@ router.post('/images/generate', async (req: Request, res: Response) => {
     if (error.name === 'ZodError') {
       return res.status(400).json({ error: 'Invalid data', details: error.errors });
     }
-    res.status(500).json({ error: 'Failed to generate image', message: error.message });
+    const statusCode =
+      typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode <= 599
+        ? error.statusCode
+        : 500;
+    res.status(statusCode).json({ error: 'Failed to generate image', message: error.message });
   }
 });
 
@@ -855,11 +869,16 @@ router.post('/images/generate', async (req: Request, res: Response) => {
 router.get('/images/generate/:jobId', async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
+    const user = (req as any).user as any;
 
     const result = await aiImageGenerator.getJobStatus(jobId);
 
     if (!result) {
       return res.status(404).json({ error: 'Job not found' });
+    }
+
+    if (user?.id && result.requestedBy && result.requestedBy !== user.id) {
+      return res.status(403).json({ error: 'Access denied' });
     }
 
     res.json(result);
