@@ -28,6 +28,7 @@ const JOURNEY_ACTION_INTERVAL = 60000; // Every 60 seconds
 const MERCURY_OUTBOX_INTERVAL = 60000; // Every 60 seconds — flush queued Mercury emails
 const LONG_CALL_RECOVERY_INTERVAL = parseInt(process.env.LONG_CALL_RECOVERY_INTERVAL_MS || '300000', 10); // Every 5 min — parallel pool is much faster
 const BATCH_TRANSCRIPTION_SWEEP_INTERVAL = parseInt(process.env.BATCH_TRANSCRIPTION_SWEEP_INTERVAL_MS || '1800000', 10); // Every 30 min — catches orphaned calls with GCS recordings
+const ANALYSIS_SWEEP_INTERVAL = parseInt(process.env.ANALYSIS_SWEEP_INTERVAL_MS || '600000', 10); // Every 10 min — analyzes transcribed-but-unanalyzed calls
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -48,6 +49,7 @@ let journeyActionInterval: NodeJS.Timeout | null = null;
 let mercuryOutboxInterval: NodeJS.Timeout | null = null;
 let longCallRecoveryInterval: NodeJS.Timeout | null = null;
 let batchTranscriptionSweepInterval: NodeJS.Timeout | null = null;
+let analysisSweepInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
@@ -58,6 +60,7 @@ let isJourneyActionRunning = false;
 let isMercuryOutboxRunning = false;
 let isLongCallRecoveryRunning = false;
 let isBatchTranscriptionSweepRunning = false;
+let isAnalysisSweepRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -224,6 +227,30 @@ export function startBackgroundJobs() {
         isBatchTranscriptionSweepRunning = false;
       }
     }, BATCH_TRANSCRIPTION_SWEEP_INTERVAL);
+  }
+
+  // Analysis sweep — runs post-call analysis on calls that have transcripts but no ai_analysis.
+  // Catches calls recovered by external scripts or where analysis was skipped.
+  if (ENABLE_AI_ANALYSIS) {
+    analysisSweepInterval = setInterval(async () => {
+      if (isAnalysisSweepRunning) return;
+      isAnalysisSweepRunning = true;
+      try {
+        await withJobTimeout('Analysis Sweep', async () => {
+          const { sweepUnanalyzedCalls } = await import('./batch-transcription-sweep');
+          const result = await sweepUnanalyzedCalls();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Analysis sweep: ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Analysis sweep error:', error);
+      } finally {
+        isAnalysisSweepRunning = false;
+      }
+    }, ANALYSIS_SWEEP_INTERVAL);
   }
 
   // AI analysis processing job (optional)
@@ -436,6 +463,11 @@ export function stopBackgroundJobs() {
   if (batchTranscriptionSweepInterval) {
     clearInterval(batchTranscriptionSweepInterval);
     batchTranscriptionSweepInterval = null;
+  }
+
+  if (analysisSweepInterval) {
+    clearInterval(analysisSweepInterval);
+    analysisSweepInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');

@@ -118,6 +118,94 @@ export async function sweepUntranscribedCalls(): Promise<SweepResult> {
   return result;
 }
 
+/**
+ * Find and run post-call analysis on calls that have transcripts but no ai_analysis.
+ * This catches calls recovered by external scripts (e.g. recover-needs-review.mjs)
+ * that were transcribed but never went through the full analysis pipeline.
+ */
+export async function sweepUnanalyzedCalls(): Promise<SweepResult> {
+  const result: SweepResult = { processed: 0, transcribed: 0, analyzed: 0, failed: 0, skipped: 0 };
+
+  try {
+    const unanalyzedCalls = await db
+      .select({
+        callAttemptId: dialerCallAttempts.id,
+        callSessionId: dialerCallAttempts.callSessionId,
+        campaignId: dialerCallAttempts.campaignId,
+        contactId: dialerCallAttempts.contactId,
+        duration: dialerCallAttempts.callDurationSeconds,
+        disposition: dialerCallAttempts.disposition,
+        transcript: callSessions.aiTranscript,
+        recordingUrl: callSessions.recordingUrl,
+      })
+      .from(dialerCallAttempts)
+      .innerJoin(callSessions, eq(callSessions.id, dialerCallAttempts.callSessionId))
+      .where(
+        and(
+          sql`${dialerCallAttempts.callDurationSeconds} >= ${MIN_CALL_DURATION_SEC}`,
+          // Has a transcript
+          sql`${callSessions.aiTranscript} IS NOT NULL AND LENGTH(${callSessions.aiTranscript}) >= 30`,
+          // No analysis yet
+          sql`${callSessions.aiAnalysis} IS NULL`,
+          // Has a recording (needed for Deepgram turn-by-turn)
+          sql`(${callSessions.recordingUrl} IS NOT NULL OR ${callSessions.recordingS3Key} IS NOT NULL)`,
+        )
+      )
+      .orderBy(sql`${dialerCallAttempts.createdAt} DESC`)
+      .limit(SWEEP_BATCH_SIZE);
+
+    if (unanalyzedCalls.length === 0) {
+      return result;
+    }
+
+    console.log(`${LOG_PREFIX} Found ${unanalyzedCalls.length} transcribed-but-unanalyzed calls to process`);
+
+    for (let i = 0; i < unanalyzedCalls.length; i += SWEEP_CONCURRENCY) {
+      const batch = unanalyzedCalls.slice(i, i + SWEEP_CONCURRENCY);
+
+      const batchResults = await Promise.allSettled(
+        batch.map(async (call) => {
+          if (!call.callSessionId || !call.transcript) return { analyzed: false };
+          try {
+            const { runPostCallAnalysis } = await import("./post-call-analyzer");
+            const analysisResult = await runPostCallAnalysis(call.callSessionId, {
+              callAttemptId: call.callAttemptId,
+              campaignId: call.campaignId || undefined,
+              contactId: call.contactId || undefined,
+              callDurationSec: call.duration || undefined,
+              disposition: (call.disposition || undefined) as string | undefined,
+              geminiTranscript: call.transcript,
+            });
+            return { analyzed: analysisResult.success };
+          } catch (err: any) {
+            console.warn(`${LOG_PREFIX} Analysis error for ${call.callAttemptId}: ${err.message}`);
+            return { analyzed: false };
+          }
+        })
+      );
+
+      for (const batchResult of batchResults) {
+        result.processed++;
+        if (batchResult.status === "fulfilled" && batchResult.value.analyzed) {
+          result.analyzed++;
+        } else {
+          result.failed++;
+        }
+      }
+    }
+
+    if (result.analyzed > 0 || result.failed > 0) {
+      console.log(
+        `${LOG_PREFIX} Analysis sweep complete: ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+      );
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Analysis sweep error:`, error);
+  }
+
+  return result;
+}
+
 async function processOneCall(call: {
   callAttemptId: string;
   callSessionId: string | null;
