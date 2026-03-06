@@ -7603,6 +7603,31 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                     session.audioDetection.humanDetectedAt = new Date();
                     markFirstHumanAudio(session, "deepgram_contact_transcript");
                     console.log(`${LOG_PREFIX} âœ… [Deepgram] HUMAN DETECTED for call ${session.callId}`);
+
+                    // SPEECH-TRIGGERED GREETING: If caller speech was detected earlier and we were
+                    // waiting for transcript classification, NOW send the greeting immediately.
+                    // Without this, the agent stays silent until the 4.5s fallback timer fires,
+                    // by which time the prospect may hang up.
+                    if ((session as any).greetingTriggeredByCallerSpeech && !session.audioDetection.hasGreetingSent && !session.isEnding) {
+                      const openingScript = (session as any).geminiOpeningScript;
+                      const gemProvider = (session as any).geminiProvider;
+                      if (openingScript && gemProvider) {
+                        console.log(`${LOG_PREFIX} [AudioGuard] Human confirmed after caller speech - sending greeting immediately`);
+                        session.audioDetection.hasGreetingSent = true;
+                        gemProvider.sendOpeningMessage(openingScript);
+                        session.openingPromptSentAt = new Date();
+                        queueSessionEvent(session, "opening.identity_prompt_sent_at", {
+                          eventTs: session.openingPromptSentAt,
+                          metadata: { provider: "google", variant: session.voiceLiftVariant || "control", trigger: "speech_detected_human" },
+                          once: true,
+                        });
+                        // Cancel fallback timer since we just sent the greeting
+                        if ((session as any).fallbackGreetingTimer) {
+                          clearTimeout((session as any).fallbackGreetingTimer);
+                          (session as any).fallbackGreetingTimer = null;
+                        }
+                      }
+                    }
                   }
                 }
 

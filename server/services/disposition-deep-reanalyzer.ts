@@ -777,9 +777,10 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
       ? parsed.dispositionAssessment.suggestedDisposition
       : currentDisposition;
 
-    // DURATION GUARD: Never allow AI to suggest qualified_lead for short calls.
-    // This prevents the reanalyzer from promoting ghost/screener calls to qualified_lead.
-    const MIN_QUALIFIED_DURATION = 45;
+    // DURATION GUARD: Never allow AI to suggest qualified_lead for ghost calls.
+    // Calls < 15s are ghost calls (no real conversation possible).
+    // Calls 15-45s are allowed but will be flagged for QA review during lead creation.
+    const MIN_QUALIFIED_DURATION = 15;
     if (suggestedDisp === "qualified_lead" && durationSec < MIN_QUALIFIED_DURATION) {
       console.warn(`${LOG_PREFIX} 🚫 Overriding AI suggested qualified_lead → needs_review (duration ${durationSec}s < ${MIN_QUALIFIED_DURATION}s minimum)`);
       suggestedDisp = "needs_review";
@@ -1644,8 +1645,8 @@ export async function pushCallsToQA(
         continue;
       }
 
-      // GUARD: Minimum duration for lead creation (45s)
-      const MIN_PUSH_DURATION = 45;
+      // GUARD: Minimum duration for lead creation (ghost call filter)
+      const MIN_PUSH_DURATION = 15;
       const durationSec = session.durationSec || 0;
       if (durationSec < MIN_PUSH_DURATION) {
         results.push({ id: csId, success: false, error: `Blocked: duration ${durationSec}s < ${MIN_PUSH_DURATION}s minimum` });
