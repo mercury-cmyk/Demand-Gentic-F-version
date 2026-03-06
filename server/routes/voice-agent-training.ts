@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { z } from 'zod';
 import { requireRole } from '../auth';
 import { initializeUnifiedAgentArchitecture, unifiedAgentRegistry } from '../services/agents/unified';
@@ -37,6 +38,26 @@ type PublishRecord = {
   sectionChanges: number;
 };
 
+type SectionChange = {
+  sectionId: string;
+  name: string;
+  oldContent: string;
+  newContent: string;
+};
+
+type PendingPublishRequest = {
+  id: string;
+  requestedBy: string;
+  requestedAt: string;
+  note: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  draftVersion: number;
+  sectionChanges: SectionChange[];
+};
+
 type VoiceTrainingStore = {
   publishedVersion: string | null;
   publishedPromptHash: string | null;
@@ -47,6 +68,7 @@ type VoiceTrainingStore = {
   sections: Record<string, DraftSection>;
   history: DraftSnapshot[];
   publishHistory: PublishRecord[];
+  pendingPublishRequests: PendingPublishRequest[];
   voiceConfig: {
     provider: string;
     voiceId: string;
@@ -130,6 +152,18 @@ function getUserId(req: Request): string {
   return ((req as any).user?.id || (req as any).user?.userId || 'dev-user') as string;
 }
 
+function getUserRoles(req: Request): string[] {
+  const u = (req as any).user;
+  if (Array.isArray(u?.roles) && u.roles.length > 0) return u.roles;
+  if (u?.role) return [u.role];
+  return [];
+}
+
+function isVoiceTrainerOnly(req: Request): boolean {
+  const roles = getUserRoles(req);
+  return roles.includes('voice_trainer') && !roles.includes('admin');
+}
+
 async function ensureStore(agentVersion: string, promptHash: string | null): Promise<VoiceTrainingStore> {
   try {
     const existing = JSON.parse(await fs.readFile(STORE_FILE, 'utf8')) as VoiceTrainingStore;
@@ -163,6 +197,7 @@ async function ensureStore(agentVersion: string, promptHash: string | null): Pro
       sections,
       history: [],
       publishHistory: [],
+      pendingPublishRequests: [],
       voiceConfig: {
         provider: 'gemini_live',
         voiceId: (aiVoiceEnum as any).enumValues?.[0] || 'Fenrir',
@@ -201,7 +236,7 @@ function getVoiceAgentOrThrow() {
   return agent;
 }
 
-router.use(requireRole('admin', 'manager', 'campaign_manager', 'quality_analyst', 'qa_analyst', 'data_ops'));
+router.use(requireRole('admin', 'manager', 'campaign_manager', 'quality_analyst', 'qa_analyst', 'data_ops', 'voice_trainer'));
 
 router.get('/overview', async (_req: Request, res: Response) => {
   try {
@@ -459,6 +494,11 @@ router.get('/versions', async (_req: Request, res: Response) => {
 
 router.post('/publish', async (req: Request, res: Response) => {
   try {
+    // Voice trainers must use the approval workflow — they cannot publish directly
+    if (isVoiceTrainerOnly(req)) {
+      return res.status(403).json({ error: 'Voice trainers must submit changes for admin approval. Use "Submit for Approval" instead.' });
+    }
+
     const note = typeof req.body?.note === 'string' ? req.body.note.trim() : 'Approved promotion from draft to published';
     const agent = getVoiceAgentOrThrow();
     const store = await ensureStore(agent.versionControl.currentVersion, agent.promptVersion);
@@ -536,6 +576,207 @@ router.post('/rollback-draft/:version', async (req: Request, res: Response) => {
     res.json({ success: true, restoredFromVersion: version, currentDraftVersion: store.draftVersion });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to rollback draft' });
+  }
+});
+
+// ── Approval Workflow Endpoints ──────────────────────────────────────────────
+
+// Voice trainers submit a publish request for admin approval
+router.post('/request-publish', async (req: Request, res: Response) => {
+  try {
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    if (!note) {
+      return res.status(400).json({ error: 'A description of changes is required when submitting for approval.' });
+    }
+
+    const agent = getVoiceAgentOrThrow();
+    const store = await ensureStore(agent.versionControl.currentVersion, agent.promptVersion);
+    if (!store.pendingPublishRequests) store.pendingPublishRequests = [];
+
+    // Check for existing pending request
+    const hasPending = store.pendingPublishRequests.some((r) => r.status === 'pending');
+    if (hasPending) {
+      return res.status(409).json({ error: 'A publish request is already pending admin approval. Please wait for it to be reviewed.' });
+    }
+
+    // Compute section diffs
+    const sectionChanges: SectionChange[] = [];
+    for (const section of agent.promptSections) {
+      const draftSection = store.sections[section.id];
+      if (!draftSection) continue;
+      if (draftSection.content !== section.content) {
+        sectionChanges.push({
+          sectionId: section.id,
+          name: section.name,
+          oldContent: section.content,
+          newContent: draftSection.content,
+        });
+      }
+    }
+
+    if (sectionChanges.length === 0) {
+      return res.status(400).json({ error: 'No changes detected between draft and published version.' });
+    }
+
+    const request: PendingPublishRequest = {
+      id: crypto.randomUUID(),
+      requestedBy: getUserId(req),
+      requestedAt: new Date().toISOString(),
+      note,
+      status: 'pending',
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewNote: null,
+      draftVersion: store.draftVersion,
+      sectionChanges,
+    };
+
+    store.pendingPublishRequests.push(request);
+    store.updatedAt = new Date().toISOString();
+    await persistStore(store);
+
+    res.json({ success: true, requestId: request.id, sectionChanges: sectionChanges.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to submit publish request' });
+  }
+});
+
+// List publish requests (voice trainers see own, admins see all)
+router.get('/publish-requests', async (req: Request, res: Response) => {
+  try {
+    const agent = getVoiceAgentOrThrow();
+    const store = await ensureStore(agent.versionControl.currentVersion, agent.promptVersion);
+    const requests = store.pendingPublishRequests || [];
+    const userId = getUserId(req);
+
+    // Voice trainers only see their own requests
+    const filtered = isVoiceTrainerOnly(req)
+      ? requests.filter((r) => r.requestedBy === userId)
+      : requests;
+
+    res.json({ requests: filtered.slice(-25).reverse() });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to fetch publish requests' });
+  }
+});
+
+// Admin approves a publish request → executes the actual publish
+router.post('/publish-requests/:id/approve', async (req: Request, res: Response) => {
+  try {
+    if (isVoiceTrainerOnly(req)) {
+      return res.status(403).json({ error: 'Only administrators can approve publish requests.' });
+    }
+
+    const requestId = req.params.id;
+    const reviewNote = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    const agent = getVoiceAgentOrThrow();
+    const store = await ensureStore(agent.versionControl.currentVersion, agent.promptVersion);
+    if (!store.pendingPublishRequests) store.pendingPublishRequests = [];
+
+    const publishRequest = store.pendingPublishRequests.find((r) => r.id === requestId);
+    if (!publishRequest) {
+      return res.status(404).json({ error: 'Publish request not found' });
+    }
+    if (publishRequest.status !== 'pending') {
+      return res.status(400).json({ error: `Request already ${publishRequest.status}` });
+    }
+
+    // Execute the actual publish using the draft sections
+    const editor = getUserId(req);
+    let sectionChanges = 0;
+    for (const change of publishRequest.sectionChanges) {
+      unifiedAgentRegistry.updateAgentPromptSection(
+        'voice',
+        change.sectionId,
+        change.newContent,
+        editor,
+        `Approved publish from Voice Training Dashboard: ${publishRequest.note}`
+      );
+      sectionChanges += 1;
+    }
+
+    const refreshedAgent = getVoiceAgentOrThrow();
+
+    // Update store with new published state
+    store.publishedVersion = refreshedAgent.versionControl.currentVersion;
+    store.publishedPromptHash = refreshedAgent.promptVersion;
+    store.updatedAt = new Date().toISOString();
+    store.lastEditor = editor;
+    store.publishHistory.push({
+      publishedVersion: refreshedAgent.versionControl.currentVersion,
+      publishedAt: new Date().toISOString(),
+      publishedBy: editor,
+      note: `Approved: ${publishRequest.note}${reviewNote ? ` | Admin note: ${reviewNote}` : ''}`,
+      sectionChanges,
+    });
+
+    // Reset draft sections to match published
+    for (const section of refreshedAgent.promptSections) {
+      store.sections[section.id] = {
+        sectionId: section.id,
+        name: section.name,
+        category: section.category,
+        content: section.content,
+        lastEditedAt: new Date().toISOString(),
+        lastEditedBy: editor,
+      };
+    }
+
+    // Mark request as approved
+    publishRequest.status = 'approved';
+    publishRequest.reviewedBy = editor;
+    publishRequest.reviewedAt = new Date().toISOString();
+    publishRequest.reviewNote = reviewNote || null;
+
+    await persistStore(store);
+
+    res.json({
+      success: true,
+      message: 'Publish request approved and promoted to production',
+      sectionChanges,
+      publishedVersion: refreshedAgent.versionControl.currentVersion,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to approve publish request' });
+  }
+});
+
+// Admin rejects a publish request with feedback
+router.post('/publish-requests/:id/reject', async (req: Request, res: Response) => {
+  try {
+    if (isVoiceTrainerOnly(req)) {
+      return res.status(403).json({ error: 'Only administrators can reject publish requests.' });
+    }
+
+    const requestId = req.params.id;
+    const reviewNote = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    if (!reviewNote) {
+      return res.status(400).json({ error: 'A rejection reason is required.' });
+    }
+
+    const agent = getVoiceAgentOrThrow();
+    const store = await ensureStore(agent.versionControl.currentVersion, agent.promptVersion);
+    if (!store.pendingPublishRequests) store.pendingPublishRequests = [];
+
+    const publishRequest = store.pendingPublishRequests.find((r) => r.id === requestId);
+    if (!publishRequest) {
+      return res.status(404).json({ error: 'Publish request not found' });
+    }
+    if (publishRequest.status !== 'pending') {
+      return res.status(400).json({ error: `Request already ${publishRequest.status}` });
+    }
+
+    publishRequest.status = 'rejected';
+    publishRequest.reviewedBy = getUserId(req);
+    publishRequest.reviewedAt = new Date().toISOString();
+    publishRequest.reviewNote = reviewNote;
+
+    store.updatedAt = new Date().toISOString();
+    await persistStore(store);
+
+    res.json({ success: true, message: 'Publish request rejected' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to reject publish request' });
   }
 });
 

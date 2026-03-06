@@ -18,6 +18,7 @@ const QA_ROLES = [
   'manager',
   'qa_analyst',
 ];
+const VOICE_TRAINING_ROLES = [...QA_ROLES, USER_ROLES.VOICE_TRAINER];
 const AGENT_ROLES = [...MANAGEMENT_ROLES, USER_ROLES.AGENT];
 const ANALYTICS_ROLES = [...QA_ROLES, USER_ROLES.CLIENT_USER];
 const CLIENT_ACCESS_ROLES = [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER];
@@ -45,7 +46,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/ai-studio', roles: MANAGEMENT_ROLES, description: 'AI Studio Dashboard' },
   { pattern: /^\/ai-studio\//, roles: MANAGEMENT_ROLES, description: 'AI Studio pages' },
   { pattern: '/preview-studio', roles: MANAGEMENT_ROLES, description: 'Preview Studio (Admin)' },
-  { pattern: '/voice-agent-training', roles: QA_ROLES, description: 'Voice Agent Training Dashboard' },
+  { pattern: '/voice-agent-training', roles: VOICE_TRAINING_ROLES, description: 'Voice Agent Training Dashboard' },
   { pattern: '/voice-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Voice Simulation' },
   { pattern: '/email-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Email Simulation' },
   { pattern: '/virtual-agents', roles: MANAGEMENT_ROLES, description: 'Virtual Agents' },
@@ -232,6 +233,12 @@ export function canAccessRoute(userRoles: string[], path: string): boolean {
   // Admin always has access
   if (userRoles.includes(USER_ROLES.ADMIN)) {
     return true;
+  }
+
+  // Voice trainer role is strictly restricted — only allow voice training dashboard and profile
+  if (userRoles.includes(USER_ROLES.VOICE_TRAINER)) {
+    const allowedPaths = ['/voice-agent-training', '/settings/profile'];
+    return allowedPaths.includes(path);
   }
 
   const requiredRoles = getRoutePermissions(path);

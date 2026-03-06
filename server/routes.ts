@@ -1109,6 +1109,7 @@ export function registerRoutes(app: Express) {
 
       res.status(201).json(userWithoutPassword);
     } catch (error) {
+      console.error('[User Creation Error]', error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation failed", errors: error.errors });
       }
@@ -1192,6 +1193,11 @@ export function registerRoutes(app: Express) {
 
       if (!Array.isArray(roles)) {
         return res.status(400).json({ message: "Roles must be an array" });
+      }
+
+      // voice_trainer is an exclusive role — cannot be combined with other roles
+      if (roles.includes('voice_trainer') && roles.length > 1) {
+        return res.status(400).json({ message: "voice_trainer must be assigned as an exclusive role and cannot be combined with other roles." });
       }
 
       await storage.updateUserRoles(userId, roles, req.user!.userId);
@@ -10537,38 +10543,28 @@ export function registerRoutes(app: Express) {
         }
       }
 
-<<<<<<< HEAD
-      // ── Pass 2: Move 'new' leads out of new based on AI quality outcome ───────────────
-      // These are leads where AI analysis ran but qaStatus was never updated from 'new'
-      const newLeads = await db
-=======
       // ── Pass 2: Move pending-review leads based on AI qualification outcome ───────────
       // These are leads where AI analysis ran but qaStatus still reflects review queue states
       // Use text comparison for qaStatus to safely support legacy "Pending Review"
       // without causing enum-cast failures on modern qa_status enum deployments.
       const pendingReviewLeads = await db
->>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
         .select({
           id: leads.id,
           aiQualificationStatus: leads.aiQualificationStatus,
           aiScore: leads.aiScore,
         })
         .from(leads)
-<<<<<<< HEAD
-        .where(and(eq(leads.qaStatus, 'new'), isNotNull(leads.aiQualificationStatus), baseWhere));
-=======
         .where(and(
           sql`${leads.qaStatus}::text IN ('new', 'under_review', 'Pending Review')`,
           isNotNull(leads.aiQualificationStatus),
           baseWhere,
         ));
->>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
 
       let movedToApproved = 0;
       let movedToReview = 0;
       let movedToRejected = 0;
 
-      for (const lead of newLeads) {
+      for (const lead of pendingReviewLeads) {
         const score = Number(lead.aiScore ?? 0);
         const status = lead.aiQualificationStatus;
 
@@ -10597,7 +10593,7 @@ export function registerRoutes(app: Express) {
 
       const summary = {
         approvedLeadsBackfilledQualified: backfilledQualified,
-        newLeadsProcessed: newLeads.length,
+        pendingReviewLeadsProcessed: pendingReviewLeads.length,
         movedToApproved,
         movedToUnderReview: movedToReview,
         movedToRejected,

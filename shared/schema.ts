@@ -140,7 +140,8 @@ export const userRoleEnum = pgEnum('user_role', [
   'quality_analyst',
   'content_creator',
   'campaign_manager',
-  'data_ops'
+  'data_ops',
+  'voice_trainer'
 ]);
 
 // Dialer Run Status Enum

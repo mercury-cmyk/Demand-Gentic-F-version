@@ -29,6 +29,8 @@ const AVAILABLE_ROLES = [
   { value: 'quality_analyst', label: 'Quality Analyst' },
   { value: 'content_creator', label: 'Content Creator' },
   { value: 'campaign_manager', label: 'Campaign Manager' },
+  { value: 'data_ops', label: 'Data Ops' },
+  { value: 'voice_trainer', label: 'Voice Trainer' },
 ];
 
 export default function UsersSettingsPage() {
@@ -216,11 +218,15 @@ export default function UsersSettingsPage() {
   };
 
   const toggleRole = (roleValue: string) => {
-    setSelectedRoles(prev =>
-      prev.includes(roleValue)
-        ? prev.filter(r => r !== roleValue)
-        : [...prev, roleValue]
-    );
+    setSelectedRoles(prev => {
+      if (prev.includes(roleValue)) {
+        return prev.filter(r => r !== roleValue);
+      }
+      // voice_trainer is exclusive — selecting it clears other roles
+      if (roleValue === 'voice_trainer') return ['voice_trainer'];
+      // Selecting another role deselects voice_trainer
+      return [...prev.filter(r => r !== 'voice_trainer'), roleValue];
+    });
   };
 
   const getRoleBadgeVariant = (userRole: string) => {

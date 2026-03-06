@@ -27,7 +27,7 @@ export const createUserSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
   firstName: z.string().min(1, 'First name is required').max(100),
   lastName: z.string().min(1, 'Last name is required').max(100),
-  role: z.enum(['admin', 'agent', 'quality_analyst', 'content_creator', 'campaign_manager']),
+  role: z.enum(['admin', 'agent', 'quality_analyst', 'content_creator', 'campaign_manager', 'data_ops', 'voice_trainer']),
 });
 
 export const updateUserSchema = z.object({
@@ -36,13 +36,13 @@ export const updateUserSchema = z.object({
   password: z.string().min(8).optional(),
   firstName: z.string().max(100).optional(),
   lastName: z.string().max(100).optional(),
-  role: z.enum(['admin', 'agent', 'quality_analyst', 'content_creator', 'campaign_manager']).optional(),
+  role: z.enum(['admin', 'agent', 'quality_analyst', 'content_creator', 'campaign_manager', 'data_ops', 'voice_trainer']).optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field must be provided for update',
 });
 
 export const assignRoleSchema = z.object({
-  role: z.enum(['admin', 'agent', 'quality_analyst', 'content_creator', 'campaign_manager']),
+  role: z.enum(['admin', 'agent', 'quality_analyst', 'content_creator', 'campaign_manager', 'data_ops', 'voice_trainer']),
 });
 
 // Contact schemas

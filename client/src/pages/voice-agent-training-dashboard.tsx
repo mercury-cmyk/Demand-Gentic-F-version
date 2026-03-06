@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Bot, FlaskConical, GitBranch, Mic, Play, Save, Upload } from 'lucide-react';
+import { Bot, FlaskConical, GitBranch, Mic, Play, Save, Upload, Clock, CheckCircle, XCircle, Send } from 'lucide-react';
 
 type DraftSection = {
   sectionId: string;
@@ -122,6 +123,30 @@ type VersionsResponse = {
     history?: DraftHistoryEntry[];
   };
   publishHistory?: PublishHistoryEntry[];
+};
+
+type PublishRequestSectionChange = {
+  sectionId: string;
+  name: string;
+  oldContent: string;
+  newContent: string;
+};
+
+type PublishRequest = {
+  id: string;
+  requestedBy: string;
+  requestedAt: string;
+  note: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  draftVersion: number;
+  sectionChanges: PublishRequestSectionChange[];
+};
+
+type PublishRequestsResponse = {
+  requests: PublishRequest[];
 };
 
 const getErrorMessage = (error: unknown): string => {
@@ -236,6 +261,12 @@ async function trainingApiRequest<T>(
 export default function VoiceAgentTrainingDashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  // Determine role for conditional UI
+  const userRoles: string[] = (user as any)?.roles || (user?.role ? [user.role] : []);
+  const isVoiceTrainer = userRoles.includes('voice_trainer') && !userRoles.includes('admin');
+  const isAdmin = userRoles.includes('admin');
 
   const [selectedSectionId, setSelectedSectionId] = useState<string>('');
   const [sectionContent, setSectionContent] = useState('');
@@ -255,7 +286,9 @@ export default function VoiceAgentTrainingDashboard() {
   const [accountId, setAccountId] = useState('demo-acct-1');
   const [contactId, setContactId] = useState('demo-contact-1');
   const [simulationInput, setSimulationInput] = useState('Run identity lock and gatekeeper protocol behavior.');
-  const [publishNote, setPublishNote] = useState('Approved after simulation review.');
+  const [publishNote, setPublishNote] = useState(isVoiceTrainer ? '' : 'Approved after simulation review.');
+  const [approvalReviewNote, setApprovalReviewNote] = useState('');
+  const [rejectionNote, setRejectionNote] = useState('');
 
   const overviewQuery = useQuery<OverviewResponse>({
     queryKey: ['voice-training-overview'],
@@ -385,6 +418,56 @@ export default function VoiceAgentTrainingDashboard() {
       toast({ title: 'Rollback failed', description: getErrorMessage(err), variant: 'destructive' });
     },
   });
+
+  // ── Approval Workflow ──────────────────────────────────────────────
+
+  const publishRequestsQuery = useQuery<PublishRequestsResponse>({
+    queryKey: ['voice-training-publish-requests'],
+    queryFn: async () => trainingApiRequest<PublishRequestsResponse>('GET', '/publish-requests'),
+  });
+
+  const requestPublishMutation = useMutation({
+    mutationFn: async () => trainingApiRequest<{ success: boolean }>('POST', '/request-publish', { note: publishNote }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['voice-training-publish-requests'] });
+      setPublishNote('');
+      toast({ title: 'Submitted for approval', description: 'Your publish request has been sent to an administrator for review.' });
+    },
+    onError: (err: unknown) => {
+      toast({ title: 'Submit failed', description: getErrorMessage(err), variant: 'destructive' });
+    },
+  });
+
+  const approveRequestMutation = useMutation({
+    mutationFn: async (requestId: string) => trainingApiRequest<{ success: boolean }>('POST', `/publish-requests/${requestId}/approve`, { note: approvalReviewNote }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['voice-training-overview'] }),
+        queryClient.invalidateQueries({ queryKey: ['voice-training-draft'] }),
+        queryClient.invalidateQueries({ queryKey: ['voice-training-versions'] }),
+        queryClient.invalidateQueries({ queryKey: ['voice-training-publish-requests'] }),
+      ]);
+      setApprovalReviewNote('');
+      toast({ title: 'Approved & Published', description: 'Changes have been promoted to production.' });
+    },
+    onError: (err: unknown) => {
+      toast({ title: 'Approval failed', description: getErrorMessage(err), variant: 'destructive' });
+    },
+  });
+
+  const rejectRequestMutation = useMutation({
+    mutationFn: async (requestId: string) => trainingApiRequest<{ success: boolean }>('POST', `/publish-requests/${requestId}/reject`, { note: rejectionNote }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['voice-training-publish-requests'] });
+      setRejectionNote('');
+      toast({ title: 'Rejected', description: 'Publish request has been rejected with feedback.' });
+    },
+    onError: (err: unknown) => {
+      toast({ title: 'Rejection failed', description: getErrorMessage(err), variant: 'destructive' });
+    },
+  });
+
+  const pendingRequests = (publishRequestsQuery.data?.requests || []).filter((r) => r.status === 'pending');
 
   const loading = overviewQuery.isLoading || draftQuery.isLoading;
   const hasLoadError = overviewQuery.isError || draftQuery.isError;
@@ -652,21 +735,169 @@ export default function VoiceAgentTrainingDashboard() {
         </TabsContent>
 
         <TabsContent value="versions" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><GitBranch className="h-4 w-4" /> Draft → Publish Governance</CardTitle>
-              <CardDescription>Promote tested draft to unified production version</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Input value={publishNote} onChange={(e) => setPublishNote(e.target.value)} placeholder="Approval / publish note" />
-              <div className="flex justify-end">
-                <Button onClick={() => publishMutation.mutate()} disabled={publishMutation.isPending}>
-                  <Upload className="h-4 w-4 mr-2" />
-                  Publish Draft to Production
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Voice trainers: Submit for Approval | Admins: Direct publish + Approval Queue */}
+          {isVoiceTrainer ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2"><Send className="h-4 w-4" /> Submit Changes for Admin Approval</CardTitle>
+                <CardDescription>Your changes will be reviewed by an administrator before being published to production.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Input
+                  value={publishNote}
+                  onChange={(e) => setPublishNote(e.target.value)}
+                  placeholder="Describe your changes (required)"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    onClick={() => requestPublishMutation.mutate()}
+                    disabled={requestPublishMutation.isPending || !publishNote.trim() || pendingRequests.length > 0}
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {pendingRequests.length > 0 ? 'Approval Pending...' : 'Submit for Approval'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2"><GitBranch className="h-4 w-4" /> Draft → Publish Governance</CardTitle>
+                <CardDescription>Promote tested draft to unified production version</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Input value={publishNote} onChange={(e) => setPublishNote(e.target.value)} placeholder="Approval / publish note" />
+                <div className="flex justify-end">
+                  <Button onClick={() => publishMutation.mutate()} disabled={publishMutation.isPending}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Publish Draft to Production
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Approval Queue — visible to admins when there are pending requests */}
+          {isAdmin && pendingRequests.length > 0 && (
+            <Card className="border-amber-500/50">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-amber-500" />
+                  Pending Approval Requests
+                  <Badge variant="secondary" className="ml-1">{pendingRequests.length}</Badge>
+                </CardTitle>
+                <CardDescription>Voice trainers have submitted changes for your review</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {pendingRequests.map((request) => (
+                  <div key={request.id} className="border rounded-lg p-4 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{request.note}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Draft v{request.draftVersion} · {request.sectionChanges.length} section{request.sectionChanges.length !== 1 ? 's' : ''} changed · {new Date(request.requestedAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-amber-600 border-amber-400">Pending</Badge>
+                    </div>
+
+                    {/* Section change preview */}
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground">View changes</summary>
+                      <div className="mt-2 space-y-2">
+                        {request.sectionChanges.map((change) => (
+                          <div key={change.sectionId} className="border rounded p-2">
+                            <p className="font-medium mb-1">{change.name}</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <p className="text-muted-foreground mb-1">Before:</p>
+                                <pre className="bg-red-50 dark:bg-red-950/20 p-2 rounded max-h-[120px] overflow-auto whitespace-pre-wrap">{change.oldContent.slice(0, 500)}{change.oldContent.length > 500 ? '...' : ''}</pre>
+                              </div>
+                              <div>
+                                <p className="text-muted-foreground mb-1">After:</p>
+                                <pre className="bg-green-50 dark:bg-green-950/20 p-2 rounded max-h-[120px] overflow-auto whitespace-pre-wrap">{change.newContent.slice(0, 500)}{change.newContent.length > 500 ? '...' : ''}</pre>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+
+                    {/* Approve / Reject actions */}
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1">
+                        <Input
+                          placeholder="Optional review note"
+                          value={approvalReviewNote}
+                          onChange={(e) => setApprovalReviewNote(e.target.value)}
+                          className="text-xs"
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => approveRequestMutation.mutate(request.id)}
+                        disabled={approveRequestMutation.isPending}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                        Approve & Publish
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          const reason = rejectionNote || prompt('Rejection reason (required):');
+                          if (reason) {
+                            setRejectionNote(reason);
+                            rejectRequestMutation.mutate(request.id);
+                          }
+                        }}
+                        disabled={rejectRequestMutation.isPending}
+                      >
+                        <XCircle className="h-3.5 w-3.5 mr-1" />
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Publish request status for voice trainers */}
+          {isVoiceTrainer && (publishRequestsQuery.data?.requests || []).length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Your Publish Requests</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 max-h-[300px] overflow-auto">
+                {(publishRequestsQuery.data?.requests || []).map((request) => (
+                  <div key={request.id} className="border rounded p-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{request.note}</span>
+                      <Badge
+                        variant={request.status === 'approved' ? 'default' : request.status === 'rejected' ? 'destructive' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {request.status === 'pending' && <Clock className="h-3 w-3 mr-1" />}
+                        {request.status === 'approved' && <CheckCircle className="h-3 w-3 mr-1" />}
+                        {request.status === 'rejected' && <XCircle className="h-3 w-3 mr-1" />}
+                        {request.status}
+                      </Badge>
+                    </div>
+                    <p className="text-muted-foreground mt-1">
+                      Draft v{request.draftVersion} · {request.sectionChanges.length} changes · {new Date(request.requestedAt).toLocaleString()}
+                    </p>
+                    {request.reviewNote && (
+                      <p className="mt-1 text-muted-foreground italic">
+                        Admin feedback: {request.reviewNote}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card>
@@ -681,11 +912,13 @@ export default function VoiceAgentTrainingDashboard() {
                       <span>{new Date(entry.savedAt).toLocaleString()}</span>
                     </div>
                     <p className="text-muted-foreground mt-1">{entry.summary}</p>
-                    <div className="mt-2 flex justify-end">
-                      <Button size="sm" variant="outline" onClick={() => rollbackMutation.mutate(entry.version)}>
-                        Restore
-                      </Button>
-                    </div>
+                    {!isVoiceTrainer && (
+                      <div className="mt-2 flex justify-end">
+                        <Button size="sm" variant="outline" onClick={() => rollbackMutation.mutate(entry.version)}>
+                          Restore
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </CardContent>

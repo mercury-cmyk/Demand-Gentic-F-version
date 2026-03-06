@@ -68,6 +68,7 @@ export const USER_ROLES = {
   QUALITY_ANALYST: 'quality_analyst',
   AGENT: 'agent',
   CLIENT_USER: 'client_user',
+  VOICE_TRAINER: 'voice_trainer',
 } as const;
 
 export type UserRole = typeof USER_ROLES[keyof typeof USER_ROLES];
@@ -83,6 +84,7 @@ const QA_ROLES: string[] = [
   'manager',
   'qa_analyst',
 ];
+const VOICE_TRAINING_ROLES: string[] = [...QA_ROLES, USER_ROLES.VOICE_TRAINER];
 
 /**
  * Main navigation configuration
@@ -96,14 +98,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     id: 'ai-intelligence',
     label: 'AI & Intelligence',
     domain: NAVIGATION_DOMAINS.AI_INTELLIGENCE,
-    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST],
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST, USER_ROLES.VOICE_TRAINER],
     description: 'AI agents, organization intelligence, and prompt configuration',
     items: [
       {
         id: 'ai-studio',
         title: 'AI Studio',
         icon: 'Sparkles',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST],
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST, USER_ROLES.VOICE_TRAINER],
         items: [
           {
             id: 'ai-dashboard',
@@ -139,7 +141,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             id: 'voice-agent-training',
             title: 'Voice Agent Training',
             url: '/voice-agent-training',
-            roles: QA_ROLES,
+            roles: VOICE_TRAINING_ROLES,
             badge: { text: 'New', variant: 'new' },
             description: 'Draft, simulate, and publish unified voice prompt modules safely',
           },
