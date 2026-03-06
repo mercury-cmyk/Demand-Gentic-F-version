@@ -1946,6 +1946,25 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           console.error(`[AI Orchestrator] Failed to reset queue item ${item.id}:`, resetError);
         }
 
+        // CLEANUP: Mark orphaned call attempt as failed to prevent accumulation of
+        // unprocessed records (prevents 29K+ orphan buildup)
+        if (callAttemptId) {
+          try {
+            await db.update(dialerCallAttempts).set({
+              disposition: 'no_answer',
+              dispositionProcessed: true,
+              dispositionProcessedAt: new Date(),
+              callEndedAt: new Date(),
+              callDurationSeconds: 0,
+              notes: `Call initiation failed: ${String(error?.message || 'unknown').substring(0, 200)}`,
+              updatedAt: new Date(),
+            }).where(eq(dialerCallAttempts.id, callAttemptId));
+            console.log(`[AI Orchestrator] Cleaned up orphaned call attempt ${callAttemptId}`);
+          } catch (cleanupErr) {
+            console.error(`[AI Orchestrator] Failed to cleanup orphaned call attempt ${callAttemptId}:`, cleanupErr);
+          }
+        }
+
         return { success: false, itemId: item.id, error };
       }
       })(); // end initiationPromise
