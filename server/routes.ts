@@ -15618,12 +15618,32 @@ Provide JSON response with:
           callAttemptId,
         });
         if (callAttemptId) {
-          // Update call attempt with duration from media bridge
-          if (data?.callDurationSeconds) {
+          // CRITICAL: Update call attempt with duration BEFORE processing disposition.
+          // Media bridge often sends submit_disposition without callDurationSeconds.
+          // Without duration, the safety gate downgrades qualified_lead → no_answer.
+          let durationToSet = data?.callDurationSeconds;
+          if (!durationToSet) {
+            // Calculate duration from callStartedAt if media bridge didn't send it
+            const [attempt] = await db.select({ callStartedAt: dialerCallAttempts.callStartedAt })
+              .from(dialerCallAttempts)
+              .where(eq(dialerCallAttempts.id, callAttemptId))
+              .limit(1);
+            if (attempt?.callStartedAt) {
+              durationToSet = Math.floor((Date.now() - new Date(attempt.callStartedAt).getTime()) / 1000);
+              console.log(`[MediaBridge Callback] Calculated duration from callStartedAt: ${durationToSet}s`);
+            }
+          }
+          if (durationToSet) {
             try {
               await db.update(dialerCallAttempts)
-                .set({ callDurationSeconds: data.callDurationSeconds, updatedAt: new Date() })
+                .set({
+                  callDurationSeconds: durationToSet,
+                  callEndedAt: new Date(),
+                  connected: durationToSet > 10,
+                  updatedAt: new Date(),
+                })
                 .where(eq(dialerCallAttempts.id, callAttemptId));
+              console.log(`[MediaBridge Callback] Updated call attempt ${callAttemptId} duration=${durationToSet}s`);
             } catch (durErr) {
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
