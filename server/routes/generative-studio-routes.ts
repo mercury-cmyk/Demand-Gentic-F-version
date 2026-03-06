@@ -14,10 +14,10 @@ import {
   contentPromotionPageViews,
   contentAssets,
   clientProjects,
-  SUPER_ORG_ID,
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, verifyToken } from "../auth";
+import { resolveScopedOrganizationId } from "../lib/client-organization-scope";
 import {
   generateLandingPage,
   generateEmailTemplate,
@@ -142,6 +142,33 @@ function normalizeOptionalId(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+async function resolveRequestOrganizationId(
+  req: Request,
+  source: "body" | "query",
+  requireOrganization = false,
+): Promise<string | undefined> {
+  const { tenantId } = getAuthedUserContext(req);
+  const requestedOrganizationId =
+    source === "body"
+      ? normalizeOptionalId(req.body?.organizationId)
+      : normalizeOptionalId(req.query.organizationId);
+
+  const organizationId = await resolveScopedOrganizationId({
+    tenantId,
+    requestedOrganizationId,
+    requireOrganization,
+  });
+
+  if (source === "body") {
+    req.body = {
+      ...(req.body || {}),
+      organizationId,
+    };
+  }
+
+  return organizationId;
+}
+
 // ============================================================================
 // PROJECTS CRUD
 // ============================================================================
@@ -155,6 +182,9 @@ function normalizeOptionalId(value: unknown): string | undefined {
 router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const projectId = normalizeOptionalId(req.query.projectId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const scopedOrganizationId = await resolveRequestOrganizationId(req, "query", false);
+
     if (!projectId) {
       return res.json({ organizationId: null, source: null });
     }
@@ -164,10 +194,23 @@ router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Re
       id: generativeStudioProjects.id,
       metadata: generativeStudioProjects.metadata,
       contentType: generativeStudioProjects.contentType,
+      ownerId: generativeStudioProjects.ownerId,
+      tenantId: generativeStudioProjects.tenantId,
     }).from(generativeStudioProjects).where(eq(generativeStudioProjects.id, projectId)).limit(1);
 
     if (gsProject) {
       const meta = (gsProject.metadata as any) || {};
+      if (tenantId) {
+        if (gsProject.tenantId !== tenantId) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+        if (!scopedOrganizationId || meta.organizationId !== scopedOrganizationId) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      } else if (gsProject.ownerId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
       return res.json({
         organizationId: meta.organizationId || null,
         clientProjectId: meta.clientProjectId || null,
@@ -179,10 +222,23 @@ router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Re
 
     // 2. Fallback: check client projects
     const [clientProject] = await db.select({
+      clientAccountId: clientProjects.clientAccountId,
       campaignOrganizationId: clientProjects.campaignOrganizationId,
     }).from(clientProjects).where(eq(clientProjects.id, projectId)).limit(1);
 
     if (clientProject) {
+      if (tenantId) {
+        if (clientProject.clientAccountId !== tenantId) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+        if (
+          !scopedOrganizationId ||
+          clientProject.campaignOrganizationId !== scopedOrganizationId
+        ) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+
       return res.json({
         organizationId: clientProject.campaignOrganizationId || null,
         clientProjectId: projectId,
@@ -197,27 +253,6 @@ router.get("/resolve-project-org", requireDualAuth, async (req: Request, res: Re
 });
 
 /**
- * GET /projects/:id
- * Fetch a single generative studio project by ID (for direct URL access)
- */
-router.get("/projects/:id", requireDualAuth, async (req: Request, res: Response) => {
-  try {
-    const [project] = await db.select()
-      .from(generativeStudioProjects)
-      .where(eq(generativeStudioProjects.id, req.params.id))
-      .limit(1);
-
-    if (!project) {
-      return res.status(404).json({ error: "Project not found" });
-    }
-
-    res.json({ project });
-  } catch (error: any) {
-    return sendGenerativeStudioError(res, error, "get project by id");
-  }
-});
-
-/**
  * GET /org-projects
  * List client projects for an organization
  */
@@ -225,7 +260,11 @@ router.get("/org-projects", requireDualAuth, async (req: Request, res: Response)
   try {
     const user = (req as any).user;
     const tenantId = user.tenantId;
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
+
+    if (tenantId && !organizationId) {
+      return res.json({ projects: [] });
+    }
 
     if (!tenantId && !organizationId) {
       return res.json({ projects: [] });
@@ -263,7 +302,7 @@ router.get("/projects", requireDualAuth, async (req: Request, res: Response) => 
   try {
     const { contentType, status, limit = '50', offset = '0' } = req.query;
     const { userId, tenantId } = getAuthedUserContext(req);
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
     const clientProjectId = normalizeOptionalId(req.query.clientProjectId);
 
     let conditions = [];
@@ -274,6 +313,10 @@ router.get("/projects", requireDualAuth, async (req: Request, res: Response) => 
        conditions.push(eq(generativeStudioProjects.tenantId, tenantId));
     } else {
        conditions.push(eq(generativeStudioProjects.ownerId, userId));
+    }
+
+    if (tenantId && !organizationId) {
+      return res.json({ projects: [], total: 0 });
     }
 
     if (!tenantId && !organizationId) {
@@ -312,9 +355,8 @@ router.get("/projects", requireDualAuth, async (req: Request, res: Response) => 
  */
 router.get("/projects/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const tenantId = user.tenantId;
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
     const clientProjectId = normalizeOptionalId(req.query.clientProjectId);
 
     const [project] = await db.select().from(generativeStudioProjects)
@@ -326,6 +368,9 @@ router.get("/projects/:id", requireDualAuth, async (req: Request, res: Response)
 
     // Security check
     if (tenantId && project.tenantId !== tenantId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!tenantId && project.ownerId !== userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -346,9 +391,8 @@ router.get("/projects/:id", requireDualAuth, async (req: Request, res: Response)
 router.patch("/projects/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const { title, generatedContent, generatedContentHtml, status, metadata } = req.body;
-    const user = (req as any).user;
-    const tenantId = user.tenantId;
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
     const clientProjectId = normalizeOptionalId(req.query.clientProjectId);
 
     // Check ownership
@@ -357,6 +401,7 @@ router.patch("/projects/:id", requireDualAuth, async (req: Request, res: Respons
 
     if (!project) return res.status(404).json({ error: 'Project not found' });
     if (tenantId && project.tenantId !== tenantId) return res.status(403).json({ error: 'Access denied' });
+    if (!tenantId && project.ownerId !== userId) return res.status(403).json({ error: 'Access denied' });
     if (!isProjectWithinScope(project, organizationId, clientProjectId)) return res.status(403).json({ error: 'Access denied' });
 
     const updates: any = { updatedAt: new Date() };
@@ -387,9 +432,8 @@ router.patch("/projects/:id", requireDualAuth, async (req: Request, res: Respons
  */
 router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const tenantId = user.tenantId;
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
     const clientProjectId = normalizeOptionalId(req.query.clientProjectId);
 
     // Check ownership
@@ -398,6 +442,7 @@ router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Respon
 
     if (!project) return res.status(404).json({ error: 'Project not found' });
     if (tenantId && project.tenantId !== tenantId) return res.status(403).json({ error: 'Access denied' });
+    if (!tenantId && project.ownerId !== userId) return res.status(403).json({ error: 'Access denied' });
     if (!isProjectWithinScope(project, organizationId, clientProjectId)) return res.status(403).json({ error: 'Access denied' });
 
     await db.delete(generativeStudioProjects)
@@ -413,24 +458,12 @@ router.delete("/projects/:id", requireDualAuth, async (req: Request, res: Respon
 // ============================================================================
 
 /**
- * Ensures organizationId is present in the request body.
- * Falls back to the super org (platform default) when none is provided.
- */
-function requireOrganizationId(req: Request, res: Response): boolean {
-  const orgId = req.body?.organizationId;
-  if (!orgId || typeof orgId !== 'string' || !orgId.trim()) {
-    req.body.organizationId = SUPER_ORG_ID;
-  }
-  return true;
-}
-
-/**
  * POST /generate/landing-page
  */
 router.post("/generate/landing-page", requireDualAuth, async (req: Request, res: Response) => {
-  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
+    await resolveRequestOrganizationId(req, "body", true);
 
     const result = await generateLandingPage({
       ...req.body,
@@ -447,9 +480,9 @@ router.post("/generate/landing-page", requireDualAuth, async (req: Request, res:
  * POST /generate/email-template
  */
 router.post("/generate/email-template", requireDualAuth, async (req: Request, res: Response) => {
-  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
+    await resolveRequestOrganizationId(req, "body", true);
 
     const result = await generateEmailTemplate({
       ...req.body,
@@ -466,9 +499,9 @@ router.post("/generate/email-template", requireDualAuth, async (req: Request, re
  * POST /generate/blog-post
  */
 router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Response) => {
-  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
+    await resolveRequestOrganizationId(req, "body", true);
 
     const result = await generateBlogPost({
       ...req.body,
@@ -485,9 +518,9 @@ router.post("/generate/blog-post", requireDualAuth, async (req: Request, res: Re
  * POST /generate/ebook
  */
 router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Response) => {
-  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
+    await resolveRequestOrganizationId(req, "body", true);
 
     const result = await generateEbook({
       ...req.body,
@@ -504,9 +537,9 @@ router.post("/generate/ebook", requireDualAuth, async (req: Request, res: Respon
  * POST /generate/solution-brief
  */
 router.post("/generate/solution-brief", requireDualAuth, async (req: Request, res: Response) => {
-  if (!requireOrganizationId(req, res)) return;
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
+    await resolveRequestOrganizationId(req, "body", true);
 
     const result = await generateSolutionBrief({
       ...req.body,
@@ -527,7 +560,7 @@ router.post("/refine/:id", requireDualAuth, async (req: Request, res: Response) 
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
     const { instructions } = req.body;
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
     const clientProjectId = normalizeOptionalId(req.query.clientProjectId);
 
     if (!instructions) {
@@ -561,7 +594,7 @@ router.post("/chat", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const { userId } = getAuthedUserContext(req);
     const { sessionId, message, projectId } = req.body;
-    const organizationId = normalizeOptionalId(req.body.organizationId);
+    const organizationId = await resolveRequestOrganizationId(req, "body", true);
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -591,8 +624,12 @@ router.post("/chat", requireDualAuth, async (req: Request, res: Response) => {
  */
 router.get("/chat/sessions", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const { userId } = getAuthedUserContext(req);
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
+
+    if (tenantId && !organizationId) {
+      return res.json({ sessions: [] });
+    }
 
     const conditions: any[] = [eq(generativeStudioChatMessages.ownerId, userId)];
     if (organizationId) {
@@ -626,8 +663,11 @@ router.get("/chat/sessions", requireDualAuth, async (req: Request, res: Response
  */
 router.get("/chat/sessions/:sessionId", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const { userId } = getAuthedUserContext(req);
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
+    if (tenantId && !organizationId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     if (organizationId && !req.params.sessionId.startsWith(`${organizationId}::`)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -651,8 +691,11 @@ router.get("/chat/sessions/:sessionId", requireDualAuth, async (req: Request, re
  */
 router.delete("/chat/sessions/:sessionId", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const { userId } = getAuthedUserContext(req);
-    const organizationId = normalizeOptionalId(req.query.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "query", false);
+    if (tenantId && !organizationId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     if (organizationId && !req.params.sessionId.startsWith(`${organizationId}::`)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -678,11 +721,9 @@ router.delete("/chat/sessions/:sessionId", requireDualAuth, async (req: Request,
  */
 router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user?.id || 'system';
-    const tenantId = user?.tenantId;
+    const { userId, tenantId } = getAuthedUserContext(req);
     const { slug, metaTitle, metaDescription } = req.body;
-    const organizationId = normalizeOptionalId(req.body.organizationId);
+    const organizationId = await resolveRequestOrganizationId(req, "body", false);
     const clientProjectId = normalizeOptionalId(req.body.clientProjectId);
 
     const [project] = await db.select().from(generativeStudioProjects)
@@ -698,8 +739,9 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
     if (!tenantId && project.ownerId !== userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
-    // Note: We don't check isProjectWithinScope here because if the user owns the project,
-    // they should be able to publish it regardless of organizationId/clientProjectId mismatch
+    if (!isProjectWithinScope(project, organizationId, clientProjectId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     // Generate slug if not provided
     const pageSlug = slug || project.title
@@ -724,6 +766,7 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
           metaDescription: metaDescription || metadata.metaDescription || metadata.seoDescription || '',
           isPublished: true,
           publishedAt: new Date(),
+          tenantId: tenantId,
           updatedAt: new Date(),
         })
         .where(eq(generativeStudioPublishedPages.id, existing.id))
@@ -749,6 +792,7 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
       isPublished: true,
       publishedAt: new Date(),
       ownerId: userId,
+      tenantId: tenantId,
     }).returning();
 
     // Update project status
@@ -768,10 +812,8 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
  */
 router.post("/unpublish/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user?.id || 'system';
-    const tenantId = user?.tenantId;
-    const organizationId = normalizeOptionalId(req.body?.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "body", false);
     const clientProjectId = normalizeOptionalId(req.body?.clientProjectId);
 
     const [project] = await db.select().from(generativeStudioProjects)
@@ -814,10 +856,8 @@ router.post("/unpublish/:id", requireDualAuth, async (req: Request, res: Respons
  */
 router.post("/save-as-asset/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const userId = user?.id || 'system';
-    const tenantId = user?.tenantId;
-    const organizationId = normalizeOptionalId(req.body?.organizationId);
+    const { userId, tenantId } = getAuthedUserContext(req);
+    const organizationId = await resolveRequestOrganizationId(req, "body", false);
     const clientProjectId = normalizeOptionalId(req.body?.clientProjectId);
 
     const [project] = await db.select().from(generativeStudioProjects)
@@ -838,6 +878,8 @@ router.post("/save-as-asset/:id", requireDualAuth, async (req: Request, res: Res
     }
 
     const metadata = project.metadata as any || {};
+    const effectiveOrganizationId = organizationId || metadata.organizationId || null;
+    const effectiveClientProjectId = clientProjectId || metadata.clientProjectId || null;
 
     const [asset] = await db.insert(contentAssets).values({
       assetType: project.contentType,
@@ -851,8 +893,8 @@ router.post("/save-as-asset/:id", requireDualAuth, async (req: Request, res: Res
       tags: metadata.tags || [],
       ownerId: userId,
       metadata: {
-        organizationId,
-        clientProjectId,
+        organizationId: effectiveOrganizationId,
+        clientProjectId: effectiveClientProjectId,
       },
     }).returning();
 

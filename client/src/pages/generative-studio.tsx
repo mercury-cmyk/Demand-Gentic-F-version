@@ -268,10 +268,10 @@ export default function GenerativeStudioPage() {
   }, [moduleFromUrl]);
 
   useEffect(() => {
-    if (orgIdFromUrl) {
+    if (orgIdFromUrl && !clientPortalToken) {
       setSelectedOrgId(orgIdFromUrl);
     }
-  }, [orgIdFromUrl]);
+  }, [clientPortalToken, orgIdFromUrl]);
 
   useEffect(() => {
     if (projectIdFromUrl) {
@@ -296,7 +296,7 @@ export default function GenerativeStudioPage() {
 
   useEffect(() => {
     if (!resolvedOrgData) return;
-    if (resolvedOrgData.organizationId) {
+    if (resolvedOrgData.organizationId && !clientPortalToken) {
       setSelectedOrgId(resolvedOrgData.organizationId);
     }
     // If the URL points to a generative studio project, auto-switch to the right tab
@@ -317,9 +317,10 @@ export default function GenerativeStudioPage() {
         setSelectedProjectId(resolvedOrgData.clientProjectId);
       }
     }
-  }, [resolvedOrgData]);
+  }, [clientPortalToken, resolvedOrgData]);
 
   useEffect(() => {
+    if (clientPortalToken) return;
     if (selectedOrgId) {
       localStorage.setItem("generativeStudioOrgId", selectedOrgId);
       // Don't override project from URL
@@ -333,16 +334,17 @@ export default function GenerativeStudioPage() {
         setSelectedProjectId(null);
       }
     }
-  }, [selectedOrgId]);
+  }, [clientPortalToken, projectIdFromUrl, selectedOrgId]);
 
   useEffect(() => {
+    if (clientPortalToken) return;
     if (!selectedOrgId) return;
     if (selectedProjectId) {
       localStorage.setItem(`generativeStudioProjectId:${selectedOrgId}`, selectedProjectId);
     } else {
       localStorage.removeItem(`generativeStudioProjectId:${selectedOrgId}`);
     }
-  }, [selectedOrgId, selectedProjectId]);
+  }, [clientPortalToken, selectedOrgId, selectedProjectId]);
 
   const { data: orgProjectsData, isLoading: orgProjectsLoading } = useQuery<{
     projects: { id: string; name: string; status?: string }[];

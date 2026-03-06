@@ -39,4 +39,15 @@ describe("analyzeVoicemailTranscript", () => {
     expect(result.hasHighPrecisionMatch).toBe(true);
     expect(result.matchedCategories).toContain("system_message");
   });
+
+  it("classifies Russian voicemail prompts as voicemail", () => {
+    const result = analyzeVoicemailTranscript(
+      "Здравствуйте. Я сейчас не могу ответить. Оставьте сообщение после сигнала, и я вам перезвоню."
+    );
+
+    expect(result.classification).toBe("voicemail");
+    expect(result.hasHighPrecisionMatch).toBe(true);
+    expect(result.matchedCategories).toContain("beep_instruction");
+    expect(result.matchedCategories).toContain("leave_info");
+  });
 });

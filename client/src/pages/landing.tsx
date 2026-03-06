@@ -84,7 +84,7 @@ export default function LandingPage() {
             <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">About Us</a>
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => window.location.href = "https://app.demandgentic.ai"}>
+            <Button variant="ghost" onClick={() => setLocation("/client-portal/login")}>
               Client Login
             </Button>
             <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
@@ -95,7 +95,6 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* ─── HERO SECTION ─────────────────────────────────────────────── */}
       <header className="pt-32 pb-24 relative overflow-hidden perspective-1000" role="banner">
         <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-background to-blue-50" />
         <div className="absolute top-20 right-0 w-[800px] h-[800px] bg-gradient-to-br from-violet-500/10 to-indigo-500/10 rounded-full blur-3xl" />
