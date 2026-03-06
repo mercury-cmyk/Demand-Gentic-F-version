@@ -991,13 +991,23 @@ async function createLeadForReanalysis(
   if (!session.campaignId || !session.contactId) return null;
 
   // DURATION GUARD: Prevent reanalysis from promoting ghost/short calls to qualified_lead
+  // Check both callSessions.durationSec and dialerCallAttempts.callDurationSeconds
+  // because SIP calls may only have duration on the call attempt, not the session.
   const [sessionDuration] = await db
     .select({ durationSec: callSessions.durationSec })
     .from(callSessions)
     .where(eq(callSessions.id, session.id))
     .limit(1);
-  const durationSec = sessionDuration?.durationSec || 0;
-  const MIN_REANALYSIS_LEAD_DURATION = 45;
+  let durationSec = sessionDuration?.durationSec || 0;
+  if (!durationSec) {
+    const [attemptDuration] = await db
+      .select({ callDurationSeconds: dialerCallAttempts.callDurationSeconds })
+      .from(dialerCallAttempts)
+      .where(eq(dialerCallAttempts.id, attempt.id))
+      .limit(1);
+    durationSec = attemptDuration?.callDurationSeconds || 0;
+  }
+  const MIN_REANALYSIS_LEAD_DURATION = 15; // Aligned with disposition engine threshold
   if (durationSec < MIN_REANALYSIS_LEAD_DURATION) {
     console.warn(`${LOG_PREFIX} 🚫 BLOCKED lead creation from reanalysis: Call ${session.id} duration ${durationSec}s < ${MIN_REANALYSIS_LEAD_DURATION}s minimum`);
     return null;
