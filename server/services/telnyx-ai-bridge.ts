@@ -603,14 +603,11 @@ export class TelnyxAiBridge extends EventEmitter {
               campaignObjective: context.campaignObjective,
               productServiceInfo: context.productServiceInfo,
               talkingPoints: context.talkingPoints,
-<<<<<<< HEAD
-=======
               maxCallDurationSeconds: context.maxCallDurationSeconds,
               callerNumberId: context.callerNumberId ?? null,
               callerNumberDecisionId: context.callerNumberDecisionId ?? null,
               callAttemptId: context.callAttemptId ?? null,
               telephonyProviderOverride: context.telephonyProviderOverride,
->>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
             });
 
             if (!result.success) {

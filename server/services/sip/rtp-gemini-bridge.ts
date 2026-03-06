@@ -873,9 +873,6 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
 
     try {
       const transcript = buildPlainTranscript(session.transcriptTurns);
-<<<<<<< HEAD
-      const dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
-=======
       const callDurationSec = Math.floor(durationSec);
 
       // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition
@@ -891,7 +888,6 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
       console.log(`[RTP Bridge] Fallback: Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${disposition}`);
 
       await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
->>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
         transcript,
         structuredTranscript: { turns: session.transcriptTurns },
       });
