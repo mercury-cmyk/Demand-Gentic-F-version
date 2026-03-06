@@ -14,7 +14,7 @@ import { WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { GoogleAuth } from 'google-auth-library';
 import { db } from '../../db';
-import { campaignQueue, dialerCallAttempts, type CanonicalDisposition } from '@shared/schema';
+import { campaignQueue, callSessions, dialerCallAttempts, type CanonicalDisposition } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from '../voice-providers/audio-transcoder';
 import { processDisposition } from '../disposition-engine';
@@ -22,7 +22,6 @@ import { processSIPPostCallAnalysis } from './sip-post-call-handler';
 import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
-import { callSessions, dialerCallAttempts } from '@shared/schema';
 import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
 
 // Gemini API configuration
@@ -873,9 +872,6 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
 
     try {
       const transcript = buildPlainTranscript(session.transcriptTurns);
-<<<<<<< HEAD
-      const dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
-=======
       const callDurationSec = Math.floor(durationSec);
 
       // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition
@@ -890,8 +886,7 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
         .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
       console.log(`[RTP Bridge] Fallback: Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${disposition}`);
 
-      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
->>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
+      const dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
         transcript,
         structuredTranscript: { turns: session.transcriptTurns },
       });
