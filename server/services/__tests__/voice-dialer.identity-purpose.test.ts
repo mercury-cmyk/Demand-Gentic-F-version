@@ -47,6 +47,14 @@ describe("isVoicemailCueTranscript", () => {
   it("does not mark normal live pickup as voicemail", () => {
     expect(isVoicemailCueTranscript("Hi, this is Marcus speaking.")).toBe(false);
   });
+
+  it("does not mark a live gatekeeper offering help as voicemail", () => {
+    expect(
+      isVoicemailCueTranscript(
+        "He's not available right now, but I can take a message or transfer you to his assistant."
+      )
+    ).toBe(false);
+  });
 });
 
 describe("isAutomatedCallScreenerTranscript", () => {

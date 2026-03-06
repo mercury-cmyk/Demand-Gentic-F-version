@@ -22,6 +22,7 @@ import {
   Brain,
   Eye,
   GitBranch,
+  Bot,
 } from 'lucide-react';
 import { ROUTES } from '@/lib/routes';
 
@@ -98,6 +99,14 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     href: ROUTES.SETTINGS_AGENT_DEFAULTS,
     icon: Settings,
     description: 'Global agent configuration',
+    category: 'infrastructure',
+  },
+  {
+    id: 'ai-governance',
+    label: 'AI Governance',
+    href: ROUTES.SETTINGS_AI_GOVERNANCE,
+    icon: Bot,
+    description: 'Task-based model routing',
     category: 'infrastructure',
   },
   {

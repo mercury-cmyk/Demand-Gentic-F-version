@@ -12,6 +12,7 @@ import { db } from "../db";
 import { campaigns, callSessions } from "@shared/schema";
 import { eq, and, isNotNull, inArray } from "drizzle-orm";
 import OpenAI from "openai";
+import { analyzeVoicemailTranscript } from "./voicemail-detection";
 
 const LOG_PREFIX = "[SmartDisposition]";
 
@@ -242,23 +243,6 @@ function analyzeTranscriptForQualification(
   const summaryLower = summaryText.toLowerCase();
 
   // Detect voicemail/IVR — comprehensive list aligned with isVoicemailTranscript() in voice-dialer.ts
-  const voicemailPatterns = [
-    'leave a message', 'leave your message', 'after the beep', 'after the tone',
-    'not available', 'cannot take your call', 'can\'t take your call',
-    'please leave', 'record your message', 'voicemail', 'voice mail',
-    'mailbox', 'answering machine', 'reached the voicemail',
-    'no one is available', 'press pound when finished',
-    'we didn\'t get your message', 'we did not get your message',
-    'you were not speaking', 'because of a bad connection',
-    'maximum time permitted', 'is not available',
-    'your call has been forwarded', 'automatic voice message system',
-    'i\'ll get back to you', 'i will get back to you',
-    'return your call', 'come to the phone',
-    'away from my phone', 'away from the phone',
-    'i\'m unable to', 'unable to take your call',
-    'nach dem signalton',
-  ];
-  
   const ivrPatterns = [
     'press 1',
     'press 2',
@@ -295,7 +279,8 @@ function analyzeTranscriptForQualification(
     'not at their desk',
   ];
 
-  const isVoicemail = voicemailPatterns.some(p => fullText.includes(p));
+  const voicemailDetection = analyzeVoicemailTranscript(fullText);
+  const isVoicemail = voicemailDetection.classification === 'voicemail';
   const isIVR = ivrPatterns.some(p => fullText.includes(p));
   const isGatekeeper = gatekeeperPatterns.some(p => fullText.includes(p));
 

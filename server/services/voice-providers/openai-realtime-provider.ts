@@ -15,9 +15,29 @@ import {
   RateLimitInfo,
 } from "./voice-provider.interface";
 import { AudioTranscoder } from "./audio-transcoder";
+import { getVoiceModelForProvider } from "../ai-model-governance";
 
 const LOG_PREFIX = "[OpenAI-Provider]";
 const DEBUG = process.env.DEBUG_VOICE_PROVIDERS === 'true';
+
+function buildOpenAIRealtimeUrl(model: string): string {
+  const configuredUrl = process.env.OPENAI_REALTIME_MODEL_URL?.trim();
+  if (!configuredUrl) {
+    return `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
+  }
+
+  try {
+    const url = new URL(configuredUrl);
+    url.searchParams.set("model", model);
+    return url.toString();
+  } catch {
+    const separator = configuredUrl.includes("?") ? "&" : "?";
+    if (configuredUrl.includes("model=")) {
+      return configuredUrl.replace(/model=[^&]+/, `model=${encodeURIComponent(model)}`);
+    }
+    return `${configuredUrl}${separator}model=${encodeURIComponent(model)}`;
+  }
+}
 
 // ==================== OPENAI MESSAGE TYPES ====================
 
@@ -105,13 +125,12 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
       throw new Error("OpenAI API key not configured");
     }
 
-    // Use the latest GA gpt-realtime model for most natural, human-like speech
-    // gpt-realtime has better natural speech, instruction following, and tool calling
-    const url = process.env.OPENAI_REALTIME_MODEL_URL ||
-      "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+    const governedModel = await getVoiceModelForProvider("openai");
+    const url = buildOpenAIRealtimeUrl(governedModel);
 
     return new Promise((resolve, reject) => {
       if (DEBUG) console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime API...`);
+      console.log(`${LOG_PREFIX} Using governed model: ${governedModel}`);
 
       this.ws = new WebSocket(url, {
         headers: {

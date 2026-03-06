@@ -127,8 +127,14 @@ const DEFAULT_DIMENSIONS = {
 };
 
 const MAX_TRANSCRIPT_CHARS = 12000;
-const QUALITY_ANALYSIS_MODEL = "vertex-ai-gemini";
-const FALLBACK_MODEL = QUALITY_ANALYSIS_MODEL;
+const REALTIME_QUALITY_ANALYSIS_MODEL = "vertex-ai-gemini";
+const POST_CALL_QUALITY_ANALYSIS_MODEL = process.env.DEEPSEEK_REASONING_MODEL || "deepseek-chat";
+
+function getConversationQualityModelLabel(analysisStage?: "realtime" | "post_call"): string {
+  return (analysisStage || "post_call") === "post_call"
+    ? POST_CALL_QUALITY_ANALYSIS_MODEL
+    : REALTIME_QUALITY_ANALYSIS_MODEL;
+}
 
 async function resolveCampaignContext(campaignId?: string): Promise<{
   name?: string;
@@ -712,7 +718,7 @@ export function buildFallbackAnalysis(
       outcome: input.disposition,
     },
     metadata: {
-      model: FALLBACK_MODEL,
+      model: getConversationQualityModelLabel(input.analysisStage),
       analyzedAt: new Date().toISOString(),
       interactionType: input.interactionType,
       analysisStage: input.analysisStage || "post_call",
@@ -757,7 +763,7 @@ export async function analyzeConversationQuality(
     campaignContext.aiAgentSettings ? `Call flow scripts: ${JSON.stringify(campaignContext.aiAgentSettings)}` : null,
   ].filter(Boolean);
 
-  const prompt = `You are the Vertex AI real-time conversation quality monitor for B2B campaigns.
+  const prompt = `You are the conversation quality monitor for B2B campaigns.
 You must continuously evaluate adherence to campaign objectives, flow compliance, disposition accuracy, qualification alignment, and breakdowns.
 
 CRITICAL RULES FOR ANALYSIS — DO NOT VIOLATE:
@@ -859,12 +865,19 @@ Return JSON with this exact shape and no extra keys:
 }`;
 
   try {
-    const actualModel = QUALITY_ANALYSIS_MODEL;
+    const actualModel = getConversationQualityModelLabel(input.analysisStage);
+    const preferredProvider = input.analysisStage === "post_call" ? "deepseek" as const : undefined;
+    const analysisLabel = input.analysisStage === "post_call" ? "conv-quality-post-call" : "conv-quality";
 
-    // Use Gemini 3 Deep Think for quality analysis
+    // Prefer DeepSeek for post-call quality analysis while keeping the same router pattern.
     let raw: any;
     try {
-      raw = await deepAnalyze(prompt, { temperature: 0.3, maxTokens: 8192, label: "conv-quality" });
+      raw = await deepAnalyze(prompt, {
+        temperature: 0.3,
+        maxTokens: 8192,
+        label: analysisLabel,
+        preferredProvider,
+      });
     } catch (routerError: any) {
       console.warn(`[ConversationQuality] AI analysis failed (all providers): ${routerError.message}`);
       // Fallback analysis will be returned

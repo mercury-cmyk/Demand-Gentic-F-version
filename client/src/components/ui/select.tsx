@@ -6,7 +6,53 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-const Select = SelectPrimitive.Root
+const EMPTY_SELECT_ITEM_VALUE = "__RADIX_SELECT_EMPTY_VALUE__"
+
+function hasEmptySelectItemValue(children: React.ReactNode): boolean {
+  let found = false
+
+  React.Children.forEach(children, (child) => {
+    if (found || !React.isValidElement(child)) {
+      return
+    }
+
+    if (child.props?.value === "") {
+      found = true
+      return
+    }
+
+    if (child.props?.children) {
+      found = hasEmptySelectItemValue(child.props.children)
+    }
+  })
+
+  return found
+}
+
+function Select({ children, value, defaultValue, onValueChange, ...props }: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Root>) {
+  const supportsEmptyItem = React.useMemo(() => hasEmptySelectItemValue(children), [children])
+
+  const normalizedValue = supportsEmptyItem && value === "" ? EMPTY_SELECT_ITEM_VALUE : value
+  const normalizedDefaultValue = supportsEmptyItem && defaultValue === "" ? EMPTY_SELECT_ITEM_VALUE : defaultValue
+
+  const handleValueChange = React.useCallback(
+    (nextValue: string) => {
+      onValueChange?.(supportsEmptyItem && nextValue === EMPTY_SELECT_ITEM_VALUE ? "" : nextValue)
+    },
+    [onValueChange, supportsEmptyItem]
+  )
+
+  return (
+    <SelectPrimitive.Root
+      value={normalizedValue}
+      defaultValue={normalizedDefaultValue}
+      onValueChange={handleValueChange}
+      {...props}
+    >
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 const SelectGroup = SelectPrimitive.Group
 
@@ -114,9 +160,10 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, value, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
+    value={value === "" ? EMPTY_SELECT_ITEM_VALUE : value}
     className={cn(
       "relative flex w-full cursor-default select-none items-center rounded-md py-2 pl-8 pr-2 text-sm outline-none focus:bg-accent/70 focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className

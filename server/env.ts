@@ -20,6 +20,7 @@ function isTruthy(value: string | undefined): boolean {
 
 function loadEnvironmentFiles(): void {
   const cwd = process.cwd();
+  const shellProvidedKeys = new Set(Object.keys(process.env));
   const candidates = [
     ".env",
     `.env.${NODE_ENV}`,
@@ -29,7 +30,13 @@ function loadEnvironmentFiles(): void {
 
   for (const envPath of candidates) {
     if (!fs.existsSync(envPath)) continue;
-    dotenv.config({ path: envPath, override: false });
+
+    const parsed = dotenv.parse(fs.readFileSync(envPath));
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (shellProvidedKeys.has(key)) continue;
+      process.env[key] = value;
+    }
   }
 }
 

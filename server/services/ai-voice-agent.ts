@@ -184,6 +184,26 @@ export interface CallContext {
   // Number pool tracking for metrics and rotation
   callerNumberId?: string | null; // Pool number ID used for this call
   callerNumberDecisionId?: string | null; // Routing decision ID for audit
+  // Telephony provider attribution and optional runtime override
+  telephonyProviderId?: string | null;
+  telephonyProviderType?: string | null;
+  telephonyProviderName?: string | null;
+  telephonyRoutingMode?: string | null;
+  telephonySelectionReason?: string | null;
+  telephonyCostPerMinute?: number | null;
+  telephonyCostPerCall?: number | null;
+  telephonyCurrency?: string | null;
+  telephonyProviderOverride?: {
+    apiKey?: string;
+    texmlAppId?: string;
+    webhookUrl?: string;
+    sipDomain?: string;
+    sipProxy?: string;
+    sipPort?: number;
+    sipTransport?: "udp" | "tcp" | "tls" | "wss";
+    sipUsername?: string;
+    sipPassword?: string;
+  };
 }
 
 type ConversationPhase = "opening" | "gatekeeper" | "pitch" | "objection_handling" | "closing" | "handoff";

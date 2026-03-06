@@ -20,6 +20,7 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { getVertexThrottleStats, deepAnalyzeJSON, generateJSON } from "./vertex-ai/vertex-client";
+import { resolveAnalysisGovernance } from "./ai-model-governance";
 
 // ==================== CONFIGURATION ====================
 
@@ -34,6 +35,7 @@ interface AnalysisOptions {
   deep?: boolean;
   /** Label for logging */
   label?: string;
+  modelOverride?: string;
 }
 
 // Provider distribution: what percentage of traffic goes to each when all healthy
@@ -85,7 +87,7 @@ async function callDeepSeek<T>(prompt: string, options: AnalysisOptions): Promis
   const client = getDeepSeekClient();
   if (!client) throw new Error("DeepSeek not configured");
 
-  const model = options.deep ? (process.env.DEEPSEEK_REASONING_MODEL || "deepseek-chat") : "deepseek-chat";
+  const model = options.modelOverride || (options.deep ? (process.env.DEEPSEEK_REASONING_MODEL || "deepseek-chat") : "deepseek-chat");
 
   const response = await client.chat.completions.create({
     model,
@@ -110,7 +112,7 @@ async function callOpenAI<T>(prompt: string, options: AnalysisOptions): Promise<
   if (!client) throw new Error("OpenAI not configured");
 
   const response = await client.chat.completions.create({
-    model: process.env.OPENAI_ANALYSIS_MODEL || "gpt-4o-mini",
+    model: options.modelOverride || (process.env.OPENAI_ANALYSIS_MODEL || "gpt-4o-mini"),
     messages: [
       {
         role: "system",
@@ -132,8 +134,8 @@ async function callClaude<T>(prompt: string, options: AnalysisOptions): Promise<
   if (!client) throw new Error("Claude not configured");
 
   const model = options.deep
-    ? (process.env.AI_ROUTER_CLAUDE_DEEP_MODEL || "claude-sonnet-4-20250514")
-    : (process.env.AI_ROUTER_CLAUDE_MODEL || "claude-haiku-4-20250514");
+    ? (options.modelOverride || (process.env.AI_ROUTER_CLAUDE_DEEP_MODEL || "claude-sonnet-4-20250514"))
+    : (options.modelOverride || (process.env.AI_ROUTER_CLAUDE_MODEL || "claude-haiku-4-20250514"));
 
   const response = await client.messages.create({
     model,
@@ -156,11 +158,13 @@ async function callVertex<T>(prompt: string, options: AnalysisOptions): Promise<
     return deepAnalyzeJSON<T>(prompt, {
       temperature: options.temperature ?? 0.2,
       maxTokens: options.maxTokens ?? 4096,
+      model: options.modelOverride,
     });
   }
   return generateJSON<T>(prompt, {
     temperature: options.temperature ?? 0.2,
     maxTokens: options.maxTokens ?? 4096,
+    model: options.modelOverride,
   });
 }
 
@@ -274,6 +278,18 @@ function selectProvider(options: AnalysisOptions): AnalysisProvider {
   return "vertex"; // Ultimate fallback
 }
 
+function buildAutoProviderChain(options: AnalysisOptions): AnalysisProvider[] {
+  const primary = selectProvider(options);
+  const providers: AnalysisProvider[] = [primary];
+  const allProviders: AnalysisProvider[] = ["vertex", "claude", "deepseek", "openai"];
+  for (const provider of allProviders) {
+    if (provider !== primary && isProviderAvailable(provider)) {
+      providers.push(provider);
+    }
+  }
+  return providers;
+}
+
 // ==================== PUBLIC API ====================
 
 /**
@@ -282,16 +298,16 @@ function selectProvider(options: AnalysisOptions): AnalysisProvider {
  * Falls back to next provider on failure.
  */
 export async function analyzeJSON<T>(prompt: string, options: AnalysisOptions = {}): Promise<T> {
-  const primary = selectProvider(options);
-  const label = options.label || "analysis";
-  const providers: AnalysisProvider[] = [primary];
+  const governance = await resolveAnalysisGovernance({ deep: options.deep === true });
+  const label = options.label || governance.scope;
+  const providers = Array.from(new Set<AnalysisProvider>([
+    governance.primaryProvider,
+    ...(governance.fallbackProvider ? [governance.fallbackProvider] : []),
+    ...buildAutoProviderChain(options),
+  ].filter((provider) => isProviderAvailable(provider))));
 
-  // Build fallback chain
-  const allProviders: AnalysisProvider[] = ["vertex", "claude", "deepseek", "openai"];
-  for (const p of allProviders) {
-    if (p !== primary && isProviderAvailable(p)) {
-      providers.push(p);
-    }
+  for (const warning of governance.warnings) {
+    console.warn(`[AI-Router] ${warning}`);
   }
 
   let lastError: Error | null = null;
@@ -300,19 +316,27 @@ export async function analyzeJSON<T>(prompt: string, options: AnalysisOptions = 
     try {
       const start = Date.now();
       let result: T;
+      const providerOptions: AnalysisOptions = {
+        ...options,
+        modelOverride: provider === governance.primaryProvider
+          ? governance.primaryModel
+          : provider === governance.fallbackProvider
+            ? governance.fallbackModel || undefined
+            : undefined,
+      };
 
       switch (provider) {
         case "vertex":
-          result = await callVertex<T>(prompt, options);
+          result = await callVertex<T>(prompt, providerOptions);
           break;
         case "claude":
-          result = await callClaude<T>(prompt, options);
+          result = await callClaude<T>(prompt, providerOptions);
           break;
         case "deepseek":
-          result = await callDeepSeek<T>(prompt, options);
+          result = await callDeepSeek<T>(prompt, providerOptions);
           break;
         case "openai":
-          result = await callOpenAI<T>(prompt, options);
+          result = await callOpenAI<T>(prompt, providerOptions);
           break;
       }
 

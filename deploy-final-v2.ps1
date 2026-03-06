@@ -1,5 +1,6 @@
 # ============================================
-# DemandGentic AI - Cloud Run Deployment Script
+# LEGACY: DemandGentic AI - Cloud Run Deployment Script
+# Historical fallback only. Preferred production path is VM deployment via vm-deploy/.
 # Syncs ALL .env secrets and env vars to production
 # ============================================
 

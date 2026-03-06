@@ -46,6 +46,7 @@ import { unifiedVoiceAgent } from "./agents/unified/unified-voice-agent";
 import { VOICE_AGENT_FOUNDATIONAL_PROMPT } from "./agents";
 import { guardQualifiedLeadDisposition } from "./disposition-engagement-guard";
 import { RealtimeCallTelemetry, hashText } from "./realtime-call-telemetry";
+import { analyzeVoicemailTranscript } from "./voicemail-detection";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -2219,24 +2220,11 @@ async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transc
     return;
   }
 
-  // SECOND: Only after audio quality passes, check for voicemail
-  const voicemailPhrases = [
-    "leave a message",
-    "leave your message",
-    "after the beep",
-    "after the tone",
-    "not available",
-    "cannot take your call",
-    "please leave",
-    "record your message",
-    "voicemail",
-    "answering machine"
-  ];
-  
-  const isVoicemail = voicemailPhrases.some(phrase => lowerTranscript.includes(phrase));
+  const voicemailDetection = analyzeVoicemailTranscript(lowerTranscript);
+  const isVoicemail = voicemailDetection.classification === "voicemail";
   
   if (isVoicemail && !session.detectedDisposition) {
-    console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId}`);
+    console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId} (score=${voicemailDetection.score})`);
     session.detectedDisposition = 'voicemail';
     session.callOutcome = 'voicemail';
     await endCall(session.callId, 'voicemail');

@@ -53,6 +53,14 @@ export interface InitiateCallParams {
   callerNumberDecisionId?: string | null;
   // Call attempt tracking (for disposition processing)
   callAttemptId?: string | null;
+  telephonyProviderOverride?: {
+    sipDomain?: string;
+    sipProxy?: string;
+    sipPort?: number;
+    sipTransport?: "udp" | "tcp" | "tls" | "wss";
+    sipUsername?: string;
+    sipPassword?: string;
+  };
 }
 
 /**
@@ -229,6 +237,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
       campaignId: params.campaignId,
       contactId: params.contactId,
       queueItemId: params.queueItemId,
+      telephonyProviderOverride: params.telephonyProviderOverride,
       onCallStateChanged: (state: string) => {
         console.log(`[SIP Dialer] Call ${callId} state: ${state}`);
       },

@@ -41,6 +41,7 @@ import { schedulePostCallAnalysis } from "./post-call-analyzer";
 import { emitCallSessionEvents, type CallSessionEventInput } from "./call-session-events";
 import { releaseProspectLock } from "./active-call-tracker";
 import { handleCallCompleted } from "./number-pool-integration";
+import { analyzeVoicemailTranscript } from "./voicemail-detection";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -221,20 +222,6 @@ const WAIT_FOR_HUMAN_SPEECH_MS = 1500; // Wait up to 1.5 seconds for human to sp
 // EARLY VOICEMAIL ABORT: Detect voicemail cues within the first ~3 seconds
 // of contact speech and terminate immediately to avoid pitching to voicemail.
 const EARLY_VOICEMAIL_WINDOW_MS = 3000;
-const EARLY_VOICEMAIL_PATTERNS: RegExp[] = [
-  /leave (a )?message/i,
-  /after the (beep|tone)/i,
-  /voicemail/i,
-  /voice\s*mail/i,
-  /record your message/i,
-  /mailbox( is)? full/i,
-  /mailbox (is )?not (set up|configured)/i,
-  /not available/i,
-  /cannot (take|accept) your call/i,
-  /you('?ve| have) reached/i,
-  /please leave/i,
-];
-
 const EARLY_AI_SCREENER_PATTERNS: RegExp[] = [
   /record your name and reason for calling/i,
   /state your name and reason for calling/i,
@@ -1368,7 +1355,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (EARLY_AI_SCREENER_PATTERNS.some((pattern) => pattern.test(text))) {
       return false;
     }
-    return EARLY_VOICEMAIL_PATTERNS.some((pattern) => pattern.test(text));
+    return analyzeVoicemailTranscript(text).classification === "voicemail";
   }
 
   function inEarlyVoicemailWindow(): boolean {

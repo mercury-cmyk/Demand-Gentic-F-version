@@ -97,6 +97,32 @@ function normalizeQaParameters(rawQaParams?: Partial<QAParameters> | null): QAPa
   };
 }
 
+function extractJsonObject(raw: string): string {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '{}';
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    return trimmed;
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+
+  return trimmed;
+}
+
+function parseAiJsonResponse(text: string): any {
+  return JSON.parse(extractJsonObject(text));
+}
+
 /**
  * Analyze lead using AI based on transcript, contact data, account data, and QA parameters
  * CRITICAL: Optimized to batch queries and prevent connection pool exhaustion
@@ -256,7 +282,7 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       console.log('[AI-QA] Falling back to chat...');
       try {
         const textResponse = await chat(systemPrompt, [{ role: "user", content: analysisPrompt + "\n\nRespond with valid JSON only." }], { temperature: 0.3, maxTokens: 2000 });
-        rawAnalysis = JSON.parse(textResponse);
+        rawAnalysis = parseAiJsonResponse(textResponse);
       } catch (chatError) {
         console.error('[AI-QA] Chat fallback also failed');
         throw chatError;

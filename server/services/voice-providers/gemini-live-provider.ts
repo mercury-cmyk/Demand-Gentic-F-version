@@ -48,6 +48,7 @@ import {
   getGeminiLiveEndpoint,
   getVertexModelName,
 } from "./gemini-types";
+import { getVoiceModelForProvider } from "../ai-model-governance";
 
 const LOG_PREFIX = "[Gemini-Provider]";
 const DEBUG = process.env.DEBUG_VOICE_PROVIDERS === 'true';
@@ -128,10 +129,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    // Use Gemini 2.5 Flash Native Audio for the Live API
-    // IMPORTANT: gemini-live-2.5-flash-native-audio ONLY works with Vertex AI (not Google AI Studio)
-    // For Google AI Studio, use gemini-2.0-flash-live-001
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
+    const model = await getVoiceModelForProvider('google');
 
     // ALWAYS use Vertex AI when project ID is available (required for gemini-live-2.5-flash-native-audio)
     // API keys (Google AI Studio) don't support the native audio models
@@ -559,7 +557,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       this.once('connected', onConnected);
 
       // Send setup message
-      this.sendSetupMessage(config);
+      void this.sendSetupMessage(config);
       if (DEBUG) console.log(`${LOG_PREFIX} Setup message sent, waiting for setupComplete... (timeout: ${SETUP_TIMEOUT_MS / 1000}s)`);
     });
   }
@@ -567,19 +565,18 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // Whether we're connected to Vertex AI (camelCase) vs Google AI Studio (snake_case)
   private useVertexAI: boolean = false;
 
-  private sendSetupMessage(config: VoiceProviderConfig): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn(`${LOG_PREFIX} sendSetupMessage failed: WS not open`);
-      return;
-    }
+  private async sendSetupMessage(config: VoiceProviderConfig): Promise<void> {
+    try {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        console.warn(`${LOG_PREFIX} sendSetupMessage failed: WS not open`);
+        return;
+      }
 
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
-    const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    // Use Gemini 2.5 Flash Native Audio for the Live API
-    // Note: Model name format differs between Google AI and Vertex AI
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
-    // Prefer Vertex AI when project ID is available (required for native audio models)
-    this.useVertexAI = !!projectId;
+      const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
+      const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
+      const model = await getVoiceModelForProvider('google');
+      // Prefer Vertex AI when project ID is available (required for native audio models)
+      this.useVertexAI = !!projectId;
 
     // Map voice to Gemini format
     const voice = mapVoiceToProvider(config.voice, 'google');
@@ -672,21 +669,25 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       }
     }
 
-    const setupMessage = { setup };
+      const setupMessage = { setup };
 
-    // Log the exact message for debugging (redact system prompt)
-    if (DEBUG) {
-      const debugSetup = { ...setup };
-      if (this.useVertexAI) {
-        debugSetup.systemInstruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
-      } else {
-        debugSetup.system_instruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+      // Log the exact message for debugging (redact system prompt)
+      if (DEBUG) {
+        const debugSetup = { ...setup };
+        if (this.useVertexAI) {
+          debugSetup.systemInstruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+        } else {
+          debugSetup.system_instruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+        }
+        console.log(`${LOG_PREFIX} Setup message (${this.useVertexAI ? 'Vertex AI/camelCase' : 'Google AI/snake_case'}):`, JSON.stringify(debugSetup, null, 2));
       }
-      console.log(`${LOG_PREFIX} Setup message (${this.useVertexAI ? 'Vertex AI/camelCase' : 'Google AI/snake_case'}):`, JSON.stringify(debugSetup, null, 2));
-    }
 
-    this.ws.send(JSON.stringify(setupMessage));
-    console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}, format: ${this.useVertexAI ? 'camelCase' : 'snake_case'}`);
+      this.ws.send(JSON.stringify(setupMessage));
+      console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}, format: ${this.useVertexAI ? 'camelCase' : 'snake_case'}`);
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Failed to send governed setup message:`, error);
+      this.emitError('setup_failed', error instanceof Error ? error.message : 'Failed to send Gemini setup message', false);
+    }
   }
 
   // Track inbound audio frames for periodic logging

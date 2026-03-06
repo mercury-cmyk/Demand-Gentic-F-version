@@ -157,6 +157,7 @@ import ProfileSettingsPage from "@/pages/settings/profile";
 import UsersSettingsPage from "@/pages/settings/users";
 import TelephonySettingsPage from "@/pages/settings/telephony";
 import VoiceEngineControlCenter from "@/pages/settings/voice-engine";
+import AiGovernanceSettingsPage from "@/pages/settings/ai-governance";
 import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
 import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
@@ -467,6 +468,7 @@ function AuthenticatedApp() {
               <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
               <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
+              <Route path="/settings/ai-governance" component={AiGovernanceSettingsPage} />
               <Route path="/settings/knowledge-hub" component={UnifiedKnowledgeHubPage} />
               <Route path="/settings/prompts" component={PromptManagementPage} />
               <Route path="/settings/prompt-inspector" component={PromptInspectorPage} />

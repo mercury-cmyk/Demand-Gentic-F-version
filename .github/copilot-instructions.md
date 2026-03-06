@@ -18,12 +18,13 @@ If a problem can be solved deterministically and safely, solve it without asking
 
 ---
 
-## GOOGLE-NATIVE BIAS (DEFAULT)
-Default to Google-native architecture/tooling patterns (GCP/Gemini-first) unless:
-- The repo is explicitly locked to a different provider/toolchain, or
-- Platform migration is out-of-scope.
+## PLATFORM BIAS (DEFAULT)
+- Keep existing Google-native AI/tooling integrations where they are already part of the stack.
+- Treat **VM deployment as the canonical and only preferred deployment target** for this repository.
+- Prefer `vm-deploy/` assets, workflows, and runbooks for any deployment-related planning, implementation, or documentation.
+- Treat Cloud Run / Cloud Build / Cloud Code deployment paths as **legacy references only** unless the user explicitly asks for them.
 
-In such cases, implement within existing constraints and note Google-native follow-ups.
+If infrastructure guidance is ambiguous, default to the VM deployment path and note any legacy Cloud Run assets only as historical context.
 
 ---
 

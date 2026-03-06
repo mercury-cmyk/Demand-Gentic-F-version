@@ -27,6 +27,7 @@ import {
   getBusinessHoursForCountry,
   getNextAvailableTime
 } from '../utils/business-hours';
+import { resolveTelephonyProvider } from '../services/telephony-provider-routing';
 import {
   UK_COUNTRY_KEYS,
   US_COUNTRY_KEYS,
@@ -1653,9 +1654,29 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           throw new Error('No caller ID available');
         }
 
+        const telephonyDecision = await resolveTelephonyProvider({
+          destination: phoneNumber,
+          executionPath: useSip ? 'sip' : 'telnyx',
+          campaignId,
+          contactId: contactId || undefined,
+        });
+        console.log(
+          `[AI Orchestrator] Telephony routing: ${telephonyDecision.providerName} (${telephonyDecision.providerType}) ` +
+          `[mode=${telephonyDecision.routingMode}, reason=${telephonyDecision.selectionReason}]`
+        );
+
         // Store numberId in context for metrics tracking after call completion
         context.callerNumberId = callerIdResult.numberId;
         context.callerNumberDecisionId = callerIdResult.decisionId;
+        context.telephonyProviderId = telephonyDecision.providerId;
+        context.telephonyProviderType = telephonyDecision.providerType;
+        context.telephonyProviderName = telephonyDecision.providerName;
+        context.telephonyRoutingMode = telephonyDecision.routingMode;
+        context.telephonySelectionReason = telephonyDecision.selectionReason;
+        context.telephonyCostPerMinute = telephonyDecision.costPerMinute ?? null;
+        context.telephonyCostPerCall = telephonyDecision.costPerCall ?? null;
+        context.telephonyCurrency = telephonyDecision.currency ?? null;
+        context.telephonyProviderOverride = telephonyDecision.telnyxOverride || telephonyDecision.sipOverride;
 
         // Persist selected outbound DID metadata for observability/debugging,
         // even if the call fails before media starts.
@@ -1664,6 +1685,14 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             await db.update(dialerCallAttempts).set({
               callerNumberId: callerIdResult.numberId || null,
               fromDid: fromNumber,
+              telephonyProviderId: telephonyDecision.providerId,
+              telephonyProviderType: telephonyDecision.providerType,
+              telephonyProviderName: telephonyDecision.providerName,
+              telephonyRoutingMode: telephonyDecision.routingMode,
+              telephonySelectionReason: telephonyDecision.selectionReason,
+              telephonyCostPerMinute: telephonyDecision.costPerMinute ?? null,
+              telephonyCostPerCall: telephonyDecision.costPerCall ?? null,
+              telephonyCurrency: telephonyDecision.currency ?? null,
               updatedAt: new Date(),
             }).where(eq(dialerCallAttempts.id, callAttemptId));
           } catch (didPersistErr) {
@@ -1735,6 +1764,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             callerNumberId: callerIdResult.numberId,
             callerNumberDecisionId: callerIdResult.decisionId,
             callAttemptId: callAttemptId || undefined,
+            telephonyProviderOverride: telephonyDecision.sipOverride,
           });
 
           if (!sipResult.success) {
@@ -1766,8 +1796,17 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           try {
             await db.update(dialerCallAttempts).set({
               telnyxCallId: telnyxCallId,
+              providerCallId: telnyxCallId,
               callerNumberId: callerIdResult.numberId || null,
               fromDid: fromNumber,
+              telephonyProviderId: telephonyDecision.providerId,
+              telephonyProviderType: telephonyDecision.providerType,
+              telephonyProviderName: telephonyDecision.providerName,
+              telephonyRoutingMode: telephonyDecision.routingMode,
+              telephonySelectionReason: telephonyDecision.selectionReason,
+              telephonyCostPerMinute: telephonyDecision.costPerMinute ?? null,
+              telephonyCostPerCall: telephonyDecision.costPerCall ?? null,
+              telephonyCurrency: telephonyDecision.currency ?? null,
               callStartedAt: new Date(),
               updatedAt: new Date(),
             }).where(eq(dialerCallAttempts.id, callAttemptId));

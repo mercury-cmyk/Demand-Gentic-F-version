@@ -113,6 +113,11 @@ import { normalizeDisposition } from "./disposition-normalizer";
 import { detectG711Format } from "./voice-providers/audio-transcoder";
 import { GeminiLiveProvider } from "./voice-providers/gemini-live-provider";
 import {
+  getVoiceModelForProvider,
+  resolveVoiceGovernance,
+  resolveVoiceGovernanceSync,
+} from "./ai-model-governance";
+import {
   AGENTIC_DEMAND_CONTROL_OPENING_TEMPLATE,
   AGENTIC_DEMAND_VARIANT_B_IDENTITY_TEMPLATE,
   AGENTIC_DEMAND_VARIANT_B_PURPOSE_LINE,
@@ -132,6 +137,10 @@ import {
   getCurrentTranscript,
   type TranscriptSegment,
 } from "./deepgram-realtime-transcription";
+import {
+  analyzeVoicemailTranscript,
+  isVoicemailByTranscriptRules,
+} from "./voicemail-detection";
 // POST-CALL ANALYSIS: Comprehensive transcription + analysis after call ends
 import { schedulePostCallAnalysis } from "./post-call-analyzer";
 
@@ -143,6 +152,25 @@ const VOICE_DIALER_DEBUG = process.env.VOICE_DIALER_DEBUG === "true";
 
 function debugLog(...args: unknown[]): void {
   if (VOICE_DIALER_DEBUG) console.log(...args);
+}
+
+function buildOpenAIRealtimeUrl(model: string): string {
+  const configuredUrl = process.env.OPENAI_REALTIME_MODEL_URL?.trim();
+  if (!configuredUrl) {
+    return `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
+  }
+
+  try {
+    const url = new URL(configuredUrl);
+    url.searchParams.set("model", model);
+    return url.toString();
+  } catch {
+    const separator = configuredUrl.includes("?") ? "&" : "?";
+    if (configuredUrl.includes("model=")) {
+      return configuredUrl.replace(/model=[^&]+/, `model=${encodeURIComponent(model)}`);
+    }
+    return `${configuredUrl}${separator}model=${encodeURIComponent(model)}`;
+  }
 }
 
 // Telnyx media streaming expects real-time G.711 packetization.
@@ -1040,65 +1068,7 @@ export function isVoicemailCueTranscript(transcript: string): boolean {
   // A gatekeeper saying "they're not available" is NOT voicemail
   if (isLiveGatekeeperTranscript(lower)) return false;
 
-  const cues = [
-    "leave a message",
-    "leave your message",
-    "please leave a message after the tone",
-    "please leave your message",
-    "after the beep",
-    "after the tone",
-    "the person you are calling is not available",
-    "not available to take your call",
-    "cannot take your call",
-    "cant take your call",
-    "unable to answer",
-    "unable to take your call",
-    "im unavailable to take your call right now",
-    "currently unavailable",
-    "is unavailable",
-    "am unavailable",
-    "please leave",
-    "leave your name",
-    "leave a name",
-    "record your message",
-    "voicemail",
-    "voice mail",
-    "mailbox",
-    "mailbox is full",
-    "cannot accept messages",
-    "no one is available",
-    "your call has been forwarded",
-    "your call has been forwarded to voicemail",
-    "your call has been forwarded to voice mail",
-    "automatic voice message system",
-    "you have reached the voice mail of",
-    "you have reached the voicemail of",
-    "at the tone please record your message",
-    "you are trying to reach is not available",
-    "away from my phone",
-    "away from the phone",
-    "i ll get back to you",
-    "i will get back to you",
-    "return your call",
-    "come to the phone",
-    "press pound",
-    "hang up or press",
-    "beep",
-  ];
-
-  if (cues.some((cue) => lower.includes(cue))) return true;
-
-  const regexCues = [
-    /you have reached (the )?voice ?mail (of|for)/i,
-    /your call has been forwarded to (an )?(automatic )?voice ?mail/i,
-    /(i m|im|i am) unavailable to take your call right now/i,
-    /please leave (a )?message after the tone/i,
-    /the person you are calling is not available/i,
-    /at the tone please record your message/i,
-    /(mailbox is full|cannot accept messages)/i,
-  ];
-
-  return regexCues.some((pattern) => pattern.test(lower));
+  return isVoicemailByTranscriptRules(lower);
 }
 
 function shouldFastAbortForEarlyVoicemail(session: OpenAIRealtimeSession, transcript: string): boolean {
@@ -1657,20 +1627,21 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
     noServer: true
   });
 
-  // Determine active voice provider
-  const voiceProvider = 'google';
-  const isGeminiActive = true;
-  const fallbackEnabled = false;
-  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
+  const voiceGovernance = resolveVoiceGovernanceSync();
 
   console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} ðŸŽ™ï¸  VOICE PROVIDER CONFIGURATION`);
   console.log(`${LOG_PREFIX} ========================================`);
-  console.log(`${LOG_PREFIX} Primary Provider: ${isGeminiActive ? 'ðŸŸ¢ Google Gemini Live' : 'ðŸ”µ OpenAI Realtime'}`);
-  console.log(`${LOG_PREFIX} Model: ${isGeminiActive ? geminiModel : 'gpt-4o-realtime-preview'}`);
-  const fallbackTarget = 'gemini';
-  console.log(`${LOG_PREFIX} Fallback: âŒ Disabled (Gemini-only mode)`);
-  console.log(`${LOG_PREFIX} Cost Savings: ${isGeminiActive ? '~50-70% vs OpenAI Realtime' : 'N/A'}`);
+  console.log(`${LOG_PREFIX} Primary Provider: ${voiceGovernance.configuredProvider}`);
+  console.log(`${LOG_PREFIX} Model: ${voiceGovernance.configuredModel}`);
+  console.log(
+    `${LOG_PREFIX} Fallback: ${voiceGovernance.fallbackEnabled && voiceGovernance.fallbackProvider
+      ? `${voiceGovernance.fallbackProvider}/${voiceGovernance.fallbackModel}`
+      : 'disabled'}`,
+  );
+  for (const warning of voiceGovernance.warnings) {
+    console.warn(`${LOG_PREFIX} ${warning}`);
+  }
   console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} WebSocket server initialized on /voice-dialer`);
 
@@ -1682,7 +1653,9 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
     console.log(`${LOG_PREFIX} Ã¢Å“â€¦ CONNECTION EVENT FIRED - New Telnyx connection from: ${req.url}`);
     
     // Send a welcome message immediately to confirm connection
-    const activeProvider = 'Gemini Live';
+    const activeProvider = resolveVoiceGovernanceSync().selectedProvider === 'openai'
+      ? 'OpenAI Realtime'
+      : 'Gemini Live';
     ws.send(JSON.stringify({
       type: "connection_established",
       message: `Connected to ${activeProvider} Voice Dialer Service`,
@@ -1993,12 +1966,14 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
           const isTestSession = isTestCallFlag || isTestIdPattern;
 
-          // Determine provider - default to Google Gemini Live (more cost-effective)
-          const requestedProvider = (customParams.provider || (urlParams as any).provider || 'gemini_live').toString().toLowerCase();
-          if (requestedProvider.includes('openai')) {
-            console.warn(`${LOG_PREFIX} OpenAI provider requested (${requestedProvider}) but is disabled. Forcing Gemini Live.`);
+          const requestedProvider = (customParams.provider || (urlParams as any).provider || 'google')
+            .toString()
+            .toLowerCase();
+          const voiceGovernance = await resolveVoiceGovernance(requestedProvider);
+          const provider: 'openai' | 'google' = voiceGovernance.selectedProvider;
+          for (const warning of voiceGovernance.warnings) {
+            console.warn(`${LOG_PREFIX} ${warning}`);
           }
-          const provider: 'openai' | 'google' = 'google';
 
           if (isTestSession) {
             // Preserve negotiated codec for test calls (especially international PCMA).
@@ -2018,6 +1993,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             campaign_id: campaignId,
             stream_id: message.stream_id,
             provider,
+            governed_model: voiceGovernance.selectedModel,
             audio_format: audioFormat,
             audio_format_source: audioFormatSource,
             has_custom_params: Object.keys(customParams).length > 0,
@@ -2920,9 +2896,10 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 //   session.voiceVariables = preflight.values;
 // }
 
-// Use the latest GA gpt-realtime model for most natural, human-like speech
-const url = process.env.OPENAI_REALTIME_MODEL_URL || "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+const openaiRealtimeModel = await getVoiceModelForProvider('openai');
+const url = buildOpenAIRealtimeUrl(openaiRealtimeModel);
 console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime: ${url.split('?')[0]}...`);
+console.log(`${LOG_PREFIX} OpenAI governed model: ${openaiRealtimeModel}`);
 
 const openaiWs = new WebSocket(url, {
   headers: {
@@ -6286,56 +6263,15 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
     return { type: 'ivr', confidence: 0.96 };
   }
 
-  // VOICEMAIL Detection - CHECK FIRST (highest priority)
-  // These patterns indicate the call went to voicemail - we must hang up immediately
-  const voicemailPatterns = [
-    // Standard voicemail greetings
-    /leave\s+(a\s+)?message/i,               // "Please leave a message"
-    /leave\s+your\s+message/i,               // "Leave your message"
-    /after\s+the\s+(beep|tone)/i,            // "After the beep"
-    /at\s+the\s+(beep|tone)/i,               // "At the tone"
-    /not\s+(available|able)\s+to/i,          // "Not available to take your call"
-    /can(')?t\s+(take|answer)/i,             // "Can't take your call"
-    /unable\s+to\s+(answer|take|come)/i,     // "Unable to answer"
-    /voicemail/i,                            // Contains "voicemail"
-    /voice\s+mail/i,                         // "voice mail" with space
-    /mailbox/i,                              // "mailbox"
-    /please\s+record/i,                      // "Please record your message"
-    /record\s+(a|your)\s+message/i,          // "Record your message"
-    /press\s+(pound|#|star|\*)\s+when/i,     // "Press pound when finished"
-    /no\s+one\s+is\s+available/i,            // "No one is available"
-    /reached\s+the\s+(voicemail|mailbox)/i,  // "You've reached the voicemail"
-    /sorry\s+(i|we)\s+(missed|can't)/i,      // "Sorry I missed your call"
-    /call\s+you\s+(back|later)/i,            // "I'll call you back"
-    /beep/i,                                  // Just "beep" - voicemail indicator
-    // CRITICAL: Voicemail system error messages (these were missing and caused false positives)
-    /we\s+(didn't|did\s+not)\s+get\s+your\s+message/i,  // "We didn't get your message"
-    /you\s+were\s+not\s+speaking/i,          // "because you were not speaking"
-    /because\s+of\s+a\s+bad\s+connection/i,  // "because of a bad connection"
-    /to\s+disconnect,?\s+press/i,            // "To disconnect, press 1"
-    /to\s+record\s+your\s+message,?\s+press/i, // "To record your message, press 2"
-    /system\s+cannot\s+process/i,            // "system cannot process your entries"
-    /please\s+try\s+again\s+later/i,         // "please try again later"
-    /are\s+you\s+still\s+there/i,            // "Are you still there?"
-    /sorry\s+you\s+(were|are)\s+having\s+trouble/i, // "Sorry you were having trouble"
-    /maximum\s+time\s+permitted/i,           // "maximum time permitted for recording"
-    // Phone number readout patterns (automated systems)
-    /^\d[\d\s,\-\.]+is\s+not\s+available/i,  // "408-555-1234 is not available"
-    /your\s+call\s+has\s+been\s+forwarded/i, // "Your call has been forwarded"
-    /automatic\s+voice\s+message\s+system/i, // "automatic voice message system"
-    // Common voicemail personal greetings
-    /i('ll|\s+will)\s+get\s+back\s+to\s+you/i, // "I'll get back to you"
-    /i('ll|\s+will)\s+(return|call)\s+you/i,   // "I'll return your call"
-    /come\s+to\s+the\s+phone/i,              // "can't come to the phone"
-    /away\s+from\s+(my|the)\s+(phone|desk)/i, // "away from my phone"
-  ];
+  if (isLiveGatekeeperTranscript(normalizedText)) {
+    return { type: 'human', confidence: 0.9 };
+  }
 
-  for (const pattern of voicemailPatterns) {
-    if (pattern.test(normalizedText)) {
-      console.log(`${LOG_PREFIX} ${LOG_TAG} VOICEMAIL PATTERN MATCHED: "${normalizedText.substring(0, 60)}..."`);
-      // Return as IVR type so the voicemail check in transcript processing will catch it
-      return { type: 'ivr', confidence: 0.98 };
-    }
+  const voicemailDetection = analyzeVoicemailTranscript(transcript);
+  if (voicemailDetection.classification === "voicemail") {
+    console.log(`${LOG_PREFIX} ${LOG_TAG} VOICEMAIL SCORE ${voicemailDetection.score}: "${normalizedText.substring(0, 60)}..."`);
+    // Return as IVR type so the voicemail check in transcript processing will catch it
+    return { type: 'ivr', confidence: voicemailDetection.hasHighPrecisionMatch ? 0.99 : 0.96 };
   }
 
   // IVR Detection Patterns (non-voicemail automated systems)
@@ -7531,29 +7467,16 @@ async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transc
     return;
   }
 
-  // SECOND: Only after audio quality passes, check for voicemail
-  const voicemailPhrases = [
-    "leave a message",
-    "leave your message",
-    "after the beep",
-    "after the tone",
-    "not available",
-    "the person you are calling is not available",
-    "cannot take your call",
-    "please leave",
-    "record your message",
-    "at the tone, please record your message",
-    "mailbox is full",
-    "cannot accept messages",
-    "voicemail",
-    "answering machine"
-  ];
-  
   const isScreener = isAutomatedCallScreenerTranscript(lowerTranscript);
-  const isVoicemail = !isScreener && voicemailPhrases.some(phrase => lowerTranscript.includes(phrase));
+  const isGatekeeper = isLiveGatekeeperTranscript(lowerTranscript);
+  const voicemailDetection = analyzeVoicemailTranscript(lowerTranscript);
+  const isVoicemail =
+    !isScreener &&
+    !isGatekeeper &&
+    voicemailDetection.classification === "voicemail";
   
   if (isVoicemail && !session.detectedDisposition) {
-    console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId}`);
+    console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId} (score=${voicemailDetection.score})`);
     session.detectedDisposition = 'voicemail';
     session.callOutcome = 'voicemail';
     recordVoicemailDetectedEvent(session, "check_for_voicemail_detection");
@@ -8553,14 +8476,38 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         // Handle real call post-call processing
         // Check if call attempt record exists - but DON'T skip processing if missing
         // This handles fallback sessions where callAttemptId might be a timestamp-based ID
-        let existingAttempt: { id: string } | undefined;
+        let existingAttempt:
+          | {
+              id: string;
+              telephonyProviderId: string | null;
+              telephonyProviderType: string | null;
+              telephonyProviderName: string | null;
+              providerCallId: string | null;
+              telephonyRoutingMode: string | null;
+              telephonySelectionReason: string | null;
+              telephonyCostPerMinute: number | null;
+              telephonyCostPerCall: number | null;
+              telephonyCurrency: string | null;
+            }
+          | undefined;
         const isFallbackAttemptId = !session.callAttemptId ||
           session.callAttemptId.startsWith('attempt-') ||
           session.callAttemptId === '';
 
         if (!isFallbackAttemptId) {
           const [attempt] = await db
-            .select({ id: dialerCallAttempts.id })
+            .select({
+              id: dialerCallAttempts.id,
+              telephonyProviderId: dialerCallAttempts.telephonyProviderId,
+              telephonyProviderType: dialerCallAttempts.telephonyProviderType,
+              telephonyProviderName: dialerCallAttempts.telephonyProviderName,
+              providerCallId: dialerCallAttempts.providerCallId,
+              telephonyRoutingMode: dialerCallAttempts.telephonyRoutingMode,
+              telephonySelectionReason: dialerCallAttempts.telephonySelectionReason,
+              telephonyCostPerMinute: dialerCallAttempts.telephonyCostPerMinute,
+              telephonyCostPerCall: dialerCallAttempts.telephonyCostPerCall,
+              telephonyCurrency: dialerCallAttempts.telephonyCurrency,
+            })
             .from(dialerCallAttempts)
             .where(eq(dialerCallAttempts.id, session.callAttemptId))
             .limit(1);
@@ -8633,9 +8580,19 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               const validContactId = session.contactId && session.contactId.length > 0 ? session.contactId : null;
               const validCampaignId = session.campaignId && session.campaignId.length > 0 ? session.campaignId : null;
               const validQueueItemId = session.queueItemId && session.queueItemId.length > 0 ? session.queueItemId : null;
+              const providerCallId = existingAttempt?.providerCallId || (session as any).telnyxCallControlId || undefined;
               
               const [callSession] = await db.insert(callSessions).values({
                 telnyxCallId: (session as any).telnyxCallControlId || undefined,
+                telephonyProviderId: existingAttempt?.telephonyProviderId || null,
+                telephonyProviderType: existingAttempt?.telephonyProviderType || null,
+                telephonyProviderName: existingAttempt?.telephonyProviderName || null,
+                providerCallId,
+                telephonyRoutingMode: existingAttempt?.telephonyRoutingMode || null,
+                telephonySelectionReason: existingAttempt?.telephonySelectionReason || null,
+                telephonyCostPerMinute: existingAttempt?.telephonyCostPerMinute ?? null,
+                telephonyCostPerCall: existingAttempt?.telephonyCostPerCall ?? null,
+                telephonyCurrency: existingAttempt?.telephonyCurrency || null,
                 fromNumber: (session as any).fromNumber || undefined,
                 toNumberE164: session.calledNumber,
                 startedAt: (session as any).callStartedAt || session.startTime,
@@ -9261,66 +9218,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     // NOT an automated voicemail system
     if (isLiveGatekeeperTranscript(lower)) return false;
 
-    // Comprehensive voicemail detection phrases
-    const voicemailPhrases = [
-      // Standard voicemail greetings
-      'leave a message',
-      'leave your message',
-      'after the beep',
-      'after the tone',
-      'the person you are calling is not available',
-      'not available',
-      'currently unavailable',
-      'is unavailable',
-      'am unavailable',
-      'cannot take your call',
-      'can\'t take your call',
-      'please leave',
-      'leave your name',
-      'leave a name',
-      'record your message',
-      'at the tone, please record your message',
-      'voicemail',
-      'voice mail',
-      'mailbox',
-      'mailbox is full',
-      'cannot accept messages',
-      'answering machine',
-      'reached the voicemail',
-      'no one is available',
-      'press pound when finished',
-      // CRITICAL: Voicemail system error messages
-      'we didn\'t get your message',
-      'we did not get your message',
-      'you were not speaking',
-      'because of a bad connection',
-      'to disconnect press',
-      'to disconnect, press',
-      'to record your message press',
-      'to record your message, press',
-      'system cannot process',
-      'please try again later',
-      'are you still there',
-      'sorry you were having trouble',
-      'sorry you are having trouble',
-      'maximum time permitted',
-      // Automated phone system messages
-      'is not available',
-      'your call has been forwarded',
-      'automatic voice message system',
-      // Common voicemail personal greetings
-      'i\'ll get back to you',
-      'i will get back to you',
-      'call you back',
-      'return your call',
-      'come to the phone',
-      'away from my phone',
-      'away from the phone',
-      'i\'m unable to',
-      'unable to take your call',
-    ];
-
-    return voicemailPhrases.some(phrase => lower.includes(phrase));
+    return isVoicemailByTranscriptRules(lower);
   }
 
 function shouldAutoTranscribeDisposition(disposition: DispositionCode): boolean {
@@ -11628,16 +11526,13 @@ export function getRealtimeStatus(): {
     };
   });
 
-  // Get the default provider from env or use 'google' as default
-  const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
-  const isGoogleDefault = !defaultProvider.includes('openai');
-  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
+  const governance = resolveVoiceGovernanceSync();
 
   return {
     activeSessions: sessionStates.length,
     websocketPath: '/voice-dialer',
-    provider: isGoogleDefault ? 'google' : 'openai',
-    model: isGoogleDefault ? geminiModel : 'gpt-4o-realtime-preview-2024-12-17',
+    provider: governance.selectedProvider,
+    model: governance.selectedModel,
     sessions: sessionStates,
   };
 }
