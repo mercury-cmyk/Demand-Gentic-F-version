@@ -403,12 +403,11 @@ export async function processDisposition(
 
     let finalDisposition = disposition;
 
-    // SAFETY: Downgrade short AI qualified leads AND callback requests to prevent false positives
-    // RE-ENABLED 2026-02-23: Production data shows massive false-positive problem.
-    // Calls as short as 3-7 seconds are being marked qualified_lead/callback_requested with
-    // ZERO contact participation, creating bogus leads that flood the QA queue. Root cause:
-    // Gemini AI hallucinates engagement when talking to screeners/IVR/silence/"not in service"
-    // recordings. Very short calls are downgraded automatically.
+    // SAFETY: Downgrade ghost/IVR AI calls to prevent false positives.
+    // Calls < 15s are ghost calls (no real conversation possible).
+    // Calls 15-45s are allowed through but flagged for QA review in processQualifiedLead.
+    // Threshold lowered 2026-03-06: 30s block was too aggressive for short white-paper campaigns
+    // where a 20-30s conversation can genuinely qualify (prospect just needs to say "yes, send it").
     if ((finalDisposition === 'qualified_lead' || finalDisposition === 'callback_requested') && callAttempt.agentType === 'ai') {
         const duration = callAttempt.callDurationSeconds || 0;
         const originalDisp = finalDisposition;
@@ -416,16 +415,8 @@ export async function processDisposition(
             console.warn(`[DispositionEngine] 🛡️ Downgrading ${originalDisp} → no_answer (Ghost AI Call: ${duration}s — no real conversation possible)`);
             finalDisposition = 'no_answer';
             result.actions.push(`Downgraded from ${originalDisp} to no_answer (duration ${duration}s < 15s — impossible to have real conversation)`);
-        } else if (duration < 30) {
-            console.warn(`[DispositionEngine] 🛡️ Downgrading ${originalDisp} → no_answer (Very Short AI Call: ${duration}s — likely voicemail/IVR)`);
-            finalDisposition = 'no_answer';
-            result.actions.push(`Downgraded from ${originalDisp} to no_answer (duration ${duration}s < 30s — insufficient for callback/qualification)`);
-        } else if (finalDisposition === 'qualified_lead' && duration < 45) {
-            console.warn(`[DispositionEngine] 🛡️ Downgrading qualified_lead → needs_review (Short AI Call: ${duration}s)`);
-            finalDisposition = 'needs_review';
-            result.actions.push(`Downgraded from qualified_lead to needs_review (duration ${duration}s < 45s)`);
         }
-        // callback_requested passes through if duration >= 30s (enough for a real callback request)
+        // 15s+ calls pass through to processQualifiedLead which flags short calls for QA review
     }
 
     // Process based on disposition type
@@ -568,28 +559,30 @@ async function processQualifiedLead(
   console.log(`[DispositionEngine] ==> Starting processQualifiedLead for call attempt: ${callAttempt.id}`);
   console.log(`[DispositionEngine] Call Data Received: ${JSON.stringify(callData, null, 2)}`);
 
-  // QUALITY GATE: Block or flag short calls to prevent false lead creation.
-  // AI agents should NEVER produce qualified leads from calls < 45s — these are
-  // screener/IVR/ghost calls. Human agents bypass the hard block but are still flagged.
-  const MINIMUM_AI_QUALIFIED_DURATION_SECONDS = 45;  // AI calls: hard block below this
+  // QUALITY GATE: Block ghost calls, flag short calls for QA review.
+  // AI calls < 15s are ghost/IVR — hard block. 15-45s calls create leads flagged for QA review.
+  // Lowered 2026-03-06: 45s block was too aggressive — white paper campaigns can qualify in 20-30s.
+  const MINIMUM_AI_QUALIFIED_DURATION_SECONDS = 15;  // AI calls: hard block below this (ghost calls)
   const MINIMUM_HUMAN_QUALIFIED_DURATION_SECONDS = 20; // Human calls: flag for review
   const callDuration = callAttempt.callDurationSeconds || 0;
   const isAiAgent = callAttempt.agentType === 'ai';
 
-  // AI agents: block lead creation entirely for very short calls
+  // AI agents: block lead creation entirely for ghost/IVR calls
   if (isAiAgent && callDuration < MINIMUM_AI_QUALIFIED_DURATION_SECONDS) {
     console.warn(`[DispositionEngine] 🚫 BLOCKING lead creation: AI qualified_lead with ${callDuration}s duration (minimum ${MINIMUM_AI_QUALIFIED_DURATION_SECONDS}s for AI). Call attempt: ${callAttempt.id}`);
     result.actions.push(`🚫 Lead creation BLOCKED: AI call ${callDuration}s < ${MINIMUM_AI_QUALIFIED_DURATION_SECONDS}s minimum`);
     return; // Exit without creating a lead
   }
 
-  // Determine if call should be flagged for review based on duration
+  // Determine if call should be flagged for QA review based on duration
+  // AI calls 15-45s are suspicious but possible — flag for manual QA review
+  const QA_REVIEW_THRESHOLD_AI = 45;
   const isShortDurationCall = isAiAgent
-    ? callDuration < MINIMUM_AI_QUALIFIED_DURATION_SECONDS
+    ? callDuration < QA_REVIEW_THRESHOLD_AI
     : callDuration < MINIMUM_HUMAN_QUALIFIED_DURATION_SECONDS;
 
   if (isShortDurationCall) {
-    console.warn(`[DispositionEngine] ⚠️ SHORT DURATION: Call ${callAttempt.id} marked as qualified_lead but duration (${callDuration}s) is below preferred threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Flagging for QA review.`);
+    console.warn(`[DispositionEngine] ⚠️ SHORT DURATION: Call ${callAttempt.id} marked as qualified_lead but duration (${callDuration}s) is below preferred threshold (${QA_REVIEW_THRESHOLD_AI}s). Flagging for QA review.`);
     result.actions.push(`⚠️ Call duration ${callDuration}s is short - flagged for priority QA review`);
   }
 
@@ -628,7 +621,7 @@ async function processQualifiedLead(
      contact?.firstName || contact?.lastName || 'Unknown');
   const qaStatus = isShortDurationCall ? 'under_review' : 'new';
   const qaDecision = isShortDurationCall
-    ? `⚠️ SHORT DURATION ALERT: Call was only ${callDuration}s (minimum: ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). AI marked as qualified but requires manual verification.`
+    ? `⚠️ SHORT DURATION ALERT: Call was only ${callDuration}s (minimum: ${QA_REVIEW_THRESHOLD_AI}s). AI marked as qualified but requires manual verification.`
     : null;
 
   // Determine source based on agent type for full auditability
@@ -1387,9 +1380,8 @@ async function processCallbackRequested(
   }
 
   // DURATION GUARD: Block lead creation for impossibly short "callback" calls
-  // Production analysis 2026-02-23: AI submits callback_requested for 3-4s calls where
-  // "This number is not in service" or IVR/voicemail plays. These are NOT real callbacks.
-  const MINIMUM_CALLBACK_DURATION = 30; // Need at least 30s for a real callback request
+  // Ghost/IVR calls < 15s are blocked. Lowered 2026-03-06 from 30s to 15s.
+  const MINIMUM_CALLBACK_DURATION = 15; // Ghost/IVR calls blocked
   if (callDuration < MINIMUM_CALLBACK_DURATION && callAttempt.agentType === 'ai') {
     console.warn(`[DispositionEngine] 🚫 BLOCKING callback lead creation: Duration ${callDuration}s < ${MINIMUM_CALLBACK_DURATION}s minimum for AI calls. Not a real callback request.`);
     result.actions.push(`Blocked callback lead creation (duration ${callDuration}s < ${MINIMUM_CALLBACK_DURATION}s — too short for real callback request)`);
