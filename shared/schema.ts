@@ -2,6 +2,7 @@
 import { sql, relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import type { AiModelPolicyMap } from "./ai-governance";
 import {
   pgTable,
   text,
@@ -2458,6 +2459,18 @@ export const agentDefaults = pgTable("agent_defaults", {
 
 export type AgentDefaults = typeof agentDefaults.$inferSelect;
 
+export const aiModelGovernance = pgTable("ai_model_governance", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  version: integer("version").notNull().default(1),
+  policies: jsonb("policies").notNull().$type<AiModelPolicyMap>(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  updatedAtIdx: index("ai_model_governance_updated_at_idx").on(table.updatedAt),
+}));
+
+export type AiModelGovernance = typeof aiModelGovernance.$inferSelect;
+
 // ==================== UNIFIED KNOWLEDGE HUB ====================
 // SINGLE SOURCE OF TRUTH for all AI agent knowledge
 // All agents—voice, email, compliance, or otherwise—MUST consume
@@ -3259,6 +3272,15 @@ export const callSessions = pgTable("call_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   callJobId: varchar("call_job_id").references(() => callJobs.id, { onDelete: 'cascade' }),
   telnyxCallId: text("telnyx_call_id"),
+  telephonyProviderId: varchar("telephony_provider_id"),
+  telephonyProviderType: varchar("telephony_provider_type", { length: 32 }),
+  telephonyProviderName: text("telephony_provider_name"),
+  providerCallId: text("provider_call_id"),
+  telephonyRoutingMode: varchar("telephony_routing_mode", { length: 16 }),
+  telephonySelectionReason: text("telephony_selection_reason"),
+  telephonyCostPerMinute: real("telephony_cost_per_minute"),
+  telephonyCostPerCall: real("telephony_cost_per_call"),
+  telephonyCurrency: varchar("telephony_currency", { length: 3 }),
   telnyxRecordingId: text("telnyx_recording_id"), // Stable Telnyx recording ID for on-demand URL generation
   recordingProvider: text("recording_provider").default('telnyx'), // Provider: telnyx | elevenlabs
   fromNumber: text("from_number"),
@@ -3301,6 +3323,7 @@ export const callSessions = pgTable("call_sessions", {
 }, (table) => ({
   callJobIdx: index("call_sessions_call_job_idx").on(table.callJobId),
   telnyxCallIdx: index("call_sessions_telnyx_call_idx").on(table.telnyxCallId),
+  telephonyProviderIdx: index("call_sessions_telephony_provider_idx").on(table.telephonyProviderId),
   statusIdx: index("call_sessions_status_idx").on(table.status),
   agentTypeIdx: index("call_sessions_agent_type_idx").on(table.agentType),
   campaignIdx: index("call_sessions_campaign_idx").on(table.campaignId),
@@ -10461,6 +10484,15 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
   recordingUrl: text("recording_url"),
   telnyxRecordingId: text("telnyx_recording_id"), // Stable Telnyx recording ID for on-demand URL generation
   telnyxCallId: text("telnyx_call_id"), // CRITICAL: Link to Telnyx call control ID for recordings/webhooks
+  telephonyProviderId: varchar("telephony_provider_id"),
+  telephonyProviderType: varchar("telephony_provider_type", { length: 32 }),
+  telephonyProviderName: text("telephony_provider_name"),
+  providerCallId: text("provider_call_id"),
+  telephonyRoutingMode: varchar("telephony_routing_mode", { length: 16 }),
+  telephonySelectionReason: text("telephony_selection_reason"),
+  telephonyCostPerMinute: real("telephony_cost_per_minute"),
+  telephonyCostPerCall: real("telephony_cost_per_call"),
+  telephonyCurrency: varchar("telephony_currency", { length: 3 }),
   // Number pool tracking (added via 0099 migration)
   callerNumberId: varchar("caller_number_id"), // References telnyx_numbers.id
   fromDid: text("from_did"), // The actual DID used for the call
@@ -10476,6 +10508,7 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
   agentTypeIdx: index("dialer_call_attempts_agent_type_idx").on(table.agentType),
   dispositionIdx: index("dialer_call_attempts_disposition_idx").on(table.disposition),
   telnyxCallIdIdx: index("dialer_call_attempts_telnyx_call_id_idx").on(table.telnyxCallId),
+  telephonyProviderIdx: index("dialer_call_attempts_telephony_provider_idx").on(table.telephonyProviderId),
   createdAtIdx: index("dialer_call_attempts_created_at_idx").on(table.createdAt),
   pendingDispositionIdx: index("dialer_call_attempts_pending_disposition_idx")
     .on(table.disposition, table.dispositionProcessed),

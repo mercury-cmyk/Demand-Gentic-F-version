@@ -300,11 +300,11 @@ export async function handleCallCompleted(
       isFailed: data.failed,
     });
 
-    // Check for carrier blocks
-    if (data.failed && data.sipCode && isCarrierBlockCode(data.sipCode)) {
-      const { handleCarrierBlock } = await import('./number-pool/cooldown-manager');
-      await handleCarrierBlock(data.numberId, data.sipCode, data.sipReason);
-    }
+    // Carrier block cooldown DISABLED per user request — no restrictions, only 30s gap.
+    // if (data.failed && data.sipCode && isCarrierBlockCode(data.sipCode)) {
+    //   const { handleCarrierBlock } = await import('./number-pool/cooldown-manager');
+    //   await handleCarrierBlock(data.numberId, data.sipCode, data.sipReason);
+    // }
 
     // Cooldown auto-trigger DISABLED per user request — no phone warm-up restrictions.
     // const cooldownCheck = await checkCooldownTriggers(data.numberId);

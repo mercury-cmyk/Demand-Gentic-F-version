@@ -16,6 +16,7 @@ import {
   TelephonyProviderFactory,
   type TelephonyProviderConfig,
 } from '../services/telephony-providers';
+import { invalidateTelephonyProviderCache } from '../services/telephony-provider-routing';
 
 const router = Router();
 
@@ -161,6 +162,8 @@ router.post('/', async (req, res) => {
       createdById: (req as any).user?.id,
     }).returning();
 
+    invalidateTelephonyProviderCache();
+
     res.status(201).json({
       success: true,
       provider: {
@@ -226,6 +229,8 @@ router.patch('/:id', async (req, res) => {
       .where(eq(telephonyProviders.id, req.params.id))
       .returning();
 
+    invalidateTelephonyProviderCache();
+
     // If provider was enabled/disabled, log it
     if (req.body.enabled !== undefined && req.body.enabled !== existing.enabled) {
       console.log(`[TelephonyProviders] Provider ${updated.id} ${updated.enabled ? 'ENABLED' : 'DISABLED'} by user ${(req as any).user?.id}`);
@@ -270,6 +275,8 @@ router.delete('/:id', async (req, res) => {
 
     await db.delete(telephonyProviders)
       .where(eq(telephonyProviders.id, req.params.id));
+
+    invalidateTelephonyProviderCache();
 
     console.log(`[TelephonyProviders] Provider ${req.params.id} deleted by user ${(req as any).user?.id}`);
 

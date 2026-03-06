@@ -27,6 +27,8 @@ const TELNYX_RECORDING_SYNC_INTERVAL = 300000; // Every 5 minutes - auto-fetch l
 const JOURNEY_ACTION_INTERVAL = 60000; // Every 60 seconds
 const MERCURY_OUTBOX_INTERVAL = 60000; // Every 60 seconds — flush queued Mercury emails
 const LONG_CALL_RECOVERY_INTERVAL = parseInt(process.env.LONG_CALL_RECOVERY_INTERVAL_MS || '300000', 10); // Every 5 min — parallel pool is much faster
+const BATCH_TRANSCRIPTION_SWEEP_INTERVAL = parseInt(process.env.BATCH_TRANSCRIPTION_SWEEP_INTERVAL_MS || '1800000', 10); // Every 30 min — catches orphaned calls with GCS recordings
+const ANALYSIS_SWEEP_INTERVAL = parseInt(process.env.ANALYSIS_SWEEP_INTERVAL_MS || '600000', 10); // Every 10 min — analyzes transcribed-but-unanalyzed calls
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -46,6 +48,8 @@ let telnyxSyncInterval: NodeJS.Timeout | null = null;
 let journeyActionInterval: NodeJS.Timeout | null = null;
 let mercuryOutboxInterval: NodeJS.Timeout | null = null;
 let longCallRecoveryInterval: NodeJS.Timeout | null = null;
+let batchTranscriptionSweepInterval: NodeJS.Timeout | null = null;
+let analysisSweepInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
@@ -55,6 +59,8 @@ let isTelnyxSyncRunning = false;
 let isJourneyActionRunning = false;
 let isMercuryOutboxRunning = false;
 let isLongCallRecoveryRunning = false;
+let isBatchTranscriptionSweepRunning = false;
+let isAnalysisSweepRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -135,6 +141,7 @@ export function startBackgroundJobs() {
   console.log(`[Background Jobs]   ✓ Transcription: ${ENABLE_TRANSCRIPTION ? 'ENABLED (every 120s)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ AI Analysis: ${ENABLE_AI_ANALYSIS ? 'ENABLED (every 120s)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ Telnyx Recording Sync: ${ENABLE_TELNYX_RECORDING_SYNC ? 'ENABLED (every 5min, last 10min window)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   ✓ Batch Transcription Sweep: ${ENABLE_TRANSCRIPTION ? `ENABLED (every ${BATCH_TRANSCRIPTION_SWEEP_INTERVAL / 60000}min, up to ${20} calls)` : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
@@ -191,6 +198,59 @@ export function startBackgroundJobs() {
         isLongCallRecoveryRunning = false;
       }
     }, LONG_CALL_RECOVERY_INTERVAL);
+  }
+
+  // Batch transcription sweep — catches orphaned calls that have a callSession recording
+  // (GCS or Telnyx) but no transcript. This is the safety net for calls that fell through
+  // all other pipelines (server restart, expired URLs, failed retries).
+  // Uses the new OpenAI-compatible Telnyx STT + full post-call analysis.
+  if (ENABLE_TRANSCRIPTION) {
+    batchTranscriptionSweepInterval = setInterval(async () => {
+      if (isBatchTranscriptionSweepRunning) {
+        return;
+      }
+
+      isBatchTranscriptionSweepRunning = true;
+      try {
+        await withJobTimeout('Batch Transcription Sweep', async () => {
+          const { sweepUntranscribedCalls } = await import('./batch-transcription-sweep');
+          const result = await sweepUntranscribedCalls();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Batch transcription sweep: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed, ${result.skipped} skipped out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Batch transcription sweep error:', error);
+      } finally {
+        isBatchTranscriptionSweepRunning = false;
+      }
+    }, BATCH_TRANSCRIPTION_SWEEP_INTERVAL);
+  }
+
+  // Analysis sweep — runs post-call analysis on calls that have transcripts but no ai_analysis.
+  // Catches calls recovered by external scripts or where analysis was skipped.
+  if (ENABLE_AI_ANALYSIS) {
+    analysisSweepInterval = setInterval(async () => {
+      if (isAnalysisSweepRunning) return;
+      isAnalysisSweepRunning = true;
+      try {
+        await withJobTimeout('Analysis Sweep', async () => {
+          const { sweepUnanalyzedCalls } = await import('./batch-transcription-sweep');
+          const result = await sweepUnanalyzedCalls();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Analysis sweep: ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Analysis sweep error:', error);
+      } finally {
+        isAnalysisSweepRunning = false;
+      }
+    }, ANALYSIS_SWEEP_INTERVAL);
   }
 
   // AI analysis processing job (optional)
@@ -398,6 +458,16 @@ export function stopBackgroundJobs() {
   if (longCallRecoveryInterval) {
     clearInterval(longCallRecoveryInterval);
     longCallRecoveryInterval = null;
+  }
+
+  if (batchTranscriptionSweepInterval) {
+    clearInterval(batchTranscriptionSweepInterval);
+    batchTranscriptionSweepInterval = null;
+  }
+
+  if (analysisSweepInterval) {
+    clearInterval(analysisSweepInterval);
+    analysisSweepInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');

@@ -349,7 +349,15 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
           campaignId,
           contactId: '',
           queueItemId: '',
-          voiceName: 'Puck',
+          voiceName: ctx.voice || 'Puck',
+          systemPrompt: ctx.systemPrompt,
+          contactName: validatedData.testContactName,
+          contactFirstName: validatedData.testContactName?.split(' ')[0],
+          contactJobTitle: validatedData.testJobTitle,
+          accountName: validatedData.testCompanyName,
+          organizationName: ctx.organizationName,
+          campaignObjective: ctx.campaignObjective,
+          maxCallDurationSeconds: 300,
         });
 
         if (sipResult.success) {

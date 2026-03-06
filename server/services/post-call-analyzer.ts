@@ -31,6 +31,7 @@ import {
 import { loadCampaignQualificationContext } from "./smart-disposition-analyzer";
 
 const LOG_PREFIX = "[PostCallAnalyzer]";
+const POST_CALL_ANALYSIS_MODEL = process.env.DEEPSEEK_REASONING_MODEL || "deepseek-chat";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -106,7 +107,7 @@ export interface PostCallAnalysisResult {
   fullTranscript: string;
   /** Outcome evaluation against campaign criteria */
   campaignOutcome: CampaignOutcomeEvaluation | null;
-  /** Conversation quality analysis (from DeepSeek/Gemini) */
+  /** Conversation quality analysis (DeepSeek-backed unified analysis) */
   qualityAnalysis: ConversationQualityAnalysis | null;
   /** Intelligence record ID (if logged) */
   intelligenceRecordId?: string;
@@ -444,13 +445,22 @@ CRITICAL RULES:
 3. STT artifacts (misspellings, garbled words) are NOT agent errors.
 4. Focus on: objective achievement, talking point coverage, qualification, and disposition accuracy.`;
 
-    // Use Gemini 3 Deep Think for evaluation
+    // Prefer DeepSeek for legacy post-call campaign evaluation.
     const { deepAnalyze } = await import("./ai-analysis-router");
     const { normalizeDisposition } = await import("./disposition-normalizer");
 
     let raw: any;
     try {
+<<<<<<< HEAD
       raw = await deepAnalyze(prompt, { temperature: 0.2, maxTokens: 4096, label: "post-call", preferredProvider: "deepseek" });
+=======
+      raw = await deepAnalyze(prompt, {
+        temperature: 0.2,
+        maxTokens: 4096,
+        label: "post-call",
+        preferredProvider: "deepseek",
+      });
+>>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
     } catch (routerError: any) {
       console.warn(`${LOG_PREFIX} AI evaluation failed (all providers): ${routerError.message}`);
       // Fallback or return partial data? returning null for now to indicate failure to process this step
@@ -596,7 +606,7 @@ function mapDeepAnalysisToQualityAnalysis(
       outcome: dispositionAssessment.suggestedDisposition,
     },
     metadata: {
-      model: "deep-analysis-unified",
+      model: POST_CALL_ANALYSIS_MODEL,
       analyzedAt: new Date().toISOString(),
       interactionType: "live_call",
       analysisStage: "post_call",

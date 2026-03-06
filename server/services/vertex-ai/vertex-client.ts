@@ -403,6 +403,7 @@ export interface GenerationOptions {
   topP?: number;
   stopSequences?: string[];
   responseFormat?: "text" | "json";
+  model?: string;
 }
 
 export interface ChatMessage {
@@ -417,7 +418,22 @@ export async function generateText(
   prompt: string,
   options: GenerationOptions = {}
 ): Promise<string> {
-  const model = getChatModel();
+  const model = options.model
+    ? getVertexAI().getGenerativeModel({
+        model: options.model,
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: currentConfig.safetySettings.harassmentThreshold },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: currentConfig.safetySettings.hateSpeechThreshold },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: currentConfig.safetySettings.sexuallyExplicitThreshold },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: currentConfig.safetySettings.dangerousContentThreshold },
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.95,
+          maxOutputTokens: 8192,
+        },
+      })
+    : getChatModel();
 
   const generationConfig: any = {
     temperature: options.temperature ?? 0.7,
@@ -711,7 +727,7 @@ export async function deepAnalyzeJSON<T>(
   prompt: string,
   options: GenerationOptions = {}
 ): Promise<T> {
-  const modelId = currentConfig.models.reasoning;
+  const modelId = options.model || currentConfig.models.reasoning;
   const isGemini3 = modelId.includes("gemini-3");
 
   const cooldownRemainingMs = getDeepThinkCooldownRemainingMs();

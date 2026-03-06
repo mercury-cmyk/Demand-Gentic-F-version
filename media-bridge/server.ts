@@ -219,6 +219,7 @@ interface BridgeSession {
   // Transcript tracking
   transcript: { role: 'agent' | 'contact'; text: string; ts: number }[];
   lastDisposition: string | null;
+  callbackSent: boolean; // Whether final transcript callback was already sent
 
   // Timers
   maxDurationTimer: NodeJS.Timeout | null;
@@ -272,6 +273,7 @@ async function createSession(params: {
 
     transcript: [],
     lastDisposition: null,
+    callbackSent: false,
 
     maxDurationTimer: null,
   };
@@ -317,6 +319,23 @@ async function createSession(params: {
 function destroySession(callId: string): void {
   const session = sessions.get(callId);
   if (!session) return;
+
+  // Send final transcript callback if one wasn't already sent via submit_disposition/end_call
+  if (!session.callbackSent && session.transcript.length > 0) {
+    const transcriptStr = buildTranscriptString(session);
+    const callDurationSeconds = Math.round((Date.now() - session.startTime) / 1000);
+    const callAttemptId = session.context?.callAttemptId || null;
+    log(`Sending final transcript callback for ${callId} (${session.transcript.length} turns, ${callDurationSeconds}s, disposition=${session.lastDisposition || 'no_answer'})`);
+    session.callbackSent = true;
+    // Fire-and-forget — don't block destroy on callback
+    callbackToCloudRun(callId, 'submit_disposition', {
+      disposition: session.lastDisposition || 'no_answer',
+      callAttemptId,
+      transcript: transcriptStr,
+      callDurationSeconds,
+      context: session.context,
+    }).catch(err => logError(`Final callback failed for ${callId}`, err));
+  }
 
   if (session.maxDurationTimer) clearTimeout(session.maxDurationTimer);
   if (session.rtpSocket) {
@@ -558,10 +577,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         const modelTurn = serverContent?.modelTurn;
         if (modelTurn?.parts) {
           for (const part of modelTurn.parts) {
-            // Capture text parts as agent transcript
-            if (part.text) {
-              session.transcript.push({ role: 'agent', text: part.text, ts: Date.now() });
-            }
+            // NOTE: Do NOT capture modelTurn.parts[].text as agent transcript here.
+            // outputTranscription (below) is the authoritative source for agent speech text.
+            // Capturing both causes duplicate/overlapping agent entries.
 
             const inlineData = part.inlineData;
             if (inlineData?.data) {
@@ -579,14 +597,45 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           }
         }
 
-        // Capture output transcription (Gemini may provide text of what it said)
+        // Capture output transcription — authoritative agent speech text from Gemini.
+        // Merge consecutive agent turns to avoid fragmented word-by-word entries.
         if (serverContent?.outputTranscription?.text) {
-          session.transcript.push({ role: 'agent', text: serverContent.outputTranscription.text, ts: Date.now() });
+          const agentText = serverContent.outputTranscription.text.trim();
+          if (agentText) {
+            const last = session.transcript[session.transcript.length - 1];
+            if (last && last.role === 'agent' && (Date.now() - last.ts) < 3000) {
+              // Merge into previous agent entry if within 3s (same turn)
+              // Avoid duplicating if the new text is already contained
+              if (!last.text.includes(agentText)) {
+                last.text = (last.text + ' ' + agentText).trim();
+                last.ts = Date.now();
+              }
+            } else {
+              // Check for exact duplicate of last agent entry
+              if (!last || last.role !== 'agent' || last.text !== agentText) {
+                session.transcript.push({ role: 'agent', text: agentText, ts: Date.now() });
+              }
+            }
+          }
         }
 
-        // Capture input transcription (Gemini's transcription of caller speech)
+        // Capture input transcription — Gemini's transcription of caller speech.
+        // Merge consecutive contact turns to avoid fragmented entries.
         if (serverContent?.inputTranscription?.text) {
-          session.transcript.push({ role: 'contact', text: serverContent.inputTranscription.text, ts: Date.now() });
+          const contactText = serverContent.inputTranscription.text.trim();
+          if (contactText) {
+            const last = session.transcript[session.transcript.length - 1];
+            if (last && last.role === 'contact' && (Date.now() - last.ts) < 3000) {
+              if (!last.text.includes(contactText)) {
+                last.text = (last.text + ' ' + contactText).trim();
+                last.ts = Date.now();
+              }
+            } else {
+              if (!last || last.role !== 'contact' || last.text !== contactText) {
+                session.transcript.push({ role: 'contact', text: contactText, ts: Date.now() });
+              }
+            }
+          }
         }
 
         // Tool calls
@@ -657,6 +706,7 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
 
   if (call.name === 'submit_disposition') {
     session.lastDisposition = call.args?.disposition || null;
+    session.callbackSent = true;
     // Include transcript + duration + callAttemptId in callback
     await callbackToCloudRun(session.callId, 'submit_disposition', {
       ...(call.args || {}),
@@ -667,6 +717,7 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     });
     response = { success: true, disposition: call.args?.disposition };
   } else if (call.name === 'end_call') {
+    session.callbackSent = true;
     // Include transcript + duration + callAttemptId in end_call callback
     await callbackToCloudRun(session.callId, 'end_call', {
       ...(call.args || {}),

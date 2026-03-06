@@ -680,6 +680,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             description: 'Configure default AI agent settings',
           },
           {
+            id: 'settings-ai-governance',
+            title: 'AI Governance',
+            url: '/settings/ai-governance',
+            roles: [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER],
+            description: 'Govern providers and models by task',
+          },
+          {
             id: 'settings-knowledge-hub',
             title: 'Knowledge Hub',
             url: '/settings/knowledge-hub',

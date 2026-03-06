@@ -58,6 +58,15 @@ export interface ActiveAiCall {
   fromNumber?: string;
   callerNumberId?: string | null;
   callerNumberDecisionId?: string | null;
+  telephonyProviderId?: string | null;
+  telephonyProviderType?: string | null;
+  telephonyProviderName?: string | null;
+  telephonyRoutingMode?: string | null;
+  telephonySelectionReason?: string | null;
+  telephonyCostPerMinute?: number | null;
+  telephonyCostPerCall?: number | null;
+  telephonyCurrency?: string | null;
+  telephonyApiKey?: string | null;
   startTime: Date;
   disposition?: string;
   isAnswered?: boolean;
@@ -196,10 +205,10 @@ export class TelnyxAiBridge extends EventEmitter {
     });
   }
 
-  private async telnyxFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  private async telnyxFetch(url: string, init: RequestInit = {}, apiKeyOverride?: string): Promise<Response> {
     const headers = new Headers(init.headers);
     if (!headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${this.telnyxApiKey}`);
+      headers.set("Authorization", `Bearer ${apiKeyOverride || this.telnyxApiKey}`);
     }
 
     // Note: the standard RequestInit type doesn't include undici's dispatcher; omit for TS compatibility
@@ -207,6 +216,15 @@ export class TelnyxAiBridge extends EventEmitter {
       ...init,
       headers,
     });
+  }
+
+  private getApiKeyForCall(callControlId?: string | null): string {
+    if (!callControlId) {
+      return this.telnyxApiKey;
+    }
+
+    const activeCall = this.findCallByControlId(callControlId);
+    return activeCall?.telephonyApiKey || this.telnyxApiKey;
   }
   
   // Format phone number to E.164 format (required by Telnyx)
@@ -585,6 +603,14 @@ export class TelnyxAiBridge extends EventEmitter {
               campaignObjective: context.campaignObjective,
               productServiceInfo: context.productServiceInfo,
               talkingPoints: context.talkingPoints,
+<<<<<<< HEAD
+=======
+              maxCallDurationSeconds: context.maxCallDurationSeconds,
+              callerNumberId: context.callerNumberId ?? null,
+              callerNumberDecisionId: context.callerNumberDecisionId ?? null,
+              callAttemptId: context.callAttemptId ?? null,
+              telephonyProviderOverride: context.telephonyProviderOverride,
+>>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
             });
 
             if (!result.success) {
@@ -608,6 +634,10 @@ export class TelnyxAiBridge extends EventEmitter {
       }
 
       logger.debug(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
+
+      const telnyxApiKey = context.telephonyProviderOverride?.apiKey?.trim() || this.telnyxApiKey;
+      const texmlAppId = context.telephonyProviderOverride?.texmlAppId?.trim() || process.env.TELNYX_TEXML_APP_ID;
+      const webhookUrl = context.telephonyProviderOverride?.webhookUrl?.trim() || this.webhookUrl;
       
       const contactFullName = [context.contactFirstName, context.contactLastName]
         .filter(Boolean)
@@ -658,8 +688,6 @@ export class TelnyxAiBridge extends EventEmitter {
       });
       // For TeXML outbound calls, prioritize TeXML App ID but fall back to Call Control App ID
       // Note: TeXML requires a TeXML Application ID created in Telnyx Portal
-      const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
-      
       // Use TeXML API for automatic streaming setup via <Stream bidirectionalMode="rtp" />
       // DEVELOPMENT: Use ngrok tunnel (PUBLIC_WEBHOOK_HOST) - this is set by dev-with-ngrok.ts
       // PRODUCTION: Use PUBLIC_TEXML_HOST or TELNYX_WEBHOOK_URL
@@ -686,8 +714,8 @@ export class TelnyxAiBridge extends EventEmitter {
         webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST || '';
         if (webhookHost) {
           webhookHost = extractHost(webhookHost);
-        } else if (this.webhookUrl) {
-          webhookHost = extractHost(this.webhookUrl);
+        } else if (webhookUrl) {
+          webhookHost = extractHost(webhookUrl);
         }
       }
       
@@ -855,14 +883,14 @@ export class TelnyxAiBridge extends EventEmitter {
             From: fromNumber,
             Url: texmlUrlWithState,
             // Prefer explicit webhook URL override for TeXML if provided
-            StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
+            StatusCallback: webhookUrl || (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
             // Include client_state so AMD webhook receives call context
             ClientState: clientStateB64,
             // NOTE: Recording disabled to fix audio noise issue
             // Recording was causing audio artifacts in the bidirectional stream
             // If recording is needed, use Telnyx's recording webhook instead
           }),
-        });
+        }, telnyxApiKey);
         
         // TeXML app must exist; do not fall back to other calling mechanisms
         if (response.status === 404) {
@@ -911,7 +939,18 @@ export class TelnyxAiBridge extends EventEmitter {
         try {
           await db
             .update(dialerCallAttempts)
-            .set({ telnyxCallId: callControlId })
+            .set({
+              telnyxCallId: callControlId,
+              providerCallId: callControlId,
+              telephonyProviderId: context.telephonyProviderId || null,
+              telephonyProviderType: context.telephonyProviderType || null,
+              telephonyProviderName: context.telephonyProviderName || null,
+              telephonyRoutingMode: context.telephonyRoutingMode || null,
+              telephonySelectionReason: context.telephonySelectionReason || null,
+              telephonyCostPerMinute: context.telephonyCostPerMinute ?? null,
+              telephonyCostPerCall: context.telephonyCostPerCall ?? null,
+              telephonyCurrency: context.telephonyCurrency || null,
+            })
             .where(eq(dialerCallAttempts.id, context.callAttemptId));
         } catch (error) {
           console.warn(`[TelnyxAiBridge] Failed to persist telnyxCallId for call attempt ${context.callAttemptId}:`, error);
@@ -936,6 +975,15 @@ export class TelnyxAiBridge extends EventEmitter {
         fromNumber,
         callerNumberId: (context as any).callerNumberId || null,
         callerNumberDecisionId: (context as any).callerNumberDecisionId || null,
+        telephonyProviderId: context.telephonyProviderId || null,
+        telephonyProviderType: context.telephonyProviderType || null,
+        telephonyProviderName: context.telephonyProviderName || null,
+        telephonyRoutingMode: context.telephonyRoutingMode || null,
+        telephonySelectionReason: context.telephonySelectionReason || null,
+        telephonyCostPerMinute: context.telephonyCostPerMinute ?? null,
+        telephonyCostPerCall: context.telephonyCostPerCall ?? null,
+        telephonyCurrency: context.telephonyCurrency || null,
+        telephonyApiKey: telnyxApiKey,
         startTime: new Date(),
         isAnswered: false,
         hardStopTimer: null,
@@ -1175,7 +1223,7 @@ export class TelnyxAiBridge extends EventEmitter {
         const timeout = setTimeout(() => controller.abort(), pollTimeoutMs);
         const response = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}`, {
           signal: controller.signal,
-        }).finally(() => clearTimeout(timeout));
+        }, this.getApiKeyForCall(callControlId)).finally(() => clearTimeout(timeout));
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -1368,7 +1416,7 @@ export class TelnyxAiBridge extends EventEmitter {
       body: JSON.stringify({
         audio_url: audioUrl,
       }),
-    });
+    }, this.getApiKeyForCall(callControlId));
 
     if (!telnyxResponse.ok) {
       const errorText = await telnyxResponse.text();
@@ -1429,7 +1477,7 @@ export class TelnyxAiBridge extends EventEmitter {
       body: JSON.stringify({
         audio_url: audioUrl,
       }),
-    });
+    }, this.getApiKeyForCall(callControlId));
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1462,7 +1510,7 @@ export class TelnyxAiBridge extends EventEmitter {
         voice: selectedVoice,
         language: "en-US",
       }),
-    });
+    }, this.getApiKeyForCall(callControlId));
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1938,7 +1986,7 @@ export class TelnyxAiBridge extends EventEmitter {
         body: JSON.stringify({
           to: transferNumber,
         }),
-      });
+      }, this.getApiKeyForCall(activeCall.callControlId));
 
       this.emit("call:transferred", { callId, reason, transferNumber });
     } catch (error) {
@@ -1955,7 +2003,7 @@ export class TelnyxAiBridge extends EventEmitter {
       headers: {
         "Content-Type": "application/json",
       },
-    });
+    }, this.getApiKeyForCall(callControlId));
   }
 
   private findCallByControlId(callControlId: string): ActiveAiCall | undefined {
@@ -2129,7 +2177,7 @@ export class TelnyxAiBridge extends EventEmitter {
         channels: "dual", // Stereo recording for better diarization
         play_beep: false,
       }),
-    });
+    }, this.getApiKeyForCall(callControlId));
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -2164,7 +2212,7 @@ export class TelnyxAiBridge extends EventEmitter {
         },
         timeout_millis: 30000,
       }),
-    });
+    }, this.getApiKeyForCall(callControlId));
 
     if (!response.ok) {
       const errorText = await response.text();

@@ -1,4 +1,4 @@
-name: Deploy to GCP Cloud Run
+name: LEGACY - Deploy to GCP Cloud Run
 
 on:
   push:

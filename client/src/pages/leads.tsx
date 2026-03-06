@@ -4,7 +4,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, CheckCircle, XCircle, Clock, Download, Loader2, Phone, Play, Pause, Eye, User, RefreshCw, Sparkles, Building2, Package, Send, X, Trash2, Tag, Plus, RotateCcw, Target, ChevronDown, ChevronUp, Globe, Briefcase } from "lucide-react";
+import { Search, CheckCircle, XCircle, Clock, Download, Loader2, Phone, Play, Pause, Eye, User, RefreshCw, Sparkles, Building2, Package, Send, X, Trash2, Tag, Plus, RotateCcw, Target, ChevronDown, ChevronUp, Globe, Briefcase, AlertTriangle } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FilterBuilder } from "@/components/filter-builder";
 import type { FilterGroup } from "@shared/filter-types";

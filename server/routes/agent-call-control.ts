@@ -267,6 +267,11 @@ router.post("/start", requireAuth, async (req: Request, res: ExpressResponse) =>
     try {
       const newSession = await createCallSessionSafely({
         telnyxCallId: callControlId,
+        telephonyProviderType: 'telnyx',
+        telephonyProviderName: 'Legacy Telnyx Call Control',
+        providerCallId: callControlId,
+        telephonyRoutingMode: 'disabled',
+        telephonySelectionReason: 'agent_call_control_legacy_telnyx',
         fromNumber: fromNumber,
         toNumberE164: to,
         startedAt: new Date(),

@@ -14,7 +14,7 @@ import { WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { GoogleAuth } from 'google-auth-library';
 import { db } from '../../db';
-import { campaignQueue, type CanonicalDisposition } from '@shared/schema';
+import { campaignQueue, dialerCallAttempts, type CanonicalDisposition } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from '../voice-providers/audio-transcoder';
 import { processDisposition } from '../disposition-engine';
@@ -534,30 +534,51 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         }
 
         // Capture agent output transcription (what AI agent is saying)
+        // Merge consecutive agent turns within 3s to avoid fragmented word-by-word entries
         const serverContent = response.serverContent || response.server_content;
         const outputTranscription = serverContent?.outputTranscription || serverContent?.output_transcription;
         if (outputTranscription?.text && typeof outputTranscription.text === 'string') {
           const text = outputTranscription.text.trim();
-          if (text && !session.transcriptTurns.some(t => t.speaker === 'agent' && t.text === text)) {
-            session.transcriptTurns.push({
-              speaker: 'agent',
-              text,
-              timestamp: Date.now() - session.metrics.startTime,
-            });
+          if (text) {
+            const lastTurn = session.transcriptTurns[session.transcriptTurns.length - 1];
+            const now = Date.now() - session.metrics.startTime;
+            if (lastTurn && lastTurn.speaker === 'agent' && (now - lastTurn.timestamp) < 3000) {
+              // Merge into previous agent entry (same turn, within 3s)
+              if (!lastTurn.text.includes(text)) {
+                lastTurn.text = (lastTurn.text + ' ' + text).trim();
+                lastTurn.timestamp = now;
+              }
+            } else if (!lastTurn || lastTurn.speaker !== 'agent' || lastTurn.text !== text) {
+              session.transcriptTurns.push({
+                speaker: 'agent',
+                text,
+                timestamp: now,
+              });
+            }
             console.log(`[RTP Bridge] Agent transcript: ${text.substring(0, 100)}...`);
           }
         }
 
         // Capture contact input transcription (what the contact is saying)
+        // Merge consecutive contact turns within 3s to avoid fragmented entries
         const inputTranscription = serverContent?.inputTranscription || serverContent?.input_transcription;
         if (inputTranscription?.text && typeof inputTranscription.text === 'string') {
           const text = inputTranscription.text.trim();
-          if (text && !session.transcriptTurns.some(t => t.speaker === 'contact' && t.text === text)) {
-            session.transcriptTurns.push({
-              speaker: 'contact',
-              text,
-              timestamp: Date.now() - session.metrics.startTime,
-            });
+          if (text) {
+            const lastTurn = session.transcriptTurns[session.transcriptTurns.length - 1];
+            const now = Date.now() - session.metrics.startTime;
+            if (lastTurn && lastTurn.speaker === 'contact' && (now - lastTurn.timestamp) < 3000) {
+              if (!lastTurn.text.includes(text)) {
+                lastTurn.text = (lastTurn.text + ' ' + text).trim();
+                lastTurn.timestamp = now;
+              }
+            } else if (!lastTurn || lastTurn.speaker !== 'contact' || lastTurn.text !== text) {
+              session.transcriptTurns.push({
+                speaker: 'contact',
+                text,
+                timestamp: now,
+              });
+            }
             console.log(`[RTP Bridge] Contact transcript: ${text.substring(0, 100)}...`);
           }
         }
@@ -638,6 +659,21 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
       try {
         const canonicalDisposition = mapToCanonicalDisposition(disposition);
         const transcript = buildPlainTranscript(session.transcriptTurns);
+
+        // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition.
+        // Without this, the disposition engine sees duration=0 and downgrades qualified_lead → no_answer.
+        const callDurationSec = Math.floor((Date.now() - session.metrics.startTime) / 1000);
+        await db.update(dialerCallAttempts)
+          .set({
+            callDurationSeconds: callDurationSec,
+            callEndedAt: new Date(),
+            disposition: canonicalDisposition,
+            connected: callDurationSec > 10,
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+        console.log(`[RTP Bridge] Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${canonicalDisposition}`);
+
         const dispositionResult = await processDisposition(
           session.callContext.callAttemptId,
           canonicalDisposition,
@@ -837,7 +873,25 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
 
     try {
       const transcript = buildPlainTranscript(session.transcriptTurns);
+<<<<<<< HEAD
       const dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
+=======
+      const callDurationSec = Math.floor(durationSec);
+
+      // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition
+      await db.update(dialerCallAttempts)
+        .set({
+          callDurationSeconds: callDurationSec,
+          callEndedAt: new Date(),
+          disposition,
+          connected: callDurationSec > 10,
+          updatedAt: new Date(),
+        })
+        .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+      console.log(`[RTP Bridge] Fallback: Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${disposition}`);
+
+      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
+>>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
         transcript,
         structuredTranscript: { turns: session.transcriptTurns },
       });
@@ -892,6 +946,47 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
 export async function closeBridgeSession(callId: string): Promise<void> {
   const session = bridgeSessions.get(callId);
   if (!session) return;
+
+  // CRITICAL: Process fallback disposition if Gemini never submitted one.
+  // This catches SIP calls that end (BYE/destroy) without Gemini calling submit_disposition.
+  if (!session.dispositionProcessed && session.callContext.callAttemptId) {
+    const durationSec = (Date.now() - session.metrics.startTime) / 1000;
+    const callDurationSec = Math.floor(durationSec);
+    const hadConversation = durationSec > 30 && session.transcriptTurns.length > 2;
+
+    let disposition: CanonicalDisposition = durationSec < 15 ? 'no_answer' : (hadConversation ? 'needs_review' : 'no_answer');
+    const reason = `SIP call ended without AI disposition (${callDurationSec}s)`;
+    console.log(`[RTP Bridge] closeBridgeSession fallback: ${disposition} for ${session.callContext.callAttemptId} (${callDurationSec}s, turns=${session.transcriptTurns.length})`);
+
+    try {
+      // Update call attempt duration BEFORE processing disposition
+      await db.update(dialerCallAttempts)
+        .set({
+          callDurationSeconds: callDurationSec,
+          callEndedAt: new Date(),
+          disposition,
+          connected: callDurationSec > 10,
+          updatedAt: new Date(),
+        })
+        .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+
+      const transcript = buildPlainTranscript(session.transcriptTurns);
+      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_session_close', {
+        transcript,
+        structuredTranscript: { turns: session.transcriptTurns },
+      });
+      session.dispositionProcessed = true;
+
+      if (session.callContext.queueItemId) {
+        const queueStatus = getQueueStatusFromDisposition(disposition);
+        await db.update(campaignQueue)
+          .set({ status: queueStatus, updatedAt: new Date(), enqueuedReason: reason })
+          .where(eq(campaignQueue.id, session.callContext.queueItemId));
+      }
+    } catch (err) {
+      console.error(`[RTP Bridge] closeBridgeSession: Failed to process fallback disposition:`, err);
+    }
+  }
 
   // Release the prospect lock to allow future calls to this number
   if (session.callContext?.phoneNumber) {

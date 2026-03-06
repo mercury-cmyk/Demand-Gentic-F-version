@@ -21,6 +21,10 @@ import {
   getRecommendedVoice,
 } from '../services/voice-providers/gemini-types';
 import { requireAuth } from '../auth';
+import {
+  getVoiceModelForProvider,
+  resolveVoiceGovernance,
+} from '../services/ai-model-governance';
 
 const router = Router();
 const LOG_PREFIX = '[VoiceProviderRoutes]';
@@ -187,15 +191,15 @@ router.get('/gemini/voices', requireAuth, async (req: Request, res: Response) =>
       ...GEMINI_VOICE_DETAILS[voice],
     }));
 
-    // Get the default provider to indicate if Gemini is the default
-    const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
-    const isGeminiDefault = !defaultProvider.includes('openai');
+    const voiceGovernance = await resolveVoiceGovernance();
+    const isGeminiDefault = voiceGovernance.configuredProvider === 'google';
+    const governedGeminiModel = await getVoiceModelForProvider('google');
 
     res.set('Cache-Control', 'public, max-age=3600'); // 1 hour
     res.json({
       provider: 'gemini',
       isDefault: isGeminiDefault,
-      model: process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio',  // Gemini 2.5 Flash Native Audio
+      model: governedGeminiModel,
       voices: voiceList,
       defaultVoice: 'Fenrir',
       recommendedForSales: 'Vega',
@@ -256,15 +260,15 @@ router.get('/gemini/recommend', requireAuth, async (req: Request, res: Response)
  */
 router.get('/default', requireAuth, async (req: Request, res: Response) => {
   try {
-    const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
-    const isGeminiDefault = !defaultProvider.includes('openai');
+    const voiceGovernance = await resolveVoiceGovernance();
+    const isGeminiDefault = voiceGovernance.configuredProvider === 'google';
 
     res.json({
       provider: isGeminiDefault ? 'google' : 'openai',
       providerName: isGeminiDefault ? 'Live Voice' : 'OpenAI Realtime',
       model: isGeminiDefault
-        ? (process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio')
-        : 'gpt-4o-realtime-preview-2024-12-17',
+        ? await getVoiceModelForProvider('google')
+        : await getVoiceModelForProvider('openai'),
       defaultVoice: isGeminiDefault ? 'Fenrir' : 'marin',
       costInfo: isGeminiDefault
         ? 'Live Voice uses Google Cloud pricing - typically 50-70% lower than OpenAI Realtime'

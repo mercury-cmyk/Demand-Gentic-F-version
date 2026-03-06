@@ -139,6 +139,15 @@ export async function createCallSessionFromDialerAttempt(
     // Create session from attempt data
     const sessionInput: SafeCallSessionInput = {
       telnyxCallId: overrides?.telnyxCallId || attempt.telnyxCallId || undefined,
+      telephonyProviderId: overrides?.telephonyProviderId || attempt.telephonyProviderId || null,
+      telephonyProviderType: overrides?.telephonyProviderType || attempt.telephonyProviderType || null,
+      telephonyProviderName: overrides?.telephonyProviderName || attempt.telephonyProviderName || null,
+      providerCallId: overrides?.providerCallId || attempt.providerCallId || attempt.telnyxCallId || undefined,
+      telephonyRoutingMode: overrides?.telephonyRoutingMode || attempt.telephonyRoutingMode || null,
+      telephonySelectionReason: overrides?.telephonySelectionReason || attempt.telephonySelectionReason || null,
+      telephonyCostPerMinute: overrides?.telephonyCostPerMinute ?? attempt.telephonyCostPerMinute ?? null,
+      telephonyCostPerCall: overrides?.telephonyCostPerCall ?? attempt.telephonyCostPerCall ?? null,
+      telephonyCurrency: overrides?.telephonyCurrency || attempt.telephonyCurrency || null,
       toNumberE164: overrides?.toNumberE164 || attempt.phoneDialed || 'unknown',
       startedAt: overrides?.startedAt || attempt.callStartedAt || new Date(),
       endedAt: overrides?.endedAt,

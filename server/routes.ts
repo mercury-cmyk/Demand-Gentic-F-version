@@ -48,6 +48,7 @@ import dispositionIntelligenceRouter from './routes/disposition-intelligence-rou
 import showcaseCallsRouter from './routes/showcase-calls-routes';
 import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes';
 import dispositionDeepReanalysisRouter from './routes/disposition-deep-reanalysis-routes';
+import batchTranscriptionRouter from './routes/batch-transcription-routes';
 import queueIntelligenceRouter from './routes/queue-intelligence-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import intelligenceRoutes from './routes/intelligence-routes';
@@ -98,6 +99,7 @@ import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
 import agentPanelOrdersRouter from './routes/agent-panel-orders'; // Register the missing orders router
 import agentDefaultsRouter from './routes/agent-defaults';
+import aiGovernanceRouter from './routes/ai-governance';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
 import adminEmailCampaignTemplateRouter from './routes/admin-email-campaign-template-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
@@ -110,6 +112,7 @@ import telephonyProvidersRouter from './routes/telephony-providers';
 import telnyxWebhookRouter from './routes/telnyx-webhook-management';
 import transcriptionManagementRouter from './routes/transcription-management';
 import recordingsRouter from './routes/recordings';
+import unifiedTelephonyRouter from './routes/unified-telephony';
 import clientAssignmentRouter from './routes/client-assignment';
 import documentExtractRouter from './routes/document-extract';
 import campaignOpsRouter from './routes/campaign-ops-routes';
@@ -10534,16 +10537,32 @@ export function registerRoutes(app: Express) {
         }
       }
 
+<<<<<<< HEAD
       // ── Pass 2: Move 'new' leads out of new based on AI quality outcome ───────────────
       // These are leads where AI analysis ran but qaStatus was never updated from 'new'
       const newLeads = await db
+=======
+      // ── Pass 2: Move pending-review leads based on AI qualification outcome ───────────
+      // These are leads where AI analysis ran but qaStatus still reflects review queue states
+      // Use text comparison for qaStatus to safely support legacy "Pending Review"
+      // without causing enum-cast failures on modern qa_status enum deployments.
+      const pendingReviewLeads = await db
+>>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
         .select({
           id: leads.id,
           aiQualificationStatus: leads.aiQualificationStatus,
           aiScore: leads.aiScore,
         })
         .from(leads)
+<<<<<<< HEAD
         .where(and(eq(leads.qaStatus, 'new'), isNotNull(leads.aiQualificationStatus), baseWhere));
+=======
+        .where(and(
+          sql`${leads.qaStatus}::text IN ('new', 'under_review', 'Pending Review')`,
+          isNotNull(leads.aiQualificationStatus),
+          baseWhere,
+        ));
+>>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
 
       let movedToApproved = 0;
       let movedToReview = 0;
@@ -15548,7 +15567,9 @@ Provide JSON response with:
   app.use("/api/agent-panel", agentPanelRouter);
   app.use("/api/agent-panel/orders", agentPanelOrdersRouter); // Mount order flow routes
   app.use("/api/agent-defaults", agentDefaultsRouter);
+  app.use("/api/ai-governance", aiGovernanceRouter);
   app.use("/api/voice-engine", voiceEngineRouter);
+  app.use("/api/telephony", unifiedTelephonyRouter);
 
   // ==================== MEDIA BRIDGE CALLBACK (from VM) ====================
 
@@ -15606,12 +15627,32 @@ Provide JSON response with:
           callAttemptId,
         });
         if (callAttemptId) {
-          // Update call attempt with duration from media bridge
-          if (data?.callDurationSeconds) {
+          // CRITICAL: Update call attempt with duration BEFORE processing disposition.
+          // Media bridge often sends submit_disposition without callDurationSeconds.
+          // Without duration, the safety gate downgrades qualified_lead → no_answer.
+          let durationToSet = data?.callDurationSeconds;
+          if (!durationToSet) {
+            // Calculate duration from callStartedAt if media bridge didn't send it
+            const [attempt] = await db.select({ callStartedAt: dialerCallAttempts.callStartedAt })
+              .from(dialerCallAttempts)
+              .where(eq(dialerCallAttempts.id, callAttemptId))
+              .limit(1);
+            if (attempt?.callStartedAt) {
+              durationToSet = Math.floor((Date.now() - new Date(attempt.callStartedAt).getTime()) / 1000);
+              console.log(`[MediaBridge Callback] Calculated duration from callStartedAt: ${durationToSet}s`);
+            }
+          }
+          if (durationToSet) {
             try {
               await db.update(dialerCallAttempts)
-                .set({ callDurationSeconds: data.callDurationSeconds, updatedAt: new Date() })
+                .set({
+                  callDurationSeconds: durationToSet,
+                  callEndedAt: new Date(),
+                  connected: durationToSet > 10,
+                  updatedAt: new Date(),
+                })
                 .where(eq(dialerCallAttempts.id, callAttemptId));
+              console.log(`[MediaBridge Callback] Updated call attempt ${callAttemptId} duration=${durationToSet}s`);
             } catch (durErr) {
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
@@ -15626,6 +15667,61 @@ Provide JSON response with:
       res.json({ success: true });
     } catch (err: any) {
       console.error('[MediaBridge Callback] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==================== BATCH RE-ANALYSIS (Admin) ====================
+
+  app.post("/api/admin/batch-reanalyze-missing-transcripts", requireAuth, async (req, res) => {
+    // Admin-only endpoint for batch reanalysis of calls missing transcripts
+    try {
+      // Find calls >= 20s with session + recording but no transcript
+      const missingCalls = await db
+        .select({
+          callAttemptId: dialerCallAttempts.id,
+          callSessionId: dialerCallAttempts.callSessionId,
+          campaignId: dialerCallAttempts.campaignId,
+          contactId: dialerCallAttempts.contactId,
+          duration: dialerCallAttempts.callDurationSeconds,
+          disposition: dialerCallAttempts.disposition,
+        })
+        .from(dialerCallAttempts)
+        .innerJoin(callSessions, eq(callSessions.id, dialerCallAttempts.callSessionId))
+        .where(
+          and(
+            sql`${dialerCallAttempts.callDurationSeconds} >= 20`,
+            sql`(${dialerCallAttempts.fullTranscript} IS NULL OR ${dialerCallAttempts.fullTranscript} = '')`,
+            sql`(${callSessions.recordingUrl} IS NOT NULL OR ${callSessions.recordingS3Key} IS NOT NULL)`,
+          )
+        );
+
+      console.log(`[BatchReanalyze] Found ${missingCalls.length} calls to reanalyze`);
+
+      if (missingCalls.length === 0) {
+        return res.json({ success: true, message: 'No calls need reanalysis', count: 0 });
+      }
+
+      // Schedule post-call analysis for each (async, don't block response)
+      const { schedulePostCallAnalysis } = await import('./services/post-call-analyzer');
+      let scheduled = 0;
+      for (const call of missingCalls) {
+        if (call.callSessionId) {
+          schedulePostCallAnalysis(call.callSessionId, {
+            callAttemptId: call.callAttemptId,
+            campaignId: call.campaignId || undefined,
+            contactId: call.contactId || undefined,
+            callDurationSec: call.duration || undefined,
+            disposition: (call.disposition || undefined) as string | undefined,
+          });
+          scheduled++;
+        }
+      }
+
+      console.log(`[BatchReanalyze] Scheduled ${scheduled} calls for post-call analysis`);
+      res.json({ success: true, found: missingCalls.length, scheduled, message: `Scheduled ${scheduled} calls for transcription and analysis` });
+    } catch (err: any) {
+      console.error('[BatchReanalyze] Error:', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -15995,6 +16091,7 @@ Provide JSON response with:
   app.use('/api/showcase-calls', showcaseCallsRouter);
   app.use('/api/disposition-reanalysis', dispositionReanalysisRouter);
   app.use('/api/disposition-deep-reanalysis', dispositionDeepReanalysisRouter);
+  app.use('/api/batch-transcription', batchTranscriptionRouter);
   app.use(queueIntelligenceRouter);
 
   // AI Project Creation
@@ -18062,7 +18159,7 @@ Provide JSON response with:
               transcriptLength: session.aiTranscript!.length,
               transcriptTruncated: analysis.metadata?.truncated || false,
               fullTranscript: session.aiTranscript!.substring(0, 12000),
-              analysisModel: analysis.metadata?.model || 'deepseek-chat',
+              analysisModel: analysis.metadata?.model || process.env.DEEPSEEK_REASONING_MODEL || 'deepseek-chat',
               analysisStage: 'post_call',
               interactionType: 'live_call',
               analyzedAt: new Date(),
@@ -18294,7 +18391,7 @@ Provide JSON response with:
             transcriptLength: transcript.length,
             transcriptTruncated: analysis.metadata?.truncated || false,
             fullTranscript: transcript.substring(0, 12000),
-            analysisModel: analysis.metadata?.model || 'vertex-ai-gemini',
+            analysisModel: analysis.metadata?.model || process.env.DEEPSEEK_REASONING_MODEL || 'deepseek-chat',
             analysisStage: 'post_call',
             interactionType: 'live_call',
             analyzedAt: new Date(),
@@ -18393,184 +18490,133 @@ Provide JSON response with:
         });
       }
 
-      // Use Gemini for analysis
-      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-      if (!geminiKey) {
-        return res.status(503).json({
-          message: "Gemini API key is not configured. Cannot perform transcript analysis."
-        });
+      const { analyzeConversationQuality } = await import("./services/conversation-quality-analyzer");
+      const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || undefined;
+
+      const analysis = await analyzeConversationQuality({
+        transcript: session.transcript,
+        interactionType: 'live_call',
+        analysisStage: 'post_call',
+        callDurationSeconds: session.duration || undefined,
+        disposition: session.disposition || undefined,
+        campaignId: session.campaignId || undefined,
+        campaignName: session.campaignName || undefined,
+        campaignObjective: session.campaignObjective || undefined,
+        contactName,
+        accountName: session.companyName || undefined,
+      });
+
+      const existingAiAnalysis = session.aiAnalysis && typeof session.aiAnalysis === 'object' && !Array.isArray(session.aiAnalysis)
+        ? session.aiAnalysis as Record<string, any>
+        : {};
+
+      const normalizedConversationQuality = {
+        overallScore: analysis.overallScore,
+        summary: analysis.summary,
+        qualityDimensions: analysis.qualityDimensions,
+        campaignAlignment: analysis.campaignAlignment,
+        dispositionReview: analysis.dispositionReview,
+        issues: analysis.issues,
+        recommendations: analysis.recommendations,
+        breakdowns: analysis.breakdowns,
+        performanceGaps: analysis.performanceGaps,
+        flowCompliance: analysis.flowCompliance,
+        learningSignals: analysis.learningSignals,
+        nextBestActions: analysis.nextBestActions,
+        promptUpdates: analysis.promptUpdates,
+        metadata: analysis.metadata,
+        status: analysis.status,
+      };
+
+      if (analysis.status === 'ok') {
+        await db.insert(callQualityRecords).values({
+          callSessionId: session.id,
+          campaignId: session.campaignId,
+          contactId: session.contactId,
+          overallQualityScore: analysis.overallScore,
+          engagementScore: analysis.qualityDimensions?.engagement,
+          clarityScore: analysis.qualityDimensions?.clarity,
+          empathyScore: analysis.qualityDimensions?.empathy,
+          objectionHandlingScore: analysis.qualityDimensions?.objectionHandling,
+          qualificationScore: analysis.qualityDimensions?.qualification,
+          closingScore: analysis.qualityDimensions?.closing,
+          sentiment: analysis.learningSignals?.sentiment,
+          engagementLevel: analysis.learningSignals?.engagementLevel,
+          issues: analysis.issues,
+          recommendations: analysis.recommendations,
+          breakdowns: analysis.breakdowns,
+          promptUpdates: analysis.promptUpdates,
+          nextBestActions: analysis.nextBestActions,
+          campaignAlignmentScore: analysis.campaignAlignment?.objectiveAdherence,
+          contextUsageScore: analysis.campaignAlignment?.contextUsage,
+          talkingPointsCoverageScore: analysis.campaignAlignment?.talkingPointsCoverage,
+          missedTalkingPoints: analysis.campaignAlignment?.missedTalkingPoints,
+          flowComplianceScore: analysis.flowCompliance?.score,
+          missedSteps: analysis.flowCompliance?.missedSteps,
+          flowDeviations: analysis.flowCompliance?.deviations,
+          assignedDisposition: analysis.dispositionReview?.assignedDisposition,
+          expectedDisposition: analysis.dispositionReview?.expectedDisposition,
+          dispositionAccurate: analysis.dispositionReview?.isAccurate,
+          dispositionNotes: analysis.dispositionReview?.notes,
+          transcriptLength: session.transcript.length,
+          transcriptTruncated: analysis.metadata?.truncated || false,
+          fullTranscript: session.transcript.substring(0, 12000),
+          analysisModel: analysis.metadata?.model || process.env.DEEPSEEK_REASONING_MODEL || 'deepseek-chat',
+          analysisStage: 'post_call',
+          interactionType: 'live_call',
+          analyzedAt: new Date(),
+        } as any);
+      } else {
+        console.warn(
+          `[Call Session Analysis] Using fallback analysis for session ${sessionId}: ${analysis.issues?.[0]?.description || analysis.status}`
+        );
       }
 
-      // Check transcript quality
-      const transcriptText = session.transcript;
-      const hasAgentTurns = /\b(Agent|AI|Assistant):/i.test(transcriptText);
-      const hasContactTurns = /\b(Contact|Prospect|User|Customer):/i.test(transcriptText);
-      const transcriptQualityWarning = !hasAgentTurns ? `
-⚠️ TRANSCRIPT QUALITY WARNING: The transcript appears to be missing AGENT turns.
-This is a data capture issue - the agent's responses were not recorded.
-Flag this as "transcript_data_gap" issue with HIGH severity.
-` : '';
-
-      const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact';
-
-      const analysisPrompt = `You are an expert B2B sales call analyst. Analyze this B2B call transcript and provide actionable feedback.
-
-CALL CONTEXT:
-- Campaign: ${session.campaignName || 'Unknown'}
-- Campaign Objective: ${session.campaignObjective || 'Unknown'}
-- Contact: ${contactName}
-- Company: ${session.companyName || 'Unknown'}
-- Agent Type: ${session.agentType || 'Unknown'}
-- Duration: ${session.duration || 'Unknown'} seconds
-- Disposition: ${session.disposition || 'Unknown'}
-
-CALL TRANSCRIPT:
-${transcriptText}
-${transcriptQualityWarning}
-
-ANALYSIS RULES:
-1. If the transcript is missing agent turns, flag this as a HIGH severity "transcript_data_gap" issue
-2. If the summary claims "interest" but disposition is "not_interested", flag as "summary_inaccuracy" issue
-3. Skeptical questions ("Why are you calling?", "Who is this?") are NOT interest signals
-4. A call ending with the prospect hanging up or being dismissive is "not_interested", not "qualified"
-5. Be critical and provide actionable insights
-
-Analyze the call and return a JSON object with:
-{
-  "overallScore": <0-100>,
-  "testResult": "success" | "needs_improvement" | "failed",
-  "performanceMetrics": {
-    "identityConfirmed": <boolean>,
-    "gatekeeperHandled": <boolean>,
-    "pitchDelivered": <boolean>,
-    "objectionHandled": <boolean>,
-    "closingAttempted": <boolean>,
-    "conversationFlow": "natural" | "scripted" | "awkward",
-    "rapportBuilding": "excellent" | "good" | "needs_work" | "poor"
-  },
-  "detectedIssues": [
-    {
-      "type": "<issue_type>",
-      "severity": "low" | "medium" | "high",
-      "description": "<what went wrong>",
-      "suggestion": "<how to fix it>"
-    }
-  ],
-  "recommendations": [
-    {
-      "category": "opening" | "qualification" | "pitch" | "objection_handling" | "closing" | "tone" | "pacing",
-      "currentBehavior": "<what happened>",
-      "suggestedChange": "<specific improvement>",
-      "expectedImprovement": "<what will improve>"
-    }
-  ],
-  "qualityDimensions": {
-    "engagement": <0-100>,
-    "clarity": <0-100>,
-    "empathy": <0-100>,
-    "objectionHandling": <0-100>,
-    "qualification": <0-100>,
-    "closing": <0-100>
-  },
-  "dispositionReview": {
-    "assignedDisposition": "${session.disposition || 'unknown'}",
-    "expectedDisposition": "<what the disposition should be based on transcript>",
-    "isAccurate": <boolean>,
-    "notes": ["<any notes about disposition accuracy>"]
-  },
-  "learningSignals": {
-    "sentiment": "positive" | "neutral" | "negative",
-    "engagementLevel": "high" | "medium" | "low",
-    "outcome": "<brief outcome description>"
-  },
-  "summary": "<2-3 sentence summary of the call and key findings>"
-}
-
-Return ONLY valid JSON, no other text.`;
-
-      // Use Gemini for analysis
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genai = new GoogleGenerativeAI(geminiKey);
-
-      // Try multiple Gemini models
-      const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-      let analysisContent: string | null = null;
-      let lastError: Error | null = null;
-
-      for (const modelName of candidateModels) {
-        try {
-          console.log(`[Call Session Analysis] Trying Gemini ${modelName} for session ${sessionId}...`);
-          const model = genai.getGenerativeModel({
-            model: modelName,
-            generationConfig: {
-              temperature: 0.3,
-              responseMimeType: "application/json",
-            }
-          });
-          const result = await model.generateContent(analysisPrompt);
-          analysisContent = result.response?.text() || null;
-          if (analysisContent) {
-            console.log(`[Call Session Analysis] Gemini ${modelName} succeeded`);
-            break;
-          }
-        } catch (err: any) {
-          lastError = err;
-          console.log(`[Call Session Analysis] Gemini ${modelName} failed: ${err.message}`);
-          continue;
-        }
-      }
-
-      if (!analysisContent) {
-        throw lastError || new Error("All Gemini models failed to analyze the call");
-      }
-
-      // Parse JSON - handle potential markdown code blocks
-      let jsonStr = analysisContent.trim();
-      if (jsonStr.startsWith("```json")) {
-        jsonStr = jsonStr.slice(7);
-      } else if (jsonStr.startsWith("```")) {
-        jsonStr = jsonStr.slice(3);
-      }
-      if (jsonStr.endsWith("```")) {
-        jsonStr = jsonStr.slice(0, -3);
-      }
-
-      const analysis = JSON.parse(jsonStr.trim());
-
-      // Update the call session with analysis results
       await db.update(callSessions)
         .set({
           aiAnalysis: {
-            overallScore: analysis.overallScore,
-            testResult: analysis.testResult,
-            performanceMetrics: analysis.performanceMetrics,
-            detectedIssues: analysis.detectedIssues,
-            recommendations: analysis.recommendations,
-            qualityDimensions: analysis.qualityDimensions,
-            dispositionReview: analysis.dispositionReview,
-            learningSignals: analysis.learningSignals,
-            summary: analysis.summary,
-            analyzedAt: new Date().toISOString(),
-          },
+            ...existingAiAnalysis,
+            conversationQuality: {
+              ...(existingAiAnalysis.conversationQuality || {}),
+              ...normalizedConversationQuality,
+            },
+          } as any,
         })
         .where(eq(callSessions.id, sessionId));
 
-      console.log(`[Call Session Analysis] Successfully analyzed session ${sessionId}, score: ${analysis.overallScore}`);
+      const testResult = analysis.status !== 'ok'
+        ? 'failed'
+        : analysis.overallScore >= 80
+          ? 'success'
+          : analysis.overallScore >= 60
+            ? 'needs_improvement'
+            : 'failed';
+
+      console.log(`[Call Session Analysis] Completed analysis for session ${sessionId}, status: ${analysis.status}, score: ${analysis.overallScore}`);
 
       res.json({
         success: true,
         sessionId,
         analysis: {
-          overallScore: analysis.overallScore,
-          testResult: analysis.testResult,
-          performanceMetrics: analysis.performanceMetrics,
-          detectedIssues: analysis.detectedIssues,
+          overallScore: analysis.status === 'ok' ? analysis.overallScore : undefined,
+          testResult,
+          performanceMetrics: {},
+          detectedIssues: analysis.issues,
           recommendations: analysis.recommendations,
           qualityDimensions: analysis.qualityDimensions,
           dispositionReview: analysis.dispositionReview,
           learningSignals: analysis.learningSignals,
           summary: analysis.summary,
+          campaignAlignment: analysis.campaignAlignment,
+          flowCompliance: analysis.flowCompliance,
+          breakdowns: analysis.breakdowns,
+          nextBestActions: analysis.nextBestActions,
+          promptUpdates: analysis.promptUpdates,
+          status: analysis.status,
         },
+        warning: analysis.status === 'ok'
+          ? undefined
+          : analysis.issues?.[0]?.description || 'Analysis completed with fallback results.',
       });
     } catch (error: any) {
       console.error("[Call Session Analysis] Error:", error);

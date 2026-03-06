@@ -577,6 +577,14 @@ export class DrachtioSIPServer {
     campaignId?: string;
     contactId?: string;
     queueItemId?: string;
+    telephonyProviderOverride?: {
+      sipDomain?: string;
+      sipProxy?: string;
+      sipPort?: number;
+      sipTransport?: "udp" | "tcp" | "tls" | "wss";
+      sipUsername?: string;
+      sipPassword?: string;
+    };
     onAudioReceived?: (audio: Buffer) => void;
     onCallStateChanged?: (state: string) => void;
     onCallEnded?: (reason: string) => void;
@@ -602,10 +610,14 @@ export class DrachtioSIPServer {
     let rtpPort: number | null = null;
 
     // SIP trunk configuration from environment
-    const sipTrunkHost = process.env.SIP_TRUNK_HOST || 'sip.telnyx.com';
+    const override = options.telephonyProviderOverride;
+    const sipTrunkHost = override?.sipProxy || override?.sipDomain || process.env.SIP_TRUNK_HOST || 'sip.telnyx.com';
+    const sipPort = override?.sipPort;
+    const sipTransport = override?.sipTransport;
+    const trunkAuthority = sipPort ? `${sipTrunkHost}:${sipPort}` : sipTrunkHost;
     const stripBOM = (s: string) => s.replace(/^\uFEFF/, '');
-    const sipUsername = stripBOM((process.env.SIP_USERNAME || process.env.TELNYX_SIP_USERNAME || '').trim());
-    const sipPassword = stripBOM((process.env.SIP_PASSWORD || process.env.TELNYX_SIP_PASSWORD || '').trim());
+    const sipUsername = stripBOM((override?.sipUsername || process.env.SIP_USERNAME || process.env.TELNYX_SIP_USERNAME || '').trim());
+    const sipPassword = stripBOM((override?.sipPassword || process.env.SIP_PASSWORD || process.env.TELNYX_SIP_PASSWORD || '').trim());
 
     try {
       rtpPort = rtpPortManager.allocate();
@@ -616,15 +628,16 @@ export class DrachtioSIPServer {
       const fromNumber = options.from.replace(/^\+/, '');
 
       // Build SIP URI for Telnyx trunk
-      const requestUri = `sip:${toNumber}@${sipTrunkHost}`;
+      const transportSuffix = sipTransport ? `;transport=${sipTransport}` : '';
+      const requestUri = `sip:${toNumber}@${trunkAuthority}${transportSuffix}`;
 
       log(`Initiating outbound call ${callId} to ${requestUri} (auth: ${sipUsername ? sipUsername : 'none'})`);
 
       // Create UAC (User Agent Client) to send INVITE
       const uacOptions = {
         headers: {
-          'From': `<sip:${fromNumber}@${sipTrunkHost}>`,
-          'To': `<sip:${toNumber}@${sipTrunkHost}>`,
+          'From': `<sip:${fromNumber}@${trunkAuthority}>`,
+          'To': `<sip:${toNumber}@${trunkAuthority}>`,
           'Contact': `<sip:${fromNumber}@${PUBLIC_IP || '127.0.0.1'}:${SIP_LISTEN_PORT}>`,
         },
         auth: sipUsername && sipPassword ? {

@@ -9,7 +9,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Phone } from "lucide-react";
 
 export default function PhoneCampaignsPage() {
-  const { getToken, token } = useAuth();
+  const { getToken } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data: campaigns = [], isLoading } = useQuery<Campaign[]>({
@@ -28,7 +28,8 @@ export default function PhoneCampaignsPage() {
 
   const PHONE_CAMPAIGN_TYPES = [
     'call', 'telemarketing', 'sql',
-    'content_syndication', 'appointment_generation', 'high_quality_leads',
+    'content_syndication', 'appointment_generation', 'appointment_setting',
+    'high_quality_leads', 'lead_qualification', 'bant_qualification',
     'live_webinar', 'on_demand_webinar', 'executive_dinner',
     'leadership_forum', 'conference'
   ];
@@ -41,18 +42,24 @@ export default function PhoneCampaignsPage() {
   const { data: queueStats = {} } = useQuery<Record<string, QueueStats>>({
     queryKey: ["/api/campaigns/queue-stats", phoneCampaigns.map((c: any) => c.id).join(',')],
     queryFn: async () => {
+        const currentToken = getToken();
+        if (!currentToken) return {};
         const stats: Record<string, QueueStats> = {};
-        for (const campaign of phoneCampaigns) {
-            const res = await fetch(`/api/campaigns/${campaign.id}/queue/stats`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (res.ok) {
-                stats[campaign.id] = await res.json();
+        await Promise.all(phoneCampaigns.map(async (campaign) => {
+            try {
+                const res = await fetch(`/api/campaigns/${campaign.id}/queue/stats`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                if (res.ok) {
+                    stats[campaign.id] = await res.json();
+                }
+            } catch (e) {
+                // Network error - skip this campaign
             }
-        }
+        }));
         return stats;
     },
-    enabled: phoneCampaigns.length > 0 && !!token,
+    enabled: phoneCampaigns.length > 0 && !!getToken(),
     refetchInterval: 10000,
 });
 

@@ -40,6 +40,10 @@ export async function createMediaBridge(params: {
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const url = `${getBaseUrl()}/bridge`;
+    const payload = {
+      ...params,
+      secret: MEDIA_BRIDGE_SECRET,
+    };
     log(`Creating bridge for ${params.callId} (RTP ${params.rtpPort}, remote ${params.remoteAddress}:${params.remotePort})`);
 
     const resp = await fetch(url, {
@@ -47,8 +51,10 @@ export async function createMediaBridge(params: {
       headers: {
         'Content-Type': 'application/json',
         'X-Bridge-Secret': MEDIA_BRIDGE_SECRET,
+        'X-Media-Bridge-Secret': MEDIA_BRIDGE_SECRET,
+        'Authorization': `Bearer ${MEDIA_BRIDGE_SECRET}`,
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(20000), // 20s timeout (Gemini connection can take a few seconds)
     });
 
@@ -74,7 +80,11 @@ export async function destroyMediaBridge(callId: string): Promise<void> {
     const url = `${getBaseUrl()}/bridge/${callId}`;
     const resp = await fetch(url, {
       method: 'DELETE',
-      headers: { 'X-Bridge-Secret': MEDIA_BRIDGE_SECRET },
+      headers: {
+        'X-Bridge-Secret': MEDIA_BRIDGE_SECRET,
+        'X-Media-Bridge-Secret': MEDIA_BRIDGE_SECRET,
+        'Authorization': `Bearer ${MEDIA_BRIDGE_SECRET}`,
+      },
       signal: AbortSignal.timeout(5000),
     });
     if (resp.ok) {

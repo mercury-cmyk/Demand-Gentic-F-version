@@ -17,7 +17,7 @@ import { db } from '../db';
 import { dialerCallAttempts, callSessions, activityLog, leads } from '@shared/schema';
 import { eq, and, or, isNull, isNotNull, gt, lt, sql, inArray } from 'drizzle-orm';
 import { transcribeFromRecording } from './deepgram-postcall-transcription';
-import { transcribeBatchParallel, BatchTranscriptionItem } from './transcription-pool';
+import { transcribeBatchParallel, resetAllCircuitBreakers, BatchTranscriptionItem } from './transcription-pool';
 
 const LOG_PREFIX = '[Transcription-Reliability]';
 
@@ -372,6 +372,10 @@ export async function processMissingTranscripts(): Promise<{
 }> {
   console.log(`${LOG_PREFIX} Starting missing transcript check...`);
 
+  // Reset circuit breakers at the start of each batch so stale open circuits
+  // don't permanently block all providers across runs
+  resetAllCircuitBreakers();
+
   const stats = { processed: 0, succeeded: 0, failed: 0 };
 
   try {
@@ -527,6 +531,38 @@ export async function processMissingTranscripts(): Promise<{
           await triggerAnalysisAfterTranscript(result.callAttemptId, result.transcript);
         } else {
           stats.failed++;
+<<<<<<< HEAD
+=======
+          // Permanently mark calls that will never succeed to stop infinite retries
+          const failedCall = callsWithoutTranscripts.find(c => c.id === result.callAttemptId);
+          const batchItem = batchItems.find(b => b.callAttemptId === result.callAttemptId);
+          const hasNoAudioSource = batchItem && !batchItem.recordingUrl && !batchItem.recordingS3Key && !batchItem.telnyxCallId;
+          const hasOnlyTelnyxId = batchItem && !batchItem.recordingUrl && !batchItem.recordingS3Key && !!batchItem.telnyxCallId;
+          const hoursSinceEnd = failedCall?.callEndedAt
+            ? (Date.now() - new Date(failedCall.callEndedAt).getTime()) / (60 * 60 * 1000) : 0;
+
+          if (hasNoAudioSource) {
+            // No audio source at all (SIP calls without recordings) — mark immediately
+            await db.update(dialerCallAttempts)
+              .set({ fullTranscript: '[SYSTEM: Recording unavailable - no audio source]', updatedAt: new Date() })
+              .where(eq(dialerCallAttempts.id, result.callAttemptId));
+            markedMissing++;
+          } else if (hasOnlyTelnyxId && hoursSinceEnd > 6) {
+            // Only has Telnyx call ID but no recording URL/S3 key after 6 hours — recording won't appear
+            await db.update(dialerCallAttempts)
+              .set({ fullTranscript: '[SYSTEM: Recording unavailable - no recording for SIP call]', updatedAt: new Date() })
+              .where(eq(dialerCallAttempts.id, result.callAttemptId));
+            markedMissing++;
+          } else if (failedCall?.callEndedAt) {
+            const daysSinceEnd = (Date.now() - new Date(failedCall.callEndedAt).getTime()) / (24 * 60 * 60 * 1000);
+            if (daysSinceEnd > 1) {
+              await db.update(dialerCallAttempts)
+                .set({ fullTranscript: '[SYSTEM: Recording unavailable - transcription failed]', updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, result.callAttemptId));
+              markedMissing++;
+            }
+          }
+>>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
         }
       }
     }

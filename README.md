@@ -2,6 +2,14 @@
 
 This project contains various scripts for managing AI campaigns and leads.
 
+## Deployment policy
+
+- **VM deployment is the canonical production path.**
+- Use `vm-deploy/setup.sh` for fresh-host bootstrap.
+- Use `vm-deploy/deploy.sh` for routine production deploys and updates.
+- Treat Cloud Run / Cloud Build / Cloud Code deployment files as **legacy-only** unless explicitly needed for historical support.
+- See `DEPLOYMENT.md` for the authoritative VM deployment runbook.
+
 ## How to run scripts
 
 To run the TypeScript scripts in this project, you need to have Node.js and npm installed. The required dependencies are listed in `package.json`.

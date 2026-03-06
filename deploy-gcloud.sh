@@ -1,5 +1,6 @@
 #!/bin/bash
-# Direct Google Cloud Run Deployment (bypasses GitHub Actions)
+# LEGACY: Direct Google Cloud Run Deployment (bypasses GitHub Actions)
+# Historical fallback only. Preferred production path is VM deployment via vm-deploy/.
 # Usage: bash deploy-gcloud.sh
 
 set -e
