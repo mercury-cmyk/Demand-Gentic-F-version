@@ -511,22 +511,28 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         functionDeclarations: [
           {
             name: 'submit_disposition',
-            description: 'Submit call outcome/disposition',
+            description: `Submit the final call outcome. CRITICAL RULES:
+- For "qualified_lead": You MUST first confirm a specific date and time for the appointment/demo BEFORE calling this. If the prospect agrees to meet but you haven't confirmed when, ASK for their availability first.
+- NEVER call submit_disposition and end_call in the same turn. After submitting disposition, wait for the response, then say a professional goodbye, THEN call end_call separately.
+- Only call this ONCE per call.`,
             parameters: {
               type: 'object',
               properties: {
                 disposition: {
                   type: 'string',
-                  description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
+                  description: 'Call outcome: qualified_lead (ONLY after confirming appointment date/time), not_interested, do_not_call, voicemail, no_answer, invalid_data, callback_requested',
                 },
-                notes: { type: 'string', description: 'Brief notes about the call' },
+                notes: { type: 'string', description: 'Brief notes. For qualified_lead, MUST include the confirmed appointment date/time.' },
               },
               required: ['disposition'],
             },
           },
           {
             name: 'end_call',
-            description: 'End the phone call gracefully',
+            description: `End the phone call. RULES:
+- NEVER call this at the same time as submit_disposition. Always wait.
+- Before ending, you MUST say a polite professional goodbye (e.g. "Thank you for your time, [name]. We look forward to speaking with you on [date]. Have a great day!")
+- For qualified_lead calls: confirm the appointment details one final time before ending.`,
             parameters: {
               type: 'object',
               properties: {
@@ -551,6 +557,15 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
               voiceConfig: {
                 prebuiltVoiceConfig: { voiceName: voice },
               },
+            },
+          },
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              // Reduce VAD sensitivity to prevent premature interruptions.
+              // LOW = less likely to interrupt the agent mid-sentence due to
+              // background noise or prospect breathing.
+              startOfSpeechSensitivity: 'START_OF_SPEECH_SENSITIVITY_LOW',
+              endOfSpeechSensitivity: 'END_OF_SPEECH_SENSITIVITY_LOW',
             },
           },
           systemInstruction: {
@@ -750,6 +765,7 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     }
 
     session.lastDisposition = disposition;
+    (session as any).dispositionSubmittedAt = Date.now();
     session.callbackSent = true;
     // Include transcript + duration + callAttemptId in callback
     await callbackToCloudRun(session.callId, 'submit_disposition', {
@@ -759,8 +775,37 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
       callDurationSeconds,
       context: session.context,
     });
-    response = { success: true, disposition: call.args?.disposition };
+    // For qualified leads, tell Gemini to now confirm appointment and say goodbye
+    if (disposition === 'qualified_lead') {
+      response = {
+        success: true,
+        disposition,
+        instructions: 'Disposition recorded. Now you MUST: 1) Confirm the appointment date and time with the prospect, 2) Thank them professionally, 3) Say goodbye, 4) THEN call end_call. Do NOT skip these steps.',
+      };
+    } else {
+      response = { success: true, disposition };
+    }
   } else if (call.name === 'end_call') {
+    // GUARD: If disposition was just submitted in the same turn or within 3 seconds,
+    // reject end_call and tell Gemini to say goodbye first.
+    const dispositionAge = Date.now() - ((session as any).dispositionSubmittedAt || 0);
+    if ((session as any).dispositionSubmittedAt && dispositionAge < 3000) {
+      log(`[GUARD] Rejecting immediate end_call for ${session.callId} — disposition was submitted ${dispositionAge}ms ago. Gemini must say goodbye first.`);
+      if (session.geminiWs?.readyState === WebSocket.OPEN) {
+        const toolResponse = {
+          toolResponse: {
+            functionResponses: [{
+              name: call.name,
+              id: call.id,
+              response: { success: false, error: 'You must say a professional goodbye to the prospect before ending the call. Thank them for their time and confirm next steps.' },
+            }],
+          },
+        };
+        session.geminiWs.send(JSON.stringify(toolResponse));
+      }
+      return;
+    }
+
     session.callbackSent = true;
     // Include transcript + duration + callAttemptId in end_call callback
     await callbackToCloudRun(session.callId, 'end_call', {
