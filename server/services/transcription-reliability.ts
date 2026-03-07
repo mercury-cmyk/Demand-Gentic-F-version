@@ -531,8 +531,6 @@ export async function processMissingTranscripts(): Promise<{
           await triggerAnalysisAfterTranscript(result.callAttemptId, result.transcript);
         } else {
           stats.failed++;
-<<<<<<< HEAD
-=======
           // Permanently mark calls that will never succeed to stop infinite retries
           const failedCall = callsWithoutTranscripts.find(c => c.id === result.callAttemptId);
           const batchItem = batchItems.find(b => b.callAttemptId === result.callAttemptId);
@@ -562,7 +560,6 @@ export async function processMissingTranscripts(): Promise<{
               markedMissing++;
             }
           }
->>>>>>> f1f4cca39ca6bedcaffb09527e55f174ed564739
         }
       }
     }

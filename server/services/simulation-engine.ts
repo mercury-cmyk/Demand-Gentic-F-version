@@ -13,6 +13,7 @@
  * call_mode: "SIMULATION" | "LIVE" is enforced at the service level
  */
 
+import crypto from 'node:crypto';
 import { db } from "../db";
 import { eq, and, desc } from "drizzle-orm";
 import {
@@ -182,6 +183,38 @@ export const DEFAULT_PERSONAS: Record<string, SimulatedHumanProfile> = {
 };
 
 // ============================================================================
+// HELPERS
+// ============================================================================
+
+const GEMINI_MODELS = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-2.5-flash"] as const;
+const DEFAULT_MODEL = GEMINI_MODELS[0]; // gemini-2.0-flash-lite — highest free-tier quota
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/** Retry a Gemini call with exponential backoff on 429/503. */
+async function retryGemini<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      const status = err?.status ?? err?.statusCode;
+      if ((status === 429 || status === 503) && attempt < maxRetries) {
+        const delay = Math.min(2000 * 2 ** attempt, 15000);
+        console.warn(`[SimulationEngine] Gemini ${status}, retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
+        await sleep(delay);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
+// ============================================================================
 // SIMULATION ENGINE CLASS
 // ============================================================================
 
@@ -200,10 +233,9 @@ export class SimulationEngine {
       console.warn("[SimulationEngine] OpenAI is configured but disabled. Gemini-only runtime enforced.");
     }
     this.openai = null;
-    if (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) {
-      this.gemini = new GoogleGenerativeAI(
-        process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY!
-      );
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    if (geminiKey) {
+      this.gemini = new GoogleGenerativeAI(geminiKey);
     }
   }
   
@@ -215,28 +247,36 @@ export class SimulationEngine {
     console.log("[SimulationEngine] Campaign:", config.campaignId);
     console.log("[SimulationEngine] Human Profile:", config.humanProfile.role, "-", config.humanProfile.disposition);
     
-    // Create database session
-    const [dbSession] = await db.insert(previewStudioSessions).values({
-      workspaceId: config.workspaceId,
-      campaignId: config.campaignId,
-      accountId: config.accountId,
-      contactId: config.contactId,
-      userId: config.userId,
-      virtualAgentId: config.virtualAgentId,
-      sessionType: 'simulation',
-      status: 'active',
-      metadata: {
-        mode: 'SIMULATION' as CallMode,
-        humanProfile: config.humanProfile,
-        maxTurns: config.maxTurns || 20,
-        simulationSpeed: config.simulationSpeed || 'fast',
-        customSystemPrompt: config.customSystemPrompt,
-        customFirstMessage: config.customFirstMessage,
-      },
-    }).returning();
+    // Create database session (skip if no campaignId — NOT NULL constraint)
+    let sessionId: string;
+    if (config.campaignId) {
+      const [dbSession] = await db.insert(previewStudioSessions).values({
+        workspaceId: config.workspaceId,
+        campaignId: config.campaignId,
+        accountId: config.accountId,
+        contactId: config.contactId,
+        userId: config.userId,
+        virtualAgentId: config.virtualAgentId,
+        sessionType: 'simulation',
+        status: 'active',
+        metadata: {
+          mode: 'SIMULATION' as CallMode,
+          humanProfile: config.humanProfile,
+          maxTurns: config.maxTurns || 20,
+          simulationSpeed: config.simulationSpeed || 'fast',
+          customSystemPrompt: config.customSystemPrompt,
+          customFirstMessage: config.customFirstMessage,
+        },
+      }).returning();
+      sessionId = dbSession.id;
+    } else {
+      // In-memory session for training dashboard simulations without a real campaign
+      sessionId = crypto.randomUUID();
+      console.log("[SimulationEngine] No campaignId — using in-memory session:", sessionId);
+    }
     
     const session: SimulationSession = {
-      id: dbSession.id,
+      id: sessionId,
       campaignId: config.campaignId,
       accountId: config.accountId,
       contactId: config.contactId,
@@ -422,9 +462,13 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
 
     try {
       if (this.provider === "gemini" && this.gemini) {
-        const model = this.gemini.getGenerativeModel({ model: "gemini-2.5-flash" });
-        const result = await model.generateContent(personaPrompt);
-        return result.response.text();
+        const gemini = this.gemini;
+        const responseText = await retryGemini(async () => {
+          const model = gemini.getGenerativeModel({ model: DEFAULT_MODEL });
+          const result = await model.generateContent(personaPrompt);
+          return result.response.text();
+        });
+        return responseText;
       } else if (this.openai) {
         const completion = await this.openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -473,11 +517,8 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
     
     try {
       if (this.provider === "gemini" && this.gemini) {
-        console.log("[SimulationEngine] Using Gemini 2.5 Flash for agent response, session:", session.id);
-        const model = this.gemini.getGenerativeModel({ 
-          model: "gemini-2.5-flash",
-          systemInstruction: context.systemPrompt,
-        });
+        console.log("[SimulationEngine] Using", DEFAULT_MODEL, "for agent response, session:", session.id);
+        const gemini = this.gemini;
         
         // Gemini requires first message to be from 'user', not 'model'
         // Filter history to ensure proper format - skip leading agent messages for history
@@ -493,16 +534,21 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
         }
         
         console.log("[SimulationEngine] Chat history length:", historyMessages.length, "Human message:", humanMessage?.substring(0, 50));
+        const msgToSend = humanMessage || "Hello";
+        const historyForChat = historyMessages.map(m => ({
+          role: m.role === "assistant" ? "model" as const : "user" as const,
+          parts: [{ text: m.content }],
+        }));
         
-        const chat = model.startChat({
-          history: historyMessages.map(m => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: m.content }],
-          })),
+        const responseText = await retryGemini(async () => {
+          const model = gemini.getGenerativeModel({ 
+            model: DEFAULT_MODEL,
+            systemInstruction: context.systemPrompt,
+          });
+          const chat = model.startChat({ history: historyForChat });
+          const result = await chat.sendMessage(msgToSend);
+          return result.response.text();
         });
-        
-        const result = await chat.sendMessage(humanMessage || "Hello");
-        const responseText = result.response.text();
         console.log("[SimulationEngine] Gemini response:", responseText.substring(0, 100));
         return responseText;
       } else if (this.openai) {
@@ -541,13 +587,15 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
       session.transcript.push(humanTurn);
       session.currentTurn++;
       
-      // Store in database
-      await db.insert(previewSimulationTranscripts).values({
-        sessionId: session.id,
-        role: "user",
-        content: humanInput,
-        timestampMs: Date.now() - session.startedAt.getTime(),
-      });
+      // Store in database (non-fatal for in-memory sessions)
+      try {
+        await db.insert(previewSimulationTranscripts).values({
+          sessionId: session.id,
+          role: "user",
+          content: humanInput,
+          timestampMs: Date.now() - session.startedAt.getTime(),
+        });
+      } catch { /* skip if session not in DB */ }
     }
     
     // Generate agent response
@@ -560,13 +608,15 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
     session.transcript.push(agentTurn);
     session.currentTurn++;
     
-    // Store in database
-    await db.insert(previewSimulationTranscripts).values({
-      sessionId: session.id,
-      role: "assistant",
-      content: agentResponse,
-      timestampMs: Date.now() - session.startedAt.getTime(),
-    });
+    // Store in database (non-fatal for in-memory sessions)
+    try {
+      await db.insert(previewSimulationTranscripts).values({
+        sessionId: session.id,
+        role: "assistant",
+        content: agentResponse,
+        timestampMs: Date.now() - session.startedAt.getTime(),
+      });
+    } catch { /* skip if session not in DB */ }
     
     return agentTurn;
   }
@@ -591,15 +641,20 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
     session.transcript.push(agentOpening);
     session.currentTurn++;
     
-    await db.insert(previewSimulationTranscripts).values({
-      sessionId: session.id,
-      role: "assistant",
-      content: openingMessage,
-      timestampMs: 0,
-    });
+    try {
+      await db.insert(previewSimulationTranscripts).values({
+        sessionId: session.id,
+        role: "assistant",
+        content: openingMessage,
+        timestampMs: 0,
+      });
+    } catch { /* skip if session not in DB */ }
     
     // Run conversation loop
     while (session.currentTurn < session.maxTurns && session.status === "active") {
+      // Small delay between turns to avoid Gemini rate limits
+      if (session.currentTurn > 1) await sleep(1200);
+      
       // Generate human response
       const humanResponse = await this.generateHumanResponse(
         session,
@@ -614,12 +669,14 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
       session.transcript.push(humanTurn);
       session.currentTurn++;
       
-      await db.insert(previewSimulationTranscripts).values({
-        sessionId: session.id,
-        role: "user",
-        content: humanResponse,
-        timestampMs: Date.now() - session.startedAt.getTime(),
-      });
+      try {
+        await db.insert(previewSimulationTranscripts).values({
+          sessionId: session.id,
+          role: "user",
+          content: humanResponse,
+          timestampMs: Date.now() - session.startedAt.getTime(),
+        });
+      } catch { /* skip if session not in DB */ }
       
       // Check for conversation ending signals
       if (this.shouldEndConversation(humanResponse, session.humanProfile)) {
@@ -637,21 +694,25 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
       session.transcript.push(agentTurn);
       session.currentTurn++;
       
-      await db.insert(previewSimulationTranscripts).values({
-        sessionId: session.id,
-        role: "assistant",
-        content: agentResponse,
-        timestampMs: Date.now() - session.startedAt.getTime(),
-      });
+      try {
+        await db.insert(previewSimulationTranscripts).values({
+          sessionId: session.id,
+          role: "assistant",
+          content: agentResponse,
+          timestampMs: Date.now() - session.startedAt.getTime(),
+        });
+      } catch { /* skip if session not in DB */ }
     }
     
     // Complete session
     session.status = "completed";
     session.endedAt = new Date();
     
-    await db.update(previewStudioSessions)
-      .set({ status: "completed", endedAt: session.endedAt })
-      .where(eq(previewStudioSessions.id, session.id));
+    try {
+      await db.update(previewStudioSessions)
+        .set({ status: "completed", endedAt: session.endedAt })
+        .where(eq(previewStudioSessions.id, session.id));
+    } catch { /* skip if session not in DB */ }
     
     // Generate evaluation
     session.evaluation = await this.evaluateSimulation(session);
