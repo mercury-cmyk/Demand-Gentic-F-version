@@ -15595,10 +15595,12 @@ Provide JSON response with:
         // If end_call includes disposition + transcript, process it
         if (callAttemptId && data?.disposition) {
           const { processDisposition } = await import('./services/disposition-engine');
+          const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
           console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}`, {
             hasTranscript: !!data?.transcript,
             callDurationSeconds: data?.callDurationSeconds,
           });
+          let durationToSet = data?.callDurationSeconds;
           if (data?.callDurationSeconds) {
             try {
               await db.update(dialerCallAttempts)
@@ -15608,14 +15610,35 @@ Provide JSON response with:
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
           }
-          await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
+          const dispositionResult = await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
             transcript: data?.transcript || undefined,
             structuredTranscript: data?.structuredTranscript || undefined,
           });
+          try {
+            const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            await processSIPPostCallAnalysis({
+              callAttemptId,
+              leadId: dispositionResult?.leadId,
+              campaignId: data?.context?.campaignId || '',
+              contactName: data?.context?.contactName || data?.context?.contactFirstName,
+              disposition: data.disposition,
+              turnTranscript: rawTurns
+                .map((turn: any) => ({
+                  speaker: turn?.role === 'agent' ? 'agent' : 'contact',
+                  text: String(turn?.text || '').trim(),
+                }))
+                .filter((turn: { text: string }) => turn.text),
+              callDurationSeconds: durationToSet || 0,
+              agentNotes: 'media_bridge end_call callback',
+            });
+          } catch (postCallErr) {
+            console.error(`[MediaBridge Callback] SIP post-call handler failed for ${callId} (non-fatal):`, postCallErr);
+          }
         }
       } else if (action === 'submit_disposition') {
         // Process disposition via the disposition engine
         const { processDisposition } = await import('./services/disposition-engine');
+        const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
         const disposition = data?.disposition || 'no_answer';
         console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`, {
           hasTranscript: !!data?.transcript,
@@ -15653,10 +15676,30 @@ Provide JSON response with:
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
           }
-          await processDisposition(callAttemptId, disposition, 'media_bridge', {
+          const dispositionResult = await processDisposition(callAttemptId, disposition, 'media_bridge', {
             transcript: data?.transcript || undefined,
             structuredTranscript: data?.structuredTranscript || undefined,
           });
+          try {
+            const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            await processSIPPostCallAnalysis({
+              callAttemptId,
+              leadId: dispositionResult?.leadId,
+              campaignId: data?.context?.campaignId || '',
+              contactName: data?.context?.contactName || data?.context?.contactFirstName,
+              disposition,
+              turnTranscript: rawTurns
+                .map((turn: any) => ({
+                  speaker: turn?.role === 'agent' ? 'agent' : 'contact',
+                  text: String(turn?.text || '').trim(),
+                }))
+                .filter((turn: { text: string }) => turn.text),
+              callDurationSeconds: durationToSet || 0,
+              agentNotes: 'media_bridge submit_disposition callback',
+            });
+          } catch (postCallErr) {
+            console.error(`[MediaBridge Callback] SIP post-call handler failed for ${callId} (non-fatal):`, postCallErr);
+          }
         }
       }
 
