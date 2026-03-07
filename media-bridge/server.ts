@@ -223,6 +223,10 @@ interface BridgeSession {
 
   // Timers
   maxDurationTimer: NodeJS.Timeout | null;
+
+  // Opening protection: suppress incoming audio forwarding to Gemini
+  // during the first few seconds so the agent can speak uninterrupted
+  openingProtectionUntil: number;
 }
 
 const sessions = new Map<string, BridgeSession>();
@@ -276,6 +280,8 @@ async function createSession(params: {
     callbackSent: false,
 
     maxDurationTimer: null,
+
+    openingProtectionUntil: 0,
   };
 
   sessions.set(params.callId, session);
@@ -412,6 +418,14 @@ function handleIncomingRtp(session: BridgeSession, buf: Buffer): void {
   // Transcode to PCM 16kHz and send to Gemini
   if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN || !session.setupComplete) {
     return; // Drop audio until Gemini is ready
+  }
+
+  // OPENING PROTECTION: Suppress incoming audio during the first few seconds after
+  // sending the opening message. Without this, the prospect's initial audio (ringing,
+  // comfort noise, carrier screening messages) triggers Gemini's VAD, which interrupts
+  // the agent before it can speak — or causes false voicemail detection.
+  if (session.openingProtectionUntil > 0 && Date.now() < session.openingProtectionUntil) {
+    return; // Drop incoming audio during protection window
   }
 
   try {
@@ -691,6 +705,12 @@ After speaking, STOP and WAIT for their response.`;
     };
     session.geminiWs.send(JSON.stringify(msg));
     log(`Opening message sent for ${session.callId}`);
+
+    // Set opening protection: suppress incoming audio for 5 seconds to prevent
+    // carrier screening messages, comfort noise, or early speech from interrupting
+    // the agent's greeting or triggering false voicemail detection.
+    const OPENING_PROTECTION_MS = 5000;
+    session.openingProtectionUntil = Date.now() + OPENING_PROTECTION_MS;
   }
 }
 
@@ -705,7 +725,31 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
   const callAttemptId = session.context?.callAttemptId || null;
 
   if (call.name === 'submit_disposition') {
-    session.lastDisposition = call.args?.disposition || null;
+    const disposition = call.args?.disposition || null;
+
+    // GUARD: Prevent premature voicemail disposition on very short calls.
+    // Carrier screening messages ("this call is being recorded for insurance purposes")
+    // can trigger false voicemail detection within the first 8 seconds.
+    // Force the agent to keep trying if the call is too short for a real voicemail.
+    const MIN_VOICEMAIL_DURATION_SEC = 8;
+    if (disposition === 'voicemail' && callDurationSeconds < MIN_VOICEMAIL_DURATION_SEC) {
+      log(`[GUARD] Rejecting premature voicemail disposition for ${session.callId} (${callDurationSeconds}s < ${MIN_VOICEMAIL_DURATION_SEC}s) — telling Gemini to keep trying`);
+      if (session.geminiWs?.readyState === WebSocket.OPEN) {
+        const toolResponse = {
+          toolResponse: {
+            functionResponses: [{
+              name: call.name,
+              id: call.id,
+              response: { success: false, error: 'Too early to determine voicemail. Continue the conversation — the call just started. Wait for more audio before deciding.' },
+            }],
+          },
+        };
+        session.geminiWs.send(JSON.stringify(toolResponse));
+      }
+      return;
+    }
+
+    session.lastDisposition = disposition;
     session.callbackSent = true;
     // Include transcript + duration + callAttemptId in callback
     await callbackToCloudRun(session.callId, 'submit_disposition', {
