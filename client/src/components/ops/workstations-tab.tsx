@@ -236,6 +236,43 @@ function StateBadge({ state }: { state: string }) {
   );
 }
 
+/* ── localStorage helpers for persistence ── */
+const TERMINAL_STORAGE_PREFIX = 'ws_terminal_';
+const GH_AUTH_STORAGE_PREFIX = 'ws_gh_';
+const MAX_STORED_LINES = 200;
+
+function loadTerminalLines(wsId: string): TerminalLine[] {
+  try {
+    const raw = localStorage.getItem(`${TERMINAL_STORAGE_PREFIX}${wsId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Array<{ id: number; type: string; text: string; timestamp: string }>;
+      return parsed.map(l => ({ ...l, type: l.type as TerminalLine['type'], timestamp: new Date(l.timestamp) }));
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function saveTerminalLines(wsId: string, lines: TerminalLine[]) {
+  try {
+    const toStore = lines.slice(-MAX_STORED_LINES);
+    localStorage.setItem(`${TERMINAL_STORAGE_PREFIX}${wsId}`, JSON.stringify(toStore));
+  } catch { /* ignore quota errors */ }
+}
+
+function loadGhAuth(wsId: string): { username: string; connected: boolean } {
+  try {
+    const raw = localStorage.getItem(`${GH_AUTH_STORAGE_PREFIX}${wsId}`);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { username: '', connected: false };
+}
+
+function saveGhAuth(wsId: string, username: string, connected: boolean) {
+  try {
+    localStorage.setItem(`${GH_AUTH_STORAGE_PREFIX}${wsId}`, JSON.stringify({ username, connected }));
+  } catch { /* ignore */ }
+}
+
 /* ══════════════════════════════════════════════════════════════
    CLOUD IDE VIEW — terminal workspace with IDE in new tab
    ══════════════════════════════════════════════════════════════ */
@@ -248,24 +285,44 @@ function CloudIDE({
   config: Config | null;
   onDisconnect: () => void;
 }) {
-  const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([
+  const wsId = workstation.id;
+  const savedGh = loadGhAuth(wsId);
+  const savedLines = loadTerminalLines(wsId);
+
+  const defaultLines: TerminalLine[] = [
     { id: 0, type: 'system', text: `Connected to ${workstation.displayName} (${workstation.id})`, timestamp: new Date() },
     { id: 1, type: 'system', text: `Host: ${workstation.host || 'resolving...'}`, timestamp: new Date() },
     { id: 2, type: 'system', text: 'IDE opens in a separate browser tab. Use Reopen IDE if you need a fresh session.', timestamp: new Date() },
     { id: 3, type: 'system', text: 'Terminal ready. Type commands to execute on the workstation.', timestamp: new Date() },
-  ]);
+  ];
+
+  const initialLines = savedLines.length > 0
+    ? [...savedLines, { id: Date.now(), type: 'system' as const, text: '── session restored ──', timestamp: new Date() }]
+    : defaultLines;
+
+  const [terminalLines, setTerminalLines] = useState<TerminalLine[]>(initialLines);
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalRunning, setTerminalRunning] = useState(false);
   const [ideOpened, setIdeOpened] = useState(true);
   const [githubDialogOpen, setGithubDialogOpen] = useState(false);
-  const [ghUsername, setGhUsername] = useState('');
+  const [ghUsername, setGhUsername] = useState(savedGh.username);
   const [ghToken, setGhToken] = useState('');
   const [ghSaving, setGhSaving] = useState(false);
-  const [ghConnected, setGhConnected] = useState(false);
+  const [ghConnected, setGhConnected] = useState(savedGh.connected);
   const [ghShowToken, setGhShowToken] = useState(false);
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const lineIdRef = useRef(4);
+  const lineIdRef = useRef(initialLines.length > 0 ? Math.max(...initialLines.map(l => l.id)) + 1 : 4);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Persist terminal lines to localStorage
+  useEffect(() => {
+    saveTerminalLines(wsId, terminalLines);
+  }, [wsId, terminalLines]);
+
+  // Persist GitHub auth state to localStorage
+  useEffect(() => {
+    saveGhAuth(wsId, ghUsername, ghConnected);
+  }, [wsId, ghUsername, ghConnected]);
 
   const addTerminalLine = useCallback((type: TerminalLine['type'], text: string) => {
     const id = lineIdRef.current++;
