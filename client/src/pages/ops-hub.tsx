@@ -27,7 +27,6 @@ import {
   Loader2,
   Code2,
   CheckCircle2,
-  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Terminal,
@@ -214,7 +213,7 @@ const TAB_TO_SECTION: Record<string, string> = {
   insights: 'INSIGHTS',
 };
 
-const SECONDARY_NAV_ORDER = ['DEVOPS', 'WORKSPACE', 'INSIGHTS'] as const;
+const SECONDARY_NAV_ORDER = ['DEVOPS', 'WORKSPACE', 'INSIGHTS'];
 
 const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
   codex: 'Codex',
@@ -280,6 +279,7 @@ function formatWorkspaceTimestamp(dateStr?: string): string {
   if (!dateStr) return '-';
   const value = new Date(dateStr);
   if (Number.isNaN(value.getTime())) return '-';
+
   return new Intl.DateTimeFormat('en-US', {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -326,6 +326,7 @@ function FileSearchDrawerPanel({
       if (!data.success) {
         throw new Error(data.error || 'Failed to load workspace directory');
       }
+
       setDirectory(data.directory);
     } catch (error) {
       toast({
@@ -408,7 +409,7 @@ function FileSearchDrawerPanel({
             onClick={() => { void fetchDirectory(directory.currentPath); }}
             className="h-8 rounded-lg"
           >
-            <RefreshCw className={`w-4 h-4 ${loadingDirectory ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${loadingDirectory ? 'animate-spin' : ''}`} />
           </Button>
         </div>
 
@@ -483,12 +484,11 @@ function FileSearchDrawerPanel({
           {selectedFile ? (
             <>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                <Badge className={selectedFile.dirty ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
-                  {selectedFile.dirty ? 'Unsaved' : 'Ready'}
-                </Badge>
-                {selectedFile.modifiedAt && <span>{formatWorkspaceTimestamp(selectedFile.modifiedAt)}</span>}
+                <span>{formatWorkspaceTimestamp(selectedFile.modifiedAt)}</span>
+                <span>·</span>
+                <span>{formatWorkspaceBytes(selectedFile.content.length)}</span>
               </div>
-              <pre className="mt-3 max-h-28 overflow-hidden whitespace-pre-wrap break-words rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600">
+              <pre className="mt-3 max-h-32 overflow-y-auto rounded-lg bg-slate-950 px-3 py-2 text-[11px] leading-relaxed text-slate-100">
                 {selectedFile.content.slice(0, 320) || 'Empty file'}
               </pre>
             </>
@@ -769,7 +769,7 @@ export default function OpsHub() {
     token: number;
   } | null>(null);
   const [externalFileToken, setExternalFileToken] = useState(0);
-  const [requestedFilePath, setRequestedFilePath] = useState<string | null>(null);
+  const [requestedFilePath, setRequestedFilePath] = useState<string | undefined>(undefined);
   const [requestedFileToken, setRequestedFileToken] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const authToken = token || getToken();
@@ -900,7 +900,7 @@ export default function OpsHub() {
         role: 'assistant',
         content: data.response?.summary || 'No response generated.',
         timestamp: new Date(),
-        provider: data.response?.provider,
+        provider: data.response?.provider === 'system' ? undefined : data.response?.provider,
         model: data.response?.model,
         transport: data.response?.transport,
         applied: Boolean(data.response?.applied),
@@ -941,11 +941,8 @@ export default function OpsHub() {
     }
   };
 
-  const flatNavItems = useMemo(
-    () => SECONDARY_NAV_ORDER.flatMap((sectionLabel) => {
-      const section = navSections.find((entry) => entry.label === sectionLabel);
-      return (section?.items || []).map((item) => ({ ...item, sectionLabel }));
-    }),
+  const secondaryNavSections = useMemo(
+    () => SECONDARY_NAV_ORDER.map((label) => navSections.find((entry) => entry.label === label)).filter((section): section is NavSection => Boolean(section)),
     [navSections],
   );
 
@@ -1116,11 +1113,7 @@ export default function OpsHub() {
               {activeProject.status === 'running' ? 'Online' : activeProject.status === 'deploying' ? 'Deploying' : 'Offline'}
             </span>
           </Badge>
-          <button
-            onClick={() => openSidePanel('files')}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
-            aria-label="Open file search"
-          >
+          <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
             <Search className="w-4 h-4" />
           </button>
           <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all relative">
@@ -1133,40 +1126,62 @@ export default function OpsHub() {
         </div>
       </header>
 
-      <div className="border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm shadow-slate-100/60 backdrop-blur-sm shrink-0">
-        <div className="overflow-x-auto">
-          <div className="flex min-w-max items-center gap-2">
-            {flatNavItems.map((item) => {
-              const itemTopTab = getTopTabForPage(item.id);
-              const isActive = activePage === item.id;
-              const isInActiveGroup = itemTopTab === activeTopTab;
+      <div className="shrink-0 border-b border-slate-200 bg-slate-50/70 px-5 py-3">
+        <div className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              {secondaryNavSections.map((section, sectionIndex) => (
+                <React.Fragment key={section.label}>
+                  {sectionIndex > 0 && <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />}
+                  {section.items.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => goToPage(item.id)}
+                      className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
+                        activePage === item.id
+                          ? 'border-indigo-200 bg-white text-indigo-600 shadow-sm'
+                          : 'border-transparent bg-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-700'
+                      }`}
+                    >
+                      <span className={activePage === item.id ? 'text-indigo-500' : 'text-slate-400'}>{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
 
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => goToPage(item.id)}
-                  className={`flex items-center gap-2 rounded-xl border px-3.5 py-2 text-[13px] font-medium transition-all ${
-                    isActive
-                      ? 'border-indigo-200 bg-indigo-50 text-indigo-700 shadow-sm'
-                      : isInActiveGroup
-                        ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                        : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:bg-white'
-                  }`}
-                >
-                  <span className={isActive ? 'text-indigo-500' : isInActiveGroup ? 'text-slate-500' : 'text-slate-400'}>
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
+          <div className="flex shrink-0 items-center gap-2 border-l border-slate-200 pl-4">
+            <button
+              onClick={() => openSidePanel('files')}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
+                sidePanelOpen && sidePanelTab === 'files'
+                  ? 'border-indigo-200 bg-white text-indigo-600 shadow-sm'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <FolderOpen className="h-4 w-4" />
+              Files
+            </button>
+            <button
+              onClick={() => openSidePanel('manager')}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
+                sidePanelOpen && sidePanelTab === 'manager'
+                  ? 'border-indigo-200 bg-white text-indigo-600 shadow-sm'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <Bot className="h-4 w-4" />
+              Manager
+            </button>
           </div>
         </div>
       </div>
 
       {/* ── Body ── */}
-      <div className="relative flex flex-1 min-h-0 overflow-hidden">
-        <main className="flex-1 min-w-0 overflow-hidden bg-white flex flex-col">
+      <div className="flex flex-1 overflow-hidden">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
           {activePage === 'logs' ? (
             renderContent()
           ) : (
@@ -1176,7 +1191,7 @@ export default function OpsHub() {
           )}
         </main>
 
-        {sidePanelOpen ? (
+        {sidePanelOpen && (
           <aside className="flex h-full w-[360px] shrink-0 flex-col border-l border-slate-200 bg-white">
             <div className="border-b border-slate-200 px-4 py-3">
               <div className="flex items-center gap-2">
@@ -1224,103 +1239,92 @@ export default function OpsHub() {
                 />
               ) : (
                 <div className="flex h-full min-h-0 flex-col bg-white">
-                  <div className="border-b border-slate-200 px-4 py-4">
+                  <div className="border-b border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#fbfaf6_100%)] px-4 py-3.5">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-sm">
-                          <Bot className="h-5 w-5 text-white" />
+                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 shadow-sm">
+                          <Code2 className="h-4.5 w-4.5 text-white" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-slate-800">Manager</p>
-                          <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                            Describe a code change, bug fix, or refactor. Open a file first when you want a direct edit.
-                          </p>
+                          <p className="text-sm font-semibold text-slate-900">AgentZ- The Architect</p>
+                          <p className="text-[11px] text-slate-500">Clean coding edits and fast planning</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1">
+                      <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1">
                         <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Ready</span>
+                        <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-700">Ready</span>
                       </div>
                     </div>
 
-                    <div className="mt-4 flex items-center gap-2">
-                      <div className="grid flex-1 grid-cols-2 gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
+                    <div className="mt-3 flex items-center gap-2">
+                      <div className="flex items-center gap-1 rounded-full bg-slate-100 p-0.5">
+                        <button
                           onClick={() => setCodingAgentMode('agent')}
-                          className={`h-9 rounded-xl text-xs ${
+                          className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
                             codingAgentMode === 'agent'
-                              ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                              ? 'bg-white text-slate-900 shadow-sm'
+                              : 'text-slate-500 hover:text-slate-700'
                           }`}
                         >
-                          Agent
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
+                          Edit
+                        </button>
+                        <button
                           onClick={() => setCodingAgentMode('plan')}
-                          className={`h-9 rounded-xl text-xs ${
+                          className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
                             codingAgentMode === 'plan'
-                              ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                              ? 'bg-white text-slate-900 shadow-sm'
+                              : 'text-slate-500 hover:text-slate-700'
                           }`}
                         >
                           Plan
-                        </Button>
+                        </button>
                       </div>
+
                       <Select
                         value={modelSelector}
                         onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
                       >
-                        <SelectTrigger className="h-9 w-[132px] rounded-xl border-slate-200 bg-slate-50 text-xs text-slate-700">
+                        <SelectTrigger className="h-8 w-[112px] rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="simple-edit">Simple Edit</SelectItem>
+                          <SelectItem value="simple-edit">Patch</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
 
                     {selectedFile && (
-                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                          File context
-                        </p>
-                        <div className="mt-1 flex items-center justify-between gap-2">
-                          <p className="truncate text-xs font-medium text-slate-700">{selectedFile.path}</p>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleOpenFileManager(selectedFile.path)}
-                            className="h-7 rounded-lg px-2 text-[11px] text-indigo-600 hover:bg-white"
-                          >
-                            Open
-                          </Button>
-                        </div>
+                      <div className="mt-2 flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/90 px-3 py-1.5">
+                        <FileText className="h-3.5 w-3.5 text-slate-400" />
+                        <p className="truncate text-[11px] font-medium text-slate-600">{selectedFile.path}</p>
                       </div>
                     )}
                   </div>
 
-                  <div className="flex-1 overflow-y-auto bg-slate-50/60 px-4 py-5">
+                  <div className="flex-1 overflow-y-auto bg-slate-50/60 px-4 py-4">
                     {chatMessages.length === 0 ? (
                       <div className="flex h-full flex-col items-center justify-center text-center">
-                        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-3xl border border-slate-200 bg-gradient-to-br from-indigo-50 to-purple-50">
-                          <Bot className="h-8 w-8 text-indigo-400" />
+                        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl border border-slate-200 bg-white">
+                          <Code2 className="h-7 w-7 text-slate-500" />
                         </div>
-                        <p className="text-sm font-semibold text-slate-700">Manager</p>
-                        <p className="mt-2 max-w-xs text-xs leading-relaxed text-slate-500">
-                          Ask for a fix, refactor, new feature, or implementation plan. This panel can now hide when you need terminal elbow room.
+                        <p className="text-sm font-medium text-slate-800">AgentZ- The Architect</p>
+                        <p className="mt-2 max-w-xs text-[13px] text-slate-500">
+                          Ask for a fix, refactor, or a quick implementation plan. Open a file first to enable direct edits.
                         </p>
-                        <div className="mt-6 flex flex-wrap justify-center gap-2">
-                          {['Fix a bug', 'Refactor code', 'Add feature', 'Write tests'].map((prompt) => (
+
+                        <div className="mt-5 flex flex-wrap justify-center gap-2">
+                          {[
+                            { label: 'Fix a bug', prompt: 'Fix a bug in the currently selected file.' },
+                            { label: 'Refactor code', prompt: 'Refactor the selected file for clarity and maintainability.' },
+                            { label: 'Add feature', prompt: 'Add a feature to the selected file and explain the implementation.' },
+                            { label: 'Write tests', prompt: 'Write tests that cover the selected functionality.' },
+                          ].map((action) => (
                             <button
-                              key={prompt}
-                              onClick={() => setChatInput(prompt)}
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
+                              key={action.label}
+                              onClick={() => setChatInput(action.prompt)}
+                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                             >
-                              {prompt}
+                              {action.label}
                             </button>
                           ))}
                         </div>
@@ -1346,7 +1350,7 @@ export default function OpsHub() {
                                 {message.transport && <span>{message.transport}</span>}
                                 {message.applied && (
                                   <span className="inline-flex items-center gap-1 font-medium text-emerald-500">
-                                    <CheckCircle2 className="w-3 h-3" />
+                                    <CheckCircle2 className="h-3 w-3" />
                                     edit applied
                                   </span>
                                 )}
@@ -1359,20 +1363,20 @@ export default function OpsHub() {
                     <div ref={chatEndRef} />
                   </div>
 
-                  <div className="border-t border-slate-200 bg-white p-3.5">
+                  <div className="border-t border-slate-200 bg-white px-3.5 py-3">
                     <div className="relative">
                       <Textarea
                         value={chatInput}
                         onChange={(event) => setChatInput(event.target.value)}
                         onKeyDown={handleChatKeyDown}
-                        placeholder="Describe the change, bug, or deployment task..."
-                        className="min-h-[84px] max-h-[160px] rounded-xl border-slate-200 bg-slate-50 pr-12 text-sm text-slate-800 placeholder:text-slate-400 resize-none focus:border-indigo-300 focus:ring-indigo-200"
+                        placeholder="Ask AgentZ for a fix, refactor, or plan..."
+                        className="min-h-[72px] max-h-[140px] resize-none rounded-2xl border-slate-200 bg-slate-50 pr-11 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:ring-slate-200"
                         rows={3}
                       />
                       <button
                         onClick={handleChatSend}
                         disabled={chatSending || !chatInput.trim()}
-                        className="absolute bottom-2.5 right-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 p-2 shadow-md transition-all hover:from-indigo-600 hover:to-purple-600 disabled:opacity-30"
+                        className="absolute bottom-2.5 right-2.5 rounded-xl bg-slate-900 p-2 shadow-sm transition-all hover:bg-slate-800 disabled:opacity-30"
                       >
                         {chatSending ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
@@ -1381,30 +1385,12 @@ export default function OpsHub() {
                         )}
                       </button>
                     </div>
+                    <p className="mt-2 text-[11px] text-slate-400">Enter sends. Shift+Enter adds a new line.</p>
                   </div>
                 </div>
               )}
             </div>
           </aside>
-        ) : (
-          <div className="absolute right-4 top-4 z-30 flex flex-col gap-2">
-            <button
-              onClick={() => openSidePanel('files')}
-              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              <FolderOpen className="h-4 w-4" />
-              Files
-            </button>
-            <button
-              onClick={() => openSidePanel('manager')}
-              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              <Bot className="h-4 w-4" />
-              Manager
-            </button>
-          </div>
         )}
       </div>
 

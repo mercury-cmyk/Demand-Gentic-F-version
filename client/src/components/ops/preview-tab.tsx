@@ -226,14 +226,14 @@ export default function PreviewTab() {
   const vp = VIEWPORT_PRESETS[viewport];
 
   return (
-    <div className={`space-y-4 ${isFullscreen ? 'fixed inset-0 z-[100] bg-slate-900 p-4' : ''}`}>
-      <Card className="bg-slate-800 border-slate-700">
+    <div className={`space-y-4 ${isFullscreen ? 'fixed inset-0 z-[100] bg-[#f5f2ea] p-4' : ''}`}>
+      <Card className="border-black/5 bg-white/90 shadow-sm">
         <CardContent className="py-3">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-            <div className="flex items-center gap-1.5 pr-3 border-r border-slate-600 text-xs text-slate-400">
+            <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3 text-xs text-slate-500">
               {healthStatus === 'checking' && <Loader2 className="w-4 h-4 animate-spin" />}
-              {healthStatus === 'healthy' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-              {healthStatus === 'unhealthy' && <XCircle className="w-4 h-4 text-red-400" />}
+              {healthStatus === 'healthy' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+              {healthStatus === 'unhealthy' && <XCircle className="w-4 h-4 text-red-500" />}
               <span>
                 {healthStatus === 'checking' ? 'Checking...' : healthStatus === 'healthy' ? 'Server healthy' : 'Server unavailable'}
               </span>
@@ -257,15 +257,15 @@ export default function PreviewTab() {
             <form onSubmit={handleUrlSubmit} className="flex-1">
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
-                  <Globe className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                  <Globe className="absolute left-2.5 top-1/2 w-3.5 h-3.5 -translate-y-1/2 text-slate-400" />
                   <Input
                     value={urlInput}
                     onChange={(event) => setUrlInput(event.target.value)}
-                    className="h-9 pl-8 bg-slate-700 border-slate-600 text-white text-sm font-mono"
+                    className="h-9 border-slate-200 bg-[#faf7f0] pl-8 text-sm font-mono text-slate-900"
                     placeholder={baseUrl}
                   />
                 </div>
-                <Button type="submit" variant="outline" size="sm" className="h-9 border-slate-600">
+                <Button type="submit" variant="outline" size="sm" className="h-9 border-slate-200 bg-white">
                   Go
                 </Button>
               </div>
@@ -309,9 +309,9 @@ export default function PreviewTab() {
 
       <div className={`flex gap-4 ${isFullscreen ? 'h-[calc(100vh-120px)]' : ''}`}>
         {!isFullscreen && (
-          <Card className="bg-slate-800 border-slate-700 w-52 shrink-0">
-            <CardContent className="p-3 space-y-1">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500 px-2 py-1">
+          <Card className="w-56 shrink-0 border-black/5 bg-white/90 shadow-sm">
+            <CardContent className="space-y-1 p-3">
+              <div className="px-2 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">
                 Quick Routes
               </div>
               {QUICK_ROUTES.map((route) => {
@@ -321,8 +321,8 @@ export default function PreviewTab() {
                   <button
                     key={route.path}
                     onClick={() => handleQuickRoute(route.path)}
-                    className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
-                      active ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+                    className={`w-full rounded-xl px-3 py-2 text-left text-sm transition ${
+                      active ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-[#faf7f0] hover:text-slate-900'
                     }`}
                   >
                     {route.label}
@@ -333,11 +333,11 @@ export default function PreviewTab() {
           </Card>
         )}
 
-        <Card className="bg-slate-800 border-slate-700 flex-1 overflow-hidden">
-          <CardContent className="p-0 h-full">
-            <div className="flex items-center justify-center bg-slate-900/50 h-full min-h-[620px]">
+        <Card className="flex-1 overflow-hidden border-black/5 bg-white/90 shadow-sm">
+          <CardContent className="h-full p-0">
+            <div className="flex h-full min-h-[620px] items-center justify-center bg-[#f7f3ea] p-4">
               <div
-                className="bg-white rounded-lg overflow-hidden shadow-2xl transition-all duration-300 relative"
+                className="relative overflow-hidden rounded-2xl bg-white shadow-[0_32px_70px_-38px_rgba(15,23,42,0.5)] transition-all duration-300"
                 style={{
                   width: isFullscreen ? '100%' : Math.min(vp.width, 1400),
                   height: isFullscreen ? '100%' : Math.min(vp.height, 820),
@@ -346,9 +346,9 @@ export default function PreviewTab() {
                 }}
               >
                 {loading && (
-                  <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center z-10">
-                    <div className="flex flex-col items-center gap-2 text-slate-200">
-                      <Loader2 className="w-6 h-6 animate-spin text-cyan-300" />
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/85">
+                    <div className="flex flex-col items-center gap-2 text-slate-600">
+                      <Loader2 className="w-6 h-6 animate-spin text-slate-500" />
                       Loading preview...
                     </div>
                   </div>
@@ -356,7 +356,7 @@ export default function PreviewTab() {
                 <iframe
                   ref={iframeRef}
                   src={previewUrl}
-                  className="w-full h-full border-0"
+                  className="h-full w-full border-0"
                   onLoad={() => setLoading(false)}
                   onError={() => setLoading(false)}
                   title="Ops Hub Preview"
@@ -365,8 +365,8 @@ export default function PreviewTab() {
               </div>
             </div>
             {!isFullscreen && (
-              <div className="bg-slate-900/80 px-3 py-1.5 text-center text-xs text-slate-500">
-                {vp.label} • Base URL {baseUrl}
+              <div className="border-t border-slate-200 bg-[#faf7f0] px-3 py-2 text-center text-xs text-slate-500">
+                {vp.label} | Base URL {baseUrl}
               </div>
             )}
           </CardContent>

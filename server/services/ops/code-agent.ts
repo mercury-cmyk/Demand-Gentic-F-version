@@ -74,7 +74,7 @@ async function runSingleFileEdit(
   if (!request.selectedFilePath) {
     return {
       provider: "system",
-      summary: "Select a workspace file before asking for an edit.",
+      summary: "Open a workspace file to enable direct edits, or switch to Plan for guidance.",
       path: null,
       applied: false,
       changed: false,

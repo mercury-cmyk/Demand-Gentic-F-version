@@ -58,7 +58,7 @@ interface ExternalFileUpdate {
 interface FileManagerTabProps {
   onFileContextChange?: (file: OpsWorkspaceFileContext | null) => void;
   externalFileUpdate?: ExternalFileUpdate | null;
-  requestedFilePath?: string | null;
+  requestedFilePath?: string;
   requestedFileToken?: number;
 }
 

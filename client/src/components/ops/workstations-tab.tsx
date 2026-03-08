@@ -2,15 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -41,11 +32,6 @@ import {
   Maximize2,
   CornerDownLeft,
   Plug,
-  KeyRound,
-  CircleCheck,
-  Github,
-  Eye,
-  EyeOff,
 } from 'lucide-react';
 
 /* ── Types ── */
@@ -101,9 +87,8 @@ interface WorkstationIdeInfo {
   success: boolean;
   url: string;
   host: string;
-  accessToken?: string;
-  expireTime?: string;
-  authMode?: 'token' | 'browser';
+  accessToken: string;
+  expireTime: string;
   error?: string;
 }
 
@@ -162,11 +147,8 @@ function wsApi(ws: Workstation) {
   return `/api/ops/workstations/clusters/${ws.clusterId}/configs/${ws.configId}/workstations/${ws.id}`;
 }
 
-function buildWorkstationAuthUrl(ideUrl: string, accessToken?: string) {
+function buildWorkstationAuthUrl(ideUrl: string, accessToken: string) {
   const normalizedUrl = ideUrl.replace(/\/$/, '');
-  if (!accessToken) {
-    return normalizedUrl;
-  }
   return `${normalizedUrl}/_workstation/authenticate?access_token=${encodeURIComponent(accessToken)}&redirect_url=${encodeURIComponent('/')}`;
 }
 
@@ -180,9 +162,8 @@ function openWorkstationLoadingWindow(): Window | null {
 body{margin:0;font-family:system-ui;background:#1e1e2e;color:#cdd6f4;display:flex;align-items:center;justify-content:center;height:100vh}
 .loading{text-align:center}.spinner{width:40px;height:40px;border:3px solid #313244;border-top:3px solid #89b4fa;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.status{font-size:13px;color:#6c7086;margin-top:8px}
 </style></head>
-<body><div class="loading"><div class="spinner"></div><p>Opening Cloud Workstation IDE\u2026</p><p class="status">The IDE may take up to 60 seconds to start after the workstation boots.</p></div></body></html>`);
+<body><div class="loading"><div class="spinner"></div><p>Opening Cloud Workstation…</p></div></body></html>`);
   popup.document.close();
 
   return popup;
@@ -236,43 +217,6 @@ function StateBadge({ state }: { state: string }) {
   );
 }
 
-/* ── localStorage helpers for persistence ── */
-const TERMINAL_STORAGE_PREFIX = 'ws_terminal_';
-const GH_AUTH_STORAGE_PREFIX = 'ws_gh_';
-const MAX_STORED_LINES = 200;
-
-function loadTerminalLines(wsId: string): TerminalLine[] {
-  try {
-    const raw = localStorage.getItem(`${TERMINAL_STORAGE_PREFIX}${wsId}`);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Array<{ id: number; type: string; text: string; timestamp: string }>;
-      return parsed.map(l => ({ ...l, type: l.type as TerminalLine['type'], timestamp: new Date(l.timestamp) }));
-    }
-  } catch { /* ignore */ }
-  return [];
-}
-
-function saveTerminalLines(wsId: string, lines: TerminalLine[]) {
-  try {
-    const toStore = lines.slice(-MAX_STORED_LINES);
-    localStorage.setItem(`${TERMINAL_STORAGE_PREFIX}${wsId}`, JSON.stringify(toStore));
-  } catch { /* ignore quota errors */ }
-}
-
-function loadGhAuth(wsId: string): { username: string; connected: boolean } {
-  try {
-    const raw = localStorage.getItem(`${GH_AUTH_STORAGE_PREFIX}${wsId}`);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return { username: '', connected: false };
-}
-
-function saveGhAuth(wsId: string, username: string, connected: boolean) {
-  try {
-    localStorage.setItem(`${GH_AUTH_STORAGE_PREFIX}${wsId}`, JSON.stringify({ username, connected }));
-  } catch { /* ignore */ }
-}
-
 /* ══════════════════════════════════════════════════════════════
    CLOUD IDE VIEW — terminal workspace with IDE in new tab
    ══════════════════════════════════════════════════════════════ */
@@ -285,44 +229,18 @@ function CloudIDE({
   config: Config | null;
   onDisconnect: () => void;
 }) {
-  const wsId = workstation.id;
-  const savedGh = loadGhAuth(wsId);
-  const savedLines = loadTerminalLines(wsId);
-
-  const defaultLines: TerminalLine[] = [
+  const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([
     { id: 0, type: 'system', text: `Connected to ${workstation.displayName} (${workstation.id})`, timestamp: new Date() },
     { id: 1, type: 'system', text: `Host: ${workstation.host || 'resolving...'}`, timestamp: new Date() },
     { id: 2, type: 'system', text: 'IDE opens in a separate browser tab. Use Reopen IDE if you need a fresh session.', timestamp: new Date() },
     { id: 3, type: 'system', text: 'Terminal ready. Type commands to execute on the workstation.', timestamp: new Date() },
-  ];
-
-  const initialLines = savedLines.length > 0
-    ? [...savedLines, { id: Date.now(), type: 'system' as const, text: '── session restored ──', timestamp: new Date() }]
-    : defaultLines;
-
-  const [terminalLines, setTerminalLines] = useState<TerminalLine[]>(initialLines);
+  ]);
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalRunning, setTerminalRunning] = useState(false);
   const [ideOpened, setIdeOpened] = useState(true);
-  const [githubDialogOpen, setGithubDialogOpen] = useState(false);
-  const [ghUsername, setGhUsername] = useState(savedGh.username);
-  const [ghToken, setGhToken] = useState('');
-  const [ghSaving, setGhSaving] = useState(false);
-  const [ghConnected, setGhConnected] = useState(savedGh.connected);
-  const [ghShowToken, setGhShowToken] = useState(false);
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const lineIdRef = useRef(initialLines.length > 0 ? Math.max(...initialLines.map(l => l.id)) + 1 : 4);
+  const lineIdRef = useRef(4);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Persist terminal lines to localStorage
-  useEffect(() => {
-    saveTerminalLines(wsId, terminalLines);
-  }, [wsId, terminalLines]);
-
-  // Persist GitHub auth state to localStorage
-  useEffect(() => {
-    saveGhAuth(wsId, ghUsername, ghConnected);
-  }, [wsId, ghUsername, ghConnected]);
 
   const addTerminalLine = useCallback((type: TerminalLine['type'], text: string) => {
     const id = lineIdRef.current++;
@@ -334,84 +252,10 @@ function CloudIDE({
       addTerminalLine('system', 'Fetching IDE credentials...');
       const data = await launchWorkstationIDE(workstation);
       setIdeOpened(true);
-      if (data.authMode === 'browser' || !data.accessToken) {
-        addTerminalLine('system', 'IDE opened in new tab using your Google browser session.');
-      } else if (data.expireTime) {
-        addTerminalLine('system', `IDE opened in new tab. Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
-      } else {
-        addTerminalLine('system', 'IDE opened in new tab with a short-lived access token.');
-      }
+      addTerminalLine('system', `IDE opened in new tab. Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
     } catch (err) {
       setIdeOpened(false);
       addTerminalLine('error', `Failed to open IDE: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  /* ── GitHub Auth ── */
-  const checkGitHubAuth = useCallback(async () => {
-    try {
-      const data = await apiJsonRequest<{ success: boolean; stdout: string; exitCode: number }>(
-        'POST', `${wsApi(workstation)}/exec`,
-        { command: 'git config --global credential.helper 2>/dev/null && test -f ~/.git-credentials && echo "configured"' },
-      );
-      if (data.exitCode === 0 && data.stdout.includes('configured')) {
-        setGhConnected(true);
-      }
-    } catch { /* ignore */ }
-  }, [workstation]);
-
-  useEffect(() => { checkGitHubAuth(); }, [checkGitHubAuth]);
-
-  const handleGitHubAuth = async () => {
-    if (!ghUsername.trim() || !ghToken.trim()) return;
-    setGhSaving(true);
-    try {
-      // Configure git credential helper
-      await apiJsonRequest<{ success: boolean }>(
-        'POST', `${wsApi(workstation)}/exec`,
-        { command: 'git config --global credential.helper store' },
-      );
-      // Write credentials to ~/.git-credentials
-      const credLine = `https://${ghUsername.trim()}:${ghToken.trim()}@github.com`;
-      await apiJsonRequest<{ success: boolean }>(
-        'POST', `${wsApi(workstation)}/exec`,
-        { command: `printf '%s\\n' '${credLine.replace(/'/g, "'\\''")}' > ~/.git-credentials && chmod 600 ~/.git-credentials` },
-      );
-      // Configure git user info
-      await apiJsonRequest<{ success: boolean }>(
-        'POST', `${wsApi(workstation)}/exec`,
-        { command: `git config --global user.name '${ghUsername.trim().replace(/'/g, "'\\''")}'` },
-      );
-      // Verify by testing GitHub API
-      const verify = await apiJsonRequest<{ success: boolean; stdout: string; exitCode: number }>(
-        'POST', `${wsApi(workstation)}/exec`,
-        { command: `git ls-remote https://github.com/${ghUsername.trim()}/${ghUsername.trim()}.git HEAD 2>&1 || echo "auth_ok"` },
-      );
-
-      setGhConnected(true);
-      setGithubDialogOpen(false);
-      setGhToken('');
-      setGhShowToken(false);
-      addTerminalLine('system', `GitHub credentials configured for ${ghUsername.trim()}. You can now clone private repos.`);
-    } catch (err) {
-      addTerminalLine('error', `Failed to configure GitHub: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setGhSaving(false);
-    }
-  };
-
-  const handleGitHubDisconnect = async () => {
-    try {
-      await apiJsonRequest<{ success: boolean }>(
-        'POST', `${wsApi(workstation)}/exec`,
-        { command: 'rm -f ~/.git-credentials && git config --global --unset credential.helper 2>/dev/null; true' },
-      );
-      setGhConnected(false);
-      setGhUsername('');
-      setGhToken('');
-      addTerminalLine('system', 'GitHub credentials removed from workstation.');
-    } catch (err) {
-      addTerminalLine('error', `Failed to remove GitHub credentials: ${err}`);
     }
   };
 
@@ -448,7 +292,7 @@ function CloudIDE({
   }, [terminalLines]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col -m-6 bg-[#1e1e2e]">
+    <div className="flex flex-col h-[calc(100vh-160px)] -m-6 bg-[#1e1e2e]">
       {/* ── Top Bar ── */}
       <div className="h-11 bg-[#181825] border-b border-[#313244] flex items-center px-3 gap-3 shrink-0">
         <Button
@@ -469,11 +313,6 @@ function CloudIDE({
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setGithubDialogOpen(true)}
-            className={`h-7 px-2 hover:bg-[#313244] ${ghConnected ? 'text-emerald-400' : 'text-[#f9e2af]'}`}>
-            <Github className="w-3.5 h-3.5 mr-1" /> {ghConnected ? 'GitHub' : 'Sign in to GitHub'}
-          </Button>
-          <div className="w-px h-4 bg-[#313244]" />
           <Button variant="ghost" size="sm" onClick={openIDEInNewTab}
             className={`h-7 px-2 hover:bg-[#313244] ${ideOpened ? 'text-emerald-400' : 'text-[#89b4fa]'}`}>
             <Maximize2 className="w-3.5 h-3.5 mr-1" /> {ideOpened ? 'Reopen IDE' : 'Open IDE'}
@@ -526,98 +365,9 @@ function CloudIDE({
         <span>{workstation.host}</span>
         {config && <><div className="mx-3 w-px h-3 bg-[#313244]" /><span>{config.machineType} &middot; {config.bootDiskSizeGb} GB</span></>}
         <div className="flex-1" />
-        {ghConnected && (
-          <>
-            <Github className="w-3 h-3 text-emerald-400 mr-1" />
-            <span className="text-emerald-400 mr-2">GitHub connected</span>
-          </>
-        )}
         {ideOpened && <span className="text-emerald-400 mr-2">IDE open in tab</span>}
         <span>Cloud Workstation</span>
       </div>
-
-      {/* ── GitHub Auth Dialog ── */}
-      <Dialog open={githubDialogOpen} onOpenChange={setGithubDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Github className="w-5 h-5" />
-              {ghConnected ? 'GitHub Authentication' : 'Sign in to GitHub'}
-            </DialogTitle>
-            <DialogDescription>
-              {ghConnected
-                ? 'Your GitHub credentials are configured on this workstation. You can update or remove them.'
-                : 'Enter your GitHub username and Personal Access Token (PAT) to clone private repositories on this workstation.'}
-            </DialogDescription>
-          </DialogHeader>
-
-          {ghConnected ? (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-                <CircleCheck className="w-5 h-5 text-emerald-600 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-emerald-800">GitHub credentials configured</p>
-                  <p className="text-xs text-emerald-600">You can clone private repos using git clone.</p>
-                </div>
-              </div>
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => { setGhConnected(false); }}>
-                  <KeyRound className="w-4 h-4 mr-1.5" /> Update Credentials
-                </Button>
-                <Button variant="destructive" onClick={async () => { await handleGitHubDisconnect(); setGithubDialogOpen(false); }}>
-                  <X className="w-4 h-4 mr-1.5" /> Remove Credentials
-                </Button>
-              </DialogFooter>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="gh-username">GitHub Username</Label>
-                <Input
-                  id="gh-username"
-                  placeholder="your-username"
-                  value={ghUsername}
-                  onChange={(e) => setGhUsername(e.target.value)}
-                  disabled={ghSaving}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="gh-token">Personal Access Token (PAT)</Label>
-                <div className="relative">
-                  <Input
-                    id="gh-token"
-                    type={ghShowToken ? 'text' : 'password'}
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                    value={ghToken}
-                    onChange={(e) => setGhToken(e.target.value)}
-                    disabled={ghSaving}
-                    className="pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setGhShowToken(!ghShowToken)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    {ghShowToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="text-xs text-slate-500">
-                  Create a PAT at GitHub {'>'} Settings {'>'} Developer settings {'>'} Personal access tokens. Needs <code className="text-xs bg-slate-100 px-1 rounded">repo</code> scope.
-                </p>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setGithubDialogOpen(false)} disabled={ghSaving}>
-                  Cancel
-                </Button>
-                <Button onClick={handleGitHubAuth} disabled={ghSaving || !ghUsername.trim() || !ghToken.trim()}>
-                  {ghSaving ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1.5" />}
-                  {ghSaving ? 'Configuring...' : 'Save & Connect'}
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -890,8 +640,7 @@ export default function WorkstationsTab() {
   }
 
   return (
-    <div className="h-full overflow-y-auto pr-1">
-      <div className="space-y-6 pb-1">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1276,7 +1025,6 @@ export default function WorkstationsTab() {
           </div>
         </div>
       )}
-      </div>
     </div>
   );
 }
