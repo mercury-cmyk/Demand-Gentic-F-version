@@ -33,11 +33,44 @@ const domainMapper = new DomainMapper(projectId);
 const costTracker = new CostTracker(projectId);
 const workstationsManager = new CloudWorkstationsManager(projectId, region);
 
+function getOpsPermissionError(error: unknown): { status: number; message: string } | null {
+  const code = typeof (error as { code?: unknown })?.code === 'number'
+    ? (error as { code: number }).code
+    : null;
+  const message = error instanceof Error ? error.message : '';
+  const details = typeof (error as { details?: unknown })?.details === 'string'
+    ? (error as { details: string }).details
+    : '';
+  const combined = `${message} ${details}`;
+
+  if (
+    code === 7 ||
+    /PERMISSION_DENIED/i.test(combined) ||
+    /workstations\.workstations\.use/i.test(combined) ||
+    /User not authorized to perform this action/i.test(combined)
+  ) {
+    return {
+      status: 403,
+      message: "Google Cloud denied workstation access. Grant the active GCP credentials the Cloud Workstations User role, or the 'workstations.workstations.use' permission, on this workstation.",
+    };
+  }
+
+  return null;
+}
+
 function handleOpsError(res: Response, error: unknown, fallbackMessage: string): Response {
   if (error instanceof OpsAgentError) {
     return res.status(error.status).json({
       success: false,
       error: error.message,
+    });
+  }
+
+  const permissionError = getOpsPermissionError(error);
+  if (permissionError) {
+    return res.status(permissionError.status).json({
+      success: false,
+      error: permissionError.message,
     });
   }
 
@@ -1231,6 +1264,48 @@ router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:w
     res.json({ success: true, ...tokenInfo });
   } catch (error) {
     handleOpsError(res, error, 'Failed to generate access token');
+  }
+});
+
+/**
+ * Get authenticated IDE URL for embedding workstation in iframe
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-url
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-url', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const ideInfo = await workstationsManager.getIDEUrl(clusterId, configId, workstationId);
+    res.json({ success: true, ...ideInfo });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to get IDE URL');
+  }
+});
+
+/**
+ * Proxy auth redirect — opens workstation IDE in browser with access token cookie
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-redirect
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-redirect', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const ideInfo = await workstationsManager.getIDEUrl(clusterId, configId, workstationId);
+    // Serve a small HTML page that authenticates and loads the IDE
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html><head><title>Cloud IDE - Loading...</title>
+<style>body{margin:0;font-family:system-ui;background:#1e1e2e;color:#cdd6f4;display:flex;align-items:center;justify-content:center;height:100vh}
+.loading{text-align:center}.spinner{width:40px;height:40px;border:3px solid #313244;border-top:3px solid #89b4fa;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}</style></head>
+<body><div class="loading"><div class="spinner"></div><p>Authenticating with workstation...</p></div>
+<script>
+(async()=>{try{
+const r=await fetch('${ideInfo.url}',{headers:{'Authorization':'Bearer ${ideInfo.accessToken}'},mode:'no-cors',credentials:'include'});
+}catch(e){}
+setTimeout(()=>{window.location.href='${ideInfo.url}';},1500);
+})();
+</script></body></html>`);
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to redirect to IDE');
   }
 });
 

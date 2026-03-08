@@ -494,7 +494,9 @@ export default class CloudWorkstationsManager extends EventEmitter {
   }
 
   /**
-   * Execute a command on a running workstation via gcloud SSH.
+   * Execute a command on a running workstation.
+   * Uses the workstation's access token + host URL to proxy via HTTP.
+   * Falls back to gcloud ssh if available.
    */
   async execCommand(
     clusterId: string,
@@ -502,26 +504,110 @@ export default class CloudWorkstationsManager extends EventEmitter {
     workstationId: string,
     command: string,
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    const { exec } = await import('child_process');
-    return new Promise((resolve) => {
-      const escaped = command.replace(/'/g, "'\\''");
-      const cmd = [
-        'gcloud', 'workstations', 'ssh', workstationId,
-        `--cluster=${clusterId}`,
-        `--config=${configId}`,
-        `--region=${this.region}`,
-        `--project=${this.projectId}`,
-        `--command='${escaped}'`,
-      ].join(' ');
+    // Get workstation host and access token
+    const workstations = await this.listWorkstations(clusterId, configId);
+    const ws = workstations.find(w => w.id === workstationId);
+    if (!ws || !ws.host) {
+      return { stdout: '', stderr: 'Workstation not found or has no host URL', exitCode: 1 };
+    }
+    if (ws.state !== 'STATE_RUNNING') {
+      return { stdout: '', stderr: 'Workstation is not running', exitCode: 1 };
+    }
 
-      exec(cmd, { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }, (error: any, stdout: string, stderr: string) => {
-        resolve({
-          stdout: stdout || '',
-          stderr: stderr || '',
-          exitCode: error?.code || 0,
+    const tokenInfo = await this.generateAccessToken(clusterId, configId, workstationId);
+
+    // Try HTTP proxy to workstation's Code Server API
+    try {
+      const https = await import('https');
+      const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
+        const postData = JSON.stringify({ command });
+        const url = new URL(`https://${ws.host}`);
+
+        const req = https.request({
+          hostname: url.hostname,
+          port: 443,
+          path: '/api/exec',
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${tokenInfo.accessToken}`,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData),
+          },
+          timeout: 30000,
+        }, (res) => {
+          let data = '';
+          res.on('data', (chunk: string) => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data);
+              resolve({
+                stdout: parsed.stdout || parsed.output || data,
+                stderr: parsed.stderr || '',
+                exitCode: parsed.exitCode || parsed.code || 0,
+              });
+            } catch {
+              // If the response isn't JSON, treat the whole body as stdout
+              resolve({ stdout: data, stderr: '', exitCode: res.statusCode === 200 ? 0 : 1 });
+            }
+          });
         });
+
+        req.on('error', (err: Error) => reject(err));
+        req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+        req.write(postData);
+        req.end();
       });
-    });
+
+      return result;
+    } catch (httpError: any) {
+      // HTTP proxy failed — try gcloud ssh as fallback
+      try {
+        const { exec } = await import('child_process');
+        return await new Promise((resolve) => {
+          const escaped = command.replace(/'/g, "'\\''");
+          const cmd = [
+            'gcloud', 'workstations', 'ssh', workstationId,
+            `--cluster=${clusterId}`,
+            `--config=${configId}`,
+            `--region=${this.region}`,
+            `--project=${this.projectId}`,
+            `--command='${escaped}'`,
+          ].join(' ');
+
+          exec(cmd, { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }, (error: any, stdout: string, stderr: string) => {
+            resolve({
+              stdout: stdout || '',
+              stderr: stderr || '',
+              exitCode: error?.code || 0,
+            });
+          });
+        });
+      } catch {
+        return {
+          stdout: '',
+          stderr: `Command execution not available. HTTP proxy error: ${httpError.message}. gcloud not found in container.`,
+          exitCode: 1,
+        };
+      }
+    }
+  }
+
+  /**
+   * Get a short-lived auth URL for embedding the workstation IDE in an iframe.
+   * Returns the workstation host URL with bearer token info.
+   */
+  async getIDEUrl(clusterId: string, configId: string, workstationId: string): Promise<{ url: string; host: string; accessToken: string; expireTime: string }> {
+    const workstations = await this.listWorkstations(clusterId, configId);
+    const ws = workstations.find(w => w.id === workstationId);
+    if (!ws || !ws.host) {
+      throw new Error('Workstation not found or has no host URL');
+    }
+    const tokenInfo = await this.generateAccessToken(clusterId, configId, workstationId);
+    return {
+      url: `https://${ws.host}`,
+      host: ws.host,
+      ...tokenInfo,
+    };
   }
 
   async generateAccessToken(clusterId: string, configId: string, workstationId: string): Promise<{ accessToken: string; expireTime: string }> {

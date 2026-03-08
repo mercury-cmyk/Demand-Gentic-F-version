@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Editor from '@monaco-editor/react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,14 +29,8 @@ import {
   X,
   Cloud,
   ArrowLeft,
-  FolderOpen,
-  File,
-  FileCode2,
-  FolderUp,
-  Save,
   Terminal,
   Maximize2,
-  Minimize2,
   CornerDownLeft,
   Plug,
 } from 'lucide-react';
@@ -84,14 +77,6 @@ interface Workstation {
   env: Record<string, string>;
 }
 
-interface FileEntry {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  size: number;
-  permissions: string;
-}
-
 interface TerminalLine {
   id: number;
   type: 'input' | 'output' | 'error' | 'system';
@@ -134,41 +119,19 @@ const MACHINE_TYPES = [
   { value: 'n1-standard-4', label: 'n1-standard-4 (4 vCPU, 15 GB)' },
 ];
 
-const EXT_LANG_MAP: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  json: 'json', yaml: 'yaml', yml: 'yaml', md: 'markdown',
-  py: 'python', go: 'go', rs: 'rust', sql: 'sql',
-  html: 'html', css: 'css', scss: 'scss', sh: 'shell', bash: 'shell',
-  dockerfile: 'dockerfile', xml: 'xml', toml: 'ini', env: 'ini',
-};
-
-function inferLanguage(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
-  const base = filename.toLowerCase();
-  if (base === 'dockerfile') return 'dockerfile';
-  if (base === 'makefile') return 'makefile';
-  if (base.endsWith('.env') || base.startsWith('.env')) return 'ini';
-  return EXT_LANG_MAP[ext] || 'plaintext';
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function formatTime(iso: string) {
   if (!iso) return '\u2014';
   const d = new Date(iso);
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function getFileIcon(entry: FileEntry) {
-  if (entry.type === 'directory') return <FolderOpen className="w-4 h-4 text-amber-500" />;
-  const ext = entry.name.split('.').pop()?.toLowerCase();
-  if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs'].includes(ext || ''))
-    return <FileCode2 className="w-4 h-4 text-blue-500" />;
-  return <File className="w-4 h-4 text-slate-400" />;
+function handleExpandableRowKeyDown(toggle: () => void) {
+  return (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggle();
+    }
+  };
 }
 
 /* ── Helper: workstation API base path ── */
@@ -196,7 +159,7 @@ function StateBadge({ state }: { state: string }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   CLOUD IDE VIEW — file tree + Monaco editor + terminal
+   CLOUD IDE VIEW — embedded workstation IDE with our toolbar + terminal
    ══════════════════════════════════════════════════════════════ */
 function CloudIDE({
   workstation,
@@ -207,95 +170,48 @@ function CloudIDE({
   config: Config | null;
   onDisconnect: () => void;
 }) {
-  const { toast } = useToast();
-  const [cwd, setCwd] = useState('/home/user');
-  const [files, setFiles] = useState<FileEntry[]>([]);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
-  const [openFileContent, setOpenFileContent] = useState('');
-  const [editorDirty, setEditorDirty] = useState(false);
-  const [fileLoading, setFileLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [ideUrl, setIdeUrl] = useState<string | null>(null);
+  const [ideLoading, setIdeLoading] = useState(true);
+  const [ideError, setIdeError] = useState<string | null>(null);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([
     { id: 0, type: 'system', text: `Connected to ${workstation.displayName} (${workstation.id})`, timestamp: new Date() },
     { id: 1, type: 'system', text: `Host: ${workstation.host || 'resolving...'}`, timestamp: new Date() },
   ]);
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalRunning, setTerminalRunning] = useState(false);
-  const [terminalExpanded, setTerminalExpanded] = useState(false);
-  const [sidebarWidth] = useState(280);
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const lineIdRef = useRef(2);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const addTerminalLine = useCallback((type: TerminalLine['type'], text: string) => {
     const id = lineIdRef.current++;
     setTerminalLines(prev => [...prev, { id, type, text, timestamp: new Date() }]);
   }, []);
 
-  /* ── File operations ── */
-  const fetchFiles = useCallback(async (path: string) => {
-    setFilesLoading(true);
-    try {
-      const data = await apiJsonRequest<{ success: boolean; entries: FileEntry[]; cwd: string }>(
-        'GET', `${wsApi(workstation)}/files?path=${encodeURIComponent(path)}`,
-      );
-      if (data.success) {
-        setFiles(data.entries || []);
-        setCwd(data.cwd || path);
+  /* ── Fetch IDE URL with access token ── */
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await apiJsonRequest<{
+          success: boolean; url: string; host: string;
+          accessToken: string; expireTime: string; error?: string;
+        }>('GET', `${wsApi(workstation)}/ide-url`);
+        if (data.success && data.url) {
+          setIdeUrl(data.url);
+          addTerminalLine('system', `IDE URL: ${data.url}`);
+          addTerminalLine('system', `Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
+        } else {
+          setIdeError(data.error || 'Failed to get IDE URL');
+        }
+      } catch (err) {
+        setIdeError(String(err));
       }
-    } catch (err) {
-      addTerminalLine('error', `Failed to list files: ${err}`);
-    } finally {
-      setFilesLoading(false);
-    }
-  }, [workstation, addTerminalLine]);
+    })();
+  }, [workstation]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openFile = async (entry: FileEntry) => {
-    if (entry.type === 'directory') {
-      fetchFiles(entry.path);
-      return;
-    }
-    setFileLoading(true);
-    try {
-      const data = await apiJsonRequest<{ success: boolean; content: string; path: string }>(
-        'GET', `${wsApi(workstation)}/file?path=${encodeURIComponent(entry.path)}`,
-      );
-      if (data.success) {
-        setOpenFilePath(data.path);
-        setOpenFileContent(data.content);
-        setEditorDirty(false);
-      }
-    } catch (err) {
-      toast({ title: 'Failed to open file', description: String(err), variant: 'destructive' });
-    } finally {
-      setFileLoading(false);
-    }
-  };
-
-  const saveFile = async () => {
-    if (!openFilePath) return;
-    setSaving(true);
-    try {
-      const data = await apiJsonRequest<{ success: boolean; error?: string }>(
-        'PUT', `${wsApi(workstation)}/file`,
-        { path: openFilePath, content: openFileContent },
-      );
-      if (data.success) {
-        setEditorDirty(false);
-        toast({ title: 'File saved', description: openFilePath });
-      } else {
-        throw new Error(data.error);
-      }
-    } catch (err) {
-      toast({ title: 'Save failed', description: String(err), variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const navigateUp = () => {
-    const parent = cwd.split('/').slice(0, -1).join('/') || '/';
-    fetchFiles(parent);
+  const openIDEInNewTab = () => {
+    window.open(`${wsApi(workstation)}/ide-redirect`, '_blank');
   };
 
   /* ── Terminal ── */
@@ -326,29 +242,18 @@ function CloudIDE({
   };
 
   useEffect(() => {
-    fetchFiles(cwd);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [terminalLines]);
-
-  const openFileName = openFilePath?.split('/').pop() || '';
-  const language = openFileName ? inferLanguage(openFileName) : 'plaintext';
-  const breadcrumbs = cwd.split('/').filter(Boolean);
 
   return (
     <div className="flex flex-col h-[calc(100vh-160px)] -m-6 bg-[#1e1e2e]">
       {/* ── IDE Top Bar ── */}
       <div className="h-11 bg-[#181825] border-b border-[#313244] flex items-center px-3 gap-3 shrink-0">
         <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDisconnect}
+          variant="ghost" size="sm" onClick={onDisconnect}
           className="h-7 px-2 text-[#cdd6f4] hover:bg-[#313244] hover:text-white"
         >
-          <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
-          Manager
+          <ArrowLeft className="w-3.5 h-3.5 mr-1.5" /> Manager
         </Button>
         <div className="w-px h-5 bg-[#313244]" />
         <div className="flex items-center gap-2">
@@ -361,175 +266,72 @@ function CloudIDE({
           )}
         </div>
         <div className="flex-1" />
-        {openFilePath && (
-          <div className="flex items-center gap-2">
-            {editorDirty && (
-              <div className="w-2 h-2 rounded-full bg-amber-400" title="Unsaved changes" />
-            )}
-            <span className="text-xs text-[#a6adc8] truncate max-w-[300px]">{openFilePath}</span>
-          </div>
-        )}
-        <div className="flex items-center gap-1 ml-3">
-          {openFilePath && editorDirty && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={saveFile}
-              disabled={saving}
-              className="h-7 px-2 text-emerald-400 hover:bg-[#313244]"
-            >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1" />}
-              Save
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setTerminalExpanded(!terminalExpanded)}
-            className="h-7 px-2 text-[#a6adc8] hover:bg-[#313244]"
-          >
-            <Terminal className="w-3.5 h-3.5 mr-1" />
-            Terminal
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" onClick={() => setShowTerminal(!showTerminal)}
+            className={`h-7 px-2 hover:bg-[#313244] ${showTerminal ? 'text-[#89b4fa]' : 'text-[#a6adc8]'}`}>
+            <Terminal className="w-3.5 h-3.5 mr-1" /> Terminal
+          </Button>
+          <Button variant="ghost" size="sm" onClick={openIDEInNewTab}
+            className="h-7 px-2 text-[#a6adc8] hover:bg-[#313244]">
+            <Maximize2 className="w-3.5 h-3.5 mr-1" /> Pop Out
+          </Button>
+          <Button variant="ghost" size="sm"
+            onClick={() => { if (iframeRef.current && ideUrl) iframeRef.current.src = ideUrl; }}
+            className="h-7 px-2 text-[#a6adc8] hover:bg-[#313244]">
+            <RefreshCw className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>
 
       {/* ── Main IDE Area ── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* ── File Explorer Sidebar ── */}
-        <div
-          className="shrink-0 bg-[#1e1e2e] border-r border-[#313244] flex flex-col"
-          style={{ width: sidebarWidth }}
-        >
-          {/* Sidebar Header */}
-          <div className="h-9 px-3 flex items-center justify-between border-b border-[#313244]">
-            <span className="text-[10px] font-bold text-[#a6adc8] uppercase tracking-widest">Explorer</span>
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={navigateUp}
-                className="p-1 rounded hover:bg-[#313244] text-[#a6adc8] hover:text-[#cdd6f4] transition-colors"
-                title="Go up"
-              >
-                <FolderUp className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => fetchFiles(cwd)}
-                className="p-1 rounded hover:bg-[#313244] text-[#a6adc8] hover:text-[#cdd6f4] transition-colors"
-                title="Refresh"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${filesLoading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
-
-          {/* Breadcrumbs */}
-          <div className="px-3 py-1.5 text-[11px] text-[#6c7086] truncate border-b border-[#313244]/50">
-            <span className="hover:text-[#a6adc8] cursor-pointer" onClick={() => fetchFiles('/')}>
-              /
-            </span>
-            {breadcrumbs.map((crumb, i) => (
-              <span key={i}>
-                <span
-                  className="hover:text-[#a6adc8] cursor-pointer"
-                  onClick={() => fetchFiles('/' + breadcrumbs.slice(0, i + 1).join('/'))}
-                >
-                  {crumb}
-                </span>
-                {i < breadcrumbs.length - 1 && <span className="mx-0.5">/</span>}
-              </span>
-            ))}
-          </div>
-
-          {/* File List */}
-          <div className="flex-1 overflow-y-auto py-1">
-            {filesLoading && files.length === 0 ? (
-              <div className="flex items-center justify-center h-24 text-[#6c7086]">
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                <span className="text-xs">Loading...</span>
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        {/* IDE Iframe */}
+        <div className="flex-1 overflow-hidden">
+          {ideError ? (
+            <div className="flex flex-col items-center justify-center h-full bg-[#1e1e2e] text-[#cdd6f4]">
+              <div className="w-16 h-16 rounded-2xl bg-[#f38ba8]/10 flex items-center justify-center mb-4">
+                <Monitor className="w-8 h-8 text-[#f38ba8]" />
               </div>
-            ) : files.length === 0 ? (
-              <div className="text-center text-[#6c7086] text-xs py-8">Empty directory</div>
-            ) : (
-              files.map((entry) => (
-                <button
-                  key={entry.path}
-                  onClick={() => openFile(entry)}
-                  className={`w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-[#313244]/60 transition-colors group ${
-                    openFilePath === entry.path ? 'bg-[#313244] text-[#cdd6f4]' : 'text-[#a6adc8]'
-                  }`}
-                >
-                  {getFileIcon(entry)}
-                  <span className="text-xs truncate flex-1">{entry.name}</span>
-                  {entry.type === 'file' && (
-                    <span className="text-[10px] text-[#585b70] group-hover:text-[#6c7086]">
-                      {formatBytes(entry.size)}
-                    </span>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-
-          {/* Sidebar Footer */}
-          <div className="px-3 py-2 border-t border-[#313244] text-[10px] text-[#585b70]">
-            {files.length} items in {cwd}
-          </div>
+              <p className="text-sm font-medium text-[#f38ba8] mb-2">Failed to connect to IDE</p>
+              <p className="text-xs text-[#6c7086] mb-4 max-w-md text-center">{ideError}</p>
+              <Button variant="outline" size="sm" onClick={openIDEInNewTab}
+                className="bg-[#313244] border-[#45475a] text-[#cdd6f4] hover:bg-[#45475a]">
+                <Maximize2 className="w-3.5 h-3.5 mr-1.5" /> Open IDE in New Tab
+              </Button>
+            </div>
+          ) : ideUrl ? (
+            <>
+              {ideLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-[#1e1e2e] z-10">
+                  <div className="text-center">
+                    <Loader2 className="w-8 h-8 animate-spin text-[#89b4fa] mx-auto mb-3" />
+                    <p className="text-sm text-[#a6adc8]">Loading Cloud IDE...</p>
+                    <p className="text-xs text-[#585b70] mt-1">Connecting to {workstation.host}</p>
+                  </div>
+                </div>
+              )}
+              <iframe
+                ref={iframeRef}
+                src={ideUrl}
+                className="w-full h-full border-0"
+                title={`Cloud IDE - ${workstation.displayName}`}
+                onLoad={() => setIdeLoading(false)}
+                onError={() => { setIdeLoading(false); setIdeError('IDE iframe failed to load. Try the Pop Out button.'); }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+                allow="clipboard-read; clipboard-write"
+              />
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-full bg-[#1e1e2e]">
+              <Loader2 className="w-6 h-6 animate-spin text-[#89b4fa] mr-3" />
+              <span className="text-sm text-[#a6adc8]">Fetching IDE credentials...</span>
+            </div>
+          )}
         </div>
 
-        {/* ── Editor + Terminal Area ── */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Editor */}
-          <div className={`flex-1 overflow-hidden ${terminalExpanded ? '' : ''}`}>
-            {fileLoading ? (
-              <div className="flex items-center justify-center h-full bg-[#1e1e2e] text-[#6c7086]">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                Loading file...
-              </div>
-            ) : openFilePath ? (
-              <Editor
-                height="100%"
-                language={language}
-                value={openFileContent}
-                theme="vs-dark"
-                onChange={(value) => {
-                  setOpenFileContent(value || '');
-                  setEditorDirty(true);
-                }}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineHeight: 20,
-                  padding: { top: 12 },
-                  automaticLayout: true,
-                  scrollBeyondLastLine: false,
-                  wordWrap: 'on',
-                  renderWhitespace: 'selection',
-                  bracketPairColorization: { enabled: true },
-                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-                  smoothScrolling: true,
-                  cursorBlinking: 'smooth',
-                  cursorSmoothCaretAnimation: 'on',
-                }}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full bg-[#1e1e2e] text-[#585b70]">
-                <div className="w-20 h-20 rounded-2xl bg-[#313244]/50 flex items-center justify-center mb-4">
-                  <Monitor className="w-10 h-10 text-[#45475a]" />
-                </div>
-                <p className="text-sm font-medium text-[#6c7086] mb-1">Cloud IDE</p>
-                <p className="text-xs text-[#585b70] max-w-xs text-center">
-                  Select a file from the explorer to start editing.
-                  Use the terminal below to run commands on the workstation.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Terminal Panel */}
-          <div className={`border-t border-[#313244] bg-[#11111b] flex flex-col shrink-0 transition-all ${
-            terminalExpanded ? 'h-[45%]' : 'h-[200px]'
-          }`}>
-            {/* Terminal Header */}
+        {/* Terminal Panel (togglable) */}
+        {showTerminal && (
+          <div className="h-[250px] border-t border-[#313244] bg-[#11111b] flex flex-col shrink-0">
             <div className="h-8 px-3 flex items-center justify-between border-b border-[#313244]/50 shrink-0">
               <div className="flex items-center gap-2">
                 <Terminal className="w-3.5 h-3.5 text-[#a6adc8]" />
@@ -541,67 +343,51 @@ function CloudIDE({
                 )}
               </div>
               <div className="flex items-center gap-1">
-                <button
-                  onClick={() => {
-                    setTerminalLines([
-                      { id: lineIdRef.current++, type: 'system', text: 'Terminal cleared', timestamp: new Date() },
-                    ]);
-                  }}
-                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8] text-[10px]"
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={() => setTerminalExpanded(!terminalExpanded)}
-                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8]"
-                >
-                  {terminalExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                <button onClick={() => setTerminalLines([{ id: lineIdRef.current++, type: 'system', text: 'Terminal cleared', timestamp: new Date() }])}
+                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8] text-[10px]">Clear</button>
+                <button onClick={() => setShowTerminal(false)}
+                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8]">
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
-
-            {/* Terminal Output */}
             <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-xs">
               {terminalLines.map((line) => (
-                <div
-                  key={line.id}
-                  className={`py-0.5 leading-5 whitespace-pre-wrap break-all ${
-                    line.type === 'input' ? 'text-[#89b4fa]' :
-                    line.type === 'error' ? 'text-[#f38ba8]' :
-                    line.type === 'system' ? 'text-[#6c7086] italic' :
-                    'text-[#cdd6f4]'
-                  }`}
-                >
-                  {line.text}
-                </div>
+                <div key={line.id} className={`py-0.5 leading-5 whitespace-pre-wrap break-all ${
+                  line.type === 'input' ? 'text-[#89b4fa]' :
+                  line.type === 'error' ? 'text-[#f38ba8]' :
+                  line.type === 'system' ? 'text-[#6c7086] italic' : 'text-[#cdd6f4]'
+                }`}>{line.text}</div>
               ))}
               <div ref={terminalEndRef} />
             </div>
-
-            {/* Terminal Input */}
             <form onSubmit={handleTerminalSubmit} className="px-3 py-2 border-t border-[#313244]/50 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="text-[#89b4fa] text-xs font-mono font-bold">$</span>
-                <input
-                  type="text"
-                  value={terminalInput}
-                  onChange={(e) => setTerminalInput(e.target.value)}
-                  placeholder="Type a command..."
-                  disabled={terminalRunning}
-                  className="flex-1 bg-transparent border-none outline-none text-xs font-mono text-[#cdd6f4] placeholder:text-[#45475a]"
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  disabled={terminalRunning || !terminalInput.trim()}
-                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8] disabled:opacity-30"
-                >
+                <input type="text" value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)}
+                  placeholder="Type a command..." disabled={terminalRunning}
+                  className="flex-1 bg-transparent border-none outline-none text-xs font-mono text-[#cdd6f4] placeholder:text-[#45475a]" autoFocus />
+                <button type="submit" disabled={terminalRunning || !terminalInput.trim()}
+                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8] disabled:opacity-30">
                   <CornerDownLeft className="w-3.5 h-3.5" />
                 </button>
               </div>
             </form>
           </div>
+        )}
+      </div>
+
+      {/* ── Status Bar ── */}
+      <div className="h-6 bg-[#181825] border-t border-[#313244] flex items-center px-3 text-[10px] text-[#585b70] shrink-0">
+        <div className="flex items-center gap-1.5">
+          <Plug className="w-3 h-3 text-emerald-400" />
+          <span className="text-emerald-400">Connected</span>
         </div>
+        <div className="mx-3 w-px h-3 bg-[#313244]" />
+        <span>{workstation.host}</span>
+        {config && <><div className="mx-3 w-px h-3 bg-[#313244]" /><span>{config.machineType} &middot; {config.bootDiskSizeGb} GB</span></>}
+        <div className="flex-1" />
+        <span>Cloud Workstation IDE</span>
       </div>
     </div>
   );
@@ -728,17 +514,30 @@ export default function WorkstationsTab() {
     }
   };
 
-  const connectToWorkstation = (ws: Workstation) => {
+  const connectToWorkstation = async (ws: Workstation) => {
     if (ws.state !== 'STATE_RUNNING') {
       toast({ title: 'Not running', description: 'Start the workstation first.', variant: 'destructive' });
       return;
     }
-    // Find config for the workstation
-    const cfgList = configs[ws.clusterId] || [];
-    const cfg = cfgList.find(c => c.id === ws.configId) || null;
-    setConnectedWs(ws);
-    setConnectedConfig(cfg);
-    setViewMode('ide');
+
+    const key = `connect-${ws.id}`;
+    setActionState(key, true);
+
+    try {
+      await apiJsonRequest<{ success: boolean; accessToken: string; expireTime: string }>(
+        'POST', `${wsApi(ws)}/access-token`, {},
+      );
+
+      const cfgList = configs[ws.clusterId] || [];
+      const cfg = cfgList.find(c => c.id === ws.configId) || null;
+      setConnectedWs(ws);
+      setConnectedConfig(cfg);
+      setViewMode('ide');
+    } catch (err) {
+      toast({ title: 'Unable to open IDE', description: String(err), variant: 'destructive' });
+    } finally {
+      setActionState(key, false);
+    }
   };
 
   const deleteWorkstation = async (ws: Workstation) => {
@@ -1015,9 +814,13 @@ export default function WorkstationsTab() {
           return (
             <div key={cluster.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
               {/* Cluster Header */}
-              <button
+              <div
+                role="button"
+                tabIndex={0}
+                aria-expanded={isExpanded}
                 onClick={() => toggleCluster(cluster.id)}
-                className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left"
+                onKeyDown={handleExpandableRowKeyDown(() => toggleCluster(cluster.id))}
+                className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
               >
                 {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-sm shrink-0">
@@ -1050,7 +853,7 @@ export default function WorkstationsTab() {
                     <Plus className="w-3 h-3 mr-1" /> Config
                   </Button>
                 </div>
-              </button>
+              </div>
 
               {/* Configs */}
               {isExpanded && (
@@ -1072,9 +875,13 @@ export default function WorkstationsTab() {
                       return (
                         <div key={config.id} className="border-t border-slate-100 first:border-t-0">
                           {/* Config Header */}
-                          <button
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={isConfigExpanded}
                             onClick={() => toggleConfig(configKey)}
-                            className="w-full flex items-center gap-3 px-5 py-3 pl-12 hover:bg-slate-50/80 transition-colors text-left"
+                            onKeyDown={handleExpandableRowKeyDown(() => toggleConfig(configKey))}
+                            className="w-full flex items-center gap-3 px-5 py-3 pl-12 hover:bg-slate-50/80 transition-colors text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                           >
                             {isConfigExpanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
                             <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
@@ -1105,7 +912,7 @@ export default function WorkstationsTab() {
                                 <Plus className="w-3 h-3 mr-1" /> Workstation
                               </Button>
                             </div>
-                          </button>
+                          </div>
 
                           {/* Workstations */}
                           {isConfigExpanded && (
@@ -1170,8 +977,11 @@ export default function WorkstationsTab() {
                                             variant="outline" size="sm"
                                             className="h-8 text-xs text-indigo-700 border-indigo-200 hover:bg-indigo-50 font-semibold"
                                             onClick={() => connectToWorkstation(ws)}
+                                            disabled={actionLoading[`connect-${ws.id}`]}
                                           >
-                                            <Plug className="w-3.5 h-3.5 mr-1" /> Connect IDE
+                                            {actionLoading[`connect-${ws.id}`]
+                                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                              : <><Plug className="w-3.5 h-3.5 mr-1" /> Connect IDE</>}
                                           </Button>
                                           <Button
                                             variant="outline" size="sm"

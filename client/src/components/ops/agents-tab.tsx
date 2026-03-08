@@ -2,29 +2,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Activity,
   BarChart3,
   Bot,
   CheckCircle2,
   Clock,
-  Cpu,
   DollarSign,
   RefreshCw,
-  Send,
-  TrendingUp,
   XCircle,
-  Zap,
 } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
 import { apiJsonRequest } from '@/lib/queryClient';
 
 interface ProviderInfo {
@@ -53,20 +40,6 @@ interface OrchestratorStatus {
   breakdown: Record<string, ProviderBreakdown>;
 }
 
-interface TestResult {
-  provider: string;
-  model?: string;
-  transport?: string;
-  content: string;
-  tokensUsed?: number;
-  costEstimate?: number;
-  latencyMs?: number;
-}
-
-type ProviderMode = 'auto' | 'manual';
-type PreferredProvider = 'codex' | 'claude' | 'gemini';
-type OptimizationProfile = 'quality' | 'balanced' | 'cost';
-
 const PROVIDER_COLORS: Record<string, string> = {
   codex: 'bg-violet-500',
   claude: 'bg-orange-500',
@@ -80,17 +53,9 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 export default function AgentsTab() {
-  const { toast } = useToast();
   const [status, setStatus] = useState<OrchestratorStatus | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [testPrompt, setTestPrompt] = useState('');
-  const [testTask, setTestTask] = useState<string>('general');
-  const [providerMode, setProviderMode] = useState<ProviderMode>('auto');
-  const [preferredProvider, setPreferredProvider] = useState<PreferredProvider>('codex');
-  const [optimizationProfile, setOptimizationProfile] = useState<OptimizationProfile>('balanced');
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const [testing, setTesting] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -112,46 +77,6 @@ export default function AgentsTab() {
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
   }, [fetchStatus]);
-
-  const handleTest = async () => {
-    if (!testPrompt.trim()) {
-      toast({
-        title: 'Enter a prompt',
-        description: 'Provide a test prompt to send to the agent orchestrator.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setTesting(true);
-    setTestResult(null);
-
-    try {
-      const data = await apiJsonRequest<{
-        response: TestResult;
-      }>('POST', '/api/ops/agents/test', {
-          prompt: testPrompt,
-          task: testTask,
-          providerMode,
-          preferredProvider,
-          optimizationProfile,
-        });
-
-      setTestResult(data.response);
-      toast({
-        title: 'Test complete',
-        description: `Routed to ${data.response.provider} in ${data.response.latencyMs}ms`,
-      });
-    } catch (err) {
-      toast({
-        title: 'Test failed',
-        description: err instanceof Error ? err.message : String(err),
-        variant: 'destructive',
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
 
   const availableCount = providers.filter((provider) => provider.available).length;
 
@@ -374,160 +299,42 @@ export default function AgentsTab() {
 
       <Card className="bg-slate-800 border-slate-700">
         <CardHeader>
-          <CardTitle className="text-white">Routing Rules</CardTitle>
+          <CardTitle className="text-white">Coding Agent Contract</CardTitle>
           <CardDescription className="text-slate-400">
-            Auto mode priorities for code quality, balance, and cost.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {[
-              {
-                task: 'Code Generation',
-                icon: Cpu,
-                route: 'Codex -> Claude -> Gemini',
-                desc: 'Simple edits and general coding favor Codex first in quality and balanced modes.',
-              },
-              {
-                task: 'Reasoning & Analysis',
-                icon: TrendingUp,
-                route: 'Claude -> Codex -> Gemini',
-                desc: 'Debugging and architecture lean on Claude first when quality matters most.',
-              },
-              {
-                task: 'Multimodal',
-                icon: Zap,
-                route: 'Gemini -> Claude',
-                desc: 'Gemini handles multimodal workloads first, with Claude as the fallback.',
-              },
-              {
-                task: 'Cost Profile',
-                icon: BarChart3,
-                route: 'Gemini -> Codex -> Claude',
-                desc: 'Cost mode starts with Gemini and only escalates when the task needs more depth.',
-              },
-            ].map((rule) => (
-              <div key={rule.task} className="p-3 rounded-lg border border-slate-600 bg-slate-700/30">
-                <div className="flex items-center gap-2 mb-1">
-                  <rule.icon className="w-4 h-4 text-blue-400" />
-                  <span className="text-sm font-medium text-white">{rule.task}</span>
-                </div>
-                <p className="text-xs text-blue-400 mb-1">{rule.route}</p>
-                <p className="text-xs text-slate-400">{rule.desc}</p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-slate-800 border-slate-700">
-        <CardHeader>
-          <CardTitle className="text-white">Agent Playground</CardTitle>
-          <CardDescription className="text-slate-400">
-            Exercise the same auto/manual provider contract used by the Ops Hub coding agent.
+            The Insights view now mirrors the simplified Ops Hub coding agent controls.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Select value={providerMode} onValueChange={(value) => setProviderMode(value as ProviderMode)}>
-              <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">Auto Select</SelectItem>
-                <SelectItem value="manual">Manual Select</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={optimizationProfile} onValueChange={(value) => setOptimizationProfile(value as OptimizationProfile)}>
-              <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="quality">Excellent Code Quality</SelectItem>
-                <SelectItem value="balanced">Balanced</SelectItem>
-                <SelectItem value="cost">Cost Optimized</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={preferredProvider}
-              onValueChange={(value) => setPreferredProvider(value as PreferredProvider)}
-              disabled={providerMode !== 'manual'}
-            >
-              <SelectTrigger className="bg-slate-700 border-slate-600 text-white disabled:opacity-60">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="codex">Codex</SelectItem>
-                <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="gemini">Gemini</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <Textarea
-                placeholder="Enter a test prompt..."
-                value={testPrompt}
-                onChange={(e) => setTestPrompt(e.target.value)}
-                className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400 min-h-[80px]"
-              />
-            </div>
-            <div className="flex flex-col gap-2 w-40">
-              <Select value={testTask} onValueChange={setTestTask}>
-                <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="general">General</SelectItem>
-                  <SelectItem value="code">Code</SelectItem>
-                  <SelectItem value="reasoning">Reasoning</SelectItem>
-                  <SelectItem value="analysis">Analysis</SelectItem>
-                  <SelectItem value="multimodal">Multimodal</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button onClick={handleTest} disabled={testing} className="w-full">
-                {testing ? (
-                  <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                ) : (
-                  <Send className="w-4 h-4 mr-2" />
-                )}
-                {testing ? 'Running...' : 'Test'}
-              </Button>
-            </div>
-          </div>
-
-          {testResult && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="p-4 rounded-lg border border-slate-600 bg-slate-700/30">
-              <div className="flex items-center gap-4 mb-3 flex-wrap">
-                <Badge className={`${PROVIDER_COLORS[testResult.provider] || 'bg-slate-500'} text-white`}>
-                  {PROVIDER_LABELS[testResult.provider] || testResult.provider}
-                </Badge>
-                {testResult.model && (
-                  <span className="text-xs text-slate-400">{testResult.model}</span>
-                )}
-                {testResult.transport && (
-                  <span className="text-xs text-slate-400">{testResult.transport}</span>
-                )}
-                {testResult.latencyMs && (
-                  <span className="text-xs text-slate-400 flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> {testResult.latencyMs}ms
-                  </span>
-                )}
-                {testResult.tokensUsed && (
-                  <span className="text-xs text-slate-400">{testResult.tokensUsed} tokens</span>
-                )}
-                {testResult.costEstimate !== undefined && (
-                  <span className="text-xs text-slate-400">${testResult.costEstimate.toFixed(6)}</span>
-                )}
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Mode Selection</p>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <div className="rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-2 text-sm font-medium text-indigo-100">
+                  Agent
+                </div>
+                <div className="rounded-lg border border-slate-500 bg-slate-700/60 px-3 py-2 text-sm font-medium text-slate-200">
+                  Plan
+                </div>
               </div>
-              <pre className="text-sm text-slate-200 whitespace-pre-wrap font-mono bg-slate-800 p-3 rounded max-h-60 overflow-y-auto">
-                {testResult.content}
-              </pre>
+              <p className="mt-3 text-xs text-slate-400">
+                `Agent` applies a `Simple Edit` to the selected workspace file. `Plan` returns steps without changing files.
+              </p>
             </div>
-          )}
+
+            <div className="p-4 rounded-lg border border-slate-600 bg-slate-700/30">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Model Selector</p>
+              <div className="mt-3 rounded-lg border border-slate-500 bg-slate-700/60 px-3 py-2 text-sm font-medium text-slate-100">
+                Simple Edit
+              </div>
+              <p className="mt-3 text-xs text-slate-400">
+                Provider routing is now internal. The UI no longer exposes auto/manual provider and cost-quality selectors.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-600 bg-slate-700/20 px-4 py-3 text-sm text-slate-300">
+            Use the right-side `AI Coding Agent` panel for requests. Open a workspace file first when you want an edit applied.
+          </div>
         </CardContent>
       </Card>
     </div>
