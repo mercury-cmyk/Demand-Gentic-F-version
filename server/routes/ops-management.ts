@@ -3,6 +3,7 @@ import CloudBuildManager from '../services/gcp/cloud-build-manager.js';
 import CloudRunDeploymentManager from '../services/gcp/cloud-run-deployment.js';
 import DomainMapper from '../services/gcp/domain-mapper.js';
 import CostTracker from '../services/gcp/cost-tracker.js';
+import CloudWorkstationsManager from '../services/gcp/cloud-workstations.js';
 import type { Request, Response } from 'express';
 import { requireAuth, requireRole } from '../auth';
 import {
@@ -30,6 +31,7 @@ const buildManager = new CloudBuildManager(projectId);
 const deploymentManager = new CloudRunDeploymentManager(projectId, region);
 const domainMapper = new DomainMapper(projectId);
 const costTracker = new CostTracker(projectId);
+const workstationsManager = new CloudWorkstationsManager(projectId, region);
 
 function handleOpsError(res: Response, error: unknown, fallbackMessage: string): Response {
   if (error instanceof OpsAgentError) {
@@ -821,7 +823,15 @@ router.get('/agents/status', async (_req: Request, res: Response) => {
  */
 router.post('/agents/test', async (req: Request, res: Response) => {
   try {
-    const { prompt, task = 'general', maxTokens, temperature } = req.body;
+    const {
+      prompt,
+      task = 'general',
+      maxTokens,
+      temperature,
+      providerMode,
+      preferredProvider,
+      optimizationProfile,
+    } = req.body;
 
     if (!prompt) {
       return res.status(400).json({ success: false, error: 'Prompt is required' });
@@ -834,6 +844,9 @@ router.post('/agents/test', async (req: Request, res: Response) => {
       task,
       maxTokens,
       temperature,
+      providerMode,
+      preferredProvider,
+      optimizationProfile,
     });
 
     res.json({
@@ -865,6 +878,9 @@ router.post('/coding-agent', async (req: Request, res: Response) => {
       selectedFilePath: req.body?.selectedFilePath,
       selectedFileContent: req.body?.selectedFileContent,
       applyChanges: Boolean(req.body?.applyChanges),
+      providerMode: req.body?.providerMode,
+      preferredProvider: req.body?.preferredProvider,
+      optimizationProfile: req.body?.optimizationProfile,
     });
 
     res.json({
@@ -1001,6 +1017,211 @@ router.delete('/files', async (req: Request, res: Response) => {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to delete file',
     });
+  }
+});
+
+// ===== CLOUD WORKSTATIONS =====
+
+/**
+ * List all workstation clusters
+ * GET /api/ops/workstations/clusters
+ */
+router.get('/workstations/clusters', async (_req: Request, res: Response) => {
+  try {
+    const clusters = await workstationsManager.listClusters();
+    res.json({ success: true, clusters });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workstation clusters');
+  }
+});
+
+/**
+ * Create a workstation cluster
+ * POST /api/ops/workstations/clusters
+ */
+router.post('/workstations/clusters', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, displayName, network, subnetwork } = req.body;
+    if (!clusterId || !displayName) {
+      return res.status(400).json({ success: false, error: 'clusterId and displayName are required' });
+    }
+    const cluster = await workstationsManager.createCluster({ clusterId, displayName, network, subnetwork });
+    res.json({ success: true, cluster });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create workstation cluster');
+  }
+});
+
+/**
+ * Delete a workstation cluster
+ * DELETE /api/ops/workstations/clusters/:clusterId
+ */
+router.delete('/workstations/clusters/:clusterId', async (req: Request, res: Response) => {
+  try {
+    await workstationsManager.deleteCluster(req.params.clusterId);
+    res.json({ success: true, message: `Cluster ${req.params.clusterId} deleted` });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete workstation cluster');
+  }
+});
+
+/**
+ * List configs for a cluster
+ * GET /api/ops/workstations/clusters/:clusterId/configs
+ */
+router.get('/workstations/clusters/:clusterId/configs', async (req: Request, res: Response) => {
+  try {
+    const configs = await workstationsManager.listConfigs(req.params.clusterId);
+    res.json({ success: true, configs });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workstation configs');
+  }
+});
+
+/**
+ * Create a workstation config
+ * POST /api/ops/workstations/clusters/:clusterId/configs
+ */
+router.post('/workstations/clusters/:clusterId/configs', async (req: Request, res: Response) => {
+  try {
+    const { configId, displayName, machineType, bootDiskSizeGb, idleTimeout, runningTimeout, containerImage, containerEnv, persistentDiskSizeGb } = req.body;
+    if (!configId || !displayName) {
+      return res.status(400).json({ success: false, error: 'configId and displayName are required' });
+    }
+    const config = await workstationsManager.createConfig({
+      clusterId: req.params.clusterId,
+      configId,
+      displayName,
+      machineType,
+      bootDiskSizeGb,
+      idleTimeout,
+      runningTimeout,
+      containerImage,
+      containerEnv,
+      persistentDiskSizeGb,
+    });
+    res.json({ success: true, config });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create workstation config');
+  }
+});
+
+/**
+ * Delete a workstation config
+ * DELETE /api/ops/workstations/clusters/:clusterId/configs/:configId
+ */
+router.delete('/workstations/clusters/:clusterId/configs/:configId', async (req: Request, res: Response) => {
+  try {
+    await workstationsManager.deleteConfig(req.params.clusterId, req.params.configId);
+    res.json({ success: true, message: `Config ${req.params.configId} deleted` });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete workstation config');
+  }
+});
+
+/**
+ * List workstations for a config
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations', async (req: Request, res: Response) => {
+  try {
+    const workstations = await workstationsManager.listWorkstations(req.params.clusterId, req.params.configId);
+    res.json({ success: true, workstations });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workstations');
+  }
+});
+
+/**
+ * List ALL workstations across all clusters and configs
+ * GET /api/ops/workstations/all
+ */
+router.get('/workstations/all', async (_req: Request, res: Response) => {
+  try {
+    const workstations = await workstationsManager.listAllWorkstations();
+    res.json({ success: true, workstations });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list all workstations');
+  }
+});
+
+/**
+ * Create a workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations', async (req: Request, res: Response) => {
+  try {
+    const { workstationId, displayName, env, labels } = req.body;
+    if (!workstationId || !displayName) {
+      return res.status(400).json({ success: false, error: 'workstationId and displayName are required' });
+    }
+    const workstation = await workstationsManager.createWorkstation({
+      clusterId: req.params.clusterId,
+      configId: req.params.configId,
+      workstationId,
+      displayName,
+      env,
+      labels,
+    });
+    res.json({ success: true, workstation });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create workstation');
+  }
+});
+
+/**
+ * Start a workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/start
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/start', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const workstation = await workstationsManager.startWorkstation(clusterId, configId, workstationId);
+    res.json({ success: true, workstation });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to start workstation');
+  }
+});
+
+/**
+ * Stop a workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/stop
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/stop', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const workstation = await workstationsManager.stopWorkstation(clusterId, configId, workstationId);
+    res.json({ success: true, workstation });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to stop workstation');
+  }
+});
+
+/**
+ * Delete a workstation
+ * DELETE /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId
+ */
+router.delete('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    await workstationsManager.deleteWorkstation(clusterId, configId, workstationId);
+    res.json({ success: true, message: `Workstation ${workstationId} deleted` });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete workstation');
+  }
+});
+
+/**
+ * Generate access token for a workstation (opens IDE)
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/access-token
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/access-token', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const tokenInfo = await workstationsManager.generateAccessToken(clusterId, configId, workstationId);
+    res.json({ success: true, ...tokenInfo });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to generate access token');
   }
 });
 

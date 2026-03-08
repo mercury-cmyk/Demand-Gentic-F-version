@@ -41,6 +41,7 @@ import {
   Play,
   Square,
   Box,
+  Monitor,
 } from 'lucide-react';
 import SecretsTab from '@/components/ops/secrets-tab';
 import CostsTab from '@/components/ops/costs-tab';
@@ -49,6 +50,7 @@ import DomainsTab from '@/components/ops/domains-tab';
 import AgentsTab from '@/components/ops/agents-tab';
 import FileManagerTab, { OpsWorkspaceFileContext } from '@/components/ops/file-manager-tab';
 import PreviewTab from '@/components/ops/preview-tab';
+import WorkstationsTab from '@/components/ops/workstations-tab';
 import { useToast } from '@/hooks/use-toast';
 
 /* ── Interfaces ── */
@@ -57,6 +59,8 @@ interface ChatMessage {
   content: string;
   timestamp: Date;
   provider?: string;
+  model?: string;
+  transport?: string;
   applied?: boolean;
 }
 
@@ -86,6 +90,10 @@ interface NavSection {
   label: string;
   items: { id: string; label: string; icon: React.ReactNode; badge?: string }[];
 }
+
+type CodingAgentProvider = 'codex' | 'claude' | 'gemini';
+type CodingAgentProviderMode = 'auto' | 'manual';
+type CodingAgentOptimizationProfile = 'quality' | 'balanced' | 'cost';
 
 /* ── Projects configuration ── */
 const PROJECTS: Project[] = [
@@ -133,6 +141,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'DEVOPS',
     items: [
+      { id: 'workstations', label: 'Workstations', icon: <Monitor className="w-4 h-4" /> },
       { id: 'deployments', label: 'Deployments', icon: <Rocket className="w-4 h-4" /> },
       { id: 'domains', label: 'Domains & DNS', icon: <Globe className="w-4 h-4" /> },
       { id: 'secrets', label: 'Secrets & Env', icon: <Lock className="w-4 h-4" /> },
@@ -158,6 +167,18 @@ const TAB_TO_SECTION: Record<string, string> = {
   workspace: 'WORKSPACE',
   devops: 'DEVOPS',
   insights: 'INSIGHTS',
+};
+
+const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
+  codex: 'Codex',
+  claude: 'Claude',
+  gemini: 'Gemini',
+};
+
+const OPTIMIZATION_PROFILE_LABELS: Record<CodingAgentOptimizationProfile, string> = {
+  quality: 'Excellent Code Quality',
+  balanced: 'Balanced',
+  cost: 'Cost Optimized',
 };
 
 function getTopTabForPage(pageId: string): string {
@@ -356,6 +377,9 @@ export default function OpsHub() {
   const [chatInput, setChatInput] = useState('');
   const [chatMode, setChatMode] = useState<'simple-edit' | 'debug' | 'deploy' | 'general'>('simple-edit');
   const [applyEdits, setApplyEdits] = useState(true);
+  const [providerMode, setProviderMode] = useState<CodingAgentProviderMode>('auto');
+  const [preferredProvider, setPreferredProvider] = useState<CodingAgentProvider>('codex');
+  const [optimizationProfile, setOptimizationProfile] = useState<CodingAgentOptimizationProfile>('balanced');
   const [chatSending, setChatSending] = useState(false);
   const [selectedFile, setSelectedFile] = useState<OpsWorkspaceFileContext | null>(null);
   const [externalFileUpdate, setExternalFileUpdate] = useState<{
@@ -437,6 +461,9 @@ export default function OpsHub() {
           selectedFilePath: selectedFile?.path,
           selectedFileContent: selectedFile?.content,
           applyChanges: chatMode === 'simple-edit' ? applyEdits : false,
+          providerMode,
+          preferredProvider,
+          optimizationProfile,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -450,6 +477,8 @@ export default function OpsHub() {
         content: data.response?.summary || 'No response generated.',
         timestamp: new Date(),
         provider: data.response?.provider,
+        model: data.response?.model,
+        transport: data.response?.transport,
         applied: Boolean(data.response?.applied),
       };
       setChatMessages((current) => [...current, nextMessage]);
@@ -506,6 +535,8 @@ export default function OpsHub() {
         );
       case 'costs':
         return <CostsTab />;
+      case 'workstations':
+        return <WorkstationsTab />;
       case 'deployments':
         return <DeploymentsTab />;
       case 'domains':
@@ -536,6 +567,16 @@ export default function OpsHub() {
     : activeProject.status === 'deploying'
     ? 'bg-amber-400 animate-pulse'
     : 'bg-slate-300';
+  const selectionSummary = providerMode === 'manual'
+    ? `Manual: ${AGENT_PROVIDER_LABELS[preferredProvider]} first`
+    : `Auto: ${OPTIMIZATION_PROFILE_LABELS[optimizationProfile]}`;
+  const selectionDetail = providerMode === 'manual'
+    ? 'Manual mode uses your chosen provider first and keeps the profile for fallback order.'
+    : optimizationProfile === 'quality'
+    ? 'Quality mode prioritizes the strongest coding and reasoning providers before cost.'
+    : optimizationProfile === 'cost'
+    ? 'Cost mode prefers Gemini first, then escalates only when needed.'
+    : 'Balanced mode favors Codex first, then falls back for deeper reasoning or lower cost.';
 
   return (
     <div className="h-screen flex flex-col bg-white text-slate-900 overflow-hidden font-sans">
@@ -756,6 +797,54 @@ export default function OpsHub() {
               </Select>
             </div>
 
+            <div className="grid grid-cols-2 gap-2">
+              <Select value={providerMode} onValueChange={(value) => setProviderMode(value as CodingAgentProviderMode)}>
+                <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto Select</SelectItem>
+                  <SelectItem value="manual">Manual Select</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={optimizationProfile}
+                onValueChange={(value) => setOptimizationProfile(value as CodingAgentOptimizationProfile)}
+              >
+                <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="quality">Excellent Code Quality</SelectItem>
+                  <SelectItem value="balanced">Balanced</SelectItem>
+                  <SelectItem value="cost">Cost Optimized</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-[minmax(0,1fr)_132px] gap-2">
+              <Select
+                value={preferredProvider}
+                onValueChange={(value) => setPreferredProvider(value as CodingAgentProvider)}
+                disabled={providerMode !== 'manual'}
+              >
+                <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg disabled:opacity-60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="codex">Codex</SelectItem>
+                  <SelectItem value="claude">Claude</SelectItem>
+                  <SelectItem value="gemini">Gemini</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Selection</p>
+                <p className="mt-1 text-xs font-medium text-slate-700">{selectionSummary}</p>
+              </div>
+            </div>
+
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -778,6 +867,7 @@ export default function OpsHub() {
                     : 'Simple Edit is in preview mode and will not save changes.'
                   : 'Non-edit modes use the agent for analysis and guidance.'}
               </p>
+              <p className="text-xs text-slate-500">{selectionDetail}</p>
             </div>
           </div>
 
@@ -794,26 +884,35 @@ export default function OpsHub() {
                 </p>
               </div>
             ) : (
-              chatMessages.map((message, index) => (
-                <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-4 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                  <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                    message.role === 'user'
-                      ? 'bg-indigo-500 text-white shadow-sm'
-                      : 'bg-white text-slate-700 border border-slate-200 shadow-sm'
-                  }`}>
-                    <p className="whitespace-pre-wrap">{message.content}</p>
-                    <div className="flex items-center gap-2 mt-2 text-[10px] opacity-60">
-                      {message.provider && <span>via {message.provider}</span>}
-                      {message.applied && (
-                        <span className="inline-flex items-center gap-1 text-emerald-500 font-medium">
-                          <CheckCircle2 className="w-3 h-3" />
-                          edit applied
-                        </span>
-                      )}
+              chatMessages.map((message, index) => {
+                const providerLabel =
+                  message.provider && message.provider in AGENT_PROVIDER_LABELS
+                    ? AGENT_PROVIDER_LABELS[message.provider as CodingAgentProvider]
+                    : message.provider;
+
+                return (
+                  <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-4 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                    <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                      message.role === 'user'
+                        ? 'bg-indigo-500 text-white shadow-sm'
+                        : 'bg-white text-slate-700 border border-slate-200 shadow-sm'
+                    }`}>
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      <div className="flex items-center gap-2 mt-2 text-[10px] opacity-60">
+                        {providerLabel && <span>via {providerLabel}</span>}
+                        {message.model && <span>{message.model}</span>}
+                        {message.transport && <span>{message.transport}</span>}
+                        {message.applied && (
+                          <span className="inline-flex items-center gap-1 text-emerald-500 font-medium">
+                            <CheckCircle2 className="w-3 h-3" />
+                            edit applied
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
             <div ref={chatEndRef} />
           </div>
