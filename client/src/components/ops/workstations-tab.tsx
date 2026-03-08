@@ -186,10 +186,42 @@ function CloudIDE({
     setTerminalLines(prev => [...prev, { id, type, text, timestamp: new Date() }]);
   }, []);
 
-  const openIDEInNewTab = () => {
-    window.open(`${wsApi(workstation)}/ide-redirect`, '_blank');
-    setIdeOpened(true);
-    addTerminalLine('system', 'Code editor opened in new tab.');
+  const openIDEInNewTab = async () => {
+    try {
+      addTerminalLine('system', 'Fetching IDE credentials...');
+      const data = await apiJsonRequest<{
+        success: boolean; url: string; host: string;
+        accessToken: string; expireTime: string; error?: string;
+      }>('GET', `${wsApi(workstation)}/ide-url`);
+      if (data.success && data.url) {
+        // Open a blank page and inject auth, then redirect to workstation
+        const w = window.open('about:blank', '_blank');
+        if (w) {
+          w.document.write(`<!DOCTYPE html><html><head><title>Cloud IDE - Loading...</title>
+<style>body{margin:0;font-family:system-ui;background:#1e1e2e;color:#cdd6f4;display:flex;align-items:center;justify-content:center;height:100vh}
+.loading{text-align:center}.spinner{width:40px;height:40px;border:3px solid #313244;border-top:3px solid #89b4fa;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}</style></head>
+<body><div class="loading"><div class="spinner"></div><p>Authenticating with workstation...</p></div>
+<script>
+(async()=>{try{
+await fetch('${data.url}',{headers:{'Authorization':'Bearer ${data.accessToken}'},mode:'no-cors',credentials:'include'});
+}catch(e){}
+setTimeout(()=>{window.location.href='${data.url}';},1500);
+})();
+</script></body></html>`);
+          w.document.close();
+        } else {
+          // Popup blocked — fallback to direct navigation
+          window.open(data.url, '_blank');
+        }
+        setIdeOpened(true);
+        addTerminalLine('system', `IDE opened in new tab. Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
+      } else {
+        addTerminalLine('error', `Failed to get IDE URL: ${data.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      addTerminalLine('error', `Failed to open IDE: ${err}`);
+    }
   };
 
   /* Auto-open IDE in new tab on mount */
