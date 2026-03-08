@@ -3,7 +3,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -27,7 +26,6 @@ import {
   Send,
   Loader2,
   Code2,
-  FileCode2,
   CheckCircle2,
   ChevronDown,
   Terminal,
@@ -79,13 +77,25 @@ interface OpsOverview {
   opsAgentReachable: boolean;
 }
 
-interface Project {
+export type DeployTarget = 'vm' | 'cloud-run';
+
+export interface ProjectService {
+  name: string;
+  label: string;
+  dockerComposeService?: string;
+  cloudRunService?: string;
+  imageUrl?: string;
+}
+
+export interface Project {
   id: string;
   name: string;
   description: string;
   status: 'running' | 'stopped' | 'deploying';
   environment: 'production' | 'development' | 'staging';
   icon: string;
+  deployTarget: DeployTarget;
+  services: ProjectService[];
 }
 
 interface NavSection {
@@ -94,8 +104,8 @@ interface NavSection {
 }
 
 type CodingAgentProvider = 'codex' | 'claude' | 'gemini';
-type CodingAgentProviderMode = 'auto' | 'manual';
-type CodingAgentOptimizationProfile = 'quality' | 'balanced' | 'cost';
+type CodingAgentRunMode = 'agent' | 'plan';
+type CodingAgentModelSelector = 'simple-edit';
 
 /* ── Projects configuration ── */
 const PROJECTS: Project[] = [
@@ -106,6 +116,13 @@ const PROJECTS: Project[] = [
     status: 'running',
     environment: 'production',
     icon: '🚀',
+    deployTarget: 'vm',
+    services: [
+      { name: 'api', label: 'API Server', dockerComposeService: 'api' },
+      { name: 'nginx', label: 'Nginx Proxy', dockerComposeService: 'nginx' },
+      { name: 'ops-agent', label: 'Ops Agent', dockerComposeService: 'ops-agent' },
+      { name: 'certbot', label: 'Certbot SSL', dockerComposeService: 'certbot' },
+    ],
   },
   {
     id: 'media-bridge',
@@ -114,6 +131,10 @@ const PROJECTS: Project[] = [
     status: 'running',
     environment: 'production',
     icon: '🎙️',
+    deployTarget: 'vm',
+    services: [
+      { name: 'media-bridge', label: 'Media Bridge', dockerComposeService: 'media-bridge' },
+    ],
   },
   {
     id: 'drachtio',
@@ -122,6 +143,22 @@ const PROJECTS: Project[] = [
     status: 'running',
     environment: 'production',
     icon: '📞',
+    deployTarget: 'vm',
+    services: [
+      { name: 'drachtio', label: 'Drachtio Server', dockerComposeService: 'drachtio' },
+    ],
+  },
+  {
+    id: 'cloud-services',
+    name: 'Cloud Run Services',
+    description: 'GCP Cloud Run managed services',
+    status: 'running',
+    environment: 'production',
+    icon: '☁️',
+    deployTarget: 'cloud-run',
+    services: [
+      { name: 'demandgentic-api', label: 'API (Cloud Run)', cloudRunService: 'demandgentic-api', imageUrl: 'gcr.io/gen-lang-client-0789558283/demandgentic-api:latest' },
+    ],
   },
 ];
 
@@ -129,6 +166,7 @@ const SERVICE_MAP: Record<string, string> = {
   demandgentic: 'api',
   'media-bridge': 'media-bridge',
   drachtio: 'drachtio',
+  'cloud-services': 'demandgentic-api',
 };
 
 /* ── Navigation ── */
@@ -175,12 +213,6 @@ const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
   codex: 'Codex',
   claude: 'Claude',
   gemini: 'Gemini',
-};
-
-const OPTIMIZATION_PROFILE_LABELS: Record<CodingAgentOptimizationProfile, string> = {
-  quality: 'Excellent Code Quality',
-  balanced: 'Balanced',
-  cost: 'Cost Optimized',
 };
 
 function normalizeOpsRole(role: unknown): string | null {
@@ -424,11 +456,8 @@ export default function OpsHub() {
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
-  const [chatMode, setChatMode] = useState<'simple-edit' | 'debug' | 'deploy' | 'general'>('simple-edit');
-  const [applyEdits, setApplyEdits] = useState(true);
-  const [providerMode, setProviderMode] = useState<CodingAgentProviderMode>('auto');
-  const [preferredProvider, setPreferredProvider] = useState<CodingAgentProvider>('codex');
-  const [optimizationProfile, setOptimizationProfile] = useState<CodingAgentOptimizationProfile>('balanced');
+  const [codingAgentMode, setCodingAgentMode] = useState<CodingAgentRunMode>('agent');
+  const [modelSelector, setModelSelector] = useState<CodingAgentModelSelector>('simple-edit');
   const [chatSending, setChatSending] = useState(false);
   const [selectedFile, setSelectedFile] = useState<OpsWorkspaceFileContext | null>(null);
   const [externalFileUpdate, setExternalFileUpdate] = useState<{
@@ -530,6 +559,11 @@ export default function OpsHub() {
   const handleChatSend = async () => {
     const prompt = chatInput.trim();
     if (!prompt) return;
+    const requestMode = codingAgentMode === 'plan' ? 'general' : modelSelector;
+    const requestPrompt =
+      codingAgentMode === 'plan'
+        ? `Create a concise execution plan for this request. Do not make or apply file changes yet.\n\n${prompt}`
+        : prompt;
 
     const userMessage: ChatMessage = { role: 'user', content: prompt, timestamp: new Date() };
     setChatMessages((current) => [...current, userMessage]);
@@ -541,14 +575,11 @@ export default function OpsHub() {
         'POST',
         '/api/ops/coding-agent',
         {
-          prompt,
-          mode: chatMode,
+          prompt: requestPrompt,
+          mode: requestMode,
           selectedFilePath: selectedFile?.path,
-          selectedFileContent: selectedFile?.content,
-          applyChanges: chatMode === 'simple-edit' ? applyEdits : false,
-          providerMode,
-          preferredProvider,
-          optimizationProfile,
+          selectedFileContent: selectedFile?.dirty ? selectedFile.content : undefined,
+          applyChanges: codingAgentMode === 'agent' && modelSelector === 'simple-edit',
         },
       );
 
@@ -622,7 +653,7 @@ export default function OpsHub() {
       case 'workstations':
         return <WorkstationsTab />;
       case 'deployments':
-        return <DeploymentsTab />;
+        return <DeploymentsTab project={activeProject} />;
       case 'domains':
         return <DomainsTab />;
       case 'agents':
@@ -651,16 +682,6 @@ export default function OpsHub() {
     : activeProject.status === 'deploying'
     ? 'bg-amber-400 animate-pulse'
     : 'bg-slate-300';
-  const selectionSummary = providerMode === 'manual'
-    ? `Manual: ${AGENT_PROVIDER_LABELS[preferredProvider]} first`
-    : `Auto: ${OPTIMIZATION_PROFILE_LABELS[optimizationProfile]}`;
-  const selectionDetail = providerMode === 'manual'
-    ? 'Manual mode uses your chosen provider first and keeps the profile for fallback order.'
-    : optimizationProfile === 'quality'
-    ? 'Quality mode prioritizes the strongest coding and reasoning providers before cost.'
-    : optimizationProfile === 'cost'
-    ? 'Cost mode prefers Gemini first, then escalates only when needed.'
-    : 'Balanced mode favors Codex first, then falls back for deeper reasoning or lower cost.';
 
   return (
     <div className="h-screen flex flex-col bg-white text-slate-900 overflow-hidden font-sans">
@@ -715,11 +736,20 @@ export default function OpsHub() {
                       <div className="text-sm font-medium text-slate-800 truncate">{project.name}</div>
                       <div className="text-xs text-slate-500 truncate">{project.description}</div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className={`w-2 h-2 rounded-full ${
-                        project.status === 'running' ? 'bg-emerald-400' : project.status === 'deploying' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'
-                      }`} />
-                      <span className="text-[10px] text-slate-500 capitalize">{project.status}</span>
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className={`w-2 h-2 rounded-full ${
+                          project.status === 'running' ? 'bg-emerald-400' : project.status === 'deploying' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'
+                        }`} />
+                        <span className="text-[10px] text-slate-500 capitalize">{project.status}</span>
+                      </div>
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                        project.deployTarget === 'cloud-run'
+                          ? 'bg-blue-100 text-blue-600'
+                          : 'bg-indigo-100 text-indigo-600'
+                      }`}>
+                        {project.deployTarget === 'cloud-run' ? 'Cloud Run' : 'VM'}
+                      </span>
                     </div>
                   </button>
                 ))}
@@ -865,96 +895,6 @@ export default function OpsHub() {
             </div>
           </div>
 
-          {/* Chat Settings */}
-          <div className="px-4 py-3 border-b border-slate-200 space-y-3">
-            <div className="flex gap-2">
-              <Select value={chatMode} onValueChange={(value) => setChatMode(value as typeof chatMode)}>
-                <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 text-slate-700 flex-1 rounded-lg">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="simple-edit">Simple Edit</SelectItem>
-                  <SelectItem value="debug">Debug</SelectItem>
-                  <SelectItem value="deploy">Deploy</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <Select value={providerMode} onValueChange={(value) => setProviderMode(value as CodingAgentProviderMode)}>
-                <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto Select</SelectItem>
-                  <SelectItem value="manual">Manual Select</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={optimizationProfile}
-                onValueChange={(value) => setOptimizationProfile(value as CodingAgentOptimizationProfile)}
-              >
-                <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="quality">Excellent Code Quality</SelectItem>
-                  <SelectItem value="balanced">Balanced</SelectItem>
-                  <SelectItem value="cost">Cost Optimized</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-[minmax(0,1fr)_132px] gap-2">
-              <Select
-                value={preferredProvider}
-                onValueChange={(value) => setPreferredProvider(value as CodingAgentProvider)}
-                disabled={providerMode !== 'manual'}
-              >
-                <SelectTrigger className="h-9 text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg disabled:opacity-60">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="codex">Codex</SelectItem>
-                  <SelectItem value="claude">Claude</SelectItem>
-                  <SelectItem value="gemini">Gemini</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Selection</p>
-                <p className="mt-1 text-xs font-medium text-slate-700">{selectionSummary}</p>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Workspace Target</p>
-                  <div className="flex items-center gap-2 mt-1 text-sm text-slate-700">
-                    <FileCode2 className="w-4 h-4 text-indigo-500" />
-                    <span className="truncate">{selectedFile?.path || 'No file selected'}</span>
-                  </div>
-                </div>
-                <Switch
-                  checked={applyEdits}
-                  onCheckedChange={setApplyEdits}
-                  disabled={chatMode !== 'simple-edit'}
-                />
-              </div>
-              <p className="text-xs text-slate-500">
-                {chatMode === 'simple-edit'
-                  ? applyEdits
-                    ? 'Simple Edit will write changes back to the selected file.'
-                    : 'Simple Edit is in preview mode and will not save changes.'
-                  : 'Non-edit modes use the agent for analysis and guidance.'}
-              </p>
-              <p className="text-xs text-slate-500">{selectionDetail}</p>
-            </div>
-          </div>
-
           {/* Chat Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-5 bg-slate-50/50">
             {chatMessages.length === 0 ? (
@@ -964,7 +904,7 @@ export default function OpsHub() {
                 </div>
                 <p className="text-sm text-slate-600 font-medium">AI Coding Agent</p>
                 <p className="text-xs text-slate-400 mt-2 max-w-xs">
-                  Ask for targeted code changes, debugging, or deployment help. Open a file first for file edits.
+                  Ask for targeted code changes or a plan. Open a file first when you want an edit applied.
                 </p>
               </div>
             ) : (
@@ -1023,6 +963,52 @@ export default function OpsHub() {
                   <Send className="w-3.5 h-3.5 text-white" />
                 )}
               </button>
+            </div>
+            <div className="mt-3 space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Mode Selection</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setCodingAgentMode('agent')}
+                    className={`h-9 rounded-lg text-xs ${
+                      codingAgentMode === 'agent'
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    Agent
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setCodingAgentMode('plan')}
+                    className={`h-9 rounded-lg text-xs ${
+                      codingAgentMode === 'plan'
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    Plan
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Model Selector</p>
+                <Select
+                  value={modelSelector}
+                  onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
+                >
+                  <SelectTrigger className="h-9 w-full text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="simple-edit">Simple Edit</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </aside>

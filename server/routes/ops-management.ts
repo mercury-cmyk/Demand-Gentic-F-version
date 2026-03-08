@@ -141,8 +141,9 @@ router.get('/deployments/status', async (_req: Request, res: Response) => {
  */
 router.post('/deployments/build', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
     const overview = await getOpsOverview();
-    if (overview.deploymentTarget === 'vm') {
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
       const job = await runDeploymentBuild({
         service: req.body?.service,
         rebuildMediaBridge: req.body?.rebuildMediaBridge,
@@ -218,8 +219,9 @@ router.get('/deployments/build/:buildId', async (req: Request, res: Response) =>
  */
 router.get('/deployments/builds', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.query.target as string | undefined;
     const overview = await getOpsOverview();
-    if (overview.deploymentTarget === 'vm') {
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
       const status = await getDeploymentStatus();
       return res.json({
         success: true,
@@ -265,13 +267,16 @@ router.post('/deployments/build/:buildId/cancel', async (req: Request, res: Resp
 // ===== CLOUD RUN DEPLOYMENT ENDPOINTS =====
 
 /**
- * Deploy to Cloud Run
+ * Deploy to Cloud Run or VM
  * POST /api/ops/deployments/deploy
+ * Pass { target: 'cloud-run' } to force Cloud Run deployment even on a VM host
  */
 router.post('/deployments/deploy', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
     const overview = await getOpsOverview();
-    if (overview.deploymentTarget === 'vm') {
+    const useVM = explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm';
+    if (useVM) {
       const job = await runDeployment({
         rebuildMediaBridge: req.body?.rebuildMediaBridge,
       });
@@ -329,12 +334,14 @@ router.post('/deployments/deploy', async (req: Request, res: Response) => {
 
 /**
  * Get service status
- * GET /api/ops/deployments/service/:serviceName
+ * GET /api/ops/deployments/service/:serviceName?target=cloud-run
  */
 router.get('/deployments/service/:serviceName', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.query.target as string | undefined;
     const overview = await getOpsOverview();
-    if (overview.deploymentTarget === 'vm') {
+    const useVM = explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm';
+    if (useVM) {
       const status = await getDeploymentStatus();
       const service = status.services.find(
         (entry) => entry.serviceName === req.params.serviceName,
@@ -393,8 +400,9 @@ router.get('/deployments/service/:serviceName/revisions', async (req: Request, r
  */
 router.post('/deployments/service/:serviceName/rollback', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
     const overview = await getOpsOverview();
-    if (overview.deploymentTarget === 'vm') {
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
       return res.status(400).json({
         success: false,
         error: 'Rollback is not automated for VM deployments. Use the host deployment history or git checkout on the VM.',
@@ -428,8 +436,9 @@ router.post('/deployments/service/:serviceName/rollback', async (req: Request, r
  */
 router.post('/deployments/service/:serviceName/traffic', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
     const overview = await getOpsOverview();
-    if (overview.deploymentTarget === 'vm') {
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
       return res.status(400).json({
         success: false,
         error: 'Traffic splitting is only available for Cloud Run deployments.',
