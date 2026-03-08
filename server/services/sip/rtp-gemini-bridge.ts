@@ -155,6 +155,7 @@ interface CallContext {
   phoneNumber?: string;
   maxCallDurationSeconds?: number;
   callerNumberId?: string | null;
+  firstMessage?: string;
 }
 
 interface AudioMetrics {
@@ -713,7 +714,8 @@ function sendOpeningMessage(session: BridgeSession): void {
   }
 
   const contactName = session.callContext.contactName || session.callContext.contactFirstName || 'there';
-  const openingText = `Hello, may I please speak with ${contactName}?`;
+  const customFirstMessage = session.callContext.firstMessage?.trim();
+  const openingText = customFirstMessage || `Hello, may I please speak with ${contactName}?`;
 
   const openingMessage = `Say ONLY this exact message now: "${openingText}"
 

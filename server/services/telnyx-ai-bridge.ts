@@ -612,6 +612,7 @@ export class TelnyxAiBridge extends EventEmitter {
               talkingPoints: context.talkingPoints,
               campaignContextBrief: context.campaignContextBrief,
               callFlow: context.callFlow,
+              firstMessage: settings.scripts?.opening,
               maxCallDurationSeconds: context.maxCallDurationSeconds,
               callerNumberId: context.callerNumberId ?? null,
               callerNumberDecisionId: context.callerNumberDecisionId ?? null,

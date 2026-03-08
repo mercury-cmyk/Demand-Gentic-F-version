@@ -35,6 +35,7 @@ export async function createMediaBridge(params: {
   voiceName?: string;
   toPhoneNumber?: string;
   contactName?: string;
+  firstMessage?: string;
   context?: any;
   maxDurationSeconds?: number;
 }): Promise<{ success: boolean; error?: string }> {

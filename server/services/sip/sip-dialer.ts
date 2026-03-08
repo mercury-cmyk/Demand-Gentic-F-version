@@ -52,6 +52,7 @@ export interface InitiateCallParams {
   talkingPoints?: string[];
   campaignContextBrief?: string | null;
   callFlow?: unknown;
+  firstMessage?: string;
   maxCallDurationSeconds?: number;
   // Number pool tracking
   callerNumberId?: string | null;
@@ -215,6 +216,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
         voiceName: params.voiceName,
         toPhoneNumber: params.toNumber,
         contactName: params.contactName || params.contactFirstName,
+        firstMessage: params.firstMessage,
         context: {
           campaignId: params.campaignId,
           contactId: params.contactId,

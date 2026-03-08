@@ -365,6 +365,7 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
           talkingPoints: ctx.talkingPoints,
           campaignContextBrief: ctx.campaignContextBrief,
           callFlow: ctx.callFlow,
+          firstMessage: ctx.firstMessage,
           maxCallDurationSeconds: 300,
         });
 
