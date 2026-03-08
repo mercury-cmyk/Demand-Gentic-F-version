@@ -2612,8 +2612,9 @@ Instructions:
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,
-              startOfSpeechSensitivity: 'MEDIUM',
-              endOfSpeechSensitivity: 'MEDIUM',
+              // Note: startOfSpeechSensitivity/endOfSpeechSensitivity enums are NOT supported
+              // by native-audio model variants (causes code 1007 setup rejection).
+              // Only use disabled + silenceDuration for compatibility across model variants.
               silenceDuration: 1.0, // 1.0 second - faster response time, feels natural
             },
           },
