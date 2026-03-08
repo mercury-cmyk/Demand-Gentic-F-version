@@ -29,7 +29,6 @@ import {
   X,
   Cloud,
   ArrowLeft,
-  Terminal,
   Maximize2,
   CornerDownLeft,
   Plug,
@@ -159,7 +158,7 @@ function StateBadge({ state }: { state: string }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   CLOUD IDE VIEW — embedded workstation IDE with our toolbar + terminal
+   CLOUD IDE VIEW — terminal workspace with IDE in new tab
    ══════════════════════════════════════════════════════════════ */
 function CloudIDE({
   workstation,
@@ -170,49 +169,33 @@ function CloudIDE({
   config: Config | null;
   onDisconnect: () => void;
 }) {
-  const [ideUrl, setIdeUrl] = useState<string | null>(null);
-  const [ideLoading, setIdeLoading] = useState(true);
-  const [ideError, setIdeError] = useState<string | null>(null);
-  const [showTerminal, setShowTerminal] = useState(false);
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([
     { id: 0, type: 'system', text: `Connected to ${workstation.displayName} (${workstation.id})`, timestamp: new Date() },
     { id: 1, type: 'system', text: `Host: ${workstation.host || 'resolving...'}`, timestamp: new Date() },
+    { id: 2, type: 'system', text: 'Terminal ready. Type commands to execute on the workstation.', timestamp: new Date() },
   ]);
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalRunning, setTerminalRunning] = useState(false);
+  const [ideOpened, setIdeOpened] = useState(false);
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const lineIdRef = useRef(2);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const lineIdRef = useRef(3);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const addTerminalLine = useCallback((type: TerminalLine['type'], text: string) => {
     const id = lineIdRef.current++;
     setTerminalLines(prev => [...prev, { id, type, text, timestamp: new Date() }]);
   }, []);
 
-  /* ── Fetch IDE URL with access token ── */
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await apiJsonRequest<{
-          success: boolean; url: string; host: string;
-          accessToken: string; expireTime: string; error?: string;
-        }>('GET', `${wsApi(workstation)}/ide-url`);
-        if (data.success && data.url) {
-          setIdeUrl(data.url);
-          addTerminalLine('system', `IDE URL: ${data.url}`);
-          addTerminalLine('system', `Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
-        } else {
-          setIdeError(data.error || 'Failed to get IDE URL');
-        }
-      } catch (err) {
-        setIdeError(String(err));
-      }
-    })();
-  }, [workstation]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const openIDEInNewTab = () => {
     window.open(`${wsApi(workstation)}/ide-redirect`, '_blank');
+    setIdeOpened(true);
+    addTerminalLine('system', 'Code editor opened in new tab.');
   };
+
+  /* Auto-open IDE in new tab on mount */
+  useEffect(() => {
+    openIDEInNewTab();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Terminal ── */
   const execCommand = async (command: string) => {
@@ -230,6 +213,7 @@ function CloudIDE({
       addTerminalLine('error', `Command failed: ${err}`);
     } finally {
       setTerminalRunning(false);
+      inputRef.current?.focus();
     }
   };
 
@@ -247,7 +231,7 @@ function CloudIDE({
 
   return (
     <div className="flex flex-col h-[calc(100vh-160px)] -m-6 bg-[#1e1e2e]">
-      {/* ── IDE Top Bar ── */}
+      {/* ── Top Bar ── */}
       <div className="h-11 bg-[#181825] border-b border-[#313244] flex items-center px-3 gap-3 shrink-0">
         <Button
           variant="ghost" size="sm" onClick={onDisconnect}
@@ -267,114 +251,46 @@ function CloudIDE({
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setShowTerminal(!showTerminal)}
-            className={`h-7 px-2 hover:bg-[#313244] ${showTerminal ? 'text-[#89b4fa]' : 'text-[#a6adc8]'}`}>
-            <Terminal className="w-3.5 h-3.5 mr-1" /> Terminal
-          </Button>
           <Button variant="ghost" size="sm" onClick={openIDEInNewTab}
-            className="h-7 px-2 text-[#a6adc8] hover:bg-[#313244]">
-            <Maximize2 className="w-3.5 h-3.5 mr-1" /> Pop Out
+            className={`h-7 px-2 hover:bg-[#313244] ${ideOpened ? 'text-emerald-400' : 'text-[#89b4fa]'}`}>
+            <Maximize2 className="w-3.5 h-3.5 mr-1" /> {ideOpened ? 'Reopen IDE' : 'Open IDE'}
           </Button>
           <Button variant="ghost" size="sm"
-            onClick={() => { if (iframeRef.current && ideUrl) iframeRef.current.src = ideUrl; }}
+            onClick={() => { setTerminalLines([]); lineIdRef.current = 0; addTerminalLine('system', 'Terminal cleared'); }}
             className="h-7 px-2 text-[#a6adc8] hover:bg-[#313244]">
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>
 
-      {/* ── Main IDE Area ── */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        {/* IDE Iframe */}
-        <div className="flex-1 overflow-hidden">
-          {ideError ? (
-            <div className="flex flex-col items-center justify-center h-full bg-[#1e1e2e] text-[#cdd6f4]">
-              <div className="w-16 h-16 rounded-2xl bg-[#f38ba8]/10 flex items-center justify-center mb-4">
-                <Monitor className="w-8 h-8 text-[#f38ba8]" />
-              </div>
-              <p className="text-sm font-medium text-[#f38ba8] mb-2">Failed to connect to IDE</p>
-              <p className="text-xs text-[#6c7086] mb-4 max-w-md text-center">{ideError}</p>
-              <Button variant="outline" size="sm" onClick={openIDEInNewTab}
-                className="bg-[#313244] border-[#45475a] text-[#cdd6f4] hover:bg-[#45475a]">
-                <Maximize2 className="w-3.5 h-3.5 mr-1.5" /> Open IDE in New Tab
-              </Button>
-            </div>
-          ) : ideUrl ? (
-            <>
-              {ideLoading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-[#1e1e2e] z-10">
-                  <div className="text-center">
-                    <Loader2 className="w-8 h-8 animate-spin text-[#89b4fa] mx-auto mb-3" />
-                    <p className="text-sm text-[#a6adc8]">Loading Cloud IDE...</p>
-                    <p className="text-xs text-[#585b70] mt-1">Connecting to {workstation.host}</p>
-                  </div>
-                </div>
-              )}
-              <iframe
-                ref={iframeRef}
-                src={ideUrl}
-                className="w-full h-full border-0"
-                title={`Cloud IDE - ${workstation.displayName}`}
-                onLoad={() => setIdeLoading(false)}
-                onError={() => { setIdeLoading(false); setIdeError('IDE iframe failed to load. Try the Pop Out button.'); }}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
-                allow="clipboard-read; clipboard-write"
-              />
-            </>
-          ) : (
-            <div className="flex items-center justify-center h-full bg-[#1e1e2e]">
-              <Loader2 className="w-6 h-6 animate-spin text-[#89b4fa] mr-3" />
-              <span className="text-sm text-[#a6adc8]">Fetching IDE credentials...</span>
-            </div>
-          )}
+      {/* ── Full-screen Terminal ── */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-[#11111b]">
+        <div className="flex-1 overflow-y-auto px-4 py-3 font-mono text-xs" onClick={() => inputRef.current?.focus()}>
+          {terminalLines.map((line) => (
+            <div key={line.id} className={`py-0.5 leading-5 whitespace-pre-wrap break-all ${
+              line.type === 'input' ? 'text-[#89b4fa]' :
+              line.type === 'error' ? 'text-[#f38ba8]' :
+              line.type === 'system' ? 'text-[#6c7086] italic' : 'text-[#cdd6f4]'
+            }`}>{line.text}</div>
+          ))}
+          <div ref={terminalEndRef} />
         </div>
-
-        {/* Terminal Panel (togglable) */}
-        {showTerminal && (
-          <div className="h-[250px] border-t border-[#313244] bg-[#11111b] flex flex-col shrink-0">
-            <div className="h-8 px-3 flex items-center justify-between border-b border-[#313244]/50 shrink-0">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-3.5 h-3.5 text-[#a6adc8]" />
-                <span className="text-[10px] font-bold text-[#a6adc8] uppercase tracking-wider">Terminal</span>
-                {terminalRunning && (
-                  <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px] px-1.5 py-0">
-                    <Loader2 className="w-2.5 h-2.5 mr-1 animate-spin" /> Running
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setTerminalLines([{ id: lineIdRef.current++, type: 'system', text: 'Terminal cleared', timestamp: new Date() }])}
-                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8] text-[10px]">Clear</button>
-                <button onClick={() => setShowTerminal(false)}
-                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8]">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-xs">
-              {terminalLines.map((line) => (
-                <div key={line.id} className={`py-0.5 leading-5 whitespace-pre-wrap break-all ${
-                  line.type === 'input' ? 'text-[#89b4fa]' :
-                  line.type === 'error' ? 'text-[#f38ba8]' :
-                  line.type === 'system' ? 'text-[#6c7086] italic' : 'text-[#cdd6f4]'
-                }`}>{line.text}</div>
-              ))}
-              <div ref={terminalEndRef} />
-            </div>
-            <form onSubmit={handleTerminalSubmit} className="px-3 py-2 border-t border-[#313244]/50 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[#89b4fa] text-xs font-mono font-bold">$</span>
-                <input type="text" value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)}
-                  placeholder="Type a command..." disabled={terminalRunning}
-                  className="flex-1 bg-transparent border-none outline-none text-xs font-mono text-[#cdd6f4] placeholder:text-[#45475a]" autoFocus />
-                <button type="submit" disabled={terminalRunning || !terminalInput.trim()}
-                  className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8] disabled:opacity-30">
-                  <CornerDownLeft className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </form>
+        <form onSubmit={handleTerminalSubmit} className="px-4 py-3 border-t border-[#313244]/50 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[#89b4fa] text-xs font-mono font-bold">$</span>
+            <input ref={inputRef} type="text" value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)}
+              placeholder="Type a command..." disabled={terminalRunning}
+              className="flex-1 bg-transparent border-none outline-none text-xs font-mono text-[#cdd6f4] placeholder:text-[#45475a]" autoFocus />
+            {terminalRunning ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+            ) : (
+              <button type="submit" disabled={!terminalInput.trim()}
+                className="p-1 rounded hover:bg-[#313244] text-[#585b70] hover:text-[#a6adc8] disabled:opacity-30">
+                <CornerDownLeft className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
-        )}
+        </form>
       </div>
 
       {/* ── Status Bar ── */}
@@ -387,7 +303,8 @@ function CloudIDE({
         <span>{workstation.host}</span>
         {config && <><div className="mx-3 w-px h-3 bg-[#313244]" /><span>{config.machineType} &middot; {config.bootDiskSizeGb} GB</span></>}
         <div className="flex-1" />
-        <span>Cloud Workstation IDE</span>
+        {ideOpened && <span className="text-emerald-400 mr-2">IDE open in tab</span>}
+        <span>Cloud Workstation</span>
       </div>
     </div>
   );
