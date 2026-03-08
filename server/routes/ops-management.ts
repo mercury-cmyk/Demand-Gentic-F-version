@@ -1271,7 +1271,7 @@ router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:w
 });
 
 /**
- * Get authenticated IDE URL for embedding workstation in iframe
+ * Get IDE URL and, when permitted, a short-lived access token for direct auth
  * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-url
  */
 router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-url', async (req: Request, res: Response) => {
@@ -1292,10 +1292,13 @@ router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:wo
   try {
     const { clusterId, configId, workstationId } = req.params;
     const ideInfo = await workstationsManager.getIDEUrl(clusterId, configId, workstationId);
-    const authUrl = `${ideInfo.url.replace(/\/$/, '')}/_workstation/authenticate?access_token=${encodeURIComponent(ideInfo.accessToken)}&redirect_url=${encodeURIComponent('/')}`;
-    res.redirect(authUrl);
+    if (ideInfo.accessToken) {
+      const authUrl = `${ideInfo.url.replace(/\/$/, '')}/_workstation/authenticate?access_token=${encodeURIComponent(ideInfo.accessToken)}&redirect_url=${encodeURIComponent('/')}`;
+      return res.redirect(authUrl);
+    }
+    return res.redirect(ideInfo.url);
   } catch (error) {
-    handleOpsError(res, error, 'Failed to redirect to IDE');
+    return handleOpsError(res, error, 'Failed to redirect to IDE');
   }
 });
 

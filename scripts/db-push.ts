@@ -1,6 +1,5 @@
 import '../server/env';
-import path from 'path';
-import { pathToFileURL } from 'url';
+import { spawn } from 'child_process';
 
 function resolveDatabaseUrl(): string {
   const nodeEnv = (process.env.NODE_ENV || 'development').toLowerCase();
@@ -23,20 +22,40 @@ function swallowBrokenPipe(error: NodeJS.ErrnoException) {
   throw error;
 }
 
+function writeSafely(stream: NodeJS.WriteStream, chunk: Buffer) {
+  try {
+    stream.write(chunk);
+  } catch (error) {
+    swallowBrokenPipe(error as NodeJS.ErrnoException);
+  }
+}
+
 const databaseUrl = resolveDatabaseUrl();
 if (!databaseUrl) {
   console.error('Database URL is required. Set DATABASE_URL_DEV or DATABASE_URL.');
   process.exit(1);
 }
 
-process.env.DATABASE_URL = databaseUrl;
 process.stdout.on('error', swallowBrokenPipe);
 process.stderr.on('error', swallowBrokenPipe);
 
-const drizzleBin = path.resolve('node_modules', 'drizzle-kit', 'bin.cjs');
-const cliArgs = process.argv.slice(2);
-const hasConfigArg = cliArgs.includes('--config');
-const effectiveArgs = hasConfigArg ? cliArgs : ['--config', 'drizzle.config.ts', ...cliArgs];
-process.argv = [process.execPath, drizzleBin, 'push', ...effectiveArgs];
+const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const child = spawn(npxCommand, ['drizzle-kit', 'push', ...process.argv.slice(2)], {
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    DATABASE_URL: databaseUrl,
+  },
+  shell: process.platform === 'win32',
+  stdio: ['inherit', 'pipe', 'pipe'],
+});
 
-await import(pathToFileURL(drizzleBin).href);
+child.stdout.on('data', (chunk) => writeSafely(process.stdout, chunk));
+child.stderr.on('data', (chunk) => writeSafely(process.stderr, chunk));
+
+const exitCode: number = await new Promise((resolve, reject) => {
+  child.on('error', reject);
+  child.on('close', (code) => resolve(code ?? 1));
+});
+
+process.exit(exitCode);

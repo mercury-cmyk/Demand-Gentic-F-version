@@ -101,8 +101,9 @@ interface WorkstationIdeInfo {
   success: boolean;
   url: string;
   host: string;
-  accessToken: string;
-  expireTime: string;
+  accessToken?: string;
+  expireTime?: string;
+  authMode?: 'token' | 'browser';
   error?: string;
 }
 
@@ -161,8 +162,11 @@ function wsApi(ws: Workstation) {
   return `/api/ops/workstations/clusters/${ws.clusterId}/configs/${ws.configId}/workstations/${ws.id}`;
 }
 
-function buildWorkstationAuthUrl(ideUrl: string, accessToken: string) {
+function buildWorkstationAuthUrl(ideUrl: string, accessToken?: string) {
   const normalizedUrl = ideUrl.replace(/\/$/, '');
+  if (!accessToken) {
+    return normalizedUrl;
+  }
   return `${normalizedUrl}/_workstation/authenticate?access_token=${encodeURIComponent(accessToken)}&redirect_url=${encodeURIComponent('/')}`;
 }
 
@@ -272,7 +276,13 @@ function CloudIDE({
       addTerminalLine('system', 'Fetching IDE credentials...');
       const data = await launchWorkstationIDE(workstation);
       setIdeOpened(true);
-      addTerminalLine('system', `IDE opened in new tab. Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
+      if (data.authMode === 'browser' || !data.accessToken) {
+        addTerminalLine('system', 'IDE opened in new tab using your Google browser session.');
+      } else if (data.expireTime) {
+        addTerminalLine('system', `IDE opened in new tab. Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
+      } else {
+        addTerminalLine('system', 'IDE opened in new tab with a short-lived access token.');
+      }
     } catch (err) {
       setIdeOpened(false);
       addTerminalLine('error', `Failed to open IDE: ${err instanceof Error ? err.message : String(err)}`);

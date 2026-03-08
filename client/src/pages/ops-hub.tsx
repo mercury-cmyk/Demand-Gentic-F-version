@@ -27,14 +27,14 @@ import {
   Loader2,
   Code2,
   CheckCircle2,
+  ChevronLeft,
   ChevronDown,
+  ChevronRight,
   Terminal,
   Rocket,
-  Settings,
   Activity,
   Server,
   RefreshCw,
-  Filter,
   Download,
   Play,
   Square,
@@ -45,7 +45,11 @@ import CostsTab from '@/components/ops/costs-tab';
 import DeploymentsTab from '@/components/ops/deployments-tab';
 import DomainsTab from '@/components/ops/domains-tab';
 import AgentsTab from '@/components/ops/agents-tab';
-import FileManagerTab, { OpsWorkspaceFileContext } from '@/components/ops/file-manager-tab';
+import FileManagerTab, {
+  OpsWorkspaceFileContext,
+  WorkspaceDirectoryResponse,
+  WorkspaceFileResponse,
+} from '@/components/ops/file-manager-tab';
 import PreviewTab from '@/components/ops/preview-tab';
 import WorkstationsTab from '@/components/ops/workstations-tab';
 import IamSecrets from '@/pages/iam/iam-secrets';
@@ -106,6 +110,7 @@ interface NavSection {
 type CodingAgentProvider = 'codex' | 'claude' | 'gemini';
 type CodingAgentRunMode = 'agent' | 'plan';
 type CodingAgentModelSelector = 'simple-edit';
+type SidePanelTab = 'files' | 'manager';
 
 /* ── Projects configuration ── */
 const PROJECTS: Project[] = [
@@ -209,6 +214,8 @@ const TAB_TO_SECTION: Record<string, string> = {
   insights: 'INSIGHTS',
 };
 
+const SECONDARY_NAV_ORDER = ['DEVOPS', 'WORKSPACE', 'INSIGHTS'] as const;
+
 const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
   codex: 'Codex',
   claude: 'Claude',
@@ -267,6 +274,299 @@ function getTopTabForPage(pageId: string): string {
     }
   }
   return 'workspace';
+}
+
+function formatWorkspaceTimestamp(dateStr?: string): string {
+  if (!dateStr) return '-';
+  const value = new Date(dateStr);
+  if (Number.isNaN(value.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(value);
+}
+
+function formatWorkspaceBytes(bytes: number): string {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, index);
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function FileSearchDrawerPanel({
+  selectedFile,
+  onSelectFile,
+  onOpenInEditor,
+}: {
+  selectedFile: OpsWorkspaceFileContext | null;
+  onSelectFile: (file: OpsWorkspaceFileContext) => void;
+  onOpenInEditor: (path?: string) => void;
+}) {
+  const { toast } = useToast();
+  const [directory, setDirectory] = useState<WorkspaceDirectoryResponse>({
+    currentPath: '',
+    breadcrumbs: [],
+    entries: [],
+  });
+  const [loadingDirectory, setLoadingDirectory] = useState(true);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const fetchDirectory = useCallback(async (nextPath: string = '') => {
+    setLoadingDirectory(true);
+    try {
+      const params = new URLSearchParams();
+      if (nextPath) params.set('path', nextPath);
+      const data = await apiJsonRequest<{
+        success: boolean;
+        directory: WorkspaceDirectoryResponse;
+        error?: string;
+      }>('GET', `/api/ops/workspace?${params.toString()}`);
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to load workspace directory');
+      }
+      setDirectory(data.directory);
+    } catch (error) {
+      toast({
+        title: 'Workspace unavailable',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingDirectory(false);
+    }
+  }, [toast]);
+
+  const openWorkspaceFile = useCallback(async (filePath: string) => {
+    setLoadingFile(true);
+    try {
+      const data = await apiJsonRequest<{
+        success: boolean;
+        file: WorkspaceFileResponse;
+        error?: string;
+      }>('GET', `/api/ops/workspace/file?path=${encodeURIComponent(filePath)}`);
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to open file');
+      }
+
+      onSelectFile({
+        path: data.file.path,
+        content: data.file.content,
+        modifiedAt: data.file.modifiedAt,
+        dirty: false,
+      });
+    } catch (error) {
+      toast({
+        title: 'Could not open file',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingFile(false);
+    }
+  }, [onSelectFile, toast]);
+
+  useEffect(() => {
+    void fetchDirectory('');
+  }, [fetchDirectory]);
+
+  const filteredEntries = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return directory.entries;
+    }
+
+    const query = searchQuery.trim().toLowerCase();
+    return directory.entries.filter((entry) => (
+      entry.name.toLowerCase().includes(query)
+      || entry.path.toLowerCase().includes(query)
+    ));
+  }, [directory.entries, searchQuery]);
+
+  const navigateToPath = (nextPath: string) => {
+    void fetchDirectory(nextPath);
+  };
+
+  const navigateUp = () => {
+    const crumbs = directory.breadcrumbs.slice(0, -1);
+    void fetchDirectory(crumbs.join('/'));
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      <div className="border-b border-slate-200 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Workspace files</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Search the live repo and hand a file to the editor or manager without sacrificing terminal space.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { void fetchDirectory(directory.currentPath); }}
+            className="h-8 rounded-lg"
+          >
+            <RefreshCw className={`w-4 h-4 ${loadingDirectory ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              placeholder="Search files or folders..."
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="h-10 rounded-xl border-slate-200 bg-slate-50 pl-10 text-sm"
+            />
+          </div>
+          {directory.currentPath && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={navigateUp}
+              className="h-10 rounded-xl px-3"
+            >
+              Up
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto text-[11px] text-slate-500">
+          <button
+            onClick={() => navigateToPath('')}
+            className="font-medium text-slate-600 transition hover:text-indigo-600"
+          >
+            /
+          </button>
+          {directory.breadcrumbs.map((crumb, index) => {
+            const nextPath = directory.breadcrumbs.slice(0, index + 1).join('/');
+            return (
+              <React.Fragment key={nextPath}>
+                <ChevronRight className="h-3 w-3 text-slate-300" />
+                <button
+                  onClick={() => navigateToPath(nextPath)}
+                  className="truncate font-medium text-slate-600 transition hover:text-indigo-600"
+                >
+                  {crumb}
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Selected file
+              </p>
+              <p className="mt-1 truncate text-sm font-medium text-slate-800">
+                {selectedFile?.path || 'No file selected yet'}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenInEditor(selectedFile?.path)}
+              disabled={!selectedFile}
+              className="h-8 rounded-lg"
+            >
+              Open editor
+            </Button>
+          </div>
+
+          {selectedFile ? (
+            <>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                <Badge className={selectedFile.dirty ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
+                  {selectedFile.dirty ? 'Unsaved' : 'Ready'}
+                </Badge>
+                {selectedFile.modifiedAt && <span>{formatWorkspaceTimestamp(selectedFile.modifiedAt)}</span>}
+              </div>
+              <pre className="mt-3 max-h-28 overflow-hidden whitespace-pre-wrap break-words rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600">
+                {selectedFile.content.slice(0, 320) || 'Empty file'}
+              </pre>
+            </>
+          ) : (
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              Pick a file here, then switch to <strong>Manager</strong> for an edit request or jump into the full editor.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-2 py-2">
+        {loadingDirectory ? (
+          <div className="px-4 py-10 text-center text-sm text-slate-400">Loading workspace…</div>
+        ) : filteredEntries.length === 0 ? (
+          <div className="px-4 py-10 text-center text-sm text-slate-400">
+            No files matched the current filter.
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {filteredEntries.map((entry) => {
+              const isActive = selectedFile?.path === entry.path;
+              return (
+                <button
+                  key={entry.path}
+                  onClick={() => {
+                    if (entry.type === 'directory') {
+                      navigateToPath(entry.path);
+                      return;
+                    }
+                    void openWorkspaceFile(entry.path);
+                  }}
+                  className={`w-full rounded-xl border px-3 py-3 text-left transition-all ${
+                    isActive
+                      ? 'border-indigo-200 bg-indigo-50/70 shadow-sm'
+                      : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                      entry.type === 'directory' ? 'bg-amber-50' : 'bg-slate-100'
+                    }`}>
+                      {entry.type === 'directory' ? (
+                        <FolderOpen className="h-4 w-4 text-amber-500" />
+                      ) : (
+                        <FileText className="h-4 w-4 text-slate-500" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-slate-800">{entry.name}</div>
+                      <div className="truncate text-[11px] text-slate-500">
+                        {entry.type === 'directory'
+                          ? entry.path || '/'
+                          : `${formatWorkspaceBytes(entry.size)} · ${formatWorkspaceTimestamp(entry.modifiedAt)}`}
+                      </div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-slate-300" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
+        <span>
+          {filteredEntries.length} item{filteredEntries.length === 1 ? '' : 's'}
+        </span>
+        {loadingFile && (
+          <span className="ml-2 inline-flex items-center gap-1 font-medium text-indigo-600">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Opening…
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /* ── Real-time Log Viewer Component ── */
@@ -447,12 +747,14 @@ function LogViewer({ service, environment }: { service: string; environment: str
 export default function OpsHub() {
   const { user, token, getToken } = useAuth();
   const { toast } = useToast();
-  const [activePage, setActivePage] = useState('files');
-  const [activeTopTab, setActiveTopTab] = useState('workspace');
+  const [activePage, setActivePage] = useState('workstations');
+  const [activeTopTab, setActiveTopTab] = useState('devops');
   const [platformOnline, setPlatformOnline] = useState(true);
   const [overview, setOverview] = useState<OpsOverview | null>(null);
   const [activeProject, setActiveProject] = useState<Project>(PROJECTS[0]);
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [sidePanelOpen, setSidePanelOpen] = useState(true);
+  const [sidePanelTab, setSidePanelTab] = useState<SidePanelTab>('manager');
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -467,6 +769,8 @@ export default function OpsHub() {
     token: number;
   } | null>(null);
   const [externalFileToken, setExternalFileToken] = useState(0);
+  const [requestedFilePath, setRequestedFilePath] = useState<string | null>(null);
+  const [requestedFileToken, setRequestedFileToken] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const authToken = token || getToken();
   const tokenPayload = parseOpsTokenPayload(authToken);
@@ -550,10 +854,15 @@ export default function OpsHub() {
   const goToTab = (tabId: string) => {
     setActiveTopTab(tabId);
     const sectionLabel = TAB_TO_SECTION[tabId];
-    const section = NAV_SECTIONS.find((entry) => entry.label === sectionLabel);
+    const section = navSections.find((entry) => entry.label === sectionLabel);
     if (section?.items.length) {
       setActivePage(section.items[0].id);
     }
+  };
+
+  const openSidePanel = (tab: SidePanelTab) => {
+    setSidePanelTab(tab);
+    setSidePanelOpen(true);
   };
 
   const handleChatSend = async () => {
@@ -632,10 +941,25 @@ export default function OpsHub() {
     }
   };
 
-  const activeSections = useMemo(
-    () => navSections.filter((section) => section.label === TAB_TO_SECTION[activeTopTab]),
-    [activeTopTab, navSections],
+  const flatNavItems = useMemo(
+    () => SECONDARY_NAV_ORDER.flatMap((sectionLabel) => {
+      const section = navSections.find((entry) => entry.label === sectionLabel);
+      return (section?.items || []).map((item) => ({ ...item, sectionLabel }));
+    }),
+    [navSections],
   );
+
+  const handleDrawerFileSelect = useCallback((file: OpsWorkspaceFileContext) => {
+    setSelectedFile(file);
+  }, []);
+
+  const handleOpenFileManager = useCallback((path?: string) => {
+    if (path) {
+      setRequestedFilePath(path);
+      setRequestedFileToken((current) => current + 1);
+    }
+    goToPage('files');
+  }, []);
 
   const renderContent = () => {
     switch (activePage) {
@@ -663,6 +987,8 @@ export default function OpsHub() {
           <FileManagerTab
             onFileContextChange={setSelectedFile}
             externalFileUpdate={externalFileUpdate}
+            requestedFilePath={requestedFilePath}
+            requestedFileToken={requestedFileToken}
           />
         );
       case 'preview':
@@ -790,7 +1116,11 @@ export default function OpsHub() {
               {activeProject.status === 'running' ? 'Online' : activeProject.status === 'deploying' ? 'Deploying' : 'Offline'}
             </span>
           </Badge>
-          <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
+          <button
+            onClick={() => openSidePanel('files')}
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+            aria-label="Open file search"
+          >
             <Search className="w-4 h-4" />
           </button>
           <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all relative">
@@ -803,215 +1133,279 @@ export default function OpsHub() {
         </div>
       </header>
 
-      {/* ── Body ── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar */}
-        <aside className="w-56 border-r border-slate-200 bg-slate-50/80 flex flex-col shrink-0">
-          <div className="flex-1 overflow-y-auto py-4 px-2">
-                      {activeSections.map((section) => (
-              <div key={section.label} className="mb-5">
-                <div className="px-3 mb-2">
-                  <span className="text-[10px] font-bold text-slate-400 tracking-[0.15em] uppercase">
-                    {section.label}
+      <div className="border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm shadow-slate-100/60 backdrop-blur-sm shrink-0">
+        <div className="overflow-x-auto">
+          <div className="flex min-w-max items-center gap-2">
+            {flatNavItems.map((item) => {
+              const itemTopTab = getTopTabForPage(item.id);
+              const isActive = activePage === item.id;
+              const isInActiveGroup = itemTopTab === activeTopTab;
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => goToPage(item.id)}
+                  className={`flex items-center gap-2 rounded-xl border px-3.5 py-2 text-[13px] font-medium transition-all ${
+                    isActive
+                      ? 'border-indigo-200 bg-indigo-50 text-indigo-700 shadow-sm'
+                      : isInActiveGroup
+                        ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        : 'border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:bg-white'
+                  }`}
+                >
+                  <span className={isActive ? 'text-indigo-500' : isInActiveGroup ? 'text-slate-500' : 'text-slate-400'}>
+                    {item.icon}
                   </span>
-                </div>
-                {section.items.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => goToPage(item.id)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-[13px] rounded-lg transition-all duration-200 mb-0.5 ${
-                      activePage === item.id
-                        ? 'bg-indigo-50 text-indigo-700 font-medium shadow-sm border border-indigo-100'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className={activePage === item.id ? 'text-indigo-500' : 'text-slate-400'}>{item.icon}</span>
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            ))}
-
-            {/* Quick Access */}
-            <div className="border-t border-slate-200 mt-3 pt-4">
-              <div className="px-3 mb-2">
-                <span className="text-[10px] font-bold text-slate-400/80 tracking-[0.15em] uppercase">
-                  Quick Access
-                </span>
-              </div>
-              {NAV_SECTIONS.filter((section) => section.label !== TAB_TO_SECTION[activeTopTab]).map((section) => (
-                <div key={section.label} className="mb-0.5">
-                  {section.items.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => goToPage(item.id)}
-                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded-md transition-all duration-200 ${
-                        activePage === item.id
-                          ? 'bg-indigo-50 text-indigo-600'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      {item.icon}
-                      <span>{item.label}</span>
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
           </div>
+        </div>
+      </div>
 
-          {/* Bottom */}
-          <div className="border-t border-slate-200 px-3 py-3">
-            <button className="w-full flex items-center gap-2 text-sm text-slate-500 hover:text-indigo-600 rounded-lg px-3 py-2 hover:bg-slate-100 transition-all">
-              <Settings className="w-4 h-4" />
-              <span className="font-medium">Settings</span>
-            </button>
-          </div>
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1 overflow-hidden bg-white flex flex-col">
+      {/* ── Body ── */}
+      <div className="relative flex flex-1 min-h-0 overflow-hidden">
+        <main className="flex-1 min-w-0 overflow-hidden bg-white flex flex-col">
           {activePage === 'logs' ? (
             renderContent()
           ) : (
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className={activePage === 'workstations' ? 'flex-1 min-h-0 overflow-hidden p-6' : 'flex-1 overflow-y-auto p-6'}>
               {renderContent()}
             </div>
           )}
         </main>
 
-        {/* Right Panel - AI Agent */}
-        <aside className="w-[360px] border-l border-slate-200 bg-white flex flex-col shrink-0">
-          <div className="px-4 py-3.5 border-b border-slate-200 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-sm">
-                <Bot className="w-3.5 h-3.5 text-white" />
-              </div>
-              <span className="text-sm font-semibold text-slate-800">AI Coding Agent</span>
-            </div>
-            <div className="flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] text-emerald-700 uppercase tracking-widest font-bold">Ready</span>
-            </div>
-          </div>
-
-          {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-5 bg-slate-50/50">
-            {chatMessages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-slate-200 flex items-center justify-center mb-4">
-                  <Bot className="w-7 h-7 text-indigo-400" />
+        {sidePanelOpen ? (
+          <aside className="flex h-full w-[360px] shrink-0 flex-col border-l border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="flex flex-1 items-center gap-1 rounded-xl bg-slate-100 p-1">
+                  <button
+                    onClick={() => setSidePanelTab('files')}
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all ${
+                      sidePanelTab === 'files'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    Files
+                  </button>
+                  <button
+                    onClick={() => setSidePanelTab('manager')}
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all ${
+                      sidePanelTab === 'manager'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    <Bot className="h-4 w-4" />
+                    Manager
+                  </button>
                 </div>
-                <p className="text-sm text-slate-600 font-medium">AI Coding Agent</p>
-                <p className="text-xs text-slate-400 mt-2 max-w-xs">
-                  Ask for targeted code changes or a plan. Open a file first when you want an edit applied.
-                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSidePanelOpen(false)}
+                  className="h-9 w-9 rounded-xl p-0 text-slate-500 hover:bg-slate-100"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
-            ) : (
-              chatMessages.map((message, index) => {
-                const providerLabel =
-                  message.provider && message.provider in AGENT_PROVIDER_LABELS
-                    ? AGENT_PROVIDER_LABELS[message.provider as CodingAgentProvider]
-                    : message.provider;
+            </div>
 
-                return (
-                  <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-4 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                    <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                      message.role === 'user'
-                        ? 'bg-indigo-500 text-white shadow-sm'
-                        : 'bg-white text-slate-700 border border-slate-200 shadow-sm'
-                    }`}>
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                      <div className="flex items-center gap-2 mt-2 text-[10px] opacity-60">
-                        {providerLabel && <span>via {providerLabel}</span>}
-                        {message.model && <span>{message.model}</span>}
-                        {message.transport && <span>{message.transport}</span>}
-                        {message.applied && (
-                          <span className="inline-flex items-center gap-1 text-emerald-500 font-medium">
-                            <CheckCircle2 className="w-3 h-3" />
-                            edit applied
-                          </span>
-                        )}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {sidePanelTab === 'files' ? (
+                <FileSearchDrawerPanel
+                  selectedFile={selectedFile}
+                  onSelectFile={handleDrawerFileSelect}
+                  onOpenInEditor={handleOpenFileManager}
+                />
+              ) : (
+                <div className="flex h-full min-h-0 flex-col bg-white">
+                  <div className="border-b border-slate-200 px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-sm">
+                          <Bot className="h-5 w-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">Manager</p>
+                          <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                            Describe a code change, bug fix, or refactor. Open a file first when you want a direct edit.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1">
+                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Ready</span>
                       </div>
                     </div>
+
+                    <div className="mt-4 flex items-center gap-2">
+                      <div className="grid flex-1 grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setCodingAgentMode('agent')}
+                          className={`h-9 rounded-xl text-xs ${
+                            codingAgentMode === 'agent'
+                              ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          Agent
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setCodingAgentMode('plan')}
+                          className={`h-9 rounded-xl text-xs ${
+                            codingAgentMode === 'plan'
+                              ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          Plan
+                        </Button>
+                      </div>
+                      <Select
+                        value={modelSelector}
+                        onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
+                      >
+                        <SelectTrigger className="h-9 w-[132px] rounded-xl border-slate-200 bg-slate-50 text-xs text-slate-700">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="simple-edit">Simple Edit</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {selectedFile && (
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          File context
+                        </p>
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <p className="truncate text-xs font-medium text-slate-700">{selectedFile.path}</p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenFileManager(selectedFile.path)}
+                            className="h-7 rounded-lg px-2 text-[11px] text-indigo-600 hover:bg-white"
+                          >
+                            Open
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                );
-              })
-            )}
-            <div ref={chatEndRef} />
-          </div>
 
-          {/* Chat Input */}
-          <div className="border-t border-slate-200 p-3.5 bg-white">
-            <div className="relative">
-              <Textarea
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                onKeyDown={handleChatKeyDown}
-                placeholder="Describe the change, bug, or deployment task..."
-                className="min-h-[84px] max-h-[160px] bg-slate-50 border-slate-200 text-sm text-slate-800 placeholder:text-slate-400 resize-none pr-12 rounded-xl focus:border-indigo-300 focus:ring-indigo-200"
-                rows={3}
-              />
-              <button
-                onClick={handleChatSend}
-                disabled={chatSending || !chatInput.trim()}
-                className="absolute right-2.5 bottom-2.5 p-2 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 disabled:opacity-30 transition-all shadow-md"
-              >
-                {chatSending ? (
-                  <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
-                ) : (
-                  <Send className="w-3.5 h-3.5 text-white" />
-                )}
-              </button>
-            </div>
-            <div className="mt-3 space-y-3">
-              <div className="space-y-1.5">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Mode Selection</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setCodingAgentMode('agent')}
-                    className={`h-9 rounded-lg text-xs ${
-                      codingAgentMode === 'agent'
-                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    Agent
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setCodingAgentMode('plan')}
-                    className={`h-9 rounded-lg text-xs ${
-                      codingAgentMode === 'plan'
-                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    Plan
-                  </Button>
+                  <div className="flex-1 overflow-y-auto bg-slate-50/60 px-4 py-5">
+                    {chatMessages.length === 0 ? (
+                      <div className="flex h-full flex-col items-center justify-center text-center">
+                        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-3xl border border-slate-200 bg-gradient-to-br from-indigo-50 to-purple-50">
+                          <Bot className="h-8 w-8 text-indigo-400" />
+                        </div>
+                        <p className="text-sm font-semibold text-slate-700">Manager</p>
+                        <p className="mt-2 max-w-xs text-xs leading-relaxed text-slate-500">
+                          Ask for a fix, refactor, new feature, or implementation plan. This panel can now hide when you need terminal elbow room.
+                        </p>
+                        <div className="mt-6 flex flex-wrap justify-center gap-2">
+                          {['Fix a bug', 'Refactor code', 'Add feature', 'Write tests'].map((prompt) => (
+                            <button
+                              key={prompt}
+                              onClick={() => setChatInput(prompt)}
+                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
+                            >
+                              {prompt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      chatMessages.map((message, index) => {
+                        const providerLabel =
+                          message.provider && message.provider in AGENT_PROVIDER_LABELS
+                            ? AGENT_PROVIDER_LABELS[message.provider as CodingAgentProvider]
+                            : message.provider;
+
+                        return (
+                          <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-4 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                            <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                              message.role === 'user'
+                                ? 'bg-indigo-500 text-white shadow-sm'
+                                : 'border border-slate-200 bg-white text-slate-700 shadow-sm'
+                            }`}>
+                              <p className="whitespace-pre-wrap">{message.content}</p>
+                              <div className="mt-2 flex items-center gap-2 text-[10px] opacity-60">
+                                {providerLabel && <span>via {providerLabel}</span>}
+                                {message.model && <span>{message.model}</span>}
+                                {message.transport && <span>{message.transport}</span>}
+                                {message.applied && (
+                                  <span className="inline-flex items-center gap-1 font-medium text-emerald-500">
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    edit applied
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  <div className="border-t border-slate-200 bg-white p-3.5">
+                    <div className="relative">
+                      <Textarea
+                        value={chatInput}
+                        onChange={(event) => setChatInput(event.target.value)}
+                        onKeyDown={handleChatKeyDown}
+                        placeholder="Describe the change, bug, or deployment task..."
+                        className="min-h-[84px] max-h-[160px] rounded-xl border-slate-200 bg-slate-50 pr-12 text-sm text-slate-800 placeholder:text-slate-400 resize-none focus:border-indigo-300 focus:ring-indigo-200"
+                        rows={3}
+                      />
+                      <button
+                        onClick={handleChatSend}
+                        disabled={chatSending || !chatInput.trim()}
+                        className="absolute bottom-2.5 right-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 p-2 shadow-md transition-all hover:from-indigo-600 hover:to-purple-600 disabled:opacity-30"
+                      >
+                        {chatSending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5 text-white" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Model Selector</p>
-                <Select
-                  value={modelSelector}
-                  onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
-                >
-                  <SelectTrigger className="h-9 w-full text-xs bg-slate-50 border-slate-200 text-slate-700 rounded-lg">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="simple-edit">Simple Edit</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              )}
             </div>
+          </aside>
+        ) : (
+          <div className="absolute right-4 top-4 z-30 flex flex-col gap-2">
+            <button
+              onClick={() => openSidePanel('files')}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <FolderOpen className="h-4 w-4" />
+              Files
+            </button>
+            <button
+              onClick={() => openSidePanel('manager')}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <Bot className="h-4 w-4" />
+              Manager
+            </button>
           </div>
-        </aside>
+        )}
       </div>
 
       {/* ── Footer ── */}

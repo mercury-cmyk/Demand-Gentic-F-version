@@ -148,6 +148,24 @@ function extractParentIds(fullName: string): { clusterId: string; configId: stri
   };
 }
 
+function isWorkstationUsePermissionError(error: unknown): boolean {
+  const code = typeof (error as { code?: unknown })?.code === 'number'
+    ? (error as { code: number }).code
+    : null;
+  const message = error instanceof Error ? error.message : '';
+  const details = typeof (error as { details?: unknown })?.details === 'string'
+    ? (error as { details: string }).details
+    : '';
+  const combined = `${message} ${details}`;
+
+  return (
+    code === 7 ||
+    /PERMISSION_DENIED/i.test(combined) ||
+    /workstations\.workstations\.use/i.test(combined) ||
+    /User not authorized to perform this action/i.test(combined)
+  );
+}
+
 export default class CloudWorkstationsManager extends EventEmitter {
   private projectId: string;
   private region: string;
@@ -554,7 +572,11 @@ export default class CloudWorkstationsManager extends EventEmitter {
    * Get a short-lived auth URL for embedding the workstation IDE in an iframe.
    * Returns the workstation host URL with bearer token info.
    */
-  async getIDEUrl(clusterId: string, configId: string, workstationId: string): Promise<{ url: string; host: string; accessToken: string; expireTime: string }> {
+  async getIDEUrl(
+    clusterId: string,
+    configId: string,
+    workstationId: string,
+  ): Promise<{ url: string; host: string; accessToken?: string; expireTime?: string; authMode: 'token' | 'browser' }> {
     const workstations = await this.listWorkstations(clusterId, configId);
     const ws = workstations.find(w => w.id === workstationId);
     if (!ws || !ws.host) {
@@ -578,11 +600,30 @@ export default class CloudWorkstationsManager extends EventEmitter {
       await new Promise(r => setTimeout(r, 3000));
     }
 
-    const tokenInfo = await this.generateAccessToken(clusterId, configId, workstationId);
+    try {
+      const tokenInfo = await this.generateAccessToken(clusterId, configId, workstationId);
+      if (tokenInfo.accessToken) {
+        return {
+          url: baseUrl,
+          host: ws.host,
+          authMode: 'token',
+          ...tokenInfo,
+        };
+      }
+    } catch (error) {
+      if (!isWorkstationUsePermissionError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        `[Workstations] Falling back to browser auth for ${workstationId} because backend credentials cannot generate an IDE token.`,
+      );
+    }
+
     return {
       url: baseUrl,
       host: ws.host,
-      ...tokenInfo,
+      authMode: 'browser',
     };
   }
 

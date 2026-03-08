@@ -20,7 +20,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { apiJsonRequest } from '@/lib/queryClient';
 
-interface WorkspaceEntry {
+export interface WorkspaceEntry {
   name: string;
   path: string;
   type: 'file' | 'directory';
@@ -28,13 +28,13 @@ interface WorkspaceEntry {
   modifiedAt: string;
 }
 
-interface WorkspaceDirectoryResponse {
+export interface WorkspaceDirectoryResponse {
   currentPath: string;
   breadcrumbs: string[];
   entries: WorkspaceEntry[];
 }
 
-interface WorkspaceFileResponse {
+export interface WorkspaceFileResponse {
   path: string;
   content: string;
   size: number;
@@ -58,6 +58,8 @@ interface ExternalFileUpdate {
 interface FileManagerTabProps {
   onFileContextChange?: (file: OpsWorkspaceFileContext | null) => void;
   externalFileUpdate?: ExternalFileUpdate | null;
+  requestedFilePath?: string | null;
+  requestedFileToken?: number;
 }
 
 function formatDate(dateStr?: string): string {
@@ -126,6 +128,8 @@ function getEntryIcon(entry: WorkspaceEntry) {
 export default function FileManagerTab({
   onFileContextChange,
   externalFileUpdate,
+  requestedFilePath,
+  requestedFileToken,
 }: FileManagerTabProps) {
   const { toast } = useToast();
   const [directory, setDirectory] = useState<WorkspaceDirectoryResponse>({
@@ -140,6 +144,7 @@ export default function FileManagerTab({
   const [openFile, setOpenFile] = useState<OpsWorkspaceFileContext | null>(null);
   const [openFileSize, setOpenFileSize] = useState(0);
   const [lastExternalToken, setLastExternalToken] = useState<number | null>(null);
+  const [lastRequestedFileToken, setLastRequestedFileToken] = useState<number | null>(null);
 
   const fetchDirectory = useCallback(async (nextPath: string = '') => {
     setLoadingDirectory(true);
@@ -264,6 +269,19 @@ export default function FileManagerTab({
     setLastExternalToken(externalFileUpdate.token);
     onFileContextChange?.(nextFile);
   }, [externalFileUpdate, lastExternalToken, onFileContextChange, openFile]);
+
+  useEffect(() => {
+    if (
+      !requestedFilePath
+      || requestedFileToken == null
+      || requestedFileToken === lastRequestedFileToken
+    ) {
+      return;
+    }
+
+    setLastRequestedFileToken(requestedFileToken);
+    void openWorkspaceFile(requestedFilePath);
+  }, [lastRequestedFileToken, openWorkspaceFile, requestedFilePath, requestedFileToken]);
 
   const filteredEntries = useMemo(() => {
     if (!searchQuery.trim()) {
