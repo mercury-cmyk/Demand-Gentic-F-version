@@ -38,6 +38,12 @@ services:
       - DRACHTIO_HOST=127.0.0.1
       - DRACHTIO_PORT=9022
       - DRACHTIO_SECRET=cymru
+    volumes:
+      # Mount gcloud CLI + SSH keys for workstation exec
+      - /snap/google-cloud-cli:/snap/google-cloud-cli:ro
+      - /snap/bin:/snap/bin:ro
+      - /home/Zahid/.ssh:/tmp/.ssh:ro
+      - /home/Zahid/.config/gcloud:/tmp/.gcloud:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 15s

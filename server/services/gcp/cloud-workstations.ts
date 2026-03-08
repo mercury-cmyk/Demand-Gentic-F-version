@@ -500,9 +500,8 @@ export default class CloudWorkstationsManager extends EventEmitter {
   }
 
   /**
-   * Execute a command on a running workstation.
-   * Uses the workstation's access token + host URL to proxy via HTTP.
-   * Falls back to gcloud ssh if available.
+   * Execute a command on a running workstation via gcloud SSH from the host.
+   * Uses child_process.exec with the full snap path to gcloud.
    */
   async execCommand(
     clusterId: string,
@@ -510,7 +509,6 @@ export default class CloudWorkstationsManager extends EventEmitter {
     workstationId: string,
     command: string,
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    // Get workstation host and access token
     const workstations = await this.listWorkstations(clusterId, configId);
     const ws = workstations.find(w => w.id === workstationId);
     if (!ws || !ws.host) {
@@ -520,82 +518,51 @@ export default class CloudWorkstationsManager extends EventEmitter {
       return { stdout: '', stderr: 'Workstation is not running', exitCode: 1 };
     }
 
-    const tokenInfo = await this.generateAccessToken(clusterId, configId, workstationId);
+    const { exec } = await import('child_process');
+    const escaped = command.replace(/'/g, "'\\''");
 
-    // Try HTTP proxy to workstation's Code Server API
-    try {
-      const https = await import('https');
-      const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
-        const postData = JSON.stringify({ command });
-        const url = new URL(`https://${ws.host}`);
+    // Try gcloud from snap path (VM host), then PATH, then fallback error
+    const gcloudPaths = ['/snap/bin/gcloud', '/snap/google-cloud-cli/current/bin/gcloud', 'gcloud'];
 
-        const req = https.request({
-          hostname: url.hostname,
-          port: 443,
-          path: '/api/exec',
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${tokenInfo.accessToken}`,
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData),
-          },
-          timeout: 30000,
-        }, (res) => {
-          let data = '';
-          res.on('data', (chunk: string) => { data += chunk; });
-          res.on('end', () => {
-            try {
-              const parsed = JSON.parse(data);
-              resolve({
-                stdout: parsed.stdout || parsed.output || data,
-                stderr: parsed.stderr || '',
-                exitCode: parsed.exitCode || parsed.code || 0,
-              });
-            } catch {
-              // If the response isn't JSON, treat the whole body as stdout
-              resolve({ stdout: data, stderr: '', exitCode: res.statusCode === 200 ? 0 : 1 });
-            }
-          });
-        });
-
-        req.on('error', (err: Error) => reject(err));
-        req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
-        req.write(postData);
-        req.end();
-      });
-
-      return result;
-    } catch (httpError: any) {
-      // HTTP proxy failed — try gcloud ssh as fallback
+    for (const gcloudBin of gcloudPaths) {
       try {
-        const { exec } = await import('child_process');
-        return await new Promise((resolve) => {
-          const escaped = command.replace(/'/g, "'\\''");
-          const cmd = [
-            'gcloud', 'workstations', 'ssh', workstationId,
-            `--cluster=${clusterId}`,
-            `--config=${configId}`,
-            `--region=${this.region}`,
-            `--project=${this.projectId}`,
-            `--command='${escaped}'`,
-          ].join(' ');
-
-          exec(cmd, { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }, (error: any, stdout: string, stderr: string) => {
+        const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
+          const cmd = `${gcloudBin} workstations ssh ${workstationId} --cluster=${clusterId} --config=${configId} --region=${this.region} --project=${this.projectId} --command='${escaped}'`;
+          exec(cmd, {
+            timeout: 60000,
+            encoding: 'utf-8',
+            maxBuffer: 5 * 1024 * 1024,
+            env: {
+              ...process.env,
+              HOME: '/tmp',
+              SSH_HOME: '/tmp/.ssh',
+              CLOUDSDK_CONFIG: '/tmp/.gcloud',
+              PATH: `/snap/bin:/snap/google-cloud-cli/current/bin:${process.env.PATH}`,
+            },
+          }, (error: any, stdout: string, stderr: string) => {
+            if (error && error.code === 'ENOENT') {
+              reject(new Error(`gcloud not found at ${gcloudBin}`));
+              return;
+            }
+            // Filter out gcloud SSH noise from stderr
+            const cleanStderr = (stderr || '').split('\n').filter((l: string) =>
+              !l.startsWith('Picking local') && !l.startsWith('Listening on') &&
+              !l.startsWith('WARNING:') && !l.startsWith('Warning:') && l.trim()
+            ).join('\n');
             resolve({
               stdout: stdout || '',
-              stderr: stderr || '',
+              stderr: cleanStderr,
               exitCode: error?.code || 0,
             });
           });
         });
+        return result;
       } catch {
-        return {
-          stdout: '',
-          stderr: `Command execution not available. HTTP proxy error: ${httpError.message}. gcloud not found in container.`,
-          exitCode: 1,
-        };
+        continue; // Try next gcloud path
       }
     }
+
+    return { stdout: '', stderr: 'gcloud CLI not found. Cannot execute commands on workstation.', exitCode: 1 };
   }
 
   /**
