@@ -15623,7 +15623,19 @@ Provide JSON response with:
             structuredTranscript: data?.structuredTranscript || undefined,
           });
           try {
-            const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            // Parse turns from structuredTranscript OR fall back to plain transcript string
+            let rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            if (rawTurns.length === 0 && typeof data?.transcript === 'string' && data.transcript.trim()) {
+              // Parse "Agent: text\nContact: text" format into structured turns
+              rawTurns = data.transcript.split('\n')
+                .filter((line: string) => line.trim())
+                .map((line: string) => {
+                  const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+                  if (match) return { role: match[1].toLowerCase() === 'agent' ? 'agent' : 'contact', text: match[2].trim() };
+                  return null;
+                })
+                .filter(Boolean);
+            }
             await processSIPPostCallAnalysis({
               callAttemptId,
               leadId: dispositionResult?.leadId,
@@ -15689,7 +15701,18 @@ Provide JSON response with:
             structuredTranscript: data?.structuredTranscript || undefined,
           });
           try {
-            const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            // Parse turns from structuredTranscript OR fall back to plain transcript string
+            let rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            if (rawTurns.length === 0 && typeof data?.transcript === 'string' && data.transcript.trim()) {
+              rawTurns = data.transcript.split('\n')
+                .filter((line: string) => line.trim())
+                .map((line: string) => {
+                  const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+                  if (match) return { role: match[1].toLowerCase() === 'agent' ? 'agent' : 'contact', text: match[2].trim() };
+                  return null;
+                })
+                .filter(Boolean);
+            }
             await processSIPPostCallAnalysis({
               callAttemptId,
               leadId: dispositionResult?.leadId,
