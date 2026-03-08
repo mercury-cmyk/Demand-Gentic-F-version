@@ -66,6 +66,62 @@ function parseErrorPayload(message: string): {
   }
 }
 
+function formatAggregatedProviderFailureMessage(message: string): string {
+  if (!message.includes("All configured coding agent providers failed.")) {
+    return message;
+  }
+
+  const summary = message.replace(
+    "All configured coding agent providers failed.",
+    "",
+  ).trim();
+
+  if (!summary) {
+    return "AgentX could not reach any configured coding provider. Check Codex, Claude, and Gemini runtime settings.";
+  }
+
+  const providerLines = summary
+    .split("|")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => {
+      const normalized = segment.toLowerCase();
+
+      if (normalized.startsWith("codex: authentication failed")) {
+        return "Codex authentication failed. Check AI_INTEGRATIONS_OPENAI_API_KEY / OPENAI_API_KEY, or switch OPS_HUB_CODEX_TRANSPORT to github_models and set GITHUB_MODELS_TOKEN.";
+      }
+
+      if (normalized.startsWith("claude: authentication failed")) {
+        return "Claude authentication failed. Check AI_INTEGRATIONS_ANTHROPIC_API_KEY / ANTHROPIC_API_KEY.";
+      }
+
+      if (
+        normalized.startsWith("gemini: endpoint or model configuration returned 404")
+      ) {
+        return "Gemini returned 404. Check AI_INTEGRATIONS_GEMINI_BASE_URL and OPS_HUB_GEMINI_MODEL. If you did not override them, verify the Gemini API key and project access.";
+      }
+
+      if (normalized.startsWith("codex: not configured")) {
+        return "Codex is not configured. Add an OpenAI API key or GitHub Models token for Ops Hub.";
+      }
+
+      if (normalized.startsWith("claude: not configured")) {
+        return "Claude is not configured. Add AI_INTEGRATIONS_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY.";
+      }
+
+      if (normalized.startsWith("gemini: not configured")) {
+        return "Gemini is not configured. Add AI_INTEGRATIONS_GEMINI_API_KEY, GOOGLE_AI_API_KEY, or GEMINI_API_KEY.";
+      }
+
+      return segment;
+    });
+
+  return [
+    "AgentX could not reach any configured coding provider.",
+    ...providerLines.map((line) => `- ${line}`),
+  ].join("\n");
+}
+
 export function formatOpsAgentErrorMessage(
   error: unknown,
   fallbackMessage: string,
@@ -79,7 +135,7 @@ export function formatOpsAgentErrorMessage(
   }
 
   if (message.includes("All configured coding agent providers failed.")) {
-    return message;
+    return formatAggregatedProviderFailureMessage(message);
   }
 
   const normalized = message.toLowerCase();
@@ -90,6 +146,15 @@ export function formatOpsAgentErrorMessage(
       : parsed?.status;
   const code = parsed?.code;
   const providerMessage = parsed?.providerMessage?.toLowerCase();
+
+  if (
+    normalized.includes("could not load the default credentials") ||
+    normalized.includes("google_application_credentials") ||
+    normalized.includes("failed to retrieve access token") ||
+    normalized.includes("failed to refresh access token")
+  ) {
+    return "AgentX could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.";
+  }
 
   if (
     status === 401 ||

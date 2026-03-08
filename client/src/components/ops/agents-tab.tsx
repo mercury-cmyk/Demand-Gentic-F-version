@@ -144,7 +144,7 @@ export default function AgentsTab() {
         <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <Badge className="border border-slate-200 bg-white text-slate-600">Primary Coding Agent</Badge>
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">AgentZ- The Architect</h2>
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">AgentX - The Architect</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">
               Clean, file-aware execution for fixes, refactors, and implementation planning inside Ops Hub.
             </p>
@@ -165,9 +165,9 @@ export default function AgentsTab() {
       <Card className="border-black/5 bg-white/90 shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-slate-900">AI Providers</CardTitle>
+            <CardTitle className="text-slate-900">Fallback Providers</CardTitle>
             <CardDescription className="text-slate-500">
-              Codex, Claude, and Gemini status with default model visibility for Ops Hub routing.
+              AgentX handles the primary Ops Hub coding flow. Codex, Claude, and Gemini remain available as fallback runtimes.
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={fetchStatus} className="border-slate-200 bg-white">
@@ -264,7 +264,7 @@ export default function AgentsTab() {
         <CardHeader>
           <CardTitle className="text-slate-900">Access Model</CardTitle>
           <CardDescription className="text-slate-500">
-            AgentZ- The Architect runs on the server, so runtime calls use stored credentials instead of vendor web sessions.
+            AgentX - The Architect runs on the server. Ops Hub now attempts Vertex-backed AgentX execution first, then falls back to Codex, Claude, and Gemini if needed.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-slate-600">
@@ -272,7 +272,13 @@ export default function AgentsTab() {
             Subscription or browser sign-in is still useful in provider-owned tools, but it does not power this VM runtime.
           </div>
           <div className="rounded-2xl border border-slate-200 bg-[#fbfaf6] px-4 py-3">
-            Codex can use either OpenAI API keys or a GitHub Models token. Claude remains Anthropic API key based, and Gemini remains Gemini API key based in the Ops runtime.
+            AgentX uses the server's Google Cloud / Vertex AI access. If that path is unavailable, Ops Hub can still fall back to Codex, Claude, or Gemini runtime credentials.
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-[#fbfaf6] px-4 py-3">
+            <p className="font-medium text-slate-700">AgentX / Vertex env</p>
+            <p className="mt-1 text-slate-500">
+              <code>GOOGLE_APPLICATION_CREDENTIALS</code>, <code>GOOGLE_CLOUD_PROJECT</code>, <code>GCP_PROJECT_ID</code>, <code>VERTEX_AI_LOCATION</code>, <code>VERTEX_CHAT_MODEL</code>
+            </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-[#fbfaf6] px-4 py-3">
             <p className="font-medium text-slate-700">Codex env</p>
@@ -335,9 +341,9 @@ export default function AgentsTab() {
 
       <Card className="border-black/5 bg-white/90 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-slate-900">AgentZ Control Surface</CardTitle>
+          <CardTitle className="text-slate-900">AgentX Control Surface</CardTitle>
           <CardDescription className="text-slate-500">
-            The Insights view mirrors the simplified Ops Hub controls for AgentZ- The Architect.
+            The Insights view mirrors the simplified Ops Hub controls for AgentX - The Architect.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -370,7 +376,7 @@ export default function AgentsTab() {
 
           <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-[#fbfaf6] px-4 py-3 text-sm text-slate-600">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
-            <span>Use the right-side `AgentZ- The Architect` panel for requests. Open a workspace file first when you want an edit applied.</span>
+            <span>Use the right-side `AgentX - The Architect` panel for requests. Open a workspace file first when you want an edit applied.</span>
           </div>
         </CardContent>
       </Card>

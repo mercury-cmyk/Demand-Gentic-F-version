@@ -212,7 +212,7 @@ import { normalizePhoneE164 } from "./normalization"; // Import normalization ut
 import { encryptJson, decryptJson } from "./lib/encryption";
 import type { FilterValues } from "@shared/filterConfig";
 import type { FilterGroup, FilterCondition } from "@shared/filter-types";
-import { getOAuthStateStore, hasRedisConfigured as hasRedisForOAuth } from "./lib/oauth-state-store";
+import { getOAuthStateStore } from "./lib/oauth-state-store";
 import { decryptTotpSecret, encryptTotpSecret, generateTotpSecret, verifyBackupCode, verifyTotpToken } from "./totp-mfa";
 
 // Configure multer for memory storage (file uploads)
@@ -223,10 +223,15 @@ const upload = multer({
   },
 });
 
-// Get Redis-backed OAuth state store if Redis is available (graceful degradation)
+// Initialize OAuth state storage for mailbox auth flows.
+// The helper already falls back to an in-memory store when Redis is unavailable,
+// so OAuth should remain usable in local/dev environments without REDIS_URL.
 let oauthStateStore: ReturnType<typeof getOAuthStateStore> | null = null;
-if (hasRedisForOAuth()) {
+try {
   oauthStateStore = getOAuthStateStore();
+} catch (error) {
+  console.error("[OAuth] Failed to initialize state store:", error);
+  oauthStateStore = null;
 }
 
 function base64URLEncode(buffer: Buffer) {

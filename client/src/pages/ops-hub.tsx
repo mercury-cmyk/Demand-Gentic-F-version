@@ -106,7 +106,7 @@ interface NavSection {
   items: { id: string; label: string; icon: React.ReactNode; badge?: string }[];
 }
 
-type CodingAgentProvider = 'codex' | 'claude' | 'gemini';
+type CodingAgentProvider = 'agentx' | 'codex' | 'claude' | 'gemini';
 type CodingAgentRunMode = 'agent' | 'plan';
 type CodingAgentModelSelector = 'simple-edit';
 type SidePanelTab = 'files' | 'manager';
@@ -216,6 +216,7 @@ const TAB_TO_SECTION: Record<string, string> = {
 const SECONDARY_NAV_ORDER = ['DEVOPS', 'WORKSPACE', 'INSIGHTS'];
 
 const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
+  agentx: 'AgentX',
   codex: 'Codex',
   claude: 'Claude',
   gemini: 'Gemini',
@@ -494,7 +495,7 @@ function FileSearchDrawerPanel({
             </>
           ) : (
             <p className="mt-2 text-xs leading-relaxed text-slate-500">
-              Pick a file here, then switch to <strong>Manager</strong> for an edit request or jump into the full editor.
+              Pick a file here, then switch to <strong>AgentX</strong> for an edit request or jump into the full editor.
             </p>
           )}
         </div>
@@ -1173,7 +1174,7 @@ export default function OpsHub() {
               }`}
             >
               <Bot className="h-4 w-4" />
-              Manager
+              AgentX
             </button>
           </div>
         </div>
@@ -1216,7 +1217,7 @@ export default function OpsHub() {
                     }`}
                   >
                     <Bot className="h-4 w-4" />
-                    Manager
+                    AgentX
                   </button>
                 </div>
                 <Button
@@ -1246,7 +1247,7 @@ export default function OpsHub() {
                           <Code2 className="h-4.5 w-4.5 text-white" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">AgentZ- The Architect</p>
+                          <p className="text-sm font-semibold text-slate-900">AgentX - The Architect</p>
                           <p className="text-[11px] text-slate-500">Clean coding edits and fast planning</p>
                         </div>
                       </div>
@@ -1307,9 +1308,9 @@ export default function OpsHub() {
                         <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl border border-slate-200 bg-white">
                           <Code2 className="h-7 w-7 text-slate-500" />
                         </div>
-                        <p className="text-sm font-medium text-slate-800">AgentZ- The Architect</p>
+                        <p className="text-sm font-medium text-slate-800">AgentX - The Architect</p>
                         <p className="mt-2 max-w-xs text-[13px] text-slate-500">
-                          Ask for a fix, refactor, or a quick implementation plan. Open a file first to enable direct edits.
+                          Ask for a fix, refactor, or a quick implementation plan. Open a file first to let AgentX apply edits directly.
                         </p>
 
                         <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -1369,7 +1370,7 @@ export default function OpsHub() {
                         value={chatInput}
                         onChange={(event) => setChatInput(event.target.value)}
                         onKeyDown={handleChatKeyDown}
-                        placeholder="Ask AgentZ for a fix, refactor, or plan..."
+                        placeholder="Ask AgentX for a fix, refactor, or plan..."
                         className="min-h-[72px] max-h-[140px] resize-none rounded-2xl border-slate-200 bg-slate-50 pr-11 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:ring-slate-200"
                         rows={3}
                       />
