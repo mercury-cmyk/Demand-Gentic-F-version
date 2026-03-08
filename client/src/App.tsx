@@ -83,7 +83,6 @@ import UserManagementPage from "@/pages/user-management";
 import EventsPage from "@/pages/events";
 import ResourcesPage from "@/pages/resources";
 import NewsPage from "@/pages/news";
-import SenderProfilesPage from "@/pages/sender-profiles";
 import SipTrunkSettingsPage from "@/pages/sip-trunk-settings";
 import AgentConsolePage from "./pages/agent-console";
 import ResourcesCentrePage from "@/pages/resources-centre";
@@ -169,7 +168,7 @@ import PromptManagementPage from "@/pages/prompt-management";
 import PromptInspectorPage from "@/pages/prompt-inspector";
 import SmtpProvidersPage from "@/pages/smtp-providers";
 import TransactionalTemplatesPage from "@/pages/transactional-templates";
-import DomainManagementPage from "@/pages/domain-management";
+import EmailManagementPage from "@/pages/email-management";
 import MercuryNotificationsPage from "@/pages/mercury-notifications";
 import DeliverabilityDashboardPage from "@/pages/deliverability-dashboard";
 import BrandKitsPage from "@/pages/brand-kits";
@@ -612,9 +611,10 @@ function AuthenticatedApp() {
               <Route path="/settings/background-jobs" component={SettingsPage} />
               <Route path="/settings/compliance" component={SettingsPage} />
               <Route path="/settings/super-org" component={SuperOrgSettingsPage} />
+              <Route path="/settings/email-management" component={EmailManagementPage} />
               <Route path="/settings/smtp-providers" component={SmtpProvidersPage} />
               <Route path="/settings/transactional-templates" component={TransactionalTemplatesPage} />
-              <Route path="/settings/domain-management" component={DomainManagementPage} />
+              <Route path="/settings/domain-management" component={() => <Redirect to="/settings/email-management?tab=domains" />} />
               <Route path="/settings/mercury-notifications" component={MercuryNotificationsPage} />
               <Route path="/settings/deliverability" component={DeliverabilityDashboardPage} />
               <Route path="/settings/brand-kits" component={BrandKitsPage} />
@@ -637,8 +637,8 @@ function AuthenticatedApp() {
 
               {/* Legacy settings routes (kept for backwards compatibility) */}
               <Route path="/user-management" component={UsersSettingsPage} />
-              <Route path="/sender-profiles" component={SenderProfilesPage} />
-              <Route path="/email-infrastructure/sender-profiles" component={SenderProfilesPage} />
+              <Route path="/sender-profiles" component={() => <Redirect to="/settings/email-management?tab=senders" />} />
+              <Route path="/email-infrastructure/sender-profiles" component={() => <Redirect to="/settings/email-management?tab=senders" />} />
               <Route path="/telephony/sip-trunks" component={TelephonySettingsPage} />
               
               {/* Resources (Admin) */}

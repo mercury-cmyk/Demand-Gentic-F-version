@@ -168,6 +168,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // SETTINGS - Admin only (except profile)
   // ============================================
   { pattern: '/settings/profile', roles: ALL_ROLES, description: 'Profile Settings' },
+  { pattern: /^\/settings\/email-management(?:\?.*)?$/, roles: MANAGEMENT_ROLES, description: 'Campaign Email Management' },
   { pattern: '/settings', roles: [USER_ROLES.ADMIN], description: 'Settings' },
   { pattern: /^\/settings\//, roles: [USER_ROLES.ADMIN], description: 'Settings pages' },
   { pattern: '/email-builder', roles: [USER_ROLES.ADMIN], description: 'Email Builder' },

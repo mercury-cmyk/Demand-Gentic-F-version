@@ -375,7 +375,7 @@ export async function generateRecommendations(
       title: 'Configure SPF Record',
       description:
         'SPF (Sender Policy Framework) is not configured. This record tells receiving servers which mail servers are authorized to send email for your domain.',
-      actionUrl: '/settings/domain-management',
+      actionUrl: '/settings/email-management?tab=domains',
       impact: 'High - Without SPF, emails are more likely to be marked as spam',
     });
   }
@@ -387,7 +387,7 @@ export async function generateRecommendations(
       title: 'Configure DKIM Record',
       description:
         'DKIM (DomainKeys Identified Mail) is not configured. This adds a digital signature to your emails to verify they haven\'t been altered.',
-      actionUrl: '/settings/domain-management',
+      actionUrl: '/settings/email-management?tab=domains',
       impact: 'High - DKIM significantly improves deliverability',
     });
   }
@@ -399,7 +399,7 @@ export async function generateRecommendations(
       title: 'Configure DMARC Record',
       description:
         'DMARC (Domain-based Message Authentication) is not configured. This tells receiving servers how to handle emails that fail SPF/DKIM checks.',
-      actionUrl: '/settings/domain-management',
+      actionUrl: '/settings/email-management?tab=domains',
       impact: 'Medium - DMARC provides visibility into email authentication',
     });
   }

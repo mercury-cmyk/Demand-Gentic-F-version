@@ -720,11 +720,11 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             description: 'SMTP providers, transactional templates, and Mercury notification rules',
           },
           {
-            id: 'settings-domain-management',
-            title: 'Domain Management',
-            url: '/settings/domain-management',
+            id: 'settings-email-management',
+            title: 'Campaign Email',
+            url: '/settings/email-management',
             roles: [USER_ROLES.ADMIN],
-            description: 'Configure sending domains and DNS records',
+            description: 'Manage campaign providers, sender profiles, and sending domains',
           },
           {
             id: 'settings-deliverability',

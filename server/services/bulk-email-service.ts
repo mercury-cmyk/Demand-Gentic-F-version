@@ -1,10 +1,12 @@
 import { db } from '../db';
-import { emailSends, contacts, accounts, campaigns, lists, segments, senderProfiles } from '@shared/schema';
+import { emailSends, contacts, accounts, campaigns, lists, segments, senderProfiles, type SenderProfile } from '@shared/schema';
 import { eq, inArray, and, isNull, or } from 'drizzle-orm';
 import { emailTrackingService } from '../lib/email-tracking-service';
 import { initializeEmailQueue, type EmailJobData } from '../workers/email-worker';
 import { checkCampaignSuppression } from '../lib/campaign-suppression';
-import { buildFilterQuery, type FilterGroup } from '../filter-builder';
+import { buildFilterQuery } from '../filter-builder';
+import type { FilterGroup } from '@shared/filter-types';
+import { campaignEmailProviderService } from './campaign-email-provider-service';
 
 export interface BulkEmailRecipient {
   email: string;
@@ -14,6 +16,7 @@ export interface BulkEmailRecipient {
 
 export interface BulkEmailOptions {
   campaignId: string;
+  senderProfileId?: string;
   from: string;
   fromName?: string;
   replyTo?: string;
@@ -23,6 +26,8 @@ export interface BulkEmailOptions {
   preheader?: string;
   recipients: BulkEmailRecipient[];
   tags?: string[];
+  providerId?: string;
+  providerKey?: string;
   espAdapter?: string;
   batchSize?: number;
   delayBetweenBatches?: number;
@@ -57,6 +62,7 @@ function injectPreheader(html: string, preheader?: string): string {
 export async function queueBulkEmails(options: BulkEmailOptions): Promise<BulkEmailResult> {
   const {
     campaignId,
+    senderProfileId,
     from,
     fromName,
     replyTo,
@@ -66,6 +72,8 @@ export async function queueBulkEmails(options: BulkEmailOptions): Promise<BulkEm
     text,
     recipients,
     tags = [],
+    providerId,
+    providerKey,
     espAdapter,
   } = options;
 
@@ -96,9 +104,10 @@ export async function queueBulkEmails(options: BulkEmailOptions): Promise<BulkEm
         .values({
           campaignId,
           contactId: recipient.contactId,
+          senderProfileId: senderProfileId || null,
           status: 'pending',
           sendAt: new Date(),
-          provider: espAdapter || 'mailgun',
+          provider: providerKey || espAdapter || 'mailgun',
         })
         .returning();
 
@@ -143,6 +152,8 @@ export async function queueBulkEmails(options: BulkEmailOptions): Promise<BulkEm
           subject: personalizedSubject,
           html: finalHtml,
           text,
+          providerId,
+          providerKey,
           espAdapter,
           listUnsubscribeUrl: unsubscribeUrl,
           campaignId,
@@ -349,22 +360,32 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
   let fromName: string | undefined;
   let replyTo: string | undefined;
   let espAdapter = 'mailgun';
+  let providerId: string | undefined;
+  let providerKey: string | undefined;
+  let senderProfileId: string | undefined;
+  let selectedProfile = null as SenderProfile | null;
 
   // @ts-ignore - senderProfileId may not be typed on campaign
-  const senderProfileId = campaign.senderProfileId;
-  if (senderProfileId) {
-    const [profile] = await db.select().from(senderProfiles).where(eq(senderProfiles.id, senderProfileId)).limit(1);
+  const campaignSenderProfileId = campaign.senderProfileId;
+  if (campaignSenderProfileId) {
+    const [profile] = await db.select().from(senderProfiles).where(eq(senderProfiles.id, campaignSenderProfileId)).limit(1);
     if (profile) {
+      selectedProfile = profile;
+      senderProfileId = profile.id;
       fromEmail = profile.fromEmail;
       fromName = profile.fromName || undefined;
       replyTo = profile.replyToEmail || profile.fromEmail;
       espAdapter = profile.espAdapter || 'mailgun';
     }
   } else {
-    // Fallback: find default mailgun sender profile
+    // Fallback: prefer the default active sender profile, then any active profile.
     const profiles = await db.select().from(senderProfiles).limit(10);
-    const defaultProfile = profiles.find(p => p.espAdapter === 'mailgun') || profiles[0];
+    const defaultProfile = profiles.find(p => p.isDefault && p.isActive !== false)
+      || profiles.find(p => p.isActive !== false)
+      || profiles[0];
     if (defaultProfile) {
+      selectedProfile = defaultProfile;
+      senderProfileId = defaultProfile.id;
       fromEmail = defaultProfile.fromEmail;
       fromName = defaultProfile.fromName || undefined;
       replyTo = defaultProfile.replyToEmail || defaultProfile.fromEmail;
@@ -372,10 +393,19 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
     }
   }
 
+  if (selectedProfile) {
+    const provider = await campaignEmailProviderService.resolveCampaignEmailProviderForSenderProfile(selectedProfile);
+    providerId = provider?.id || undefined;
+    providerKey = provider?.providerKey || selectedProfile.espProvider || selectedProfile.espAdapter || 'mailgun';
+  } else {
+    providerKey = 'mailgun';
+  }
+
   console.log(`[sendCampaignEmails] Sending from ${fromName ? `${fromName} <${fromEmail}>` : fromEmail}`);
 
   return queueBulkEmails({
     campaignId,
+    senderProfileId,
     from: fromEmail,
     fromName,
     replyTo,
@@ -385,6 +415,8 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
     preheader: campaign.emailPreheader || undefined,
     recipients,
     tags: ['campaign', `campaign-${campaignId}`],
+    providerId,
+    providerKey,
     espAdapter,
   });
 }

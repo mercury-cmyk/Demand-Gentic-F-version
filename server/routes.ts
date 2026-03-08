@@ -66,6 +66,7 @@ import campaignSendRouter from './routes/campaign-send-routes';
 import transactionalTemplatesRouter from './routes/transactional-templates';
 import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } from './routes/mercury-bridge';
 import domainManagementRouter from './routes/domain-management';
+import emailManagementRouter from './routes/email-management';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
 import unifiedEmailSystemRouter from './routes/unified-email-system';
@@ -16183,6 +16184,7 @@ Provide JSON response with:
   app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
 
   // ==================== EMAIL & DELIVERABILITY ====================
+  app.use('/api/email-management', requireAuth, emailManagementRouter);
   app.use('/api/domains', requireAuth, domainManagementRouter);
   app.use('/api/deliverability', requireAuth, deliverabilityRouter);
   app.use('/api/email', requireAuth, unifiedEmailRoutes);
