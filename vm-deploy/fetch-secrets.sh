@@ -45,6 +45,8 @@ ENABLE_GMAIL_SYNC=false
 # URLs
 BASE_URL=https://demandgentic.ai
 APP_BASE_URL=https://demandgentic.ai
+VM_OPS_AGENT_URL=http://127.0.0.1:8383
+OPS_HUB_DEPLOY_TARGET=vm
 PUBLIC_TEXML_HOST=demandgentic.ai
 PUBLIC_WEBHOOK_HOST=demandgentic.ai
 PUBLIC_WEBSOCKET_URL=wss://demandgentic.ai/voice-dialer
@@ -116,6 +118,7 @@ SECRETS=(
     ORG_INTELLIGENCE_OPENAI_MODEL
     PGDATABASE PGHOST PGPORT PGUSER PGPASSWORD
     LIVEKIT_WEBHOOK_SECRET LIVEKIT_API_KEY LIVEKIT_API_SECRET
+    OPS_AGENT_TOKEN
 )
 
 echo "" >> "$ENV_FILE"
@@ -130,6 +133,20 @@ for secret in "${SECRETS[@]}"; do
         echo "  - $secret (not found, skipping)"
     fi
 done
+
+if ! grep -q '^OPS_AGENT_TOKEN=' "$ENV_FILE"; then
+    if command -v openssl >/dev/null 2>&1; then
+        GENERATED_TOKEN=$(openssl rand -hex 24)
+    else
+        GENERATED_TOKEN=$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(24))
+PY
+)
+    fi
+    echo "OPS_AGENT_TOKEN=$GENERATED_TOKEN" >> "$ENV_FILE"
+    echo "  + OPS_AGENT_TOKEN (generated locally)"
+fi
 
 chmod 600 "$ENV_FILE"
 echo ""

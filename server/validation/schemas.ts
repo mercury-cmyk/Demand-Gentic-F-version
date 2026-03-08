@@ -12,6 +12,22 @@ export const loginSchema = z.object({
   rememberMe: z.boolean().optional(),
 });
 
+export const mfaVerifySchema = z.object({
+  username: z.string().min(1, 'Username is required').max(100),
+  password: z.string().min(1, 'Password is required'),
+  token: z.string().min(1, 'Authentication code is required').max(32),
+  useBackupCode: z.boolean().optional().default(false),
+  rememberMe: z.boolean().optional(),
+});
+
+export const mfaConfirmSchema = z.object({
+  token: z.string().min(6, 'Authentication code is required').max(12),
+});
+
+export const mfaDisableSchema = z.object({
+  password: z.string().min(1, 'Password is required'),
+});
+
 export const registerSchema = z.object({
   username: z.string().min(3, 'Username must be at least 3 characters').max(50),
   email: z.string().email('Invalid email address'),

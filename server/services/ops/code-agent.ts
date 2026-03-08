@@ -4,6 +4,7 @@ import type {
   LLMProvider,
   ProviderMode,
 } from "../multi-provider-agent";
+import { formatOpsAgentErrorMessage } from "./format-agent-error";
 import { readWorkspaceFile, writeWorkspaceFile } from "./runtime";
 
 export interface OpsCodeAgentRequest {
@@ -118,10 +119,10 @@ async function runSingleFileEdit(
   } catch (error) {
     return {
       provider: "system",
-      summary:
-        error instanceof Error
-          ? error.message
-          : "The coding agent failed to generate an edit.",
+      summary: formatOpsAgentErrorMessage(
+        error,
+        "The coding agent failed to generate an edit.",
+      ),
       path: request.selectedFilePath,
       applied: false,
       changed: false,
@@ -210,10 +211,10 @@ export async function runOpsCodeAgent(
   } catch (error) {
     return {
       provider: "system",
-      summary:
-        error instanceof Error
-          ? error.message
-          : "The coding agent failed to generate a response.",
+      summary: formatOpsAgentErrorMessage(
+        error,
+        "The coding agent failed to generate a response.",
+      ),
       path: request.selectedFilePath || null,
       applied: false,
       changed: false,

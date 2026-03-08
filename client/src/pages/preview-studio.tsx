@@ -295,13 +295,17 @@ export default function PreviewStudioPage() {
       const res = await apiRequest('POST', '/api/preview-studio/intelligence-generate', {
         campaignId: selectedCampaignId,
         accountId: selectedAccountId,
-      });
+      }, { timeout: 120000 });
       if (!res.ok) throw new Error('Failed to generate intelligence');
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       refetchIntelligence();
-      toast({ title: 'Intelligence Generated', description: 'Account intelligence has been generated. Check status for remaining components.' });
+      if (data?.success) {
+        toast({ title: 'Intelligence Generated', description: 'Account intelligence has been generated successfully.' });
+      } else {
+        toast({ variant: 'destructive', title: 'Generation Incomplete', description: 'Intelligence generation did not fully complete. Some required components may still be missing.' });
+      }
     },
     onError: (error: Error) => {
       toast({ variant: 'destructive', title: 'Generation Failed', description: error.message });

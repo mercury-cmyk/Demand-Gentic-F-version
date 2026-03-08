@@ -143,6 +143,9 @@ import {
 } from "./middleware/security";
 import {
   loginSchema,
+  mfaConfirmSchema,
+  mfaDisableSchema,
+  mfaVerifySchema,
   createUserSchema,
   updateUserSchema,
   assignRoleSchema,
@@ -210,6 +213,7 @@ import { encryptJson, decryptJson } from "./lib/encryption";
 import type { FilterValues } from "@shared/filterConfig";
 import type { FilterGroup, FilterCondition } from "@shared/filter-types";
 import { getOAuthStateStore, hasRedisConfigured as hasRedisForOAuth } from "./lib/oauth-state-store";
+import { decryptTotpSecret, encryptTotpSecret, generateTotpSecret, verifyBackupCode, verifyTotpToken } from "./totp-mfa";
 
 // Configure multer for memory storage (file uploads)
 const upload = multer({
@@ -364,6 +368,43 @@ type MicrosoftTokenSet = {
 
 const MAILBOX_PROVIDER = "o365";
 const GOOGLE_MAILBOX_PROVIDER = "google";
+const REMEMBER_ME_TOKEN_TTL = "30d";
+
+function getRequestedAuthTokenTtl(rememberMe?: boolean): string | undefined {
+  return rememberMe ? REMEMBER_ME_TOKEN_TTL : undefined;
+}
+
+async function resolveInternalUserRolesForAuth(user: schema.User): Promise<string[]> {
+  let userRolesForAuth = await storage.getUserRoles(user.id);
+
+  if (userRolesForAuth.length === 0) {
+    const allUsersWithRoles = await storage.getAllUsersWithRoles();
+    const hasAdmin = allUsersWithRoles.some((candidate) => candidate.roles.includes('admin'));
+
+    if (!hasAdmin) {
+      await storage.assignUserRole(user.id, 'admin', user.id);
+      userRolesForAuth = ['admin'];
+    } else {
+      userRolesForAuth = [user.role || 'agent'];
+    }
+  }
+
+  return Array.isArray(userRolesForAuth) ? userRolesForAuth : [userRolesForAuth];
+}
+
+function sanitizeInternalUser(user: schema.User, roles: string[]) {
+  const { password: _password, ...userWithoutPassword } = user;
+  return { ...userWithoutPassword, roles };
+}
+
+async function buildInternalAuthSuccessPayload(user: schema.User, rememberMe?: boolean) {
+  const roles = await resolveInternalUserRolesForAuth(user);
+  const token = generateToken(user, roles, getRequestedAuthTokenTtl(rememberMe));
+  return {
+    token,
+    user: sanitizeInternalUser(user, roles),
+  };
+}
 
 function deriveOpportunityStatus(stage: string, requested?: string | null): "open" | "won" | "lost" | "on_hold" {
   const normalized = requested?.toLowerCase();
@@ -1281,7 +1322,7 @@ export function registerRoutes(app: Express) {
   // Apply strict rate limiting to login endpoint (5 attempts per 15 minutes)
   app.post("/api/auth/login", authLimiter, validate({ body: loginSchema }), async (req, res) => {
     try {
-      const { username, password } = req.body;
+      const { username, password, rememberMe } = req.body;
 
       const user = await storage.getUserByUsername(username);
 
@@ -1295,42 +1336,189 @@ export function registerRoutes(app: Express) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Fetch user roles (multi-role support)
-      let userRoles = await storage.getUserRoles(user.id);
-
-      // Bootstrap check: If user has no roles and no admin users exist in the system,
-      // automatically assign admin role to this user (first user setup)
-      if (userRoles.length === 0) {
-        const allUsersWithRoles = await storage.getAllUsersWithRoles();
-        const hasAdmin = allUsersWithRoles.some(u => u.roles.includes('admin'));
-
-        if (!hasAdmin) {
-          // This is the first user - give them admin role
-          await storage.assignUserRole(user.id, 'admin', user.id);
-          userRoles = ['admin'];
-        } else {
-          // Use legacy role as fallback - ensure it's always in an array
-          userRoles = [user.role || 'agent'];
+      if (user.mfaEnabled) {
+        if (!user.totpSecret) {
+          return res.status(500).json({ message: "2FA is configured incorrectly for this account" });
         }
+
+        return res.json({
+          requiresMFA: true,
+          mfaType: 'totp',
+          rememberMe: !!rememberMe,
+        });
       }
 
-      // Ensure userRoles is always an array
-      if (!Array.isArray(userRoles)) {
-        userRoles = [userRoles];
-      }
-
-      // Generate JWT token with roles
-      const token = generateToken(user, userRoles);
-
-      // Return token and user info without password, including roles
-      const { password: _, ...userWithoutPassword } = user;
-      res.json({
-        token,
-        user: { ...userWithoutPassword, roles: userRoles }
-      });
+      res.json(await buildInternalAuthSuccessPayload(user, rememberMe));
     } catch (error) {
       console.error('[LOGIN ERROR]', error);
       res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/mfa/verify", authLimiter, validate({ body: mfaVerifySchema }), async (req, res) => {
+    try {
+      const { username, password, token, useBackupCode, rememberMe } = req.body;
+
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isValidPassword = await comparePassword(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      if (!user.mfaEnabled) {
+        return res.status(400).json({ message: "Multi-factor authentication is not enabled for this account" });
+      }
+
+      if (!user.totpSecret) {
+        return res.status(500).json({ message: "2FA is configured incorrectly for this account" });
+      }
+
+      const backupCodes = Array.isArray(user.backupCodes)
+        ? user.backupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+      const usedBackupCodes = Array.isArray(user.usedBackupCodes)
+        ? user.usedBackupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+
+      if (useBackupCode) {
+        const normalizedBackupCode = token.toUpperCase().replace(/[^A-Z0-9]/g, "").trim();
+        const isValidBackupCode = verifyBackupCode(usedBackupCodes, backupCodes, normalizedBackupCode);
+
+        if (!isValidBackupCode) {
+          return res.status(401).json({ message: "Invalid backup code" });
+        }
+
+        await storage.updateUser(user.id, {
+          usedBackupCodes: [...new Set([...usedBackupCodes, normalizedBackupCode])],
+        });
+      } else {
+        const decryptedSecret = decryptTotpSecret(user.totpSecret);
+        const isValidTotp = verifyTotpToken(decryptedSecret, token);
+
+        if (!isValidTotp) {
+          return res.status(401).json({ message: "Invalid authentication code" });
+        }
+      }
+
+      res.json(await buildInternalAuthSuccessPayload(user, rememberMe));
+    } catch (error) {
+      console.error('[MFA VERIFY ERROR]', error);
+      res.status(500).json({ message: "MFA verification failed" });
+    }
+  });
+
+  app.get("/api/auth/mfa/status", requireAuth, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const backupCodes = Array.isArray(user.backupCodes)
+        ? user.backupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+      const usedBackupCodes = Array.isArray(user.usedBackupCodes)
+        ? user.usedBackupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+
+      res.json({
+        mfaEnabled: user.mfaEnabled,
+        mfaEnrolledAt: user.mfaEnrolledAt ?? null,
+        hasBackupCodes: backupCodes.length > usedBackupCodes.length,
+      });
+    } catch (error) {
+      console.error('[MFA STATUS ERROR]', error);
+      res.status(500).json({ message: "Failed to load MFA status" });
+    }
+  });
+
+  app.post("/api/auth/mfa/enroll", requireAuth, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (user.mfaEnabled) {
+        return res.status(409).json({ message: "2FA is already enabled for this account" });
+      }
+
+      const enrollment = await generateTotpSecret(user.email || user.username);
+
+      await storage.updateUser(user.id, {
+        mfaEnabled: false,
+        totpSecret: encryptTotpSecret(enrollment.secret),
+        backupCodes: enrollment.backupCodes,
+        usedBackupCodes: [],
+        mfaEnrolledAt: null,
+      });
+
+      res.json(enrollment);
+    } catch (error) {
+      console.error('[MFA ENROLL ERROR]', error);
+      res.status(500).json({ message: "Failed to start MFA enrollment" });
+    }
+  });
+
+  app.post("/api/auth/mfa/confirm", requireAuth, validate({ body: mfaConfirmSchema }), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (!user.totpSecret) {
+        return res.status(400).json({ message: "2FA enrollment has not been started" });
+      }
+
+      const decryptedSecret = decryptTotpSecret(user.totpSecret);
+      const isValidTotp = verifyTotpToken(decryptedSecret, req.body.token);
+
+      if (!isValidTotp) {
+        return res.status(400).json({ message: "Invalid authentication code" });
+      }
+
+      await storage.updateUser(user.id, {
+        mfaEnabled: true,
+        mfaEnrolledAt: new Date(),
+        usedBackupCodes: Array.isArray(user.usedBackupCodes) ? user.usedBackupCodes : [],
+      });
+
+      res.json({ message: "2FA enabled" });
+    } catch (error) {
+      console.error('[MFA CONFIRM ERROR]', error);
+      res.status(500).json({ message: "Failed to confirm MFA enrollment" });
+    }
+  });
+
+  app.post("/api/auth/mfa/disable", requireAuth, validate({ body: mfaDisableSchema }), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const isValidPassword = await comparePassword(req.body.password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Password is incorrect" });
+      }
+
+      await storage.updateUser(user.id, {
+        mfaEnabled: false,
+        totpSecret: null,
+        backupCodes: null,
+        usedBackupCodes: [],
+        mfaEnrolledAt: null,
+      });
+
+      res.json({ message: "2FA disabled" });
+    } catch (error) {
+      console.error('[MFA DISABLE ERROR]', error);
+      res.status(500).json({ message: "Failed to disable MFA" });
     }
   });
 

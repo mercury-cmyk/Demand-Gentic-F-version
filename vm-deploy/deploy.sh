@@ -7,8 +7,9 @@
 
 set -euo pipefail
 
-APP_DIR="/home/Zahid/demandgentic"
-COMPOSE="docker compose -f vm-deploy/docker-compose.yml"
+APP_DIR="${APP_DIR:-/home/Zahid/demandgentic}"
+COMPOSE_FILE_REL="${COMPOSE_FILE_REL:-vm-deploy/docker-compose.yml}"
+COMPOSE="docker compose -f $COMPOSE_FILE_REL"
 REBUILD_MB=false
 
 for arg in "$@"; do

@@ -259,6 +259,7 @@ async function synthesizeProblemIntelligence(params: {
     params;
 
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  const openaiBaseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
 
   // Fallback if no API key
   if (!openaiKey) {
@@ -278,7 +279,7 @@ async function synthesizeProblemIntelligence(params: {
 
   try {
     const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
+    const openai = new OpenAI({ apiKey: openaiKey, ...(openaiBaseURL ? { baseURL: openaiBaseURL } : {}) });
 
     const response = await openai.chat.completions.create({
       model: SYNTHESIS_MODEL,

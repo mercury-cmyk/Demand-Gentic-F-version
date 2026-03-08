@@ -408,6 +408,7 @@ function VoiceTrainerShell({ user, userRoles }: { user: any; userRoles: string[]
 
 function AuthenticatedApp() {
   const { user, token, getToken } = useAuth();
+  const [location] = useLocation();
 
   // Custom sidebar width for enterprise CRM
   const style = {
@@ -428,6 +429,7 @@ function AuthenticatedApp() {
   ]));
   const resolvedUserRoles = userRoles.length > 0 ? userRoles : ['agent'];
   const primaryRole = resolvedUserRoles.includes('admin') ? 'admin' : resolvedUserRoles[0];
+  const isOpsHubRoute = location.startsWith('/ops-hub');
 
   // Voice trainer users get a clean, isolated full-screen layout — no sidebar, no top nav
   const isVoiceTrainer = resolvedUserRoles.includes('voice_trainer') && !resolvedUserRoles.includes('admin');
@@ -440,13 +442,21 @@ function AuthenticatedApp() {
       <AgentPanelProvider userRole={primaryRole} isClientPortal={false}>
         <CommandPalette />
         <div className="flex h-screen w-full agentx-shell">
-          <AppSidebar userRoles={resolvedUserRoles} />
+          {!isOpsHubRoute && <AppSidebar userRoles={resolvedUserRoles} />}
           <div className="flex flex-col flex-1 overflow-hidden">
-            <TopBar
-              userName={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'User'}
-              userRoles={resolvedUserRoles}
-            />
-            <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-background">
+            {!isOpsHubRoute && (
+              <TopBar
+                userName={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'User'}
+                userRoles={resolvedUserRoles}
+              />
+            )}
+            <main
+              className={
+                isOpsHubRoute
+                  ? 'flex-1 overflow-hidden bg-background'
+                  : 'flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-background'
+              }
+            >
               <RouteGuard userRoles={resolvedUserRoles}>
             <Switch>
               <Route path="/" component={Dashboard} />
