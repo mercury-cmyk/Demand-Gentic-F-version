@@ -1,12 +1,26 @@
-import express from 'express';
 import { Router } from 'express';
 import CloudBuildManager from '../services/gcp/cloud-build-manager.js';
 import CloudRunDeploymentManager from '../services/gcp/cloud-run-deployment.js';
 import DomainMapper from '../services/gcp/domain-mapper.js';
 import CostTracker from '../services/gcp/cost-tracker.js';
 import type { Request, Response } from 'express';
+import { requireAuth, requireRole } from '../auth';
+import {
+  getDeploymentStatus,
+  getOpsOverview,
+  listWorkspaceDirectory,
+  readWorkspaceFile,
+  restartDeploymentService,
+  runDeployment,
+  runDeploymentBuild,
+  writeWorkspaceFile,
+} from '../services/ops/runtime';
+import { OpsAgentError } from '../services/ops/runtime';
+import { runOpsCodeAgent } from '../services/ops/code-agent';
 
 const router = Router();
+router.use(requireAuth);
+router.use(requireRole('admin', 'campaign_manager'));
 
 // Initialize GCP managers
 const projectId = process.env.GCP_PROJECT_ID || '';
@@ -17,6 +31,106 @@ const deploymentManager = new CloudRunDeploymentManager(projectId, region);
 const domainMapper = new DomainMapper(projectId);
 const costTracker = new CostTracker(projectId);
 
+function handleOpsError(res: Response, error: unknown, fallbackMessage: string): Response {
+  if (error instanceof OpsAgentError) {
+    return res.status(error.status).json({
+      success: false,
+      error: error.message,
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    error: error instanceof Error ? error.message : fallbackMessage,
+  });
+}
+
+// ===== OPS HUB OVERVIEW =====
+
+router.get('/overview', async (_req: Request, res: Response) => {
+  try {
+    const overview = await getOpsOverview();
+    res.json({
+      success: true,
+      overview,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to load Ops Hub overview');
+  }
+});
+
+// ===== WORKSPACE FILES =====
+
+router.get('/workspace', async (req: Request, res: Response) => {
+  try {
+    const directory = await listWorkspaceDirectory((req.query.path as string) || '');
+    res.json({
+      success: true,
+      directory,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workspace directory');
+  }
+});
+
+router.get('/workspace/file', async (req: Request, res: Response) => {
+  try {
+    const requestedPath = req.query.path as string;
+    if (!requestedPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'path is required',
+      });
+    }
+
+    const file = await readWorkspaceFile(requestedPath);
+    res.json({
+      success: true,
+      file,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to read workspace file');
+  }
+});
+
+router.put('/workspace/file', async (req: Request, res: Response) => {
+  try {
+    const { path: filePath, content } = req.body as {
+      path?: string;
+      content?: string;
+    };
+
+    if (!filePath || typeof content !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'path and content are required',
+      });
+    }
+
+    const file = await writeWorkspaceFile(filePath, content);
+    res.json({
+      success: true,
+      file,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to save workspace file');
+  }
+});
+
+// ===== VM DEPLOYMENT STATUS =====
+
+router.get('/deployments/status', async (_req: Request, res: Response) => {
+  try {
+    const status = await getDeploymentStatus();
+    res.json({
+      success: true,
+      status,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to load deployment status');
+  }
+});
+
 // ===== CLOUD BUILD ENDPOINTS =====
 
 /**
@@ -25,6 +139,20 @@ const costTracker = new CostTracker(projectId);
  */
 router.post('/deployments/build', async (req: Request, res: Response) => {
   try {
+    const overview = await getOpsOverview();
+    if (overview.deploymentTarget === 'vm') {
+      const job = await runDeploymentBuild({
+        service: req.body?.service,
+        rebuildMediaBridge: req.body?.rebuildMediaBridge,
+      });
+
+      return res.json({
+        success: true,
+        job,
+        message: 'VM build queued successfully',
+      });
+    }
+
     const { branch = 'main', projectName } = req.body;
 
     const buildConfig = {
@@ -56,11 +184,7 @@ router.post('/deployments/build', async (req: Request, res: Response) => {
       message: 'Build triggered successfully',
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error deploying service';
-    return res.status(500).json({
-      success: false,
-      error: errorMessage,
-    });
+    return handleOpsError(res, error, 'Unknown error deploying service');
   }
 });
 
@@ -92,6 +216,16 @@ router.get('/deployments/build/:buildId', async (req: Request, res: Response) =>
  */
 router.get('/deployments/builds', async (req: Request, res: Response) => {
   try {
+    const overview = await getOpsOverview();
+    if (overview.deploymentTarget === 'vm') {
+      const status = await getDeploymentStatus();
+      return res.json({
+        success: true,
+        builds: status.jobs,
+        count: status.jobs.length,
+      });
+    }
+
     const { limit = 10 } = req.query;
     const builds = await buildManager.listBuilds(parseInt(limit as string));
 
@@ -101,11 +235,7 @@ router.get('/deployments/builds', async (req: Request, res: Response) => {
       count: builds.length,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error listing builds';
-    res.status(500).json({
-      success: false,
-      error: errorMessage,
-    });
+    handleOpsError(res, error, 'Unknown error listing builds');
   }
 });
 
@@ -138,6 +268,19 @@ router.post('/deployments/build/:buildId/cancel', async (req: Request, res: Resp
  */
 router.post('/deployments/deploy', async (req: Request, res: Response) => {
   try {
+    const overview = await getOpsOverview();
+    if (overview.deploymentTarget === 'vm') {
+      const job = await runDeployment({
+        rebuildMediaBridge: req.body?.rebuildMediaBridge,
+      });
+
+      return res.status(202).json({
+        success: true,
+        job,
+        message: 'VM deploy queued successfully',
+      });
+    }
+
     const {
       serviceName,
       imageUrl,
@@ -178,10 +321,7 @@ router.post('/deployments/deploy', async (req: Request, res: Response) => {
       message: `Deployment to ${deploymentEnv} completed`,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    handleOpsError(res, error, 'Unknown error');
   }
 });
 
@@ -191,6 +331,26 @@ router.post('/deployments/deploy', async (req: Request, res: Response) => {
  */
 router.get('/deployments/service/:serviceName', async (req: Request, res: Response) => {
   try {
+    const overview = await getOpsOverview();
+    if (overview.deploymentTarget === 'vm') {
+      const status = await getDeploymentStatus();
+      const service = status.services.find(
+        (entry) => entry.serviceName === req.params.serviceName,
+      );
+
+      if (!service) {
+        return res.status(404).json({
+          success: false,
+          error: `Service ${req.params.serviceName} not found`,
+        });
+      }
+
+      return res.json({
+        success: true,
+        service,
+      });
+    }
+
     const { serviceName } = req.params;
     const status = await deploymentManager.getServiceStatus(serviceName);
 
@@ -199,10 +359,7 @@ router.get('/deployments/service/:serviceName', async (req: Request, res: Respon
       service: status,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    handleOpsError(res, error, 'Unknown error');
   }
 });
 
@@ -234,6 +391,14 @@ router.get('/deployments/service/:serviceName/revisions', async (req: Request, r
  */
 router.post('/deployments/service/:serviceName/rollback', async (req: Request, res: Response) => {
   try {
+    const overview = await getOpsOverview();
+    if (overview.deploymentTarget === 'vm') {
+      return res.status(400).json({
+        success: false,
+        error: 'Rollback is not automated for VM deployments. Use the host deployment history or git checkout on the VM.',
+      });
+    }
+
     const { serviceName } = req.params;
     const { revisionName } = req.body;
 
@@ -251,10 +416,7 @@ router.post('/deployments/service/:serviceName/rollback', async (req: Request, r
       message: `Rolled back ${serviceName} to ${revisionName}`,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    handleOpsError(res, error, 'Unknown error');
   }
 });
 
@@ -264,6 +426,14 @@ router.post('/deployments/service/:serviceName/rollback', async (req: Request, r
  */
 router.post('/deployments/service/:serviceName/traffic', async (req: Request, res: Response) => {
   try {
+    const overview = await getOpsOverview();
+    if (overview.deploymentTarget === 'vm') {
+      return res.status(400).json({
+        success: false,
+        error: 'Traffic splitting is only available for Cloud Run deployments.',
+      });
+    }
+
     const { serviceName } = req.params;
     const { revisions } = req.body;
 
@@ -282,10 +452,86 @@ router.post('/deployments/service/:serviceName/traffic', async (req: Request, re
       revisions,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+    handleOpsError(res, error, 'Unknown error');
+  }
+});
+
+router.post('/deployments/restart', async (req: Request, res: Response) => {
+  try {
+    const { service } = req.body as { service?: string };
+    if (!service) {
+      return res.status(400).json({
+        success: false,
+        error: 'service is required',
+      });
+    }
+
+    const job = await restartDeploymentService(service);
+    res.status(202).json({
+      success: true,
+      job,
+      message: `Restart queued for ${service}`,
     });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to restart service');
+  }
+});
+
+// ===== CONTAINER LOGS ENDPOINT =====
+
+/**
+ * Fetch real-time logs from a docker container
+ * GET /api/ops/logs/:service?tail=200&since=5m&grep=pattern
+ */
+router.get('/logs/:service', async (req: Request, res: Response) => {
+  try {
+    const { service } = req.params;
+    const tail = parseInt(req.query.tail as string) || 200;
+    const since = (req.query.since as string) || '30m';
+    const grep = (req.query.grep as string) || '';
+    const safeTail = Math.min(Math.max(tail, 10), 2000);
+
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFile);
+
+    const args = [
+      'compose', '-f', 'vm-deploy/docker-compose.yml',
+      'logs', service,
+      '--tail', String(safeTail),
+      '--no-log-prefix',
+      '--no-color',
+    ];
+    if (since) args.push('--since', since);
+
+    const { stdout, stderr } = await execFileAsync('docker', args, {
+      cwd: process.cwd(),
+      timeout: 15000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+
+    let lines = (stdout || stderr || '')
+      .split('\n')
+      .filter((line: string) => line.trim());
+
+    if (grep) {
+      const pattern = new RegExp(grep, 'i');
+      lines = lines.filter((line: string) => pattern.test(line));
+    }
+
+    res.json({
+      success: true,
+      service,
+      lines,
+      count: lines.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    // If docker isn't available, return empty
+    if (error?.message?.includes('ENOENT') || error?.message?.includes('not found')) {
+      return res.json({ success: true, service: req.params.service, lines: [], count: 0, note: 'Docker not available on this host' });
+    }
+    handleOpsError(res, error, 'Failed to fetch container logs');
   }
 });
 
@@ -599,6 +845,34 @@ router.post('/agents/test', async (req: Request, res: Response) => {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
     });
+  }
+});
+
+router.post('/coding-agent', async (req: Request, res: Response) => {
+  try {
+    const { prompt } = req.body as { prompt?: string };
+
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Prompt is required',
+      });
+    }
+
+    const response = await runOpsCodeAgent({
+      prompt: prompt.trim(),
+      mode: req.body?.mode,
+      selectedFilePath: req.body?.selectedFilePath,
+      selectedFileContent: req.body?.selectedFileContent,
+      applyChanges: Boolean(req.body?.applyChanges),
+    });
+
+    res.json({
+      success: true,
+      response,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to run coding agent');
   }
 });
 
