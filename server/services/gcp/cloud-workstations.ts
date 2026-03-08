@@ -409,8 +409,14 @@ export default class CloudWorkstationsManager extends EventEmitter {
     this.emit('workstation:creating', { workstationId: request.workstationId });
 
     // Don't block — return immediately, let provisioning happen in background
-    operation.promise().then(() => {
+    operation.promise().then(async () => {
       this.emit('workstation:created', { workstationId: request.workstationId });
+      // Auto-grant IAM so the service account can generate access tokens
+      try {
+        await this.autoGrantWorkstationIAM(request.clusterId, request.configId, request.workstationId);
+      } catch (iamErr: any) {
+        console.error(`[Workstations] Failed to auto-grant IAM on ${request.workstationId}:`, iamErr?.message);
+      }
     }).catch((err: any) => {
       this.emit('workstation:error', { workstationId: request.workstationId, error: err?.message });
     });
@@ -620,5 +626,80 @@ export default class CloudWorkstationsManager extends EventEmitter {
       accessToken: response.accessToken || '',
       expireTime: response.expireTime?.seconds ? new Date(Number(response.expireTime.seconds) * 1000).toISOString() : '',
     };
+  }
+
+  /**
+   * Auto-grant IAM on a workstation so the service account can generate access tokens
+   * and the configured user email can access the IDE.
+   */
+  private async autoGrantWorkstationIAM(clusterId: string, configId: string, workstationId: string): Promise<void> {
+    const https = await import('https');
+    const metadata = await import('http');
+
+    // Get access token from metadata server
+    const metaToken = await new Promise<string>((resolve, reject) => {
+      metadata.get(
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+        { headers: { 'Metadata-Flavor': 'Google' } },
+        (res) => {
+          let data = '';
+          res.on('data', (c: string) => data += c);
+          res.on('end', () => {
+            try { resolve(JSON.parse(data).access_token); }
+            catch { reject(new Error('Failed to parse metadata token')); }
+          });
+        },
+      ).on('error', reject);
+    });
+
+    // Get service account email
+    const saEmail = await new Promise<string>((resolve, reject) => {
+      metadata.get(
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email',
+        { headers: { 'Metadata-Flavor': 'Google' } },
+        (res) => {
+          let data = '';
+          res.on('data', (c: string) => data += c);
+          res.on('end', () => resolve(data.trim()));
+        },
+      ).on('error', reject);
+    });
+
+    const wsPath = `projects/${this.projectId}/locations/${this.region}/workstationClusters/${clusterId}/workstationConfigs/${configId}/workstations/${workstationId}`;
+    const body = JSON.stringify({
+      policy: {
+        bindings: [
+          { role: 'roles/workstations.admin', members: [`serviceAccount:${saEmail}`] },
+          { role: 'roles/workstations.user', members: [`serviceAccount:${saEmail}`] },
+        ],
+      },
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const req = https.request({
+        hostname: 'workstations.googleapis.com',
+        path: `/v1/${wsPath}:setIamPolicy`,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${metaToken}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      }, (res) => {
+        let data = '';
+        res.on('data', (c: string) => data += c);
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            console.log(`[Workstations] Auto-granted IAM on ${workstationId}`);
+            resolve();
+          } else {
+            reject(new Error(`IAM setPolicy failed (${res.statusCode}): ${data}`));
+          }
+        });
+      });
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
   }
 }
