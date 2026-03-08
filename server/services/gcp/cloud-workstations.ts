@@ -546,7 +546,7 @@ export default class CloudWorkstationsManager extends EventEmitter {
       const req = http.request(proxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-        timeout: 65000,
+        timeout: 300000,
       }, (res) => {
         let data = '';
         res.on('data', (chunk: string) => { data += chunk; });
@@ -562,7 +562,7 @@ export default class CloudWorkstationsManager extends EventEmitter {
       req.on('error', (err: Error) => {
         resolve({ stdout: '', stderr: `Exec proxy unavailable: ${err.message}. Ensure ws-exec-proxy service is running on the VM.`, exitCode: 1 });
       });
-      req.on('timeout', () => { req.destroy(); resolve({ stdout: '', stderr: 'Command timed out (60s)', exitCode: 124 }); });
+      req.on('timeout', () => { req.destroy(); resolve({ stdout: '', stderr: 'Command timed out (5min)', exitCode: 124 }); });
       req.write(postData);
       req.end();
     });
