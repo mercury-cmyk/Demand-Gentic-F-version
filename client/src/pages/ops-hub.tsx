@@ -43,7 +43,6 @@ import {
   Box,
   Monitor,
 } from 'lucide-react';
-import SecretsTab from '@/components/ops/secrets-tab';
 import CostsTab from '@/components/ops/costs-tab';
 import DeploymentsTab from '@/components/ops/deployments-tab';
 import DomainsTab from '@/components/ops/domains-tab';
@@ -51,7 +50,10 @@ import AgentsTab from '@/components/ops/agents-tab';
 import FileManagerTab, { OpsWorkspaceFileContext } from '@/components/ops/file-manager-tab';
 import PreviewTab from '@/components/ops/preview-tab';
 import WorkstationsTab from '@/components/ops/workstations-tab';
+import IamSecrets from '@/pages/iam/iam-secrets';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { apiJsonRequest } from '@/lib/queryClient';
 
 /* ── Interfaces ── */
 interface ChatMessage {
@@ -181,6 +183,50 @@ const OPTIMIZATION_PROFILE_LABELS: Record<CodingAgentOptimizationProfile, string
   cost: 'Cost Optimized',
 };
 
+function normalizeOpsRole(role: unknown): string | null {
+  if (typeof role === 'string') {
+    const trimmed = role.trim().toLowerCase();
+    return trimmed || null;
+  }
+
+  if (role && typeof role === 'object' && 'role' in role) {
+    return normalizeOpsRole((role as { role?: unknown }).role);
+  }
+
+  return null;
+}
+
+function collectOpsRoles(roles: unknown): string[] {
+  if (roles == null) {
+    return [];
+  }
+
+  const values = Array.isArray(roles) ? roles : [roles];
+  return values
+    .map((value) => normalizeOpsRole(value))
+    .filter((value): value is string => Boolean(value));
+}
+
+function parseOpsTokenPayload(token: string | null): Record<string, unknown> | null {
+  if (!token) {
+    return null;
+  }
+
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+
+  try {
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
 function getTopTabForPage(pageId: string): string {
   for (const section of NAV_SECTIONS) {
     if (section.items.some((item) => item.id === pageId)) {
@@ -208,8 +254,10 @@ function LogViewer({ service, environment }: { service: string; environment: str
         since,
         ...(searchQuery ? { grep: searchQuery } : {}),
       });
-      const resp = await fetch(`/api/ops/logs/${service}?${params}`);
-      const data = await resp.json();
+      const data = await apiJsonRequest<{ success: boolean; lines?: string[] }>(
+        'GET',
+        `/api/ops/logs/${service}?${params}`,
+      );
       if (data.success) {
         setLines(data.lines || []);
       }
@@ -365,6 +413,7 @@ function LogViewer({ service, environment }: { service: string; environment: str
 
 /* ── Main Component ── */
 export default function OpsHub() {
+  const { user, token, getToken } = useAuth();
   const { toast } = useToast();
   const [activePage, setActivePage] = useState('files');
   const [activeTopTab, setActiveTopTab] = useState('workspace');
@@ -390,22 +439,51 @@ export default function OpsHub() {
   } | null>(null);
   const [externalFileToken, setExternalFileToken] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const authToken = token || getToken();
+  const tokenPayload = parseOpsTokenPayload(authToken);
+  const userRoles = Array.from(new Set([
+    ...collectOpsRoles((user as { role?: unknown; roles?: unknown } | null)?.role),
+    ...collectOpsRoles((user as { role?: unknown; roles?: unknown } | null)?.roles),
+    ...collectOpsRoles(tokenPayload?.role),
+    ...collectOpsRoles(tokenPayload?.roles),
+  ]));
+  const canManageSecrets = userRoles.includes('admin');
+  const navSections = useMemo(
+    () =>
+      NAV_SECTIONS.map((section) => ({
+        ...section,
+        items: section.items.filter((item) => canManageSecrets || item.id !== 'secrets'),
+      })).filter((section) => section.items.length > 0),
+    [canManageSecrets],
+  );
 
   useEffect(() => {
+    // Guard: if no auth token, redirect to login immediately
+    if (!authToken) {
+      window.location.href = '/login';
+      return;
+    }
+
     const loadOverview = async () => {
       try {
-        const response = await fetch('/api/ops/overview');
-        const data = await response.json();
-        if (!response.ok || !data.success) {
+        const data = await apiJsonRequest<{ success: boolean; overview: OpsOverview; error?: string }>(
+          'GET',
+          '/api/ops/overview',
+        );
+        if (!data.success) {
           throw new Error(data.error || 'Failed to load Ops Hub overview');
         }
         setOverview(data.overview);
       } catch (error) {
-        toast({
-          title: 'Ops Hub overview unavailable',
-          description: error instanceof Error ? error.message : String(error),
-          variant: 'destructive',
-        });
+        // Don't toast session-expired — the redirect handles it
+        const msg = error instanceof Error ? error.message : String(error);
+        if (!msg.includes('Session expired')) {
+          toast({
+            title: 'Ops Hub overview unavailable',
+            description: msg,
+            variant: 'destructive',
+          });
+        }
       }
     };
 
@@ -422,7 +500,14 @@ export default function OpsHub() {
     checkPlatform();
     const interval = setInterval(checkPlatform, 30000);
     return () => clearInterval(interval);
-  }, [toast]);
+  }, [toast, authToken]);
+
+  useEffect(() => {
+    if (!canManageSecrets && activePage === 'secrets') {
+      setActivePage('files');
+      setActiveTopTab(getTopTabForPage('files'));
+    }
+  }, [activePage, canManageSecrets]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -452,10 +537,10 @@ export default function OpsHub() {
     setChatSending(true);
 
     try {
-      const response = await fetch('/api/ops/coding-agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const data = await apiJsonRequest<any>(
+        'POST',
+        '/api/ops/coding-agent',
+        {
           prompt,
           mode: chatMode,
           selectedFilePath: selectedFile?.path,
@@ -464,11 +549,10 @@ export default function OpsHub() {
           providerMode,
           preferredProvider,
           optimizationProfile,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
+        },
+      );
 
-      if (!response.ok || !data.success) {
+      if (!data.success) {
         throw new Error(data.error || 'Failed to run coding agent');
       }
 
@@ -518,14 +602,14 @@ export default function OpsHub() {
   };
 
   const activeSections = useMemo(
-    () => NAV_SECTIONS.filter((section) => section.label === TAB_TO_SECTION[activeTopTab]),
-    [activeTopTab],
+    () => navSections.filter((section) => section.label === TAB_TO_SECTION[activeTopTab]),
+    [activeTopTab, navSections],
   );
 
   const renderContent = () => {
     switch (activePage) {
       case 'secrets':
-        return <SecretsTab />;
+        return canManageSecrets ? <IamSecrets /> : null;
       case 'logs':
         return (
           <LogViewer
@@ -694,7 +778,7 @@ export default function OpsHub() {
         {/* Left Sidebar */}
         <aside className="w-56 border-r border-slate-200 bg-slate-50/80 flex flex-col shrink-0">
           <div className="flex-1 overflow-y-auto py-4 px-2">
-            {activeSections.map((section) => (
+                      {activeSections.map((section) => (
               <div key={section.label} className="mb-5">
                 <div className="px-3 mb-2">
                   <span className="text-[10px] font-bold text-slate-400 tracking-[0.15em] uppercase">

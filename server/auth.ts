@@ -64,9 +64,6 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    if (req.path.startsWith('/overview') || req.path.startsWith('/workstations') || req.path.startsWith('/files') || req.path.startsWith('/logs')) {
-      console.log(`[AUTH-DEBUG] 401 no-header on ${req.method} ${req.originalUrl} | auth-header: ${authHeader ? authHeader.substring(0, 20) + '...' : 'MISSING'}`);
-    }
     return res.status(401).json({ message: "Authentication required" });
   }
 
@@ -74,9 +71,6 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const payload = verifyToken(token);
 
   if (!payload) {
-    if (req.path.startsWith('/overview') || req.path.startsWith('/workstations') || req.path.startsWith('/files') || req.path.startsWith('/logs')) {
-      console.log(`[AUTH-DEBUG] 401 invalid-token on ${req.method} ${req.originalUrl} | token-start: ${token.substring(0, 30)}...`);
-    }
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 
