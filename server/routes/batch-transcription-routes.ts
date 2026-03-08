@@ -14,7 +14,7 @@ import {
   callSessions,
   leads,
 } from "@shared/schema";
-import { eq, and, sql, isNull, or, gte, lte } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 
 const router = Router();
@@ -37,6 +37,7 @@ interface BatchJob {
 }
 
 const activeJobs = new Map<string, BatchJob>();
+const CALL_ORDER_BY = sql`COALESCE(${dialerCallAttempts.callStartedAt}, ${dialerCallAttempts.createdAt}) DESC`;
 
 /**
  * POST /api/batch-transcription/preview
@@ -53,30 +54,14 @@ router.post("/preview", requireAuth, async (req, res) => {
       limit = 1000,
     } = req.body;
 
-    const conditions = buildFilterConditions({
+    const calls = await getCallsToProcess({
       campaignId,
       minDurationSec,
       dateFrom,
       dateTo,
       includeFailedTranscriptions,
+      limit,
     });
-
-    const calls = await db
-      .select({
-        callAttemptId: dialerCallAttempts.id,
-        callSessionId: dialerCallAttempts.callSessionId,
-        campaignId: dialerCallAttempts.campaignId,
-        duration: dialerCallAttempts.callDurationSeconds,
-        disposition: dialerCallAttempts.disposition,
-        hasRecordingUrl: sql<boolean>`${callSessions.recordingUrl} IS NOT NULL`,
-        hasS3Key: sql<boolean>`${callSessions.recordingS3Key} IS NOT NULL`,
-        createdAt: dialerCallAttempts.createdAt,
-      })
-      .from(dialerCallAttempts)
-      .innerJoin(callSessions, eq(callSessions.id, dialerCallAttempts.callSessionId))
-      .where(and(...conditions))
-      .orderBy(sql`${dialerCallAttempts.createdAt} DESC`)
-      .limit(limit);
 
     // Group by campaign for overview
     const byCampaign: Record<string, number> = {};
@@ -95,7 +80,7 @@ router.post("/preview", requireAuth, async (req, res) => {
         callAttemptId: c.callAttemptId,
         duration: c.duration,
         disposition: c.disposition,
-        hasRecording: c.hasRecordingUrl || c.hasS3Key,
+        hasRecording: c.hasAttemptRecordingUrl || c.hasSessionRecordingUrl || c.hasS3Key,
         createdAt: c.createdAt,
       })),
     });
@@ -134,30 +119,14 @@ router.post("/run", requireAuth, async (req, res) => {
       }
     }
 
-    const conditions = buildFilterConditions({
+    const calls = await getCallsToProcess({
       campaignId,
       minDurationSec,
       dateFrom,
       dateTo,
       includeFailedTranscriptions,
+      limit,
     });
-
-    const calls = await db
-      .select({
-        callAttemptId: dialerCallAttempts.id,
-        callSessionId: dialerCallAttempts.callSessionId,
-        campaignId: dialerCallAttempts.campaignId,
-        contactId: dialerCallAttempts.contactId,
-        duration: dialerCallAttempts.callDurationSeconds,
-        disposition: dialerCallAttempts.disposition,
-        recordingUrl: callSessions.recordingUrl,
-        recordingS3Key: callSessions.recordingS3Key,
-      })
-      .from(dialerCallAttempts)
-      .innerJoin(callSessions, eq(callSessions.id, dialerCallAttempts.callSessionId))
-      .where(and(...conditions))
-      .orderBy(sql`${dialerCallAttempts.createdAt} DESC`)
-      .limit(limit);
 
     if (calls.length === 0) {
       return res.json({ success: true, message: "No calls need transcription", count: 0 });
@@ -295,6 +264,13 @@ interface CallToProcess {
   disposition: string | null;
   recordingUrl: string | null;
   recordingS3Key: string | null;
+}
+
+interface CallToPreview extends CallToProcess {
+  hasAttemptRecordingUrl: boolean;
+  hasSessionRecordingUrl: boolean;
+  hasS3Key: boolean;
+  createdAt: Date;
 }
 
 async function processBatchJob(
@@ -477,17 +453,27 @@ function buildFilterConditions(filters: {
   const conditions = [
     sql`${dialerCallAttempts.callDurationSeconds} >= ${filters.minDurationSec}`,
     // Must have a recording somewhere
-    sql`(${callSessions.recordingUrl} IS NOT NULL OR ${callSessions.recordingS3Key} IS NOT NULL)`,
+    sql`(
+      ${dialerCallAttempts.recordingUrl} IS NOT NULL
+      OR ${callSessions.recordingUrl} IS NOT NULL
+      OR ${callSessions.recordingS3Key} IS NOT NULL
+    )`,
   ];
 
   // No transcript (or failed transcription)
   if (filters.includeFailedTranscriptions) {
     conditions.push(
-      sql`(${dialerCallAttempts.fullTranscript} IS NULL OR LENGTH(${dialerCallAttempts.fullTranscript}) < 20)`
+      sql`(
+        (${dialerCallAttempts.fullTranscript} IS NULL OR LENGTH(${dialerCallAttempts.fullTranscript}) < 20)
+        AND (${dialerCallAttempts.aiTranscript} IS NULL OR LENGTH(${dialerCallAttempts.aiTranscript}) < 20)
+      )`
     );
   } else {
     conditions.push(
-      sql`(${dialerCallAttempts.fullTranscript} IS NULL OR ${dialerCallAttempts.fullTranscript} = '')`
+      sql`(
+        (${dialerCallAttempts.fullTranscript} IS NULL OR ${dialerCallAttempts.fullTranscript} = '')
+        AND (${dialerCallAttempts.aiTranscript} IS NULL OR ${dialerCallAttempts.aiTranscript} = '')
+      )`
     );
   }
 
@@ -496,14 +482,74 @@ function buildFilterConditions(filters: {
   }
 
   if (filters.dateFrom) {
-    conditions.push(gte(dialerCallAttempts.createdAt, new Date(filters.dateFrom)));
+    conditions.push(
+      sql`COALESCE(${dialerCallAttempts.callStartedAt}, ${dialerCallAttempts.createdAt}) >= ${normalizeFilterDate(filters.dateFrom, "start")}`
+    );
   }
 
   if (filters.dateTo) {
-    conditions.push(lte(dialerCallAttempts.createdAt, new Date(filters.dateTo)));
+    conditions.push(
+      sql`COALESCE(${dialerCallAttempts.callStartedAt}, ${dialerCallAttempts.createdAt}) <= ${normalizeFilterDate(filters.dateTo, "end")}`
+    );
   }
 
   return conditions;
+}
+
+async function getCallsToProcess(filters: {
+  campaignId?: string;
+  minDurationSec: number;
+  dateFrom?: string;
+  dateTo?: string;
+  includeFailedTranscriptions: boolean;
+  limit: number;
+}): Promise<CallToPreview[]> {
+  const conditions = buildFilterConditions(filters);
+  const rows = await db
+    .select({
+      callAttemptId: dialerCallAttempts.id,
+      callSessionId: dialerCallAttempts.callSessionId,
+      campaignId: dialerCallAttempts.campaignId,
+      contactId: dialerCallAttempts.contactId,
+      duration: dialerCallAttempts.callDurationSeconds,
+      disposition: dialerCallAttempts.disposition,
+      attemptRecordingUrl: dialerCallAttempts.recordingUrl,
+      sessionRecordingUrl: callSessions.recordingUrl,
+      recordingS3Key: callSessions.recordingS3Key,
+      hasAttemptRecordingUrl: sql<boolean>`${dialerCallAttempts.recordingUrl} IS NOT NULL`,
+      hasSessionRecordingUrl: sql<boolean>`${callSessions.recordingUrl} IS NOT NULL`,
+      hasS3Key: sql<boolean>`${callSessions.recordingS3Key} IS NOT NULL`,
+      createdAt: sql<Date>`COALESCE(${dialerCallAttempts.callStartedAt}, ${dialerCallAttempts.createdAt})`,
+    })
+    .from(dialerCallAttempts)
+    .leftJoin(callSessions, eq(callSessions.id, dialerCallAttempts.callSessionId))
+    .where(and(...conditions))
+    .orderBy(CALL_ORDER_BY)
+    .limit(filters.limit);
+
+  return rows.map((row) => ({
+    callAttemptId: row.callAttemptId,
+    callSessionId: row.callSessionId,
+    campaignId: row.campaignId,
+    contactId: row.contactId,
+    duration: row.duration,
+    disposition: row.disposition,
+    recordingUrl: row.sessionRecordingUrl || row.attemptRecordingUrl,
+    recordingS3Key: row.recordingS3Key,
+    hasAttemptRecordingUrl: row.hasAttemptRecordingUrl,
+    hasSessionRecordingUrl: row.hasSessionRecordingUrl,
+    hasS3Key: row.hasS3Key,
+    createdAt: row.createdAt,
+  }));
+}
+
+function normalizeFilterDate(value: string, boundary: "start" | "end"): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const suffix = boundary === "start" ? "T00:00:00.000Z" : "T23:59:59.999Z";
+    return new Date(`${value}${suffix}`);
+  }
+
+  return new Date(value);
 }
 
 function formatDuration(ms: number): string {
