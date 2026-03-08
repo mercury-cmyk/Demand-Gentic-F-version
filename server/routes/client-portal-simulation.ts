@@ -41,6 +41,7 @@ import {
   getVirtualAgentConfig,
   mergeAgentSettings,
 } from '../services/virtual-agent-settings';
+import { buildCampaignContextSection as buildRuntimeCampaignContextSection } from '../services/foundation-capabilities';
 import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from '../services/number-pool-integration';
 import {
   buildUnifiedCallContext,
@@ -107,12 +108,15 @@ const CAMPAIGN_SIMULATION_SELECT = {
   name: campaigns.name,
   aiAgentSettings: campaigns.aiAgentSettings,
   campaignObjective: campaigns.campaignObjective,
+  type: campaigns.type,
   productServiceInfo: campaigns.productServiceInfo,
   talkingPoints: campaigns.talkingPoints,
   targetAudienceDescription: campaigns.targetAudienceDescription,
+  campaignContextBrief: campaigns.campaignContextBrief,
   callScript: campaigns.callScript,
   campaignObjections: campaigns.campaignObjections,
   successCriteria: campaigns.successCriteria,
+  callFlow: campaigns.callFlow,
   qualificationQuestions: campaigns.qualificationQuestions,
 };
 
@@ -611,30 +615,19 @@ function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?
     parts.push(agentPersona);
   }
 
-  // Campaign objective
-  if (campaign.campaignObjective) {
-    parts.push(`\n## Campaign Objective`);
-    parts.push(campaign.campaignObjective);
-  }
-
-  // Product/Service info
-  if (campaign.productServiceInfo) {
-    parts.push(`\n## Product/Service Information`);
-    parts.push(campaign.productServiceInfo);
-  }
-
-  // Talking points
-  if (campaign.talkingPoints && Array.isArray(campaign.talkingPoints)) {
-    parts.push(`\n## Key Talking Points`);
-    campaign.talkingPoints.forEach((point: string) => {
-      parts.push(`- ${point}`);
-    });
-  }
-
-  // Target audience
-  if (campaign.targetAudienceDescription) {
-    parts.push(`\n## Target Audience`);
-    parts.push(campaign.targetAudienceDescription);
+  const runtimeAlignedCampaignSection = buildRuntimeCampaignContextSection({
+    objective: campaign.campaignObjective,
+    productInfo: campaign.productServiceInfo,
+    talkingPoints: Array.isArray(campaign.talkingPoints) ? campaign.talkingPoints : null,
+    targetAudience: campaign.targetAudienceDescription,
+    objections: Array.isArray(campaign.campaignObjections) ? campaign.campaignObjections : null,
+    successCriteria: campaign.successCriteria,
+    brief: campaign.campaignContextBrief,
+    campaignType: campaign.type || null,
+    callFlow: campaign.callFlow as any,
+  });
+  if (runtimeAlignedCampaignSection) {
+    parts.push(`\n${runtimeAlignedCampaignSection}`);
   }
 
   // Call script
@@ -663,21 +656,6 @@ function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?
       parts.push(`\n## Objection Handling`);
       parts.push(settings.scripts.objections);
     }
-  }
-
-  // Campaign objections
-  if (campaign.campaignObjections && Array.isArray(campaign.campaignObjections)) {
-    parts.push(`\n## Common Objections & Responses`);
-    campaign.campaignObjections.forEach((obj: { objection: string; response: string }) => {
-      parts.push(`- Objection: "${obj.objection}"`);
-      parts.push(`  Response: "${obj.response}"`);
-    });
-  }
-
-  // Success criteria
-  if (campaign.successCriteria) {
-    parts.push(`\n## Success Criteria`);
-    parts.push(campaign.successCriteria);
   }
 
   // Qualification questions

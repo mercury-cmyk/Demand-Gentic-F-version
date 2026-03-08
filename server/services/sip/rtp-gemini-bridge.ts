@@ -22,7 +22,7 @@ import { processSIPPostCallAnalysis } from './sip-post-call-handler';
 import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
-import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
+import { buildSipRuntimePrompt } from './sip-runtime-prompt';
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -133,15 +133,21 @@ interface TranscriptTurn {
 }
 
 interface CallContext {
+  systemPrompt?: string;
   contactName?: string;
   contactFirstName?: string;
   contactJobTitle?: string;
   accountName?: string;
   organizationName?: string;
   campaignName?: string;
+  campaignType?: string | null;
   campaignObjective?: string;
+  successCriteria?: string;
+  targetAudienceDescription?: string;
   productServiceInfo?: string;
   talkingPoints?: string[];
+  campaignContextBrief?: string | null;
+  callFlow?: unknown;
   queueItemId?: string;
   callAttemptId?: string;
   campaignId?: string;
@@ -230,82 +236,25 @@ function buildPlainTranscript(turns: TranscriptTurn[]): string | undefined {
  * Build system prompt for Gemini
  */
 function buildSystemPrompt(context: CallContext, voiceName: string, sessionId: string): string {
-  const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
-  const personaProfile = resolveGeminiPersonaProfile({
-    voiceName,
+  return buildSipRuntimePrompt({
     sessionId,
+    voiceName,
+    systemPrompt: context.systemPrompt,
+    contactName: context.contactName,
+    contactFirstName: context.contactFirstName,
+    contactJobTitle: context.contactJobTitle,
+    accountName: context.accountName,
+    organizationName: context.organizationName,
+    campaignName: context.campaignName,
+    campaignType: context.campaignType,
+    campaignObjective: context.campaignObjective,
+    successCriteria: context.successCriteria,
+    targetAudienceDescription: context.targetAudienceDescription,
+    productServiceInfo: context.productServiceInfo,
+    talkingPoints: context.talkingPoints,
+    campaignContextBrief: context.campaignContextBrief,
+    callFlow: context.callFlow,
   });
-
-  let prompt = `${personaProfile.prompt}
-
-## YOUR IDENTITY
-
-You are an AI voice assistant from ${orgRef}.
-
-${context.contactName ? `**The person you are calling:** ${context.contactName}` : ''}
-${context.contactJobTitle ? `**Job Title:** ${context.contactJobTitle}` : ''}
-${context.accountName ? `**Company:** ${context.accountName}` : ''}
-
-**Opening:**
-"Hello, may I please speak with ${context.contactName || 'the contact'}?"
-
-${context.campaignObjective ? `## INTERNAL OBJECTIVE (DO NOT SAY TO PROSPECT)
-${context.campaignObjective}
-` : ''}
-
-${context.productServiceInfo ? `## WHAT TO SAY ABOUT YOUR OFFERING
-${context.productServiceInfo}
-` : ''}
-
-${context.talkingPoints?.length ? `## KEY TALKING POINTS
-${context.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
-` : ''}
-
-## CALL FLOW
-1. Confirm identity
-2. Introduce yourself and ${orgRef}
-3. Explain why you're calling (value to them)
-4. Ask questions to understand their needs
-5. Present relevant information
-6. Propose next steps
-7. Close professionally
-
-## VOICEMAIL / IVR FAST-EXIT (CRITICAL)
-If you hear ANY automation/mailbox cue, stop immediately.
-Examples:
-- "leave a message", "after the beep", "after the tone", "voicemail", "mailbox"
-- "the person you are trying to reach is not available"
-- menu prompts: "press 1", "press 2", "to disconnect", "main menu"
-- repeated prompts, beep loops, or long silence loops
-
-Action:
-1. Call \`submit_disposition\` with "voicemail"
-2. Immediately call \`end_call\`
-
-Do NOT leave a message. Do NOT continue script/discovery on automation.
-
-## SILENCE GUARD
-If connected but no meaningful human response after your opening (~8-10 seconds),
-end quickly with "no_answer" (unless voicemail cue exists, then use "voicemail").
-
-## RECORDING CALL OUTCOME
-
-BEFORE ending any call, you MUST call \`submit_disposition\` with the outcome:
-- "qualified_lead" - prospect interested
-- "not_interested" - prospect declined
-- "do_not_call" - requested removal
-- "voicemail" - reached voicemail
-- "no_answer" - no answer / callback requested
-- "invalid_data" - wrong number
-
-## ENDING THE CALL
-
-When conversation is over:
-1. Call \`submit_disposition\` with outcome
-2. Call \`end_call\` to hang up
-`;
-
-  return prompt;
 }
 
 /**

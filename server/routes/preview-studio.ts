@@ -35,6 +35,7 @@ import {
   type ParticipantCallContext,
 } from "../services/account-call-service";
 import { ensureVoiceAgentControlLayer } from "../services/voice-agent-control-defaults";
+import { buildCampaignContextSection as buildRuntimeCampaignContextSection } from "../services/foundation-capabilities";
 import {
   getVirtualAgentConfig,
   mergeAgentSettings,
@@ -2066,6 +2067,23 @@ router.post("/save-as-lead", requireAuth, async (req, res) => {
  * 6. Success Criteria
  */
 function buildCampaignContextSection(campaign: any): string {
+  const runtimeAlignedSection = buildRuntimeCampaignContextSection({
+    objective: campaign.campaignObjective,
+    productInfo: campaign.productServiceInfo,
+    talkingPoints: Array.isArray(campaign.talkingPoints) ? campaign.talkingPoints : null,
+    targetAudience: campaign.targetAudienceDescription,
+    objections: Array.isArray(campaign.campaignObjections) ? campaign.campaignObjections : null,
+    successCriteria: campaign.successCriteria,
+    brief: campaign.campaignContextBrief,
+    campaignType: campaign.type || campaign.campaignType || null,
+    callFlow: campaign.callFlow as any,
+  });
+
+  if (runtimeAlignedSection) {
+    console.log(`[Preview Studio] Runtime-aligned campaign context enabled (talking points: ${campaign.talkingPoints?.length || 0})`);
+    return runtimeAlignedSection;
+  }
+
   const parts = ['## Campaign Context'];
 
   // CRITICAL: Campaign objective comes first - this is the PRIMARY GOAL

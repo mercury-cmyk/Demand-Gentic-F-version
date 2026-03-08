@@ -7,6 +7,7 @@ import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { enrichCampaignQADefaults, buildCampaignContextBrief, generateQAParametersFromContext } from "./lib/campaign-qa-defaults";
+import { buildCallFlowPromptSection } from "@shared/call-flow";
 import { storage } from "./storage";
 import { emailTrackingService } from "./lib/email-tracking-service";
 import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
@@ -5590,6 +5591,11 @@ export function registerRoutes(app: Express) {
       ].join("\n"));
     }
 
+    const callFlowSection = buildCallFlowPromptSection(data?.callFlow, data?.type || data?.campaignType);
+    if (callFlowSection) {
+      parts.push(callFlowSection.replace("### Campaign-Specific Call Flow (Highest Priority for Sequence)", "# Campaign Call Flow"));
+    }
+
     const scripts = data?.aiAgentSettings?.scripts;
     if (scripts) {
       parts.push([
@@ -5784,7 +5790,7 @@ export function registerRoutes(app: Express) {
           return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
         }
         // Restrict client updates to safe fields only
-        const allowedClientFields = ['aiAgentSettings', 'selectedVoice', 'openingScript', 'callScript', 'campaignObjective', 'productServiceInfo', 'talkingPoints', 'targetAudienceDescription', 'campaignObjections', 'successCriteria', 'qualificationQuestions'];
+        const allowedClientFields = ['aiAgentSettings', 'selectedVoice', 'openingScript', 'callScript', 'campaignObjective', 'productServiceInfo', 'talkingPoints', 'targetAudienceDescription', 'campaignObjections', 'successCriteria', 'qualificationQuestions', 'callFlow'];
         const requestedFields = Object.keys(updateData);
         const disallowedFields = requestedFields.filter(f => !allowedClientFields.includes(f));
         if (disallowedFields.length > 0) {
@@ -6334,6 +6340,7 @@ export function registerRoutes(app: Express) {
         productServiceInfo: originalCampaign.productServiceInfo,
         campaignObjections: originalCampaign.campaignObjections,
         campaignContextBrief: originalCampaign.campaignContextBrief,
+        callFlow: originalCampaign.callFlow,
         callScript: originalCampaign.callScript,
         // Copy QA configuration
         qaParameters: originalCampaign.qaParameters,

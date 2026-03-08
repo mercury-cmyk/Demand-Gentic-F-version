@@ -8,6 +8,8 @@
  * Pure functions — no DB calls, no async, no side effects.
  */
 
+import { createCampaignTypeCallFlowPreset } from "@shared/call-flow";
+
 interface QAParameters {
   required_info: string[];
   scoring_weights: {
@@ -159,6 +161,10 @@ export function enrichCampaignQADefaults<T extends Record<string, any>>(data: T)
     if (qaParams) {
       enriched.qaParameters = qaParams;
     }
+  }
+
+  if (!enriched.callFlow) {
+    enriched.callFlow = createCampaignTypeCallFlowPreset(enriched.type || enriched.campaignType || null);
   }
 
   return enriched as T;

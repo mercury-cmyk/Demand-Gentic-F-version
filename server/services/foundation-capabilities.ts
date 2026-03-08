@@ -10,6 +10,8 @@
  * - Contact Context: Per-call personalization (existing)
  */
 
+import { buildCallFlowPromptSection, type CampaignCallFlow } from "@shared/call-flow";
+
 export interface FoundationCapability {
   id: string;
   label: string;
@@ -299,6 +301,7 @@ export function buildCampaignContextSection(config: {
   brief?: string | null;
   campaignType?: string | null;
   qualificationCriteria?: any | null; // Added qualification criteria
+  callFlow?: CampaignCallFlow | null;
 }): string {
   const sections: string[] = [];
 
@@ -433,6 +436,11 @@ This requires elevated, prestige positioning. Frame the event as curated and exc
     };
     const typeDesc = typeDescriptions[config.campaignType] || `Campaign Type: ${config.campaignType}`;
     sections.push(`## CAMPAIGN TYPE\n${typeDesc}`);
+  }
+
+  const callFlowSection = buildCallFlowPromptSection(config.callFlow, config.campaignType);
+  if (callFlowSection) {
+    sections.push(callFlowSection);
   }
 
   // CRITICAL: Campaign objective comes first - this is the PRIMARY GOAL

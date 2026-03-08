@@ -80,6 +80,7 @@ export default function TelemarketingCreatePage() {
       targetAudienceDescription: existingCampaign.targetAudienceDescription,
       successCriteria: existingCampaign.successCriteria,
       campaignObjections: existingCampaign.campaignObjections,
+      callFlow: existingCampaign.callFlow,
       // Scheduling
       scheduling: {
         type: existingCampaign.scheduleJson?.type || 'immediate',
@@ -265,6 +266,7 @@ export default function TelemarketingCreatePage() {
         targetAudienceDescription: data.targetAudienceDescription || null,
         successCriteria: data.successCriteria || null,
         campaignObjections: data.campaignObjections?.length > 0 ? data.campaignObjections : null,
+        callFlow: data.callFlow || null,
       };
 
       let result;

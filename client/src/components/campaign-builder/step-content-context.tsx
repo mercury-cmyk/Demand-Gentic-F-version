@@ -42,6 +42,8 @@ import {
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CallFlowEditor } from "@/components/campaigns/CallFlowEditor";
+import { normalizeCampaignCallFlow, type CampaignCallFlow } from "@shared/call-flow";
 
 interface CampaignOrganization {
   id: string;
@@ -97,9 +99,16 @@ export function StepContentContext({ data, onNext, onBack }: StepContentContextP
 
   // Call script (for manual mode or AI-generated)
   const [callScript, setCallScript] = useState<string>(data?.content?.script || "");
+  const [callFlow, setCallFlow] = useState<CampaignCallFlow>(
+    () => normalizeCampaignCallFlow(data?.callFlow, data?.type)
+  );
 
   // AI Generation state
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    setCallFlow(normalizeCampaignCallFlow(data?.callFlow, data?.type));
+  }, [data?.callFlow, data?.type]);
 
   // Handle document upload and AI extraction
   const handleDocumentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -352,6 +361,7 @@ export function StepContentContext({ data, onNext, onBack }: StepContentContextP
       productServiceInfo: productServiceInfo.trim() || null,
       targetAudienceDescription: targetAudienceDescription.trim() || null,
       campaignObjections: validObjections.length > 0 ? validObjections : null,
+      callFlow,
       content: {
         script: callScript.trim() || null,
       },
@@ -623,6 +633,12 @@ export function StepContentContext({ data, onNext, onBack }: StepContentContextP
           </div>
         </CardContent>
       </Card>
+
+      <CallFlowEditor
+        campaignType={data?.type}
+        value={callFlow}
+        onChange={setCallFlow}
+      />
 
       {/* AI Content Generation */}
       <Card>

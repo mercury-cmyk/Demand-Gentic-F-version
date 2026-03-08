@@ -153,8 +153,10 @@ export interface CallContext {
   contactFirstName: string;
   contactLastName: string;
   contactTitle?: string;
+  contactJobTitle?: string;
   contactEmail?: string;
   companyName: string;
+  accountName?: string;
   phoneNumber: string;
   campaignId: string;
   queueItemId: string;
@@ -167,6 +169,7 @@ export interface CallContext {
   runId?: string; // Dialer run ID for unified tracking
   callAttemptId?: string; // Dialer call attempt ID for unified tracking
   // Campaign context for AI agent behavior
+  campaignName?: string;
   campaignType?: string; // e.g., content_syndication, appointment_setting
   organizationName?: string; // The organization name (NOT campaign name)
   campaignObjective?: string; // e.g., "Book qualified meetings with IT decision makers"
@@ -174,6 +177,7 @@ export interface CallContext {
   targetAudienceDescription?: string; // e.g., "CISOs at mid-market companies"
   productServiceInfo?: string; // Product/service details
   talkingPoints?: string[]; // Key points to mention
+  campaignContextBrief?: string; // Additional campaign background or summary
   offerType?: string; // e.g., asset, meeting, demo, validation
   funnelStage?: string; // e.g., awareness, consideration, decision
   icpPersona?: string; // e.g., CISO, VP Marketing

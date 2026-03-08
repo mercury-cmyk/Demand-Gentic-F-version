@@ -251,6 +251,39 @@ router.get("/jobs", requireAuth, async (_req, res) => {
   res.json({ jobs });
 });
 
+/**
+ * POST /api/batch-transcription/sweep-orphans
+ * Manually trigger the orphan recording session sweep.
+ * Finds call_sessions with recordings but not linked to any dialer_call_attempt,
+ * matches them to attempts, and transcribes + analyzes.
+ */
+router.post("/sweep-orphans", requireAuth, async (_req, res) => {
+  try {
+    const { sweepOrphanRecordingSessions } = await import("../services/batch-transcription-sweep");
+    const result = await sweepOrphanRecordingSessions();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} Orphan sweep error:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/batch-transcription/sweep-ringouts
+ * Manually trigger the stale ring-out cleanup.
+ * Marks 0-duration, non-connected calls with NULL disposition as no_answer.
+ */
+router.post("/sweep-ringouts", requireAuth, async (_req, res) => {
+  try {
+    const { sweepStaleRingOuts } = await import("../services/batch-transcription-sweep");
+    const result = await sweepStaleRingOuts();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} Ring-out sweep error:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== BATCH PROCESSING ENGINE ====================
 
 interface CallToProcess {

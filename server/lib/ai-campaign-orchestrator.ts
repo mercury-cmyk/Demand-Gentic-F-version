@@ -1747,15 +1747,21 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             contactId: contactId || '',
             queueItemId: item.id,
             voiceName: aiSettings.persona?.voice || 'Puck',
+            systemPrompt: aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
             contactName: `${item.contact_first_name || ''} ${item.contact_last_name || ''}`.trim() || 'there',
             contactFirstName: item.contact_first_name || 'there',
             contactJobTitle: item.contact_job_title || 'Decision Maker',
             accountName: item.account_name || 'your company',
             organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
             campaignName: campaign.name,
+            campaignType: (campaign as any).type || (campaign as any).campaignType || null,
             campaignObjective: (campaign as any).campaignObjective || undefined,
+            successCriteria: (campaign as any).successCriteria || undefined,
+            targetAudienceDescription: (campaign as any).targetAudienceDescription || undefined,
             productServiceInfo: (campaign as any).productServiceInfo || undefined,
             talkingPoints: (campaign as any).talkingPoints || undefined,
+            campaignContextBrief: (campaign as any).campaignContextBrief || undefined,
+            callFlow: (campaign as any).callFlow || null,
             maxCallDurationSeconds: (() => {
               const raw = Number((campaign as any).maxCallDurationSeconds);
               if (!Number.isFinite(raw) || raw <= 0) return undefined;

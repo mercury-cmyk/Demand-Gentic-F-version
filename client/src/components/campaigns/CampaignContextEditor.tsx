@@ -12,6 +12,8 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { CallFlowEditor } from "@/components/campaigns/CallFlowEditor";
+import type { CampaignCallFlow } from "@shared/call-flow";
 
 export interface CampaignContextData {
   campaignObjective: string;
@@ -21,18 +23,21 @@ export interface CampaignContextData {
   targetAudienceDescription: string;
   successCriteria: string;
   campaignObjections?: Array<{ objection: string; response: string }>;
+  callFlow?: CampaignCallFlow | null;
 }
 
 interface CampaignContextEditorProps {
   data: CampaignContextData;
   onChange: (data: CampaignContextData) => void;
   headerAction?: React.ReactNode;
+  campaignType?: string | null;
 }
 
 export function CampaignContextEditor({
   data,
   onChange,
   headerAction,
+  campaignType,
 }: CampaignContextEditorProps) {
   const [newTalkingPoint, setNewTalkingPoint] = useState("");
 
@@ -208,6 +213,12 @@ export function CampaignContextEditor({
           />
           <p className="text-xs text-muted-foreground">What counts as a successful call outcome?</p>
         </div>
+
+        <CallFlowEditor
+          campaignType={campaignType}
+          value={data.callFlow}
+          onChange={(callFlow) => updateField("callFlow", callFlow)}
+        />
 
         {/* Campaign Objections */}
         <div className="space-y-3">

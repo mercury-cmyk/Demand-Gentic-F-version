@@ -20,7 +20,7 @@ import * as rtpBridge from './rtp-gemini-bridge';
 import * as mediaBridgeClient from './media-bridge-client';
 import { drachtioServer } from './drachtio-server';
 import { v4 as uuidv4 } from 'uuid';
-import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
+import { buildSipRuntimePrompt } from './sip-runtime-prompt';
 
 // Feature flag for SIP calling
 const USE_SIP_CALLING = process.env.USE_SIP_CALLING === 'true';
@@ -44,9 +44,14 @@ export interface InitiateCallParams {
   // Campaign context
   campaignName?: string;
   organizationName?: string;
+  campaignType?: string | null;
   campaignObjective?: string;
+  successCriteria?: string;
+  targetAudienceDescription?: string;
   productServiceInfo?: string;
   talkingPoints?: string[];
+  campaignContextBrief?: string | null;
+  callFlow?: unknown;
   maxCallDurationSeconds?: number;
   // Number pool tracking
   callerNumberId?: string | null;
@@ -138,82 +143,25 @@ export function isReady(): boolean {
  * Build system prompt for the media bridge Gemini session
  */
 function buildSystemPrompt(params: InitiateCallParams, callId: string): string {
-  const voiceName = params.voiceName || 'Puck';
-  const orgRef = params.organizationName || 'DemandGentic.ai By Pivotal B2B';
-
-  const personaProfile = resolveGeminiPersonaProfile({ voiceName, sessionId: callId });
-
-  let prompt = `${personaProfile.prompt}
-
-## YOUR IDENTITY
-
-You are an AI voice assistant from ${orgRef}.
-
-${params.contactName ? `**The person you are calling:** ${params.contactName}` : ''}
-${params.contactJobTitle ? `**Job Title:** ${params.contactJobTitle}` : ''}
-${params.accountName ? `**Company:** ${params.accountName}` : ''}
-
-**Opening:**
-"Hello, may I please speak with ${params.contactName || 'the contact'}?"
-
-${params.campaignObjective ? `## INTERNAL OBJECTIVE (DO NOT SAY TO PROSPECT)
-${params.campaignObjective}
-` : ''}
-
-${params.productServiceInfo ? `## WHAT TO SAY ABOUT YOUR OFFERING
-${params.productServiceInfo}
-` : ''}
-
-${params.talkingPoints?.length ? `## KEY TALKING POINTS
-${params.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
-` : ''}
-
-## CALL FLOW
-1. Confirm identity
-2. Introduce yourself and ${orgRef}
-3. Explain why you're calling (value to them)
-4. Ask questions to understand their needs
-5. Present relevant information
-6. Propose next steps
-7. Close professionally
-
-## VOICEMAIL / IVR FAST-EXIT (CRITICAL)
-If you hear ANY automation or mailbox cue, do NOT continue the script.
-Examples:
-- "leave a message", "after the beep", "after the tone", "voicemail", "mailbox"
-- "the person you are trying to reach is not available"
-- menu prompts like "press 1", "press 2", "to disconnect", "main menu"
-- repeated automated prompts or beep/silence loops
-
-When detected, IMMEDIATELY:
-1. Call \`submit_disposition\` with "voicemail"
-2. Call \`end_call\` with reason "voicemail detected"
-
-Never leave a voicemail message. Never continue discovery/pitch on automation.
-
-## SILENCE GUARD
-If call is connected but there is no meaningful human response:
-- after your opening and ~8-10 seconds of silence/looping audio, end quickly
-- use "no_answer" only for pure silence/ringing with no mailbox cue
-
-## RECORDING CALL OUTCOME
-
-BEFORE ending any call, you MUST call \`submit_disposition\` with the outcome:
-- "qualified_lead" - prospect interested
-- "not_interested" - prospect declined
-- "do_not_call" - requested removal
-- "voicemail" - reached voicemail
-- "no_answer" - no answer / callback requested
-- "invalid_data" - wrong number
-
-## ENDING THE CALL
-
-When conversation is over:
-1. Call \`submit_disposition\` with outcome
-2. Call \`end_call\` to hang up
-`;
-
-  return prompt;
+  return buildSipRuntimePrompt({
+    sessionId: callId,
+    voiceName: params.voiceName,
+    systemPrompt: params.systemPrompt,
+    contactName: params.contactName,
+    contactFirstName: params.contactFirstName,
+    contactJobTitle: params.contactJobTitle,
+    accountName: params.accountName,
+    organizationName: params.organizationName,
+    campaignName: params.campaignName,
+    campaignType: params.campaignType,
+    campaignObjective: params.campaignObjective,
+    successCriteria: params.successCriteria,
+    targetAudienceDescription: params.targetAudienceDescription,
+    productServiceInfo: params.productServiceInfo,
+    talkingPoints: params.talkingPoints,
+    campaignContextBrief: params.campaignContextBrief,
+    callFlow: params.callFlow,
+  });
 }
 
 /**

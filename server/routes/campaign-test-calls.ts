@@ -356,7 +356,15 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
           contactJobTitle: validatedData.testJobTitle,
           accountName: validatedData.testCompanyName,
           organizationName: ctx.organizationName,
+          campaignName: campaign.name,
+          campaignType: ctx.campaignType || null,
           campaignObjective: ctx.campaignObjective,
+          successCriteria: ctx.successCriteria,
+          targetAudienceDescription: ctx.targetAudienceDescription,
+          productServiceInfo: ctx.productServiceInfo,
+          talkingPoints: ctx.talkingPoints,
+          campaignContextBrief: ctx.campaignContextBrief,
+          callFlow: ctx.callFlow,
           maxCallDurationSeconds: 300,
         });
 
