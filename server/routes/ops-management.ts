@@ -1260,9 +1260,12 @@ router.delete('/workstations/clusters/:clusterId/configs/:configId/workstations/
 router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/access-token', async (req: Request, res: Response) => {
   try {
     const { clusterId, configId, workstationId } = req.params;
+    console.log('[Workstations] generateAccessToken request:', { clusterId, configId, workstationId });
     const tokenInfo = await workstationsManager.generateAccessToken(clusterId, configId, workstationId);
+    console.log('[Workstations] generateAccessToken success, expireTime:', tokenInfo.expireTime);
     res.json({ success: true, ...tokenInfo });
-  } catch (error) {
+  } catch (error: any) {
+    console.error('[Workstations] generateAccessToken error:', error?.message, error?.code, error?.details);
     handleOpsError(res, error, 'Failed to generate access token');
   }
 });
