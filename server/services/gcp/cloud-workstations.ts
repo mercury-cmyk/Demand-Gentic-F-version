@@ -224,17 +224,21 @@ export default class CloudWorkstationsManager extends EventEmitter {
 
     this.emit('cluster:creating', { clusterId: request.clusterId });
 
-    const [cluster] = await operation.promise();
-    this.emit('cluster:created', { clusterId: request.clusterId });
+    // Don't block — cluster provisioning takes 10-20 minutes
+    operation.promise().then(() => {
+      this.emit('cluster:created', { clusterId: request.clusterId });
+    }).catch((err: any) => {
+      this.emit('cluster:error', { clusterId: request.clusterId, error: err?.message });
+    });
 
     return {
-      id: extractId(cluster.name),
-      name: cluster.name,
-      displayName: cluster.displayName || request.displayName,
-      network: cluster.network || '',
-      subnetwork: cluster.subnetwork || '',
-      controlPlaneIp: cluster.controlPlaneIp || '',
-      state: 'READY',
+      id: request.clusterId,
+      name: `${this.locationPath()}/workstationClusters/${request.clusterId}`,
+      displayName: request.displayName,
+      network: request.network || '',
+      subnetwork: request.subnetwork || '',
+      controlPlaneIp: '',
+      state: 'RECONCILING',
       createTime: new Date().toISOString(),
       degraded: false,
     };
@@ -315,20 +319,25 @@ export default class CloudWorkstationsManager extends EventEmitter {
     });
 
     this.emit('config:creating', { clusterId: request.clusterId, configId: request.configId });
-    const [config] = await operation.promise();
-    this.emit('config:created', { clusterId: request.clusterId, configId: request.configId });
+
+    // Don't block — provisioning takes minutes. Fire-and-forget, emit when done.
+    operation.promise().then(() => {
+      this.emit('config:created', { clusterId: request.clusterId, configId: request.configId });
+    }).catch((err: any) => {
+      this.emit('config:error', { clusterId: request.clusterId, configId: request.configId, error: err?.message });
+    });
 
     return {
-      id: extractId(config.name),
-      name: config.name,
-      displayName: config.displayName || request.displayName,
+      id: request.configId,
+      name: `${this.clusterPath(request.clusterId)}/workstationConfigs/${request.configId}`,
+      displayName: request.displayName,
       clusterId: request.clusterId,
       machineType: request.machineType || 'e2-standard-4',
       bootDiskSizeGb: request.bootDiskSizeGb || 50,
       idleTimeout: request.idleTimeout || '1200s',
       runningTimeout: request.runningTimeout || '43200s',
       containerImage: request.containerImage || null,
-      state: 'READY',
+      state: 'RECONCILING',
       createTime: new Date().toISOString(),
       degraded: false,
     };
@@ -398,20 +407,25 @@ export default class CloudWorkstationsManager extends EventEmitter {
     });
 
     this.emit('workstation:creating', { workstationId: request.workstationId });
-    const [workstation] = await operation.promise();
-    this.emit('workstation:created', { workstationId: request.workstationId });
+
+    // Don't block — return immediately, let provisioning happen in background
+    operation.promise().then(() => {
+      this.emit('workstation:created', { workstationId: request.workstationId });
+    }).catch((err: any) => {
+      this.emit('workstation:error', { workstationId: request.workstationId, error: err?.message });
+    });
 
     return {
-      id: extractId(workstation.name),
-      name: workstation.name,
-      displayName: workstation.displayName || request.displayName,
+      id: request.workstationId,
+      name: `${this.configPath(request.clusterId, request.configId)}/workstations/${request.workstationId}`,
+      displayName: request.displayName,
       configId: request.configId,
       clusterId: request.clusterId,
-      state: workstation.state || 'STATE_STOPPED',
-      host: workstation.host || '',
+      state: 'STATE_STOPPED',
+      host: '',
       createTime: new Date().toISOString(),
       startTime: '',
-      reconciling: false,
+      reconciling: true,
       env: request.env || {},
     };
   }
