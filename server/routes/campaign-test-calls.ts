@@ -13,6 +13,7 @@ import {
   type CampaignTestCall,
   workOrders, // Import workOrders
   agentDefaults,
+  dialerCallAttempts,
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -343,12 +344,32 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         console.log(`[Campaign Test Call] International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
         console.log("=".repeat(60));
 
+        // Create a call attempt record so post-call analysis works for test calls
+        let testCallAttemptId: string | undefined;
+        try {
+          const [callAttempt] = await db
+            .insert(dialerCallAttempts)
+            .values({
+              campaignId,
+              agentType: 'ai',
+              phoneDialed: normalizedPhone,
+              attemptNumber: 1,
+              callStartedAt: new Date(),
+            })
+            .returning();
+          testCallAttemptId = callAttempt.id;
+          console.log(`[Campaign Test Call] Created call attempt ${testCallAttemptId} for SIP test call`);
+        } catch (err) {
+          console.error(`[Campaign Test Call] Failed to create call attempt record:`, err);
+        }
+
         const sipResult = await initiateSipCall({
           toNumber: normalizedPhone,
           fromNumber,
           campaignId,
           contactId: '',
           queueItemId: '',
+          callAttemptId: testCallAttemptId || null,
           voiceName: ctx.voice || 'Puck',
           systemPrompt: ctx.systemPrompt,
           contactName: validatedData.testContactName,
