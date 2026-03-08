@@ -21,7 +21,7 @@ import { runOpsCodeAgent } from '../services/ops/code-agent';
 
 const router = Router();
 router.use(requireAuth);
-router.use(requireRole('admin', 'campaign_manager'));
+router.use(requireRole('admin', 'campaign_manager', 'manager'));
 
 // Initialize GCP managers
 const projectId = process.env.GCP_PROJECT_ID || '';
@@ -1231,6 +1231,125 @@ router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:w
     res.json({ success: true, ...tokenInfo });
   } catch (error) {
     handleOpsError(res, error, 'Failed to generate access token');
+  }
+});
+
+/**
+ * Execute command on a running workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/exec
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/exec', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { command } = req.body;
+    if (!command || typeof command !== 'string') {
+      return res.status(400).json({ success: false, error: 'command is required' });
+    }
+    const result = await workstationsManager.execCommand(clusterId, configId, workstationId, command);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to execute command on workstation');
+  }
+});
+
+/**
+ * List files on a running workstation
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/files?path=/home/user
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/files', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const dirPath = (req.query.path as string) || '/home/user';
+    const escaped = dirPath.replace(/'/g, "'\\''");
+
+    const result = await workstationsManager.execCommand(
+      clusterId, configId, workstationId,
+      `ls -la --color=never '${escaped}' 2>/dev/null && echo '---STAT---' && stat -c '%Y' '${escaped}' 2>/dev/null`,
+    );
+
+    const lines = result.stdout.split('\n').filter(Boolean);
+    const entries: Array<{ name: string; path: string; type: 'file' | 'directory'; size: number; permissions: string }> = [];
+
+    for (const line of lines) {
+      if (line === '---STAT---' || line.startsWith('total ')) continue;
+      // Parse ls -la output: permissions links owner group size month day time name
+      const match = line.match(/^([drwxlst-]+)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\d+\s+[\d:]+\s+(.+)$/);
+      if (match) {
+        const [, perms, size, name] = match;
+        if (name === '.' || name === '..') continue;
+        const isDir = perms.startsWith('d');
+        const cleanPath = dirPath.endsWith('/') ? dirPath : dirPath + '/';
+        entries.push({
+          name,
+          path: cleanPath + name,
+          type: isDir ? 'directory' : 'file',
+          size: parseInt(size) || 0,
+          permissions: perms,
+        });
+      }
+    }
+
+    // Sort: directories first, then alphabetical
+    entries.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    res.json({ success: true, entries, cwd: dirPath });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list files on workstation');
+  }
+});
+
+/**
+ * Read file from a running workstation
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file?path=/home/user/file.ts
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const filePath = req.query.path as string;
+    if (!filePath) return res.status(400).json({ success: false, error: 'path query parameter is required' });
+
+    const escaped = filePath.replace(/'/g, "'\\''");
+    const result = await workstationsManager.execCommand(clusterId, configId, workstationId, `cat '${escaped}'`);
+
+    if (result.exitCode !== 0) {
+      return res.status(404).json({ success: false, error: result.stderr || 'File not found' });
+    }
+
+    res.json({ success: true, content: result.stdout, path: filePath });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to read file from workstation');
+  }
+});
+
+/**
+ * Write file to a running workstation
+ * PUT /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file
+ */
+router.put('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { path: filePath, content } = req.body;
+    if (!filePath || typeof content !== 'string') {
+      return res.status(400).json({ success: false, error: 'path and content are required' });
+    }
+
+    const b64 = Buffer.from(content).toString('base64');
+    const escaped = filePath.replace(/'/g, "'\\''");
+    const result = await workstationsManager.execCommand(
+      clusterId, configId, workstationId,
+      `echo '${b64}' | base64 -d > '${escaped}'`,
+    );
+
+    if (result.exitCode !== 0) {
+      return res.status(500).json({ success: false, error: result.stderr || 'Failed to write file' });
+    }
+
+    res.json({ success: true, path: filePath });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to write file to workstation');
   }
 });
 

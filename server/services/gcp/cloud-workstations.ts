@@ -493,6 +493,37 @@ export default class CloudWorkstationsManager extends EventEmitter {
     this.emit('workstation:deleted', { workstationId });
   }
 
+  /**
+   * Execute a command on a running workstation via gcloud SSH.
+   */
+  async execCommand(
+    clusterId: string,
+    configId: string,
+    workstationId: string,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const { exec } = await import('child_process');
+    return new Promise((resolve) => {
+      const escaped = command.replace(/'/g, "'\\''");
+      const cmd = [
+        'gcloud', 'workstations', 'ssh', workstationId,
+        `--cluster=${clusterId}`,
+        `--config=${configId}`,
+        `--region=${this.region}`,
+        `--project=${this.projectId}`,
+        `--command='${escaped}'`,
+      ].join(' ');
+
+      exec(cmd, { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }, (error: any, stdout: string, stderr: string) => {
+        resolve({
+          stdout: stdout || '',
+          stderr: stderr || '',
+          exitCode: error?.code || 0,
+        });
+      });
+    });
+  }
+
   async generateAccessToken(clusterId: string, configId: string, workstationId: string): Promise<{ accessToken: string; expireTime: string }> {
     const client = await this.getClient();
     const [response] = await client.generateAccessToken({
