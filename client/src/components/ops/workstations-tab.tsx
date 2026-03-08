@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { apiJsonRequest } from '@/lib/queryClient';
 import {
   Plus,
   Play,
@@ -152,8 +153,10 @@ export default function WorkstationsTab() {
 
   const fetchClusters = useCallback(async () => {
     try {
-      const resp = await fetch('/api/ops/workstations/clusters');
-      const data = await resp.json();
+      const data = await apiJsonRequest<{
+        success: boolean;
+        clusters?: Cluster[];
+      }>('GET', '/api/ops/workstations/clusters');
       if (data.success) {
         setClusters(data.clusters || []);
         // Auto-expand clusters and fetch their configs
@@ -170,8 +173,10 @@ export default function WorkstationsTab() {
 
   const fetchConfigs = async (clusterId: string) => {
     try {
-      const resp = await fetch(`/api/ops/workstations/clusters/${clusterId}/configs`);
-      const data = await resp.json();
+      const data = await apiJsonRequest<{
+        success: boolean;
+        configs?: Config[];
+      }>('GET', `/api/ops/workstations/clusters/${clusterId}/configs`);
       if (data.success) {
         setConfigs(prev => ({ ...prev, [clusterId]: data.configs || [] }));
         for (const config of data.configs || []) {
@@ -185,8 +190,10 @@ export default function WorkstationsTab() {
 
   const fetchWorkstations = async (clusterId: string, configId: string) => {
     try {
-      const resp = await fetch(`/api/ops/workstations/clusters/${clusterId}/configs/${configId}/workstations`);
-      const data = await resp.json();
+      const data = await apiJsonRequest<{
+        success: boolean;
+        workstations?: Workstation[];
+      }>('GET', `/api/ops/workstations/clusters/${clusterId}/configs/${configId}/workstations`);
       if (data.success) {
         setWorkstations(prev => ({ ...prev, [`${clusterId}/${configId}`]: data.workstations || [] }));
       }
@@ -228,11 +235,14 @@ export default function WorkstationsTab() {
     const key = `start-${ws.id}`;
     setActionState(key, true);
     try {
-      const resp = await fetch(
+      const data = await apiJsonRequest<{
+        success: boolean;
+        error?: string;
+      }>(
+        'POST',
         `/api/ops/workstations/clusters/${ws.clusterId}/configs/${ws.configId}/workstations/${ws.id}/start`,
-        { method: 'POST' }
+        {},
       );
-      const data = await resp.json();
       if (data.success) {
         toast({ title: 'Workstation starting', description: `${ws.displayName} is starting up...` });
         fetchWorkstations(ws.clusterId, ws.configId);
@@ -250,11 +260,14 @@ export default function WorkstationsTab() {
     const key = `stop-${ws.id}`;
     setActionState(key, true);
     try {
-      const resp = await fetch(
+      const data = await apiJsonRequest<{
+        success: boolean;
+        error?: string;
+      }>(
+        'POST',
         `/api/ops/workstations/clusters/${ws.clusterId}/configs/${ws.configId}/workstations/${ws.id}/stop`,
-        { method: 'POST' }
+        {},
       );
-      const data = await resp.json();
       if (data.success) {
         toast({ title: 'Workstation stopping', description: `${ws.displayName} is shutting down...` });
         fetchWorkstations(ws.clusterId, ws.configId);
@@ -281,11 +294,13 @@ export default function WorkstationsTab() {
     const key = `delete-${ws.id}`;
     setActionState(key, true);
     try {
-      const resp = await fetch(
+      const data = await apiJsonRequest<{
+        success: boolean;
+        error?: string;
+      }>(
+        'DELETE',
         `/api/ops/workstations/clusters/${ws.clusterId}/configs/${ws.configId}/workstations/${ws.id}`,
-        { method: 'DELETE' }
       );
-      const data = await resp.json();
       if (data.success) {
         toast({ title: 'Workstation deleted', description: ws.displayName });
         fetchWorkstations(ws.clusterId, ws.configId);
@@ -339,12 +354,10 @@ export default function WorkstationsTab() {
         body = { workstationId: formId, displayName: formDisplayName };
       }
 
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await resp.json();
+      const data = await apiJsonRequest<{
+        success: boolean;
+        error?: string;
+      }>('POST', url, body);
 
       if (data.success) {
         toast({ title: `${createMode} created`, description: formDisplayName });

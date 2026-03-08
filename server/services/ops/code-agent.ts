@@ -1,3 +1,9 @@
+import type {
+  AgentRequest,
+  AgentOptimizationProfile,
+  LLMProvider,
+  ProviderMode,
+} from "../multi-provider-agent";
 import { readWorkspaceFile, writeWorkspaceFile } from "./runtime";
 
 export interface OpsCodeAgentRequest {
@@ -6,16 +12,59 @@ export interface OpsCodeAgentRequest {
   selectedFilePath?: string | null;
   selectedFileContent?: string | null;
   applyChanges?: boolean;
+  providerMode?: ProviderMode;
+  preferredProvider?: LLMProvider | null;
+  optimizationProfile?: AgentOptimizationProfile;
 }
 
 export interface OpsCodeAgentResponse {
   provider: string;
+  model?: string;
+  transport?: string;
   summary: string;
   path: string | null;
   applied: boolean;
   changed: boolean;
   updatedContent?: string;
   modifiedAt?: string;
+}
+
+type SingleFileEditPayload = {
+  summary?: unknown;
+  updatedContent?: unknown;
+};
+
+async function requestAgentResponse(
+  agentOptions: Pick<
+    AgentRequest,
+    "maxTokens" | "temperature" | "responseFormat" | "systemPrompt"
+  >,
+  prompt: string,
+  mode: OpsCodeAgentRequest["mode"],
+  selection: Pick<
+    OpsCodeAgentRequest,
+    "providerMode" | "preferredProvider" | "optimizationProfile"
+  >,
+  context?: Record<string, unknown>,
+) {
+  const { getOrchestrator } = await import("../multi-provider-agent.js");
+
+  return getOrchestrator().execute({
+    prompt,
+    task:
+      mode === "simple-edit"
+        ? "code"
+        : mode === "debug"
+          ? "analysis"
+          : mode === "deploy"
+            ? "reasoning"
+            : "general",
+    context,
+    providerMode: selection.providerMode,
+    preferredProvider: selection.preferredProvider ?? undefined,
+    optimizationProfile: selection.optimizationProfile,
+    ...agentOptions,
+  });
 }
 
 async function runSingleFileEdit(
@@ -31,77 +80,70 @@ async function runSingleFileEdit(
     };
   }
 
-  const file = request.selectedFileContent != null
-    ? {
-        path: request.selectedFilePath,
-        content: request.selectedFileContent,
-      }
-    : await readWorkspaceFile(request.selectedFilePath);
+  const file =
+    request.selectedFileContent != null
+      ? {
+          path: request.selectedFilePath,
+          content: request.selectedFileContent,
+        }
+      : await readWorkspaceFile(request.selectedFilePath);
 
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  let response;
+  try {
+    response = await requestAgentResponse(
+      {
+        maxTokens: 4096,
+        temperature: 0.2,
+        responseFormat: "json",
+        systemPrompt: [
+          "You are a precise code editor working on a single file.",
+          "Apply the user's request only to the provided file content.",
+          "Return valid JSON with keys: summary and updatedContent.",
+          "updatedContent must contain the complete file contents after the edit.",
+          "Do not wrap the file or JSON in markdown fences.",
+          "Preserve imports, formatting style, and unrelated code.",
+        ].join(" "),
+      },
+      JSON.stringify({
+        instruction: request.prompt,
+        path: request.selectedFilePath,
+        content: file.content,
+      }),
+      request.mode,
+      request,
+      {
+        selectedFilePath: request.selectedFilePath,
+      },
+    );
+  } catch (error) {
     return {
       provider: "system",
-      summary: "OpenAI API key is not configured, so Ops Hub cannot apply code edits.",
+      summary:
+        error instanceof Error
+          ? error.message
+          : "The coding agent failed to generate an edit.",
       path: request.selectedFilePath,
       applied: false,
       changed: false,
     };
   }
 
-  const OpenAI = (await import("openai")).default;
-  const client = new OpenAI({
-    apiKey,
-    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  });
-
-  const model =
-    process.env.OPS_HUB_CODE_MODEL ||
-    process.env.AI_OPERATOR_MODEL ||
-    process.env.OPENAI_MODEL ||
-    "gpt-4o-mini";
-
-  const systemPrompt = [
-    "You are a precise code editor working on a single file.",
-    "Apply the user's request only to the provided file content.",
-    "Return valid JSON with keys: summary, updatedContent.",
-    "updatedContent must contain the complete file contents after the edit.",
-    "Do not wrap the file in markdown fences.",
-    "Preserve existing imports, formatting style, and unrelated code.",
-  ].join(" ");
-
-  const completion = await client.chat.completions.create({
-    model,
-    temperature: 0.2,
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: systemPrompt,
-      },
-      {
-        role: "user",
-        content: JSON.stringify({
-          instruction: request.prompt,
-          path: request.selectedFilePath,
-          content: file.content,
-        }),
-      },
-    ],
-  });
-
-  const rawContent = completion.choices[0]?.message?.content;
-  if (!rawContent) {
-    throw new Error("The coding model returned an empty response");
+  let payload: SingleFileEditPayload;
+  try {
+    payload = JSON.parse(response.content) as SingleFileEditPayload;
+  } catch {
+    return {
+      provider: "system",
+      summary: `The ${response.provider} response could not be parsed as a file edit.`,
+      path: request.selectedFilePath,
+      applied: false,
+      changed: false,
+    };
   }
-
-  const payload = JSON.parse(rawContent) as {
-    summary?: unknown;
-    updatedContent?: unknown;
-  };
-
   const updatedContent =
-    typeof payload.updatedContent === "string" ? payload.updatedContent : file.content;
+    typeof payload.updatedContent === "string"
+      ? payload.updatedContent
+      : file.content;
   const summary =
     typeof payload.summary === "string" && payload.summary.trim()
       ? payload.summary.trim()
@@ -110,7 +152,9 @@ async function runSingleFileEdit(
 
   if (!request.applyChanges || !changed) {
     return {
-      provider: "openai",
+      provider: response.provider,
+      model: response.model,
+      transport: response.transport,
       summary,
       path: request.selectedFilePath,
       applied: false,
@@ -121,7 +165,9 @@ async function runSingleFileEdit(
 
   const savedFile = await writeWorkspaceFile(request.selectedFilePath, updatedContent);
   return {
-    provider: "openai",
+    provider: response.provider,
+    model: response.model,
+    transport: response.transport,
     summary,
     path: request.selectedFilePath,
     applied: true,
@@ -138,28 +184,39 @@ export async function runOpsCodeAgent(
     return runSingleFileEdit(request);
   }
 
-  const { getOrchestrator } = await import("../multi-provider-agent.js");
-  const orchestrator = getOrchestrator();
-  const response = await orchestrator.execute({
-    prompt: request.prompt,
-    task:
-      request.mode === "debug"
-        ? "analysis"
-        : request.mode === "deploy"
-          ? "reasoning"
-          : "general",
-    context: request.selectedFilePath
-      ? {
-          selectedFilePath: request.selectedFilePath,
-        }
-      : undefined,
-  });
+  try {
+    const response = await requestAgentResponse(
+      {},
+      request.prompt,
+      request.mode,
+      request,
+      request.selectedFilePath
+        ? {
+            selectedFilePath: request.selectedFilePath,
+            selectedFileContent: request.selectedFileContent,
+          }
+        : undefined,
+    );
 
-  return {
-    provider: response.provider,
-    summary: response.content,
-    path: request.selectedFilePath || null,
-    applied: false,
-    changed: false,
-  };
+    return {
+      provider: response.provider,
+      model: response.model,
+      transport: response.transport,
+      summary: response.content,
+      path: request.selectedFilePath || null,
+      applied: false,
+      changed: false,
+    };
+  } catch (error) {
+    return {
+      provider: "system",
+      summary:
+        error instanceof Error
+          ? error.message
+          : "The coding agent failed to generate a response.",
+      path: request.selectedFilePath || null,
+      applied: false,
+      changed: false,
+    };
+  }
 }
