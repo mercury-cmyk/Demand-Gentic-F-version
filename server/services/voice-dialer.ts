@@ -7877,12 +7877,13 @@ async function resolveTelnyxCallControlId(session: OpenAIRealtimeSession): Promi
       }
     }
 
-    // Secondary DB fallback via call_sessions table.
+    // Secondary DB fallback via dialer_call_attempts -> call_sessions linkage.
     try {
       const [cs] = await db
         .select({ telnyxCallId: callSessions.telnyxCallId })
-        .from(callSessions)
-        .where(eq(callSessions.callAttemptId, attemptId))
+        .from(dialerCallAttempts)
+        .innerJoin(callSessions, eq(callSessions.id, dialerCallAttempts.callSessionId))
+        .where(eq(dialerCallAttempts.id, attemptId))
         .limit(1);
 
       if (isLikelyControlId(cs?.telnyxCallId)) {

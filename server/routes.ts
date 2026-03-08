@@ -5359,29 +5359,43 @@ export function registerRoutes(app: Express) {
   app.get("/api/campaigns/:id/email-metrics", requireAuth, async (req, res) => {
     try {
       const campaignId = req.params.id;
-      
-      // Get all email events for this campaign
-      const events = await db.select()
+      const [sendStats] = await db
+        .select({
+          totalRecipients: sql<number>`COUNT(*)::int`,
+          delivered: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'sent' THEN 1 END)::int`,
+          bounced: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'bounced' THEN 1 END)::int`,
+          failed: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'failed' THEN 1 END)::int`,
+        })
+        .from(schema.emailSends)
+        .where(eq(schema.emailSends.campaignId, campaignId));
+
+      const [eventStats] = await db
+        .select({
+          opened: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'opened' THEN 1 END)::int`,
+          clicked: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'clicked' THEN 1 END)::int`,
+          hardBounced: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'bounced' AND ${schema.emailEvents.bounceType} = 'hard' THEN 1 END)::int`,
+          softBounced: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'bounced' AND ${schema.emailEvents.bounceType} = 'soft' THEN 1 END)::int`,
+          complained: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'complained' THEN 1 END)::int`,
+          unsubscribed: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'unsubscribed' THEN 1 END)::int`,
+        })
         .from(schema.emailEvents)
         .where(eq(schema.emailEvents.campaignId, campaignId));
 
-      // Calculate metrics by grouping events
       const metrics = {
-        totalRecipients: new Set(events.map(e => e.recipient)).size,
-        sent: events.filter(e => e.type === 'accepted' || e.type === 'delivered').length,
-        delivered: events.filter(e => e.type === 'delivered').length,
-        opened: events.filter(e => e.type === 'opened').length,
-        clicked: events.filter(e => e.type === 'clicked').length,
-        bounced: events.filter(e => e.type === 'bounced').length,
-        hardBounced: events.filter(e => e.type === 'bounced' && e.bounceType === 'hard').length,
-        softBounced: events.filter(e => e.type === 'bounced' && e.bounceType === 'soft').length,
-        complained: events.filter(e => e.type === 'complained').length,
-        unsubscribed: events.filter(e => e.type === 'unsubscribed').length,
-        failed: events.filter(e => e.type === 'failed').length,
+        totalRecipients: Number(sendStats?.totalRecipients) || 0,
+        sent: Number(sendStats?.totalRecipients) || 0,
+        delivered: Number(sendStats?.delivered) || 0,
+        opened: Number(eventStats?.opened) || 0,
+        clicked: Number(eventStats?.clicked) || 0,
+        bounced: Number(sendStats?.bounced) || 0,
+        hardBounced: Number(eventStats?.hardBounced) || 0,
+        softBounced: Number(eventStats?.softBounced) || 0,
+        complained: Number(eventStats?.complained) || 0,
+        unsubscribed: Number(eventStats?.unsubscribed) || 0,
+        failed: Number(sendStats?.failed) || 0,
       };
 
-      // Calculate rates
-      const deliveredCount = metrics.delivered || 1; // Avoid division by zero
+      const deliveredCount = metrics.delivered || 1;
       const sentCount = metrics.sent || 1;
 
       const rates = {
@@ -5406,7 +5420,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Get call campaign snapshot stats
-  // Combines stats from both human agent calls (callAttempts) and AI calls (callSessions)
+  // Combines stats from both human agent calls (callAttempts) and AI dialer attempts.
   app.get("/api/campaigns/:id/call-stats", requireAuth, async (req, res) => {
     try {
       const campaignId = req.params.id;
@@ -5446,67 +5460,28 @@ export function registerRoutes(app: Express) {
         .from(callAttempts)
         .where(eq(callAttempts.campaignId, campaignId));
 
-      // Query AI agent calls from callSessions
-      // AI dispositions are stored in aiDisposition field with similar values
-      // UPDATED definition: 'Connected' means any Right Party Contact (RPC) or where a conversation occurred.
-      // Explicitly includes: Qualified, Not Interested, DNC, Wrong Number (often means answered).
-      // Explicitly excludes: No Answer, Voicemail, Busy, Failed.
-      
-      // Canonical dispositions that indicate the call connected (Right Party Contact)
-      const aiConnectedDispositions = [
-        'qualified_lead',
-        'callback_requested',
-        'not_interested',
-        'do_not_call',
-        'invalid_data',
-        'needs_review',
-      ];
-
-      // Canonical dispositions from disposition-normalizer.ts
-      const aiQualifiedDispositions = ['qualified_lead'];
-      const aiDncDispositions = ['do_not_call'];
-      const aiNotInterestedDispositions = ['not_interested'];
-      const aiNoAnswerDispositions = ['no_answer'];
-      const aiVoicemailDispositions = ['voicemail'];
-
-      const [aiCallStats] = await db
-        .select({
-          callsMade: sql<number>`COUNT(*)::int`,
-          callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiConnectedDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiQualifiedDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiDncDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiNotInterestedDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiNoAnswerDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) OR (${callSessions.aiDisposition} IS NULL AND ${callSessions.status} = 'no_answer') THEN 1 END)::int`,
-          voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiVoicemailDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          busy: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN ('busy') AND ${callSessions.aiDisposition} IS NULL THEN 1 END)::int`,
-          wrongNumber: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'invalid_data' THEN 1 END)::int`,
-          callbackRequested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'callback_requested' THEN 1 END)::int`,
-          noDisposition: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IS NULL AND ${callSessions.status} NOT IN ('no_answer', 'busy') THEN 1 END)::int`,
-        })
-        .from(callSessions)
-        .where(eq(callSessions.campaignId, campaignId));
+      const aiCallStatsResult = await db.execute(sql`
+        SELECT
+          COUNT(*)::int AS "callsMade",
+          COUNT(CASE WHEN dca.disposition IN ('qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review') THEN 1 END)::int AS "callsConnected",
+          COUNT(CASE WHEN dca.disposition = 'qualified_lead' THEN 1 END)::int AS "leadsQualified",
+          COUNT(CASE WHEN dca.disposition = 'do_not_call' THEN 1 END)::int AS "dncRequests",
+          COUNT(CASE WHEN dca.disposition = 'not_interested' THEN 1 END)::int AS "notInterested",
+          COUNT(CASE WHEN dca.disposition = 'no_answer' THEN 1 END)::int AS "noAnswer",
+          COUNT(CASE WHEN dca.disposition = 'voicemail' THEN 1 END)::int AS "voicemail",
+          COUNT(CASE WHEN cs.status = 'busy' AND dca.disposition IS NULL THEN 1 END)::int AS "busy",
+          COUNT(CASE WHEN dca.disposition = 'invalid_data' THEN 1 END)::int AS "wrongNumber",
+          COUNT(CASE WHEN dca.disposition = 'callback_requested' THEN 1 END)::int AS "callbackRequested",
+          COUNT(CASE WHEN dca.disposition IS NULL AND COALESCE(cs.status::text, '') NOT IN ('no_answer', 'busy') THEN 1 END)::int AS "noDisposition"
+        FROM dialer_call_attempts dca
+        LEFT JOIN call_sessions cs ON cs.id = dca.call_session_id
+        WHERE dca.campaign_id = ${campaignId}
+      `);
+      const aiCallStats = (aiCallStatsResult.rows[0] || {}) as Record<string, unknown>;
 
       // Combine human + AI stats
-      const callsMade = (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0);
-      const callsConnected = (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0);
+      const callsMade = (humanCallStats?.callsMade || 0) + (Number(aiCallStats.callsMade) || 0);
+      const callsConnected = (humanCallStats?.callsConnected || 0) + (Number(aiCallStats.callsConnected) || 0);
 
       // Leads Qualified: query the leads table directly so manual QA overrides are included.
       // callSessions.aiDisposition never changes when a reviewer manually approves a needs_review lead,
@@ -5520,14 +5495,14 @@ export function registerRoutes(app: Express) {
         ));
       const leadsQualified = leadsQualifiedResult?.count || 0;
 
-      const dncRequests = (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0);
-      const notInterested = (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0);
-      const noAnswer = (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0);
-      const voicemail = (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0);
-      const busy = (humanCallStats?.busy || 0) + (aiCallStats?.busy || 0);
-      const wrongNumber = (humanCallStats?.wrongNumber || 0) + (aiCallStats?.wrongNumber || 0);
-      const callbackRequested = (humanCallStats?.callbackRequested || 0) + (aiCallStats?.callbackRequested || 0);
-      const noDisposition = (humanCallStats?.noDisposition || 0) + (aiCallStats?.noDisposition || 0);
+      const dncRequests = (humanCallStats?.dncRequests || 0) + (Number(aiCallStats.dncRequests) || 0);
+      const notInterested = (humanCallStats?.notInterested || 0) + (Number(aiCallStats.notInterested) || 0);
+      const noAnswer = (humanCallStats?.noAnswer || 0) + (Number(aiCallStats.noAnswer) || 0);
+      const voicemail = (humanCallStats?.voicemail || 0) + (Number(aiCallStats.voicemail) || 0);
+      const busy = (humanCallStats?.busy || 0) + (Number(aiCallStats.busy) || 0);
+      const wrongNumber = (humanCallStats?.wrongNumber || 0) + (Number(aiCallStats.wrongNumber) || 0);
+      const callbackRequested = (humanCallStats?.callbackRequested || 0) + (Number(aiCallStats.callbackRequested) || 0);
+      const noDisposition = (humanCallStats?.noDisposition || 0) + (Number(aiCallStats.noDisposition) || 0);
 
       res.json({
         campaignId,
@@ -5568,11 +5543,53 @@ export function registerRoutes(app: Express) {
         .from(leads)
         .where(and(
           inArray(leads.campaignId, campaignIds),
-          inArray(leads.qaStatus, ['new', 'under_review', 'approved', 'pending_pm_review', 'published'])
+          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
         ))
         .groupBy(leads.campaignId);
       const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
         leadsQualifiedRows.map((r) => [r.campaignId, r.count])
+      );
+
+      const emailSendStatsRows = await db
+        .select({
+          campaignId: schema.emailSends.campaignId,
+          totalSent: sql<number>`COUNT(*)::int`,
+          delivered: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'sent' THEN 1 END)::int`,
+        })
+        .from(schema.emailSends)
+        .where(inArray(schema.emailSends.campaignId, campaignIds))
+        .groupBy(schema.emailSends.campaignId);
+      const emailSendStatsByCampaign: Record<string, { totalSent: number; delivered: number }> = Object.fromEntries(
+        emailSendStatsRows.map((row) => [
+          row.campaignId,
+          {
+            totalSent: Number(row.totalSent) || 0,
+            delivered: Number(row.delivered) || 0,
+          },
+        ])
+      );
+
+      const emailEventStatsRows = await db
+        .select({
+          campaignId: schema.emailEvents.campaignId,
+          uniqueOpens: sql<number>`COUNT(DISTINCT CASE WHEN ${schema.emailEvents.type} = 'opened' THEN ${schema.emailEvents.recipient} END)::int`,
+          uniqueClicks: sql<number>`COUNT(DISTINCT CASE WHEN ${schema.emailEvents.type} = 'clicked' THEN ${schema.emailEvents.recipient} END)::int`,
+          unsubscribes: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'unsubscribed' THEN 1 END)::int`,
+          spamComplaints: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'complained' THEN 1 END)::int`,
+        })
+        .from(schema.emailEvents)
+        .where(inArray(schema.emailEvents.campaignId, campaignIds))
+        .groupBy(schema.emailEvents.campaignId);
+      const emailEventStatsByCampaign: Record<string, { uniqueOpens: number; uniqueClicks: number; unsubscribes: number; spamComplaints: number }> = Object.fromEntries(
+        emailEventStatsRows.map((row) => [
+          row.campaignId,
+          {
+            uniqueOpens: Number(row.uniqueOpens) || 0,
+            uniqueClicks: Number(row.uniqueClicks) || 0,
+            unsubscribes: Number(row.unsubscribes) || 0,
+            spamComplaints: Number(row.spamComplaints) || 0,
+          },
+        ])
       );
 
       // Process campaigns in parallel (server-side, single request from client)
@@ -5582,29 +5599,21 @@ export function registerRoutes(app: Express) {
 
         try {
           if (info.isEmail) {
-            const [sentResult] = await db
-              .select({ count: sql<number>`COUNT(*)::int` })
-              .from(campaignQueue)
-              .where(eq(campaignQueue.campaignId, campaignId));
-            const totalSent = sentResult?.count || 0;
-
-            const sendIdSubquery = sql`(SELECT id FROM email_sends WHERE campaign_id = ${campaignId})`;
-            const [opensResult] = await db.execute(sql`
-              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
-              FROM email_opens WHERE message_id IN ${sendIdSubquery}
-            `).then(r => r.rows as any[]);
-            const [clicksResult] = await db.execute(sql`
-              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
-              FROM email_link_clicks WHERE message_id IN ${sendIdSubquery}
-            `).then(r => r.rows as any[]);
-
-            entry.email = {
-              totalRecipients: totalSent,
-              delivered: totalSent,
-              opens: opensResult?.unique || 0,
-              clicks: clicksResult?.unique || 0,
+            const sendStats = emailSendStatsByCampaign[campaignId] || { totalSent: 0, delivered: 0 };
+            const eventStats = emailEventStatsByCampaign[campaignId] || {
+              uniqueOpens: 0,
+              uniqueClicks: 0,
               unsubscribes: 0,
               spamComplaints: 0,
+            };
+
+            entry.email = {
+              totalRecipients: sendStats.totalSent,
+              delivered: sendStats.delivered,
+              opens: eventStats.uniqueOpens,
+              clicks: eventStats.uniqueClicks,
+              unsubscribes: eventStats.unsubscribes,
+              spamComplaints: eventStats.spamComplaints,
             };
           }
 
@@ -5632,37 +5641,38 @@ export function registerRoutes(app: Express) {
               .from(callAttempts)
               .where(eq(callAttempts.campaignId, campaignId));
 
-            const aiConnectedDispositions = ['qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review'];
-            const [aiCallStats] = await db
-              .select({
-                callsMade: sql<number>`COUNT(*)::int`,
-                callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(aiConnectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
-                leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'qualified_lead' THEN 1 END)::int`,
-                dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'do_not_call' THEN 1 END)::int`,
-                notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
-                noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' OR (${callSessions.aiDisposition} IS NULL AND ${callSessions.status} = 'no_answer') THEN 1 END)::int`,
-                voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
-                busy: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN ('busy') AND ${callSessions.aiDisposition} IS NULL THEN 1 END)::int`,
-                wrongNumber: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'invalid_data' THEN 1 END)::int`,
-                callbackRequested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'callback_requested' THEN 1 END)::int`,
-                noDisposition: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IS NULL AND ${callSessions.status} NOT IN ('no_answer', 'busy') THEN 1 END)::int`,
-              })
-              .from(callSessions)
-              .where(eq(callSessions.campaignId, campaignId));
+            const aiCallStatsResult = await db.execute(sql`
+              SELECT
+                COUNT(*)::int AS "callsMade",
+                COUNT(CASE WHEN dca.disposition IN ('qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review') THEN 1 END)::int AS "callsConnected",
+                COUNT(CASE WHEN dca.disposition = 'qualified_lead' THEN 1 END)::int AS "leadsQualified",
+                COUNT(CASE WHEN dca.disposition = 'do_not_call' THEN 1 END)::int AS "dncRequests",
+                COUNT(CASE WHEN dca.disposition = 'not_interested' THEN 1 END)::int AS "notInterested",
+                COUNT(CASE WHEN dca.disposition = 'no_answer' THEN 1 END)::int AS "noAnswer",
+                COUNT(CASE WHEN dca.disposition = 'voicemail' THEN 1 END)::int AS "voicemail",
+                COUNT(CASE WHEN cs.status = 'busy' AND dca.disposition IS NULL THEN 1 END)::int AS "busy",
+                COUNT(CASE WHEN dca.disposition = 'invalid_data' THEN 1 END)::int AS "wrongNumber",
+                COUNT(CASE WHEN dca.disposition = 'callback_requested' THEN 1 END)::int AS "callbackRequested",
+                COUNT(CASE WHEN dca.disposition IS NULL AND COALESCE(cs.status::text, '') NOT IN ('no_answer', 'busy') THEN 1 END)::int AS "noDisposition"
+              FROM dialer_call_attempts dca
+              LEFT JOIN call_sessions cs ON cs.id = dca.call_session_id
+              WHERE dca.campaign_id = ${campaignId}
+            `);
+            const aiCallStats = (aiCallStatsResult.rows[0] || {}) as Record<string, unknown>;
 
             entry.call = {
               contactsInQueue: queueStats.queued,
-              callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
-              callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
+              callsMade: (humanCallStats?.callsMade || 0) + (Number(aiCallStats.callsMade) || 0),
+              callsConnected: (humanCallStats?.callsConnected || 0) + (Number(aiCallStats.callsConnected) || 0),
               leadsQualified: leadsQualifiedByCampaign[campaignId] || 0,
-              dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
-              notInterested: (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0),
-              noAnswer: (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0),
-              voicemail: (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0),
-              busy: (humanCallStats?.busy || 0) + (aiCallStats?.busy || 0),
-              wrongNumber: (humanCallStats?.wrongNumber || 0) + (aiCallStats?.wrongNumber || 0),
-              callbackRequested: (humanCallStats?.callbackRequested || 0) + (aiCallStats?.callbackRequested || 0),
-              noDisposition: (humanCallStats?.noDisposition || 0) + (aiCallStats?.noDisposition || 0),
+              dncRequests: (humanCallStats?.dncRequests || 0) + (Number(aiCallStats.dncRequests) || 0),
+              notInterested: (humanCallStats?.notInterested || 0) + (Number(aiCallStats.notInterested) || 0),
+              noAnswer: (humanCallStats?.noAnswer || 0) + (Number(aiCallStats.noAnswer) || 0),
+              voicemail: (humanCallStats?.voicemail || 0) + (Number(aiCallStats.voicemail) || 0),
+              busy: (humanCallStats?.busy || 0) + (Number(aiCallStats.busy) || 0),
+              wrongNumber: (humanCallStats?.wrongNumber || 0) + (Number(aiCallStats.wrongNumber) || 0),
+              callbackRequested: (humanCallStats?.callbackRequested || 0) + (Number(aiCallStats.callbackRequested) || 0),
+              noDisposition: (humanCallStats?.noDisposition || 0) + (Number(aiCallStats.noDisposition) || 0),
             };
           }
         } catch (err) {
@@ -5727,9 +5737,15 @@ export function registerRoutes(app: Express) {
       const events = await query;
 
       // Get total count
+      const countWhere = eventType && typeof eventType === 'string'
+        ? and(
+            eq(schema.emailEvents.campaignId, campaignId),
+            eq(schema.emailEvents.type, eventType)
+          )
+        : eq(schema.emailEvents.campaignId, campaignId);
       const countResult = await db.select({ count: sql<number>`count(*)::int` })
         .from(schema.emailEvents)
-        .where(eq(schema.emailEvents.campaignId, campaignId));
+        .where(countWhere);
       
       const totalCount = countResult[0]?.count || 0;
 
@@ -8522,7 +8538,9 @@ export function registerRoutes(app: Express) {
                   callAttemptId: callAttemptIdForProcessing || undefined,
                   contactName: contactName,
                   contactEmail: contact.email || undefined,
-                  accountName: contact.companyNorm || undefined,
+                  accountId: contact.accountId || (contact as any).account?.id || undefined,
+                  accountName: (contact as any).account?.name || contact.companyNorm || undefined,
+                  accountIndustry: (contact as any).account?.industryStandardized || undefined,
                   qaStatus: 'new',
                   qaDecision: null,
                   agentId: agentId,
@@ -9764,27 +9782,75 @@ export function registerRoutes(app: Express) {
       const recipient = eventData.recipient;
       const timestamp = new Date(eventData.timestamp * 1000);
       const campaignIdHeader = eventData.message?.headers?.['x-campaign-id'];
+      const userVariables = eventData['user-variables'] || {};
+      const sendIdHeader = userVariables.send_id || eventData.message?.headers?.['x-send-id'] || null;
       const bounceType = eventData.severity; // 'temporary' or 'permanent'
 
       console.log(`[Mailgun Webhook] ${eventType} - ${recipient} - Campaign: ${campaignIdHeader}`);
 
-      // Find contact by email
-      const contact = await db.select().from(schema.contacts)
-        .where(eq(schema.contacts.emailNormalized, recipient.toLowerCase()))
-        .limit(1);
-      const contactId = contact[0]?.id;
+      let resolvedSendId: string | null = null;
+      let resolvedCampaignId: string | null = campaignIdHeader || null;
+      let resolvedContactId: string | null = null;
+
+      if (sendIdHeader) {
+        const [send] = await db.select({
+          id: schema.emailSends.id,
+          campaignId: schema.emailSends.campaignId,
+          contactId: schema.emailSends.contactId,
+        })
+          .from(schema.emailSends)
+          .where(eq(schema.emailSends.id, sendIdHeader))
+          .limit(1);
+
+        if (send) {
+          resolvedSendId = send.id;
+          resolvedCampaignId = send.campaignId || resolvedCampaignId;
+          resolvedContactId = send.contactId || resolvedContactId;
+        }
+      }
+
+      if (!resolvedSendId && messageId) {
+        const [send] = await db.select({
+          id: schema.emailSends.id,
+          campaignId: schema.emailSends.campaignId,
+          contactId: schema.emailSends.contactId,
+        })
+          .from(schema.emailSends)
+          .where(eq(schema.emailSends.providerMessageId, messageId))
+          .limit(1);
+
+        if (send) {
+          resolvedSendId = send.id;
+          resolvedCampaignId = send.campaignId || resolvedCampaignId;
+          resolvedContactId = send.contactId || resolvedContactId;
+        }
+      }
+
+      if (!resolvedContactId && typeof recipient === 'string' && recipient.trim().length > 0) {
+        const [contact] = await db.select().from(schema.contacts)
+          .where(eq(schema.contacts.emailNormalized, recipient.toLowerCase()))
+          .limit(1);
+        resolvedContactId = contact?.id || null;
+      }
 
       // Store event in email_events table
       await db.insert(schema.emailEvents).values({
+        sendId: resolvedSendId,
         messageId,
-        campaignId: campaignIdHeader || null,
-        contactId: contactId || null,
+        campaignId: resolvedCampaignId,
+        contactId: resolvedContactId,
         recipient,
         type: eventType,
         bounceType: bounceType === 'permanent' ? 'hard' : bounceType === 'temporary' ? 'soft' : null,
         metadata: eventData,
         createdAt: timestamp,
       });
+
+      if (resolvedSendId && ['bounced', 'failed', 'complained'].includes(eventType)) {
+        await db.update(schema.emailSends)
+          .set({ status: 'bounced' })
+          .where(eq(schema.emailSends.id, resolvedSendId));
+      }
 
       // Handle automatic suppression for hard bounces, unsubscribes, and spam complaints
       const shouldSuppress = 
@@ -9809,15 +9875,15 @@ export function registerRoutes(app: Express) {
             email: recipient,
             emailNormalized: recipient.toLowerCase(),
             reason: suppressionReason,
-            campaignId: campaignIdHeader || null,
-            contactId: contactId || null,
+            campaignId: resolvedCampaignId,
+            contactId: resolvedContactId,
             metadata: { event: eventType, timestamp },
           });
 
           console.log(`[Mailgun Webhook] Added ${recipient} to suppression list (${suppressionReason})`);
 
           // Update contact record
-          if (contactId) {
+          if (resolvedContactId) {
             const updateData: any = {};
             if (eventType === 'bounced') {
               updateData.emailStatus = 'bounced';
@@ -9835,7 +9901,7 @@ export function registerRoutes(app: Express) {
 
             await db.update(schema.contacts)
               .set(updateData)
-              .where(eq(schema.contacts.id, contactId));
+              .where(eq(schema.contacts.id, resolvedContactId));
           }
         }
       }

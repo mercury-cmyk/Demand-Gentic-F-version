@@ -1839,6 +1839,7 @@ router.post('/:id/push-to-lead', async (req: Request, res: Response) => {
         contactName: contactName,
         contactEmail: callSession.contactEmail,
         campaignId: callSession.campaignId,
+        accountId: callSession.contactAccountId,
         recordingUrl: callSession.recordingUrl,
         recordingS3Key: callSession.recordingS3Key,
         recordingStatus: callSession.recordingS3Key ? 'completed' : 'pending',

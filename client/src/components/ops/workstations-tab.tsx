@@ -83,6 +83,15 @@ interface TerminalLine {
   timestamp: Date;
 }
 
+interface WorkstationIdeInfo {
+  success: boolean;
+  url: string;
+  host: string;
+  accessToken: string;
+  expireTime: string;
+  error?: string;
+}
+
 type ViewMode = 'manager' | 'ide';
 type CreateMode = 'cluster' | 'config' | 'workstation' | null;
 
@@ -138,6 +147,57 @@ function wsApi(ws: Workstation) {
   return `/api/ops/workstations/clusters/${ws.clusterId}/configs/${ws.configId}/workstations/${ws.id}`;
 }
 
+function buildWorkstationAuthUrl(ideUrl: string, accessToken: string) {
+  const normalizedUrl = ideUrl.replace(/\/$/, '');
+  return `${normalizedUrl}/_workstation/authenticate?access_token=${encodeURIComponent(accessToken)}&redirect_url=${encodeURIComponent('/')}`;
+}
+
+function openWorkstationLoadingWindow(): Window | null {
+  const popup = window.open('', '_blank');
+  if (!popup) return null;
+
+  popup.document.write(`<!DOCTYPE html>
+<html><head><title>Cloud IDE - Loading...</title>
+<style>
+body{margin:0;font-family:system-ui;background:#1e1e2e;color:#cdd6f4;display:flex;align-items:center;justify-content:center;height:100vh}
+.loading{text-align:center}.spinner{width:40px;height:40px;border:3px solid #313244;border-top:3px solid #89b4fa;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style></head>
+<body><div class="loading"><div class="spinner"></div><p>Opening Cloud Workstation…</p></div></body></html>`);
+  popup.document.close();
+
+  return popup;
+}
+
+async function launchWorkstationIDE(ws: Workstation): Promise<WorkstationIdeInfo> {
+  const popup = openWorkstationLoadingWindow();
+
+  try {
+    const data = await apiJsonRequest<WorkstationIdeInfo>('GET', `${wsApi(ws)}/ide-url`);
+    if (!data.success || !data.url) {
+      throw new Error(data.error || 'Unable to get workstation IDE URL');
+    }
+
+    const authUrl = buildWorkstationAuthUrl(data.url, data.accessToken);
+
+    if (popup && !popup.closed) {
+      popup.location.replace(authUrl);
+    } else {
+      const fallbackPopup = window.open(authUrl, '_blank');
+      if (!fallbackPopup) {
+        throw new Error('Popup blocked. Allow popups for this site and try again.');
+      }
+    }
+
+    return data;
+  } catch (error) {
+    if (popup && !popup.closed) {
+      popup.close();
+    }
+    throw error;
+  }
+}
+
 /* ── StateBadge ── */
 function StateBadge({ state }: { state: string }) {
   const spinning = state === 'STATE_STARTING' || state === 'STATE_STOPPING' || state === 'RECONCILING';
@@ -172,13 +232,14 @@ function CloudIDE({
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([
     { id: 0, type: 'system', text: `Connected to ${workstation.displayName} (${workstation.id})`, timestamp: new Date() },
     { id: 1, type: 'system', text: `Host: ${workstation.host || 'resolving...'}`, timestamp: new Date() },
-    { id: 2, type: 'system', text: 'Terminal ready. Type commands to execute on the workstation.', timestamp: new Date() },
+    { id: 2, type: 'system', text: 'IDE opens in a separate browser tab. Use Reopen IDE if you need a fresh session.', timestamp: new Date() },
+    { id: 3, type: 'system', text: 'Terminal ready. Type commands to execute on the workstation.', timestamp: new Date() },
   ]);
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalRunning, setTerminalRunning] = useState(false);
-  const [ideOpened, setIdeOpened] = useState(false);
+  const [ideOpened, setIdeOpened] = useState(true);
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const lineIdRef = useRef(3);
+  const lineIdRef = useRef(4);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addTerminalLine = useCallback((type: TerminalLine['type'], text: string) => {
@@ -189,29 +250,14 @@ function CloudIDE({
   const openIDEInNewTab = async () => {
     try {
       addTerminalLine('system', 'Fetching IDE credentials...');
-      const data = await apiJsonRequest<{
-        success: boolean; url: string; host: string;
-        accessToken: string; expireTime: string; error?: string;
-      }>('GET', `${wsApi(workstation)}/ide-url`);
-      if (data.success && data.url) {
-        // Open a blank tab and POST the token to the workstation login endpoint
-        // Cloud Workstations accepts token via /_workstation/authenticate?access_token=...
-        const authUrl = `${data.url}/_workstation/authenticate?access_token=${encodeURIComponent(data.accessToken)}&redirect_url=${encodeURIComponent('/')}`;
-        window.open(authUrl, '_blank');
-        setIdeOpened(true);
-        addTerminalLine('system', `IDE opened in new tab. Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
-      } else {
-        addTerminalLine('error', `Failed to get IDE URL: ${data.error || 'Unknown error'}`);
-      }
+      const data = await launchWorkstationIDE(workstation);
+      setIdeOpened(true);
+      addTerminalLine('system', `IDE opened in new tab. Token expires: ${new Date(data.expireTime).toLocaleTimeString()}`);
     } catch (err) {
-      addTerminalLine('error', `Failed to open IDE: ${err}`);
+      setIdeOpened(false);
+      addTerminalLine('error', `Failed to open IDE: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
-
-  /* Auto-open IDE in new tab on mount */
-  useEffect(() => {
-    openIDEInNewTab();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Terminal ── */
   const execCommand = async (command: string) => {
@@ -457,9 +503,7 @@ export default function WorkstationsTab() {
     setActionState(key, true);
 
     try {
-      await apiJsonRequest<{ success: boolean; accessToken: string; expireTime: string }>(
-        'POST', `${wsApi(ws)}/access-token`, {},
-      );
+      await launchWorkstationIDE(ws);
 
       const cfgList = configs[ws.clusterId] || [];
       const cfg = cfgList.find(c => c.id === ws.configId) || null;
@@ -467,7 +511,11 @@ export default function WorkstationsTab() {
       setConnectedConfig(cfg);
       setViewMode('ide');
     } catch (err) {
-      toast({ title: 'Unable to open IDE', description: String(err), variant: 'destructive' });
+      toast({
+        title: 'Unable to open IDE',
+        description: err instanceof Error ? err.message : String(err),
+        variant: 'destructive',
+      });
     } finally {
       setActionState(key, false);
     }

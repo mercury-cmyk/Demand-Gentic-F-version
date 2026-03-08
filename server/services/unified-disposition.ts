@@ -10,7 +10,8 @@ import {
   campaignSuppressionAccounts,
   suppressionPhones,
   campaigns,
-  contacts
+  contacts,
+  accounts,
 } from "@shared/schema";
 import { normalizeDisposition } from "./disposition-normalizer";
 
@@ -225,6 +226,7 @@ async function createQualifiedLead(params: {
   contactId: string;
   callSessionId: string;
   callAttemptId?: string;
+  accountId?: string;
   dispositionLabel: string;
   transcript?: string;
   analysis?: any;
@@ -234,8 +236,13 @@ async function createQualifiedLead(params: {
 }): Promise<{ success: boolean; leadId?: string }> {
   try {
     const contactResult = await db
-      .select()
+      .select({
+        contact: contacts,
+        accountName: accounts.name,
+        accountIndustry: accounts.industryStandardized,
+      })
       .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .where(eq(contacts.id, params.contactId))
       .limit(1);
 
@@ -244,7 +251,7 @@ async function createQualifiedLead(params: {
       return { success: false };
     }
 
-    const contact = contactResult[0];
+    const { contact, accountName, accountIndustry } = contactResult[0];
     const contactName = contact.fullName || 
       `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || 
       contact.email || 'Unknown';
@@ -275,12 +282,14 @@ async function createQualifiedLead(params: {
       contactName,
       contactEmail: contact.email || '',
       campaignId: params.campaignId,
+      accountId: params.accountId || contact.accountId || undefined,
+      accountName: accountName || undefined,
+      accountIndustry: accountIndustry || undefined,
       dialedNumber: params.dialedNumber || contact.directPhone || contact.mobilePhone || '',
       notes: `[${params.agentType === 'ai' ? aiAgentName : 'Agent'} - ${params.dispositionLabel}]${params.notes ? '\n\n' + params.notes : ''}${params.analysis?.summary ? '\n\nSummary: ' + params.analysis.summary : ''}`,
       transcript: params.transcript || '',
       transcriptionStatus: params.transcript ? 'completed' : 'pending',
       qaStatus: 'new',
-      accountName: '',
       customFields: params.agentType === 'ai' ? {
         aiAgentCall: true,
         aiAgentName: aiAgentName,

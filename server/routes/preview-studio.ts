@@ -1990,18 +1990,29 @@ router.post("/save-as-lead", requireAuth, async (req, res) => {
     // Get contact details if provided
     let contactName = 'Preview Test Contact';
     let contactEmail = '';
+    let accountId: string | undefined;
+    let accountName = '';
+    let accountIndustry: string | undefined;
     if (contactId) {
       try {
         const [contact] = await db
-          .select()
+          .select({
+            contact: contacts,
+            accountName: accounts.name,
+            accountIndustry: accounts.industryStandardized,
+          })
           .from(contacts)
+          .leftJoin(accounts, eq(contacts.accountId, accounts.id))
           .where(eq(contacts.id, contactId))
           .limit(1);
         if (contact) {
-          contactName = contact.fullName || 
-            `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || 
+          contactName = contact.contact.fullName || 
+            `${contact.contact.firstName || ''} ${contact.contact.lastName || ''}`.trim() || 
             'Preview Test Contact';
-          contactEmail = contact.email || '';
+          contactEmail = contact.contact.email || '';
+          accountId = contact.contact.accountId || undefined;
+          accountName = contact.accountName || '';
+          accountIndustry = contact.accountIndustry || undefined;
         }
       } catch (e) {
         // Ignore contact lookup errors
@@ -2018,12 +2029,14 @@ router.post("/save-as-lead", requireAuth, async (req, res) => {
       contactName,
       contactEmail,
       campaignId,
+      accountId,
       dialedNumber: '',
       notes: `[Preview Studio Test - ${disposition}]${notes ? '\n\n' + notes : ''}${analysis?.executiveSummary ? '\n\nAnalysis Summary:\nVerdict: ' + analysis.executiveSummary.verdict + '\nScore: ' + (analysis.scorecard?.total || 'N/A') + '/135' : ''}`,
       transcript: transcriptText,
       transcriptionStatus: transcriptText ? 'completed' : 'pending',
       qaStatus: 'new',
-      accountName: '',
+      accountName,
+      accountIndustry,
       customFields: {
         previewStudioSession: true,
         sessionId: sessionId,

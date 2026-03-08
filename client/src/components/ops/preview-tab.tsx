@@ -40,6 +40,72 @@ const QUICK_ROUTES = [
   { path: '/preview-studio', label: 'Preview Studio' },
 ];
 
+const CLOUD_WORKSTATIONS_SUFFIX = 'cloudworkstations.dev';
+const DEFAULT_PREVIEW_PORT = 5000;
+
+function isLocalhostUrl(value: string | undefined): boolean {
+  if (!value) return false;
+
+  try {
+    const url = new URL(value);
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+function getPreviewPort(candidateBaseUrl: string | undefined): number {
+  if (!candidateBaseUrl || !isLocalhostUrl(candidateBaseUrl)) {
+    return DEFAULT_PREVIEW_PORT;
+  }
+
+  try {
+    const parsed = new URL(candidateBaseUrl);
+    const parsedPort = Number(parsed.port || DEFAULT_PREVIEW_PORT);
+    return Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : DEFAULT_PREVIEW_PORT;
+  } catch {
+    return DEFAULT_PREVIEW_PORT;
+  }
+}
+
+function getCloudWorkstationsPreviewOrigin(browserOrigin: string, port: number): string | null {
+  try {
+    const currentUrl = new URL(browserOrigin);
+    const currentHost = currentUrl.hostname;
+    if (!currentHost.endsWith(CLOUD_WORKSTATIONS_SUFFIX)) {
+      return null;
+    }
+
+    const prefixedHostMatch = currentHost.match(/^(\d+)(?:-dot-|-)(.+)$/);
+    if (prefixedHostMatch) {
+      const [, currentPort, baseHost] = prefixedHostMatch;
+      if (Number(currentPort) === port) {
+        return `${currentUrl.protocol}//${currentUrl.host}`;
+      }
+
+      return `${currentUrl.protocol}//${port}-dot-${baseHost}`;
+    }
+
+    return `${currentUrl.protocol}//${port}-dot-${currentUrl.host}`;
+  } catch {
+    return null;
+  }
+}
+
+function resolvePreviewBaseUrl(candidateBaseUrl: string | undefined, browserOrigin: string): string {
+  const trimmedCandidate = candidateBaseUrl?.trim();
+  const workstationPreviewOrigin = getCloudWorkstationsPreviewOrigin(
+    browserOrigin,
+    getPreviewPort(trimmedCandidate),
+  );
+
+  if (workstationPreviewOrigin && (!trimmedCandidate || isLocalhostUrl(trimmedCandidate) || trimmedCandidate === browserOrigin)) {
+    return workstationPreviewOrigin;
+  }
+
+  return trimmedCandidate || workstationPreviewOrigin || browserOrigin;
+}
+
 function withPath(baseUrl: string, routePath: string): string {
   try {
     return new URL(routePath, `${baseUrl.replace(/\/$/, '')}/`).toString();
@@ -51,9 +117,11 @@ function withPath(baseUrl: string, routePath: string): string {
 export default function PreviewTab() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const fallbackBaseUrl = typeof window !== 'undefined'
+  const browserOrigin = typeof window !== 'undefined'
     ? window.location.origin
     : 'http://localhost:5000';
+
+  const fallbackBaseUrl = resolvePreviewBaseUrl(undefined, browserOrigin);
 
   const [baseUrl, setBaseUrl] = useState(fallbackBaseUrl);
   const [previewUrl, setPreviewUrl] = useState(fallbackBaseUrl);
@@ -92,7 +160,7 @@ export default function PreviewTab() {
           return;
         }
 
-        const nextBaseUrl = data.overview?.previewBaseUrl || fallbackBaseUrl;
+        const nextBaseUrl = resolvePreviewBaseUrl(data.overview?.previewBaseUrl, browserOrigin);
         setBaseUrl(nextBaseUrl);
         setPreviewUrl(nextBaseUrl);
         setUrlInput(nextBaseUrl);
@@ -104,7 +172,7 @@ export default function PreviewTab() {
     };
 
     loadOverview();
-  }, [fallbackBaseUrl]);
+  }, [browserOrigin, fallbackBaseUrl]);
 
   const navigate = (url: string) => {
     setPreviewUrl(url);

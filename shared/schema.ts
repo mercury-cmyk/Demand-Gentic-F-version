@@ -2939,6 +2939,7 @@ export const leads = pgTable("leads", {
   qaStatus: qaStatusEnum("qa_status").notNull().default('new'),
   
   // Account snapshot fields (for denormalized access)
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'set null' }),
   accountName: text("account_name"),
   accountIndustry: text("account_industry"),
   
@@ -3011,6 +3012,7 @@ export const leads = pgTable("leads", {
   callAttemptIdx: index("leads_call_attempt_idx").on(table.callAttemptId),
   deletedAtIdx: index("leads_deleted_at_idx").on(table.deletedAt),
   contactIdx: index("leads_contact_idx").on(table.contactId),
+  accountIdx: index("leads_account_idx").on(table.accountId),
   agentIdx: index("leads_agent_idx").on(table.agentId),
   createdIdx: index("leads_created_idx").on(table.createdAt),
 }));
@@ -5539,6 +5541,7 @@ export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
 
 export const leadsRelations = relations(leads, ({ one, many }) => ({
   contact: one(contacts, { fields: [leads.contactId], references: [contacts.id] }),
+  account: one(accounts, { fields: [leads.accountId], references: [accounts.id] }),
   campaign: one(campaigns, { fields: [leads.campaignId], references: [campaigns.id] }),
   callAttempt: one(dialerCallAttempts, { fields: [leads.callAttemptId], references: [dialerCallAttempts.id] }),
   agent: one(users, { fields: [leads.agentId], references: [users.id] }),

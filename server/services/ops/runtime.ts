@@ -78,9 +78,13 @@ export async function getOpsOverview(): Promise<OpsOverview> {
 
 export async function listWorkspaceDirectory(relativePath = ""): Promise<OpsWorkspaceDirectory> {
   if (hasRemoteAgent()) {
-    return requestOpsAgent<OpsWorkspaceDirectory>(
-      `/workspace?path=${encodeURIComponent(relativePath)}`,
-    );
+    try {
+      return await requestOpsAgent<OpsWorkspaceDirectory>(
+        `/workspace?path=${encodeURIComponent(relativePath)}`,
+      );
+    } catch {
+      return listLocalWorkspaceDirectory(relativePath);
+    }
   }
 
   return listLocalWorkspaceDirectory(relativePath);
@@ -88,9 +92,13 @@ export async function listWorkspaceDirectory(relativePath = ""): Promise<OpsWork
 
 export async function readWorkspaceFile(relativePath: string): Promise<OpsWorkspaceFile> {
   if (hasRemoteAgent()) {
-    return requestOpsAgent<OpsWorkspaceFile>(
-      `/workspace/file?path=${encodeURIComponent(relativePath)}`,
-    );
+    try {
+      return await requestOpsAgent<OpsWorkspaceFile>(
+        `/workspace/file?path=${encodeURIComponent(relativePath)}`,
+      );
+    } catch {
+      return readLocalWorkspaceFile(relativePath);
+    }
   }
 
   return readLocalWorkspaceFile(relativePath);
@@ -98,10 +106,14 @@ export async function readWorkspaceFile(relativePath: string): Promise<OpsWorksp
 
 export async function writeWorkspaceFile(relativePath: string, content: string): Promise<OpsWorkspaceFile> {
   if (hasRemoteAgent()) {
-    return requestOpsAgent<OpsWorkspaceFile>("/workspace/file", {
-      method: "PUT",
-      body: JSON.stringify({ path: relativePath, content }),
-    });
+    try {
+      return await requestOpsAgent<OpsWorkspaceFile>("/workspace/file", {
+        method: "PUT",
+        body: JSON.stringify({ path: relativePath, content }),
+      });
+    } catch {
+      return writeLocalWorkspaceFile(relativePath, content);
+    }
   }
 
   return writeLocalWorkspaceFile(relativePath, content);
@@ -109,7 +121,11 @@ export async function writeWorkspaceFile(relativePath: string, content: string):
 
 export async function getDeploymentStatus(): Promise<OpsDeploymentStatus> {
   if (hasRemoteAgent()) {
-    return requestOpsAgent<OpsDeploymentStatus>("/deploy/status");
+    try {
+      return await requestOpsAgent<OpsDeploymentStatus>("/deploy/status");
+    } catch {
+      return getLocalDeploymentStatus();
+    }
   }
 
   return getLocalDeploymentStatus();
@@ -119,10 +135,14 @@ export async function runDeploymentBuild(
   request: OpsDeploymentActionRequest = {},
 ): Promise<OpsDeploymentJob> {
   if (hasRemoteAgent()) {
-    return requestOpsAgent<OpsDeploymentJob>("/deploy/build", {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
+    try {
+      return await requestOpsAgent<OpsDeploymentJob>("/deploy/build", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    } catch {
+      return runLocalBuildAction(request);
+    }
   }
 
   return runLocalBuildAction(request);
@@ -132,10 +152,14 @@ export async function runDeployment(
   request: OpsDeploymentActionRequest = {},
 ): Promise<OpsDeploymentJob> {
   if (hasRemoteAgent()) {
-    return requestOpsAgent<OpsDeploymentJob>("/deploy/deploy", {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
+    try {
+      return await requestOpsAgent<OpsDeploymentJob>("/deploy/deploy", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    } catch {
+      return runLocalDeployAction(request);
+    }
   }
 
   return runLocalDeployAction(request);
@@ -143,10 +167,14 @@ export async function runDeployment(
 
 export async function restartDeploymentService(service: string): Promise<OpsDeploymentJob> {
   if (hasRemoteAgent()) {
-    return requestOpsAgent<OpsDeploymentJob>("/deploy/restart", {
-      method: "POST",
-      body: JSON.stringify({ service }),
-    });
+    try {
+      return await requestOpsAgent<OpsDeploymentJob>("/deploy/restart", {
+        method: "POST",
+        body: JSON.stringify({ service }),
+      });
+    } catch {
+      return runLocalRestartAction(service);
+    }
   }
 
   return runLocalRestartAction(service);

@@ -136,6 +136,18 @@ export async function createCallSessionFromDialerAttempt(
       return null;
     }
 
+    if (attempt.callSessionId) {
+      const [existingSession] = await db
+        .select()
+        .from(callSessions)
+        .where(eq(callSessions.id, attempt.callSessionId))
+        .limit(1);
+
+      if (existingSession) {
+        return existingSession;
+      }
+    }
+
     // Create session from attempt data
     const sessionInput: SafeCallSessionInput = {
       telnyxCallId: overrides?.telnyxCallId || attempt.telnyxCallId || undefined,
@@ -148,23 +160,42 @@ export async function createCallSessionFromDialerAttempt(
       telephonyCostPerMinute: overrides?.telephonyCostPerMinute ?? attempt.telephonyCostPerMinute ?? null,
       telephonyCostPerCall: overrides?.telephonyCostPerCall ?? attempt.telephonyCostPerCall ?? null,
       telephonyCurrency: overrides?.telephonyCurrency || attempt.telephonyCurrency || null,
+      telnyxRecordingId: overrides?.telnyxRecordingId || attempt.telnyxRecordingId || undefined,
+      recordingUrl: overrides?.recordingUrl || attempt.recordingUrl || null,
+      fromNumber: overrides?.fromNumber || attempt.fromDid || null,
+      callerNumberId: overrides?.callerNumberId || attempt.callerNumberId || null,
+      fromDid: overrides?.fromDid || attempt.fromDid || null,
       toNumberE164: overrides?.toNumberE164 || attempt.phoneDialed || 'unknown',
       startedAt: overrides?.startedAt || attempt.callStartedAt || new Date(),
-      endedAt: overrides?.endedAt,
-      durationSec: overrides?.durationSec,
+      endedAt: overrides?.endedAt || attempt.callEndedAt || null,
+      durationSec: overrides?.durationSec ?? attempt.callDurationSeconds ?? null,
       status: overrides?.status || 'connecting',
       agentType: overrides?.agentType || 'ai',
       aiAgentId: overrides?.aiAgentId || attempt.virtualAgentId || 'system',
       aiDisposition: overrides?.aiDisposition,
+      aiTranscript: overrides?.aiTranscript || attempt.fullTranscript || attempt.aiTranscript || null,
       campaignId: overrides?.campaignId || attempt.campaignId || null,
       contactId: overrides?.contactId || attempt.contactId || null,
       queueItemId: overrides?.queueItemId || attempt.queueItemId || null,
-      recordingStatus: overrides?.recordingStatus || 'pending',
+      recordingStatus: overrides?.recordingStatus || (attempt.recordingUrl ? 'stored' : 'pending'),
       validateCampaignId: true,
       validateContactId: true,
     };
 
-    return createCallSessionSafely(sessionInput);
+    const session = await createCallSessionSafely(sessionInput);
+    if (!session) {
+      return null;
+    }
+
+    await db
+      .update(dialerCallAttempts)
+      .set({
+        callSessionId: session.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(dialerCallAttempts.id, attemptId));
+
+    return session;
   } catch (error) {
     console.error(
       `${LOG_PREFIX} Failed to create call session from dialer attempt:`,

@@ -410,13 +410,27 @@ export async function resolveCampaignContext(campaignId: string): Promise<{
 export async function buildUnifiedCallContext(input: BuildCallContextInput): Promise<UnifiedCallContext | null> {
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 11);
+  const isTestCall = input.isTestCall || false;
+
+  if (!isTestCall) {
+    const missing = [
+      !input.queueItemId ? 'queueItemId' : null,
+      !input.callAttemptId ? 'callAttemptId' : null,
+      !input.contactId ? 'contactId' : null,
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      console.error(`[UnifiedCallContext] Refusing to build non-test call context without canonical linkage: ${missing.join(', ')}`);
+      return null;
+    }
+  }
 
   // Generate IDs if not provided
   const callId = input.callId || `ai-call-${timestamp}-${randomSuffix}`;
   const runId = input.runId || `run-${timestamp}`;
-  const queueItemId = input.queueItemId || (input.isTestCall ? `test-queue-${callId}` : `queue-${timestamp}`);
-  const callAttemptId = input.callAttemptId || (input.isTestCall ? `test-attempt-${callId}` : `attempt-${timestamp}`);
-  const contactId = input.contactId || (input.isTestCall ? `test-contact-${callId}` : `contact-${timestamp}`);
+  const queueItemId = input.queueItemId || `test-queue-${callId}`;
+  const callAttemptId = input.callAttemptId || `test-attempt-${callId}`;
+  const contactId = input.contactId || `test-contact-${callId}`;
 
   // Resolve agent assignment
   const agentAssignment = await resolveAgentAssignment(input.campaignId);
@@ -485,8 +499,8 @@ export async function buildUnifiedCallContext(input: BuildCallContextInput): Pro
     maxCallDurationSeconds: campaignContext.maxCallDurationSeconds,
 
     // Session metadata
-    isTestCall: input.isTestCall || false,
-    testCallId: input.isTestCall ? callId : null,
+    isTestCall,
+    testCallId: isTestCall ? callId : null,
     provider: input.provider || 'google',
   };
 }

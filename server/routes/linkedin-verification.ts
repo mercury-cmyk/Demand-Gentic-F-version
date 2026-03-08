@@ -8,7 +8,7 @@ import { requireAuth } from '../auth';
 import { getPresignedUploadUrl, generateStorageKey, getPublicUrl } from '../lib/storage';
 import { z } from 'zod';
 import { db } from '../db';
-import { leads } from '@shared/schema';
+import { leads, contacts, accounts } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
 import { linkedinVerificationQueue } from '../lib/linkedin-verification-queue';
@@ -274,11 +274,27 @@ router.post('/create-lead', requireAuth, async (req, res) => {
       });
     }
 
+    const [contact] = contactId
+      ? await db
+          .select({
+            accountId: contacts.accountId,
+            accountName: accounts.name,
+            accountIndustry: accounts.industryStandardized,
+          })
+          .from(contacts)
+          .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+          .where(eq(contacts.id, contactId))
+          .limit(1)
+      : [];
+
     // Create new lead
     const [newLead] = await db.insert(leads)
       .values({
         campaignId,
         contactId: contactId || null,
+        accountId: contact?.accountId || null,
+        accountName: contact?.accountName || null,
+        accountIndustry: contact?.accountIndustry || null,
         linkedinUrl,
         verificationStatus: 'pending',
         createdAt: new Date(),

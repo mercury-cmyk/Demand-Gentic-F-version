@@ -604,11 +604,13 @@ async function processQualifiedLead(
   // Fetch contact info for lead record (join with accounts for company name)
   const [contact] = await db
     .select({
+      accountId: contacts.accountId,
       fullName: contacts.fullName,
       firstName: contacts.firstName,
       lastName: contacts.lastName,
       email: contacts.email,
       companyName: accounts.name,  // accounts.name is the company name
+      accountIndustry: accounts.industryStandardized,
     })
     .from(contacts)
     .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -640,7 +642,9 @@ async function processQualifiedLead(
     callAttemptId: callAttempt.id, // CRITICAL: Link lead to call attempt for traceability
     contactName: contactName,
     contactEmail: contact?.email || undefined,
+    accountId: contact?.accountId || undefined,
     accountName: contact?.companyName || undefined,
+    accountIndustry: contact?.accountIndustry || undefined,
     qaStatus: qaStatus as 'new' | 'under_review',
     qaDecision: qaDecision,
     agentId: callAttempt.humanAgentId,
@@ -1407,11 +1411,13 @@ async function processCallbackRequested(
   // Fetch contact info for lead record
   const [contact] = await db
     .select({
+      accountId: contacts.accountId,
       fullName: contacts.fullName,
       firstName: contacts.firstName,
       lastName: contacts.lastName,
       email: contacts.email,
       companyName: accounts.name,
+      accountIndustry: accounts.industryStandardized,
     })
     .from(contacts)
     .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -1435,7 +1441,9 @@ async function processCallbackRequested(
       callAttemptId: callAttempt.id,
       contactName: contactName,
       contactEmail: contact?.email || undefined,
+      accountId: contact?.accountId || undefined,
       accountName: contact?.companyName || undefined,
+      accountIndustry: contact?.accountIndustry || undefined,
       qaStatus: 'new' as const,
       qaDecision: '📞 CALLBACK REQUESTED: Prospect asked to be called back. Schedule and confirm callback time.',
       agentId: callAttempt.humanAgentId,
@@ -1707,11 +1715,13 @@ export async function createFallbackLead(params: {
     // Fetch contact info
     const [contact] = await db
       .select({
+        accountId: contacts.accountId,
         fullName: contacts.fullName,
         firstName: contacts.firstName,
         lastName: contacts.lastName,
         email: contacts.email,
         companyName: accounts.name,
+        accountIndustry: accounts.industryStandardized,
       })
       .from(contacts)
       .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -1737,7 +1747,9 @@ export async function createFallbackLead(params: {
         callAttemptId: params.callAttemptId || undefined,
         contactName,
         contactEmail: contact?.email || undefined,
+        accountId: contact?.accountId || undefined,
         accountName: contact?.companyName || undefined,
+        accountIndustry: contact?.accountIndustry || undefined,
         qaStatus: qaStatus as 'new' | 'under_review',
         qaDecision,
         dialedNumber: params.dialedNumber,

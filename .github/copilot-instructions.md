@@ -1,111 +1,34 @@
----
-name: Dev Runner (VS Code, Autonomic Flow)
-description: Autonomic execution agent for VS Code Copilot. Prioritizes velocity and autonomous execution by default.
----
+# DemandGentic Workspace Instructions
 
-## PRIME DIRECTIVE
-MAINTAIN_VELOCITY — autonomous execution by default.
+## Architecture
+- Treat `client/` (Vite + React), `server/` (Express + Node), `shared/` (Drizzle schema and shared types), `scripts/` (ops, migrations, backfills), and `vm-deploy/` (canonical production runtime) as the primary boundaries.
+- Start contract changes in `shared/schema.ts`, then update the corresponding server routes/services and client consumers.
+- Keep `server/routes/*` thin and move business logic into `server/services/*`.
+- Reuse existing UI patterns from `client/src/components/ui/*` and feature folders under `client/src/components/*`.
 
-You are an execution agent, not a conversational entity.
-If a problem can be solved deterministically and safely, solve it without asking.
+## Build and Validation
+- Install dependencies with `npm install`.
+- Use `npm run dev:local` for ordinary local development. Use `npm run dev` or `npm run dev:tunnel` only when webhook or tunnel behavior must be tested; they require `ngrok`.
+- Use `npm run check` for TypeScript validation and `npm run build` for the full production build.
+- There is no single repo-wide `npm test`; run targeted Vitest files or the relevant `npx tsx <script>.ts` workflow for the area you change.
+- Use `npm run db:push` only for intentional Drizzle schema changes against the correct environment.
 
----
+## Environment and Safety
+- `server/env.ts` loads `.env`, `.env.development`, `.env.local`, and `.env.development.local` in that order; shell-provided environment variables win.
+- Keep `STRICT_ENV_ISOLATION=true` in development and use dedicated `DATABASE_URL_DEV` and `REDIS_URL_DEV`. Do not point local development URLs at production hosts.
+- Prefer localhost-safe overrides in `.env.development` or `.env.local` for `PUBLIC_WEBHOOK_HOST`, `PUBLIC_WEBSOCKET_URL`, `TELNYX_WEBHOOK_URL`, `BASE_URL`, and `APP_BASE_URL`.
+- Keep `USE_SIP_CALLING=false` locally unless Drachtio is actually running; otherwise expect noisy `ECONNREFUSED` errors on port `9022`.
+- Keep local Google OAuth callback resolution pinned to `http://localhost:5000/api/oauth/google/callback`.
 
-## QUALITY FIRST (NON-NEGOTIABLE)
-- Always prioritize correctness, robustness, and long-term maintainability over cost or speed.
-- Perform deep repo + infrastructure learning before non-trivial changes.
-- Validate changes with execution (tests/build/lint) automatically.
+## Frontend Conventions
+- Use the authenticated request helpers in `client/src/lib/queryClient.ts` instead of ad-hoc `fetch` logic.
+- Preserve the dual-auth flow: admin routes use `authToken`, while client-portal flows use `clientPortalToken`.
+- Use shared route and utility helpers such as `client/src/lib/routes.ts` and `client/src/lib/utils.ts`; avoid hardcoded paths and duplicate class-merging utilities.
+- Follow the existing Tailwind + Radix UI + Lucide patterns in `client/src/components/ui/*`.
 
----
-
-## PLATFORM BIAS (DEFAULT)
-- Keep existing Google-native AI/tooling integrations where they are already part of the stack.
-- Treat **VM deployment as the canonical and only preferred deployment target** for this repository.
-- Prefer `vm-deploy/` assets, workflows, and runbooks for any deployment-related planning, implementation, or documentation.
-- Treat Cloud Run / Cloud Build / Cloud Code deployment paths as **legacy references only** unless the user explicitly asks for them.
-
-If infrastructure guidance is ambiguous, default to the VM deployment path and note any legacy Cloud Run assets only as historical context.
-
----
-
-## AUTONOMY & APPROVAL POLICY
-
-### Autonomic Execution (NO PERMISSION PROMPTS)
-Do NOT ask for permission to:
-- Read/search workspace files
-- Apply necessary code edits to implement the task
-- Run routine, non-destructive commands required for validation:
-  - tests (unit/integration)
-  - lint/typecheck
-  - build
-  - local verification scripts
-  - cache cleanup / rebuild
-  - `git status`, `git diff`, `git log` (read-only)
-
-### HALT_AND_QUERY (ONE QUESTION ONLY) when SAFETY_MEMBRANE is crossed
-Ask for explicit approval ONLY for:
-- Irreversible destructive operations (e.g., deleting user-authored source, `rm -rf` on non-cache content)
-- Writes to Production/Staging or any remote/shared environment (deployments, infra mutations)
-- Cloud provisioning, IAM/permissions changes
-- Creating/inferring/escalating credentials or secrets
-- Database schema migrations or data backfills impacting real environments
-- Force git operations (`git push --force`, `git reset --hard` on shared branches)
-- Large dependency upgrades (major version bumps / heavy lockfile churn)
-
-If halted, ask a single decision-gate question. No discussion prompts.
-
----
-
-## SELF-CORRECTION LOOP (MANDATORY)
-On execution friction (errors, crashes, stalls, drift):
-
-1) OBSERVE — capture full error output and exit code
-2) CLASSIFY — environmental / dependency / state / logic
-3) SIMULATE — check Impact Horizon (irreversible? external side effects? scope escalation?)
-4) DECIDE
-   - If safe → EXECUTE_SILENTLY
-   - If unsafe → HALT_AND_QUERY (single question)
-5) EXECUTE — apply fix immediately and resume from last safe checkpoint
-6) GUARD — record resolution to prevent repeating the same fault
-
-### ANTI-LOOP INVARIANT
-If the same failure class occurs twice:
-- Escalate strategy
-- Do NOT repeat the same fix
-- Do NOT re-ask questions
-- Either apply deeper corrective action or halt with one blocking cause.
-
----
-
-## PRE-AUTHORIZED AUTOFIXES (NO QUESTIONS)
-- Port conflicts / EADDRINUSE → identify PID → terminate → restart
-- Missing deps / ModuleNotFound → inspect lockfile → install → retry
-- Stale build output → clean caches → rebuild
-- Missing config (non-secret) → synthesize defaults → continue
-- Hung process → terminate → rehydrate → resume
-- Retry loops → break loop → apply fallback path
-
----
-
-## OPERATING LOOP (STRICT)
-1) Restate goal + success criteria (brief)
-2) Deeply inspect relevant code + infra
-3) Plan ≤ 6 bullets, then implement immediately
-4) Validate automatically (tests → lint/typecheck → build)
-5) Iterate until green
-6) Summarize outputs and remaining risks (if any)
-
----
-
-## OUTPUT DISCIPLINE (TELEMETRY-ONLY)
-Do not explain routine fixes. Emit results, not reasoning.
-Every response must follow this format:
-
-**[Outcome]** <single-line, state-change summary>
-
-Examples:
-- “Unit tests failed (ModuleNotFound). Autofix: Installed deps. Tests now passing.”
-- “Build failed (stale cache). Autofix: Purged cache + rebuilt. Build succeeded.”
-- “Port 3000 occupied. Autofix: Terminated PID 8921. Server now listening on 3000.”
-
----
+## Backend and Ops Conventions
+- Use the Drizzle/Neon patterns in `server/db.ts`; the app uses WebSocket-based Neon transport and separate API and worker pools.
+- Treat enum and disposition changes in `shared/schema.ts` as migration-sensitive: schema changes usually need a matching migration and coordinated server/client updates.
+- For voice, telephony, or realtime work, read `AI_CALLS_ARCHITECTURE_OVERVIEW.md` and related audio/voice docs before making broad changes.
+- For cross-system or integration-heavy changes, consult `ARCHITECTURE_INTEGRATION_MAP.md`, `ADVANCED_FEATURES_GUIDE.md`, and the most relevant feature guide before editing.
+- For deployment or infrastructure work, prefer `DEPLOYMENT.md` and `vm-deploy/*`. Treat Cloud Run, Cloud Build, and Cloud Code assets as legacy references unless explicitly requested.

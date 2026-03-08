@@ -1292,21 +1292,8 @@ router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:wo
   try {
     const { clusterId, configId, workstationId } = req.params;
     const ideInfo = await workstationsManager.getIDEUrl(clusterId, configId, workstationId);
-    // Serve a small HTML page that authenticates and loads the IDE
-    res.setHeader('Content-Type', 'text/html');
-    res.send(`<!DOCTYPE html>
-<html><head><title>Cloud IDE - Loading...</title>
-<style>body{margin:0;font-family:system-ui;background:#1e1e2e;color:#cdd6f4;display:flex;align-items:center;justify-content:center;height:100vh}
-.loading{text-align:center}.spinner{width:40px;height:40px;border:3px solid #313244;border-top:3px solid #89b4fa;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
-@keyframes spin{to{transform:rotate(360deg)}}</style></head>
-<body><div class="loading"><div class="spinner"></div><p>Authenticating with workstation...</p></div>
-<script>
-(async()=>{try{
-const r=await fetch('${ideInfo.url}',{headers:{'Authorization':'Bearer ${ideInfo.accessToken}'},mode:'no-cors',credentials:'include'});
-}catch(e){}
-setTimeout(()=>{window.location.href='${ideInfo.url}';},1500);
-})();
-</script></body></html>`);
+    const authUrl = `${ideInfo.url.replace(/\/$/, '')}/_workstation/authenticate?access_token=${encodeURIComponent(ideInfo.accessToken)}&redirect_url=${encodeURIComponent('/')}`;
+    res.redirect(authUrl);
   } catch (error) {
     handleOpsError(res, error, 'Failed to redirect to IDE');
   }

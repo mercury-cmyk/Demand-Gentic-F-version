@@ -27,9 +27,10 @@ import {
   campaignQueue,
   contacts,
   accounts,
-  virtualAgents,
+  dialerRuns,
+  dialerCallAttempts,
 } from '@shared/schema';
-import { eq, and, sql, or, isNull, lte, inArray } from 'drizzle-orm';
+import { eq, and, sql, or, isNull, lte, inArray, count, desc } from 'drizzle-orm';
 import { getBestPhoneForContact } from '../lib/phone-utils';
 import {
   detectContactTimezone,
@@ -46,7 +47,9 @@ import {
 import {
   buildUnifiedCallContext,
   contextToClientStateParams,
+  resolveAgentAssignment,
   storeCallSession,
+  toDbVirtualAgentId,
 } from './unified-call-context';
 import {
   isCountryEnabled,
@@ -103,6 +106,7 @@ interface ActiveCall {
   campaignId: string;
   queueItemId: string;
   contactId: string;
+  callAttemptId: string;
   callControlId?: string;
   telnyxCallSid?: string;
   callerNumberId: string | null;
@@ -318,6 +322,82 @@ class AutonomousAIDialerService {
   // ──────────────────────────────────────────────────────────────────────────
   // Pull eligible queue items (matching campaign-runner-ws logic)
   // ──────────────────────────────────────────────────────────────────────────
+  private async getOrCreateAiDialerRun(
+    campaignId: string,
+    maxConcurrentCalls: number,
+    virtualAgentId: string | null,
+  ) {
+    const [existingRun] = await db
+      .select()
+      .from(dialerRuns)
+      .where(and(
+        eq(dialerRuns.campaignId, campaignId),
+        eq(dialerRuns.agentType, 'ai'),
+        inArray(dialerRuns.status, ['active', 'pending', 'paused']),
+        virtualAgentId
+          ? eq(dialerRuns.virtualAgentId, virtualAgentId)
+          : sql`${dialerRuns.virtualAgentId} IS NULL`
+      ))
+      .orderBy(desc(dialerRuns.createdAt))
+      .limit(1);
+
+    if (existingRun) {
+      return existingRun;
+    }
+
+    const [run] = await db.insert(dialerRuns).values({
+      campaignId,
+      runType: 'power_dial',
+      agentType: 'ai',
+      virtualAgentId,
+      status: 'active',
+      maxConcurrentCalls: maxConcurrentCalls || 1,
+      callTimeoutSeconds: 30,
+      startedAt: new Date(),
+    }).returning();
+
+    return run;
+  }
+
+  private async createPendingAiCallAttempt(params: {
+    campaignId: string;
+    contactId: string;
+    queueItemId: string;
+    dialerRunId: string;
+    phoneNumber: string;
+    fromNumber: string;
+    callerNumberId: string | null;
+    virtualAgentId: string | null;
+  }) {
+    const [attemptCount] = await db
+      .select({ count: count() })
+      .from(dialerCallAttempts)
+      .where(and(
+        eq(dialerCallAttempts.campaignId, params.campaignId),
+        eq(dialerCallAttempts.contactId, params.contactId)
+      ));
+
+    const attemptNumber = (Number(attemptCount?.count) || 0) + 1;
+
+    const [callAttempt] = await db
+      .insert(dialerCallAttempts)
+      .values({
+        dialerRunId: params.dialerRunId,
+        campaignId: params.campaignId,
+        contactId: params.contactId,
+        queueItemId: params.queueItemId,
+        agentType: 'ai',
+        virtualAgentId: params.virtualAgentId,
+        phoneDialed: params.phoneNumber,
+        callerNumberId: params.callerNumberId,
+        fromDid: params.fromNumber || null,
+        attemptNumber,
+      })
+      .returning();
+
+    return callAttempt;
+  }
+
   private async pullEligibleQueueItems(campaignId: string) {
     const baseWhere = and(
       eq(campaignQueue.campaignId, campaignId),
@@ -468,26 +548,53 @@ class AutonomousAIDialerService {
       throw new Error('No from number available');
     }
 
+    const agentAssignment = await resolveAgentAssignment(campaignId);
+    if (!agentAssignment) {
+      console.warn(`${LOG_PREFIX} No AI agent assignment for campaign ${campaignId}, skipping item ${item.queueItem.id}`);
+      return;
+    }
+
+    const dbVirtualAgentId = toDbVirtualAgentId(agentAssignment.virtualAgentId);
+    const dialerRun = await this.getOrCreateAiDialerRun(
+      campaignId,
+      this.campaignConfigs.get(campaignId)?.maxWorkers || 1,
+      dbVirtualAgentId,
+    );
+    const callAttempt = await this.createPendingAiCallAttempt({
+      campaignId,
+      contactId: item.contact.id,
+      queueItemId: item.queueItem.id,
+      dialerRunId: dialerRun.id,
+      phoneNumber,
+      fromNumber,
+      callerNumberId,
+      virtualAgentId: dbVirtualAgentId,
+    });
+
     // Build unified call context
     const ctx = await buildUnifiedCallContext({
       campaignId,
+      runId: dialerRun.id,
       queueItemId: item.queueItem.id,
+      callAttemptId: callAttempt.id,
       contactId: item.contact.id,
       calledNumber: phoneNumber,
       fromNumber,
       callerNumberId,
       callerNumberDecisionId,
       contactName: `${item.contact.firstName || ''} ${item.contact.lastName || ''}`.trim(),
-      contactFirstName: item.contact.firstName,
-      contactLastName: item.contact.lastName,
-      contactEmail: item.contact.email,
-      contactJobTitle: item.contact.jobTitle,
-      accountName: item.account?.name,
+      contactFirstName: item.contact.firstName || undefined,
+      contactLastName: item.contact.lastName || undefined,
+      contactEmail: item.contact.email || undefined,
+      contactJobTitle: item.contact.jobTitle || undefined,
+      accountName: item.account?.name || undefined,
       isTestCall: false,
       provider: 'google', // Gemini Live as default AI provider
     });
 
     if (!ctx) {
+      await db.delete(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, callAttempt.id));
       console.warn(`${LOG_PREFIX} No AI config for campaign ${campaignId}, skipping item ${item.queueItem.id}`);
       return;
     }
@@ -548,6 +655,12 @@ class AutonomousAIDialerService {
     if (!telnyxResponse.ok) {
       releaseNumberWithoutOutcome(callerNumberId);
       const errorText = await telnyxResponse.text();
+      await db.update(dialerCallAttempts)
+        .set({
+          notes: `Autonomous dialer placement failed: ${errorText.substring(0, 500)}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(dialerCallAttempts.id, callAttempt.id));
       console.error(`${LOG_PREFIX} Telnyx API error: ${telnyxResponse.status} — ${errorText}`);
 
       // Requeue the item
@@ -573,12 +686,27 @@ class AutonomousAIDialerService {
     const callControlId = telnyxData?.data?.call_control_id || telnyxData?.call_control_id;
     const callSid = telnyxData?.data?.call_sid || telnyxData?.call_sid;
 
+    await db.update(dialerCallAttempts)
+      .set({
+        callerNumberId,
+        fromDid: fromNumber || null,
+        callStartedAt: new Date(),
+        telnyxCallId: callControlId || null,
+        providerCallId: callSid || callControlId || null,
+        telephonyProviderType: 'telnyx',
+        telephonyProviderName: 'Telnyx',
+        telephonyRoutingMode: 'texml',
+        updatedAt: new Date(),
+      })
+      .where(eq(dialerCallAttempts.id, callAttempt.id));
+
     // Track the active call
     const callId = ctx.callId;
     const activeCall: ActiveCall = {
       campaignId,
       queueItemId: item.queueItem.id,
       contactId: item.contact.id,
+      callAttemptId: callAttempt.id,
       callControlId,
       telnyxCallSid: callSid,
       callerNumberId,

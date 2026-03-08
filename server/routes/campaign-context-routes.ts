@@ -473,6 +473,35 @@ function convertToLegacyFormat(context: Partial<StructuredCampaignContext>): Rec
   const flow = (context as any).conversationFlow;
   const successIndicators = (context as any).successIndicators;
   const qualificationCriteria = (context as any).qualificationCriteria;
+  const talkingPoints = Array.isArray((context as any).talkingPoints)
+    ? (context as any).talkingPoints.filter((point: unknown): point is string => typeof point === 'string' && point.trim().length > 0)
+    : [];
+  const objections = Array.isArray(flow?.objectionHandling)
+    ? flow.objectionHandling
+        .filter((item: any) => item && (item.objection || item.response))
+        .map((item: any) => ({
+          objection: item.objection || '',
+          response: item.response || '',
+          category: item.category || undefined,
+        }))
+    : [];
+  const targetAudienceDescription = [
+    audience?.industries?.length ? `Industries: ${audience.industries.join(', ')}` : '',
+    audience?.regions?.length ? `Regions: ${audience.regions.join(', ')}` : '',
+    audience?.jobTitles?.length ? `Roles: ${audience.jobTitles.join(', ')}` : '',
+    audience?.companySizeMin || audience?.companySizeMax
+      ? `Company Size: ${audience.companySizeMin || 'any'}-${audience.companySizeMax || 'any'} employees`
+      : '',
+  ].filter(Boolean).join('\n');
+  const contextBrief = [
+    objectives?.primaryGoal ? `Primary Goal: ${objectives.primaryGoal}` : '',
+    successIndicators?.qualifiedLeadDefinition ? `Qualified Lead: ${successIndicators.qualifiedLeadDefinition}` : '',
+    (context as any).coreMessage ? `Core Message: ${(context as any).coreMessage}` : '',
+    targetAudienceDescription ? `Audience:\n${targetAudienceDescription}` : '',
+    deliverables.length > 0
+      ? `Deliverables: ${deliverables.map((d: any) => d?.name || d?.description).filter(Boolean).join('; ')}`
+      : '',
+  ].filter(Boolean).join('\n\n');
 
   return {
     // Campaign objective field
@@ -485,22 +514,13 @@ function convertToLegacyFormat(context: Partial<StructuredCampaignContext>): Rec
     
     // Core message and talking points
     coreMessage: (context as any).coreMessage || '',
-    talkingPoints: (context as any).talkingPoints?.join('\n') || '',
+    talkingPoints,
     
     // Target audience description
-    targetAudienceDescription: [
-      audience?.industries?.length ? `Industries: ${audience.industries.join(', ')}` : '',
-      audience?.regions?.length ? `Regions: ${audience.regions.join(', ')}` : '',
-      audience?.jobTitles?.length ? `Roles: ${audience.jobTitles.join(', ')}` : '',
-      audience?.companySizeMin || audience?.companySizeMax 
-        ? `Company Size: ${audience.companySizeMin || 'any'}-${audience.companySizeMax || 'any'} employees`
-        : '',
-    ].filter(Boolean).join('\n'),
+    targetAudienceDescription,
     
     // Objections
-    campaignObjections: flow?.objectionHandling
-      ?.map((o: any) => `Q: ${o.objection}\nA: ${o.response}`)
-      .join('\n\n') || '',
+    campaignObjections: objections,
     
     // Success criteria
     successCriteria: successIndicators?.qualifiedLeadDefinition || '',
@@ -510,9 +530,33 @@ function convertToLegacyFormat(context: Partial<StructuredCampaignContext>): Rec
       ?.map((c: any) => `${c.field}: ${c.operator} ${c.value}${c.required ? ' (required)' : ''}`)
       .join('\n') || '',
     
-    // Context brief (full JSON)
-    campaignContextBrief: JSON.stringify(context),
+    // Context brief (short summary)
+    campaignContextBrief: contextBrief,
+    callFlow: buildLegacyCallFlow(flow),
     structuredContext: context,
+  };
+}
+
+function buildLegacyCallFlow(flow: any) {
+  if (!flow || typeof flow !== 'object') {
+    return null;
+  }
+
+  const valuePresentationParts = [
+    ...(Array.isArray(flow.valuePresentation?.keyMessages) ? flow.valuePresentation.keyMessages : []),
+    ...(Array.isArray(flow.valuePresentation?.proofPoints) ? flow.valuePresentation.proofPoints : []),
+  ].filter((part: unknown): part is string => typeof part === 'string' && part.trim().length > 0);
+
+  const closingParts = [
+    flow.closing?.callToAction,
+    ...(Array.isArray(flow.closing?.nextSteps) ? flow.closing.nextSteps : []),
+  ].filter((part: unknown): part is string => typeof part === 'string' && part.trim().length > 0);
+
+  return {
+    openingApproach: flow.opening?.script || flow.opening?.approach || '',
+    valueProposition: valuePresentationParts.join('\n'),
+    closingStrategy: closingParts.join('\n'),
+    voicemailScript: flow.voicemail?.script || '',
   };
 }
 
