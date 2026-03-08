@@ -253,6 +253,47 @@ export function startBackgroundJobs() {
     }, ANALYSIS_SWEEP_INTERVAL);
   }
 
+  // Orphan recording session sweep — links orphan call_sessions (recordings without
+  // linked attempts) to their matching attempts, then transcribes + analyzes them.
+  // Critical for SIP calls where recording sync creates separate sessions.
+  if (ENABLE_TRANSCRIPTION) {
+    setInterval(async () => {
+      if (isBatchTranscriptionSweepRunning) return; // share guard with batch sweep
+      isBatchTranscriptionSweepRunning = true;
+      try {
+        await withJobTimeout('Orphan Recording Sweep', async () => {
+          const { sweepOrphanRecordingSessions } = await import('./batch-transcription-sweep');
+          const result = await sweepOrphanRecordingSessions();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Orphan recording sweep: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Orphan recording sweep error:', error);
+      } finally {
+        isBatchTranscriptionSweepRunning = false;
+      }
+    }, BATCH_TRANSCRIPTION_SWEEP_INTERVAL + 60000); // Offset by 1 min from batch sweep
+  }
+
+  // Ring-out cleanup sweep — marks stale NULL-disposition non-connected calls as no_answer.
+  // These are calls that rang but nobody picked up and the orchestrator didn't finalize.
+  if (ENABLE_LOCK_SWEEPER) {
+    setInterval(async () => {
+      try {
+        const { sweepStaleRingOuts } = await import('./batch-transcription-sweep');
+        const result = await sweepStaleRingOuts();
+        if (result.marked > 0) {
+          console.log(`[Background Jobs] Ring-out sweep: marked ${result.marked} stale calls as no_answer`);
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Ring-out sweep error:', error);
+      }
+    }, LOCK_SWEEPER_INTERVAL); // Every 10 minutes, same as lock sweeper
+  }
+
   // AI analysis processing job (optional)
   if (ENABLE_AI_ANALYSIS) {
     analysisInterval = setInterval(async () => {

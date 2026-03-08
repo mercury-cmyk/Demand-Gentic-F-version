@@ -110,6 +110,12 @@ import {
   type AssembledProviderPrompt,
 } from "./provider-prompt-assembly";
 import { normalizeDisposition } from "./disposition-normalizer";
+import {
+  resolveAgentConfig,
+  isInlineAgentOrigin,
+  toDbVirtualAgentId,
+  type ResolvedAgentConfig,
+} from "./unified-call-context";
 import { detectG711Format } from "./voice-providers/audio-transcoder";
 import { GeminiLiveProvider } from "./voice-providers/gemini-live-provider";
 import {
@@ -328,6 +334,8 @@ interface OpenAIRealtimeSession {
   stateHistory?: string[];
   provider: 'openai' | 'google';
   virtualAgentId: string;
+  /** Unified Agent Architecture: fully resolved agent config. Consumers use this instead of querying virtualAgents table. */
+  resolvedAgentConfig?: ResolvedAgentConfig | null;
   isTestSession: boolean;
   // Test contact data for test sessions (from test panel form)
   testContact?: {
@@ -2842,8 +2850,12 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
       console.log(`${LOG_PREFIX} âœ… Contact validation passed for call ${session.callId}`);
     }
 
-    const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
-    const baseSettings = session.agentSettingsOverride ?? (agentConfig?.settings ?? undefined);
+    // Unified Agent Architecture: resolve config once, cache on session
+    if (!session.resolvedAgentConfig) {
+      session.resolvedAgentConfig = await resolveAgentConfig(session.campaignId, session.provider);
+    }
+    const agentConfig = session.resolvedAgentConfig;
+    const baseSettings = session.agentSettingsOverride ?? (agentConfig?.rawSettings ?? undefined);
     const agentSettings = mergeAgentSettings(baseSettings as Partial<VirtualAgentSettings> | undefined);
     session.agentSettings = agentSettings;
 
@@ -3074,7 +3086,7 @@ openaiWs.on("open", async () => {
         || campaignConfig?.organizationName?.trim()
         || null;
       const canonicalAgentName = voiceTemplateValues["agent.name"]?.trim()
-        || agentConfig?.name?.trim()
+        || agentConfig?.agentName?.trim()
         || null;
       
       // Check if we have a custom first message override
@@ -3439,7 +3451,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       // Database calls - all in parallel (including agent defaults for voice fallback)
       getCampaignConfig(session.campaignId),
       getContactInfo(session.contactId),
-      session.virtualAgentId ? getVirtualAgentConfig(session.virtualAgentId) : Promise.resolve(null),
+      // Unified Agent Architecture: resolve config from campaign, not virtualAgents table
+      session.resolvedAgentConfig ? Promise.resolve(session.resolvedAgentConfig) : resolveAgentConfig(session.campaignId, 'google'),
       db.select({ defaultVoice: agentDefaults.defaultVoice }).from(agentDefaults).limit(1).then(r => r[0] || null),
     ]);
 
@@ -3496,8 +3509,13 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       }
     }
 
+    // Cache resolved agent config on session for later use
+    if (agentConfig) {
+      session.resolvedAgentConfig = agentConfig;
+    }
+
     // Merge agent settings - combine base settings with any overrides
-    const baseSettings = agentConfig?.settings as Partial<VirtualAgentSettings> | undefined;
+    const baseSettings = agentConfig?.rawSettings as Partial<VirtualAgentSettings> | undefined;
     const mergedBase = session.agentSettingsOverride
       ? { ...baseSettings, ...session.agentSettingsOverride } as Partial<VirtualAgentSettings>
       : baseSettings;
@@ -8708,8 +8726,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               timestamp: new Date().toISOString(),
             })) || [];
 
-            const isInlineCampaignAgent = session.virtualAgentId?.startsWith('campaign-') && session.virtualAgentId?.includes('-inline');
-            const dbVirtualAgentId = isInlineCampaignAgent ? undefined : (session.virtualAgentId || undefined);
+            const dbVirtualAgentId = toDbVirtualAgentId(session.virtualAgentId) || undefined;
             await db.insert(callProducerTracking).values({
               callSessionId: callSessionId,
               campaignId: session.campaignId!,
@@ -9743,6 +9760,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       campaignObjections: campaign.campaignObjections as Array<{ objection: string; response: string }> | null,
       successCriteria: campaign.successCriteria,
       campaignContextBrief: campaign.campaignContextBrief,
+      callFlow: campaign.callFlow,
       // Max call duration enforcement (campaign-level)
       maxCallDurationSeconds: campaign.maxCallDurationSeconds,
     };
@@ -10597,6 +10615,7 @@ async function buildSystemPrompt(
       successCriteria: campaignConfig?.successCriteria,
       brief: campaignConfig?.campaignContextBrief,
       campaignType: campaignConfig?.type,
+      callFlow: campaignConfig?.callFlow,
     });
 
     console.log(`${LOG_PREFIX} ðŸ” DEBUG CAMPAIGN CONTEXT (PATH 1):`, {
@@ -10678,6 +10697,7 @@ async function buildSystemPrompt(
       successCriteria: campaignConfig?.successCriteria,
       brief: campaignConfig?.campaignContextBrief,
       campaignType: campaignConfig?.type,
+      callFlow: campaignConfig?.callFlow,
     });
 
     if (campaignContextSection) {
@@ -10742,6 +10762,7 @@ async function buildSystemPrompt(
       successCriteria: campaignConfig?.successCriteria,
       brief: campaignConfig?.campaignContextBrief,
       campaignType: campaignConfig?.type,
+      callFlow: campaignConfig?.callFlow,
     });
 
     if (campaignContextSection) {
@@ -11249,6 +11270,7 @@ Before calling: say "I understand you'd like to speak with someone directly. Let
     successCriteria: campaignConfig?.successCriteria,
     brief: campaignConfig?.campaignContextBrief,
     campaignType: campaignConfig?.type,
+    callFlow: campaignConfig?.callFlow,
     qualificationCriteria: campaignConfig?.qualificationCriteria, // Pass qualification criteria
   });
 

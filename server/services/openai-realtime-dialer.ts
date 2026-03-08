@@ -47,6 +47,7 @@ import { VOICE_AGENT_FOUNDATIONAL_PROMPT } from "./agents";
 import { guardQualifiedLeadDisposition } from "./disposition-engagement-guard";
 import { RealtimeCallTelemetry, hashText } from "./realtime-call-telemetry";
 import { analyzeVoicemailTranscript } from "./voicemail-detection";
+import { resolveAgentConfig, type ResolvedAgentConfig } from "./unified-call-context";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -156,6 +157,8 @@ interface OpenAIRealtimeSession {
   contactId: string;
   provider: 'openai' | 'google';
   virtualAgentId: string;
+  /** Unified Agent Architecture: fully resolved agent config. */
+  resolvedAgentConfig?: ResolvedAgentConfig | null;
   isTestSession: boolean;
   telnyxWs: WebSocket;
   openaiWs: WebSocket | null;
@@ -817,39 +820,8 @@ function getAvailableTools(systemTools: SystemToolsSettings) {
   });
 }
 
-async function getVirtualAgentConfig(virtualAgentId: string): Promise<{
-  systemPrompt: string | null;
-  firstMessage: string | null;
-  voice: string | null;
-  settings: Partial<VirtualAgentSettings> | null;
-} | null> {
-  if (!virtualAgentId) return null;
-
-  try {
-    const [agent] = await db
-      .select({
-        systemPrompt: virtualAgents.systemPrompt,
-        firstMessage: virtualAgents.firstMessage,
-        voice: virtualAgents.voice,
-        settings: virtualAgents.settings,
-      })
-      .from(virtualAgents)
-      .where(eq(virtualAgents.id, virtualAgentId))
-      .limit(1);
-
-    if (!agent) return null;
-
-    return {
-      systemPrompt: agent.systemPrompt,
-      firstMessage: agent.firstMessage,
-      voice: agent.voice,
-      settings: (agent.settings as Partial<VirtualAgentSettings> | null) ?? null,
-    };
-  } catch (error) {
-    console.error(`${LOG_PREFIX} Error fetching virtual agent config:`, error);
-    return null;
-  }
-}
+// getVirtualAgentConfig removed — replaced by resolveAgentConfig() from unified-call-context.ts
+// (Unified Agent Architecture: agent config is resolved once from campaign, not virtualAgents table)
 
 async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<void> {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -866,8 +838,12 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
   try {
     const campaignConfig = await getCampaignConfig(session.campaignId);
     const contactInfo = await getContactInfo(session.contactId);
-    const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
-    const baseSettings = session.agentSettingsOverride ?? (agentConfig?.settings ?? undefined);
+    // Unified Agent Architecture: resolve config once from campaign, not virtualAgents table
+    if (!session.resolvedAgentConfig) {
+      session.resolvedAgentConfig = await resolveAgentConfig(session.campaignId, 'openai');
+    }
+    const agentConfig = session.resolvedAgentConfig;
+    const baseSettings = session.agentSettingsOverride ?? (agentConfig?.rawSettings ?? undefined);
     const agentSettings = mergeAgentSettings(baseSettings as Partial<VirtualAgentSettings> | undefined);
     session.agentSettings = agentSettings;
 
@@ -1006,7 +982,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         || campaignConfig?.organizationName?.trim()
         || null;
       const canonicalAgentName = voiceTemplateValues["agent.name"]?.trim()
-        || agentConfig?.name?.trim()
+        || agentConfig?.agentName?.trim()
         || null;
       
       // Check if we have a custom first message override
@@ -2587,6 +2563,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     const aiSettings = campaign.aiAgentSettings as any || {};
     return {
       script: campaign.callScript,
+      type: campaign.type,
       voice: aiSettings?.persona?.voice || 'alloy',
       openingScript: aiSettings?.scripts?.opening,
       qualificationCriteria: campaign.qualificationQuestions,
@@ -2598,6 +2575,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       campaignObjections: campaign.campaignObjections as Array<{ objection: string; response: string }> | null,
       successCriteria: campaign.successCriteria,
       campaignContextBrief: campaign.campaignContextBrief,
+      callFlow: campaign.callFlow,
       // Agent name: resolve from persona fields
       agentName: (aiSettings?.persona?.name || aiSettings?.persona?.agentName || aiSettings?.agentName || '').trim() || null,
       // Include assignedVoices so voice name can be used as agentName fallback
@@ -2706,6 +2684,8 @@ async function buildSystemPrompt(
       objections: campaignConfig?.campaignObjections,
       successCriteria: campaignConfig?.successCriteria,
       brief: campaignConfig?.campaignContextBrief,
+      campaignType: campaignConfig?.type,
+      callFlow: campaignConfig?.callFlow,
     });
 
     if (campaignContextSection) {
@@ -2826,6 +2806,8 @@ Before calling: say "Thanks for your patience—I'm connecting you with someone 
     objections: campaignConfig?.campaignObjections,
     successCriteria: campaignConfig?.successCriteria,
     brief: campaignConfig?.campaignContextBrief,
+    campaignType: campaignConfig?.type,
+    callFlow: campaignConfig?.callFlow,
   });
 
   if (campaignContextSection) {

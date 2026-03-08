@@ -399,6 +399,31 @@ export async function syncTelnyxRecordingsToDatabase(options: ListRecordingsOpti
           }
         }
 
+        // Strategy 3: Match via dialer_call_attempts.telnyx_call_id → find linked call_session
+        // SIP calls create sessions with telnyx_call_id=null, but the attempt stores the Telnyx call ID.
+        // This bridges the gap between Telnyx recordings and SIP-originated sessions.
+        if (existingSession.length === 0 && recording.call_control_id) {
+          const attemptMatch = await db
+            .select({
+              callSessionId: dialerCallAttempts.callSessionId,
+            })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.telnyxCallId, recording.call_control_id))
+            .limit(1);
+
+          if (attemptMatch.length > 0 && attemptMatch[0].callSessionId) {
+            existingSession = await db
+              .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
+              .from(callSessions)
+              .where(eq(callSessions.id, attemptMatch[0].callSessionId))
+              .limit(1);
+
+            if (existingSession.length > 0) {
+              console.log(`[TelnyxSync] Strategy 3: Matched recording to session ${existingSession[0].id} via attempt.telnyx_call_id`);
+            }
+          }
+        }
+
         if (existingSession.length > 0) {
           // Update existing session if it doesn't have recording URL
           if (!existingSession[0].recordingUrl && downloadUrl) {

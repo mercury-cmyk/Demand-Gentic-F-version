@@ -13,6 +13,7 @@ import { db } from '../db';
 import { campaigns, campaignAgentAssignments, virtualAgents } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { getOrganizationById } from './problem-intelligence/organization-service';
+import { mergeAgentSettings, type VirtualAgentSettings } from './virtual-agent-settings';
 
 /**
  * Unified call context - used by both test calls and queue calls
@@ -53,11 +54,13 @@ export interface UnifiedCallContext {
 
   // Campaign context
   campaignObjective: string;
+  campaignType: string;
   successCriteria: string;
   targetAudienceDescription: string;
   productServiceInfo: string;
   talkingPoints: string[];
   campaignContextBrief: string;
+  callFlow: unknown;
   maxCallDurationSeconds: number | null;
 
   // Session metadata
@@ -76,6 +79,66 @@ export interface ResolvedAgentAssignment {
   firstMessage: string;
   voice: string;
   settings: Record<string, any> | null;
+}
+
+/**
+ * Fully resolved agent configuration — the Unified Agent Architecture abstraction.
+ *
+ * Once built, no consumer should ever need to query the virtualAgents table.
+ * The originId is kept for audit/locking purposes ONLY — consumers MUST NOT
+ * use it to re-fetch config. It may be a DB ID, "campaign-{id}-inline", or
+ * any future source.
+ */
+export interface ResolvedAgentConfig {
+  /** Opaque origin identifier — for audit trails and queue locking only. */
+  originId: string;
+  agentName: string;
+  systemPrompt: string;
+  firstMessage: string;
+  voice: string;
+  provider: 'google' | 'openai';
+  /** Fully merged settings (defaults already applied). */
+  settings: VirtualAgentSettings;
+  /** Raw settings before merge (for override logic). */
+  rawSettings: Record<string, any> | null;
+}
+
+/**
+ * Resolve agent config from campaign — single resolution point.
+ * Returns a fully resolved config so downstream code never needs
+ * to query the virtualAgents table directly.
+ */
+export async function resolveAgentConfig(
+  campaignId: string,
+  providerHint?: 'google' | 'openai'
+): Promise<ResolvedAgentConfig | null> {
+  const assignment = await resolveAgentAssignment(campaignId);
+  if (!assignment) return null;
+
+  const mergedSettings = mergeAgentSettings(
+    assignment.settings as Partial<VirtualAgentSettings> | undefined
+  );
+
+  return {
+    originId: assignment.virtualAgentId || `campaign-${campaignId}-inline`,
+    agentName: assignment.agentName,
+    systemPrompt: assignment.systemPrompt,
+    firstMessage: assignment.firstMessage,
+    voice: assignment.voice,
+    provider: providerHint || 'google',
+    settings: mergedSettings,
+    rawSettings: assignment.settings,
+  };
+}
+
+/** Check if an agent origin ID represents an inline campaign agent (not a DB record) */
+export function isInlineAgentOrigin(originId: string | null | undefined): boolean {
+  return !!originId && originId.startsWith('campaign-') && originId.includes('-inline');
+}
+
+/** Extract a DB-safe virtualAgentId (null for inline agents) */
+export function toDbVirtualAgentId(originId: string | null | undefined): string | null {
+  return isInlineAgentOrigin(originId) ? null : (originId || null);
 }
 
 /**
@@ -274,11 +337,13 @@ CRITICAL CONVERSATION BEHAVIOR:
 export async function resolveCampaignContext(campaignId: string): Promise<{
   organizationName: string;
   campaignObjective: string;
+  campaignType: string;
   successCriteria: string;
   targetAudienceDescription: string;
   productServiceInfo: string;
   talkingPoints: string[];
   campaignContextBrief: string;
+  callFlow: unknown;
   maxCallDurationSeconds: number | null;
 }> {
   const [campaign] = await db
@@ -291,11 +356,13 @@ export async function resolveCampaignContext(campaignId: string): Promise<{
     return {
       organizationName: 'our organization',
       campaignObjective: '',
+      campaignType: '',
       successCriteria: '',
       targetAudienceDescription: '',
       productServiceInfo: '',
       talkingPoints: [],
       campaignContextBrief: '',
+      callFlow: null,
       maxCallDurationSeconds: null,
     };
   }
@@ -325,11 +392,13 @@ export async function resolveCampaignContext(campaignId: string): Promise<{
   return {
     organizationName,
     campaignObjective: (campaign as any).campaignObjective || '',
+    campaignType: (campaign as any).type || (campaign as any).campaignType || '',
     successCriteria: (campaign as any).successCriteria || '',
     targetAudienceDescription: (campaign as any).targetAudienceDescription || '',
     productServiceInfo: (campaign as any).productServiceInfo || '',
     talkingPoints: ((campaign as any).talkingPoints as string[]) || [],
     campaignContextBrief: (campaign as any).campaignContextBrief || '',
+    callFlow: (campaign as any).callFlow || null,
     maxCallDurationSeconds: (campaign as any).maxCallDurationSeconds || null,
   };
 }
@@ -406,11 +475,13 @@ export async function buildUnifiedCallContext(input: BuildCallContextInput): Pro
 
     // Campaign context (from unified resolver)
     campaignObjective: campaignContext.campaignObjective,
+    campaignType: campaignContext.campaignType,
     successCriteria: campaignContext.successCriteria,
     targetAudienceDescription: campaignContext.targetAudienceDescription,
     productServiceInfo: campaignContext.productServiceInfo,
     talkingPoints: campaignContext.talkingPoints,
     campaignContextBrief: campaignContext.campaignContextBrief,
+    callFlow: campaignContext.callFlow,
     maxCallDurationSeconds: campaignContext.maxCallDurationSeconds,
 
     // Session metadata
