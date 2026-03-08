@@ -180,8 +180,9 @@ function openWorkstationLoadingWindow(): Window | null {
 body{margin:0;font-family:system-ui;background:#1e1e2e;color:#cdd6f4;display:flex;align-items:center;justify-content:center;height:100vh}
 .loading{text-align:center}.spinner{width:40px;height:40px;border:3px solid #313244;border-top:3px solid #89b4fa;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
 @keyframes spin{to{transform:rotate(360deg)}}
+.status{font-size:13px;color:#6c7086;margin-top:8px}
 </style></head>
-<body><div class="loading"><div class="spinner"></div><p>Opening Cloud Workstation…</p></div></body></html>`);
+<body><div class="loading"><div class="spinner"></div><p>Opening Cloud Workstation IDE\u2026</p><p class="status">The IDE may take up to 60 seconds to start after the workstation boots.</p></div></body></html>`);
   popup.document.close();
 
   return popup;

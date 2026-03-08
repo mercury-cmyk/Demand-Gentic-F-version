@@ -583,19 +583,23 @@ export default class CloudWorkstationsManager extends EventEmitter {
       throw new Error('Workstation not found or has no host URL');
     }
 
-    // Wait for the workstation proxy to become ready (can take 30-60s after STATE_RUNNING)
+    // Wait for the workstation IDE to become ready (can take 30-90s after STATE_RUNNING)
+    // We probe /_workstation/authenticate specifically because the reverse proxy may return
+    // 200 on / while the Code OSS backend behind it is still starting (causing 404 on authenticate).
     const baseUrl = `https://${ws.host}`;
-    const maxAttempts = 10;
+    const maxAttempts = 20;
     for (let i = 1; i <= maxAttempts; i++) {
       try {
-        const probe = await fetch(baseUrl, { method: 'HEAD', redirect: 'manual' });
-        // Any response (even 302/401/403) means proxy is up; only network errors or 502/503 mean not ready
-        if (probe.status < 502) break;
+        const probe = await fetch(`${baseUrl}/_workstation/authenticate`, { method: 'HEAD', redirect: 'manual' });
+        // 302/400/401/405 all mean the authenticate endpoint is alive; only 404/502/503 mean not ready
+        if (probe.status !== 404 && probe.status < 502) break;
+        // Also accept 404 after enough retries — fall through to token-based auth which may still work
+        if (probe.status === 404 && i >= 15) break;
       } catch {
         // Network error — proxy not ready yet
       }
       if (i === maxAttempts) {
-        throw new Error('Workstation proxy is not ready yet. Please wait a moment and try again.');
+        console.warn(`[Workstations] IDE proxy for ${workstationId} did not become ready after ${maxAttempts} probes, proceeding anyway`);
       }
       await new Promise(r => setTimeout(r, 3000));
     }
