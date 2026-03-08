@@ -518,51 +518,36 @@ export default class CloudWorkstationsManager extends EventEmitter {
       return { stdout: '', stderr: 'Workstation is not running', exitCode: 1 };
     }
 
-    const { exec } = await import('child_process');
-    const escaped = command.replace(/'/g, "'\\''");
+    // Call the VM host's exec proxy (Python service on port 9922)
+    // which runs gcloud workstations ssh on the host where gcloud is available
+    const http = await import('http');
+    const proxyUrl = `http://127.0.0.1:9922/exec/${clusterId}/${configId}/${workstationId}`;
+    const postData = JSON.stringify({ command });
 
-    // Try gcloud from snap path (VM host), then PATH, then fallback error
-    const gcloudPaths = ['/snap/bin/gcloud', '/snap/google-cloud-cli/current/bin/gcloud', 'gcloud'];
-
-    for (const gcloudBin of gcloudPaths) {
-      try {
-        const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
-          const cmd = `${gcloudBin} workstations ssh ${workstationId} --cluster=${clusterId} --config=${configId} --region=${this.region} --project=${this.projectId} --command='${escaped}'`;
-          exec(cmd, {
-            timeout: 60000,
-            encoding: 'utf-8',
-            maxBuffer: 5 * 1024 * 1024,
-            env: {
-              ...process.env,
-              HOME: '/tmp',
-              SSH_HOME: '/tmp/.ssh',
-              CLOUDSDK_CONFIG: '/tmp/.gcloud',
-              PATH: `/snap/bin:/snap/google-cloud-cli/current/bin:${process.env.PATH}`,
-            },
-          }, (error: any, stdout: string, stderr: string) => {
-            if (error && error.code === 'ENOENT') {
-              reject(new Error(`gcloud not found at ${gcloudBin}`));
-              return;
-            }
-            // Filter out gcloud SSH noise from stderr
-            const cleanStderr = (stderr || '').split('\n').filter((l: string) =>
-              !l.startsWith('Picking local') && !l.startsWith('Listening on') &&
-              !l.startsWith('WARNING:') && !l.startsWith('Warning:') && l.trim()
-            ).join('\n');
-            resolve({
-              stdout: stdout || '',
-              stderr: cleanStderr,
-              exitCode: error?.code || 0,
-            });
-          });
+    return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
+      const req = http.request(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+        timeout: 65000,
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk: string) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            resolve({ stdout: parsed.stdout || '', stderr: parsed.stderr || '', exitCode: parsed.exitCode || 0 });
+          } catch {
+            resolve({ stdout: data, stderr: '', exitCode: 1 });
+          }
         });
-        return result;
-      } catch {
-        continue; // Try next gcloud path
-      }
-    }
-
-    return { stdout: '', stderr: 'gcloud CLI not found. Cannot execute commands on workstation.', exitCode: 1 };
+      });
+      req.on('error', (err: Error) => {
+        resolve({ stdout: '', stderr: `Exec proxy unavailable: ${err.message}. Ensure ws-exec-proxy service is running on the VM.`, exitCode: 1 });
+      });
+      req.on('timeout', () => { req.destroy(); resolve({ stdout: '', stderr: 'Command timed out (60s)', exitCode: 124 }); });
+      req.write(postData);
+      req.end();
+    });
   }
 
   /**
@@ -575,9 +560,27 @@ export default class CloudWorkstationsManager extends EventEmitter {
     if (!ws || !ws.host) {
       throw new Error('Workstation not found or has no host URL');
     }
+
+    // Wait for the workstation proxy to become ready (can take 30-60s after STATE_RUNNING)
+    const baseUrl = `https://${ws.host}`;
+    const maxAttempts = 10;
+    for (let i = 1; i <= maxAttempts; i++) {
+      try {
+        const probe = await fetch(baseUrl, { method: 'HEAD', redirect: 'manual' });
+        // Any response (even 302/401/403) means proxy is up; only network errors or 502/503 mean not ready
+        if (probe.status < 502) break;
+      } catch {
+        // Network error — proxy not ready yet
+      }
+      if (i === maxAttempts) {
+        throw new Error('Workstation proxy is not ready yet. Please wait a moment and try again.');
+      }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
     const tokenInfo = await this.generateAccessToken(clusterId, configId, workstationId);
     return {
-      url: `https://${ws.host}`,
+      url: baseUrl,
       host: ws.host,
       ...tokenInfo,
     };
