@@ -6,6 +6,7 @@ import { execFile, spawn } from "node:child_process";
 import type {
   OpsDeploymentActionRequest,
   OpsDeploymentJob,
+  OpsDeploymentLogs,
   OpsDeploymentService,
   OpsDeploymentStatus,
   OpsOverview,
@@ -68,6 +69,18 @@ function resolveWorkspacePath(relativePath = ""): string {
 function trimSnippet(value: string, maxLength = 4000): string {
   if (value.length <= maxLength) return value;
   return value.slice(value.length - maxLength);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildLogPattern(value: string): RegExp {
+  try {
+    return new RegExp(value, "i");
+  } catch {
+    return new RegExp(escapeRegExp(value), "i");
+  }
 }
 
 function execFileAsync(command: string, args: string[], cwd = WORKSPACE_ROOT): Promise<string> {
@@ -379,6 +392,51 @@ export async function writeLocalWorkspaceFile(relativePath: string, content: str
   return readLocalWorkspaceFile(relativePath);
 }
 
+export async function createLocalWorkspaceFolder(relativePath: string): Promise<{ path: string; created: boolean }> {
+  const resolvedPath = resolveWorkspacePath(relativePath);
+  await fsp.mkdir(resolvedPath, { recursive: true });
+  return { path: normalizeRelativePath(relativePath), created: true };
+}
+
+export async function deleteLocalWorkspaceEntry(relativePath: string): Promise<{ path: string; deleted: boolean }> {
+  const resolvedPath = resolveWorkspacePath(relativePath);
+  const stats = await fsp.stat(resolvedPath);
+  if (stats.isDirectory()) {
+    await fsp.rm(resolvedPath, { recursive: true, force: true });
+  } else {
+    await fsp.unlink(resolvedPath);
+  }
+  return { path: normalizeRelativePath(relativePath), deleted: true };
+}
+
+export async function renameLocalWorkspaceEntry(
+  oldRelativePath: string,
+  newRelativePath: string,
+): Promise<{ oldPath: string; newPath: string; renamed: boolean }> {
+  const resolvedOld = resolveWorkspacePath(oldRelativePath);
+  const resolvedNew = resolveWorkspacePath(newRelativePath);
+  await fsp.mkdir(path.dirname(resolvedNew), { recursive: true });
+  await fsp.rename(resolvedOld, resolvedNew);
+  return {
+    oldPath: normalizeRelativePath(oldRelativePath),
+    newPath: normalizeRelativePath(newRelativePath),
+    renamed: true,
+  };
+}
+
+export async function writeMultipleLocalWorkspaceFiles(
+  files: Array<{ path: string; content: string }>,
+): Promise<{ written: number; paths: string[] }> {
+  const paths: string[] = [];
+  for (const file of files) {
+    const resolvedPath = resolveWorkspacePath(file.path);
+    await fsp.mkdir(path.dirname(resolvedPath), { recursive: true });
+    await fsp.writeFile(resolvedPath, file.content, "utf8");
+    paths.push(normalizeRelativePath(file.path));
+  }
+  return { written: paths.length, paths };
+}
+
 export async function getLocalDeploymentStatus(): Promise<OpsDeploymentStatus> {
   const composeServices = await parseComposeMetadata();
   const dockerRows = await getDockerRows();
@@ -459,4 +517,67 @@ export async function runLocalRestartAction(service: string): Promise<OpsDeploym
     ["compose", "-f", "vm-deploy/docker-compose.yml", "restart", service],
     service,
   );
+}
+
+export async function getLocalDeploymentLogs(
+  service: string,
+  options: {
+    tail?: number;
+    since?: string;
+    grep?: string;
+  } = {},
+): Promise<OpsDeploymentLogs> {
+  const tail = Math.min(Math.max(options.tail ?? 200, 10), 2000);
+  const since = (options.since || "30m").trim();
+  const grep = (options.grep || "").trim();
+
+  const args = [
+    "compose",
+    "-f",
+    "vm-deploy/docker-compose.yml",
+    "logs",
+    "--tail",
+    String(tail),
+    "--timestamps",
+    "--no-log-prefix",
+    "--no-color",
+  ];
+  if (since) {
+    args.push("--since", since);
+  }
+  if (service && service !== "all") {
+    args.push(service);
+  }
+
+  try {
+    const output = await execFileAsync("docker", args);
+    let lines = output
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter(Boolean);
+
+    if (grep) {
+      const pattern = buildLogPattern(grep);
+      lines = lines.filter((line) => pattern.test(line));
+    }
+
+    return {
+      service,
+      lines,
+      count: lines.length,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/ENOENT|not found/i.test(message)) {
+      return {
+        service,
+        lines: [],
+        count: 0,
+        timestamp: new Date().toISOString(),
+        note: "Docker not available on this host",
+      };
+    }
+    throw error;
+  }
 }

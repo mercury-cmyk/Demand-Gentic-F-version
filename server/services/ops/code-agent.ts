@@ -5,17 +5,25 @@ import type {
   ProviderMode,
 } from "../multi-provider-agent";
 import { formatOpsAgentErrorMessage } from "./format-agent-error";
-import { readWorkspaceFile, writeWorkspaceFile } from "./runtime";
+import { readWorkspaceFile, writeWorkspaceFile, writeMultipleWorkspaceFiles } from "./runtime";
 
 export interface OpsCodeAgentRequest {
   prompt: string;
-  mode?: "simple-edit" | "debug" | "deploy" | "general" | "plan";
+  mode?: "simple-edit" | "multi-edit" | "debug" | "deploy" | "general" | "plan";
   selectedFilePath?: string | null;
   selectedFileContent?: string | null;
+  /** Additional workspace file paths to include as context */
+  contextFilePaths?: string[];
   applyChanges?: boolean;
   providerMode?: ProviderMode;
   preferredProvider?: LLMProvider | null;
   optimizationProfile?: AgentOptimizationProfile;
+}
+
+export interface OpsCodeAgentFileEdit {
+  path: string;
+  content: string;
+  isNew?: boolean;
 }
 
 export interface OpsCodeAgentResponse {
@@ -28,6 +36,8 @@ export interface OpsCodeAgentResponse {
   changed: boolean;
   updatedContent?: string;
   modifiedAt?: string;
+  /** Multi-file edits when in multi-edit mode */
+  fileEdits?: OpsCodeAgentFileEdit[];
 }
 
 type SingleFileEditPayload = {
@@ -114,6 +124,31 @@ const AGENTX_AGENT_MODE_PROMPT = [
   '- if blocked or unsafe, return the original content unchanged in "updatedContent"',
 ].join("\n");
 
+const AGENTX_MULTI_EDIT_MODE_PROMPT = [
+  "Mode: Multi-File Edit",
+  "",
+  "Use this mode when the user wants changes across multiple files, or wants to create new files.",
+  "",
+  "Execution rules:",
+  "- you may edit multiple existing files and create new files",
+  "- treat the provided file contents as the source of truth",
+  "- make the smallest safe changes that fully satisfy the request",
+  "- preserve unrelated code and local conventions",
+  "- for new files, provide the complete file content",
+  "- for existing files, provide the complete updated file content",
+  "- do not invent files or APIs that are not in the provided context",
+  "",
+  "Response contract:",
+  '- return valid JSON only',
+  '- use exactly these keys: "summary" and "files"',
+  '- "summary" must briefly state what changed across all files',
+  '- "files" must be an array of objects, each with "path" (string), "content" (string), and "isNew" (boolean)',
+  '- "path" must be a relative workspace path (e.g. "src/utils/helpers.ts")',
+  '- "content" must contain the complete final contents of the file',
+  '- "isNew" is true only for files being created, false for edits to existing files',
+  '- only include files that were actually changed or created',
+].join("\n");
+
 const AGENTX_PLAN_MODE_PROMPT = [
   "Mode: Plan",
   "",
@@ -151,7 +186,7 @@ function resolveMode(mode?: OpsCodeAgentRequest["mode"]): OpsCodeAgentMode {
 function getAgentTask(mode?: OpsCodeAgentRequest["mode"]): AgentTask {
   const resolvedMode = resolveMode(mode);
 
-  if (resolvedMode === "simple-edit") {
+  if (resolvedMode === "simple-edit" || resolvedMode === "multi-edit") {
     return "code";
   }
 
@@ -220,6 +255,31 @@ function buildAgentFileEditPrompt(
     "",
     "Context:",
     buildSelectedFileContext(file.path, file.content),
+    "",
+    `User request:\n${request.prompt}`,
+  ].join("\n");
+}
+
+function buildMultiFileContext(
+  files: Array<{ path: string; content: string }>,
+): string {
+  if (files.length === 0) return "No workspace files provided.";
+  return files
+    .map((f) => `--- File: ${f.path} ---\n${f.content}\n--- End: ${f.path} ---`)
+    .join("\n\n");
+}
+
+function buildMultiEditPrompt(
+  request: OpsCodeAgentRequest,
+  files: Array<{ path: string; content: string }>,
+): string {
+  return [
+    AGENTX_SHARED_BASE_PROMPT,
+    "",
+    AGENTX_MULTI_EDIT_MODE_PROMPT,
+    "",
+    "Workspace files:",
+    buildMultiFileContext(files),
     "",
     `User request:\n${request.prompt}`,
   ].join("\n");

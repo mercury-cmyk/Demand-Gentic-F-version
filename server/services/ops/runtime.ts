@@ -1,6 +1,7 @@
 import type {
   OpsDeploymentActionRequest,
   OpsDeploymentJob,
+  OpsDeploymentLogs,
   OpsDeploymentStatus,
   OpsOverview,
   OpsWorkspaceDirectory,
@@ -8,6 +9,7 @@ import type {
 } from "./types";
 import {
   getLocalDeploymentStatus,
+  getLocalDeploymentLogs,
   getLocalOverview,
   listLocalWorkspaceDirectory,
   readLocalWorkspaceFile,
@@ -15,6 +17,10 @@ import {
   runLocalDeployAction,
   runLocalRestartAction,
   writeLocalWorkspaceFile,
+  createLocalWorkspaceFolder,
+  deleteLocalWorkspaceEntry,
+  renameLocalWorkspaceEntry,
+  writeMultipleLocalWorkspaceFiles,
 } from "./local-runtime";
 
 const OPS_AGENT_URL = (process.env.VM_OPS_AGENT_URL || "").trim().replace(/\/$/, "");
@@ -31,6 +37,16 @@ export class OpsAgentError extends Error {
 
 function hasRemoteAgent(): boolean {
   return Boolean(OPS_AGENT_URL);
+}
+
+export function getOpsAgentRequestInfo(): {
+  baseUrl: string | null;
+  headers: Record<string, string>;
+} {
+  return {
+    baseUrl: hasRemoteAgent() ? OPS_AGENT_URL : null,
+    headers: OPS_AGENT_TOKEN ? { "x-ops-agent-token": OPS_AGENT_TOKEN } : {},
+  };
 }
 
 async function requestOpsAgent<T>(
@@ -119,6 +135,27 @@ export async function writeWorkspaceFile(relativePath: string, content: string):
   return writeLocalWorkspaceFile(relativePath, content);
 }
 
+export async function createWorkspaceFolder(relativePath: string): Promise<{ path: string; created: boolean }> {
+  return createLocalWorkspaceFolder(relativePath);
+}
+
+export async function deleteWorkspaceEntry(relativePath: string): Promise<{ path: string; deleted: boolean }> {
+  return deleteLocalWorkspaceEntry(relativePath);
+}
+
+export async function renameWorkspaceEntry(
+  oldPath: string,
+  newPath: string,
+): Promise<{ oldPath: string; newPath: string; renamed: boolean }> {
+  return renameLocalWorkspaceEntry(oldPath, newPath);
+}
+
+export async function writeMultipleWorkspaceFiles(
+  files: Array<{ path: string; content: string }>,
+): Promise<{ written: number; paths: string[] }> {
+  return writeMultipleLocalWorkspaceFiles(files);
+}
+
 export async function getDeploymentStatus(): Promise<OpsDeploymentStatus> {
   if (hasRemoteAgent()) {
     try {
@@ -146,6 +183,39 @@ export async function runDeploymentBuild(
   }
 
   return runLocalBuildAction(request);
+}
+
+export async function getDeploymentLogs(
+  service: string,
+  options: {
+    tail?: number;
+    since?: string;
+    grep?: string;
+  } = {},
+): Promise<OpsDeploymentLogs> {
+  if (hasRemoteAgent()) {
+    try {
+      const params = new URLSearchParams();
+      if (typeof options.tail === "number") {
+        params.set("tail", String(options.tail));
+      }
+      if (options.since) {
+        params.set("since", options.since);
+      }
+      if (options.grep) {
+        params.set("grep", options.grep);
+      }
+
+      const suffix = params.size > 0 ? `?${params.toString()}` : "";
+      return await requestOpsAgent<OpsDeploymentLogs>(
+        `/logs/${encodeURIComponent(service)}${suffix}`,
+      );
+    } catch {
+      return getLocalDeploymentLogs(service, options);
+    }
+  }
+
+  return getLocalDeploymentLogs(service, options);
 }
 
 export async function runDeployment(

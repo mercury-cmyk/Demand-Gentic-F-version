@@ -7,6 +7,7 @@ import CloudWorkstationsManager from '../services/gcp/cloud-workstations.js';
 import type { Request, Response } from 'express';
 import { requireAuth, requireRole } from '../auth';
 import {
+  getDeploymentLogs,
   getDeploymentStatus,
   getOpsOverview,
   listWorkspaceDirectory,
@@ -15,6 +16,10 @@ import {
   runDeployment,
   runDeploymentBuild,
   writeWorkspaceFile,
+  createWorkspaceFolder,
+  deleteWorkspaceEntry,
+  renameWorkspaceEntry,
+  writeMultipleWorkspaceFiles,
 } from '../services/ops/runtime';
 import { OpsAgentError } from '../services/ops/runtime';
 import { runOpsCodeAgent } from '../services/ops/code-agent';
@@ -149,6 +154,65 @@ router.put('/workspace/file', async (req: Request, res: Response) => {
     });
   } catch (error) {
     handleOpsError(res, error, 'Failed to save workspace file');
+  }
+});
+
+// Create a new folder
+router.post('/workspace/folder', async (req: Request, res: Response) => {
+  try {
+    const { path: folderPath } = req.body as { path?: string };
+    if (!folderPath) {
+      return res.status(400).json({ success: false, error: 'path is required' });
+    }
+    const result = await createWorkspaceFolder(folderPath);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create folder');
+  }
+});
+
+// Delete a file or folder
+router.delete('/workspace/entry', async (req: Request, res: Response) => {
+  try {
+    const entryPath = req.query.path as string;
+    if (!entryPath) {
+      return res.status(400).json({ success: false, error: 'path is required' });
+    }
+    const result = await deleteWorkspaceEntry(entryPath);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete entry');
+  }
+});
+
+// Rename / move a file or folder
+router.post('/workspace/rename', async (req: Request, res: Response) => {
+  try {
+    const { oldPath, newPath } = req.body as { oldPath?: string; newPath?: string };
+    if (!oldPath || !newPath) {
+      return res.status(400).json({ success: false, error: 'oldPath and newPath are required' });
+    }
+    const result = await renameWorkspaceEntry(oldPath, newPath);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to rename entry');
+  }
+});
+
+// Upload multiple files (folder upload from browser)
+router.post('/workspace/upload', async (req: Request, res: Response) => {
+  try {
+    const { files } = req.body as { files?: Array<{ path: string; content: string }> };
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ success: false, error: 'files array is required' });
+    }
+    if (files.length > 500) {
+      return res.status(400).json({ success: false, error: 'Maximum 500 files per upload' });
+    }
+    const result = await writeMultipleWorkspaceFiles(files);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to upload files');
   }
 });
 
@@ -533,48 +597,17 @@ router.get('/logs/:service', async (req: Request, res: Response) => {
     const tail = parseInt(req.query.tail as string) || 200;
     const since = (req.query.since as string) || '30m';
     const grep = (req.query.grep as string) || '';
-    const safeTail = Math.min(Math.max(tail, 10), 2000);
-
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-
-    const args = [
-      'compose', '-f', 'vm-deploy/docker-compose.yml',
-      'logs', service,
-      '--tail', String(safeTail),
-      '--no-log-prefix',
-      '--no-color',
-    ];
-    if (since) args.push('--since', since);
-
-    const { stdout, stderr } = await execFileAsync('docker', args, {
-      cwd: process.cwd(),
-      timeout: 15000,
-      maxBuffer: 2 * 1024 * 1024,
+    const logs = await getDeploymentLogs(service, {
+      tail,
+      since,
+      grep,
     });
-
-    let lines = (stdout || stderr || '')
-      .split('\n')
-      .filter((line: string) => line.trim());
-
-    if (grep) {
-      const pattern = new RegExp(grep, 'i');
-      lines = lines.filter((line: string) => pattern.test(line));
-    }
 
     res.json({
       success: true,
-      service,
-      lines,
-      count: lines.length,
-      timestamp: new Date().toISOString(),
+      ...logs,
     });
-  } catch (error: any) {
-    // If docker isn't available, return empty
-    if (error?.message?.includes('ENOENT') || error?.message?.includes('not found')) {
-      return res.json({ success: true, service: req.params.service, lines: [], count: 0, note: 'Docker not available on this host' });
-    }
+  } catch (error) {
     handleOpsError(res, error, 'Failed to fetch container logs');
   }
 });

@@ -36,6 +36,18 @@ function trimSnippet(value, maxLength = 4000) {
   return value.slice(value.length - maxLength);
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildLogPattern(value) {
+  try {
+    return new RegExp(value, "i");
+  } catch {
+    return new RegExp(escapeRegExp(value), "i");
+  }
+}
+
 function normalizeRelativePath(input = "") {
   const normalized = input.replace(/\\/g, "/").replace(/^\/+/, "").trim();
   if (!normalized) return "";
@@ -228,6 +240,165 @@ function deriveHealth(rawStatus) {
 
 function isTextBuffer(buffer) {
   return !buffer.includes(0);
+}
+
+function buildLogArgs(service, { tail = 200, since = "30m", follow = false } = {}) {
+  const safeTail = Math.min(Math.max(Number(tail) || 200, 10), 2000);
+  const args = [
+    "compose",
+    "-f",
+    "vm-deploy/docker-compose.yml",
+    "logs",
+    "--tail",
+    String(safeTail),
+    "--timestamps",
+    "--no-log-prefix",
+    "--no-color",
+  ];
+
+  if (follow) {
+    args.push("--follow");
+  }
+
+  if (since) {
+    args.push("--since", since);
+  }
+
+  if (service && service !== "all") {
+    args.push(service);
+  }
+
+  return args;
+}
+
+async function getServiceLogs(service, { tail = 200, since = "30m", grep = "" } = {}) {
+  if (!(await commandExists("docker"))) {
+    return {
+      service,
+      lines: [],
+      count: 0,
+      timestamp: new Date().toISOString(),
+      note: "Docker not available on this host",
+    };
+  }
+
+  const output = await execFileAsync("docker", buildLogArgs(service, { tail, since }));
+  let lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+
+  if (grep) {
+    const pattern = buildLogPattern(grep);
+    lines = lines.filter((line) => pattern.test(line));
+  }
+
+  return {
+    service,
+    lines,
+    count: lines.length,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function streamServiceLogs(req, res, service, { tail = 100, since = "2m", grep = "" } = {}) {
+  if (!(await commandExists("docker"))) {
+    return json(res, 503, { error: "Docker not available on this host" });
+  }
+
+  const pattern = grep ? buildLogPattern(grep) : null;
+  const child = spawn("docker", buildLogArgs(service, { tail, since, follow: true }), {
+    cwd: WORKSPACE_ROOT,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  const createLineWriter = (streamName) => {
+    let buffer = "";
+
+    const emitLine = (line) => {
+      if (!line.trim()) {
+        return;
+      }
+      if (pattern && !pattern.test(line)) {
+        return;
+      }
+
+      res.write(
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          service,
+          stream: streamName,
+          line,
+        })}\n`,
+      );
+    };
+
+    return {
+      write(chunk) {
+        buffer += String(chunk);
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          emitLine(line);
+        }
+      },
+      flush() {
+        if (buffer) {
+          emitLine(buffer);
+          buffer = "";
+        }
+      },
+    };
+  };
+
+  const stdoutWriter = createLineWriter("stdout");
+  const stderrWriter = createLineWriter("stderr");
+
+  child.stdout.on("data", (chunk) => {
+    stdoutWriter.write(chunk);
+  });
+  child.stderr.on("data", (chunk) => {
+    stderrWriter.write(chunk);
+  });
+
+  child.on("error", (error) => {
+    if (!res.writableEnded) {
+      res.write(
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          service,
+          stream: "error",
+          line: `[OpsAgent] ${error.message}`,
+        })}\n`,
+      );
+      res.end();
+    }
+  });
+
+  child.on("close", () => {
+    stdoutWriter.flush();
+    stderrWriter.flush();
+    if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
+  const stopStream = () => {
+    if (!child.killed) {
+      child.kill("SIGTERM");
+    }
+  };
+
+  req.on("close", stopStream);
+  res.on("close", stopStream);
 }
 
 async function listWorkspaceDirectory(relativePath = "") {
@@ -502,6 +673,28 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && parsedUrl.pathname === "/deploy/status") {
       return json(res, 200, await getDeployStatus());
+    }
+
+    const logStreamMatch = req.method === "GET"
+      ? parsedUrl.pathname.match(/^\/logs\/stream\/([^/]+)$/)
+      : null;
+    if (logStreamMatch) {
+      return streamServiceLogs(req, res, decodeURIComponent(logStreamMatch[1]), {
+        tail: parsedUrl.searchParams.get("tail") || "100",
+        since: parsedUrl.searchParams.get("since") || "2m",
+        grep: parsedUrl.searchParams.get("grep") || "",
+      });
+    }
+
+    const logSnapshotMatch = req.method === "GET"
+      ? parsedUrl.pathname.match(/^\/logs\/([^/]+)$/)
+      : null;
+    if (logSnapshotMatch) {
+      return json(res, 200, await getServiceLogs(decodeURIComponent(logSnapshotMatch[1]), {
+        tail: parsedUrl.searchParams.get("tail") || "200",
+        since: parsedUrl.searchParams.get("since") || "30m",
+        grep: parsedUrl.searchParams.get("grep") || "",
+      }));
     }
 
     if (req.method === "POST" && parsedUrl.pathname === "/deploy/build") {
