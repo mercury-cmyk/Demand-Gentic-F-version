@@ -266,7 +266,7 @@ export default function PreviewStudioPage() {
     }
   };
 
-  // Intelligence status check — core intelligence (Account + Problem) required; Org + Solution optional enhancements
+  // Intelligence status check — account intelligence is required; problem/org/solution are optional enhancements
   const { data: intelligenceStatus, isLoading: intelligenceLoading, refetch: refetchIntelligence } = useQuery<{
     ready: boolean;
     fullyEnriched?: boolean;

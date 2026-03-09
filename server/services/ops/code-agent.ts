@@ -320,6 +320,33 @@ async function requestAgentXFileEdit(
   response: AgentRuntimeResponse;
   payload: SingleFileEditPayload;
 }> {
+  // Try Kimi first, fall back to Vertex AI
+  const { isKimiConfigured, kimiGenerateJSON } = await import("../kimi-client.js");
+
+  if (isKimiConfigured()) {
+    try {
+      const payload = await kimiGenerateJSON<SingleFileEditPayload>(
+        buildAgentFileEditPrompt(request, file),
+        { maxTokens: 8192, temperature: 0.1, model: "standard" },
+      );
+
+      return {
+        response: {
+          provider: "agentx",
+          model: "moonshot-v1-32k",
+          transport: "kimi",
+          content:
+            typeof payload.summary === "string" && payload.summary.trim()
+              ? payload.summary.trim()
+              : "Updated the selected file.",
+        },
+        payload,
+      };
+    } catch (kimiErr) {
+      console.warn("[CodeAgent] Kimi file-edit failed, falling back to Vertex AI:", (kimiErr as Error).message);
+    }
+  }
+
   const { generateJSON, getVertexConfig } = await import("../vertex-ai/index.js");
 
   const payload = await generateJSON<SingleFileEditPayload>(

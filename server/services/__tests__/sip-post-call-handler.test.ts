@@ -9,10 +9,13 @@ vi.mock('@shared/schema', () => ({
   campaignTestCalls: {},
   dialerCallAttempts: {},
   leads: {},
+  previewSimulationTranscripts: {},
+  previewStudioSessions: {},
 }));
 
 import {
   buildCampaignTestCallUpdate,
+  buildPreviewSessionUpdate,
   extractCampaignTestCallId,
 } from '../sip/sip-post-call-handler';
 
@@ -95,5 +98,90 @@ describe('sip-post-call-handler helpers', () => {
 
     expect(update.endedAt).toBeInstanceOf(Date);
     expect(update.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it('builds the preview session metadata payload expected by Preview Studio SIP post-call handling', () => {
+    const update = buildPreviewSessionUpdate({
+      existingMetadata: {
+        testPhoneNumber: '+15551234567',
+        requestedCallEngine: 'sip',
+      },
+      callSessionId: 'session-789',
+      callControlId: 'sip-call-123',
+      disposition: 'qualified_lead',
+      callDurationSeconds: 97,
+      transcriptTurnCount: 6,
+      qualityAnalysis: {
+        summary: 'The prospect engaged and agreed to next steps.',
+        overallScore: 91,
+        issues: [
+          {
+            type: 'minor_gap',
+            severity: 'low',
+            description: 'The opener could be slightly tighter.',
+            recommendation: 'Shorten the first sentence.',
+          },
+        ],
+        promptUpdates: [
+          {
+            category: 'opening',
+            change: 'State the value proposition earlier.',
+            rationale: 'This should improve early clarity.',
+            priority: 'medium',
+          },
+        ],
+        dispositionReview: {
+          confirmed: true,
+        },
+      },
+    });
+
+    expect(update).toMatchObject({
+      status: 'completed',
+      metadata: {
+        testPhoneNumber: '+15551234567',
+        requestedCallEngine: 'sip',
+        callEngine: 'sip',
+        callControlId: 'sip-call-123',
+        callSessionId: 'session-789',
+        finalDisposition: 'qualified_lead',
+        postCallAnalysisTranscriptCount: 6,
+        postCallAnalysis: {
+          transcriptTurnCount: 6,
+          transcriptAvailable: true,
+          summary: 'The prospect engaged and agreed to next steps.',
+          conversationQuality: null,
+          voiceDialerAnalysis: {
+            summary: 'The prospect engaged and agreed to next steps.',
+            overallScore: 91,
+            issues: [
+              {
+                type: 'minor_gap',
+                severity: 'low',
+                description: 'The opener could be slightly tighter.',
+                recommendation: 'Shorten the first sentence.',
+              },
+            ],
+            promptUpdates: [
+              {
+                category: 'opening',
+                change: 'State the value proposition earlier.',
+                rationale: 'This should improve early clarity.',
+                priority: 'medium',
+              },
+            ],
+            dispositionReview: {
+              confirmed: true,
+            },
+          },
+          dispositionSource: 'sip_post_call_handler',
+          durationSeconds: 97,
+        },
+      },
+    });
+
+    expect(update.endedAt).toBeInstanceOf(Date);
+    expect(update.updatedAt).toBeInstanceOf(Date);
+    expect((update.metadata as Record<string, unknown>).postCallReadyAt).toEqual(expect.any(String));
   });
 });
