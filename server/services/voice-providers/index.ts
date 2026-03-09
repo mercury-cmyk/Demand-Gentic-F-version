@@ -53,6 +53,7 @@ export {
 
 export { OpenAIRealtimeProvider } from "./openai-realtime-provider";
 export { GeminiLiveProvider } from "./gemini-live-provider";
+export { KimiVoiceProvider } from "./kimi-voice-provider";
 
 // ==================== AUDIO TRANSCODING ====================
 

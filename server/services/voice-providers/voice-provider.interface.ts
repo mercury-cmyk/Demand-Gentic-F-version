@@ -9,7 +9,7 @@ import { EventEmitter } from "events";
 
 // ==================== CONFIGURATION TYPES ====================
 
-export type VoiceProviderType = 'openai' | 'google';
+export type VoiceProviderType = 'openai' | 'google' | 'kimi';
 export type AudioFormat = 'g711_ulaw' | 'g711_alaw' | 'pcm_16k' | 'pcm_24k';
 
 export interface TurnDetectionConfig {
@@ -323,6 +323,16 @@ export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
 };
 
 export function mapVoiceToProvider(voice: string, targetProvider: VoiceProviderType): string {
+  if (targetProvider === 'kimi') {
+    // Kimi uses Google Cloud TTS voices — map to Neural2/Studio voices
+    const kimiMap: Record<string, string> = {
+      'alloy': 'en-US-Neural2-A', 'echo': 'en-US-Neural2-D', 'fable': 'en-US-Neural2-J',
+      'nova': 'en-US-Neural2-F', 'shimmer': 'en-US-Neural2-C', 'onyx': 'en-US-Neural2-D',
+      'cedar': 'en-US-Studio-O', 'marin': 'en-US-Studio-Q',
+      'kore': 'en-US-Neural2-F', 'fenrir': 'en-US-Neural2-D', 'puck': 'en-US-Neural2-A',
+    };
+    return kimiMap[voice.toLowerCase()] || 'en-US-Neural2-F';
+  }
   if (targetProvider === 'google') {
     // If already a valid Gemini voice, return as-is (case-insensitive)
     const matchedVoice = VALID_GEMINI_VOICES.find(v => v.toLowerCase() === voice.toLowerCase());

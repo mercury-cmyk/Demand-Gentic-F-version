@@ -69,7 +69,9 @@ let governanceCache:
   | null = null;
 
 function mapToVoiceProvider(provider: AiGovernanceProvider): VoiceProviderType {
-  return provider === "openai" ? "openai" : "google";
+  if (provider === "openai") return "openai";
+  if ((provider as string) === "kimi" || (provider as string) === "moonshot") return "kimi";
+  return "google";
 }
 
 function mapToAnalysisProvider(
@@ -181,6 +183,19 @@ export function getProviderAvailability(provider: AiGovernanceProvider): Provide
             available: false,
             reason: "Missing DeepSeek API key.",
           };
+    default: {
+      // Support Kimi/Moonshot and any future providers
+      const providerStr = provider as string;
+      if (providerStr === "kimi" || providerStr === "moonshot") {
+        return !!(process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY)
+          ? { available: true, reason: null }
+          : {
+              available: false,
+              reason: "Missing Kimi/Moonshot API key (KIMI_API_KEY).",
+            };
+      }
+      return { available: false, reason: `Unknown provider: ${providerStr}` };
+    }
   }
 }
 

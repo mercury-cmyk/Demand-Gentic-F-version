@@ -118,6 +118,7 @@ import {
 } from "./unified-call-context";
 import { detectG711Format } from "./voice-providers/audio-transcoder";
 import { GeminiLiveProvider } from "./voice-providers/gemini-live-provider";
+import { KimiVoiceProvider } from "./voice-providers/kimi-voice-provider";
 import {
   getVoiceModelForProvider,
   resolveVoiceGovernance,
@@ -332,7 +333,7 @@ interface OpenAIRealtimeSession {
   identityConfirmed?: boolean;
   currentState?: string;
   stateHistory?: string[];
-  provider: 'openai' | 'google';
+  provider: 'openai' | 'google' | 'kimi';
   virtualAgentId: string;
   /** Unified Agent Architecture: fully resolved agent config. Consumers use this instead of querying virtualAgents table. */
   resolvedAgentConfig?: ResolvedAgentConfig | null;
@@ -658,9 +659,9 @@ function schedulePurposePivotGuard(session: OpenAIRealtimeSession): void {
       metadata: { targetMs: 700 },
     });
 
-    if (session.provider === "google") {
-      const provider = (session as any).geminiProvider;
-      if (provider?.isReady?.()) {
+    if (session.provider === "google" || session.provider === "kimi") {
+      const provider = (session as any).geminiProvider || (session as any).kimiProvider;
+      if (provider?.isConnected || provider?.isReady?.()) {
         provider.sendTextMessage(
           "STATE ENFORCEMENT: identity confirmed. Respond NOW using this two-sentence pattern with no filler: \"This is [Agent Name] calling on behalf of [Organization]. I'm calling to [single clear purpose].\" Then stop and listen."
         );
@@ -1990,7 +1991,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             .toString()
             .toLowerCase();
           const voiceGovernance = await resolveVoiceGovernance(requestedProvider);
-          const provider: 'openai' | 'google' = voiceGovernance.selectedProvider;
+          const provider: 'openai' | 'google' | 'kimi' = voiceGovernance.selectedProvider as any;
           for (const warning of voiceGovernance.warnings) {
             console.warn(`${LOG_PREFIX} ${warning}`);
           }
@@ -2413,7 +2414,9 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             }
           }, 4000);
 
-          if (provider === 'google') {
+          if (provider === 'kimi') {
+            await initializeKimiSession(session);
+          } else if (provider === 'google') {
             await initializeGoogleSession(session);
           } else {
             await initializeOpenAISession(session);
@@ -3388,6 +3391,118 @@ openaiWs.on("open", async () => {
   }
 }
 
+
+// ==================== KIMI VOICE PROVIDER INTEGRATION ====================
+// Uses Kimi LLM brain + Google STT/TTS for voice calls
+
+async function initializeKimiSession(session: OpenAIRealtimeSession): Promise<void> {
+  console.log(`${LOG_PREFIX} Initializing Kimi voice session for call: ${session.callId}`);
+  const initStartTime = Date.now();
+
+  try {
+    const provider = new KimiVoiceProvider();
+
+    // Parallel init: provider connect + DB lookups
+    const [, campaignConfig, contactInfo, agentConfig] = await Promise.all([
+      provider.connect(),
+      getCampaignConfig(session.campaignId),
+      getContactInfo(session.contactId),
+      resolveAgentConfig(session.campaignId, 'kimi' as any),
+    ]);
+
+    if (agentConfig) {
+      session.resolvedAgentConfig = agentConfig;
+    }
+
+    const agentName = agentConfig?.agentName || session.resolvedAgentConfig?.agentName || "AI Assistant";
+    const voice = session.voiceOverride || agentConfig?.voice || "nova";
+    const systemPrompt = session.systemPromptOverride || agentConfig?.systemPrompt || `You are ${agentName}, a professional AI calling assistant.`;
+    const firstMessage = session.firstMessageOverride || agentConfig?.firstMessage || "";
+
+    // Configure the provider
+    await provider.configure({
+      systemPrompt,
+      voice,
+      inputAudioFormat: session.audioFormat === "g711_alaw" ? "g711_alaw" : "g711_ulaw",
+      outputAudioFormat: session.audioFormat === "g711_alaw" ? "g711_alaw" : "g711_ulaw",
+      tools: [], // Tools from agent settings could be added here
+      turnDetection: {
+        type: "server_vad",
+        silenceDurationMs: 800,
+      },
+    });
+
+    // Wire provider events to session/Telnyx
+    provider.on("audio:delta", (event) => {
+      if (!session.isActive || session.isEnding) return;
+      // Send audio to Telnyx
+      if (session.telnyxWs && session.telnyxWs.readyState === 1 && session.streamSid) {
+        const payload = {
+          event: "media",
+          stream_id: session.streamSid,
+          media: {
+            payload: event.audioBuffer.toString("base64"),
+          },
+        };
+        session.telnyxWs.send(JSON.stringify(payload));
+      }
+    });
+
+    provider.on("transcript:user", (event) => {
+      if (event.isFinal && event.text.trim()) {
+        session.transcripts.push({
+          role: "user",
+          text: event.text,
+          timestamp: new Date(),
+        });
+        session.lastUserSpeechTime = new Date();
+      }
+    });
+
+    provider.on("transcript:agent", (event) => {
+      if (event.isFinal && event.text.trim()) {
+        session.transcripts.push({
+          role: "assistant",
+          text: event.text,
+          timestamp: new Date(),
+        });
+      }
+    });
+
+    provider.on("function:call", (event) => {
+      console.log(`${LOG_PREFIX} Kimi function call: ${event.name}`, event.args);
+      handleProviderFunctionCall(session, event.name, event.args, event.callId);
+    });
+
+    provider.on("error", async (event) => {
+      console.error(`${LOG_PREFIX} Kimi provider error: ${event.code} - ${event.message}`);
+      if (!event.recoverable) await endCall(session.callId, "error");
+    });
+
+    provider.on("disconnected", async () => {
+      console.log(`${LOG_PREFIX} Kimi provider disconnected: ${session.callId}`);
+      if (session.isActive) await endCall(session.callId, "error");
+    });
+
+    // Store provider reference
+    (session as any).kimiProvider = provider;
+    (session as any).geminiProvider = provider; // Alias for compatibility with audio routing
+
+    // Start audio health monitoring
+    startAudioHealthMonitor(session);
+
+    const initMs = Date.now() - initStartTime;
+    console.log(`${LOG_PREFIX} Kimi session initialized in ${initMs}ms for call: ${session.callId}`);
+
+    // Send opening message if configured
+    if (firstMessage) {
+      provider.sendTextMessage(firstMessage);
+    }
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} Kimi session init failed: ${error.message}`);
+    await endCall(session.callId, "error");
+  }
+}
 
 // Google Gemini Live Provider Integration
 // Uses the voice-providers abstraction for Google's real-time voice API
@@ -7468,8 +7583,8 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
   // Route audio to the appropriate provider (Google Gemini or OpenAI)
   const geminiProvider = (session as any).geminiProvider;
 
-  if (session.provider === 'google' && geminiProvider) {
-    // Route to Gemini provider
+  if ((session.provider === 'google' || session.provider === 'kimi') && geminiProvider) {
+    // Route to Gemini/Kimi provider
     if (!geminiProvider.isConnected) {
       return;
     }
