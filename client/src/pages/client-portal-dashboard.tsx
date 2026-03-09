@@ -279,6 +279,7 @@ const TAB_ALIASES: Record<string, string> = {
   'agentic-demand': 'overview',
   'activations': 'campaigns',
   'analytics': 'overview',
+  'leads': 'journey-pipeline',
 };
 
 function resolveTab(tab: string | null): string {
@@ -2500,7 +2501,7 @@ export default function ClientPortalDashboard() {
                     <CardTitle className="text-lg">Recent Orders</CardTitle>
                     <CardDescription>Your latest contact orders</CardDescription>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('leads')}>
+                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('journey-pipeline')}>
                     View All <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </CardHeader>
