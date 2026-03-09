@@ -52,6 +52,7 @@ import FileManagerTab, {
 import PreviewTab from '@/components/ops/preview-tab';
 import WorkstationsTab from '@/components/ops/workstations-tab';
 import IamSecrets from '@/pages/iam/iam-secrets';
+const CloudLogsMonitor = React.lazy(() => import('@/pages/cloud-logs-monitor'));
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { apiJsonRequest } from '@/lib/queryClient';
@@ -195,6 +196,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'INSIGHTS',
     items: [
       { id: 'logs', label: 'Container Logs', icon: <Terminal className="w-4 h-4" /> },
+      { id: 'vm-logs', label: 'VM Live Logs', icon: <Activity className="w-4 h-4" /> },
       { id: 'costs', label: 'Cost Analytics', icon: <BarChart3 className="w-4 h-4" /> },
       { id: 'agents', label: 'AI Agents', icon: <Bot className="w-4 h-4" /> },
     ],
@@ -966,6 +968,12 @@ export default function OpsHub() {
             environment={activeProject.environment}
           />
         );
+      case 'vm-logs':
+        return (
+          <React.Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 animate-spin text-indigo-500" /></div>}>
+            <CloudLogsMonitor />
+          </React.Suspense>
+        );
       case 'costs':
         return <CostsTab />;
       case 'workstations':
@@ -1179,7 +1187,7 @@ export default function OpsHub() {
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden">
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
-          {activePage === 'logs' ? (
+          {activePage === 'logs' || activePage === 'vm-logs' ? (
             renderContent()
           ) : (
             <div className={activePage === 'workstations' ? 'flex-1 min-h-0 overflow-hidden p-6' : 'flex-1 overflow-y-auto p-6'}>
