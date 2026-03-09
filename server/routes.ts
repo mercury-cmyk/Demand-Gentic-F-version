@@ -104,6 +104,7 @@ import agentDefaultsRouter from './routes/agent-defaults';
 import aiGovernanceRouter from './routes/ai-governance';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
 import adminEmailCampaignTemplateRouter from './routes/admin-email-campaign-template-routes';
+import deepResearchRouter from './routes/deep-research-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
@@ -15848,6 +15849,7 @@ Provide JSON response with:
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
   app.use("/api/agent-panel/orders", agentPanelOrdersRouter); // Mount order flow routes
+  app.use("/api/deep-research", deepResearchRouter);
   app.use("/api/agent-defaults", agentDefaultsRouter);
   app.use("/api/ai-governance", aiGovernanceRouter);
   app.use("/api/voice-engine", voiceEngineRouter);
