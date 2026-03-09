@@ -40,6 +40,8 @@ import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recordin
 import callQualityTracker from "./call-quality-tracker";
 import { telnyxNumbers } from "@shared/number-pool-schema";
 import { autoEnrollJourneyLeadFromDisposition } from "./client-journey-automation";
+import { processEmailEngagement } from "./campaign-pipeline-orchestrator";
+import { processEmailEngagement, type EngagementSignal } from "./campaign-pipeline-orchestrator";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -529,6 +531,40 @@ export async function processDisposition(
       errorMessage: result.errors.join('; ') || null,
       executedBy: processedBy
     });
+
+    // ── Campaign-Pipeline Orchestrator: emit engagement signal ──
+    // Routes ALL dispositions through the pipeline orchestrator so voicemail,
+    // no_answer, needs_review, and callback_requested all trigger pipeline
+    // actions (stage changes, follow-up emails, AI calls) automatically.
+    const dispositionToSignal: Record<string, EngagementSignal> = {
+      voicemail: 'call_voicemail',
+      no_answer: 'call_no_answer',
+      callback_requested: 'call_callback_requested',
+      qualified_lead: 'call_positive_response',
+      needs_review: 'call_answered',
+    };
+    const engagementSignal = dispositionToSignal[finalDisposition];
+    if (engagementSignal) {
+      setImmediate(async () => {
+        try {
+          await processEmailEngagement({
+            signal: engagementSignal,
+            campaignId: callAttempt.campaignId,
+            contactId: callAttempt.contactId,
+            metadata: {
+              callAttemptId,
+              disposition: finalDisposition,
+              callDurationSeconds: callAttempt.callDurationSeconds,
+              agentType: callAttempt.agentType,
+              callSessionId: callAttempt.callSessionId,
+            },
+          });
+        } catch (pipelineErr) {
+          console.warn(`[DispositionEngine] Pipeline orchestrator signal failed:`, pipelineErr);
+        }
+      });
+      result.actions.push(`Pipeline engagement signal emitted: ${engagementSignal}`);
+    }
 
     result.success = result.errors.length === 0;
     return result;
@@ -1101,6 +1137,46 @@ async function processVoicemailOrNoAnswer(
 
   result.nextAttemptAt = nextAttemptAt;
   result.queueState = 'waiting_retry';
+
+  // Auto-enroll into journey pipeline + emit engagement signal for follow-up automation
+  setImmediate(async () => {
+    try {
+      await autoEnrollJourneyLeadFromDisposition({
+        campaignId: callAttempt.campaignId,
+        contactId: callAttempt.contactId,
+        sourceCallSessionId: callAttempt.callSessionId,
+        sourceDisposition: type as 'voicemail' | 'no_answer',
+        sourceCallSummary: callAttempt.notes || null,
+        sourceAiAnalysis: {
+          callAttemptId: callAttempt.id,
+          agentType: callAttempt.agentType,
+          callDurationSeconds: callAttempt.callDurationSeconds,
+          attemptNumber: currentAttempts,
+          nextAttemptAt: nextAttemptAt.toISOString(),
+        },
+        callbackAt: nextAttemptAt,
+      });
+    } catch (err: any) {
+      console.warn(`[DispositionEngine] Journey enrollment failed for ${type}:`, err.message);
+    }
+    // Also emit to campaign-pipeline orchestrator for email follow-up scheduling
+    try {
+      const signal = type === 'voicemail' ? 'call_voicemail' as const : 'call_no_answer' as const;
+      await processEmailEngagement({
+        signal,
+        campaignId: callAttempt.campaignId,
+        contactId: callAttempt.contactId,
+        metadata: {
+          callAttemptId: callAttempt.id,
+          callDurationSeconds: callAttempt.callDurationSeconds,
+          attemptNumber: currentAttempts,
+          nextAttemptAt: nextAttemptAt.toISOString(),
+        },
+      });
+    } catch (err: any) {
+      console.warn(`[DispositionEngine] Pipeline engagement signal failed for ${type}:`, err.message);
+    }
+  });
 }
 
 /**
@@ -1282,6 +1358,29 @@ async function processNeedsReview(
 
   result.nextAttemptAt = nextAttemptAt;
   result.queueState = 'waiting_retry';
+
+  // Emit engagement signal — needs_review contacts should enter pipeline for nurture
+  setImmediate(async () => {
+    try {
+      await autoEnrollJourneyLeadFromDisposition({
+        campaignId: callAttempt.campaignId,
+        contactId: callAttempt.contactId,
+        sourceCallSessionId: callAttempt.callSessionId,
+        sourceDisposition: 'needs_review',
+        sourceCallSummary: callAttempt.notes || null,
+        sourceAiAnalysis: {
+          callAttemptId: callAttempt.id,
+          agentType: callAttempt.agentType,
+          callDurationSeconds: callAttempt.callDurationSeconds,
+          reason: 'ambiguous_outcome',
+          nextAttemptAt: nextAttemptAt.toISOString(),
+        },
+        callbackAt: nextAttemptAt,
+      });
+    } catch (err: any) {
+      console.warn(`[DispositionEngine] Journey enrollment failed for needs_review:`, err.message);
+    }
+  });
 }
 
 /**

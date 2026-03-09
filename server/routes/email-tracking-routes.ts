@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { emailTrackingService } from '../lib/email-tracking-service';
 import { requireAuth } from '../auth';
+import { emitEmailEngagementSignal } from '../lib/email-pipeline-bridge';
 
 const router = Router();
 
@@ -43,6 +44,10 @@ router.get('/open/:token', async (req: Request, res: Response) => {
           deviceType,
         }
       ).catch(err => console.error('[TRACKING-OPEN] Error:', err));
+
+      // Emit pipeline engagement signal (async, fire-and-forget)
+      emitEmailEngagementSignal('email_opened', decoded.messageId, decoded.recipientEmail)
+        .catch(err => console.warn('[TRACKING-OPEN] Pipeline signal failed:', err));
     }
     
     // Always return tracking pixel (even if tracking fails)
@@ -106,6 +111,10 @@ router.get('/click/:token', async (req: Request, res: Response) => {
       // Log but don't block redirect on DB errors
       console.error('[TRACKING-CLICK] Failed to record click:', err);
     });
+
+    // Emit pipeline engagement signal (async, fire-and-forget)
+    emitEmailEngagementSignal('email_clicked', decoded.messageId, decoded.recipientEmail, decoded.originalUrl)
+      .catch(err => console.warn('[TRACKING-CLICK] Pipeline signal failed:', err));
     
     // Redirect to original URL
     res.redirect(302, decoded.originalUrl);

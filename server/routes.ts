@@ -131,6 +131,7 @@ import aiAudienceFilterRouter from './routes/ai-audience-filter-routes';
 import oiBatchRouter from './routes/oi-batch-routes';
 import previewStudioRouter from './routes/preview-studio';
 import clientPortalSimulationRouter from './routes/client-portal-simulation';
+import campaignPipelineRouter from './routes/campaign-pipeline-routes';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
@@ -6846,6 +6847,24 @@ export function registerRoutes(app: Express) {
           return res.status(400).json({
             message: sendErr instanceof Error ? sendErr.message : "Failed to send campaign",
           });
+        }
+      }
+
+      // === AUTO-CREATE JOURNEY PIPELINE FOR CLIENT ===
+      // The Pipeline Agent automatically creates a pipeline for each campaign
+      // so leads are captured and nurtured from the moment the campaign starts.
+      if (updated.clientAccountId) {
+        try {
+          const { autoCreatePipelineForCampaign } = await import("./services/ai-pipeline-agent");
+          const pipelineResult = await autoCreatePipelineForCampaign(req.params.id);
+          if (pipelineResult.created) {
+            console.log(`[LAUNCH CAMPAIGN] Pipeline Agent auto-created pipeline ${pipelineResult.pipelineId} for campaign ${req.params.id}`);
+          } else {
+            console.log(`[LAUNCH CAMPAIGN] Pipeline Agent skipped: ${pipelineResult.reason} (existing: ${pipelineResult.pipelineId || 'none'})`);
+          }
+        } catch (pipelineErr) {
+          // Non-fatal: campaign launches regardless of pipeline creation
+          console.error(`[LAUNCH CAMPAIGN] Pipeline auto-creation error (non-fatal):`, pipelineErr);
         }
       }
 
@@ -16352,6 +16371,9 @@ Provide JSON response with:
   app.use('/api/client-portal', clientPortalRouter);
   app.use('/api/client-portal/qualified-leads', clientPortalQualifiedLeadsRouter);
   app.use('/api', qaGatedContentRouter);
+
+  // ==================== CAMPAIGN-PIPELINE ORCHESTRATOR ====================
+  app.use('/api/campaign-pipeline', requireAuth, campaignPipelineRouter);
 
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);

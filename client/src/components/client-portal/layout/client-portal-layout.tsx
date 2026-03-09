@@ -69,6 +69,7 @@ import {
   Trophy,
   GitBranch,
   Wand2,
+  Workflow,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -133,6 +134,7 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus, highlighted: true },
       { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
       { name: 'Lead Pipeline', href: '/client-portal/dashboard?tab=journey-pipeline', icon: GitBranch },
+      { name: 'Campaign Pipeline', href: '/client-portal/dashboard?tab=campaign-pipeline', icon: Workflow },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
       // { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
       // { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },

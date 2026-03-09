@@ -347,9 +347,11 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         // Create a call attempt record so post-call analysis works for test calls
         let testCallAttemptId: string | undefined;
         try {
+          testCallAttemptId = `test-attempt-${testCallId}`;
           const [callAttempt] = await db
             .insert(dialerCallAttempts)
             .values({
+              id: testCallAttemptId,
               campaignId,
               agentType: 'ai',
               phoneDialed: normalizedPhone,
@@ -391,12 +393,34 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         });
 
         if (sipResult.success) {
+          const sipCallControlId = sipResult.callControlId || sipResult.callId;
+
+          await db.update(campaignTestCalls)
+            .set({
+              callControlId: sipCallControlId,
+              status: 'in_progress',
+              answeredAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(campaignTestCalls.id, testCallId));
+
+          if (testCallAttemptId) {
+            await db.update(dialerCallAttempts)
+              .set({
+                telnyxCallId: sipCallControlId,
+                providerCallId: sipCallControlId,
+                updatedAt: new Date(),
+              })
+              .where(eq(dialerCallAttempts.id, testCallAttemptId));
+          }
+
           return res.json({
             success: true,
             message: 'Test call initiated via Direct SIP',
             callId: sipResult.callId,
-            callControlId: sipResult.callControlId,
+            callControlId: sipCallControlId,
             engine: 'sip',
+            testCallId,
           });
         }
 
