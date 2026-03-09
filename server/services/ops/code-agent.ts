@@ -374,6 +374,28 @@ async function requestAgentXFileEdit(
 async function requestAgentXResponse(
   request: OpsCodeAgentRequest,
 ): Promise<AgentRuntimeResponse> {
+  // Try Kimi first, fall back to Vertex AI
+  const { isKimiConfigured, kimiChat } = await import("../kimi-client.js");
+
+  if (isKimiConfigured()) {
+    try {
+      const content = await kimiChat(
+        buildPlanResponsePrompt(request),
+        [],
+        { maxTokens: 4096, temperature: 0.2, model: "standard" },
+      );
+
+      return {
+        provider: "agentx",
+        model: "moonshot-v1-32k",
+        transport: "kimi",
+        content,
+      };
+    } catch (kimiErr) {
+      console.warn("[CodeAgent] Kimi response failed, falling back to Vertex AI:", (kimiErr as Error).message);
+    }
+  }
+
   const { generateText, getVertexConfig } = await import("../vertex-ai/index.js");
   const content = await generateText(buildPlanResponsePrompt(request), {
     maxTokens: 4096,
