@@ -14847,7 +14847,7 @@ export const qaConversationAnalysis = pgTable("qa_conversation_analysis", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   conversationId: varchar("conversation_id").notNull(),
   leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   conversationType: text("conversation_type").notNull(), // 'call', 'email', 'meeting'
   discoveryQuality: integer("discovery_quality").notNull(), // 0-10
   engagementQuality: integer("engagement_quality").notNull(), // 0-10
@@ -14873,7 +14873,7 @@ export const qaInteractionQuality = pgTable("qa_interaction_quality", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   interactionId: varchar("interaction_id").notNull(),
   leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   interactionType: text("interaction_type").notNull(), // 'call', 'email', 'meeting', 'network', 'content'
   timinessScore: integer("timeliness_score").notNull(), // 0-10
   relevanceScore: integer("relevance_score").notNull(), // 0-10
@@ -14897,7 +14897,7 @@ export const qaInteractionQuality = pgTable("qa_interaction_quality", {
 export const qaTouchpointSequenceQuality = pgTable("qa_touchpoint_sequence_quality", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   totalTouches: integer("total_touches").notNull(),
   touchpointSequence: jsonb("touchpoint_sequence").notNull(), // Array of { type, channel, timestamp, engagement }
   voiceTouchCount: integer("voice_touch_count").notNull(),
@@ -14925,7 +14925,7 @@ export const qaComplianceReview = pgTable("qa_compliance_review", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   conversationId: varchar("conversation_id"),
   interactionId: varchar("interaction_id"),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   callerIdVerified: boolean("caller_id_verified"),
   purposeStatedClearlyly: boolean("purpose_stated_clearly"),
   consentObtained: boolean("consent_obtained"),

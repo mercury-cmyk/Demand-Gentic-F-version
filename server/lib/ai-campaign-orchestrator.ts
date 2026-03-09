@@ -828,9 +828,17 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
   // Get current in-progress count (watchdog handles truly stuck items)
   const inProgressCount = await getInProgressCount(campaignId);
-  const { defaultMax } = await getConcurrencyLimits();
+  const { defaultMax, globalMax } = await getConcurrencyLimits();
   // Always use the global max — per-campaign overrides disabled to ensure max capacity
-  const maxConcurrent = defaultMax;
+  const campaignConfiguredMax = Number((campaign as any).maxConcurrentWorkers);
+  const aiSettingsConfiguredMax = Number((aiSettings as any)?.maxConcurrentCalls);
+  const requestedCampaignMax =
+    Number.isFinite(campaignConfiguredMax) && campaignConfiguredMax > 0
+      ? campaignConfiguredMax
+      : Number.isFinite(aiSettingsConfiguredMax) && aiSettingsConfiguredMax > 0
+        ? aiSettingsConfiguredMax
+        : defaultMax;
+  const maxConcurrent = Math.max(1, Math.min(Math.floor(requestedCampaignMax), globalMax));
   const campaignSlots = Math.max(0, maxConcurrent - inProgressCount);
   const requestedSlots = typeof options?.maxNewCalls === 'number'
     ? Math.max(0, Math.floor(options.maxNewCalls))
@@ -842,7 +850,12 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     console.log(`[AI Orchestrator] Strict USA-only queue filter enabled for campaign ${campaign.name} (${campaignId})`);
   }
 
-  console.log(`[AI Orchestrator] Campaign ${campaignId}: ${inProgressCount}/${maxConcurrent} in progress, ${campaignSlots} campaign slots, ${slotsAvailable} allowed by request`);
+  console.log(
+    `[AI Orchestrator] Campaign ${campaignId}: ${inProgressCount}/${maxConcurrent} in progress ` +
+    `(campaignMax=${Number.isFinite(campaignConfiguredMax) && campaignConfiguredMax > 0 ? Math.floor(campaignConfiguredMax) : 'default'}, ` +
+    `aiSettingsMax=${Number.isFinite(aiSettingsConfiguredMax) && aiSettingsConfiguredMax > 0 ? Math.floor(aiSettingsConfiguredMax) : 'unset'}, ` +
+    `globalMax=${globalMax}), ${campaignSlots} campaign slots, ${slotsAvailable} allowed by request`
+  );
 
   if (slotsAvailable <= 0) {
     return { initiated: 0, skipped: 0 };

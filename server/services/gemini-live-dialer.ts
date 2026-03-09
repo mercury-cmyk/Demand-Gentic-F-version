@@ -2223,6 +2223,7 @@ Instructions:
                     agentType: 'ai' as const,
                     aiAgentId: attemptDetails.virtualAgentId || 'gemini-live',
                     aiDisposition: (callContext.disposition || 'completed') as CanonicalDisposition,
+                    aiTranscript: geminiTranscript || undefined,
                     campaignId: attemptDetails.campaignId || callContext.campaignId || null,
                     contactId: attemptDetails.contactId || callContext.contactId || null,
                     queueItemId: attemptDetails.queueItemId || callContext.queueItemId || null,
@@ -2234,7 +2235,10 @@ Instructions:
                     callSessionId = newSession.id;
 
                     await db.update(dialerCallAttempts)
-                      .set({ callSessionId: newSession.id })
+                      .set({
+                        callSessionId: newSession.id,
+                        fullTranscript: geminiTranscript || undefined,
+                      })
                       .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
 
                     console.log(`[Gemini Live] ✅ Created new call session ${callSessionId}`);

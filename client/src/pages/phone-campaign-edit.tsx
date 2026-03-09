@@ -186,7 +186,9 @@ export default function PhoneCampaignEditPage() {
       // setDialMode is not needed as it's always 'ai_agent'
 
       // Initialize AI Agent settings
-      if (campaign.aiAgentSettings?.maxConcurrentCalls) {
+      if (campaign.maxConcurrentWorkers) {
+        setMaxConcurrentCalls(campaign.maxConcurrentWorkers);
+      } else if (campaign.aiAgentSettings?.maxConcurrentCalls) {
         setMaxConcurrentCalls(campaign.aiAgentSettings.maxConcurrentCalls);
       }
 
@@ -322,6 +324,7 @@ export default function PhoneCampaignEditPage() {
       problemIntelligenceOrgId,
       // Dial mode
       dialMode,
+      maxConcurrentWorkers: maxConcurrentCalls,
       // AI Agent settings (includes concurrency)
       aiAgentSettings,
       // Campaign Context fields

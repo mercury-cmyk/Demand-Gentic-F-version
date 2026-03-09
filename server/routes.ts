@@ -5824,6 +5824,39 @@ export function registerRoutes(app: Express) {
     return result.length > 0 ? result : null;
   };
 
+  const parsePositiveInteger = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null;
+    }
+    return Math.max(1, Math.floor(parsed));
+  };
+
+  const syncCampaignConcurrencySettings = (
+    payload: Record<string, any>,
+    options?: { existingAiSettings?: any; existingDialMode?: string | null }
+  ): void => {
+    const effectiveDialMode = payload.dialMode ?? options?.existingDialMode ?? null;
+    if (effectiveDialMode !== 'ai_agent') {
+      return;
+    }
+
+    const explicitWorkers = parsePositiveInteger(payload.maxConcurrentWorkers);
+    const aiSettingsMax = parsePositiveInteger(payload.aiAgentSettings?.maxConcurrentCalls);
+    const resolvedMax = explicitWorkers ?? aiSettingsMax;
+
+    if (!resolvedMax) {
+      return;
+    }
+
+    payload.maxConcurrentWorkers = resolvedMax;
+    payload.aiAgentSettings = {
+      ...(options?.existingAiSettings || {}),
+      ...(payload.aiAgentSettings || {}),
+      maxConcurrentCalls: resolvedMax,
+    };
+  };
+
   app.post("/api/campaigns", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const { assignedAgents, ...campaignData } = req.body;
@@ -5921,6 +5954,8 @@ export function registerRoutes(app: Express) {
         };
         console.log(`[Campaign Create] Built aiAgentSettings with voice: ${campaignData.selectedVoice}`);
       }
+
+      syncCampaignConcurrencySettings(campaignData);
 
       const campaign = await storage.createCampaign(campaignData);
 
@@ -6127,6 +6162,11 @@ export function registerRoutes(app: Express) {
         };
         console.log(`[Campaign Update] Synced persona.voice to first assigned voice: "${firstVoice.id}" (${firstVoice.name}), total assigned: ${updateData.assignedVoices.length}`);
       }
+
+      syncCampaignConcurrencySettings(updateData, {
+        existingAiSettings: existingCampaign.aiAgentSettings,
+        existingDialMode: existingCampaign.dialMode,
+      });
       
       let campaign = await storage.updateCampaign(req.params.id, updateData);
       if (!campaign) {
