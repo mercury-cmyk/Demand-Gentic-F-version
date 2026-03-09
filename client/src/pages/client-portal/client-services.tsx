@@ -53,10 +53,10 @@ export default function ClientServices() {
     },
     {
       icon: Users,
-      title: "3. Manage Leads & Opportunities",
-      description: "As leads come in, they are qualified by our AI. View them in your dashboard, listen to call recordings, and track their journey through the pipeline.",
-      action: "View Leads",
-      link: "/client-portal/dashboard?tab=leads"
+      title: "3. Track Leads in the Pipeline",
+      description: "Review lead activity in one place, open source context instantly, and move follow-up work through a single unified pipeline.",
+      action: "Open Lead Pipeline",
+      link: "/client-portal/dashboard?tab=journey-pipeline"
     },
     {
       icon: BarChart,

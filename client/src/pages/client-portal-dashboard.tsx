@@ -41,12 +41,6 @@ import {
 import { IntelligenceFlowDiagram } from '@/components/intelligence-flow-diagram';
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
-  QualifiedLeadsTable,
-  LeadDetailModal,
-  EnhancedLeadDetailModal,
-  ExportLeadsDialog,
-} from '@/components/client-portal/leads';
-import {
   CampaignCard,
   RequestLeadsDialog,
   CampaignCreationWizard,
@@ -560,10 +554,6 @@ export default function ClientPortalDashboard() {
   // Campaign Creation Wizard State (new wizard)
   const [showCampaignWizard, setShowCampaignWizard] = useState(false);
   const [showPreviewStudio, setShowPreviewStudio] = useState(false);
-
-  // Qualified Leads state
-  const [selectedQualifiedLeadId, setSelectedQualifiedLeadId] = useState<string | null>(null);
-  const [showExportDialog, setShowExportDialog] = useState(false);
 
   // Request leads dialog state
   const [showRequestLeadsDialog, setShowRequestLeadsDialog] = useState(false);
@@ -2856,45 +2846,6 @@ export default function ClientPortalDashboard() {
 
           </div>
         )}
-
-
-        {/* ==================== LEADS TAB ==================== */}
-        {activeTab === 'leads' && (
-          <div className="space-y-6 md:space-y-8 max-w-7xl mx-auto">
-            <Card className="rounded-2xl border border-emerald-200/80 dark:border-emerald-900/80 bg-gradient-to-r from-emerald-50/80 via-cyan-50/70 to-blue-50/80 dark:from-emerald-950/20 dark:via-cyan-950/10 dark:to-blue-950/20 shadow-sm">
-              <CardContent className="p-5 md:p-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="space-y-1.5">
-                    <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                      <UserCheck className="h-6 w-6 text-emerald-600" />
-                      Qualified Leads
-                    </h2>
-                    <p className="text-sm md:text-base text-slate-700/80 dark:text-slate-300/80 max-w-3xl">
-                      Review all QA-approved leads in one place, open call details instantly, and export clean reports for your team.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs md:text-sm text-muted-foreground">
-                    <Badge variant="outline" className="bg-white/70 dark:bg-slate-900/50 border-emerald-200 dark:border-emerald-900 px-3 py-1">
-                      Fast filters
-                    </Badge>
-                    <Badge variant="outline" className="bg-white/70 dark:bg-slate-900/50 border-cyan-200 dark:border-cyan-900 px-3 py-1">
-                      Responsive table
-                    </Badge>
-                    <Badge variant="outline" className="bg-white/70 dark:bg-slate-900/50 border-blue-200 dark:border-blue-900 px-3 py-1">
-                      In-line playback
-                    </Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <QualifiedLeadsTable
-              onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}
-              onExport={() => setShowExportDialog(true)}
-            />
-          </div>
-        )}
-
         {/* ==================== REPORTS TAB ==================== */}
         {(activeTab === 'reports' || activeTab === 'analytics-reports') && (
           <div className="space-y-6">
@@ -5745,19 +5696,6 @@ export default function ClientPortalDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Qualified Lead Detail Modal - Enhanced with Comments */}
-      <EnhancedLeadDetailModal
-        leadId={selectedQualifiedLeadId}
-        open={!!selectedQualifiedLeadId}
-        onClose={() => setSelectedQualifiedLeadId(null)}
-      />
-
-      {/* Export Leads Dialog */}
-      <ExportLeadsDialog
-        open={showExportDialog}
-        onClose={() => setShowExportDialog(false)}
-      />
 
       {/* AI Reports Panel */}
       <AgenticReportsPanel

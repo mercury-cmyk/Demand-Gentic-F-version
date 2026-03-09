@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and, ilike, or, desc } from 'drizzle-orm';
+import { eq, and, ilike, or, desc, asc } from 'drizzle-orm';
 import {
   clientBusinessProfiles,
   clientFeatureAccess,
@@ -18,6 +18,8 @@ import {
   campaigns,
   accounts,
   accountIntelligence,
+  externalEvents,
+  workOrderDrafts,
 } from '@shared/schema';
 import { z } from 'zod';
 import { collectWebsiteContent, type WebsitePageSummary } from '../lib/website-research';
@@ -1313,6 +1315,71 @@ router.get('/image-proxy', async (req: Request, res: Response) => {
     }
     console.error('[CLIENT SETTINGS] Image proxy error:', error.message);
     res.status(500).json({ message: 'Failed to fetch image' });
+  }
+});
+
+// ==================== LINKED EVENTS (for Organization Intelligence) ====================
+
+/**
+ * GET /linked-events
+ * Returns external events for this client so the OI Events tab can display them.
+ * Includes draft/work-order status for each event.
+ */
+router.get('/linked-events', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Fetch all external events for this client, ordered by date
+    const events = await db
+      .select({
+        id: externalEvents.id,
+        title: externalEvents.title,
+        community: externalEvents.community,
+        eventType: externalEvents.eventType,
+        location: externalEvents.location,
+        startAtIso: externalEvents.startAtIso,
+        startAtHuman: externalEvents.startAtHuman,
+        sourceUrl: externalEvents.sourceUrl,
+        sourceProvider: externalEvents.sourceProvider,
+        overviewExcerpt: externalEvents.overviewExcerpt,
+      })
+      .from(externalEvents)
+      .where(eq(externalEvents.clientId, clientAccountId))
+      .orderBy(asc(externalEvents.startAtIso));
+
+    // Fetch draft statuses for these events
+    const drafts = await db
+      .select({
+        externalEventId: workOrderDrafts.externalEventId,
+        status: workOrderDrafts.status,
+        workOrderId: workOrderDrafts.workOrderId,
+      })
+      .from(workOrderDrafts)
+      .where(eq(workOrderDrafts.clientAccountId, clientAccountId));
+
+    const draftMap = new Map<string, { status: string; workOrderId: string | null }>();
+    for (const d of drafts) {
+      if (d.externalEventId) {
+        draftMap.set(d.externalEventId, { status: d.status, workOrderId: d.workOrderId });
+      }
+    }
+
+    const linkedEvents = events.map((event) => {
+      const draft = draftMap.get(event.id);
+      return {
+        ...event,
+        draftStatus: draft?.status || null,
+        hasWorkOrder: !!draft?.workOrderId,
+      };
+    });
+
+    res.json({ events: linkedEvents });
+  } catch (error: any) {
+    console.error('[CLIENT SETTINGS] Linked events error:', error.message);
+    res.status(500).json({ message: 'Failed to fetch linked events' });
   }
 });
 

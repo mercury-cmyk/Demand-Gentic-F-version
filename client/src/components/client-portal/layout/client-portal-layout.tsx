@@ -53,7 +53,6 @@ import {
   Crown,
   ArrowLeft,
   Target,
-  UserCheck,
   Headphones,
   Layers,
   AlertTriangle,
@@ -132,7 +131,7 @@ const baseNavigationGroups: NavGroup[] = [
     items: [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus, highlighted: true },
-      // { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
+      // Legacy qualified-leads entry removed in favor of Lead Pipeline.
       { name: 'Lead Pipeline', href: '/client-portal/dashboard?tab=journey-pipeline', icon: GitBranch },
       { name: 'Campaign Pipeline', href: '/client-portal/dashboard?tab=campaign-pipeline', icon: Workflow },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
@@ -396,12 +395,14 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
   const currentPageLabel = React.useMemo(() => {
     if (location === '/client-portal/dashboard') {
-      const tab = new URLSearchParams(searchString).get('tab') || 'overview';
+      const requestedTab = new URLSearchParams(searchString).get('tab') || 'overview';
+      const tab = requestedTab === 'leads' ? 'journey-pipeline' : requestedTab;
       const tabLabels: Record<string, string> = {
         overview: 'Overview',
         campaigns: 'All Campaigns',
-        leads: 'Leads',
+        leads: 'Lead Pipeline',
         'journey-pipeline': 'Lead Pipeline',
+        'campaign-pipeline': 'Campaign Pipeline',
         'work-orders': 'Work Orders',
         bookings: 'Bookings',
         'target-markets': 'Target Markets',

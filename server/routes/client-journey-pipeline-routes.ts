@@ -36,6 +36,26 @@ const DEFAULT_STAGES = [
   { id: "closed", name: "Closed", order: 5, color: "#6b7280", defaultActionType: "note" },
 ];
 
+function escapeCsvValue(value: unknown): string {
+  if (value === null || value === undefined) return '""';
+  const normalized = String(value).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+function formatCsvDate(value: Date | string | null | undefined): string {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toISOString();
+}
+
+function sanitizeFilename(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "lead-pipeline";
+}
+
 // ─── GET /status — Feature probe ───
 
 router.get("/status", async (_req: Request, res: Response) => {
@@ -764,6 +784,95 @@ router.post("/leads/:id/recommend-action", async (req: Request, res: Response) =
 
 // ─── GET /pipelines/:id/analytics — Pipeline metrics ───
 
+// Export the current pipeline view as CSV for client teams.
+router.get("/pipelines/:id/export", async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: "Unauthorized" });
+
+    const [pipeline] = await db
+      .select()
+      .from(clientJourneyPipelines)
+      .where(
+        and(
+          eq(clientJourneyPipelines.id, req.params.id),
+          eq(clientJourneyPipelines.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!pipeline) return res.status(404).json({ message: "Pipeline not found" });
+
+    const stages = Array.isArray(pipeline.stages)
+      ? (pipeline.stages as Array<Record<string, unknown>>)
+      : [];
+    const stageNameById = new Map(
+      stages.map((stage) => [String(stage.id || ""), String(stage.name || stage.id || "")])
+    );
+
+    const leadRows = await db
+      .select()
+      .from(clientJourneyLeads)
+      .where(eq(clientJourneyLeads.pipelineId, pipeline.id))
+      .orderBy(desc(clientJourneyLeads.updatedAt), desc(clientJourneyLeads.priority));
+
+    const header = [
+      "Pipeline",
+      "Lead Name",
+      "Email",
+      "Phone",
+      "Company",
+      "Job Title",
+      "Stage",
+      "Priority",
+      "Status",
+      "Next Action Type",
+      "Next Action At",
+      "Last Activity At",
+      "Source Disposition",
+      "Source Call Session Id",
+      "Call Summary",
+      "Created At",
+      "Updated At",
+    ];
+
+    const rows = leadRows.map((lead) => [
+      pipeline.name,
+      lead.contactName || "",
+      lead.contactEmail || "",
+      lead.contactPhone || "",
+      lead.companyName || "",
+      lead.jobTitle || "",
+      stageNameById.get(lead.currentStageId) || lead.currentStageId || "",
+      lead.priority ?? "",
+      lead.status || "",
+      lead.nextActionType || "",
+      formatCsvDate(lead.nextActionAt),
+      formatCsvDate(lead.lastActivityAt),
+      lead.sourceDisposition ? lead.sourceDisposition.replace(/_/g, " ") : "",
+      lead.sourceCallSessionId || "",
+      lead.sourceCallSummary || "",
+      formatCsvDate(lead.createdAt),
+      formatCsvDate(lead.updatedAt),
+    ]);
+
+    const csv = [header, ...rows]
+      .map((row) => row.map((value) => escapeCsvValue(value)).join(","))
+      .join("\n");
+
+    const dateStamp = new Date().toISOString().split("T")[0];
+    const filename = `${sanitizeFilename(pipeline.name)}-${dateStamp}.csv`;
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.status(200).send(csv);
+  } catch (error) {
+    console.error("[JourneyPipeline] Failed to export pipeline:", error);
+    res.status(500).json({ success: false, message: "Failed to export pipeline" });
+  }
+});
+
+// Pipeline metrics for board/list monitoring.
 router.get("/pipelines/:id/analytics", async (req: Request, res: Response) => {
   try {
     const clientAccountId = req.clientUser?.clientAccountId;
