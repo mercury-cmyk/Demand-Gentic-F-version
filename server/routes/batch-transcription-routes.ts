@@ -253,6 +253,22 @@ router.post("/sweep-ringouts", requireAuth, async (_req, res) => {
   }
 });
 
+/**
+ * POST /api/batch-transcription/sweep-sessions
+ * Manually trigger direct call_sessions transcription sweep.
+ * Processes sessions with recordings but no transcript, even without dialer_call_attempts.
+ */
+router.post("/sweep-sessions", requireAuth, async (_req, res) => {
+  try {
+    const { sweepCallSessionsDirect } = await import("../services/batch-transcription-sweep");
+    const result = await sweepCallSessionsDirect();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} Direct session sweep error:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== BATCH PROCESSING ENGINE ====================
 
 interface CallToProcess {

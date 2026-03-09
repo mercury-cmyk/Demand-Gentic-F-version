@@ -484,6 +484,91 @@ export async function sweepOrphanRecordingSessions(): Promise<SweepResult> {
 }
 
 /**
+ * Sweep call_sessions directly (without requiring dialer_call_attempts).
+ * This catches bulk-imported calls or sessions where no attempt record was linked.
+ */
+export async function sweepCallSessionsDirect(): Promise<SweepResult> {
+  const result: SweepResult = { processed: 0, transcribed: 0, analyzed: 0, failed: 0, skipped: 0 };
+
+  try {
+    const lookbackDate = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    const gracePeriod = new Date(Date.now() - 5 * 60 * 1000);
+
+    const untranscribedSessions = await db
+      .select({
+        id: callSessions.id,
+        campaignId: callSessions.campaignId,
+        contactId: callSessions.contactId,
+        durationSec: callSessions.durationSec,
+        aiDisposition: callSessions.aiDisposition,
+        recordingUrl: callSessions.recordingUrl,
+        recordingS3Key: callSessions.recordingS3Key,
+      })
+      .from(callSessions)
+      .where(
+        and(
+          sql`${callSessions.durationSec} >= ${MIN_CALL_DURATION_SEC}`,
+          sql`(${callSessions.aiTranscript} IS NULL OR LENGTH(${callSessions.aiTranscript}) < 20)`,
+          sql`(${callSessions.recordingUrl} IS NOT NULL OR ${callSessions.recordingS3Key} IS NOT NULL)`,
+          gte(callSessions.startedAt, lookbackDate),
+          sql`${callSessions.startedAt} < ${gracePeriod}`,
+        )
+      )
+      .orderBy(sql`${callSessions.startedAt} DESC`)
+      .limit(SWEEP_BATCH_SIZE);
+
+    if (untranscribedSessions.length === 0) {
+      return result;
+    }
+
+    console.log(`${LOG_PREFIX} [DirectSweep] Found ${untranscribedSessions.length} untranscribed call sessions to process`);
+
+    for (let i = 0; i < untranscribedSessions.length; i += SWEEP_CONCURRENCY) {
+      const batch = untranscribedSessions.slice(i, i + SWEEP_CONCURRENCY);
+
+      const batchResults = await Promise.allSettled(
+        batch.map(async (session) => {
+          try {
+            const { runPostCallAnalysis } = await import("./post-call-analyzer");
+            const analysisResult = await runPostCallAnalysis(session.id, {
+              campaignId: session.campaignId || undefined,
+              contactId: session.contactId || undefined,
+              callDurationSec: session.durationSec || undefined,
+              disposition: session.aiDisposition || undefined,
+            });
+            return { transcribed: analysisResult.success && !analysisResult.skipped, analyzed: analysisResult.success };
+          } catch (err: any) {
+            console.error(`${LOG_PREFIX} [DirectSweep] Error processing session ${session.id}: ${err.message}`);
+            return { transcribed: false, analyzed: false };
+          }
+        })
+      );
+
+      for (const batchResult of batchResults) {
+        result.processed++;
+        if (batchResult.status === "fulfilled") {
+          if (batchResult.value.transcribed) result.transcribed++;
+          if (batchResult.value.analyzed) result.analyzed++;
+          if (!batchResult.value.transcribed) result.failed++;
+        } else {
+          result.failed++;
+        }
+      }
+    }
+
+    if (result.transcribed > 0 || result.failed > 0) {
+      console.log(
+        `${LOG_PREFIX} [DirectSweep] Complete: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+      );
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} [DirectSweep] Error:`, error);
+  }
+
+  return result;
+}
+
+/**
  * Mark stale ring-out call attempts as 'no_answer'.
  * These are calls where the phone rang but nobody picked up — they have
  * NULL disposition, connected=false, 0 duration, and no call_ended_at.

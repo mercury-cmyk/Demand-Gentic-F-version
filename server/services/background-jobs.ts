@@ -284,6 +284,30 @@ export function startBackgroundJobs() {
     }, BATCH_TRANSCRIPTION_SWEEP_INTERVAL + 60000); // Offset by 1 min from batch sweep
   }
 
+  // Direct call_sessions sweep — transcribes sessions that have recordings but no transcript
+  // and no linked dialer_call_attempts (e.g. bulk-imported calls).
+  if (ENABLE_TRANSCRIPTION) {
+    setInterval(async () => {
+      if (isBatchTranscriptionSweepRunning) return;
+      isBatchTranscriptionSweepRunning = true;
+      try {
+        await withJobTimeout('Direct Session Transcription Sweep', async () => {
+          const { sweepCallSessionsDirect } = await import('./batch-transcription-sweep');
+          const result = await sweepCallSessionsDirect();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Direct session sweep: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Direct session sweep error:', error);
+      } finally {
+        isBatchTranscriptionSweepRunning = false;
+      }
+    }, BATCH_TRANSCRIPTION_SWEEP_INTERVAL + 120000); // Offset by 2 min from batch sweep
+  }
+
   // Ring-out cleanup sweep — marks stale NULL-disposition non-connected calls as no_answer.
   // These are calls that rang but nobody picked up and the orchestrator didn't finalize.
   if (ENABLE_LOCK_SWEEPER) {
