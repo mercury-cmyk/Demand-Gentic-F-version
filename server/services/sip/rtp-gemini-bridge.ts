@@ -156,6 +156,7 @@ interface CallContext {
   maxCallDurationSeconds?: number;
   callerNumberId?: string | null;
   firstMessage?: string;
+  previewSessionId?: string | null;
 }
 
 interface AudioMetrics {
@@ -168,6 +169,10 @@ interface AudioMetrics {
 
 // Active bridge sessions
 const bridgeSessions: Map<string, BridgeSession> = new Map();
+
+function isSyntheticPreviewAttempt(callAttemptId: string | undefined): boolean {
+  return !!callAttemptId && callAttemptId.startsWith('preview-attempt-');
+}
 
 /**
  * Map AI disposition to canonical disposition
@@ -612,31 +617,38 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
         // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition.
         // Without this, the disposition engine sees duration=0 and downgrades qualified_lead → no_answer.
         const callDurationSec = Math.floor((Date.now() - session.metrics.startTime) / 1000);
-        await db.update(dialerCallAttempts)
-          .set({
-            callDurationSeconds: callDurationSec,
-            callEndedAt: new Date(),
-            disposition: canonicalDisposition,
-            connected: callDurationSec > 10,
-            updatedAt: new Date(),
-          })
-          .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
-        console.log(`[RTP Bridge] Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${canonicalDisposition}`);
+        const syntheticPreviewAttempt = isSyntheticPreviewAttempt(session.callContext.callAttemptId);
+        let dispositionResult: Awaited<ReturnType<typeof processDisposition>> | null = null;
 
-        const dispositionResult = await processDisposition(
-          session.callContext.callAttemptId,
-          canonicalDisposition,
-          'sip_gemini',
-          {
-            transcript,
-            structuredTranscript: { turns: session.transcriptTurns },
-          }
-        );
+        if (syntheticPreviewAttempt) {
+          console.log(`[RTP Bridge] Synthetic Preview Studio attempt ${session.callContext.callAttemptId} - skipping disposition engine`);
+        } else {
+          await db.update(dialerCallAttempts)
+            .set({
+              callDurationSeconds: callDurationSec,
+              callEndedAt: new Date(),
+              disposition: canonicalDisposition,
+              connected: callDurationSec > 10,
+              updatedAt: new Date(),
+            })
+            .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+          console.log(`[RTP Bridge] Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${canonicalDisposition}`);
+
+          dispositionResult = await processDisposition(
+            session.callContext.callAttemptId,
+            canonicalDisposition,
+            'sip_gemini',
+            {
+              transcript,
+              structuredTranscript: { turns: session.transcriptTurns },
+            }
+          );
+        }
         session.dispositionProcessed = true;
 
         console.log(
           `[RTP Bridge] Disposition processed for ${session.callContext.callAttemptId}` +
-          ` | leadId=${dispositionResult.leadId || 'none'}` +
+          ` | leadId=${dispositionResult?.leadId || 'none'}` +
           ` | transcriptChars=${transcript?.length || 0}`
         );
 
@@ -660,13 +672,15 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
           const durationSec = Math.round((Date.now() - session.metrics.startTime) / 1000);
           await processSIPPostCallAnalysis({
             callAttemptId: session.callContext.callAttemptId,
-            leadId: dispositionResult.leadId,
+            leadId: dispositionResult?.leadId,
             campaignId: session.callContext.campaignId || '',
             contactName: session.callContext.contactName || session.callContext.contactFirstName,
             disposition: canonicalDisposition,
             turnTranscript: session.transcriptTurns,
-            callDurationSeconds: durationSec,
+            callDurationSeconds: syntheticPreviewAttempt ? callDurationSec : durationSec,
             agentNotes: notes || '',
+            previewSessionId: session.callContext.previewSessionId,
+            providerCallId: session.callId,
           });
           console.log(`[RTP Bridge] 📝 SIP post-call analysis completed for ${session.callContext.callAttemptId}`);
         } catch (postCallErr) {
@@ -826,21 +840,28 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
       const callDurationSec = Math.floor(durationSec);
 
       // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition
-      await db.update(dialerCallAttempts)
-        .set({
-          callDurationSeconds: callDurationSec,
-          callEndedAt: new Date(),
-          disposition,
-          connected: callDurationSec > 10,
-          updatedAt: new Date(),
-        })
-        .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
-      console.log(`[RTP Bridge] Fallback: Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${disposition}`);
+      const syntheticPreviewAttempt = isSyntheticPreviewAttempt(session.callContext.callAttemptId);
+      let dispResult: Awaited<ReturnType<typeof processDisposition>> | null = null;
 
-      const dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
-        transcript,
-        structuredTranscript: { turns: session.transcriptTurns },
-      });
+      if (syntheticPreviewAttempt) {
+        console.log(`[RTP Bridge] Fallback: synthetic Preview Studio attempt ${session.callContext.callAttemptId} - skipping disposition engine`);
+      } else {
+        await db.update(dialerCallAttempts)
+          .set({
+            callDurationSeconds: callDurationSec,
+            callEndedAt: new Date(),
+            disposition,
+            connected: callDurationSec > 10,
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+        console.log(`[RTP Bridge] Fallback: Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${disposition}`);
+
+        dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
+          transcript,
+          structuredTranscript: { turns: session.transcriptTurns },
+        });
+      }
       session.dispositionProcessed = true;
 
       if (session.callContext.queueItemId) {
@@ -858,13 +879,15 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
       try {
         await processSIPPostCallAnalysis({
           callAttemptId: session.callContext.callAttemptId,
-          leadId: dispResult.leadId,
+          leadId: dispResult?.leadId,
           campaignId: session.callContext.campaignId || '',
           contactName: session.callContext.contactName || session.callContext.contactFirstName,
           disposition,
           turnTranscript: session.transcriptTurns,
           callDurationSeconds: Math.round(durationSec),
           agentNotes: `Fallback: ${reason}`,
+          previewSessionId: session.callContext.previewSessionId,
+          providerCallId: session.callId,
         });
         console.log(`[RTP Bridge] 📝 Fallback post-call analysis completed`);
       } catch (postCallErr) {
@@ -905,22 +928,27 @@ export async function closeBridgeSession(callId: string): Promise<void> {
     console.log(`[RTP Bridge] closeBridgeSession fallback: ${disposition} for ${session.callContext.callAttemptId} (${callDurationSec}s, turns=${session.transcriptTurns.length})`);
 
     try {
-      // Update call attempt duration BEFORE processing disposition
-      await db.update(dialerCallAttempts)
-        .set({
-          callDurationSeconds: callDurationSec,
-          callEndedAt: new Date(),
-          disposition,
-          connected: callDurationSec > 10,
-          updatedAt: new Date(),
-        })
-        .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
-
       const transcript = buildPlainTranscript(session.transcriptTurns);
-      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_session_close', {
-        transcript,
-        structuredTranscript: { turns: session.transcriptTurns },
-      });
+      const syntheticPreviewAttempt = isSyntheticPreviewAttempt(session.callContext.callAttemptId);
+
+      if (syntheticPreviewAttempt) {
+        console.log(`[RTP Bridge] closeBridgeSession: synthetic Preview Studio attempt ${session.callContext.callAttemptId} - skipping disposition engine`);
+      } else {
+        await db.update(dialerCallAttempts)
+          .set({
+            callDurationSeconds: callDurationSec,
+            callEndedAt: new Date(),
+            disposition,
+            connected: callDurationSec > 10,
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+
+        await processDisposition(session.callContext.callAttemptId, disposition, 'sip_session_close', {
+          transcript,
+          structuredTranscript: { turns: session.transcriptTurns },
+        });
+      }
       session.dispositionProcessed = true;
 
       if (session.callContext.queueItemId) {
@@ -929,6 +957,18 @@ export async function closeBridgeSession(callId: string): Promise<void> {
           .set({ status: queueStatus, updatedAt: new Date(), enqueuedReason: reason })
           .where(eq(campaignQueue.id, session.callContext.queueItemId));
       }
+
+      await processSIPPostCallAnalysis({
+        callAttemptId: session.callContext.callAttemptId,
+        campaignId: session.callContext.campaignId || '',
+        contactName: session.callContext.contactName || session.callContext.contactFirstName,
+        disposition,
+        turnTranscript: session.transcriptTurns,
+        callDurationSeconds: callDurationSec,
+        agentNotes: `Fallback: ${reason}`,
+        previewSessionId: session.callContext.previewSessionId,
+        providerCallId: session.callId,
+      });
     } catch (err) {
       console.error(`[RTP Bridge] closeBridgeSession: Failed to process fallback disposition:`, err);
     }

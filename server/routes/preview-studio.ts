@@ -13,6 +13,7 @@ import {
   campaignAgentAssignments,
   callSessions,
   leads,
+  agentDefaults,
   type PreviewStudioSession,
   type PreviewSimulationTranscript,
   type PreviewGeneratedContent,
@@ -93,6 +94,14 @@ function buildTranscriptText(transcripts: Array<{ role: string; content: string 
     .join('\n');
 }
 
+function countTranscriptLines(transcriptText: string | null | undefined): number {
+  return String(transcriptText || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .length;
+}
+
 function inferDispositionFromTranscript(transcriptText: string, metadata: Record<string, unknown>): string {
   const lower = transcriptText.toLowerCase();
   const endReason = String(metadata.endReason || '').toLowerCase();
@@ -134,8 +143,47 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<PreviewPost
     .orderBy(previewSimulationTranscripts.timestampMs);
 
   const metadata = ((session.metadata as Record<string, unknown>) || {}) as Record<string, unknown>;
-  const transcriptText = buildTranscriptText(transcripts);
-  const turnCount = transcripts.length;
+  let voiceDialerDisposition: string | null = null;
+  let voiceDialerAnalysis: Record<string, unknown> | null = null;
+  let transcriptText = buildTranscriptText(transcripts);
+  let turnCount = transcripts.length;
+  const callSessionId = typeof metadata.callSessionId === 'string' ? metadata.callSessionId : undefined;
+  const callControlId = typeof metadata.callControlId === 'string' ? metadata.callControlId : undefined;
+
+  try {
+    let csRecord: typeof callSessions.$inferSelect | null = null;
+
+    if (callSessionId) {
+      const [byId] = await db
+        .select()
+        .from(callSessions)
+        .where(eq(callSessions.id, callSessionId))
+        .limit(1);
+      csRecord = byId || null;
+    } else if (callControlId) {
+      const [byCallControlId] = await db
+        .select()
+        .from(callSessions)
+        .where(eq(callSessions.telnyxCallId, callControlId))
+        .orderBy(desc(callSessions.startedAt))
+        .limit(1);
+      csRecord = byCallControlId || null;
+    }
+
+    if (csRecord?.aiDisposition) {
+      voiceDialerDisposition = csRecord.aiDisposition;
+      voiceDialerAnalysis = (csRecord as any).aiAnalysis?.postCallAnalysis || null;
+      if (!transcriptText.trim() && csRecord.aiTranscript) {
+        transcriptText = csRecord.aiTranscript;
+      }
+      if (turnCount === 0 && csRecord.aiTranscript) {
+        turnCount = countTranscriptLines(csRecord.aiTranscript);
+      }
+      console.log(`[Preview Studio] Using voice-dialer disposition: ${voiceDialerDisposition} (from callSession ${csRecord.id})`);
+    }
+  } catch (lookupErr) {
+    console.warn('[Preview Studio] callSessions lookup failed:', lookupErr);
+  }
 
   const existingTurnCount = Number(metadata.postCallAnalysisTranscriptCount || 0);
   if (
@@ -147,30 +195,6 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<PreviewPost
       finalDisposition: String(metadata.finalDisposition),
       postCallAnalysis: metadata.postCallAnalysis as Record<string, unknown>,
     };
-  }
-
-  // Check if the voice-dialer's full post-call analysis pipeline has already
-  // determined a disposition via callSessions (includes AI-powered campaign outcome evaluation).
-  let voiceDialerDisposition: string | null = null;
-  let voiceDialerAnalysis: Record<string, unknown> | null = null;
-  const callControlId = metadata.callControlId as string | undefined;
-  if (callControlId) {
-    try {
-      const [csRecord] = await db
-        .select()
-        .from(callSessions)
-        .where(eq(callSessions.telnyxCallId, callControlId))
-        .orderBy(desc(callSessions.startedAt))
-        .limit(1);
-
-      if (csRecord?.aiDisposition) {
-        voiceDialerDisposition = csRecord.aiDisposition;
-        voiceDialerAnalysis = (csRecord as any).aiAnalysis?.postCallAnalysis || null;
-        console.log(`[Preview Studio] Using voice-dialer disposition: ${voiceDialerDisposition} (from callSession ${csRecord.id})`);
-      }
-    } catch (lookupErr) {
-      console.warn('[Preview Studio] callSessions lookup failed:', lookupErr);
-    }
   }
 
   const finalDisposition = voiceDialerDisposition || inferDispositionFromTranscript(transcriptText, metadata);
@@ -197,7 +221,7 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<PreviewPost
     transcriptAvailable: transcriptText.trim().length > 0,
     summary:
       transcriptText.trim().length > 0
-        ? `Post-call analysis ready (${turnCount} turns captured).`
+        ? String(voiceDialerAnalysis?.summary || `Post-call analysis ready (${turnCount} turns captured).`)
         : 'Call ended. No transcript captured yet; showing provisional outcome.',
     conversationQuality,
     ...(voiceDialerAnalysis ? { voiceDialerAnalysis } : {}),
@@ -439,6 +463,7 @@ export interface PhoneTestStartResponse {
   campaignName: string | null;
   agentName: string | null;
   voiceProvider: string;
+  engine?: 'sip' | 'texml';
 }
 
 // ==================== ENDPOINTS ====================
@@ -1121,8 +1146,8 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
 
 /**
  * POST /api/preview-studio/phone-test/start
- * Initiate a real phone call test (same flow as campaign test calls)
- * This uses Telnyx TeXML to place a real call and connects to OpenAI Realtime
+ * Initiate a real phone call test (same flow as campaign test calls).
+ * Uses either direct SIP or Telnyx TeXML based on the configured call engine.
  */
 router.post("/phone-test/start", requireAuth, async (req, res) => {
   try {
@@ -1166,21 +1191,6 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       hasCustomFirstMessage: !!customFirstMessage,
     });
 
-    // Check environment configuration
-    const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
-
-    if (!telnyxApiKey || telnyxApiKey.startsWith('REPLACE_ME')) {
-      return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY." });
-    }
-    if (!openaiApiKey) {
-      return res.status(500).json({ message: "OpenAI API key not configured" });
-    }
-    if (!texmlAppId) {
-      return res.status(500).json({ message: "Telnyx TeXML Application ID not configured." });
-    }
-
     // Get campaign
     const [campaign] = await db
       .select()
@@ -1191,6 +1201,13 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     if (!campaign) {
       return res.status(404).json({ message: "Campaign not found" });
     }
+
+    const [engineDefaults] = await db
+      .select({ defaultCallEngine: agentDefaults.defaultCallEngine })
+      .from(agentDefaults)
+      .limit(1);
+    const requestedCallEngine = engineDefaults?.defaultCallEngine || 'texml';
+    console.log(`[Preview Studio Phone Test] Call engine from DB: "${engineDefaults?.defaultCallEngine}" -> using: "${requestedCallEngine}"`);
 
     // Resolve virtual agent (optional for Preview Studio - can use custom prompts)
     const resolvedVirtualAgentId = await resolveVirtualAgentId({
@@ -1302,6 +1319,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
         testCallId,
         testPhoneNumber: normalizedPhone,
         voiceProvider,
+        requestedCallEngine,
         startedAt: new Date().toISOString(),
         agentSettings: mergedSettings,
         accountName: account?.name || null,
@@ -1475,6 +1493,87 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
+    let sipFallbackReason: string | undefined;
+    if (requestedCallEngine === 'sip') {
+      if (voiceProvider !== 'google') {
+        sipFallbackReason = 'Preview Studio SIP currently supports Google/Gemini voices only';
+        console.warn(`[Preview Studio Phone Test] ${sipFallbackReason} - falling back to TeXML`);
+      } else {
+        const { isReady: isSipReady, initiateAiCall: initiateSipCall } = await import("../services/sip");
+
+        if (!isSipReady()) {
+          sipFallbackReason = 'SIP engine not ready';
+          console.warn(`[Preview Studio Phone Test] SIP engine selected but not ready - falling back to TeXML`);
+        } else {
+          const sipResult = await initiateSipCall({
+            toNumber: normalizedPhone,
+            fromNumber,
+            campaignId,
+            contactId: contactId || '',
+            queueItemId: '',
+            callAttemptId: unifiedContext.callAttemptId,
+            previewSessionId: session.id,
+            voiceName: unifiedContext.voice || 'Puck',
+            systemPrompt: unifiedContext.systemPrompt,
+            contactName: unifiedContext.contactName,
+            contactFirstName: unifiedContext.contactFirstName,
+            contactJobTitle: unifiedContext.contactJobTitle,
+            accountName: unifiedContext.accountName,
+            organizationName: unifiedContext.organizationName,
+            campaignName: campaign.name,
+            campaignType: unifiedContext.campaignType || null,
+            campaignObjective: unifiedContext.campaignObjective,
+            successCriteria: unifiedContext.successCriteria,
+            targetAudienceDescription: unifiedContext.targetAudienceDescription,
+            productServiceInfo: unifiedContext.productServiceInfo,
+            talkingPoints: unifiedContext.talkingPoints,
+            campaignContextBrief: unifiedContext.campaignContextBrief,
+            callFlow: unifiedContext.callFlow,
+            firstMessage: unifiedContext.firstMessage,
+            maxCallDurationSeconds: unifiedContext.maxCallDurationSeconds ?? 300,
+            callerNumberId,
+            callerNumberDecisionId,
+          });
+
+          if (sipResult.success) {
+            const sipCallControlId = sipResult.callControlId || sipResult.callId;
+            if (!sipCallControlId) {
+              throw new Error('SIP call started without a call ID');
+            }
+
+            await db.update(previewStudioSessions)
+              .set({
+                metadata: {
+                  ...(session.metadata as Record<string, unknown> || {}),
+                  callControlId: sipCallControlId,
+                  callEngine: 'sip',
+                  sipFallbackReason: null,
+                },
+              })
+              .where(eq(previewStudioSessions.id, session.id));
+
+            const response: PhoneTestStartResponse = {
+              success: true,
+              message: "Phone test initiated. Your phone will ring shortly.",
+              sessionId: session.id,
+              testCallId,
+              callControlId: sipCallControlId,
+              phoneNumber: normalizedPhone,
+              campaignName: campaign.name,
+              agentName: unifiedContext.agentName,
+              voiceProvider,
+              engine: 'sip',
+            };
+
+            return res.json(response);
+          }
+
+          sipFallbackReason = sipResult.error || 'SIP call failed';
+          console.warn(`[Preview Studio Phone Test] SIP initiation failed (${sipFallbackReason}) - falling back to TeXML`);
+        }
+      }
+    }
+
     // Prepare webhook URL - match admin test call logic (campaign-test-calls.ts)
     // In development, prefer the ngrok tunnel host
     let webhookHost = '';
@@ -1494,6 +1593,20 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
+
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
+
+    if (!telnyxApiKey || telnyxApiKey.startsWith('REPLACE_ME')) {
+      return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY." });
+    }
+    if (voiceProvider === 'openai' && !openaiApiKey) {
+      return res.status(500).json({ message: "OpenAI API key not configured" });
+    }
+    if (!texmlAppId) {
+      return res.status(500).json({ message: "Telnyx TeXML Application ID not configured." });
+    }
 
     console.log('[Preview Studio Phone Test] Initiating Telnyx call to:', normalizedPhone);
 
@@ -1537,7 +1650,12 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
         .set({
           status: 'error',
           endedAt: new Date(),
-          metadata: { ...(session.metadata as Record<string, unknown> || {}), error: friendlyMessage },
+          metadata: {
+            ...(session.metadata as Record<string, unknown> || {}),
+            error: friendlyMessage,
+            callEngine: 'texml',
+            sipFallbackReason: sipFallbackReason || null,
+          },
         })
         .where(eq(previewStudioSessions.id, session.id));
 
@@ -1550,7 +1668,12 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     // Update session with call control ID
     await db.update(previewStudioSessions)
       .set({
-        metadata: { ...(session.metadata as Record<string, unknown> || {}), callControlId },
+        metadata: {
+          ...(session.metadata as Record<string, unknown> || {}),
+          callControlId,
+          callEngine: 'texml',
+          sipFallbackReason: sipFallbackReason || null,
+        },
       })
       .where(eq(previewStudioSessions.id, session.id));
 
@@ -1566,6 +1689,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       campaignName: campaign.name,
       agentName: unifiedContext.agentName,
       voiceProvider,
+      engine: 'texml',
     };
 
     res.json(response);
@@ -1643,6 +1767,7 @@ router.post("/phone-test/:sessionId/hangup", requireAuth, async (req, res) => {
 
     const metadata = session.metadata as any;
     const callControlId = metadata?.callControlId;
+    const callEngine = metadata?.callEngine;
 
     if (!callControlId) {
       // No call control ID - just mark as ended
@@ -1657,37 +1782,46 @@ router.post("/phone-test/:sessionId/hangup", requireAuth, async (req, res) => {
       return res.json({ success: true, message: "Session ended (no active call)" });
     }
 
-    // Call Telnyx to hang up the call
-    const telnyxApiKey = process.env.TELNYX_API_KEY;
-    if (!telnyxApiKey) {
-      return res.status(500).json({ message: "Telnyx API key not configured" });
-    }
-
-    console.log(`[Preview Studio] Hanging up call with call_control_id: ${callControlId}`);
-
-    try {
-      const hangupResponse = await fetch(
-        `https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${telnyxApiKey}`,
-          },
-          body: JSON.stringify({}),
+    if (callEngine === 'sip') {
+      try {
+        const { endCall } = await import("../services/sip");
+        const ended = await endCall(callControlId, 'preview_studio_user_hangup');
+        if (!ended) {
+          console.warn(`[Preview Studio] SIP hangup returned false for ${callControlId}`);
         }
-      );
-
-      if (!hangupResponse.ok) {
-        const errorText = await hangupResponse.text();
-        console.error(`[Preview Studio] Telnyx hangup error: ${hangupResponse.status} - ${errorText}`);
-        // Still mark as ended even if Telnyx fails (call might have already ended)
-      } else {
-        console.log(`[Preview Studio] Telnyx hangup successful for ${callControlId}`);
+      } catch (sipError) {
+        console.error("[Preview Studio] SIP hangup request failed:", sipError);
       }
-    } catch (telnyxError) {
-      console.error("[Preview Studio] Telnyx hangup request failed:", telnyxError);
-      // Continue to mark session as ended
+    } else {
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "Telnyx API key not configured" });
+      }
+
+      console.log(`[Preview Studio] Hanging up call with call_control_id: ${callControlId}`);
+
+      try {
+        const hangupResponse = await fetch(
+          `https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${telnyxApiKey}`,
+            },
+            body: JSON.stringify({}),
+          }
+        );
+
+        if (!hangupResponse.ok) {
+          const errorText = await hangupResponse.text();
+          console.error(`[Preview Studio] Telnyx hangup error: ${hangupResponse.status} - ${errorText}`);
+        } else {
+          console.log(`[Preview Studio] Telnyx hangup successful for ${callControlId}`);
+        }
+      } catch (telnyxError) {
+        console.error("[Preview Studio] Telnyx hangup request failed:", telnyxError);
+      }
     }
 
     // Update session status

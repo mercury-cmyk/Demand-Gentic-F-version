@@ -486,7 +486,7 @@ export default function PreviewStudioPage() {
                   <div className="mt-1.5 space-y-1">
                     {[
                       { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain, confidence: intelligenceStatus?.accountIntelligence?.confidence, required: true },
-                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: true },
+                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: false },
                       { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2, required: false },
                       { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target, required: false },
                     ].map(item => (
@@ -512,7 +512,7 @@ export default function PreviewStudioPage() {
                   <div className="mt-1.5 space-y-1">
                     {[
                       { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain, required: true },
-                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, required: true },
+                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, required: false },
                       { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2, required: false },
                       { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target, required: false },
                     ].map(item => (
@@ -522,7 +522,7 @@ export default function PreviewStudioPage() {
                       </div>
                     ))}
                   </div>
-                  {(intelligenceStatus?.missingRequiredComponents?.length || intelligenceStatus?.missingComponents?.includes('Account Intelligence') || intelligenceStatus?.missingComponents?.includes('Problem Intelligence')) && (
+                  {(intelligenceStatus?.missingRequiredComponents?.length || intelligenceStatus?.missingComponents?.includes('Account Intelligence')) && (
                     <Button
                       size="sm"
                       onClick={() => generateIntelligenceMutation.mutate()}
@@ -537,7 +537,7 @@ export default function PreviewStudioPage() {
                     </Button>
                   )}
                   <p className="text-xs text-amber-200/50 mt-1.5">
-                    Account & Problem intelligence required. Org & Solution Mapping are optional enhancements.
+                    Account intelligence is required. Problem, Org, and Solution Mapping improve quality but do not block previews.
                   </p>
                 </div>
               )}

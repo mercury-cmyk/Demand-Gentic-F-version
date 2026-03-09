@@ -869,11 +869,7 @@ export default function OpsHub() {
   const handleChatSend = async () => {
     const prompt = chatInput.trim();
     if (!prompt) return;
-    const requestMode = codingAgentMode === 'plan' ? 'general' : modelSelector;
-    const requestPrompt =
-      codingAgentMode === 'plan'
-        ? `Create a concise execution plan for this request. Do not make or apply file changes yet.\n\n${prompt}`
-        : prompt;
+    const requestMode = codingAgentMode === 'plan' ? 'plan' : modelSelector;
 
     const userMessage: ChatMessage = { role: 'user', content: prompt, timestamp: new Date() };
     setChatMessages((current) => [...current, userMessage]);
@@ -885,7 +881,7 @@ export default function OpsHub() {
         'POST',
         '/api/ops/coding-agent',
         {
-          prompt: requestPrompt,
+          prompt,
           mode: requestMode,
           selectedFilePath: selectedFile?.path,
           selectedFileContent: selectedFile?.dirty ? selectedFile.content : undefined,
@@ -1267,7 +1263,7 @@ export default function OpsHub() {
                               : 'text-slate-500 hover:text-slate-700'
                           }`}
                         >
-                          Edit
+                          Agent
                         </button>
                         <button
                           onClick={() => setCodingAgentMode('plan')}

@@ -902,14 +902,14 @@ export default function ClientPortalPreviewStudioPage() {
                   const orgDone = intelligenceStatus?.organizationIntelligence?.available || false;
                   const solnDone = intelligenceStatus?.solutionMapping?.available || false;
                   const probDone = intelligenceStatus?.problemIntelligence?.available || false;
-                  // Core intelligence = auto-generatable (Account + Problem). These are required.
-                  // Org Intelligence + Solution Mapping are optional enhancements.
+                  // Preview unlocks once account intelligence is available.
+                  // Problem Intelligence, Org Intelligence, and Solution Mapping are quality enhancements.
                   const coreReady = intelligenceReady; // ready now means core components only
                   const allDone = acctDone && orgDone && solnDone && probDone;
 
                   const stepItems = [
                     { key: 'acct', label: 'Account Intelligence', description: 'Prospect company research', icon: Brain, done: acctDone, confidence: intelligenceStatus?.accountIntelligence?.confidence, required: true },
-                    { key: 'prob', label: 'Problem Intelligence', description: 'Problem detection & messaging', icon: Zap, done: probDone, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: true },
+                    { key: 'prob', label: 'Problem Intelligence', description: 'Problem detection & messaging (recommended)', icon: Zap, done: probDone, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: false },
                     { key: 'org', label: 'Organization Intelligence', description: 'Your company profile (optional)', icon: Building2, done: orgDone, required: false },
                     { key: 'soln', label: 'Solution Mapping', description: 'Product-problem alignment (optional)', icon: Target, done: solnDone, required: false },
                   ];

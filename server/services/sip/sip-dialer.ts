@@ -59,6 +59,7 @@ export interface InitiateCallParams {
   callerNumberDecisionId?: string | null;
   // Call attempt tracking (for disposition processing)
   callAttemptId?: string | null;
+  previewSessionId?: string | null;
   telephonyProviderOverride?: {
     sipDomain?: string;
     sipProxy?: string;
@@ -224,6 +225,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
           callerNumberId: params.callerNumberId,
           phoneNumber: params.toNumber,
           callAttemptId: params.callAttemptId,
+          previewSessionId: params.previewSessionId,
           // Safety hints for the SIP media bridge runtime
           voicemailAutoHangup: true,
           voicemailSilenceGuardMs: 10000,

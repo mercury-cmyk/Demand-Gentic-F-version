@@ -9,7 +9,7 @@ import { readWorkspaceFile, writeWorkspaceFile } from "./runtime";
 
 export interface OpsCodeAgentRequest {
   prompt: string;
-  mode?: "simple-edit" | "debug" | "deploy" | "general";
+  mode?: "simple-edit" | "debug" | "deploy" | "general" | "plan";
   selectedFilePath?: string | null;
   selectedFileContent?: string | null;
   applyChanges?: boolean;
@@ -42,6 +42,207 @@ type AgentRuntimeResponse = {
   content: string;
 };
 
+type OpsCodeAgentMode = NonNullable<OpsCodeAgentRequest["mode"]>;
+type AgentTask = "code" | "analysis" | "reasoning" | "general";
+
+const AGENTX_SHARED_BASE_PROMPT = [
+  "You are AgentX - The Architect, the primary coding and planning agent inside Ops Hub.",
+  "",
+  "Mission:",
+  "- deliver correct, minimal, defensible engineering outcomes",
+  "- use provided context carefully and never invent missing repository state",
+  "- prioritize safe progress over broad speculation",
+  "",
+  "Working principles:",
+  "- understand the request before acting",
+  "- distinguish facts, reasonable inferences, and unknowns",
+  "- make low-risk assumptions only when they do not change behavior materially",
+  "- surface high-risk ambiguity instead of guessing",
+  "- prefer the narrowest complete solution",
+  "- follow existing patterns visible in the provided file and context",
+  "- preserve unrelated behavior, interfaces, formatting style, comments, and naming unless a change is required",
+  "",
+  "Quality bar:",
+  "- correctness before cleverness",
+  "- clarity before compression",
+  "- maintainability before novelty",
+  "- reversibility for risky changes",
+  "- note material trade-offs, edge cases, and missing validation only when they affect the outcome",
+  "",
+  "Safety rules:",
+  "- do not invent files, APIs, commands, logs, tests, or deployments",
+  "- do not claim code was run, verified, or shipped unless that result is explicitly available",
+  "- do not imply multi-file completion from single-file context",
+  "- do not silently broaden scope",
+  "- if blocked, explain the exact blocker and the next best action",
+  "- avoid reproducing sensitive secrets or credentials",
+  "",
+  "Reasoning discipline:",
+  "- reason carefully and step by step internally",
+  "- provide conclusions, decisions, and concrete actions",
+  "- do not expose hidden chain-of-thought",
+  "- before finalizing, check for obvious syntax, naming, import, type, nullability, async, and logic issues within the visible context",
+  "",
+  "Communication style:",
+  "- concise",
+  "- direct",
+  "- factual",
+  "- implementation-focused",
+  "- no filler, no marketing language",
+].join("\n");
+
+const AGENTX_AGENT_MODE_PROMPT = [
+  "Mode: Agent",
+  "",
+  "Use this mode when the user wants a direct code change and a workspace file is selected.",
+  "",
+  "Execution rules:",
+  "- treat the selected file path and selected file content as the source of truth",
+  "- edit only the selected file",
+  "- make the smallest safe change that fully satisfies the request",
+  "- preserve unrelated code and local conventions",
+  "- do not perform opportunistic cleanup or large rewrites unless required for correctness",
+  "- if the correct solution depends on other files, unseen types, external runtime behavior, or repository-wide changes, do not fake completion",
+  "- if no safe single-file edit is possible, leave the file unchanged and explain why briefly",
+  "- if no file is selected and editing is required, instruct the user to open a workspace file or switch to Plan mode",
+  "",
+  "Response contract:",
+  '- return valid JSON only',
+  '- use exactly these keys: "summary" and "updatedContent"',
+  '- "summary" must briefly state what changed, or why no safe change was made',
+  '- "updatedContent" must contain the complete final contents of the selected file',
+  '- if blocked or unsafe, return the original content unchanged in "updatedContent"',
+].join("\n");
+
+const AGENTX_PLAN_MODE_PROMPT = [
+  "Mode: Plan",
+  "",
+  "Use this mode when no file is selected, when the task likely spans multiple files, or when the user wants guidance before edits.",
+  "",
+  "Planning rules:",
+  "- do not edit files",
+  "- use the selected file only as context if one is provided",
+  "- produce a concrete implementation plan, not a generic explanation",
+  "- favor the safest path with the fewest moving parts",
+  "- identify likely files, dependencies, risks, and verification steps",
+  "- make assumptions explicit when needed",
+  "- if critical information is missing, state the blocker plainly and give the next best path forward",
+  "",
+  "Response format:",
+  "Return a concise plan with these sections:",
+  "1. Goal",
+  "2. Known Context",
+  "3. Assumptions",
+  "4. Proposed Changes",
+  "5. Execution Steps",
+  "6. Risks",
+  "7. Verification",
+  "",
+  "Style:",
+  "- keep it short",
+  "- prefer specific steps over theory",
+  "- be operational and decision-oriented",
+].join("\n");
+
+function resolveMode(mode?: OpsCodeAgentRequest["mode"]): OpsCodeAgentMode {
+  return mode ?? "general";
+}
+
+function getAgentTask(mode?: OpsCodeAgentRequest["mode"]): AgentTask {
+  const resolvedMode = resolveMode(mode);
+
+  if (resolvedMode === "simple-edit") {
+    return "code";
+  }
+
+  if (resolvedMode === "debug") {
+    return "analysis";
+  }
+
+  if (resolvedMode === "deploy" || resolvedMode === "plan") {
+    return "reasoning";
+  }
+
+  return "general";
+}
+
+function buildSelectedFileContext(
+  selectedFilePath?: string | null,
+  selectedFileContent?: string | null,
+): string {
+  return [
+    selectedFilePath
+      ? `Selected file path: ${selectedFilePath}`
+      : "Selected file path: none",
+    typeof selectedFileContent === "string"
+      ? `Selected file content:\n${selectedFileContent}`
+      : "Selected file content: unavailable",
+  ].join("\n\n");
+}
+
+function buildPlanFocus(mode?: OpsCodeAgentRequest["mode"]): string {
+  const resolvedMode = resolveMode(mode);
+
+  if (resolvedMode === "debug") {
+    return [
+      "Plan emphasis:",
+      "- diagnose the most likely root cause",
+      "- identify the narrowest safe fix",
+      "- call out observability gaps and regression checks",
+    ].join("\n");
+  }
+
+  if (resolvedMode === "deploy") {
+    return [
+      "Plan emphasis:",
+      "- focus on deployment steps, dependencies, and rollout order",
+      "- include verification and rollback considerations",
+      "- note environment or credential prerequisites",
+    ].join("\n");
+  }
+
+  return [
+    "Plan emphasis:",
+    "- produce an implementation-ready engineering plan",
+    "- favor the smallest safe solution",
+    "- call out likely files, dependencies, and validation steps",
+  ].join("\n");
+}
+
+function buildAgentFileEditPrompt(
+  request: OpsCodeAgentRequest,
+  file: { path: string; content: string },
+): string {
+  return [
+    AGENTX_SHARED_BASE_PROMPT,
+    "",
+    AGENTX_AGENT_MODE_PROMPT,
+    "",
+    "Context:",
+    buildSelectedFileContext(file.path, file.content),
+    "",
+    `User request:\n${request.prompt}`,
+  ].join("\n");
+}
+
+function buildPlanResponsePrompt(request: OpsCodeAgentRequest): string {
+  return [
+    AGENTX_SHARED_BASE_PROMPT,
+    "",
+    AGENTX_PLAN_MODE_PROMPT,
+    "",
+    buildPlanFocus(request.mode),
+    "",
+    "Context:",
+    buildSelectedFileContext(
+      request.selectedFilePath,
+      request.selectedFileContent,
+    ),
+    "",
+    `User request:\n${request.prompt}`,
+  ].join("\n");
+}
+
 async function requestAgentResponse(
   agentOptions: Pick<
     AgentRequest,
@@ -59,14 +260,7 @@ async function requestAgentResponse(
 
   return getOrchestrator().execute({
     prompt,
-    task:
-      mode === "simple-edit"
-        ? "code"
-        : mode === "debug"
-          ? "analysis"
-          : mode === "deploy"
-            ? "reasoning"
-            : "general",
+    task: getAgentTask(mode),
     context,
     providerMode: selection.providerMode,
     preferredProvider: selection.preferredProvider ?? undefined,
@@ -129,25 +323,7 @@ async function requestAgentXFileEdit(
   const { generateJSON, getVertexConfig } = await import("../vertex-ai/index.js");
 
   const payload = await generateJSON<SingleFileEditPayload>(
-    [
-      "You are AgentX, the coding operator inside Ops Hub.",
-      "Edit exactly one file using only the provided file content.",
-      "Return valid JSON with keys: summary and updatedContent.",
-      "updatedContent must contain the full file contents after the edit.",
-      "Preserve imports, formatting style, and unrelated code.",
-      "If the request cannot be completed safely within this file, leave the content unchanged and explain why in summary.",
-      "",
-      "Edit request payload:",
-      JSON.stringify(
-        {
-          instruction: request.prompt,
-          path: file.path,
-          content: file.content,
-        },
-        null,
-        2,
-      ),
-    ].join("\n"),
+    buildAgentFileEditPrompt(request, file),
     {
       maxTokens: 8192,
       temperature: 0.1,
@@ -172,35 +348,10 @@ async function requestAgentXResponse(
   request: OpsCodeAgentRequest,
 ): Promise<AgentRuntimeResponse> {
   const { generateText, getVertexConfig } = await import("../vertex-ai/index.js");
-  const mode = request.mode || "general";
-  const objective =
-    mode === "debug"
-      ? "Diagnose the issue, identify the root cause, and propose the narrowest safe fix."
-      : mode === "deploy"
-        ? "Focus on deployment steps, verification, and rollback risk."
-        : "Provide concise, implementation-focused coding guidance.";
-
-  const content = await generateText(
-    [
-      "You are AgentX, the coding operator inside Ops Hub.",
-      objective,
-      "Be concise, concrete, and action-oriented.",
-      request.selectedFilePath
-        ? `Selected file: ${request.selectedFilePath}`
-        : "No file is currently selected.",
-      request.selectedFileContent
-        ? `Selected file content:\n${request.selectedFileContent}`
-        : "",
-      "",
-      `User request:\n${request.prompt}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-    {
-      maxTokens: 4096,
-      temperature: 0.2,
-    },
-  );
+  const content = await generateText(buildPlanResponsePrompt(request), {
+    maxTokens: 4096,
+    temperature: 0.2,
+  });
 
   return {
     provider: "agentx",
@@ -216,7 +367,8 @@ async function runSingleFileEdit(
   if (!request.selectedFilePath) {
     return {
       provider: "system",
-      summary: "Open a workspace file to enable direct edits, or switch to Plan for guidance.",
+      summary:
+        "Open a workspace file to enable Agent mode edits, or switch to Plan mode for guidance.",
       path: null,
       applied: false,
       changed: false,
@@ -253,23 +405,21 @@ async function runSingleFileEdit(
           temperature: 0.2,
           responseFormat: "json",
           systemPrompt: [
-            "You are a precise code editor working on a single file.",
-            "Apply the user's request only to the provided file content.",
-            "Return valid JSON with keys: summary and updatedContent.",
-            "updatedContent must contain the complete file contents after the edit.",
-            "Do not wrap the file or JSON in markdown fences.",
-            "Preserve imports, formatting style, and unrelated code.",
-          ].join(" "),
+            AGENTX_SHARED_BASE_PROMPT,
+            "",
+            AGENTX_AGENT_MODE_PROMPT,
+          ].join("\n"),
         },
         JSON.stringify({
-          instruction: request.prompt,
-          path: request.selectedFilePath,
-          content: file.content,
-        }),
+          selectedFilePath: request.selectedFilePath,
+          selectedFileContent: file.content,
+          userRequest: request.prompt,
+        }, null, 2),
         request.mode,
         request,
         {
           selectedFilePath: request.selectedFilePath,
+          selectedFileContent: file.content,
         },
       );
     } catch (providerError) {
@@ -368,8 +518,24 @@ export async function runOpsCodeAgent(
 
   try {
     const response = await requestAgentResponse(
-      {},
-      request.prompt,
+      {
+        systemPrompt: [
+          AGENTX_SHARED_BASE_PROMPT,
+          "",
+          AGENTX_PLAN_MODE_PROMPT,
+          "",
+          buildPlanFocus(request.mode),
+        ].join("\n"),
+      },
+      [
+        "Context:",
+        buildSelectedFileContext(
+          request.selectedFilePath,
+          request.selectedFileContent,
+        ),
+        "",
+        `User request:\n${request.prompt}`,
+      ].join("\n"),
       request.mode,
       request,
       request.selectedFilePath
