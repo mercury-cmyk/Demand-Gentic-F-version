@@ -396,22 +396,22 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
       const functionDecls = [
         {
           name: 'submit_disposition',
-          description: 'Submit call outcome/disposition',
+          description: 'Submit the final call outcome ONLY after completing ALL required call flow stages. CRITICAL RULES: (1) You MUST complete every required stage in the call flow before calling this. If the prospect just agreed to something (e.g. receiving a document, attending an event), you still need to complete the closing and graceful_exit stages. (2) NEVER call submit_disposition and end_call in the same turn — wait for the response first, then say goodbye, then call end_call separately. (3) Only call this ONCE per call. (4) If the prospect wants to end the call early or asks to be removed, you may call this before completing all stages.',
           parameters: {
             type: 'object',
             properties: {
               disposition: {
                 type: 'string',
-                description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
+                description: 'Call outcome: qualified_lead (ONLY after completing ALL required call flow stages including closing), not_interested (prospect explicitly declined), do_not_call (prospect requested removal), voicemail (automation detected), no_answer (pure silence), invalid_data (wrong number), callback_requested (prospect asked for callback), needs_review (ambiguous outcome)',
               },
-              notes: { type: 'string', description: 'Brief notes about the call' },
+              notes: { type: 'string', description: 'Brief notes about the call outcome and which stages were completed' },
             },
             required: ['disposition'],
           },
         },
         {
           name: 'end_call',
-          description: 'End the phone call gracefully',
+          description: 'End the phone call. RULES: (1) NEVER call this at the same time as submit_disposition — always wait for the disposition response first. (2) Before calling this, you MUST say a professional goodbye, thank the prospect, and confirm any next steps. (3) Only call this AFTER submit_disposition has been called and you have said goodbye.',
           parameters: {
             type: 'object',
             properties: {
@@ -693,7 +693,13 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
           console.error(`[RTP Bridge] SIP post-call analysis failed (non-fatal):`, postCallErr);
         }
 
-        response = { success: true, disposition: canonicalDisposition };
+        // Tell Gemini to complete the call professionally before ending
+        response = {
+          success: true,
+          disposition: canonicalDisposition,
+          instructions: 'Disposition recorded. You MUST now: 1) Confirm any next steps with the prospect (e.g. document delivery, meeting time), 2) Thank them professionally for their time, 3) Say a warm goodbye, 4) ONLY THEN call end_call. Do NOT skip these steps or rush to end the call.',
+        };
+        (session as any).dispositionSubmittedAt = Date.now();
       } catch (err) {
         console.error(`[RTP Bridge] Failed to process disposition:`, err);
         response = { success: false, error: 'Failed to save disposition' };
@@ -703,9 +709,18 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     const { reason } = call.args || {};
     console.log(`[RTP Bridge] End call requested: ${reason}`);
 
-    // Hang up the SIP call
-    sipClient.endCall(session.callId, reason);
-    response = { success: true, message: 'Call ended' };
+    // GUARD: If disposition was just submitted within 5 seconds, reject end_call
+    // and tell Gemini to say goodbye first. This prevents the agent from
+    // hanging up immediately after submitting disposition without a proper farewell.
+    const dispositionAge = Date.now() - ((session as any).dispositionSubmittedAt || 0);
+    if ((session as any).dispositionSubmittedAt && dispositionAge < 5000) {
+      console.log(`[RTP Bridge] [GUARD] Rejecting immediate end_call for ${session.callId} — disposition was submitted ${dispositionAge}ms ago. Agent must say goodbye first.`);
+      response = { success: false, error: 'You must say a professional goodbye to the prospect before ending the call. Thank them for their time, confirm next steps, and say farewell. Then call end_call again.' };
+    } else {
+      // Hang up the SIP call
+      sipClient.endCall(session.callId, reason);
+      response = { success: true, message: 'Call ended' };
+    }
   }
 
   // Send function response back to Gemini (camelCase for Vertex AI, snake_case for AI Studio)

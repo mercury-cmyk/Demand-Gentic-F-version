@@ -345,7 +345,6 @@ SUCCESS = explicit agreement to a specific date/time. Do NOT accept "maybe" as s
 - DO NOT pitch your company or any services
 - DO NOT try to qualify them on anything
 - DO NOT offer to schedule a follow-up meeting
-- DO NOT continue conversation after they say yes — END CALL IMMEDIATELY
 - DO NOT ask follow-up questions beyond email confirmation and consent
 
 **THE 7-STEP FLOW (NEVER DEVIATE):**
@@ -362,15 +361,17 @@ SUCCESS = explicit agreement to a specific date/time. Do NOT accept "maybe" as s
 
 (6) **PERMISSION REQUEST (5-10 seconds)**: "Can I send this across?"
 
-(7) **CLOSE (5 seconds)**: "Great. You'll have it in the next few minutes. Thanks [Name]!" THEN HANG UP.
+(7) **CLOSE AND GOODBYE (10-15 seconds)**: After they say yes: "Great. You'll have it in the next few minutes. Thanks so much for your time, [Name]! Have a wonderful day." — Say a warm, professional goodbye BEFORE ending the call. Do NOT hang up abruptly after "yes".
 
-**Total Call Duration**: 60-75 seconds. If the contact is asking questions or engaging, BRIEFLY answer but do NOT extend the conversation. Redirect to: "Let's get this in your inbox and you can review it. I'll send it over now."
+**Total Call Duration**: 60-90 seconds. If the contact is asking questions or engaging, BRIEFLY answer but do NOT extend the conversation. Redirect to: "Let's get this in your inbox and you can review it. I'll send it over now."
 
-**What Success Looks Like**: Contact says "yes" to receiving the asset. That's it. STOP the conversation immediately.
+**CRITICAL**: When the contact says "yes" to receiving the asset, you MUST still complete Step 7 (Close and Goodbye) before submitting disposition. Confirm delivery, thank them, and say goodbye professionally. Do NOT submit disposition or end the call the instant they say yes.
 
-**What Failure Looks Like**: Agent asks discovery questions, tries to qualify, attempts to pitch services, or continues talking after they say yes.
+**What Success Looks Like**: Contact says "yes" to receiving the asset, you confirm delivery, thank them, and say a professional goodbye.
 
-**Remember**: This is a CONTENT DISTRIBUTION campaign. Your job is to get permission to send an asset via email. The conversation should feel like delivering a package, not conducting an interview.`,
+**What Failure Looks Like**: Agent asks discovery questions, tries to qualify, attempts to pitch services, or hangs up abruptly without saying goodbye after they say yes.
+
+**Remember**: This is a CONTENT DISTRIBUTION campaign. Your job is to get permission to send an asset via email. The conversation should feel like delivering a package, not conducting an interview. But ALWAYS end with a professional, warm goodbye.`,
 
 
       'lead_qualification': `**LEAD QUALIFICATION CAMPAIGN** — Your goal has TWO parts: (1) Build awareness, and (2) qualify interest without over-complicating the call.

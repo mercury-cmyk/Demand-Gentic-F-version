@@ -519,9 +519,11 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         functionDeclarations: [
           {
             name: 'submit_disposition',
-            description: `Submit the final call outcome. CRITICAL RULES:
-- For "qualified_lead": You MUST first confirm a specific date and time for the appointment/demo BEFORE calling this. If the prospect agrees to meet but you haven't confirmed when, ASK for their availability first.
+            description: `Submit the final call outcome ONLY after completing ALL required call flow stages. CRITICAL RULES:
+- You MUST complete every required stage in the call flow before calling this. If the prospect just agreed to something (receiving a document, attending an event, scheduling a meeting), you still need to complete closing and graceful_exit stages first.
+- For "qualified_lead": You MUST first confirm all next-step details (appointment date/time, email for document delivery, etc.) AND say a professional goodbye BEFORE calling this.
 - NEVER call submit_disposition and end_call in the same turn. After submitting disposition, wait for the response, then say a professional goodbye, THEN call end_call separately.
+- A prospect saying "yes" or "sure" does NOT mean the call is done — continue to the next call flow stage.
 - Only call this ONCE per call.`,
             parameters: {
               type: 'object',
@@ -806,21 +808,21 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
       callDurationSeconds,
       context: session.context,
     });
-    // For qualified leads, tell Gemini to now confirm appointment and say goodbye
+    // For qualified leads, tell Gemini to complete the call professionally
     if (disposition === 'qualified_lead') {
       response = {
         success: true,
         disposition,
-        instructions: 'Disposition recorded. Now you MUST: 1) Confirm the appointment date and time with the prospect, 2) Thank them professionally, 3) Say goodbye, 4) THEN call end_call. Do NOT skip these steps.',
+        instructions: 'Disposition recorded. Now you MUST: 1) Confirm any next steps with the prospect (document delivery, meeting details, etc.), 2) Thank them professionally for their time, 3) Say a warm goodbye, 4) THEN call end_call. Do NOT skip these closing steps or hang up abruptly.',
       };
     } else {
       response = { success: true, disposition };
     }
   } else if (call.name === 'end_call') {
-    // GUARD: If disposition was just submitted in the same turn or within 3 seconds,
+    // GUARD: If disposition was just submitted in the same turn or within 5 seconds,
     // reject end_call and tell Gemini to say goodbye first.
     const dispositionAge = Date.now() - ((session as any).dispositionSubmittedAt || 0);
-    if ((session as any).dispositionSubmittedAt && dispositionAge < 3000) {
+    if ((session as any).dispositionSubmittedAt && dispositionAge < 5000) {
       log(`[GUARD] Rejecting immediate end_call for ${session.callId} — disposition was submitted ${dispositionAge}ms ago. Gemini must say goodbye first.`);
       if (session.geminiWs?.readyState === WebSocket.OPEN) {
         const toolResponse = {

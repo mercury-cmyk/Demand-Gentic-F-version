@@ -952,6 +952,7 @@ router.post('/coding-agent', async (req: Request, res: Response) => {
       mode: req.body?.mode,
       selectedFilePath: req.body?.selectedFilePath,
       selectedFileContent: req.body?.selectedFileContent,
+      contextFilePaths: Array.isArray(req.body?.contextFilePaths) ? req.body.contextFilePaths : undefined,
       applyChanges: Boolean(req.body?.applyChanges),
       providerMode: req.body?.providerMode,
       preferredProvider: req.body?.preferredProvider,

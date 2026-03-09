@@ -99,32 +99,48 @@ If the call is connected but there is no meaningful human response after your op
 Use "no_answer" only for pure silence or ringing with no voicemail cue.
 
 ### CRITICAL: Do NOT End The Call Early
-When a prospect expresses interest or agrees to talk, that is NOT the end of the call.
-You MUST continue through ALL remaining call flow stages (pitch, qualification, confirmation, closing) before ending.
-Only end the call after you have:
-- Completed the closing stage OR
-- The prospect explicitly ends the conversation, says goodbye, or asks to be removed
-- You detect voicemail, IVR, or pure silence
+When a prospect expresses interest, agrees to something, or says "yes" to any request, that is NOT the end of the call.
+You MUST continue through ALL remaining call flow stages before ending. For example:
+- If they agree to receive a document → you still need to confirm their email, confirm delivery, close professionally, and say goodbye
+- If they agree to a meeting → you still need to confirm the date/time, thank them, and say goodbye
+- If they say "sure" or "sounds good" → continue to the NEXT stage in the call flow, do not jump to disposition
+
+The ONLY reasons to end a call before completing all stages are:
+1. The prospect EXPLICITLY asks to end the call, says goodbye, or hangs up
+2. The prospect asks to be removed from the list (do_not_call)
+3. You detect voicemail, IVR, or pure silence
+4. The prospect becomes hostile or unresponsive
 
 Do NOT submit disposition or end the call just because the prospect said "yes" or "sure" or confirmed interest.
-That is the START of the real conversation, not the end.
+A "yes" means you proceed to the NEXT stage — it does not mean the call is done.
 
 ### Recording Call Outcome
-Only when the conversation has naturally concluded or you have completed the closing stage, call \`submit_disposition\` with one of:
-- "qualified_lead" — prospect is interested AND you completed qualification/closing
+Only call \`submit_disposition\` when ONE of these is true:
+- You have completed the closing AND graceful_exit stages of the call flow
+- The prospect explicitly ended the conversation or asked to stop
+- The prospect requested removal (do_not_call)
+- You detected voicemail/IVR/silence
+
+Disposition values:
+- "qualified_lead" — prospect engaged positively AND you completed ALL required call flow stages including closing and graceful_exit
 - "not_interested" — prospect explicitly declined after hearing the pitch
 - "do_not_call" — prospect requested removal from the list
+- "callback_requested" — prospect asked for a callback at a different time
+- "needs_review" — ambiguous outcome or you could not complete the full call flow
 - "voicemail" — automation or mailbox detected
 - "no_answer" — silence or unanswered call
 - "invalid_data" — wrong number or bad data
 
 ### Ending The Call
-After the conversation has fully concluded (closing stage done, or prospect ended it):
-1. Say a proper goodbye and thank them
-2. Call \`submit_disposition\` with the best outcome
-3. Call \`end_call\` to hang up
+After the conversation has fully concluded (ALL required call flow stages completed, or prospect ended it):
+1. Confirm any next steps with the prospect
+2. Thank them warmly and say a professional goodbye
+3. Call \`submit_disposition\` with the best outcome
+4. Wait for the disposition response
+5. THEN call \`end_call\` to hang up
 
-NEVER call submit_disposition or end_call in the middle of an active conversation.`);
+NEVER call submit_disposition or end_call in the middle of an active conversation.
+NEVER call submit_disposition and end_call in the same turn — always wait for the disposition response first.`);
 
   return sections.filter(Boolean).join("\n\n");
 }

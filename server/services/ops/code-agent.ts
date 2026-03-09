@@ -598,11 +598,147 @@ async function runSingleFileEdit(
   };
 }
 
+type MultiFileEditPayload = {
+  summary?: unknown;
+  files?: unknown;
+};
+
+async function runMultiFileEdit(
+  request: OpsCodeAgentRequest,
+): Promise<OpsCodeAgentResponse> {
+  // Gather context files
+  const contextFiles: Array<{ path: string; content: string }> = [];
+
+  // Include the selected file
+  if (request.selectedFilePath) {
+    const fileContent =
+      request.selectedFileContent ??
+      (await readWorkspaceFile(request.selectedFilePath).then((f) => f.content).catch(() => null));
+    if (fileContent !== null) {
+      contextFiles.push({ path: request.selectedFilePath, content: fileContent });
+    }
+  }
+
+  // Include additional context files
+  if (request.contextFilePaths?.length) {
+    for (const filePath of request.contextFilePaths) {
+      if (contextFiles.some((f) => f.path === filePath)) continue;
+      try {
+        const file = await readWorkspaceFile(filePath);
+        contextFiles.push({ path: filePath, content: file.content });
+      } catch {
+        // skip unreadable files
+      }
+    }
+  }
+
+  if (contextFiles.length === 0) {
+    return {
+      provider: "system",
+      summary: "Open one or more workspace files to enable multi-file editing.",
+      path: null,
+      applied: false,
+      changed: false,
+    };
+  }
+
+  const prompt = buildMultiEditPrompt(request, contextFiles);
+
+  // Try Kimi first, fall back to Vertex AI
+  let payload: MultiFileEditPayload;
+  let provider = "agentx";
+  let model: string | undefined;
+  let transport: string | undefined;
+
+  const { isKimiConfigured, kimiGenerateJSON } = await import("../kimi-client.js");
+
+  if (isKimiConfigured()) {
+    try {
+      payload = await kimiGenerateJSON<MultiFileEditPayload>(prompt, {
+        maxTokens: 16384,
+        temperature: 0.1,
+        model: "standard",
+      });
+      model = "moonshot-v1-32k";
+      transport = "kimi";
+    } catch (kimiErr) {
+      console.warn("[CodeAgent] Kimi multi-edit failed, falling back:", (kimiErr as Error).message);
+      const { generateJSON, getVertexConfig } = await import("../vertex-ai/index.js");
+      payload = await generateJSON<MultiFileEditPayload>(prompt, {
+        maxTokens: 16384,
+        temperature: 0.1,
+      });
+      model = getVertexConfig().models.chat;
+      transport = "vertex-ai";
+    }
+  } else {
+    const { generateJSON, getVertexConfig } = await import("../vertex-ai/index.js");
+    payload = await generateJSON<MultiFileEditPayload>(prompt, {
+      maxTokens: 16384,
+      temperature: 0.1,
+    });
+    model = getVertexConfig().models.chat;
+    transport = "vertex-ai";
+  }
+
+  const summary =
+    typeof payload.summary === "string" && payload.summary.trim()
+      ? payload.summary.trim()
+      : "Applied multi-file changes.";
+
+  const rawFiles = Array.isArray(payload.files) ? payload.files : [];
+  const fileEdits: OpsCodeAgentFileEdit[] = rawFiles
+    .filter(
+      (f: any): f is { path: string; content: string; isNew?: boolean } =>
+        typeof f?.path === "string" && typeof f?.content === "string",
+    )
+    .map((f) => ({
+      path: f.path,
+      content: f.content,
+      isNew: Boolean(f.isNew),
+    }));
+
+  if (!request.applyChanges || fileEdits.length === 0) {
+    return {
+      provider,
+      model,
+      transport,
+      summary,
+      path: request.selectedFilePath || null,
+      applied: false,
+      changed: fileEdits.length > 0,
+      fileEdits,
+    };
+  }
+
+  // Apply all file edits
+  await writeMultipleWorkspaceFiles(
+    fileEdits.map((f) => ({ path: f.path, content: f.content })),
+  );
+
+  return {
+    provider,
+    model,
+    transport,
+    summary,
+    path: request.selectedFilePath || null,
+    applied: true,
+    changed: true,
+    fileEdits,
+  };
+}
+
 export async function runOpsCodeAgent(
   request: OpsCodeAgentRequest,
 ): Promise<OpsCodeAgentResponse> {
-  if ((request.mode || "general") === "simple-edit") {
+  const resolvedMode = request.mode || "general";
+
+  if (resolvedMode === "simple-edit") {
     return runSingleFileEdit(request);
+  }
+
+  if (resolvedMode === "multi-edit") {
+    return runMultiFileEdit(request);
   }
 
   let agentXFailure: string | null = null;

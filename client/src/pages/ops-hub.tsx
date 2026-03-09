@@ -109,7 +109,7 @@ interface NavSection {
 
 type CodingAgentProvider = 'agentx' | 'codex' | 'claude' | 'gemini';
 type CodingAgentRunMode = 'agent' | 'plan';
-type CodingAgentModelSelector = 'simple-edit';
+type CodingAgentModelSelector = 'simple-edit' | 'multi-edit';
 type SidePanelTab = 'files' | 'manager';
 
 /* ── Projects configuration ── */
@@ -879,15 +879,16 @@ export default function OpsHub() {
     setChatSending(true);
 
     try {
+      const isMultiEdit = codingAgentMode === 'agent' && modelSelector === 'multi-edit';
       const data = await apiJsonRequest<any>(
         'POST',
         '/api/ops/coding-agent',
         {
           prompt,
-          mode: requestMode,
+          mode: isMultiEdit ? 'multi-edit' : requestMode,
           selectedFilePath: selectedFile?.path,
           selectedFileContent: selectedFile?.dirty ? selectedFile.content : undefined,
-          applyChanges: codingAgentMode === 'agent' && modelSelector === 'simple-edit',
+          applyChanges: codingAgentMode === 'agent',
         },
       );
 
@@ -895,9 +896,14 @@ export default function OpsHub() {
         throw new Error(data.error || 'Failed to run coding agent');
       }
 
+      const fileEdits = data.response?.fileEdits as Array<{ path: string; content: string; isNew?: boolean }> | undefined;
+      const editSummary = fileEdits?.length
+        ? `\n\nFiles ${data.response?.applied ? 'applied' : 'proposed'}: ${fileEdits.map((f: any) => `${f.isNew ? '(new) ' : ''}${f.path}`).join(', ')}`
+        : '';
+
       const nextMessage: ChatMessage = {
         role: 'assistant',
-        content: data.response?.summary || 'No response generated.',
+        content: (data.response?.summary || 'No response generated.') + editSummary,
         timestamp: new Date(),
         provider: data.response?.provider === 'system' ? undefined : data.response?.provider,
         model: data.response?.model,
@@ -906,6 +912,7 @@ export default function OpsHub() {
       };
       setChatMessages((current) => [...current, nextMessage]);
 
+      // Handle single-file edit applied
       if (data.response?.applied && data.response?.path && typeof data.response?.updatedContent === 'string') {
         const nextToken = externalFileToken + 1;
         setExternalFileToken(nextToken);
@@ -922,6 +929,20 @@ export default function OpsHub() {
           dirty: false,
         });
         toast({ title: 'Edit applied', description: data.response.path });
+      }
+
+      // Handle multi-file edits applied
+      if (data.response?.applied && fileEdits?.length) {
+        for (const edit of fileEdits) {
+          const nextToken = externalFileToken + 1;
+          setExternalFileToken(nextToken);
+          setExternalFileUpdate({
+            path: edit.path,
+            content: edit.content,
+            token: nextToken,
+          });
+        }
+        toast({ title: 'Multi-file edit applied', description: `${fileEdits.length} files updated` });
       }
     } catch (error) {
       setChatMessages((current) => [
@@ -1294,6 +1315,7 @@ export default function OpsHub() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="simple-edit">Patch</SelectItem>
+                          <SelectItem value="multi-edit">Multi-File</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
