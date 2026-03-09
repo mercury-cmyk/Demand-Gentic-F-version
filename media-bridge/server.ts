@@ -204,11 +204,13 @@ interface BridgeSession {
   setupComplete: boolean;
   callAnswered: boolean;
   openingMessageSent: boolean;
+  openingFallbackTimer: NodeJS.Timeout | null;
 
   // Context
   systemPrompt: string;
   voiceName: string;
   contactName: string;
+  firstMessage: string | null;
   context: any;
 
   // Metrics
@@ -242,6 +244,7 @@ async function createSession(params: {
   voiceName?: string;
   toPhoneNumber?: string;
   contactName?: string;
+  firstMessage?: string;
   context?: any;
   maxDurationSeconds?: number;
 }): Promise<{ success: boolean; error?: string }> {
@@ -263,12 +266,17 @@ async function createSession(params: {
 
     geminiWs: null,
     setupComplete: false,
-    callAnswered: false,
+    // The SIP dialer creates the media bridge only after the outbound call is answered.
+    // Waiting for inbound RTP here creates a deadlock on endpoints that do not send
+    // audio immediately: the agent waits for RTP, and the callee waits for the agent.
+    callAnswered: true,
     openingMessageSent: false,
+    openingFallbackTimer: null,
 
     systemPrompt: params.systemPrompt,
     voiceName: params.voiceName || 'Puck',
     contactName: params.contactName || 'there',
+    firstMessage: params.firstMessage?.trim() || null,
     context: params.context || {},
 
     startTime: Date.now(),
@@ -344,6 +352,7 @@ function destroySession(callId: string): void {
   }
 
   if (session.maxDurationTimer) clearTimeout(session.maxDurationTimer);
+  if (session.openingFallbackTimer) clearTimeout(session.openingFallbackTimer);
   if (session.rtpSocket) {
     try { session.rtpSocket.close(); } catch (_) {}
     session.rtpSocket = null;
@@ -375,9 +384,8 @@ function startRtpListener(session: BridgeSession): void {
     }
 
     // Mark call as answered on first RTP
-    if (!session.callAnswered) {
-      session.callAnswered = true;
-      log(`Call ${session.callId} answered (first RTP from ${rinfo.address}:${rinfo.port})`);
+    if (session.packetsReceived === 1) {
+      log(`First RTP received for ${session.callId} from ${rinfo.address}:${rinfo.port}`);
       trySendOpeningMessage(session);
     }
 
@@ -597,7 +605,11 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           session.setupComplete = true;
           log(`Gemini setup complete for ${session.callId}`);
           resolve();
-          trySendOpeningMessage(session);
+          if (session.packetsReceived > 0) {
+            trySendOpeningMessage(session);
+          } else {
+            scheduleOpeningFallback(session);
+          }
           return;
         }
 
@@ -702,12 +714,31 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
   });
 }
 
+function scheduleOpeningFallback(session: BridgeSession): void {
+  if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
+  if (session.openingFallbackTimer) return;
+
+  const OPENING_FALLBACK_DELAY_MS = 1500;
+  session.openingFallbackTimer = setTimeout(() => {
+    session.openingFallbackTimer = null;
+    if (!session.openingMessageSent) {
+      log(`Opening fallback fired for ${session.callId} after ${OPENING_FALLBACK_DELAY_MS}ms without inbound RTP`);
+      trySendOpeningMessage(session);
+    }
+  }, OPENING_FALLBACK_DELAY_MS);
+}
+
 function trySendOpeningMessage(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
   session.openingMessageSent = true;
+  if (session.openingFallbackTimer) {
+    clearTimeout(session.openingFallbackTimer);
+    session.openingFallbackTimer = null;
+  }
 
   const name = session.contactName || 'there';
-  const text = `Say ONLY this exact message now: "Hello, may I please speak with ${name}?"
+  const greeting = session.firstMessage || `Hello, may I please speak with ${name}?`;
+  const text = `Say ONLY this exact message now: "${greeting}"
 
 After speaking, STOP and WAIT for their response.`;
 
@@ -894,7 +925,7 @@ app.use((req, res, next) => {
 app.post('/bridge', async (req, res) => {
   try {
     const { callId, rtpPort, remoteAddress, remotePort, systemPrompt, voiceName,
-      toPhoneNumber, contactName, context, maxDurationSeconds } = req.body;
+      toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds } = req.body;
 
     if (!callId || !rtpPort || !remoteAddress || !remotePort) {
       res.status(400).json({ error: 'Missing required fields: callId, rtpPort, remoteAddress, remotePort' });
@@ -904,7 +935,7 @@ app.post('/bridge', async (req, res) => {
     const result = await createSession({
       callId, rtpPort, remoteAddress, remotePort,
       systemPrompt: systemPrompt || 'You are a helpful AI voice assistant.',
-      voiceName, toPhoneNumber, contactName, context, maxDurationSeconds,
+      voiceName, toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds,
     });
 
     if (result.success) {
@@ -939,6 +970,7 @@ app.get('/bridge/:callId', (req, res) => {
     remotePort: session.remotePort,
     setupComplete: session.setupComplete,
     callAnswered: session.callAnswered,
+    openingMessageSent: session.openingMessageSent,
     packetsReceived: session.packetsReceived,
     packetsSent: session.packetsSent,
     durationSec: Math.round((Date.now() - session.startTime) / 1000),
@@ -963,6 +995,7 @@ app.get('/stats', (_req, res) => {
     remote: `${s.remoteAddress}:${s.remotePort}`,
     setupComplete: s.setupComplete,
     callAnswered: s.callAnswered,
+    openingMessageSent: s.openingMessageSent,
     rx: s.packetsReceived,
     tx: s.packetsSent,
     dur: Math.round((Date.now() - s.startTime) / 1000),

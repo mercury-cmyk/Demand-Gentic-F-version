@@ -77,3 +77,11 @@ export interface OpsDeploymentActionRequest {
   service?: string;
   rebuildMediaBridge?: boolean;
 }
+
+export interface OpsDeploymentLogs {
+  service: string;
+  lines: string[];
+  count: number;
+  timestamp: string;
+  note?: string;
+}
