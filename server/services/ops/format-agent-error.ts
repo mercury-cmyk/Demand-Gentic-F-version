@@ -77,7 +77,7 @@ function formatAggregatedProviderFailureMessage(message: string): string {
   ).trim();
 
   if (!summary) {
-    return "AgentX could not reach any configured coding provider. Check Codex, Claude, and Gemini runtime settings.";
+    return "AgentX could not reach any configured coding provider. Check Codex, Claude, Gemini, Kimi, and DeepSeek runtime settings.";
   }
 
   const providerLines = summary
@@ -93,6 +93,14 @@ function formatAggregatedProviderFailureMessage(message: string): string {
 
       if (normalized.startsWith("claude: authentication failed")) {
         return "Claude authentication failed. Check AI_INTEGRATIONS_ANTHROPIC_API_KEY / ANTHROPIC_API_KEY.";
+      }
+
+      if (normalized.startsWith("kimi: authentication failed")) {
+        return "Kimi authentication failed. Check KIMI_API_KEY / MOONSHOT_API_KEY.";
+      }
+
+      if (normalized.startsWith("deepseek: authentication failed")) {
+        return "DeepSeek authentication failed. Check DEEPSEEK_API_KEY.";
       }
 
       if (
@@ -111,6 +119,14 @@ function formatAggregatedProviderFailureMessage(message: string): string {
 
       if (normalized.startsWith("gemini: not configured")) {
         return "Gemini is not configured. Add AI_INTEGRATIONS_GEMINI_API_KEY, GOOGLE_AI_API_KEY, or GEMINI_API_KEY.";
+      }
+
+      if (normalized.startsWith("kimi: not configured")) {
+        return "Kimi is not configured. Add KIMI_API_KEY or MOONSHOT_API_KEY.";
+      }
+
+      if (normalized.startsWith("deepseek: not configured")) {
+        return "DeepSeek is not configured. Add DEEPSEEK_API_KEY.";
       }
 
       return segment;
@@ -164,7 +180,7 @@ export function formatOpsAgentErrorMessage(
     normalized.includes("authentication") ||
     providerMessage?.includes("authentication")
   ) {
-    return "AI provider authentication failed. Check Codex, Claude, and Gemini credentials.";
+    return "AI provider authentication failed. Check Codex, Claude, Gemini, Kimi, and DeepSeek credentials.";
   }
 
   if (

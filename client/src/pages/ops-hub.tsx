@@ -107,7 +107,7 @@ interface NavSection {
   items: { id: string; label: string; icon: React.ReactNode; badge?: string }[];
 }
 
-type CodingAgentProvider = 'agentx' | 'codex' | 'claude' | 'gemini';
+type CodingAgentProvider = 'agentx' | 'ensemble' | 'codex' | 'claude' | 'gemini' | 'kimi' | 'deepseek';
 type CodingAgentRunMode = 'agent' | 'plan';
 type CodingAgentModelSelector = 'simple-edit' | 'multi-edit';
 type SidePanelTab = 'files' | 'manager';
@@ -219,9 +219,12 @@ const SECONDARY_NAV_ORDER = ['DEVOPS', 'WORKSPACE', 'INSIGHTS'];
 
 const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
   agentx: 'AgentX',
+  ensemble: 'AgentX Ensemble',
   codex: 'Codex',
   claude: 'Claude',
   gemini: 'Gemini',
+  kimi: 'Kimi',
+  deepseek: 'DeepSeek',
 };
 
 function normalizeOpsRole(role: unknown): string | null {

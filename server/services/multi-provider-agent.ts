@@ -8,11 +8,31 @@ export type ProviderMode = "auto" | "manual";
 export type AgentOptimizationProfile = "quality" | "balanced" | "cost";
 export type AgentResponseFormat = "text" | "json";
 export type CodexTransport = "openai_api" | "github_models";
+export type KimiTransport = "moonshot_api";
+export type DeepSeekTransport = "deepseek_api";
+export type CodingWorkflowRole =
+  | "architecture"
+  | "reasoning"
+  | "security"
+  | "ux"
+  | "implementation";
 
 export enum LLMProvider {
   CODEX = "codex",
   CLAUDE = "claude",
   GEMINI = "gemini",
+  KIMI = "kimi",
+  DEEPSEEK = "deepseek",
+}
+
+export interface CodingWorkflowStep {
+  role: CodingWorkflowRole;
+  roleLabel: string;
+  purpose: string;
+  provider: LLMProvider;
+  label: string;
+  available: boolean;
+  defaultModel: string;
 }
 
 export interface AgentRequest {
@@ -105,6 +125,8 @@ function normalizePreferredProvider(provider?: string): LLMProvider | undefined 
     case LLMProvider.CODEX:
     case LLMProvider.CLAUDE:
     case LLMProvider.GEMINI:
+    case LLMProvider.KIMI:
+    case LLMProvider.DEEPSEEK:
       return provider;
     default:
       return undefined;
@@ -135,6 +157,8 @@ function compactProviderErrorMessage(message: string): string {
 export class MultiProviderOrchestrator {
   private codexOpenAIClient: OpenAI | null = null;
   private codexGitHubClient: OpenAI | null = null;
+  private kimiClient: OpenAI | null = null;
+  private deepSeekClient: OpenAI | null = null;
   private claudeClient: Anthropic | null = null;
   private geminiClient: GoogleGenAI | null = null;
   private providerMetrics: Map<LLMProvider, ProviderMetrics> = new Map();
@@ -171,6 +195,24 @@ export class MultiProviderOrchestrator {
       availability: this.hasGeminiCredentials(),
       defaultModel: this.resolveProviderModel(LLMProvider.GEMINI, "balanced"),
     });
+
+    this.providerMetrics.set(LLMProvider.KIMI, {
+      label: "Kimi",
+      successRate: 0.95,
+      avgLatencyMs: 780,
+      costPerRequest: 0.004,
+      availability: this.hasKimiCredentials(),
+      defaultModel: this.resolveProviderModel(LLMProvider.KIMI, "balanced"),
+    });
+
+    this.providerMetrics.set(LLMProvider.DEEPSEEK, {
+      label: "DeepSeek",
+      successRate: 0.94,
+      avgLatencyMs: 620,
+      costPerRequest: 0.002,
+      availability: this.hasDeepSeekCredentials(),
+      defaultModel: this.resolveProviderModel(LLMProvider.DEEPSEEK, "balanced"),
+    });
   }
 
   private hasOpenAIApiKey(): boolean {
@@ -200,6 +242,17 @@ export class MultiProviderOrchestrator {
         process.env.GOOGLE_AI_API_KEY ||
         process.env.GEMINI_API_KEY,
     );
+  }
+
+  private hasKimiCredentials(): boolean {
+    return Boolean(
+      process.env.KIMI_API_KEY ||
+        process.env.MOONSHOT_API_KEY,
+    );
+  }
+
+  private hasDeepSeekCredentials(): boolean {
+    return Boolean(process.env.DEEPSEEK_API_KEY);
   }
 
   private resolveCodexTransport(): CodexTransport {
@@ -315,6 +368,53 @@ export class MultiProviderOrchestrator {
     return this.claudeClient;
   }
 
+  private getKimiClient(): OpenAI {
+    if (this.kimiClient) {
+      return this.kimiClient;
+    }
+
+    const apiKey =
+      process.env.KIMI_API_KEY ||
+      process.env.MOONSHOT_API_KEY;
+
+    if (!apiKey) {
+      throw new Error(
+        "Kimi is not configured. Set KIMI_API_KEY or MOONSHOT_API_KEY.",
+      );
+    }
+
+    this.kimiClient = new OpenAI({
+      apiKey,
+      baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1",
+      timeout: 180_000,
+      maxRetries: 2,
+    });
+
+    return this.kimiClient;
+  }
+
+  private getDeepSeekClient(): OpenAI {
+    if (this.deepSeekClient) {
+      return this.deepSeekClient;
+    }
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "DeepSeek is not configured. Set DEEPSEEK_API_KEY.",
+      );
+    }
+
+    this.deepSeekClient = new OpenAI({
+      apiKey,
+      baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+      timeout: 120_000,
+      maxRetries: 2,
+    });
+
+    return this.deepSeekClient;
+  }
+
   private getGeminiClient(): GoogleGenAI {
     if (this.geminiClient) {
       return this.geminiClient;
@@ -349,6 +449,8 @@ export class MultiProviderOrchestrator {
       [LLMProvider.CODEX, this.isCodexTransportAvailable(codexTransport)],
       [LLMProvider.CLAUDE, this.hasClaudeCredentials()],
       [LLMProvider.GEMINI, this.hasGeminiCredentials()],
+      [LLMProvider.KIMI, this.hasKimiCredentials()],
+      [LLMProvider.DEEPSEEK, this.hasDeepSeekCredentials()],
     ];
 
     for (const [provider, availability] of updates) {
@@ -415,6 +517,26 @@ export class MultiProviderOrchestrator {
           ],
           "gemini-2.0-flash",
         );
+      case LLMProvider.KIMI:
+        return selectFirstEnv(
+          [
+            `OPS_HUB_KIMI_${profile.toUpperCase()}_MODEL`,
+            "OPS_HUB_KIMI_MODEL",
+          ],
+          profile === "quality"
+            ? "moonshot-v1-128k"
+            : profile === "cost"
+              ? "moonshot-v1-8k"
+              : "moonshot-v1-32k",
+        );
+      case LLMProvider.DEEPSEEK:
+        return selectFirstEnv(
+          [
+            `OPS_HUB_DEEPSEEK_${profile.toUpperCase()}_MODEL`,
+            "OPS_HUB_DEEPSEEK_MODEL",
+          ],
+          profile === "quality" ? "deepseek-reasoner" : "deepseek-chat",
+        );
     }
   }
 
@@ -445,6 +567,30 @@ export class MultiProviderOrchestrator {
         runtimeAccessModes: ["Anthropic API key"],
         notes: [
           "Claude web subscriptions are separate from this server-side runtime.",
+        ],
+      };
+    }
+
+    if (provider === LLMProvider.KIMI) {
+      return {
+        activeRuntimeAccess: this.hasKimiCredentials()
+          ? "Moonshot / Kimi API key"
+          : "Moonshot / Kimi API key required",
+        runtimeAccessModes: ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
+        notes: [
+          "Kimi is used as the long-context architecture planner in collaborative coding mode.",
+        ],
+      };
+    }
+
+    if (provider === LLMProvider.DEEPSEEK) {
+      return {
+        activeRuntimeAccess: this.hasDeepSeekCredentials()
+          ? "DeepSeek API key"
+          : "DeepSeek API key required",
+        runtimeAccessModes: ["DEEPSEEK_API_KEY"],
+        notes: [
+          "DeepSeek is used as the security and cost reviewer in collaborative coding mode.",
         ],
       };
     }
@@ -524,27 +670,79 @@ export class MultiProviderOrchestrator {
     const autoOrder = (() => {
       if (task === "multimodal") {
         return profile === "cost"
-          ? [LLMProvider.GEMINI, LLMProvider.CODEX, LLMProvider.CLAUDE]
-          : [LLMProvider.GEMINI, LLMProvider.CLAUDE, LLMProvider.CODEX];
+          ? [
+              LLMProvider.GEMINI,
+              LLMProvider.DEEPSEEK,
+              LLMProvider.KIMI,
+              LLMProvider.CODEX,
+              LLMProvider.CLAUDE,
+            ]
+          : [
+              LLMProvider.GEMINI,
+              LLMProvider.CLAUDE,
+              LLMProvider.KIMI,
+              LLMProvider.CODEX,
+              LLMProvider.DEEPSEEK,
+            ];
       }
 
       if (task === "analysis" || task === "reasoning") {
         if (profile === "quality") {
-          return [LLMProvider.CLAUDE, LLMProvider.CODEX, LLMProvider.GEMINI];
+          return [
+            LLMProvider.CLAUDE,
+            LLMProvider.KIMI,
+            LLMProvider.CODEX,
+            LLMProvider.GEMINI,
+            LLMProvider.DEEPSEEK,
+          ];
         }
 
         if (profile === "cost") {
-          return [LLMProvider.GEMINI, LLMProvider.CODEX, LLMProvider.CLAUDE];
+          return [
+            LLMProvider.DEEPSEEK,
+            LLMProvider.GEMINI,
+            LLMProvider.KIMI,
+            LLMProvider.CODEX,
+            LLMProvider.CLAUDE,
+          ];
         }
 
-        return [LLMProvider.CLAUDE, LLMProvider.CODEX, LLMProvider.GEMINI];
+        return [
+          LLMProvider.CLAUDE,
+          LLMProvider.KIMI,
+          LLMProvider.CODEX,
+          LLMProvider.GEMINI,
+          LLMProvider.DEEPSEEK,
+        ];
       }
 
       if (profile === "cost") {
-        return [LLMProvider.GEMINI, LLMProvider.CODEX, LLMProvider.CLAUDE];
+        return [
+          LLMProvider.DEEPSEEK,
+          LLMProvider.GEMINI,
+          LLMProvider.KIMI,
+          LLMProvider.CODEX,
+          LLMProvider.CLAUDE,
+        ];
       }
 
-      return [LLMProvider.CODEX, LLMProvider.CLAUDE, LLMProvider.GEMINI];
+      if (task === "code" && profile === "quality") {
+        return [
+          LLMProvider.CODEX,
+          LLMProvider.KIMI,
+          LLMProvider.CLAUDE,
+          LLMProvider.GEMINI,
+          LLMProvider.DEEPSEEK,
+        ];
+      }
+
+      return [
+        LLMProvider.CODEX,
+        LLMProvider.KIMI,
+        LLMProvider.CLAUDE,
+        LLMProvider.GEMINI,
+        LLMProvider.DEEPSEEK,
+      ];
     })();
 
     if (mode === "manual" && preferredProvider) {
@@ -694,6 +892,96 @@ export class MultiProviderOrchestrator {
     };
   }
 
+  private async callKimi(request: AgentRequest): Promise<AgentResponse> {
+    const startTime = Date.now();
+    const profile = normalizeOptimizationProfile(request.optimizationProfile);
+    const model = this.resolveProviderModel(LLMProvider.KIMI, profile);
+    const completion = await this.getKimiClient().chat.completions.create({
+      model,
+      temperature: request.temperature ?? 0.2,
+      max_tokens: request.maxTokens ?? 4096,
+      response_format:
+        request.responseFormat === "json"
+          ? { type: "json_object" }
+          : undefined,
+      messages: [
+        {
+          role: "system",
+          content: this.buildSystemPrompt(request),
+        },
+        {
+          role: "user",
+          content: request.prompt,
+        },
+      ],
+    });
+
+    const content = completion.choices[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error("Kimi returned an empty response.");
+    }
+
+    const latencyMs = Date.now() - startTime;
+    const tokensUsed = completion.usage?.total_tokens;
+    const costEstimate =
+      this.providerMetrics.get(LLMProvider.KIMI)?.costPerRequest;
+
+    return {
+      provider: LLMProvider.KIMI,
+      model,
+      transport: "moonshot_api",
+      content,
+      tokensUsed,
+      costEstimate,
+      latencyMs,
+    };
+  }
+
+  private async callDeepSeek(request: AgentRequest): Promise<AgentResponse> {
+    const startTime = Date.now();
+    const profile = normalizeOptimizationProfile(request.optimizationProfile);
+    const model = this.resolveProviderModel(LLMProvider.DEEPSEEK, profile);
+    const completion = await this.getDeepSeekClient().chat.completions.create({
+      model,
+      temperature: request.temperature ?? 0.2,
+      max_tokens: request.maxTokens ?? 4096,
+      response_format:
+        request.responseFormat === "json"
+          ? { type: "json_object" }
+          : undefined,
+      messages: [
+        {
+          role: "system",
+          content: this.buildSystemPrompt(request),
+        },
+        {
+          role: "user",
+          content: request.prompt,
+        },
+      ],
+    });
+
+    const content = completion.choices[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error("DeepSeek returned an empty response.");
+    }
+
+    const latencyMs = Date.now() - startTime;
+    const tokensUsed = completion.usage?.total_tokens;
+    const costEstimate =
+      this.providerMetrics.get(LLMProvider.DEEPSEEK)?.costPerRequest;
+
+    return {
+      provider: LLMProvider.DEEPSEEK,
+      model,
+      transport: "deepseek_api",
+      content,
+      tokensUsed,
+      costEstimate,
+      latencyMs,
+    };
+  }
+
   private async executeWithProvider(
     provider: LLMProvider,
     request: AgentRequest,
@@ -705,7 +993,129 @@ export class MultiProviderOrchestrator {
         return this.callClaude(request);
       case LLMProvider.GEMINI:
         return this.callGemini(request);
+      case LLMProvider.KIMI:
+        return this.callKimi(request);
+      case LLMProvider.DEEPSEEK:
+        return this.callDeepSeek(request);
     }
+  }
+
+  private getCodingWorkflowBlueprint(): Array<{
+    role: CodingWorkflowRole;
+    roleLabel: string;
+    purpose: string;
+    preferredProviders: LLMProvider[];
+    profile: AgentOptimizationProfile;
+  }> {
+    return [
+      {
+        role: "architecture",
+        roleLabel: "Architecture",
+        purpose: "Own system framing, scope control, long-context understanding, and scalable design direction.",
+        preferredProviders: [
+          LLMProvider.KIMI,
+          LLMProvider.CLAUDE,
+          LLMProvider.GEMINI,
+          LLMProvider.CODEX,
+          LLMProvider.DEEPSEEK,
+        ],
+        profile: "quality",
+      },
+      {
+        role: "reasoning",
+        roleLabel: "Reasoning",
+        purpose: "Stress-test correctness, edge cases, and architectural coherence before edits are synthesized.",
+        preferredProviders: [
+          LLMProvider.CLAUDE,
+          LLMProvider.KIMI,
+          LLMProvider.CODEX,
+          LLMProvider.GEMINI,
+          LLMProvider.DEEPSEEK,
+        ],
+        profile: "quality",
+      },
+      {
+        role: "security",
+        roleLabel: "Security + Cost",
+        purpose: "Review trust boundaries, validation, abuse paths, and implementation cost efficiency.",
+        preferredProviders: [
+          LLMProvider.DEEPSEEK,
+          LLMProvider.CLAUDE,
+          LLMProvider.GEMINI,
+          LLMProvider.CODEX,
+          LLMProvider.KIMI,
+        ],
+        profile: "cost",
+      },
+      {
+        role: "ux",
+        roleLabel: "UX + Performance",
+        purpose: "Check operator experience, responsiveness, API routing choices, and runtime observability.",
+        preferredProviders: [
+          LLMProvider.GEMINI,
+          LLMProvider.CLAUDE,
+          LLMProvider.KIMI,
+          LLMProvider.CODEX,
+          LLMProvider.DEEPSEEK,
+        ],
+        profile: "cost",
+      },
+      {
+        role: "implementation",
+        roleLabel: "Implementation",
+        purpose: "Synthesize the final code or plan using the collaborative guidance and repository constraints.",
+        preferredProviders: [
+          LLMProvider.CODEX,
+          LLMProvider.KIMI,
+          LLMProvider.CLAUDE,
+          LLMProvider.GEMINI,
+          LLMProvider.DEEPSEEK,
+        ],
+        profile: "quality",
+      },
+    ];
+  }
+
+  getCodingWorkflow(): CodingWorkflowStep[] {
+    this.syncProviderMetrics();
+
+    const availableProviders = Array.from(this.providerMetrics.entries())
+      .filter(([, metrics]) => metrics.availability)
+      .map(([provider]) => provider);
+    const usedProviders = new Set<LLMProvider>();
+
+    return this.getCodingWorkflowBlueprint().map((step) => {
+      const distinctProvider = step.preferredProviders.find(
+        (provider) =>
+          availableProviders.includes(provider) && !usedProviders.has(provider),
+      );
+      const fallbackProvider = step.preferredProviders.find((provider) =>
+        availableProviders.includes(provider),
+      );
+      const provider =
+        distinctProvider ??
+        fallbackProvider ??
+        step.preferredProviders[0];
+
+      if (availableProviders.includes(provider)) {
+        usedProviders.add(provider);
+      }
+
+      const metrics = this.providerMetrics.get(provider);
+      return {
+        role: step.role,
+        roleLabel: step.roleLabel,
+        purpose: step.purpose,
+        provider,
+        label: metrics?.label || provider,
+        available: metrics?.availability ?? false,
+        defaultModel: this.resolveProviderModel(provider, step.profile),
+      };
+    });
+  }
+
+  isProviderAvailable(provider: LLMProvider): boolean {
+    return this.isAvailable(provider);
   }
 
   async execute(request: AgentRequest): Promise<AgentResponse> {
@@ -716,7 +1126,7 @@ export class MultiProviderOrchestrator {
 
     if (providerOrder.length === 0) {
       throw new Error(
-        "No coding agent provider is configured. Add Codex, Claude, or Gemini credentials to continue.",
+        "No coding agent provider is configured. Add Codex, Claude, Gemini, Kimi, or DeepSeek credentials to continue.",
       );
     }
 

@@ -878,11 +878,13 @@ router.get('/agents/status', async (_req: Request, res: Response) => {
     const orchestrator = getOrchestrator();
     const status = orchestrator.getStatus();
     const providers = orchestrator.listProviders();
+    const workflow = orchestrator.getCodingWorkflow();
 
     res.json({
       success: true,
       status,
       providers,
+      workflow,
     });
   } catch (error) {
     res.status(500).json({

@@ -4,6 +4,12 @@ import type {
   LLMProvider,
   ProviderMode,
 } from "../multi-provider-agent";
+import type { CollaborativeOrchestration } from "./collaborative-code-agent";
+import {
+  runCollaborativeMultiFileEdit,
+  runCollaborativePlan,
+  runCollaborativeSingleFileEdit,
+} from "./collaborative-code-agent";
 import { formatOpsAgentErrorMessage } from "./format-agent-error";
 import { readWorkspaceFile, writeWorkspaceFile, writeMultipleWorkspaceFiles } from "./runtime";
 
@@ -38,6 +44,8 @@ export interface OpsCodeAgentResponse {
   modifiedAt?: string;
   /** Multi-file edits when in multi-edit mode */
   fileEdits?: OpsCodeAgentFileEdit[];
+  orchestrationMode?: "ensemble" | "single";
+  orchestration?: CollaborativeOrchestration;
 }
 
 type SingleFileEditPayload = {
@@ -373,6 +381,46 @@ function buildCombinedFailureMessage(
   ].join("\n\n");
 }
 
+async function collectContextFiles(
+  request: Pick<
+    OpsCodeAgentRequest,
+    "selectedFilePath" | "selectedFileContent" | "contextFilePaths"
+  >,
+): Promise<Array<{ path: string; content: string }>> {
+  const contextFiles: Array<{ path: string; content: string }> = [];
+
+  if (request.selectedFilePath) {
+    const fileContent =
+      request.selectedFileContent ??
+      (await readWorkspaceFile(request.selectedFilePath)
+        .then((file) => file.content)
+        .catch(() => null));
+    if (fileContent !== null) {
+      contextFiles.push({
+        path: request.selectedFilePath,
+        content: fileContent,
+      });
+    }
+  }
+
+  if (request.contextFilePaths?.length) {
+    for (const filePath of request.contextFilePaths) {
+      if (contextFiles.some((file) => file.path === filePath)) {
+        continue;
+      }
+
+      try {
+        const file = await readWorkspaceFile(filePath);
+        contextFiles.push({ path: filePath, content: file.content });
+      } catch {
+        // Skip unreadable files and keep the collaborative run scoped to valid context.
+      }
+    }
+  }
+
+  return contextFiles;
+}
+
 async function requestAgentXFileEdit(
   request: OpsCodeAgentRequest,
   file: { path: string; content: string },
@@ -492,6 +540,57 @@ async function runSingleFileEdit(
         }
       : await readWorkspaceFile(request.selectedFilePath);
 
+  let collaborativeFailure: string | null = null;
+  try {
+    const collaborative = await runCollaborativeSingleFileEdit(request, file);
+    if (collaborative) {
+      const changed = collaborative.updatedContent !== file.content;
+
+      if (!request.applyChanges || !changed) {
+        return {
+          provider: "ensemble",
+          model: collaborative.model,
+          transport: collaborative.transport
+            ? `multi-agent/${collaborative.transport}`
+            : "multi-agent",
+          summary: collaborative.summary,
+          path: request.selectedFilePath,
+          applied: false,
+          changed,
+          updatedContent: collaborative.updatedContent,
+          orchestrationMode: "ensemble",
+          orchestration: collaborative.orchestration,
+        };
+      }
+
+      const savedFile = await writeWorkspaceFile(
+        request.selectedFilePath,
+        collaborative.updatedContent,
+      );
+      return {
+        provider: "ensemble",
+        model: collaborative.model,
+        transport: collaborative.transport
+          ? `multi-agent/${collaborative.transport}`
+          : "multi-agent",
+        summary: collaborative.summary,
+        path: request.selectedFilePath,
+        applied: true,
+        changed,
+        updatedContent: savedFile.content,
+        modifiedAt: savedFile.modifiedAt,
+        orchestrationMode: "ensemble",
+        orchestration: collaborative.orchestration,
+      };
+    }
+  } catch (error) {
+    collaborativeFailure = formatOpsAgentErrorMessage(
+      error,
+      "Collaborative orchestration failed to generate an edit.",
+    );
+    console.warn("[CodeAgent] Collaborative single-file edit failed:", collaborativeFailure);
+  }
+
   let response: AgentRuntimeResponse;
   let payload: SingleFileEditPayload;
   let agentXFailure: string | null = null;
@@ -532,14 +631,18 @@ async function runSingleFileEdit(
         },
       );
     } catch (providerError) {
+      const singleProviderFailure = buildCombinedFailureMessage(
+        agentXFailure,
+        formatOpsAgentErrorMessage(
+          providerError,
+          "The coding agent failed to generate an edit.",
+        ),
+      );
       return {
         provider: "system",
         summary: buildCombinedFailureMessage(
-          agentXFailure,
-          formatOpsAgentErrorMessage(
-            providerError,
-            "The coding agent failed to generate an edit.",
-          ),
+          collaborativeFailure,
+          singleProviderFailure,
         ),
         path: request.selectedFilePath,
         applied: false,
@@ -581,6 +684,7 @@ async function runSingleFileEdit(
       applied: false,
       changed,
       updatedContent,
+      orchestrationMode: "single",
     };
   }
 
@@ -595,6 +699,7 @@ async function runSingleFileEdit(
     changed,
     updatedContent: savedFile.content,
     modifiedAt: savedFile.modifiedAt,
+    orchestrationMode: "single",
   };
 }
 
@@ -606,31 +711,7 @@ type MultiFileEditPayload = {
 async function runMultiFileEdit(
   request: OpsCodeAgentRequest,
 ): Promise<OpsCodeAgentResponse> {
-  // Gather context files
-  const contextFiles: Array<{ path: string; content: string }> = [];
-
-  // Include the selected file
-  if (request.selectedFilePath) {
-    const fileContent =
-      request.selectedFileContent ??
-      (await readWorkspaceFile(request.selectedFilePath).then((f) => f.content).catch(() => null));
-    if (fileContent !== null) {
-      contextFiles.push({ path: request.selectedFilePath, content: fileContent });
-    }
-  }
-
-  // Include additional context files
-  if (request.contextFilePaths?.length) {
-    for (const filePath of request.contextFilePaths) {
-      if (contextFiles.some((f) => f.path === filePath)) continue;
-      try {
-        const file = await readWorkspaceFile(filePath);
-        contextFiles.push({ path: filePath, content: file.content });
-      } catch {
-        // skip unreadable files
-      }
-    }
-  }
+  const contextFiles = await collectContextFiles(request);
 
   if (contextFiles.length === 0) {
     return {
@@ -640,6 +721,61 @@ async function runMultiFileEdit(
       applied: false,
       changed: false,
     };
+  }
+
+  try {
+    const collaborative = await runCollaborativeMultiFileEdit(
+      request,
+      contextFiles,
+    );
+    if (collaborative) {
+      if (!request.applyChanges || collaborative.fileEdits.length === 0) {
+        return {
+          provider: "ensemble",
+          model: collaborative.model,
+          transport: collaborative.transport
+            ? `multi-agent/${collaborative.transport}`
+            : "multi-agent",
+          summary: collaborative.summary,
+          path: request.selectedFilePath || null,
+          applied: false,
+          changed: collaborative.fileEdits.length > 0,
+          fileEdits: collaborative.fileEdits,
+          orchestrationMode: "ensemble",
+          orchestration: collaborative.orchestration,
+        };
+      }
+
+      await writeMultipleWorkspaceFiles(
+        collaborative.fileEdits.map((file) => ({
+          path: file.path,
+          content: file.content,
+        })),
+      );
+
+      return {
+        provider: "ensemble",
+        model: collaborative.model,
+        transport: collaborative.transport
+          ? `multi-agent/${collaborative.transport}`
+          : "multi-agent",
+        summary: collaborative.summary,
+        path: request.selectedFilePath || null,
+        applied: true,
+        changed: true,
+        fileEdits: collaborative.fileEdits,
+        orchestrationMode: "ensemble",
+        orchestration: collaborative.orchestration,
+      };
+    }
+  } catch (error) {
+    console.warn(
+      "[CodeAgent] Collaborative multi-file edit failed:",
+      formatOpsAgentErrorMessage(
+        error,
+        "Collaborative orchestration failed to generate multi-file edits.",
+      ),
+    );
   }
 
   const prompt = buildMultiEditPrompt(request, contextFiles);
@@ -708,6 +844,7 @@ async function runMultiFileEdit(
       applied: false,
       changed: fileEdits.length > 0,
       fileEdits,
+      orchestrationMode: "single",
     };
   }
 
@@ -725,6 +862,7 @@ async function runMultiFileEdit(
     applied: true,
     changed: true,
     fileEdits,
+    orchestrationMode: "single",
   };
 }
 
@@ -741,6 +879,36 @@ export async function runOpsCodeAgent(
     return runMultiFileEdit(request);
   }
 
+  try {
+    const collaborative = await runCollaborativePlan(
+      request,
+      await collectContextFiles(request),
+    );
+    if (collaborative) {
+      return {
+        provider: "ensemble",
+        model: collaborative.model,
+        transport: collaborative.transport
+          ? `multi-agent/${collaborative.transport}`
+          : "multi-agent",
+        summary: collaborative.summary,
+        path: request.selectedFilePath || null,
+        applied: false,
+        changed: false,
+        orchestrationMode: "ensemble",
+        orchestration: collaborative.orchestration,
+      };
+    }
+  } catch (error) {
+    console.warn(
+      "[CodeAgent] Collaborative planning failed:",
+      formatOpsAgentErrorMessage(
+        error,
+        "Collaborative orchestration failed to generate a plan.",
+      ),
+    );
+  }
+
   let agentXFailure: string | null = null;
   try {
     const response = await requestAgentXResponse(request);
@@ -753,6 +921,7 @@ export async function runOpsCodeAgent(
       path: request.selectedFilePath || null,
       applied: false,
       changed: false,
+      orchestrationMode: "single",
     };
   } catch (error) {
     agentXFailure = formatAgentXErrorMessage(
@@ -799,6 +968,7 @@ export async function runOpsCodeAgent(
       path: request.selectedFilePath || null,
       applied: false,
       changed: false,
+      orchestrationMode: "single",
     };
   } catch (error) {
     return {

@@ -21,7 +21,7 @@ describe("formatOpsAgentErrorMessage", () => {
         "fallback",
       ),
     ).toBe(
-      "AI provider authentication failed. Check Codex, Claude, and Gemini credentials.",
+      "AI provider authentication failed. Check Codex, Claude, Gemini, Kimi, and DeepSeek credentials.",
     );
   });
 
@@ -46,6 +46,18 @@ describe("formatOpsAgentErrorMessage", () => {
       ),
     ).toBe(
       "AgentX could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.",
+    );
+  });
+
+  it("formats Kimi and DeepSeek configuration issues into actionable guidance", () => {
+    const message =
+      "All configured coding agent providers failed. Kimi: not configured | DeepSeek: authentication failed";
+    expect(formatOpsAgentErrorMessage(new Error(message), "fallback")).toBe(
+      [
+        "AgentX could not reach any configured coding provider.",
+        "- Kimi is not configured. Add KIMI_API_KEY or MOONSHOT_API_KEY.",
+        "- DeepSeek authentication failed. Check DEEPSEEK_API_KEY.",
+      ].join("\n"),
     );
   });
 });

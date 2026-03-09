@@ -40,21 +40,37 @@ interface OrchestratorStatus {
   breakdown: Record<string, ProviderBreakdown>;
 }
 
+interface WorkflowStep {
+  role: string;
+  roleLabel: string;
+  purpose: string;
+  provider: string;
+  label: string;
+  available: boolean;
+  defaultModel: string;
+}
+
 const PROVIDER_COLORS: Record<string, string> = {
   codex: 'bg-violet-500',
   claude: 'bg-orange-500',
   gemini: 'bg-blue-500',
+  kimi: 'bg-emerald-500',
+  deepseek: 'bg-rose-500',
+  ensemble: 'bg-slate-900',
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
   codex: 'Codex',
   claude: 'Claude (Anthropic)',
   gemini: 'Gemini (Google)',
+  kimi: 'Kimi (Moonshot)',
+  deepseek: 'DeepSeek',
 };
 
 export default function AgentsTab() {
   const [status, setStatus] = useState<OrchestratorStatus | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [workflow, setWorkflow] = useState<WorkflowStep[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchStatus = useCallback(async () => {
@@ -62,9 +78,11 @@ export default function AgentsTab() {
       const data = await apiJsonRequest<{
         status: OrchestratorStatus;
         providers: ProviderInfo[];
+        workflow: WorkflowStep[];
       }>('GET', '/api/ops/agents/status');
       setStatus(data.status);
       setProviders(data.providers || []);
+      setWorkflow(data.workflow || []);
     } catch (err) {
       console.error('Failed to fetch agent status:', err);
     } finally {
@@ -143,31 +161,71 @@ export default function AgentsTab() {
       <Card className="border-black/5 bg-[linear-gradient(135deg,#ffffff_0%,#f7f3ea_100%)] shadow-sm">
         <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
-            <Badge className="border border-slate-200 bg-white text-slate-600">Primary Coding Agent</Badge>
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">AgentX - The Architect</h2>
+            <Badge className="border border-slate-200 bg-white text-slate-600">Collaborative Coding Orchestrator</Badge>
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">AgentX Ensemble</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">
-              Clean, file-aware execution for fixes, refactors, and implementation planning inside Ops Hub.
+              Ops Hub now routes coding work through a staged ensemble: Kimi for architecture, Claude for reasoning, DeepSeek for security and cost, Gemini for UX and performance, and Codex for final synthesis.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Execution</p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">Execute + Simple Edit</p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">Staged multi-agent review</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Fallback</p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">Plan without file changes</p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">Single-provider recovery path</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {workflow.length > 0 && (
+        <Card className="border-black/5 bg-white/90 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-slate-900">Collaborative Workflow</CardTitle>
+            <CardDescription className="text-slate-500">
+              Default role assignments used when AgentX runs collaborative coding mode.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-5 md:grid-cols-2">
+              {workflow.map((step) => (
+                <div
+                  key={step.role}
+                  className={`rounded-2xl border p-4 shadow-sm ${
+                    step.available
+                      ? 'border-slate-200 bg-[#fcfbf7]'
+                      : 'border-slate-200 bg-slate-50 opacity-70'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        {step.roleLabel}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{step.label}</p>
+                    </div>
+                    <div className={`h-3 w-3 rounded-full ${PROVIDER_COLORS[step.provider] || 'bg-gray-500'}`} />
+                  </div>
+                  <p className="mt-3 text-xs leading-relaxed text-slate-500">{step.purpose}</p>
+                  <div className="mt-4 border-t border-slate-200 pt-3 text-[11px] text-slate-500">
+                    <p>Default model: {step.defaultModel}</p>
+                    <p className="mt-1">{step.available ? 'Configured' : 'Waiting for credentials'}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="border-black/5 bg-white/90 shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-slate-900">Fallback Providers</CardTitle>
+            <CardTitle className="text-slate-900">Collaborative Providers</CardTitle>
             <CardDescription className="text-slate-500">
-              AgentX handles the primary Ops Hub coding flow. Codex, Claude, and Gemini remain available as fallback runtimes.
+              Each provider has a distinct role in collaborative coding mode, and can also serve as a routed fallback when another stage is unavailable.
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={fetchStatus} className="border-slate-200 bg-white">
@@ -243,6 +301,8 @@ export default function AgentsTab() {
                       {provider.name === 'codex' && 'Best for: coding tasks, refactors, and balanced engineering work'}
                       {provider.name === 'claude' && 'Best for: debugging, reasoning, and long-context analysis'}
                       {provider.name === 'gemini' && 'Best for: cost-sensitive runs, multimodal work, and fast iteration'}
+                      {provider.name === 'kimi' && 'Best for: architecture planning, long-context understanding, and scalable design direction'}
+                      {provider.name === 'deepseek' && 'Best for: security review, cost efficiency, and operational risk checks'}
                     </p>
                     {provider.runtimeAccessModes && provider.runtimeAccessModes.length > 0 && (
                       <p className="mt-2 text-[11px] text-slate-400">
@@ -264,7 +324,7 @@ export default function AgentsTab() {
         <CardHeader>
           <CardTitle className="text-slate-900">Access Model</CardTitle>
           <CardDescription className="text-slate-500">
-            AgentX - The Architect runs on the server. Ops Hub now attempts Vertex-backed AgentX execution first, then falls back to Codex, Claude, and Gemini if needed.
+            AgentX runs server-side and coordinates the collaborative provider graph. Browser logins do not power this runtime.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-slate-600">
@@ -272,7 +332,7 @@ export default function AgentsTab() {
             Subscription or browser sign-in is still useful in provider-owned tools, but it does not power this VM runtime.
           </div>
           <div className="rounded-2xl border border-slate-200 bg-[#fbfaf6] px-4 py-3">
-            AgentX uses the server's Google Cloud / Vertex AI access. If that path is unavailable, Ops Hub can still fall back to Codex, Claude, or Gemini runtime credentials.
+            Collaborative mode prefers role-specialized providers first. If a stage is unavailable, Ops Hub routes to the next configured provider rather than failing the whole run immediately.
           </div>
           <div className="rounded-2xl border border-slate-200 bg-[#fbfaf6] px-4 py-3">
             <p className="font-medium text-slate-700">AgentX / Vertex env</p>
@@ -290,6 +350,12 @@ export default function AgentsTab() {
             <p className="font-medium text-slate-700">Claude / Gemini env</p>
             <p className="mt-1 text-slate-500">
               <code>ANTHROPIC_API_KEY</code>, <code>AI_INTEGRATIONS_ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>GOOGLE_AI_API_KEY</code>, <code>AI_INTEGRATIONS_GEMINI_API_KEY</code>
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-[#fbfaf6] px-4 py-3">
+            <p className="font-medium text-slate-700">Kimi / DeepSeek env</p>
+            <p className="mt-1 text-slate-500">
+              <code>KIMI_API_KEY</code>, <code>MOONSHOT_API_KEY</code>, <code>KIMI_BASE_URL</code>, <code>DEEPSEEK_API_KEY</code>, <code>DEEPSEEK_BASE_URL</code>
             </p>
           </div>
         </CardContent>
@@ -343,7 +409,7 @@ export default function AgentsTab() {
         <CardHeader>
           <CardTitle className="text-slate-900">AgentX Control Surface</CardTitle>
           <CardDescription className="text-slate-500">
-            The Insights view mirrors the simplified Ops Hub controls for AgentX - The Architect.
+            The Insights view exposes the simplified entry point, but the execution path behind it is now collaborative.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -366,10 +432,10 @@ export default function AgentsTab() {
             <div className="rounded-xl border border-slate-200 bg-[#fbfaf6] p-3.5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Model Selector</p>
               <div className="mt-2.5 inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-900">
-                Simple Edit
+                Ensemble routing
               </div>
               <p className="mt-2.5 text-xs text-slate-500">
-                Provider routing is internal. The UI no longer exposes auto/manual provider or cost-quality selectors.
+                Provider routing is internal. AgentX assigns architecture, reasoning, security, UX, and synthesis roles automatically.
               </p>
             </div>
           </div>
