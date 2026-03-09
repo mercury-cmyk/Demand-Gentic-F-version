@@ -438,6 +438,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         setupPayload.systemInstruction = {
           parts: [{ text: session.systemPrompt }],
         };
+        // Enable transcription so Gemini returns text versions of audio
+        setupPayload.outputAudioTranscription = {};
+        setupPayload.inputAudioTranscription = {};
       } else {
         // Google AI Studio (generativelanguage.googleapis.com) — snake_case
         setupPayload.tools = [{ function_declarations: functionDecls }];
@@ -452,6 +455,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         setupPayload.system_instruction = {
           parts: [{ text: session.systemPrompt }],
         };
+        // Enable transcription so Gemini returns text versions of audio
+        setupPayload.output_audio_transcription = {};
+        setupPayload.input_audio_transcription = {};
       }
 
       const setupMessage = { setup: setupPayload };
