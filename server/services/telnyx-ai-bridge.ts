@@ -28,6 +28,7 @@ import { normalizeToE164, isValidE164 } from "../lib/phone-utils";
 import { processDisposition, createFallbackLead } from "./disposition-engine";
 import { getGoogleVoiceConfig } from "./voice-constants";
 import { handleCallCompleted } from "./number-pool-integration";
+import { resolveAgentAssignment } from "./unified-call-context";
 import { logger } from "./production-logger";
 
 
@@ -586,6 +587,11 @@ export class TelnyxAiBridge extends EventEmitter {
           if (!sipDialer.isReady()) {
             logger.warn('[TelnyxAiBridge] SIP dialer not ready, falling back to TeXML');
           } else {
+            // UNIFIED AGENT RESOLUTION: Use the same resolveAgentAssignment() that test calls use
+            // This ensures systemPrompt, voice (with rotation), firstMessage, and agentName
+            // are identical between test calls and production calls.
+            const unifiedAgent = context.campaignId ? await resolveAgentAssignment(context.campaignId) : null;
+
             const contactName = [context.contactFirstName, context.contactLastName].filter(Boolean).join(' ').trim() || 'there';
             const contactJobTitle = context.contactJobTitle || context.contactTitle || 'Decision Maker';
             const accountName = context.accountName || context.companyName || 'your company';
@@ -596,8 +602,8 @@ export class TelnyxAiBridge extends EventEmitter {
               campaignId: context.campaignId!,
               contactId: context.contactId!,
               queueItemId: context.queueItemId || '',
-              voiceName: (settings as any).persona?.voice || 'Puck',
-              systemPrompt: settings.scripts?.systemPrompt || (settings as any).systemPrompt,
+              voiceName: unifiedAgent?.voice || (settings as any).persona?.voice || 'Puck',
+              systemPrompt: unifiedAgent?.systemPrompt || settings.scripts?.systemPrompt || (settings as any).systemPrompt,
               contactName,
               contactFirstName: context.contactFirstName || 'there',
               contactJobTitle,
@@ -612,7 +618,7 @@ export class TelnyxAiBridge extends EventEmitter {
               talkingPoints: context.talkingPoints,
               campaignContextBrief: context.campaignContextBrief,
               callFlow: context.callFlow,
-              firstMessage: settings.scripts?.opening,
+              firstMessage: unifiedAgent?.firstMessage || settings.scripts?.opening,
               maxCallDurationSeconds: context.maxCallDurationSeconds,
               callerNumberId: context.callerNumberId ?? null,
               callerNumberDecisionId: context.callerNumberDecisionId ?? null,

@@ -42,6 +42,7 @@ import {
   COUNTRY_DIAL_PREFIX,
 } from '../utils/country-utils';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
+import { resolveAgentAssignment } from '../services/unified-call-context';
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
 import { formatPhoneWithCountryCode } from '../lib/phone-formatter';
 import {
@@ -1481,11 +1482,14 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // Use normalized phone going forward
         phoneNumber = normalizedPhone;
 
+        // UNIFIED AGENT RESOLUTION: Use the same resolveAgentAssignment() that test calls use
+        // This ensures systemPrompt, voice (with rotation), firstMessage, and agentName
+        // are identical between test calls and production queue calls.
+        const unifiedAgent = await resolveAgentAssignment(campaignId);
+
         // Contact data comes from the SQL query (snake_case)
-        // Use virtual agent name if available, fall back to aiSettings persona
-        // NOTE: Default must be a real name, not "your representative" which is in PLACEHOLDER_VALUES blocklist
-        // Check both agentName and name since wizard stores in agentName field
-        const agentName = virtualAgent?.name || (aiSettings.persona as any)?.agentName || aiSettings.persona?.name || "Alex";
+        // Agent name from unified resolution (same logic as test calls)
+        const agentName = unifiedAgent?.agentName || virtualAgent?.name || (aiSettings.persona as any)?.agentName || aiSettings.persona?.name || "Alex";
         const agentFirstName = agentName.split(' ')[0]; // Extract first name
         
         // Create call attempt record for proper tracking
@@ -1752,6 +1756,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
         if (useSip) {
           // Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live
+          // CRITICAL: Use unified agent resolution (same as test calls) for systemPrompt,
+          // voice (with rotation), and firstMessage to ensure zero drift.
           console.log(`[AI Orchestrator] Using Direct SIP engine for call to ${phoneNumber}`);
           const sipResult = await sipDialer.initiateAiCall({
             toNumber: phoneNumber,
@@ -1759,13 +1765,13 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             campaignId,
             contactId: contactId || '',
             queueItemId: item.id,
-            voiceName: aiSettings.persona?.voice || 'Puck',
-            systemPrompt: aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
+            voiceName: unifiedAgent?.voice || aiSettings.persona?.voice || 'Puck',
+            systemPrompt: unifiedAgent?.systemPrompt || aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
             contactName: `${item.contact_first_name || ''} ${item.contact_last_name || ''}`.trim() || 'there',
             contactFirstName: item.contact_first_name || 'there',
             contactJobTitle: item.contact_job_title || 'Decision Maker',
             accountName: item.account_name || 'your company',
-            organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+            organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'our organization',
             campaignName: campaign.name,
             campaignType: (campaign as any).type || (campaign as any).campaignType || null,
             campaignObjective: (campaign as any).campaignObjective || undefined,
@@ -1775,6 +1781,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             talkingPoints: (campaign as any).talkingPoints || undefined,
             campaignContextBrief: (campaign as any).campaignContextBrief || undefined,
             callFlow: (campaign as any).callFlow || null,
+            firstMessage: unifiedAgent?.firstMessage || undefined,
             maxCallDurationSeconds: (() => {
               const raw = Number((campaign as any).maxCallDurationSeconds);
               if (!Number.isFinite(raw) || raw <= 0) return undefined;
