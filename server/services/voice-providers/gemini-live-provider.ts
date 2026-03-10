@@ -66,6 +66,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private currentResponseId: string | null = null;
   private pendingFunctionCalls: Map<string, { name: string; args: any }> = new Map();
 
+  // Model override — set by connectWithRetry when trying fallback models
+  private modelOverride: string | null = null;
+  /** The model name that was actually used for the active connection */
+  public activeModel: string | null = null;
+
   // WebSocket keepalive — prevents silent connection drops from proxies/LBs/firewalls
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   private lastPongReceived: number = 0;
@@ -129,7 +134,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    const model = await getVoiceModelForProvider('google');
+    const model = this.modelOverride || await getVoiceModelForProvider('google');
+    this.activeModel = model;
 
     // ALWAYS use Vertex AI when project ID is available (required for gemini-live-2.5-flash-native-audio)
     // API keys (Google AI Studio) don't support the native audio models
@@ -275,10 +281,13 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   /**
    * Connect with retry logic. Re-authenticates on failure (for Vertex AI).
    * Max 2 retries (3 total attempts) with exponential backoff.
+   * If all retries fail with the primary model, tries known fallback model names.
    */
   async connectWithRetry(maxRetries: number = 2): Promise<void> {
+    const primaryModel = this.modelOverride || await getVoiceModelForProvider('google');
     let lastError: Error | null = null;
 
+    // Try primary model with retries
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 0) {
@@ -300,6 +309,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
           this.setupComplete = false;
         }
 
+        this.modelOverride = primaryModel;
         await this.connect();
         return; // Success
       } catch (error: any) {
@@ -313,7 +323,32 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       }
     }
 
-    throw lastError || new Error('Gemini connection failed after retries');
+    // Primary model exhausted retries — try known fallback model names
+    const FALLBACK_MODELS = [
+      'gemini-2.5-flash-preview-native-audio-dialog',
+      'gemini-2.0-flash-live-001',
+      'gemini-2.0-flash-live',
+    ].filter(m => m !== primaryModel);
+
+    for (const fallbackModel of FALLBACK_MODELS) {
+      console.warn(`${LOG_PREFIX} ⚡ Primary model "${primaryModel}" failed. Trying fallback: "${fallbackModel}"...`);
+      try {
+        if (this.auth) this.auth = null;
+        if (this.ws) {
+          try { this.ws.terminate(); } catch (_) {}
+          this.ws = null;
+        }
+        this.setupComplete = false;
+        this.modelOverride = fallbackModel;
+        await this.connect();
+        console.log(`${LOG_PREFIX} ✅ Fallback model "${fallbackModel}" connected successfully`);
+        return;
+      } catch (error: any) {
+        console.error(`${LOG_PREFIX} Fallback model "${fallbackModel}" also failed:`, error.message);
+      }
+    }
+
+    throw lastError || new Error('Gemini connection failed after retries and fallbacks');
   }
 
   // ==================== KEEPALIVE & RECONNECTION ====================
@@ -574,7 +609,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
       const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
       const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-      const model = await getVoiceModelForProvider('google');
+      // Use the model that successfully connected (activeModel), not governance default
+      const model = this.activeModel || await getVoiceModelForProvider('google');
       // Prefer Vertex AI when project ID is available (required for native audio models)
       this.useVertexAI = !!projectId;
 

@@ -202,7 +202,7 @@ const VOICEMAIL_EARLY_WINDOW_MS = 12000;
 const FAST_AUTOMATION_ABORT_WINDOW_MS = 3000;
 const TRANSFER_HOLD_GRACE_WINDOW_MS = 45000;
 const CHANNEL_BLEED_WINDOW_MS = 8000;
-const HARD_MAX_CALL_DURATION_SECONDS = 300;
+const HARD_MAX_CALL_DURATION_SECONDS = 240;
 
 // ============= GEMINI CONNECTION SEMAPHORE =============
 // Prevents event loop saturation by limiting how many Gemini WebSocket

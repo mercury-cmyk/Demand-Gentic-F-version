@@ -80,7 +80,7 @@ export interface ActiveAiCall {
   enforcedMaxDurationSeconds?: number;
 }
 
-const GLOBAL_MAX_CALL_DURATION_SECONDS = 300;
+const GLOBAL_MAX_CALL_DURATION_SECONDS = 240;
 const PRE_ANSWER_MAX_SECONDS = 60;
 
 export interface QueuedCall {

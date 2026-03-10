@@ -21,48 +21,60 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   console.log(`[Backfill callStartedAt] Mode: ${dryRun ? "DRY-RUN" : "LIVE"}`);
 
-  // Find all call attempts with a disposition but no callStartedAt
-  const rows = await db
-    .select({
-      id: dialerCallAttempts.id,
-      createdAt: dialerCallAttempts.createdAt,
-      callEndedAt: dialerCallAttempts.callEndedAt,
-      callDurationSeconds: dialerCallAttempts.callDurationSeconds,
-    })
+  // Count affected rows first
+  const [countRow] = await db
+    .select({ count: sql<number>`COUNT(*)::int` })
     .from(dialerCallAttempts)
     .where(
       sql`${dialerCallAttempts.callStartedAt} IS NULL AND ${dialerCallAttempts.disposition} IS NOT NULL`
     );
 
-  console.log(`[Backfill callStartedAt] Found ${rows.length} records to backfill`);
+  const total = countRow?.count || 0;
+  console.log(`[Backfill callStartedAt] Found ${total} records to backfill`);
 
-  let updated = 0;
-  for (const row of rows) {
-    let callStartedAt: Date;
-
-    if (row.callEndedAt && row.callDurationSeconds && row.callDurationSeconds > 0) {
-      // Best estimate: endedAt minus duration
-      callStartedAt = new Date(row.callEndedAt.getTime() - row.callDurationSeconds * 1000);
-    } else if (row.createdAt) {
-      // Fallback: createdAt + 2s connection delay
-      callStartedAt = new Date(row.createdAt.getTime() + 2000);
-    } else {
-      console.warn(`  Skipping ${row.id}: no timing data available`);
-      continue;
-    }
-
-    if (dryRun) {
-      console.log(`  [DRY-RUN] Would set callStartedAt=${callStartedAt.toISOString()} for ${row.id}`);
-    } else {
-      await db
-        .update(dialerCallAttempts)
-        .set({ callStartedAt, updatedAt: new Date() })
-        .where(sql`${dialerCallAttempts.id} = ${row.id}`);
-      updated++;
-    }
+  if (total === 0) {
+    console.log("[Backfill callStartedAt] Nothing to do.");
+    process.exit(0);
   }
 
-  console.log(`[Backfill callStartedAt] Done. ${dryRun ? "Would update" : "Updated"} ${dryRun ? rows.length : updated} records.`);
+  if (dryRun) {
+    console.log(`[Backfill callStartedAt] DRY-RUN: Would update ${total} records.`);
+    process.exit(0);
+  }
+
+  // Process in batches of 2000 to avoid Neon pooler timeouts
+  const BATCH_SIZE = 2000;
+  let totalUpdated = 0;
+  let batchNum = 0;
+
+  while (true) {
+    batchNum++;
+    const result = await db.execute(sql`
+      WITH batch AS (
+        SELECT id FROM dialer_call_attempts
+        WHERE call_started_at IS NULL AND disposition IS NOT NULL
+        LIMIT ${BATCH_SIZE}
+      )
+      UPDATE dialer_call_attempts dca
+      SET
+        call_started_at = CASE
+          WHEN dca.call_ended_at IS NOT NULL AND dca.call_duration_seconds IS NOT NULL AND dca.call_duration_seconds > 0
+            THEN dca.call_ended_at - (dca.call_duration_seconds * INTERVAL '1 second')
+          ELSE dca.created_at + INTERVAL '2 seconds'
+        END,
+        updated_at = NOW()
+      FROM batch
+      WHERE dca.id = batch.id
+    `);
+
+    const updatedCount = (result as any).rowCount ?? (result as any).count ?? 0;
+    totalUpdated += updatedCount;
+    console.log(`[Backfill callStartedAt] Batch ${batchNum}: updated ${updatedCount} rows (total: ${totalUpdated}/${total})`);
+
+    if (updatedCount === 0) break;
+  }
+
+  console.log(`[Backfill callStartedAt] Done. Updated ${totalUpdated} records.`);
   process.exit(0);
 }
 

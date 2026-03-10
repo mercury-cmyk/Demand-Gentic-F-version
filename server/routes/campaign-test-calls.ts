@@ -389,7 +389,7 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
           campaignContextBrief: ctx.campaignContextBrief,
           callFlow: ctx.callFlow,
           firstMessage: ctx.firstMessage,
-          maxCallDurationSeconds: 300,
+          maxCallDurationSeconds: 240,
         });
 
         if (sipResult.success) {

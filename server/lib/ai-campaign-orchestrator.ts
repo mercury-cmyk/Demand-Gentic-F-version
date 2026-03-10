@@ -1550,7 +1550,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           maxCallDurationSeconds: (() => {
             const raw = Number((campaign as any).maxCallDurationSeconds);
             if (!Number.isFinite(raw) || raw <= 0) return undefined;
-            return Math.min(raw, 300);
+            return Math.min(raw, 240);
           })(),
         };
 
@@ -1783,7 +1783,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             maxCallDurationSeconds: (() => {
               const raw = Number((campaign as any).maxCallDurationSeconds);
               if (!Number.isFinite(raw) || raw <= 0) return undefined;
-              return Math.min(raw, 300);
+              return Math.min(raw, 240);
             })(),
             callerNumberId: callerIdResult.numberId,
             callerNumberDecisionId: callerIdResult.decisionId,

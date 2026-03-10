@@ -261,4 +261,160 @@ router.get("/config-diagnostics", async (req, res) => {
   });
 });
 
+/**
+ * Gemini Live API connectivity test.
+ * Tests whether the configured model can establish a WebSocket session.
+ * Admin-only endpoint.
+ */
+router.get("/gemini-connectivity", async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    const { default: jwt } = await import('jsonwebtoken');
+    const token = authHeader.replace('Bearer ', '');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as any;
+    if (decoded.role !== 'ADMIN' && decoded.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  try {
+    const { getAiModelGovernanceSnapshot } = await import('../services/ai-model-governance');
+    const WebSocket = (await import('ws')).default;
+    const { GoogleAuth } = await import('google-auth-library');
+
+    const snapshot = await getAiModelGovernanceSnapshot(true);
+    const policy = snapshot.policies.voice_realtime;
+    const model = policy.primaryModel;
+    const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || '';
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || '';
+    const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
+    const useVertexAI = !!projectId;
+
+    const result: Record<string, unknown> = {
+      timestamp: new Date().toISOString(),
+      governance: {
+        source: snapshot.isSystemDefault ? 'system_default' : 'database',
+        provider: policy.primaryProvider,
+        model,
+        enabled: policy.enabled,
+        fallback: policy.allowFallback ? policy.fallbackModel : null,
+      },
+      credentials: {
+        hasApiKey: !!apiKey,
+        hasProjectId: !!projectId,
+        mode: useVertexAI ? 'vertex_ai' : 'google_ai_studio',
+        projectId: projectId || null,
+        location,
+      },
+    };
+
+    // Test WebSocket connection (10s timeout)
+    const testStart = Date.now();
+    const testResult = await new Promise<{ connected: boolean; setupComplete: boolean; error: string | null }>((resolve) => {
+      const timeout = setTimeout(() => {
+        ws?.terminate();
+        resolve({ connected: false, setupComplete: false, error: 'Connection timeout (10s)' });
+      }, 10000);
+
+      let ws: InstanceType<typeof WebSocket> | null = null;
+
+      (async () => {
+        try {
+          let wsUrl: string;
+          const headers: Record<string, string> = {};
+
+          if (useVertexAI) {
+            const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+            const accessToken = await auth.getAccessToken();
+            if (!accessToken) {
+              clearTimeout(timeout);
+              resolve({ connected: false, setupComplete: false, error: 'Failed to get OAuth2 access token' });
+              return;
+            }
+            wsUrl = `wss://${location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
+            headers['Authorization'] = `Bearer ${accessToken}`;
+          } else {
+            wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+          }
+
+          ws = new WebSocket(wsUrl, { headers });
+
+          ws.on('open', () => {
+            const modelResourceName = useVertexAI
+              ? `projects/${projectId}/locations/${location}/publishers/google/models/${model}`
+              : `models/${model}`;
+
+            const setup = useVertexAI
+              ? { setup: { model: modelResourceName, generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } } }, systemInstruction: { parts: [{ text: 'Test.' }] }, realtimeInputConfig: { automaticActivityDetection: { disabled: false } } } }
+              : { setup: { model: modelResourceName, generation_config: { response_modalities: ['AUDIO'], speech_config: { voice_config: { prebuilt_voice_config: { voice_name: 'Kore' } } } }, system_instruction: { parts: [{ text: 'Test.' }] }, realtime_input_config: { automatic_activity_detection: { disabled: false } } } };
+
+            ws!.send(JSON.stringify(setup));
+          });
+
+          ws.on('message', (data) => {
+            try {
+              const msg = JSON.parse(data.toString());
+              if (msg.setupComplete || msg.setup_complete) {
+                clearTimeout(timeout);
+                ws?.close();
+                resolve({ connected: true, setupComplete: true, error: null });
+                return;
+              }
+              if (msg.error) {
+                clearTimeout(timeout);
+                ws?.close();
+                resolve({ connected: true, setupComplete: false, error: `API error: ${msg.error.message || JSON.stringify(msg.error)}` });
+                return;
+              }
+            } catch { /* ignore parse errors */ }
+          });
+
+          ws.on('close', (code, reason) => {
+            clearTimeout(timeout);
+            resolve({ connected: true, setupComplete: false, error: `WebSocket closed (code=${code}, reason=${reason?.toString() || 'none'}) before setup_complete — model may be invalid` });
+          });
+
+          ws.on('error', (err: any) => {
+            clearTimeout(timeout);
+            resolve({ connected: false, setupComplete: false, error: `WebSocket error: ${err.message}` });
+          });
+        } catch (err: any) {
+          clearTimeout(timeout);
+          resolve({ connected: false, setupComplete: false, error: `Setup error: ${err.message}` });
+        }
+      })();
+    });
+
+    result.connection = {
+      ...testResult,
+      latencyMs: Date.now() - testStart,
+    };
+
+    result.status = testResult.setupComplete ? 'operational' : 'failing';
+    result.diagnosis = testResult.setupComplete
+      ? 'Gemini Live API is operational. If calls are still silent, check WebSocket URL reachability and Telnyx TeXML config.'
+      : testResult.error?.includes('timeout')
+        ? 'Connection timed out. Check network/firewall or Google Cloud quota.'
+        : testResult.error?.includes('access token')
+          ? 'Auth failure. Refresh service account credentials or check Vertex AI permissions.'
+          : testResult.error?.includes('closed')
+            ? `Model "${model}" may be deprecated or invalid. Check Google Cloud model availability.`
+            : `Connection failed: ${testResult.error}`;
+
+    res.status(testResult.setupComplete ? 200 : 503).json(result);
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Gemini connectivity test failed',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 export default router;

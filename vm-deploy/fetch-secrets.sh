@@ -72,7 +72,7 @@ USE_VERTEX_AI=true
 VOICE_PROVIDER=google
 VOICE_PROVIDER_FALLBACK=true
 VOICE_PROVIDER_FALLBACK_TARGET=openai
-GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio
+GEMINI_LIVE_MODEL=gemini-2.5-flash-preview-native-audio-dialog
 
 # Telnyx
 TELNYX_NUMBER_POOL_ENABLED=true

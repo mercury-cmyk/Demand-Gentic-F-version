@@ -122,7 +122,7 @@ const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
     eagerness: 'high',  // OPTIMIZED: 'high' for faster turn-taking, reduces latency
     takeTurnAfterSilenceSeconds: 2,  // OPTIMIZED: reduced from 4s for faster responses
     endConversationAfterSilenceSeconds: 60,
-    maxConversationDurationSeconds: 300,  // 5 minutes max call duration
+    maxConversationDurationSeconds: 240,  // 4 minutes max call duration
   },
   softTimeout: {
     responseTimeoutSeconds: -1,
@@ -3000,8 +3000,8 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       : 120; // Default: 2 minutes of user silence ends call
       
     const maxDurationSeconds = Number.isFinite(maxDurationRaw) && maxDurationRaw > 0
-      ? Math.min(maxDurationRaw, 300)
-      : 300; // Default: 300 seconds hard limit
+      ? Math.min(maxDurationRaw, 240)
+      : 240; // Default: 240 seconds hard limit
 
     const timeSinceUserSpeech = session.lastUserSpeechTime
       ? Math.round((now.getTime() - session.lastUserSpeechTime.getTime()) / 1000)
