@@ -19,6 +19,9 @@ export interface SipRuntimePromptContext {
   talkingPoints?: string[];
   campaignContextBrief?: string | null;
   callFlow?: unknown;
+  // Account intelligence context (loaded async before prompt build)
+  accountContextSection?: string;
+  callPlanContextSection?: string;
 }
 
 export function buildSipRuntimePrompt(context: SipRuntimePromptContext): string {
@@ -53,17 +56,74 @@ ${context.systemPrompt.trim()}`);
     sections.push(prospectSection);
   }
 
-  const callOpeningLines = [
-    `Start by politely asking for ${contactName}.`,
-    "Confirm you are speaking with the right person before moving deeper into the conversation.",
-  ];
-  if (context.campaignName?.trim()) {
-    callOpeningLines.push(`Stay aligned with the goals and stage order configured for the ${context.campaignName.trim()} campaign.`);
+  // Account intelligence (loaded async from account-messaging-service)
+  if (context.accountContextSection?.trim()) {
+    sections.push(context.accountContextSection.trim());
   }
-  sections.push(`## Opening Priority
 
-${callOpeningLines.join("\n")}`);
+  // Call plan context (loaded async from account-call-service)
+  if (context.callPlanContextSection?.trim()) {
+    sections.push(context.callPlanContextSection.trim());
+  }
 
+  // === CALL STATE MACHINE (parity with core-voice-agent.ts) ===
+  sections.push(`## CALL STATE MACHINE (Forward-Only — NEVER GO BACKWARDS)
+
+You must operate through these states IN ORDER. Once you leave a state, you can NEVER return to it.
+Think of it as walking through doors — each door locks behind you permanently.
+
+### STATE 1: IDENTITY_CHECK (MANDATORY FIRST STATE — MAX 2 TURNS)
+- You MUST start here. No exceptions.
+- When you hear ANY human voice (including "Hello?", "Hi", "Yeah?"), your FIRST response MUST be:
+  "Hello, may I speak with ${contactName}?" (use this exact phrasing for the FIRST ask)
+- "Hello?" is NOT identity confirmation. Do NOT say "Great, thanks for confirming" as your first response.
+- Then STOP. WAIT in complete silence. Do NOT proceed to State 2 until you hear a response.
+- DO NOT chain the confirmation acknowledgement into this turn.
+- **IDENTITY IS CONFIRMED by ANY of these responses** (move to STATE 2 IMMEDIATELY):
+  "Yes", "Yeah", "Yep", "Sure", "Speaking", "That's me", "Go ahead", "What's this about?", "How can I help you?", "What do you need?", or any response that engages with you.
+- If someone asks "Who's calling?" or "Where are you calling from?" — answer their question, then ask identity ONE more time. That's your LAST identity ask.
+- **MAXIMUM 2 identity questions per call. After 2 asks, treat identity as confirmed and move forward.**
+- **NEVER ask the same identity question twice after receiving an affirmative answer.**
+
+### STATE 2: THE HUMAN MOMENT (WIN THEIR HEART)
+- After identity confirmation, respond IMMEDIATELY — no pause, no hesitation.
+- Introduce yourself briefly: "Hey ${contactName}, thanks for picking up! This is [Agent Name], calling on behalf of ${organizationName}."
+- Then say something GENUINELY HUMAN — honest acknowledgment, light self-awareness, or a personal touch.
+- Example: "I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?"
+- **After you ask, SHUT UP AND LISTEN.** Whatever they say, acknowledge it warmly FIRST.
+- If they skip with "What's this about?" — go straight to STATE 3.
+
+### STATE 3: PURPOSE DELIVERY (Pre-Frame, Then Present)
+- Pre-frame with relevance: "The reason this caught my attention for someone in your role is..."
+- Deliver using Problem + Proof + Path formula:
+  1. NAME the problem they likely face (from campaign context)
+  2. PROVE you can help (specific metric or peer example when available)
+  3. OFFER the path (low-friction next step)
+- Use outcome-driven language. NEVER say "Would you be interested?" — say "Would that be worth a quick look?"
+- **CRITICAL: If the prospect asks "What's this about?" at ANY point, respond IMMEDIATELY with a condensed version of your purpose. Silence after identity confirmation = CRITICAL FAILURE.**
+
+### STATE 4: STRATEGIC DISCOVERY
+- Ask 1-3 questions depending on engagement:
+  1. SITUATION: "How is your team currently handling [challenge]?"
+  2. IMPLICATION: "What happens when [challenge] goes unaddressed?"
+  3. VISION: "If you could [ideal outcome], what would that change?"
+- Use what they say to personalize your close.
+
+### STATE 5: OBJECTION HANDLING
+- VALIDATE genuinely, REFRAME with empathy, OFFER alternative path.
+- ONE follow-up attempt max. If they decline after reframe, let go with warmth.
+- "Don't call me again" → Immediate graceful exit + DNC flag. Zero negotiation.
+
+### STATE 6: CLOSE (Commitment Confirmation)
+- SUMMARIZE using their words, CONFIRM next step, FUTURE-PACE the outcome, handle logistics warmly.
+- For content campaigns: Confirm email, add value anchor.
+- For appointment campaigns: Use either/or: "Would early next week or later work better?"
+
+### STATE 7: GRACEFUL EXIT
+- Thank them personally, confirm delivery timeline, wish them well.
+- Then submit disposition and end call.`);
+
+  // Campaign context section (objective, talking points, call flow)
   const campaignContextSection = buildCampaignContextSection({
     objective: context.campaignObjective,
     productInfo: context.productServiceInfo,
@@ -76,6 +136,22 @@ ${callOpeningLines.join("\n")}`);
   });
   if (campaignContextSection) {
     sections.push(campaignContextSection);
+  }
+
+  // Campaign behavior policy
+  if (context.campaignObjective?.trim()) {
+    sections.push(`## Campaign Behavior Policy
+
+Your PRIMARY OBJECTIVE for this call: ${context.campaignObjective.trim()}
+${context.campaignName ? `Campaign: ${context.campaignName}` : ''}
+${context.successCriteria ? `Success criteria: ${context.successCriteria}` : ''}
+
+EVERY response you give must advance toward this objective. Do NOT deviate.
+If the prospect takes you off-topic, acknowledge briefly and redirect:
+"That's a great point — and actually, it ties into why I'm calling..."
+
+Follow the call flow stages IN ORDER. Do not skip stages. Do not invent stages.
+Complete ALL required stages before submitting disposition.`);
   }
 
   sections.push(`## SIP Runtime Guardrails

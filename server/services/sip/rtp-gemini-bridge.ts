@@ -14,7 +14,7 @@ import { WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { GoogleAuth } from 'google-auth-library';
 import { db } from '../../db';
-import { campaignQueue, callSessions, dialerCallAttempts, type CanonicalDisposition } from '@shared/schema';
+import { campaignQueue, callSessions, dialerCallAttempts, contacts, type CanonicalDisposition } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from '../voice-providers/audio-transcoder';
 import { processDisposition } from '../disposition-engine';
@@ -23,6 +23,8 @@ import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
 import { buildSipRuntimePrompt } from './sip-runtime-prompt';
+import { getOrBuildAccountIntelligence, getOrBuildAccountMessagingBrief, buildAccountContextSection, getAccountProfileData } from '../account-messaging-service';
+import { getOrBuildAccountCallBrief, buildParticipantCallContext, getOrBuildParticipantCallPlan, getCallMemoryNotes, buildCallPlanContextSection } from '../account-call-service';
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -124,6 +126,16 @@ interface BridgeSession {
   maxDurationTimer: NodeJS.Timeout | null;
   // Transcript capture for post-call analysis
   transcriptTurns: TranscriptTurn[];
+  // Identity & state tracking (parity with TeXML/voice-dialer)
+  identityConfirmed: boolean;
+  identityConfirmedAt: Date | null;
+  agentTurnCount: number;
+  contactTurnCount: number;
+  // State reinforcement tracking (prevents Gemini from regressing)
+  contactTurnsSinceReinforcement: number;
+  lastStateReinforcementAt: Date | null;
+  stateReinforcementCount: number;
+  currentState: string;
 }
 
 interface TranscriptTurn {
@@ -239,9 +251,67 @@ function buildPlainTranscript(turns: TranscriptTurn[]): string | undefined {
 }
 
 /**
- * Build system prompt for Gemini
+ * Build system prompt for Gemini — loads account intelligence + call plan for parity with TeXML
  */
-function buildSystemPrompt(context: CallContext, voiceName: string, sessionId: string): string {
+async function buildSystemPrompt(context: CallContext, voiceName: string, sessionId: string): Promise<string> {
+  let accountContextSection: string | undefined;
+  let callPlanContextSection: string | undefined;
+
+  // Load account intelligence if we have contactId (look up accountId from contact)
+  if (context.contactId && context.campaignId) {
+    try {
+      const contactRows = await db
+        .select({ accountId: contacts.accountId })
+        .from(contacts)
+        .where(eq(contacts.id, context.contactId))
+        .limit(1);
+      const accountId = contactRows[0]?.accountId;
+
+      if (accountId) {
+        // Load account intelligence (cached, regenerated if stale)
+        const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
+        const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
+          accountId,
+          campaignId: context.campaignId,
+          intelligenceRecord: accountIntelligenceRecord,
+        });
+        const accountProfile = await getAccountProfileData(accountId);
+        accountContextSection = buildAccountContextSection(
+          accountIntelligenceRecord.payloadJson as any,
+          accountMessagingBriefRecord.payloadJson as any,
+          accountProfile
+        );
+
+        // Load call plan context
+        const accountCallBriefRecord = await getOrBuildAccountCallBrief({
+          accountId,
+          campaignId: context.campaignId,
+        });
+        const participantContext = await buildParticipantCallContext(context.contactId);
+        const participantCallPlanRecord = await getOrBuildParticipantCallPlan({
+          accountId,
+          contactId: context.contactId,
+          campaignId: context.campaignId,
+          attemptNumber: 1,
+          callAttemptId: context.callAttemptId || null,
+          accountCallBrief: accountCallBriefRecord,
+        });
+        const memoryNotes = await getCallMemoryNotes(accountId, context.contactId);
+        callPlanContextSection = buildCallPlanContextSection({
+          accountCallBrief: accountCallBriefRecord.payloadJson as any,
+          participantCallPlan: participantCallPlanRecord.payloadJson as any,
+          participantContext,
+          memoryNotes,
+        });
+
+        console.log(`[RTP Bridge] Loaded account intelligence for SIP call ${sessionId} (account: ${accountId})`);
+      }
+    } catch (err) {
+      console.warn(`[RTP Bridge] Failed to load account intelligence for SIP call ${sessionId}:`, err);
+      // Non-fatal — continue with basic prompt
+    }
+  }
+
   return buildSipRuntimePrompt({
     sessionId,
     voiceName,
@@ -260,6 +330,8 @@ function buildSystemPrompt(context: CallContext, voiceName: string, sessionId: s
     talkingPoints: context.talkingPoints,
     campaignContextBrief: context.campaignContextBrief,
     callFlow: context.callFlow,
+    accountContextSection,
+    callPlanContextSection,
   });
 }
 
@@ -290,7 +362,7 @@ export async function createBridgeSession(params: {
     listeningTimeout: null,
     dispositionProcessed: false,
     voiceName: voiceName || GEMINI_VOICES[0],
-    systemPrompt: buildSystemPrompt(context, voiceName || GEMINI_VOICES[0], callId),
+    systemPrompt: '', // Will be set after async load below
     callContext: context,
     g711Format: detectG711Format((context as any).to || (context as any).phoneNumber),
     metrics: {
@@ -304,7 +376,18 @@ export async function createBridgeSession(params: {
     maxReconnectAttempts: 3,
     maxDurationTimer: null,
     transcriptTurns: [],
+    identityConfirmed: false,
+    identityConfirmedAt: null,
+    agentTurnCount: 0,
+    contactTurnCount: 0,
+    contactTurnsSinceReinforcement: 0,
+    lastStateReinforcementAt: null,
+    stateReinforcementCount: 0,
+    currentState: 'IDENTITY_CHECK',
   };
+
+  // Load system prompt with account intelligence (async)
+  session.systemPrompt = await buildSystemPrompt(context, voiceName || GEMINI_VOICES[0], callId);
 
   bridgeSessions.set(callId, session);
 
@@ -515,6 +598,7 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
                 timestamp: now,
               });
             }
+            session.agentTurnCount++;
             console.log(`[RTP Bridge] Agent transcript: ${text.substring(0, 100)}...`);
           }
         }
@@ -540,6 +624,58 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
               });
             }
             console.log(`[RTP Bridge] Contact transcript: ${text.substring(0, 100)}...`);
+            session.contactTurnCount++;
+
+            // IDENTITY DETECTION: Check if contact confirmed identity (parity with TeXML path)
+            if (!session.identityConfirmed && session.agentTurnCount >= 1) {
+              if (detectSipIdentityConfirmation(text)) {
+                session.identityConfirmed = true;
+                session.identityConfirmedAt = new Date();
+                session.currentState = 'RIGHT_PARTY_INTRO';
+                console.log(`[RTP Bridge] ✅ Identity CONFIRMED for SIP call: ${session.callId}`);
+                // Inject identity lock into Gemini conversation
+                injectSipIdentityLock(session);
+              }
+            }
+
+            // WATCHDOG: If 3+ agent turns + 2+ contact turns but identity not confirmed,
+            // force-advance to prevent looping
+            if (!session.identityConfirmed && session.agentTurnCount >= 3 && session.contactTurnCount >= 2) {
+              console.log(`[RTP Bridge] ⚠️ WATCHDOG: Identity unconfirmed after ${session.agentTurnCount} agent + ${session.contactTurnCount} contact turns — force-advancing for call: ${session.callId}`);
+              session.identityConfirmed = true;
+              session.identityConfirmedAt = new Date();
+              session.currentState = 'RIGHT_PARTY_INTRO';
+              injectSipIdentityLock(session);
+            }
+
+            // STATE REINFORCEMENT: Periodic reminders to Gemini to prevent regression
+            // Mirrors voice-dialer.ts reinforcement loop (every 3 contact turns)
+            if (session.identityConfirmed) {
+              session.contactTurnsSinceReinforcement++;
+
+              const REINFORCEMENT_INTERVAL_TURNS = 3;
+              const MIN_REINFORCEMENT_GAP_MS = 15000;
+              const MAX_REINFORCEMENTS = 10;
+
+              const timeSinceLast = session.lastStateReinforcementAt
+                ? Date.now() - session.lastStateReinforcementAt.getTime()
+                : Infinity;
+
+              if (
+                session.contactTurnsSinceReinforcement >= REINFORCEMENT_INTERVAL_TURNS &&
+                timeSinceLast >= MIN_REINFORCEMENT_GAP_MS &&
+                session.stateReinforcementCount < MAX_REINFORCEMENTS
+              ) {
+                const reinforcement = buildSipStateReinforcement(session);
+                if (reinforcement) {
+                  injectSipTextMessage(session, reinforcement);
+                  session.lastStateReinforcementAt = new Date();
+                  session.stateReinforcementCount++;
+                  session.contactTurnsSinceReinforcement = 0;
+                  console.log(`[RTP Bridge] [StateReinforcement] Injected reminder #${session.stateReinforcementCount} for call: ${session.callId}`);
+                }
+              }
+            }
           }
         }
 
@@ -1078,6 +1214,140 @@ export function getBridgeSession(callId: string): BridgeSession | undefined {
  */
 export function getActiveSessions(): Map<string, BridgeSession> {
   return new Map(bridgeSessions);
+}
+
+// ============================================================================
+// IDENTITY DETECTION & STATE MANAGEMENT (parity with TeXML voice-dialer)
+// ============================================================================
+
+/**
+ * Detect if contact's response confirms their identity.
+ * Mirrors detectIdentityConfirmation() from voice-dialer.ts.
+ */
+function detectSipIdentityConfirmation(transcript: string): boolean {
+  const normalizedText = transcript
+    .toLowerCase()
+    .replace(/[.,!?;:\/\\]+/g, ' ')
+    .replace(/\b(um|uh|ah|oh|hmm|like|well|so)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Gatekeeper exclusions
+  const gatekeeperPhrases = [
+    'available', 'transfer', 'connect', 'hold', 'moment', 'one second',
+    'wait', 'check', 'see if', 'patch', 'through', 'reception', 'assistant',
+    'secretary', 'office', 'desk', 'line', 'he is', 'she is', 'they are',
+    'reason for', 'fail to', 'message', 'leave'
+  ];
+  if (gatekeeperPhrases.some(phrase => normalizedText.includes(phrase))) {
+    return false;
+  }
+
+  const patterns = [
+    /^yes\b/, /^yeah\b/, /^yep\b/, /^yup\b/, /^sure\b/,
+    /^absolutely\b/, /^definitely\b/, /^speaking\b/,
+    /^this is (me|him|her|they|them)\b/, /^that'?s me\b/, /^it'?s me\b/,
+    /^i am\b/, /^i'?m \w+/, /\bi am \w+/, /\bi'?m \w+/,
+    /^that'?s correct\b/, /^correct\b/, /^right\b/,
+    /\byes\b.*\b(this is|speaking|that'?s me|i am|i'm)\b/,
+    /\bhi\b.*\b(yes|this is|speaking|i am|i'm)\b/,
+    /\bhello\b.*\b(yes|speaking|this is)\b/,
+    /speaking$/, /this is \w+(\s+\w+)?/, /\w+ speaking$/, /\w+ here\b/,
+    /^you('ve)?\s*(got|reached|found)\s*(me|him|her)\b/,
+    /you('re)?\s*(talking|speaking)\s*(to|with)\s*(me|him|her|\w+)/,
+    /why\s+(are\s+)?you\s+ask/, /i\s+(said|told|already)\b/,
+    /^go ahead\b/, /^what('?s| is)\s+(this|it|up)\b/,
+    /^how can i help\b/, /^what do you (need|want)\b/,
+  ];
+
+  return patterns.some(p => p.test(normalizedText));
+}
+
+/**
+ * Inject identity lock message into Gemini conversation via clientContent.
+ * This tells Gemini to stop asking identity questions and move to the call purpose.
+ */
+function injectSipIdentityLock(session: BridgeSession): void {
+  if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN) return;
+
+  try {
+    // Use Vertex AI camelCase format
+    const lockMessage = {
+      clientContent: {
+        turns: [{
+          role: 'user',
+          parts: [{
+            text: `[SYSTEM OVERRIDE] Identity is CONFIRMED. The person on the line IS the intended contact.
+
+RULES NOW IN EFFECT:
+1. NEVER ask "Am I speaking with..." or any identity question again — identity is DONE.
+2. Introduce yourself NOW and explain the purpose of your call.
+3. Follow the campaign objective. Stay on track.
+4. Any hesitation from the contact is about the TOPIC, not identity.
+5. Move forward with the conversation — do NOT loop back.
+
+YOUR NEXT ACTION: Greet them warmly, introduce yourself, and deliver your purpose.`
+          }]
+        }],
+        turnComplete: true,
+      }
+    };
+
+    session.geminiWs.send(JSON.stringify(lockMessage));
+    console.log(`[RTP Bridge] ✅ Identity lock injected for SIP call: ${session.callId}`);
+  } catch (err) {
+    console.error(`[RTP Bridge] Error injecting identity lock for ${session.callId}:`, err);
+  }
+}
+
+/**
+ * Build state reinforcement message for Gemini.
+ * Mirrors buildStateReinforcementMessage() from voice-dialer.ts.
+ */
+function buildSipStateReinforcement(session: BridgeSession): string | null {
+  if (!session.identityConfirmed) return null;
+
+  const elapsedSinceConfirm = session.identityConfirmedAt
+    ? Math.round((Date.now() - session.identityConfirmedAt.getTime()) / 1000)
+    : 0;
+
+  // Get last 2 agent transcripts for context
+  const recentAgentTexts = session.transcriptTurns
+    .filter(t => t.speaker === 'agent')
+    .slice(-2)
+    .map(t => t.text.substring(0, 60))
+    .join(' | ');
+
+  return `[STATE REMINDER: Identity CONFIRMED ${elapsedSinceConfirm}s ago. Current phase: ${session.currentState}. ` +
+    `Do NOT re-ask identity. Do NOT repeat your last message. ` +
+    (recentAgentTexts ? `Your recent messages: "${recentAgentTexts}". ` : '') +
+    `Continue the conversation forward from where you left off. ` +
+    `Follow the campaign objective and call flow stages IN ORDER. ` +
+    `If the prospect just spoke, respond to what they ACTUALLY said.]`;
+}
+
+/**
+ * Inject a text message into Gemini conversation via clientContent.
+ * Used for state reinforcement and system instructions.
+ */
+function injectSipTextMessage(session: BridgeSession, text: string): void {
+  if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN) return;
+
+  try {
+    const message = {
+      clientContent: {
+        turns: [{
+          role: 'user',
+          parts: [{ text }]
+        }],
+        turnComplete: true,
+      }
+    };
+
+    session.geminiWs.send(JSON.stringify(message));
+  } catch (err) {
+    console.error(`[RTP Bridge] Error injecting text message for ${session.callId}:`, err);
+  }
 }
 
 // Export types
