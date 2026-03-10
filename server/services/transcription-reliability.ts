@@ -454,6 +454,7 @@ export async function processMissingTranscripts(): Promise<{
     let skippedTooShort = 0;
     let skippedUploading = 0;
     let skippedTooRecent = 0;
+    let markedMissing = 0;
 
     // Build batches for the right recovery strategy per audio source.
     const batchItems: BatchTranscriptionItem[] = [];
@@ -560,6 +561,18 @@ export async function processMissingTranscripts(): Promise<{
               updatedAt: new Date(),
             })
             .where(eq(dialerCallAttempts.id, result.callAttemptId));
+
+          // Propagate transcript to call_sessions.aiTranscript for Conversation Quality tab
+          const matchedCall = callsWithoutTranscripts.find(c => c.id === result.callAttemptId);
+          if (matchedCall?.callSessionId) {
+            try {
+              await db.update(callSessions)
+                .set({ aiTranscript: result.transcript })
+                .where(eq(callSessions.id, matchedCall.callSessionId));
+            } catch (syncErr: any) {
+              console.warn(`${LOG_PREFIX} Failed to sync transcript to call_sessions: ${syncErr.message}`);
+            }
+          }
 
           await logTranscriptionActivity(result.callAttemptId, 'fallback_completed', {
             source: result.provider || 'pool',
