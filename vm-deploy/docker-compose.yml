@@ -93,7 +93,7 @@ services:
       - MEDIA_BRIDGE_PORT=8090
       - GOOGLE_CLOUD_PROJECT=gen-lang-client-0789558283
       - GOOGLE_CLOUD_LOCATION=us-central1
-      - GEMINI_LIVE_MODEL=gemini-2.5-flash-preview-native-audio-dialog
+      - GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio
       # After migration: callback goes direct to local API, no internet round-trip
       - CLOUD_RUN_API_URL=http://localhost:8080
     healthcheck:
