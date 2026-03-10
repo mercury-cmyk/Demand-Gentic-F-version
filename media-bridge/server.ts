@@ -417,7 +417,10 @@ function startRtpListener(session: BridgeSession): void {
     // Mark call as answered on first RTP
     if (session.packetsReceived === 1) {
       log(`First RTP received for ${session.callId} from ${rinfo.address}:${rinfo.port}`);
-      trySendOpeningMessage(session);
+      // LISTEN-FIRST: Don't speak yet — let audio flow to Gemini so it can
+      // hear the contact say "Hello?" and respond naturally via system prompt.
+      // Schedule fallback for silent contacts who are waiting for us to speak first.
+      scheduleOpeningFallback(session);
     }
 
     handleIncomingRtp(session, msg);
@@ -805,11 +808,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           session.setupComplete = true;
           log(`Gemini setup complete for ${session.callId}`);
           resolve();
-          if (session.packetsReceived > 0) {
-            trySendOpeningMessage(session);
-          } else {
-            scheduleOpeningFallback(session);
-          }
+          // LISTEN-FIRST: Always schedule fallback. Let Gemini hear the contact
+          // speak first and respond naturally, rather than speaking immediately.
+          scheduleOpeningFallback(session);
           return;
         }
 
@@ -879,6 +880,15 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         if (serverContent?.inputTranscription?.text) {
           const contactText = serverContent.inputTranscription.text.trim();
           if (contactText) {
+            // LISTEN-FIRST: If contact speaks, cancel the opening fallback timer.
+            // Gemini has heard them and will respond naturally via the system prompt.
+            if (session.openingFallbackTimer && !session.openingMessageSent) {
+              clearTimeout(session.openingFallbackTimer);
+              session.openingFallbackTimer = null;
+              session.openingMessageSent = true; // Mark as handled — Gemini responds naturally
+              log(`Contact speech detected for ${session.callId} — cancelled opening fallback (listen-first): "${contactText.substring(0, 80)}"`);
+            }
+
             const last = session.transcript[session.transcript.length - 1];
             if (last && last.role === 'contact' && (Date.now() - last.ts) < 3000) {
               if (!last.text.includes(contactText)) {
@@ -954,15 +964,14 @@ function scheduleOpeningFallback(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
   if (session.openingFallbackTimer) return;
 
-  // Match TeXML Gemini Live opening pattern:
-  // Wait 4.5s for contact to speak first (natural flow — Gemini hears their "Hello?"
-  // and responds naturally). Only send explicit greeting if contact is silent.
-  // TeXML uses 4.5s; previous SIP value was 1.5s which was too fast.
-  const OPENING_FALLBACK_DELAY_MS = 4500;
+  // LISTEN-FIRST: Wait for contact to speak first. Gemini hears their audio
+  // and responds naturally via the system prompt. This fallback only fires if
+  // the contact is completely silent — they may be waiting for us to speak.
+  const OPENING_FALLBACK_DELAY_MS = 6000;
   session.openingFallbackTimer = setTimeout(() => {
     session.openingFallbackTimer = null;
     if (!session.openingMessageSent) {
-      log(`Opening fallback fired for ${session.callId} after ${OPENING_FALLBACK_DELAY_MS}ms without contact speech`);
+      log(`Opening fallback fired for ${session.callId} after ${OPENING_FALLBACK_DELAY_MS}ms — contact silent, agent speaking first`);
       trySendOpeningMessage(session);
     }
   }, OPENING_FALLBACK_DELAY_MS);
@@ -978,9 +987,11 @@ function trySendOpeningMessage(session: BridgeSession): void {
 
   const name = session.contactName || 'there';
   const greeting = session.firstMessage || `Hello, may I please speak with ${name}?`;
-  const text = `Say ONLY this exact message now: "${greeting}"
+  // This only fires after the listen-first fallback (contact was silent).
+  // Give Gemini context about why it should speak now.
+  const text = `The person on the line has not spoken yet. Start the conversation by saying: "${greeting}"
 
-After speaking, STOP and WAIT for their response.`;
+Then STOP and WAIT for their response.`;
 
   if (session.geminiWs?.readyState === WebSocket.OPEN) {
     const msg = {
@@ -990,15 +1001,9 @@ After speaking, STOP and WAIT for their response.`;
       },
     };
     session.geminiWs.send(JSON.stringify(msg));
-    log(`Opening message sent for ${session.callId}`);
-
-    // Set opening protection: suppress incoming audio briefly to prevent
-    // carrier screening messages, comfort noise, or early speech from interrupting
-    // the agent's greeting or triggering false voicemail detection.
-    // REDUCED from 5000ms to 2000ms — 5s was too aggressive and dropped legitimate
-    // contact speech. The agent's greeting is ~2s; contact responds ~1s after.
-    const OPENING_PROTECTION_MS = 2000;
-    session.openingProtectionUntil = Date.now() + OPENING_PROTECTION_MS;
+    log(`Opening message sent for ${session.callId} (fallback — contact was silent)`);
+    // LISTEN-FIRST: No opening protection. Audio continues flowing to Gemini
+    // so it can hear the contact's response without any delay.
   }
 }
 
