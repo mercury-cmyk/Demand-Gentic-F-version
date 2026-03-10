@@ -2413,9 +2413,15 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "Missing mailboxAccountId" });
       }
 
+      // SECURITY: Verify mailbox belongs to authenticated user
+      const mailbox = await storage.getMailboxAccountById(mailboxAccountId);
+      if (!mailbox || mailbox.userId !== req.user!.userId) {
+        return res.status(403).json({ message: "Access denied: mailbox does not belong to you" });
+      }
+
       // Import M365 sync service
       const { m365SyncService } = await import('./services/m365-sync-service');
-      
+
       const result = await m365SyncService.syncEmails(mailboxAccountId, { limit: 50 });
 
       res.json({ 
@@ -2435,6 +2441,12 @@ export function registerRoutes(app: Express) {
 
       if (!mailboxAccountId) {
         return res.status(400).json({ message: "Missing mailboxAccountId" });
+      }
+
+      // SECURITY: Verify mailbox belongs to authenticated user
+      const mailbox = await storage.getMailboxAccountById(mailboxAccountId);
+      if (!mailbox || mailbox.userId !== req.user!.userId) {
+        return res.status(403).json({ message: "Access denied: mailbox does not belong to you" });
       }
 
       const { gmailSyncService } = await import('./services/gmail-sync-service');
@@ -2459,8 +2471,14 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "Missing mailboxAccountId" });
       }
 
+      // SECURITY: Verify mailbox belongs to authenticated user
+      const mailbox = await storage.getMailboxAccountById(mailboxAccountId);
+      if (!mailbox || mailbox.userId !== req.user!.userId) {
+        return res.status(403).json({ message: "Access denied: mailbox does not belong to you" });
+      }
+
       const { m365SyncService } = await import('./services/m365-sync-service');
-      
+
       const result = await m365SyncService.backfillInboxFromActivities(mailboxAccountId);
 
       res.json({ 

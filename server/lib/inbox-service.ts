@@ -206,7 +206,28 @@ export async function getInboxMessages(
 ): Promise<InboxMessage[]> {
   const { limit = 50, offset = 0, unreadOnly = false, searchQuery } = options;
 
-  // Fetch all inbound messages with CRM data
+  // SECURITY: Get the user's connected mailbox emails to filter messages
+  const userMailboxes = await db
+    .select({ mailboxEmail: mailboxAccounts.mailboxEmail })
+    .from(mailboxAccounts)
+    .where(eq(mailboxAccounts.userId, userId));
+
+  const userEmails = userMailboxes
+    .map(m => m.mailboxEmail?.toLowerCase())
+    .filter(Boolean) as string[];
+
+  if (userEmails.length === 0) {
+    // User has no connected mailbox — return empty inbox
+    return [];
+  }
+
+  // Build user-ownership filter: inbound messages where user's email is in toEmails or ccEmails
+  const userEmailFilter = or(
+    ...userEmails.map(email => sql`${email} = ANY(${dealMessages.toEmails})`),
+    ...userEmails.map(email => sql`${email} = ANY(${dealMessages.ccEmails})`)
+  );
+
+  // Fetch ONLY messages addressed to this user's mailbox(es)
   const results = await db
     .select({
       message: dealMessages,
@@ -231,6 +252,7 @@ export async function getInboxMessages(
     .where(
       and(
         eq(dealMessages.direction, 'inbound'),
+        userEmailFilter,
         searchQuery
           ? or(
               sql`${dealMessages.subject} ILIKE ${`%${searchQuery}%`}`,
