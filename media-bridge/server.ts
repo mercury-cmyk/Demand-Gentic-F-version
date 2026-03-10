@@ -765,11 +765,10 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           },
           realtimeInputConfig: {
             automaticActivityDetection: {
-              // Reduce VAD sensitivity to prevent premature interruptions.
-              // LOW = less likely to interrupt the agent mid-sentence due to
-              // background noise or prospect breathing.
-              startOfSpeechSensitivity: 'START_OF_SPEECH_SENSITIVITY_LOW',
-              endOfSpeechSensitivity: 'END_OF_SPEECH_SENSITIVITY_LOW',
+              // VAD sensitivity enums (startOfSpeechSensitivity, endOfSpeechSensitivity)
+              // removed — they cause Gemini to silently reject the setup message
+              // (WebSocket closes without setup_complete). See commit ae79156.
+              disabled: false,
             },
           },
           systemInstruction: {

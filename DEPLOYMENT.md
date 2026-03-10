@@ -101,16 +101,6 @@ After deploy, verify:
 - SIP is expected to be enabled in production on the VM path
 - The VM deployment path assumes local Drachtio + media bridge co-residency
 
-## Legacy deployment assets
+## Notes
 
-These files are legacy and should not be treated as the preferred deployment path:
-
-- `cloudbuild.yaml`
-- `cloud-run-service.yaml`
-- `cloud-run-service-with-secrets.yaml`
-- `.github/workflows/deploy-gcp.yml`
-- `deploy-final-v2.ps1`
-- `deploy-gcloud.sh`
-- Cloud Code / Cloud Run VS Code tasks
-
-Keep them only for historical reference, rollback archaeology, or explicit legacy support work.
+Cloud Run / Cloud Build deployment files were removed. The VM path is the only production deployment method.

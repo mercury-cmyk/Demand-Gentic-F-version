@@ -1,6 +1,0 @@
-gcloud run deploy pivotalcrm-service-476094933916 \
-  --source . \
-  --region us-central1 \
-  --platform managed \
-  --allow-unauthenticated \
-  --set-env-vars NODE_ENV=production,OPENAI_API_KEY=... ,TELNYX_API_KEY=... ,TELNYX_CALL_CONTROL_APP_ID=2853482451592807572,TELNYX_FROM_NUMBER=+13023601514,REDIS_URL=...,PORT=5000

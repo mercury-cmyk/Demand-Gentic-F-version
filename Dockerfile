@@ -60,7 +60,7 @@ RUN chown -R nodejs:nodejs /app
 # Switch to non-root user
 USER nodejs
 
-# Expose port (Cloud Run uses PORT env variable)
+# Expose port
 EXPOSE 8080
 
 # Health check
