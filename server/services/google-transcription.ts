@@ -59,6 +59,18 @@ function decodeObjectPath(rawPath: string): string {
     .join('/');
 }
 
+// Rewrite legacy bucket references to the current primary bucket.
+// Old recordings may reference "demandgentic-storage" whose billing is closed.
+const LEGACY_BUCKET_ALIASES = ['demandgentic-storage'];
+function normalizeGcsUri(uri: string): string {
+  for (const alias of LEGACY_BUCKET_ALIASES) {
+    if (uri.startsWith(`gs://${alias}/`)) {
+      return uri.replace(`gs://${alias}/`, `gs://${BUCKET}/`);
+    }
+  }
+  return uri;
+}
+
 function toGcsUri(value: string | null | undefined): string | null {
   if (!value) return null;
 
@@ -66,7 +78,7 @@ function toGcsUri(value: string | null | undefined): string | null {
   if (!trimmed) return null;
 
   if (trimmed.startsWith('gs://')) {
-    return trimmed;
+    return normalizeGcsUri(trimmed);
   }
 
   if (trimmed.startsWith('gcs-internal://')) {
@@ -86,13 +98,13 @@ function toGcsUri(value: string | null | undefined): string | null {
         if (firstSlash <= 0) return null;
         const bucket = path.slice(0, firstSlash);
         const key = decodeObjectPath(path.slice(firstSlash + 1));
-        return key ? `gs://${bucket}/${key}` : null;
+        return key ? normalizeGcsUri(`gs://${bucket}/${key}`) : null;
       }
 
       if (host.endsWith('.storage.googleapis.com')) {
         const bucket = host.replace(/\.storage\.googleapis\.com$/, '');
         const key = decodeObjectPath(path);
-        return key ? `gs://${bucket}/${key}` : null;
+        return key ? normalizeGcsUri(`gs://${bucket}/${key}`) : null;
       }
     } catch {
       return null;
