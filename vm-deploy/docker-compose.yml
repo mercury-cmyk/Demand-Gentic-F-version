@@ -82,7 +82,7 @@ services:
   # Media bridge — RTP <-> Gemini Live audio bridging
   media-bridge:
     build:
-      context: /home/Zahid/media-bridge
+      context: ../media-bridge
       dockerfile: Dockerfile
     image: media-bridge:latest
     container_name: dg_media_bridge
