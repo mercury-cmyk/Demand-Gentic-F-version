@@ -6173,12 +6173,17 @@ function createOutOfBandResponse(
  * This matches common affirmative responses to identity questions.
  */
 function detectIdentityConfirmation(transcript: string): boolean {
-  const normalizedText = transcript.toLowerCase().trim();
+  // Normalize: lowercase, strip punctuation/filler, collapse whitespace
+  const normalizedText = transcript
+    .toLowerCase()
+    .replace(/[.,!?;:\/\\]+/g, ' ')  // Strip punctuation that breaks regex anchors
+    .replace(/\b(um|uh|ah|oh|hmm|like|well|so)\b/g, '')  // Strip filler words
+    .replace(/\s+/g, ' ')
+    .trim();
 
   // EXCLUSIONS: Gatekeeper phrases (Definitive NO for identity confirmation)
-  // If these words appear, it is NOT identity confirmation, even if "yes" is present
   const gatekeeperPhrases = [
-    'available', 'transfer', 'connect', 'hold', 'moment', 'one second', 
+    'available', 'transfer', 'connect', 'hold', 'moment', 'one second',
     'wait', 'check', 'see if', 'patch', 'through', 'reception', 'assistant',
     'secretary', 'office', 'desk', 'line', 'he is', 'she is', 'they are',
     'reason for', 'fail to', 'message', 'leave'
@@ -6190,32 +6195,39 @@ function detectIdentityConfirmation(transcript: string): boolean {
 
   // Short affirmatives that confirm identity
   const identityConfirmPatterns = [
-    /^yes$/,
-    /^yeah$/,
-    /^yep$/,
-    /^yup$/,
-    /^speaking$/,
-    /^this is (me|him|her|they|them)$/,
-    /^that'?s me$/,
-    /^it'?s me$/,
-    /^i am$/,
-    /^i am \w+/,              // "I am Jordan", "I am John Smith"
+    /^yes\b/,                 // "yes", "yes sure", "yes that's me"
+    /^yeah\b/,                // "yeah", "yeah sure"
+    /^yep\b/,
+    /^yup\b/,
+    /^sure\b/,                // "sure", "sure that's me"
+    /^absolutely\b/,
+    /^definitely\b/,
+    /^speaking\b/,
+    /^this is (me|him|her|they|them)\b/,
+    /^that'?s me\b/,
+    /^it'?s me\b/,
+    /^i am\b/,
     /^i'?m \w+/,              // "I'm Jordan"
-    /\bi am \w+/,             // "Yes I am Jordan", "I said I am Jordan"
+    /\bi am \w+/,             // "Yes I am Jordan"
     /\bi'?m \w+/,             // "Yes I'm Jordan"
-    /^that'?s correct$/,
-    /^correct$/,
-    /^right$/,
-    /^yes[,.]?\s*(this is|speaking|that'?s me|i am|i'm)/,
-    /^hi[,.]?\s*(yes|this is|speaking|i am|i'm)/,
+    /^that'?s correct\b/,
+    /^correct\b/,
+    /^right\b/,
+    /\byes\b.*\b(this is|speaking|that'?s me|i am|i'm)\b/,
+    /\bhi\b.*\b(yes|this is|speaking|i am|i'm)\b/,
+    /\bhello\b.*\b(yes|speaking|this is)\b/,
     /speaking$/,
-    /this is \w+(\s+\w+)?/,   // "This is John" or "This is John Smith" anywhere in text
+    /this is \w+(\s+\w+)?/,   // "This is John" anywhere
     /\w+ speaking$/,          // "John speaking"
-    /\w+ here$/,              // "Jordan here"
-    /^you('ve)?\s*(got|reached|found)\s*(me|him|her)/,
-    /you('re)?\s*(talking|speaking)\s*(to|with)\s*(me|him|her|\w+)/,  // "You're talking to Jordan"
-    /why\s+(are\s+)?you\s+ask/,  // "Why are you asking" implies frustration at re-asking = already confirmed
-    /i\s+(said|told|already)/,   // "I said...", "I told you...", "I already..." = frustration at repeating
+    /\w+ here\b/,             // "Jordan here"
+    /^you('ve)?\s*(got|reached|found)\s*(me|him|her)\b/,
+    /you('re)?\s*(talking|speaking)\s*(to|with)\s*(me|him|her|\w+)/,
+    /why\s+(are\s+)?you\s+ask/,
+    /i\s+(said|told|already)\b/,
+    /^go ahead\b/,            // "go ahead" implies they're ready
+    /^what('?s| is)\s+(this|it|up)\b/,  // "what's this about?"
+    /^how can i help\b/,      // "how can I help you?"
+    /^what do you (need|want)\b/,
   ];
 
   for (const pattern of identityConfirmPatterns) {
@@ -6223,16 +6235,6 @@ function detectIdentityConfirmation(transcript: string): boolean {
       return true;
     }
   }
-
-  // NOTE: We explicitly DO NOT treat bare "hello", "hi", or greetings as identity confirmation.
-  // The contact saying "Hello?" when answering the phone is NOT confirming their identity.
-  // Identity confirmation only happens AFTER the agent asks "Am I speaking with [Name]?"
-  // and the contact responds with an affirmative like "yes", "speaking", "this is me", etc.
-  //
-  // The patterns above already cover cases like:
-  // - "Yes, this is John" (matches: /this is \w+/)
-  // - "Hi, yes speaking" (matches: /^hi[,.]?\s*(yes|this is|speaking|i am|i'm)/)
-  // - "Hello, John speaking" (matches: /\w+ speaking$/)
 
   return false;
 }
