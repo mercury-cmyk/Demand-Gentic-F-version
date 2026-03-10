@@ -229,6 +229,10 @@ interface BridgeSession {
   // Opening protection: suppress incoming audio forwarding to Gemini
   // during the first few seconds so the agent can speak uninterrupted
   openingProtectionUntil: number;
+
+  // RTP pacing: queue outgoing audio packets to send at correct 20ms intervals
+  rtpSendQueue: Buffer[];
+  rtpPacingTimer: NodeJS.Timeout | null;
 }
 
 const sessions = new Map<string, BridgeSession>();
@@ -290,6 +294,9 @@ async function createSession(params: {
     maxDurationTimer: null,
 
     openingProtectionUntil: 0,
+
+    rtpSendQueue: [],
+    rtpPacingTimer: null,
   };
 
   sessions.set(params.callId, session);
@@ -353,6 +360,8 @@ function destroySession(callId: string): void {
 
   if (session.maxDurationTimer) clearTimeout(session.maxDurationTimer);
   if (session.openingFallbackTimer) clearTimeout(session.openingFallbackTimer);
+  if (session.rtpPacingTimer) { clearInterval(session.rtpPacingTimer); session.rtpPacingTimer = null; }
+  session.rtpSendQueue.length = 0;
   if (session.rtpSocket) {
     try { session.rtpSocket.close(); } catch (_) {}
     session.rtpSocket = null;
@@ -390,6 +399,12 @@ function startRtpListener(session: BridgeSession): void {
     }
 
     handleIncomingRtp(session, msg);
+
+    // Periodic audio flow diagnostics (every 250 packets ≈ 5s at 50 pkt/s)
+    if (session.packetsReceived % 250 === 0) {
+      const durSec = Math.round((Date.now() - session.startTime) / 1000);
+      log(`[AudioFlow] ${session.callId} @${durSec}s: rx=${session.packetsReceived} tx=${session.packetsSent} queue=${session.rtpSendQueue.length} gemini=${session.setupComplete ? 'ready' : 'pending'} transcriptTurns=${session.transcript.length}`);
+    }
   });
 
   sock.on('error', (err: Error) => {
@@ -433,6 +448,10 @@ function handleIncomingRtp(session: BridgeSession, buf: Buffer): void {
   // comfort noise, carrier screening messages) triggers Gemini's VAD, which interrupts
   // the agent before it can speak — or causes false voicemail detection.
   if (session.openingProtectionUntil > 0 && Date.now() < session.openingProtectionUntil) {
+    // Log once when protection starts dropping audio
+    if (session.packetsReceived % 100 === 1) {
+      log(`Opening protection active for ${session.callId} — dropping inbound audio (${Math.round(session.openingProtectionUntil - Date.now())}ms remaining)`);
+    }
     return; // Drop incoming audio during protection window
   }
 
@@ -480,6 +499,30 @@ function sendRtpPacket(session: BridgeSession, g711Audio: Buffer): void {
   });
 
   session.packetsSent++;
+}
+
+/**
+ * Start paced RTP sending — drains the send queue at 20ms intervals.
+ * This prevents burst-sending all packets at once, which causes jitter
+ * buffer overflow and garbled/choppy audio on the contact's phone.
+ */
+function startRtpPacing(session: BridgeSession): void {
+  if (session.rtpPacingTimer) return; // Already running
+
+  const RTP_PACING_INTERVAL_MS = 20; // 20ms = one G.711 packet at 8kHz
+
+  session.rtpPacingTimer = setInterval(() => {
+    const packet = session.rtpSendQueue.shift();
+    if (packet) {
+      sendRtpPacket(session, packet);
+    } else {
+      // Queue empty — stop timer to avoid spinning
+      if (session.rtpPacingTimer) {
+        clearInterval(session.rtpPacingTimer);
+        session.rtpPacingTimer = null;
+      }
+    }
+  }, RTP_PACING_INTERVAL_MS);
 }
 
 // ==================== GEMINI CONNECTION ====================
@@ -629,11 +672,25 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
               const pcm24k = Buffer.from(inlineData.data, 'base64');
               const g711 = pcm24kToG711(pcm24k, session.g711Format);
               // Split into 20ms RTP packets (160 bytes for G.711 8kHz)
+              // Queue packets for paced sending at 20ms intervals instead of
+              // burst-sending, which causes jitter/garbled audio on the contact's phone.
               const PACKET_SIZE = 160;
               for (let i = 0; i < g711.length; i += PACKET_SIZE) {
                 const chunk = g711.slice(i, Math.min(i + PACKET_SIZE, g711.length));
                 if (chunk.length > 0) {
-                  sendRtpPacket(session, chunk);
+                  session.rtpSendQueue.push(chunk);
+                }
+              }
+              // Start pacing timer if not already running
+              startRtpPacing(session);
+
+              // Cancel opening protection early once Gemini starts producing audio
+              // (the agent is speaking — contact audio should be accepted soon after)
+              if (session.openingProtectionUntil > 0) {
+                const remainingProtection = session.openingProtectionUntil - Date.now();
+                if (remainingProtection > 500) {
+                  // Allow 500ms after first audio chunk for agent speech to settle
+                  session.openingProtectionUntil = Date.now() + 500;
                 }
               }
             }
@@ -689,9 +746,15 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           }
         }
 
-        // Interruption
+        // Interruption — flush queued agent audio so the contact doesn't hear stale speech
         if (serverContent?.interrupted) {
-          log(`Call ${session.callId} interrupted by user`);
+          const flushed = session.rtpSendQueue.length;
+          session.rtpSendQueue.length = 0;
+          if (session.rtpPacingTimer) {
+            clearInterval(session.rtpPacingTimer);
+            session.rtpPacingTimer = null;
+          }
+          log(`Call ${session.callId} interrupted by user (flushed ${flushed} queued packets)`);
         }
       } catch (err) {
         logError(`Error handling Gemini message for ${session.callId}`, err);
@@ -754,10 +817,12 @@ After speaking, STOP and WAIT for their response.`;
     session.geminiWs.send(JSON.stringify(msg));
     log(`Opening message sent for ${session.callId}`);
 
-    // Set opening protection: suppress incoming audio for 5 seconds to prevent
+    // Set opening protection: suppress incoming audio briefly to prevent
     // carrier screening messages, comfort noise, or early speech from interrupting
     // the agent's greeting or triggering false voicemail detection.
-    const OPENING_PROTECTION_MS = 5000;
+    // REDUCED from 5000ms to 2000ms — 5s was too aggressive and dropped legitimate
+    // contact speech. The agent's greeting is ~2s; contact responds ~1s after.
+    const OPENING_PROTECTION_MS = 2000;
     session.openingProtectionUntil = Date.now() + OPENING_PROTECTION_MS;
   }
 }
@@ -975,6 +1040,14 @@ app.get('/bridge/:callId', (req, res) => {
     openingMessageSent: session.openingMessageSent,
     packetsReceived: session.packetsReceived,
     packetsSent: session.packetsSent,
+    rtpSendQueueLength: session.rtpSendQueue.length,
+    rtpPacingActive: !!session.rtpPacingTimer,
+    openingProtectionActive: session.openingProtectionUntil > Date.now(),
+    openingProtectionRemainingMs: Math.max(0, session.openingProtectionUntil - Date.now()),
+    transcriptTurns: session.transcript.length,
+    agentTurns: session.transcript.filter(t => t.role === 'agent').length,
+    contactTurns: session.transcript.filter(t => t.role === 'contact').length,
+    lastDisposition: session.lastDisposition,
     durationSec: Math.round((Date.now() - session.startTime) / 1000),
   });
 });
