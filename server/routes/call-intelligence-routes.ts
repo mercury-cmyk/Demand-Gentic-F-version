@@ -1020,6 +1020,52 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
 });
 
 /**
+ * POST /api/call-intelligence/unified/bulk-retry
+ * Retry analysis for all calls with missing transcripts or failed analysis.
+ * Must be registered BEFORE /unified/:id to avoid param matching.
+ */
+router.post("/unified/bulk-retry", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const { recoverFailedAnalyses } = await import("../services/analysis-recovery-sweep");
+    const result = await recoverFailedAnalyses();
+
+    const [pendingCount] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(callSessions)
+      .where(
+        and(
+          sql`${callSessions.analysisStatus} IN ('failed', 'pending', 'processing')`,
+          sql`${callSessions.durationSec} >= 20`
+        )
+      );
+
+    const [pendingLeadsCount] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(leads)
+      .where(
+        and(
+          isNull(leads.transcript),
+          sql`(${leads.transcriptionStatus} IN ('failed', 'pending') OR ${leads.transcriptionStatus} IS NULL)`,
+          sql`(${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL)`
+        )
+      );
+
+    res.json({
+      success: true,
+      processed: result.processed,
+      recovered: result.recovered,
+      permanentlyFailed: result.permanentlyFailed,
+      remainingPendingSessions: Number(pendingCount?.count || 0),
+      remainingPendingLeads: Number(pendingLeadsCount?.count || 0),
+      message: `Processed ${result.processed} items: ${result.recovered} recovered, ${result.permanentlyFailed} permanently failed`,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Bulk retry error:", error);
+    res.status(500).json({ error: `Bulk retry failed: ${error.message}` });
+  }
+});
+
+/**
  * GET /api/call-intelligence/unified/:id
  * Get full details for a single call including complete transcript and quality analysis
  * Searches both call_sessions and dialer_call_attempts tables
@@ -1480,53 +1526,6 @@ router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager',
   } catch (error) {
     console.error("[CallIntelligence] Error analyzing call:", error);
     res.status(500).json({ error: "Failed to analyze call" });
-  }
-});
-
-/**
- * POST /api/call-intelligence/unified/bulk-retry
- * Retry analysis for all calls with missing transcripts or failed analysis.
- * Triggers the recovery sweep immediately and returns counts.
- */
-router.post("/unified/bulk-retry", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
-  try {
-    const { recoverFailedAnalyses } = await import("../services/analysis-recovery-sweep");
-    const result = await recoverFailedAnalyses();
-
-    // Also count how many are still pending
-    const [pendingCount] = await db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(callSessions)
-      .where(
-        and(
-          sql`${callSessions.analysisStatus} IN ('failed', 'pending', 'processing')`,
-          sql`${callSessions.durationSec} >= 20`
-        )
-      );
-
-    const [pendingLeadsCount] = await db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(leads)
-      .where(
-        and(
-          isNull(leads.transcript),
-          sql`(${leads.transcriptionStatus} IN ('failed', 'pending') OR ${leads.transcriptionStatus} IS NULL)`,
-          sql`(${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL)`
-        )
-      );
-
-    res.json({
-      success: true,
-      processed: result.processed,
-      recovered: result.recovered,
-      permanentlyFailed: result.permanentlyFailed,
-      remainingPendingSessions: Number(pendingCount?.count || 0),
-      remainingPendingLeads: Number(pendingLeadsCount?.count || 0),
-      message: `Processed ${result.processed} items: ${result.recovered} recovered, ${result.permanentlyFailed} permanently failed`,
-    });
-  } catch (error: any) {
-    console.error("[CallIntelligence] Bulk retry error:", error);
-    res.status(500).json({ error: `Bulk retry failed: ${error.message}` });
   }
 });
 
