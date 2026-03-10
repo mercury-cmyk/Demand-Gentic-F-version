@@ -774,6 +774,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           systemInstruction: {
             parts: [{ text: session.systemPrompt }],
           },
+          // Enable transcription so we capture agent + caller speech text
+          outputAudioTranscription: {},
+          inputAudioTranscription: {},
         },
       };
 
