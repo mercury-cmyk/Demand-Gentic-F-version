@@ -580,11 +580,15 @@ export class DrachtioSIPServer {
       log(`Initiating outbound call ${callId} to ${requestUri} (auth: ${sipUsername ? sipUsername : 'none'})`);
 
       // Create UAC (User Agent Client) to send INVITE
+      // P-Asserted-Identity tells Telnyx which number to present as caller ID
+      // (required when FQDN connection has ani_override_type=always)
       const uacOptions = {
         headers: {
           'From': `<sip:${fromNumber}@${trunkAuthority}>`,
           'To': `<sip:${toNumber}@${trunkAuthority}>`,
           'Contact': `<sip:${fromNumber}@${PUBLIC_IP || '127.0.0.1'}:${SIP_LISTEN_PORT}>`,
+          'P-Asserted-Identity': `<sip:+${fromNumber}@${trunkAuthority}>`,
+          'Remote-Party-ID': `<sip:+${fromNumber}@${trunkAuthority}>;party=calling;privacy=off;screen=yes`,
         },
         auth: sipUsername && sipPassword ? {
           username: sipUsername,
