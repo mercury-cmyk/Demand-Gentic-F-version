@@ -19,8 +19,7 @@ import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { env } from "../env";
 import { getOrganizationById } from "../services/problem-intelligence/organization-service";
-// number-pool-integration only needed for production calls; test calls bypass it
-import { releaseNumberWithoutOutcome } from "../services/number-pool-integration";
+import { getCallerIdForCall, releaseNumberWithoutOutcome } from "../services/number-pool-integration";
 // CRITICAL: Use unified call context builder to ensure test and queue calls are identical
 import {
   buildUnifiedCallContext,
@@ -249,17 +248,32 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
           }
         }
 
-        // TEST CALLS: Skip number pool enforcement entirely for immediate execution.
-        let fromNumber: string = env.TELNYX_FROM_NUMBER || '';
+        // Use number pool rotation for test calls (same as production queue calls)
+        let fromNumber: string = '';
         let callerNumberId: string | undefined;
         let callerNumberDecisionId: string | undefined;
 
+        try {
+          const callerIdResult = await getCallerIdForCall({
+            campaignId,
+            prospectNumber: normalizedPhone,
+            callType: 'test_call',
+          });
+          fromNumber = callerIdResult.callerId;
+          callerNumberId = callerIdResult.numberId || undefined;
+          callerNumberDecisionId = callerIdResult.decisionId || undefined;
+          console.log(`[Campaign Test Call] Number pool selected: ${fromNumber} (${callerIdResult.selectionReason})`);
+        } catch (poolErr: any) {
+          // Fall back to legacy number if pool fails
+          fromNumber = env.TELNYX_FROM_NUMBER || '';
+          console.warn(`[Campaign Test Call] Pool selection failed, using legacy: ${fromNumber}`, poolErr?.message);
+        }
+
         if (!fromNumber) {
           return res.status(500).json({
-            message: "No phone number configured. Please set TELNYX_FROM_NUMBER in your .env.local file."
+            message: "No phone number available. Check number pool or set TELNYX_FROM_NUMBER."
           });
         }
-        console.log(`[Campaign Test Call] ⚡ Using direct number (no pool): ${fromNumber}`);
 
         // Build Unified Context
         // This ensures test calls use the EXACT same context logic as production queue calls

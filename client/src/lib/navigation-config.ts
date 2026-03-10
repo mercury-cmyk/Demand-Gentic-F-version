@@ -638,10 +638,10 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           },
           {
             id: 'settings-cloud-logs',
-            title: 'Cloud Logs',
+            title: 'System Logs',
             url: '/cloud-logs',
             roles: [USER_ROLES.ADMIN],
-            description: 'Monitor cloud logs and system health',
+            description: 'Monitor API, media bridge, and SIP server logs',
           },
         ],
       },

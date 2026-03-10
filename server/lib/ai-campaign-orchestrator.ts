@@ -1581,6 +1581,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             prospectRegion: item._country || undefined,
             prospectTimezone: item._timezone || undefined,
             callType: 'ai_campaign_orchestrator',
+            callEngine: useSip ? 'sip' : 'texml',
             numberPoolConfig: numberPoolConfig ? {
               enabled: numberPoolConfig.enabled ?? true,
               maxCallsPerNumber: numberPoolConfig.maxCallsPerNumber,
