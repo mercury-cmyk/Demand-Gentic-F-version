@@ -27,10 +27,48 @@ import {
 import { seedQueuePriorities } from "./campaign-timezone-analyzer";
 import { processDisposition } from "./disposition-engine";
 import { getCallerIdForCall, handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "./number-pool-integration";
-import { buildUnifiedCallContext } from "./unified-call-context";
+import { buildUnifiedCallContext, resolveAgentAssignment, toDbVirtualAgentId } from "./unified-call-context";
 import { isCountryEnabled, getContactCallPriority } from "../utils/country-utils";
+import { createCallSessionFromDialerAttempt } from "../lib/call-session-factory";
 
 const LOG_PREFIX = "[CampaignRunner-WS]";
+
+function normalizeTranscript(
+  transcript?: Array<{ role: string; text: string }>
+): { fullTranscript: string | null; aiTranscript: string | null } {
+  if (!Array.isArray(transcript) || transcript.length === 0) {
+    return { fullTranscript: null, aiTranscript: null };
+  }
+
+  const normalizedTurns = transcript
+    .map((turn) => {
+      const text = typeof turn?.text === "string" ? turn.text.trim() : "";
+      if (!text) return null;
+
+      const role = typeof turn?.role === "string" ? turn.role.toLowerCase() : "speaker";
+      const speaker = role.includes("assistant") || role.includes("agent")
+        ? "Agent"
+        : role.includes("user") || role.includes("contact") || role.includes("prospect")
+          ? "Contact"
+          : "Speaker";
+
+      return {
+        role,
+        text,
+        line: `${speaker}: ${text}`,
+      };
+    })
+    .filter((turn): turn is { role: string; text: string; line: string } => Boolean(turn));
+
+  const fullTranscript = normalizedTurns.map((turn) => turn.line).join("\n").trim() || null;
+  const aiTranscript = normalizedTurns
+    .filter((turn) => turn.role.includes("assistant") || turn.role.includes("agent"))
+    .map((turn) => turn.text)
+    .join("\n")
+    .trim() || null;
+
+  return { fullTranscript, aiTranscript };
+}
 
 // isCountryEnabled, getContactCallPriority — imported from '../utils/country-utils'
 
@@ -39,6 +77,8 @@ export interface CampaignTask {
   campaignId: string;
   queueItemId: string;
   contactId: string;
+  dialerRunId?: string;
+  callAttemptId?: string;
   // Contact info
   contactFirstName: string | null;
   contactLastName: string | null;
@@ -346,12 +386,98 @@ class CampaignRunnerService {
       console.warn(`${LOG_PREFIX} Number pool selection failed at dispatch time, keeping fallback caller ID:`, poolError);
     }
 
-    return {
+    const hydratedTask = {
       ...task,
       fromNumber,
       callerNumberId,
       callerNumberDecisionId,
     };
+
+    if (hydratedTask.callAttemptId) {
+      await db.update(dialerCallAttempts)
+        .set({
+          callerNumberId,
+          fromDid: fromNumber || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(dialerCallAttempts.id, hydratedTask.callAttemptId));
+    }
+
+    return hydratedTask;
+  }
+
+  private async getOrCreateAiDialerRun(
+    campaignId: string,
+    maxConcurrentCalls: number,
+    virtualAgentId: string | null,
+  ) {
+    const [existingRun] = await db
+      .select()
+      .from(dialerRuns)
+      .where(and(
+        eq(dialerRuns.campaignId, campaignId),
+        eq(dialerRuns.agentType, "ai"),
+        inArray(dialerRuns.status, ["active", "pending", "paused"]),
+        virtualAgentId
+          ? eq(dialerRuns.virtualAgentId, virtualAgentId)
+          : sql`${dialerRuns.virtualAgentId} IS NULL`
+      ))
+      .orderBy(desc(dialerRuns.createdAt))
+      .limit(1);
+
+    if (existingRun) {
+      return existingRun;
+    }
+
+    const [run] = await db.insert(dialerRuns).values({
+      campaignId,
+      runType: "power_dial",
+      agentType: "ai",
+      virtualAgentId,
+      status: "active",
+      maxConcurrentCalls: maxConcurrentCalls || 1,
+      callTimeoutSeconds: 30,
+      startedAt: new Date(),
+    }).returning();
+
+    return run;
+  }
+
+  private async createPendingAiCallAttempt(params: {
+    campaignId: string;
+    contactId: string;
+    queueItemId: string;
+    dialerRunId: string;
+    phoneNumber: string;
+    fromNumber: string;
+    virtualAgentId: string | null;
+  }) {
+    const [attemptCount] = await db
+      .select({ count: count() })
+      .from(dialerCallAttempts)
+      .where(and(
+        eq(dialerCallAttempts.campaignId, params.campaignId),
+        eq(dialerCallAttempts.contactId, params.contactId)
+      ));
+
+    const attemptNumber = (Number(attemptCount?.count) || 0) + 1;
+
+    const [callAttempt] = await db
+      .insert(dialerCallAttempts)
+      .values({
+        dialerRunId: params.dialerRunId,
+        campaignId: params.campaignId,
+        contactId: params.contactId,
+        queueItemId: params.queueItemId,
+        agentType: "ai",
+        virtualAgentId: params.virtualAgentId,
+        phoneDialed: params.phoneNumber,
+        fromDid: params.fromNumber || null,
+        attemptNumber,
+      })
+      .returning();
+
+    return callAttempt;
   }
 
   private handleTaskStarted(ws: WebSocket, message: IncomingMessage): void {
@@ -406,66 +532,39 @@ class CampaignRunnerService {
       const isVoicemail = canonicalDisposition === "voicemail";
       const isNoAnswer = canonicalDisposition === "no_answer";
       const connected = !isVoicemail && !isNoAnswer;
+      const { fullTranscript, aiTranscript } = normalizeTranscript(message.transcript);
+      const callSessionStatus = isVoicemail
+        ? "voicemail_detected"
+        : isNoAnswer
+          ? "no_answer"
+          : "completed";
 
       try {
-        let virtualAgentId = task.virtualAgentId || null;
-        if (!virtualAgentId) {
-          const [campaign] = await db
-            .select({ virtualAgentId: campaigns.virtualAgentId })
-            .from(campaigns)
-            .where(eq(campaigns.id, task.campaignId))
-            .limit(1);
-          virtualAgentId = campaign?.virtualAgentId || null;
-        }
+        const virtualAgentId = task.virtualAgentId || null;
+        let callAttemptId = task.callAttemptId;
 
-        const [existingRun] = await db
-          .select()
-          .from(dialerRuns)
-          .where(and(
-            eq(dialerRuns.campaignId, task.campaignId),
-            eq(dialerRuns.agentType, "ai"),
-            inArray(dialerRuns.status, ["active", "pending", "paused"]),
-            virtualAgentId
-              ? eq(dialerRuns.virtualAgentId, virtualAgentId)
-              : sql`${dialerRuns.virtualAgentId} IS NULL`
-          ))
-          .orderBy(desc(dialerRuns.createdAt))
-          .limit(1);
-
-        const run = existingRun || (await db.insert(dialerRuns).values({
-          campaignId: task.campaignId,
-          runType: "power_dial",
-          agentType: "ai",
-          virtualAgentId,
-          status: "active",
-          maxConcurrentCalls: runner.maxConcurrent || 1,
-          callTimeoutSeconds: 30,
-          startedAt: new Date(),
-        }).returning())[0];
-
-        const [attemptCount] = await db
-          .select({ count: count() })
-          .from(dialerCallAttempts)
-          .where(and(
-            eq(dialerCallAttempts.campaignId, task.campaignId),
-            eq(dialerCallAttempts.contactId, task.contactId)
-          ));
-
-        const attemptNumber = (Number(attemptCount?.count) || 0) + 1;
-
-        const [callAttempt] = await db
-          .insert(dialerCallAttempts)
-          .values({
-            dialerRunId: run.id,
+        if (!callAttemptId) {
+          const run = await this.getOrCreateAiDialerRun(
+            task.campaignId,
+            runner.maxConcurrent || 1,
+            virtualAgentId,
+          );
+          const callAttempt = await this.createPendingAiCallAttempt({
             campaignId: task.campaignId,
             contactId: task.contactId,
             queueItemId: task.queueItemId,
-            agentType: "ai",
+            dialerRunId: run.id,
+            phoneNumber: task.phoneNumber,
+            fromNumber: task.fromNumber,
             virtualAgentId,
-            phoneDialed: task.phoneNumber,
+          });
+          callAttemptId = callAttempt.id;
+        }
+
+        await db.update(dialerCallAttempts)
+          .set({
             callerNumberId: task.callerNumberId || null,
             fromDid: task.fromNumber || null,
-            attemptNumber,
             callStartedAt,
             callEndedAt,
             callDurationSeconds: Number.isFinite(callDurationSeconds) ? callDurationSeconds : null,
@@ -476,11 +575,27 @@ class CampaignRunnerService {
             dispositionSubmittedBy: runner.userId,
             notes: rawDisposition ? `CampaignRunner disposition: ${rawDisposition}` : null,
             recordingUrl: message.recordingUrl || null,
+            fullTranscript,
+            aiTranscript,
             updatedAt: new Date(),
           })
-          .returning();
+          .where(eq(dialerCallAttempts.id, callAttemptId));
 
-        const result = await processDisposition(callAttempt.id, canonicalDisposition, "campaign_runner");
+        await createCallSessionFromDialerAttempt(callAttemptId, {
+          status: callSessionStatus,
+          startedAt: callStartedAt || undefined,
+          endedAt: callEndedAt,
+          durationSec: Number.isFinite(callDurationSeconds) ? callDurationSeconds : null,
+          recordingUrl: message.recordingUrl || null,
+          recordingStatus: message.recordingUrl ? "stored" : "pending",
+          aiTranscript: fullTranscript || aiTranscript || undefined,
+          aiDisposition: canonicalDisposition,
+          queueItemId: task.queueItemId,
+          campaignId: task.campaignId,
+          contactId: task.contactId,
+        });
+
+        const result = await processDisposition(callAttemptId, canonicalDisposition, "campaign_runner");
         if (!result.success) {
           console.error(`${LOG_PREFIX} Disposition engine errors:`, result.errors);
         }
@@ -488,7 +603,7 @@ class CampaignRunnerService {
         if (task.callerNumberId) {
           await handleNumberPoolCallCompleted({
             numberId: task.callerNumberId,
-            dialerAttemptId: callAttempt.id,
+            dialerAttemptId: callAttemptId,
             answered: connected,
             durationSec: Number.isFinite(callDurationSeconds) ? callDurationSeconds : 0,
             disposition: canonicalDisposition,
@@ -610,6 +725,17 @@ class CampaignRunnerService {
       const [agent] = virtualAgentId 
         ? await db.select().from(virtualAgents).where(eq(virtualAgents.id, virtualAgentId)).limit(1)
         : [];
+      const agentAssignment = await resolveAgentAssignment(campaignId);
+      if (!agentAssignment) {
+        this.broadcastStallReason(campaignId, "No AI agent assignment found for this campaign.");
+        return;
+      }
+      const dbVirtualAgentId = toDbVirtualAgentId(agentAssignment.virtualAgentId);
+      const dialerRun = await this.getOrCreateAiDialerRun(
+        campaignId,
+        (campaignExt.maxConcurrentWorkers || 1) as number,
+        dbVirtualAgentId,
+      );
 
       // Get queued queue items with contact and account info
       // Filter out contacts that are suppressed (next_call_eligible_at > NOW())
@@ -775,7 +901,7 @@ class CampaignRunnerService {
           // Permanently skip items in disabled countries
           await db.update(campaignQueue)
             .set({
-               status: 'completed',
+               status: 'removed',
                removedReason: 'country_not_enabled',
                updatedAt: new Date()
             })
@@ -827,28 +953,41 @@ class CampaignRunnerService {
             const phoneResult = getBestPhoneForContact(item.contact);
             if (!phoneResult.phone) return null;
 
-            const callerNumberId: string | null = null;
-            const callerNumberDecisionId: string | null = null;
+            const callerNumberId: string | undefined = undefined;
+            const callerNumberDecisionId: string | undefined = undefined;
+            const callAttempt = await this.createPendingAiCallAttempt({
+              campaignId,
+              contactId: item.contact.id,
+              queueItemId: item.queueItem.id,
+              dialerRunId: dialerRun.id,
+              phoneNumber: phoneResult.phone,
+              fromNumber,
+              virtualAgentId: dbVirtualAgentId,
+            });
 
             const unifiedCtx = await buildUnifiedCallContext({
               campaignId,
+              runId: dialerRun.id,
               queueItemId: item.queueItem.id,
+              callAttemptId: callAttempt.id,
               contactId: item.contact.id,
               calledNumber: phoneResult.phone,
               fromNumber,
               callerNumberId,
               callerNumberDecisionId,
               contactName: `${item.contact.firstName} ${item.contact.lastName}`,
-              contactFirstName: item.contact.firstName,
-              contactLastName: item.contact.lastName,
-              contactEmail: item.contact.email,
-              contactJobTitle: item.contact.jobTitle,
-              accountName: item.account?.name,
+              contactFirstName: item.contact.firstName || undefined,
+              contactLastName: item.contact.lastName || undefined,
+              contactEmail: item.contact.email || undefined,
+              contactJobTitle: item.contact.jobTitle || undefined,
+              accountName: item.account?.name || undefined,
               isTestCall: false,
               provider: 'google',
             });
 
             if (!unifiedCtx) {
+              await db.delete(dialerCallAttempts)
+                .where(eq(dialerCallAttempts.id, callAttempt.id));
               console.warn(`${LOG_PREFIX} Failed to build unified context for item ${item.queueItem.id}, skipping`);
               return null;
             }
@@ -858,6 +997,8 @@ class CampaignRunnerService {
               campaignId,
               queueItemId: item.queueItem.id,
               contactId: item.contact.id,
+              dialerRunId: dialerRun.id,
+              callAttemptId: callAttempt.id,
               contactFirstName: item.contact.firstName,
               contactLastName: item.contact.lastName,
               contactEmail: item.contact.email,
@@ -889,7 +1030,7 @@ class CampaignRunnerService {
               fromNumber,
               callerNumberId,
               callerNumberDecisionId,
-              virtualAgentId: unifiedCtx.virtualAgentId,
+              virtualAgentId: dbVirtualAgentId,
               agentName: unifiedCtx.agentName,
               agentFullName: unifiedCtx.agentName,
             };

@@ -501,20 +501,11 @@ export async function executeDueJourneyActions(limit: number = 25): Promise<{ pr
           })
           .where(eq(clientJourneyActions.id, action.id));
       } else if (action.actionType === "email") {
-        await db
-          .update(clientJourneyActions)
-          .set({
-            status: "in_progress",
-            completedAt: null,
-            outcome: "Email follow-up handoff created for human-controlled send",
-            outcomeDetails: {
-              handoffCreatedAt: new Date().toISOString(),
-              deliveryMode: "human_controlled",
-            },
-            triggeredNextAction: false,
-            updatedAt: new Date(),
-          })
-          .where(eq(clientJourneyActions.id, action.id));
+        // Email actions are now handled by executePipelineEmailActions() in
+        // campaign-pipeline-orchestrator.ts which generates AI content and
+        // sends via Mercury automatically. Skip here — the orchestrator
+        // background job picks up scheduled email actions on its own interval.
+        continue;
       } else {
         await db
           .update(clientJourneyActions)

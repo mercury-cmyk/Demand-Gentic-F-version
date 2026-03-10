@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -527,6 +527,64 @@ export function BatchTranscriptionPanel({
         </Card>
       )}
 
+      {/* ── Maintenance Sweeps ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Maintenance Sweeps
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Run one-off cleanup tasks. These also run automatically in the background on a schedule.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Orphan Recording Sweep */}
+            <div className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium flex items-center gap-1.5">
+                    <FileAudio className="h-3.5 w-3.5 text-amber-500" />
+                    Orphan Recording Sweep
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Finds call sessions with recordings not linked to any call attempt, matches them, and transcribes + analyzes.
+                  </p>
+                </div>
+              </div>
+              <SweepButton
+                endpoint="/api/batch-transcription/sweep-orphans"
+                label="Run Orphan Sweep"
+                formatResult={(data) =>
+                  `Processed ${data.processed ?? 0}, transcribed ${data.transcribed ?? 0}, analyzed ${data.analyzed ?? 0}, skipped ${data.skipped ?? 0}`
+                }
+              />
+            </div>
+
+            {/* Stale Ring-out Cleanup */}
+            <div className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium flex items-center gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 text-orange-500" />
+                    Stale Ring-out Cleanup
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Marks 0-duration, non-connected calls with no disposition as "no_answer" so they stop showing as pending.
+                  </p>
+                </div>
+              </div>
+              <SweepButton
+                endpoint="/api/batch-transcription/sweep-ringouts"
+                label="Run Ring-out Cleanup"
+                formatResult={(data) => `Marked ${data.marked ?? 0} calls as no_answer`}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Pipeline Info */}
       <Card className="bg-muted/30">
         <CardContent className="py-3">
@@ -563,6 +621,61 @@ function StatCard({
         <div className={`font-semibold ${isText ? 'text-xs' : 'text-sm'}`}>{value}</div>
         <div className="text-[10px] text-muted-foreground">{label}</div>
       </div>
+    </div>
+  );
+}
+
+function SweepButton({
+  endpoint,
+  label,
+  formatResult,
+}: {
+  endpoint: string;
+  label: string;
+  formatResult: (data: any) => string;
+}) {
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', endpoint);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: 'Sweep completed', description: formatResult(data) });
+    },
+    onError: (err: any) => {
+      toast({ title: 'Sweep failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 text-xs"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+      >
+        {mutation.isPending ? (
+          <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+        ) : (
+          <Play className="h-3 w-3 mr-1.5" />
+        )}
+        {label}
+      </Button>
+      {mutation.isSuccess && (
+        <span className="text-[11px] text-green-600 flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3" />
+          {formatResult(mutation.data)}
+        </span>
+      )}
+      {mutation.isError && (
+        <span className="text-[11px] text-red-500 flex items-center gap-1">
+          <XCircle className="h-3 w-3" />
+          Failed
+        </span>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 import {
   Plus,
   LayoutGrid,
@@ -21,6 +22,8 @@ import {
   Clock,
   AlertTriangle,
   RefreshCw,
+  Download,
+  Loader2,
 } from "lucide-react";
 import { PipelineBoard } from "./pipeline-board";
 import { LeadDetailPanel } from "./lead-detail-panel";
@@ -107,10 +110,12 @@ interface PipelineAnalytics {
 
 export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [view, setView] = useState<"board" | "list" | "analytics">("board");
+  const [isExporting, setIsExporting] = useState(false);
 
   // ─── Fetch pipelines ───
   const { data: pipelinesData, isLoading: loadingPipelines } = useQuery<{ pipelines: Pipeline[] }>({
@@ -164,6 +169,51 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
   const leads = leadsData?.leads || [];
   const analytics = analyticsData?.analytics;
 
+  const handleExport = async () => {
+    if (!activePipeline?.id) return;
+
+    setIsExporting(true);
+    try {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/pipelines/${activePipeline.id}/export`,
+        authHeaders
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to export pipeline");
+      }
+
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get("content-disposition");
+      const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
+      const filename =
+        filenameMatch?.[1] ||
+        `lead-pipeline-${new Date().toISOString().split("T")[0]}.csv`;
+
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(link);
+
+      toast({
+        title: "Pipeline export ready",
+        description: `Downloaded ${filename}`,
+      });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Failed to export pipeline",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // ─── Loading state ───
   if (loadingPipelines) {
     return (
@@ -209,6 +259,32 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
 
   return (
     <div className="space-y-4">
+      <Card className="rounded-2xl border border-indigo-200/80 bg-gradient-to-r from-indigo-50/90 via-sky-50/70 to-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-slate-900">
+                <GitBranch className="h-6 w-6 text-indigo-600" />
+                <h2 className="text-2xl font-semibold tracking-tight">Lead Pipeline</h2>
+              </div>
+              <p className="max-w-3xl text-sm text-slate-700/85 md:text-base">
+                Track lead activity in one place, open call details instantly, and export clean reports for your team.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline" className="bg-white/80 px-3 py-1">
+                Unified tracking
+              </Badge>
+              <Badge variant="outline" className="bg-white/80 px-3 py-1">
+                Instant detail view
+              </Badge>
+              <Badge variant="outline" className="bg-white/80 px-3 py-1">
+                CSV export
+              </Badge>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
       {/* ─── Header ─── */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -246,6 +322,20 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
             onClick={() => refetchLeads()}
           >
             <RefreshCw className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={!activePipeline || isExporting}
+          >
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4 mr-1" />
+            )}
+            {isExporting ? "Exporting..." : "Export CSV"}
           </Button>
 
           {/* View Toggles */}
@@ -299,6 +389,9 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
       {view === "list" && activePipeline && (
         <Card>
           <CardContent className="p-0">
+            <div className="border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+              Click any row to open full lead and call context.
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

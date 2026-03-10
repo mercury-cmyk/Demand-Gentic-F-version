@@ -204,11 +204,13 @@ interface BridgeSession {
   setupComplete: boolean;
   callAnswered: boolean;
   openingMessageSent: boolean;
+  openingFallbackTimer: NodeJS.Timeout | null;
 
   // Context
   systemPrompt: string;
   voiceName: string;
   contactName: string;
+  firstMessage: string | null;
   context: any;
 
   // Metrics
@@ -223,6 +225,10 @@ interface BridgeSession {
 
   // Timers
   maxDurationTimer: NodeJS.Timeout | null;
+
+  // Opening protection: suppress incoming audio forwarding to Gemini
+  // during the first few seconds so the agent can speak uninterrupted
+  openingProtectionUntil: number;
 }
 
 const sessions = new Map<string, BridgeSession>();
@@ -238,6 +244,7 @@ async function createSession(params: {
   voiceName?: string;
   toPhoneNumber?: string;
   contactName?: string;
+  firstMessage?: string;
   context?: any;
   maxDurationSeconds?: number;
 }): Promise<{ success: boolean; error?: string }> {
@@ -259,12 +266,17 @@ async function createSession(params: {
 
     geminiWs: null,
     setupComplete: false,
-    callAnswered: false,
+    // The SIP dialer creates the media bridge only after the outbound call is answered.
+    // Waiting for inbound RTP here creates a deadlock on endpoints that do not send
+    // audio immediately: the agent waits for RTP, and the callee waits for the agent.
+    callAnswered: true,
     openingMessageSent: false,
+    openingFallbackTimer: null,
 
     systemPrompt: params.systemPrompt,
     voiceName: params.voiceName || 'Puck',
     contactName: params.contactName || 'there',
+    firstMessage: params.firstMessage?.trim() || null,
     context: params.context || {},
 
     startTime: Date.now(),
@@ -276,6 +288,8 @@ async function createSession(params: {
     callbackSent: false,
 
     maxDurationTimer: null,
+
+    openingProtectionUntil: 0,
   };
 
   sessions.set(params.callId, session);
@@ -338,6 +352,7 @@ function destroySession(callId: string): void {
   }
 
   if (session.maxDurationTimer) clearTimeout(session.maxDurationTimer);
+  if (session.openingFallbackTimer) clearTimeout(session.openingFallbackTimer);
   if (session.rtpSocket) {
     try { session.rtpSocket.close(); } catch (_) {}
     session.rtpSocket = null;
@@ -369,9 +384,8 @@ function startRtpListener(session: BridgeSession): void {
     }
 
     // Mark call as answered on first RTP
-    if (!session.callAnswered) {
-      session.callAnswered = true;
-      log(`Call ${session.callId} answered (first RTP from ${rinfo.address}:${rinfo.port})`);
+    if (session.packetsReceived === 1) {
+      log(`First RTP received for ${session.callId} from ${rinfo.address}:${rinfo.port}`);
       trySendOpeningMessage(session);
     }
 
@@ -412,6 +426,14 @@ function handleIncomingRtp(session: BridgeSession, buf: Buffer): void {
   // Transcode to PCM 16kHz and send to Gemini
   if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN || !session.setupComplete) {
     return; // Drop audio until Gemini is ready
+  }
+
+  // OPENING PROTECTION: Suppress incoming audio during the first few seconds after
+  // sending the opening message. Without this, the prospect's initial audio (ringing,
+  // comfort noise, carrier screening messages) triggers Gemini's VAD, which interrupts
+  // the agent before it can speak — or causes false voicemail detection.
+  if (session.openingProtectionUntil > 0 && Date.now() < session.openingProtectionUntil) {
+    return; // Drop incoming audio during protection window
   }
 
   try {
@@ -497,22 +519,30 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         functionDeclarations: [
           {
             name: 'submit_disposition',
-            description: 'Submit call outcome/disposition',
+            description: `Submit the final call outcome ONLY after completing ALL required call flow stages. CRITICAL RULES:
+- You MUST complete every required stage in the call flow before calling this. If the prospect just agreed to something (receiving a document, attending an event, scheduling a meeting), you still need to complete closing and graceful_exit stages first.
+- For "qualified_lead": You MUST first confirm all next-step details (appointment date/time, email for document delivery, etc.) AND say a professional goodbye BEFORE calling this.
+- NEVER call submit_disposition and end_call in the same turn. After submitting disposition, wait for the response, then say a professional goodbye, THEN call end_call separately.
+- A prospect saying "yes" or "sure" does NOT mean the call is done — continue to the next call flow stage.
+- Only call this ONCE per call.`,
             parameters: {
               type: 'object',
               properties: {
                 disposition: {
                   type: 'string',
-                  description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
+                  description: 'Call outcome: qualified_lead (ONLY after confirming appointment date/time), not_interested, do_not_call, voicemail, no_answer, invalid_data, callback_requested',
                 },
-                notes: { type: 'string', description: 'Brief notes about the call' },
+                notes: { type: 'string', description: 'Brief notes. For qualified_lead, MUST include the confirmed appointment date/time.' },
               },
               required: ['disposition'],
             },
           },
           {
             name: 'end_call',
-            description: 'End the phone call gracefully',
+            description: `End the phone call. RULES:
+- NEVER call this at the same time as submit_disposition. Always wait.
+- Before ending, you MUST say a polite professional goodbye (e.g. "Thank you for your time, [name]. We look forward to speaking with you on [date]. Have a great day!")
+- For qualified_lead calls: confirm the appointment details one final time before ending.`,
             parameters: {
               type: 'object',
               properties: {
@@ -537,6 +567,15 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
               voiceConfig: {
                 prebuiltVoiceConfig: { voiceName: voice },
               },
+            },
+          },
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              // Reduce VAD sensitivity to prevent premature interruptions.
+              // LOW = less likely to interrupt the agent mid-sentence due to
+              // background noise or prospect breathing.
+              startOfSpeechSensitivity: 'START_OF_SPEECH_SENSITIVITY_LOW',
+              endOfSpeechSensitivity: 'END_OF_SPEECH_SENSITIVITY_LOW',
             },
           },
           systemInstruction: {
@@ -568,7 +607,11 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           session.setupComplete = true;
           log(`Gemini setup complete for ${session.callId}`);
           resolve();
-          trySendOpeningMessage(session);
+          if (session.packetsReceived > 0) {
+            trySendOpeningMessage(session);
+          } else {
+            scheduleOpeningFallback(session);
+          }
           return;
         }
 
@@ -673,12 +716,31 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
   });
 }
 
+function scheduleOpeningFallback(session: BridgeSession): void {
+  if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
+  if (session.openingFallbackTimer) return;
+
+  const OPENING_FALLBACK_DELAY_MS = 1500;
+  session.openingFallbackTimer = setTimeout(() => {
+    session.openingFallbackTimer = null;
+    if (!session.openingMessageSent) {
+      log(`Opening fallback fired for ${session.callId} after ${OPENING_FALLBACK_DELAY_MS}ms without inbound RTP`);
+      trySendOpeningMessage(session);
+    }
+  }, OPENING_FALLBACK_DELAY_MS);
+}
+
 function trySendOpeningMessage(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
   session.openingMessageSent = true;
+  if (session.openingFallbackTimer) {
+    clearTimeout(session.openingFallbackTimer);
+    session.openingFallbackTimer = null;
+  }
 
   const name = session.contactName || 'there';
-  const text = `Say ONLY this exact message now: "Hello, may I please speak with ${name}?"
+  const greeting = session.firstMessage || `Hello, may I please speak with ${name}?`;
+  const text = `Say ONLY this exact message now: "${greeting}"
 
 After speaking, STOP and WAIT for their response.`;
 
@@ -691,6 +753,12 @@ After speaking, STOP and WAIT for their response.`;
     };
     session.geminiWs.send(JSON.stringify(msg));
     log(`Opening message sent for ${session.callId}`);
+
+    // Set opening protection: suppress incoming audio for 5 seconds to prevent
+    // carrier screening messages, comfort noise, or early speech from interrupting
+    // the agent's greeting or triggering false voicemail detection.
+    const OPENING_PROTECTION_MS = 5000;
+    session.openingProtectionUntil = Date.now() + OPENING_PROTECTION_MS;
   }
 }
 
@@ -705,7 +773,32 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
   const callAttemptId = session.context?.callAttemptId || null;
 
   if (call.name === 'submit_disposition') {
-    session.lastDisposition = call.args?.disposition || null;
+    const disposition = call.args?.disposition || null;
+
+    // GUARD: Prevent premature voicemail disposition on very short calls.
+    // Carrier screening messages ("this call is being recorded for insurance purposes")
+    // can trigger false voicemail detection within the first 8 seconds.
+    // Force the agent to keep trying if the call is too short for a real voicemail.
+    const MIN_VOICEMAIL_DURATION_SEC = 8;
+    if (disposition === 'voicemail' && callDurationSeconds < MIN_VOICEMAIL_DURATION_SEC) {
+      log(`[GUARD] Rejecting premature voicemail disposition for ${session.callId} (${callDurationSeconds}s < ${MIN_VOICEMAIL_DURATION_SEC}s) — telling Gemini to keep trying`);
+      if (session.geminiWs?.readyState === WebSocket.OPEN) {
+        const toolResponse = {
+          toolResponse: {
+            functionResponses: [{
+              name: call.name,
+              id: call.id,
+              response: { success: false, error: 'Too early to determine voicemail. Continue the conversation — the call just started. Wait for more audio before deciding.' },
+            }],
+          },
+        };
+        session.geminiWs.send(JSON.stringify(toolResponse));
+      }
+      return;
+    }
+
+    session.lastDisposition = disposition;
+    (session as any).dispositionSubmittedAt = Date.now();
     session.callbackSent = true;
     // Include transcript + duration + callAttemptId in callback
     await callbackToCloudRun(session.callId, 'submit_disposition', {
@@ -715,8 +808,37 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
       callDurationSeconds,
       context: session.context,
     });
-    response = { success: true, disposition: call.args?.disposition };
+    // For qualified leads, tell Gemini to complete the call professionally
+    if (disposition === 'qualified_lead') {
+      response = {
+        success: true,
+        disposition,
+        instructions: 'Disposition recorded. Now you MUST: 1) Confirm any next steps with the prospect (document delivery, meeting details, etc.), 2) Thank them professionally for their time, 3) Say a warm goodbye, 4) THEN call end_call. Do NOT skip these closing steps or hang up abruptly.',
+      };
+    } else {
+      response = { success: true, disposition };
+    }
   } else if (call.name === 'end_call') {
+    // GUARD: If disposition was just submitted in the same turn or within 5 seconds,
+    // reject end_call and tell Gemini to say goodbye first.
+    const dispositionAge = Date.now() - ((session as any).dispositionSubmittedAt || 0);
+    if ((session as any).dispositionSubmittedAt && dispositionAge < 5000) {
+      log(`[GUARD] Rejecting immediate end_call for ${session.callId} — disposition was submitted ${dispositionAge}ms ago. Gemini must say goodbye first.`);
+      if (session.geminiWs?.readyState === WebSocket.OPEN) {
+        const toolResponse = {
+          toolResponse: {
+            functionResponses: [{
+              name: call.name,
+              id: call.id,
+              response: { success: false, error: 'You must say a professional goodbye to the prospect before ending the call. Thank them for their time and confirm next steps.' },
+            }],
+          },
+        };
+        session.geminiWs.send(JSON.stringify(toolResponse));
+      }
+      return;
+    }
+
     session.callbackSent = true;
     // Include transcript + duration + callAttemptId in end_call callback
     await callbackToCloudRun(session.callId, 'end_call', {
@@ -805,7 +927,7 @@ app.use((req, res, next) => {
 app.post('/bridge', async (req, res) => {
   try {
     const { callId, rtpPort, remoteAddress, remotePort, systemPrompt, voiceName,
-      toPhoneNumber, contactName, context, maxDurationSeconds } = req.body;
+      toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds } = req.body;
 
     if (!callId || !rtpPort || !remoteAddress || !remotePort) {
       res.status(400).json({ error: 'Missing required fields: callId, rtpPort, remoteAddress, remotePort' });
@@ -815,7 +937,7 @@ app.post('/bridge', async (req, res) => {
     const result = await createSession({
       callId, rtpPort, remoteAddress, remotePort,
       systemPrompt: systemPrompt || 'You are a helpful AI voice assistant.',
-      voiceName, toPhoneNumber, contactName, context, maxDurationSeconds,
+      voiceName, toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds,
     });
 
     if (result.success) {
@@ -850,6 +972,7 @@ app.get('/bridge/:callId', (req, res) => {
     remotePort: session.remotePort,
     setupComplete: session.setupComplete,
     callAnswered: session.callAnswered,
+    openingMessageSent: session.openingMessageSent,
     packetsReceived: session.packetsReceived,
     packetsSent: session.packetsSent,
     durationSec: Math.round((Date.now() - session.startTime) / 1000),
@@ -874,6 +997,7 @@ app.get('/stats', (_req, res) => {
     remote: `${s.remoteAddress}:${s.remotePort}`,
     setupComplete: s.setupComplete,
     callAnswered: s.callAnswered,
+    openingMessageSent: s.openingMessageSent,
     rx: s.packetsReceived,
     tx: s.packetsSent,
     dur: Math.round((Date.now() - s.startTime) / 1000),

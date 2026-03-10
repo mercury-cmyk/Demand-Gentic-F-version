@@ -273,20 +273,24 @@ if (isMainModule) {
       console.error('[STARTUP] Database initialization failed (non-blocking):', err);
     }
 
-    // Load secrets from database into process.env
-    // Cloud Run/Env vars take priority; DB acts as dynamic override/fallback
-    // DISABLED globally for now to prevent decryption errors (Session Key Mismatch between DB and Cloud Run)
-    /*
-    if (process.env.NODE_ENV === 'production') {
-      try {
-        const { initializeSecrets } = await import("./services/secret-loader");
-        await initializeSecrets({ overwriteEnv: false });
-      } catch (err) {
-        console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
-        console.log('[STARTUP] Continuing with .env values as fallback...');
+    // Load secrets from Ops Hub secret store into process.env
+    // For local/dev: secrets from DB replace .env (overwriteEnv=true so .env is not needed)
+    // For production (Cloud Run): disabled — GCP Secret Manager provides env vars directly
+    {
+      const isCloudRun = Boolean(process.env.K_SERVICE || process.env.CLOUD_RUN_JOB);
+      if (!isCloudRun) {
+        try {
+          const { initializeSecrets } = await import("./services/secret-loader");
+          await initializeSecrets({ overwriteEnv: true });
+          console.log('[STARTUP] Ops Hub secrets loaded into env (local/dev mode)');
+        } catch (err) {
+          console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
+          console.log('[STARTUP] Continuing with .env values as fallback...');
+        }
+      } else {
+        console.log('[STARTUP] Cloud Run detected — using GCP Secret Manager env vars directly');
       }
     }
-    */
 
     // Recover audio checkpoints from crashed calls (non-blocking)
     try {

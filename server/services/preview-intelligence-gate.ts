@@ -5,9 +5,9 @@
  *
  * REQUIRED (auto-generatable — gate blocks if missing):
  * 1. Account Intelligence (problem hypothesis, recommended angle, tone)
- * 2. Problem Intelligence (detected problems, messaging package, outreach strategy)
  *
  * OPTIONAL (pre-configured — enhance quality but don't block):
+ * 2. Problem Intelligence (detected problems, messaging package, outreach strategy)
  * 3. Organization Intelligence (org profile with offerings, ICP, positioning)
  * 4. Solution Mapping (problem-to-solution mapping for the campaign)
  *
@@ -33,6 +33,10 @@ import {
 import {
   generateAccountProblemIntelligence,
 } from './problem-intelligence/problem-generation-engine';
+import {
+  runOrganizationResearch,
+  type StructuredIntelligence,
+} from './organization-research-service';
 
 // ==================== TYPES ====================
 
@@ -77,6 +81,195 @@ export interface IntelligenceGateResult {
   passed: boolean;
   status: IntelligenceStatus;
   accountIntelligencePayload: AccountIntelligencePayload | null;
+}
+
+type ResolvedCampaignOrganization = {
+  campaign: {
+    id: string;
+    problemIntelligenceOrgId: string | null;
+    productServiceInfo: string | null;
+  } | null;
+  organization: typeof campaignOrganizations.$inferSelect | null;
+};
+
+async function resolveCampaignOrganization(campaignId: string): Promise<ResolvedCampaignOrganization> {
+  const [campaign] = await db
+    .select({
+      id: campaigns.id,
+      problemIntelligenceOrgId: campaigns.problemIntelligenceOrgId,
+      productServiceInfo: campaigns.productServiceInfo,
+    })
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+
+  if (!campaign) {
+    return { campaign: null, organization: null };
+  }
+
+  let organization: typeof campaignOrganizations.$inferSelect | null = null;
+
+  if (campaign.problemIntelligenceOrgId) {
+    const [linkedOrg] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.id, campaign.problemIntelligenceOrgId))
+      .limit(1);
+    organization = linkedOrg || null;
+  }
+
+  if (!organization) {
+    const [defaultOrg] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(
+        and(
+          eq(campaignOrganizations.isActive, true),
+          eq(campaignOrganizations.isDefault, true),
+        )
+      )
+      .limit(1);
+    organization = defaultOrg || null;
+  }
+
+  if (!organization) {
+    const [fallbackOrg] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.isActive, true))
+      .orderBy(desc(campaignOrganizations.isDefault), campaignOrganizations.name)
+      .limit(1);
+    organization = fallbackOrg || null;
+  }
+
+  return { campaign, organization };
+}
+
+function hasStructuredIntelligenceSection(section: unknown): boolean {
+  return !!section && typeof section === 'object' && Object.keys(section as Record<string, unknown>).length > 0;
+}
+
+export function normalizeOrganizationWebsiteUrl(domain: string | null | undefined): string | null {
+  const trimmed = String(domain || '').trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed.replace(/^www\./i, '')}`;
+}
+
+export function mapOrganizationResearchToCampaignOrganizationIntelligence(intelligence: StructuredIntelligence): {
+  identity: Record<string, unknown>;
+  offerings: Record<string, unknown>;
+  icp: Record<string, unknown>;
+  positioning: Record<string, unknown>;
+  outreach: Record<string, unknown>;
+} {
+  return {
+    identity: {
+      legalName: intelligence.identity.legalName,
+      description: intelligence.identity.description,
+      industry: intelligence.identity.industry,
+      foundedYear: intelligence.identity.foundedYear,
+      headquarters: intelligence.identity.headquarters,
+    },
+    offerings: {
+      coreProducts: intelligence.offerings.coreProducts,
+      useCases: intelligence.offerings.useCases,
+      problemsSolved: intelligence.offerings.problemsSolved,
+      differentiators: intelligence.offerings.differentiators,
+    },
+    icp: {
+      industries: intelligence.icp.targetIndustries,
+      personas: intelligence.icp.targetPersonas,
+      companySize: intelligence.icp.companySize,
+      buyingSignals: intelligence.icp.buyingSignals,
+    },
+    positioning: {
+      oneLiner: intelligence.positioning.oneLiner,
+      valueProposition: intelligence.positioning.valueProposition,
+      competitors: intelligence.positioning.competitors,
+      whyUs: intelligence.positioning.whyChooseUs,
+    },
+    outreach: {
+      emailAngles: intelligence.outreach.emailAngles,
+      callOpeners: intelligence.outreach.callOpeners,
+      objectionHandlers: intelligence.outreach.objectionHandlers,
+    },
+  };
+}
+
+async function autoGenerateOrganizationIntelligence(campaignId: string): Promise<boolean> {
+  const resolved = await resolveCampaignOrganization(campaignId);
+  const organization = resolved.organization;
+
+  if (!resolved.campaign || !organization) {
+    console.warn(`[Preview Intelligence Gate] No campaign organization available for ${campaignId}`);
+    return false;
+  }
+
+  const websiteUrl = normalizeOrganizationWebsiteUrl(organization.domain);
+  if (!websiteUrl) {
+    console.warn(`[Preview Intelligence Gate] Skipping organization intelligence generation for ${campaignId}: organization ${organization.id} has no domain`);
+    return false;
+  }
+
+  const research = await runOrganizationResearch({
+    organizationName: organization.name,
+    websiteUrl,
+    industry: organization.industry || undefined,
+    notes: resolved.campaign.productServiceInfo || undefined,
+  });
+
+  const mapped = mapOrganizationResearchToCampaignOrganizationIntelligence(research.intelligence);
+
+  await db
+    .update(campaignOrganizations)
+    .set({
+      identity: {
+        ...((organization.identity as Record<string, unknown>) || {}),
+        ...mapped.identity,
+      },
+      offerings: {
+        ...((organization.offerings as Record<string, unknown>) || {}),
+        ...mapped.offerings,
+      },
+      icp: {
+        ...((organization.icp as Record<string, unknown>) || {}),
+        ...mapped.icp,
+      },
+      positioning: {
+        ...((organization.positioning as Record<string, unknown>) || {}),
+        ...mapped.positioning,
+      },
+      outreach: {
+        ...((organization.outreach as Record<string, unknown>) || {}),
+        ...mapped.outreach,
+      },
+      compiledOrgContext: research.compiledContext,
+      description:
+        organization.description ||
+        research.intelligence.identity.description.value ||
+        null,
+      industry:
+        organization.industry ||
+        research.intelligence.identity.industry.value ||
+        null,
+      updatedAt: new Date(),
+    })
+    .where(eq(campaignOrganizations.id, organization.id));
+
+  if (!resolved.campaign.problemIntelligenceOrgId) {
+    await db
+      .update(campaigns)
+      .set({
+        problemIntelligenceOrgId: organization.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(campaigns.id, campaignId));
+  }
+
+  return true;
 }
 
 // ==================== CORE GATE FUNCTION ====================
@@ -136,47 +329,16 @@ export async function checkPreviewIntelligence(params: {
   };
 
   try {
-    // Get campaign to find linked organization
-    const [campaign] = await db
-      .select({
-        id: campaigns.id,
-        problemIntelligenceOrgId: campaigns.problemIntelligenceOrgId,
-        productServiceInfo: campaigns.productServiceInfo,
-      })
-      .from(campaigns)
-      .where(eq(campaigns.id, campaignId))
-      .limit(1);
-
-    // Check campaignOrganizations — the client org linked to this campaign
-    let orgProfile: any = null;
-
-    if (campaign?.problemIntelligenceOrgId) {
-      const [profile] = await db
-        .select()
-        .from(campaignOrganizations)
-        .where(eq(campaignOrganizations.id, campaign.problemIntelligenceOrgId))
-        .limit(1);
-      orgProfile = profile;
-    }
-
-    // Fallback: find the default active organization
-    if (!orgProfile) {
-      const [defaultOrg] = await db
-        .select()
-        .from(campaignOrganizations)
-        .where(eq(campaignOrganizations.isActive, true))
-        .limit(1);
-      orgProfile = defaultOrg;
-    }
+    const { organization: orgProfile } = await resolveCampaignOrganization(campaignId);
 
     if (orgProfile) {
       const identity = orgProfile.identity as any;
-      const hasIdentity = !!(identity && Object.keys(identity).length > 0);
+      const hasIdentity = hasStructuredIntelligenceSection(identity);
       orgIntel = {
         available: hasIdentity,
-        hasOfferings: !!(orgProfile.offerings && Object.keys(orgProfile.offerings as any).length > 0),
-        hasIcp: !!(orgProfile.icp && Object.keys(orgProfile.icp as any).length > 0),
-        hasPositioning: !!(orgProfile.positioning && Object.keys(orgProfile.positioning as any).length > 0),
+        hasOfferings: hasStructuredIntelligenceSection(orgProfile.offerings),
+        hasIcp: hasStructuredIntelligenceSection(orgProfile.icp),
+        hasPositioning: hasStructuredIntelligenceSection(orgProfile.positioning),
         orgName: identity?.legalName?.value || identity?.legalName || orgProfile.name || null,
       };
       // Available if identity exists — offerings/icp/positioning are bonuses
@@ -297,12 +459,14 @@ export async function checkPreviewIntelligence(params: {
     missingComponents.push('Problem Intelligence');
   }
 
-  // Separate required (auto-generatable) from optional (pre-configured) components.
-  // Required: Account Intelligence, Problem Intelligence — these can be auto-generated
-  // Optional: Organization Intelligence, Solution Mapping — these need manual configuration
+  // Separate required from optional components.
+  // Required: Account Intelligence — Preview Studio should unlock once the core
+  // account context exists.
+  // Optional: Problem Intelligence, Organization Intelligence, Solution Mapping.
   // Production campaign calls don't check the gate at all, so we only require
-  // what we can auto-generate. Optional components enhance quality but don't block.
-  const requiredComponents = ['Account Intelligence', 'Problem Intelligence'];
+  // the minimum context needed for a useful preview. Everything else improves
+  // quality but should not block testing.
+  const requiredComponents = ['Account Intelligence'];
   const missingRequiredComponents = missingComponents.filter(c => requiredComponents.includes(c));
   const missingOptionalComponents = missingComponents.filter(c => !requiredComponents.includes(c));
 
@@ -337,11 +501,11 @@ export async function checkPreviewIntelligence(params: {
  * Used before any preview/test action to ensure core intelligence is present.
  *
  * Auto-generates (if missing and autoGenerate=true):
- * - Account Intelligence (problem hypothesis, recommended angle, tone)
- * - Problem Intelligence (detected problems, messaging package, outreach strategy)
+ * - Account Intelligence (required to unlock Preview Studio)
+ * - Problem Intelligence (best-effort enhancement)
  *
- * Gate passes when auto-generatable components are available.
- * Organization Intelligence and Solution Mapping enhance quality but do NOT block,
+ * Gate passes when account intelligence is available.
+ * Problem Intelligence, Organization Intelligence, and Solution Mapping enhance quality but do NOT block,
  * matching the behavior of production campaign calls which skip the gate entirely.
  */
 export async function enforcePreviewIntelligence(params: {
@@ -366,6 +530,18 @@ export async function enforcePreviewIntelligence(params: {
       }
     } catch (e) {
       console.error('[Preview Intelligence Gate] Failed to auto-generate account intelligence:', e);
+    }
+  }
+
+  if (!status.organizationIntelligence.available && autoGenerate) {
+    try {
+      console.log(`[Preview Intelligence Gate] Auto-generating organization intelligence for campaign ${campaignId}`);
+      const generated = await autoGenerateOrganizationIntelligence(campaignId);
+      if (generated) {
+        generatedAnything = true;
+      }
+    } catch (e) {
+      console.error('[Preview Intelligence Gate] Failed to auto-generate organization intelligence:', e);
     }
   }
 

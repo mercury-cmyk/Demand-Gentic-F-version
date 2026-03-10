@@ -13,6 +13,7 @@ import {
   type CampaignTestCall,
   workOrders, // Import workOrders
   agentDefaults,
+  dialerCallAttempts,
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -343,12 +344,34 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
         console.log(`[Campaign Test Call] International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
         console.log("=".repeat(60));
 
+        // Create a call attempt record so post-call analysis works for test calls
+        let testCallAttemptId: string | undefined;
+        try {
+          testCallAttemptId = `test-attempt-${testCallId}`;
+          const [callAttempt] = await db
+            .insert(dialerCallAttempts)
+            .values({
+              id: testCallAttemptId,
+              campaignId,
+              agentType: 'ai',
+              phoneDialed: normalizedPhone,
+              attemptNumber: 1,
+              callStartedAt: new Date(),
+            })
+            .returning();
+          testCallAttemptId = callAttempt.id;
+          console.log(`[Campaign Test Call] Created call attempt ${testCallAttemptId} for SIP test call`);
+        } catch (err) {
+          console.error(`[Campaign Test Call] Failed to create call attempt record:`, err);
+        }
+
         const sipResult = await initiateSipCall({
           toNumber: normalizedPhone,
           fromNumber,
           campaignId,
           contactId: '',
           queueItemId: '',
+          callAttemptId: testCallAttemptId || null,
           voiceName: ctx.voice || 'Puck',
           systemPrompt: ctx.systemPrompt,
           contactName: validatedData.testContactName,
@@ -356,17 +379,48 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
           contactJobTitle: validatedData.testJobTitle,
           accountName: validatedData.testCompanyName,
           organizationName: ctx.organizationName,
+          campaignName: campaign.name,
+          campaignType: ctx.campaignType || null,
           campaignObjective: ctx.campaignObjective,
+          successCriteria: ctx.successCriteria,
+          targetAudienceDescription: ctx.targetAudienceDescription,
+          productServiceInfo: ctx.productServiceInfo,
+          talkingPoints: ctx.talkingPoints,
+          campaignContextBrief: ctx.campaignContextBrief,
+          callFlow: ctx.callFlow,
+          firstMessage: ctx.firstMessage,
           maxCallDurationSeconds: 300,
         });
 
         if (sipResult.success) {
+          const sipCallControlId = sipResult.callControlId || sipResult.callId;
+
+          await db.update(campaignTestCalls)
+            .set({
+              callControlId: sipCallControlId,
+              status: 'in_progress',
+              answeredAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(campaignTestCalls.id, testCallId));
+
+          if (testCallAttemptId) {
+            await db.update(dialerCallAttempts)
+              .set({
+                telnyxCallId: sipCallControlId,
+                providerCallId: sipCallControlId,
+                updatedAt: new Date(),
+              })
+              .where(eq(dialerCallAttempts.id, testCallAttemptId));
+          }
+
           return res.json({
             success: true,
             message: 'Test call initiated via Direct SIP',
             callId: sipResult.callId,
-            callControlId: sipResult.callControlId,
+            callControlId: sipCallControlId,
             engine: 'sip',
+            testCallId,
           });
         }
 

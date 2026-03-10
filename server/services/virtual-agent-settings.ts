@@ -175,6 +175,12 @@ export function mergeAgentSettings(raw?: Partial<VirtualAgentSettings>): Virtual
   };
 }
 
+/**
+ * @deprecated Use resolveAgentConfig() from unified-call-context.ts instead.
+ * This function queries the virtualAgents table directly. The Unified Agent
+ * Architecture resolves agent config once at call setup via resolveAgentConfig(),
+ * eliminating repeated DB lookups during the call flow.
+ */
 export async function getVirtualAgentConfig(virtualAgentId: string): Promise<{
   systemPrompt: string | null;
   firstMessage: string | null;

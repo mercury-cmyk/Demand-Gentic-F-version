@@ -2939,6 +2939,7 @@ export const leads = pgTable("leads", {
   qaStatus: qaStatusEnum("qa_status").notNull().default('new'),
   
   // Account snapshot fields (for denormalized access)
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'set null' }),
   accountName: text("account_name"),
   accountIndustry: text("account_industry"),
   
@@ -3011,6 +3012,7 @@ export const leads = pgTable("leads", {
   callAttemptIdx: index("leads_call_attempt_idx").on(table.callAttemptId),
   deletedAtIdx: index("leads_deleted_at_idx").on(table.deletedAt),
   contactIdx: index("leads_contact_idx").on(table.contactId),
+  accountIdx: index("leads_account_idx").on(table.accountId),
   agentIdx: index("leads_agent_idx").on(table.agentId),
   createdIdx: index("leads_created_idx").on(table.createdAt),
 }));
@@ -4122,6 +4124,81 @@ export const senderProfiles = pgTable("sender_profiles", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export type CampaignEmailDnsProfile = {
+  spfInclude?: string;
+  dkimType?: 'cname' | 'txt';
+  dkimSelector?: string;
+  dkimValue?: string;
+  trackingHost?: string;
+  trackingValue?: string;
+  returnPathHost?: string;
+  returnPathValue?: string;
+  dmarcPolicy?: 'none' | 'quarantine' | 'reject';
+  dmarcReportEmail?: string;
+  setupNotes?: string;
+};
+
+export type CampaignEmailSendingProfile = {
+  batchSize?: number;
+  rateLimitPerMinute?: number;
+  dailyCap?: number;
+  enableOpenTracking?: boolean;
+  enableClickTracking?: boolean;
+  enableUnsubscribeHeader?: boolean;
+  retryCount?: number;
+  retryBackoffMs?: number;
+  warmupMode?: boolean;
+};
+
+export const campaignEmailProviders = pgTable("campaign_email_providers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerKey: text("provider_key").notNull(), // mailgun | brainpool | custom
+  name: text("name").notNull(),
+  description: text("description"),
+  transport: text("transport").notNull().default('smtp'), // mailgun_api | smtp
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false),
+  priority: integer("priority").notNull().default(1),
+  apiBaseUrl: text("api_base_url"),
+  apiDomain: text("api_domain"),
+  apiRegion: text("api_region"),
+  apiKeyEncrypted: text("api_key_encrypted"),
+  webhookSigningKeyEncrypted: text("webhook_signing_key_encrypted"),
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  smtpSecure: boolean("smtp_secure").default(true),
+  smtpUsername: text("smtp_username"),
+  smtpPasswordEncrypted: text("smtp_password_encrypted"),
+  defaultFromEmail: text("default_from_email"),
+  defaultFromName: text("default_from_name"),
+  replyToEmail: text("reply_to_email"),
+  dnsProfile: jsonb("dns_profile").$type<CampaignEmailDnsProfile>(),
+  sendingProfile: jsonb("sending_profile").$type<CampaignEmailSendingProfile>(),
+  healthStatus: text("health_status").notNull().default('unknown'),
+  lastHealthCheck: timestamp("last_health_check"),
+  lastHealthError: text("last_health_error"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  providerKeyIdx: index("campaign_email_providers_key_idx").on(table.providerKey),
+  defaultIdx: index("campaign_email_providers_default_idx").on(table.isDefault),
+  enabledIdx: index("campaign_email_providers_enabled_idx").on(table.isEnabled),
+  priorityIdx: index("campaign_email_providers_priority_idx").on(table.priority),
+  nameUniq: uniqueIndex("campaign_email_providers_name_uniq").on(table.name),
+}));
+
+export const campaignEmailSenderBindings = pgTable("campaign_email_sender_bindings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  senderProfileId: varchar("sender_profile_id").notNull().references(() => senderProfiles.id, { onDelete: 'cascade' }),
+  providerId: varchar("provider_id").notNull().references(() => campaignEmailProviders.id, { onDelete: 'cascade' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  senderUniq: uniqueIndex("campaign_email_sender_bindings_sender_uniq").on(table.senderProfileId),
+  providerIdx: index("campaign_email_sender_bindings_provider_idx").on(table.providerId),
+}));
+
 // Email Templates - Unified template system for campaigns and sequences
 export const emailTemplates = pgTable("email_templates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -4569,6 +4646,17 @@ export const domainWarmupSchedule = pgTable("domain_warmup_schedule", {
   scheduledDateIdx: index("warmup_schedule_date_idx").on(table.scheduledDate),
   statusIdx: index("warmup_schedule_status_idx").on(table.status),
   dayIdx: index("warmup_schedule_day_idx").on(table.day),
+}));
+
+export const campaignEmailDomainBindings = pgTable("campaign_email_domain_bindings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  domainAuthId: integer("domain_auth_id").notNull().references(() => domainAuth.id, { onDelete: 'cascade' }),
+  providerId: varchar("provider_id").notNull().references(() => campaignEmailProviders.id, { onDelete: 'cascade' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  domainUniq: uniqueIndex("campaign_email_domain_bindings_domain_uniq").on(table.domainAuthId),
+  providerIdx: index("campaign_email_domain_bindings_provider_idx").on(table.providerId),
 }));
 
 // ==================== END PHASE 2: DOMAIN MANAGEMENT & DELIVERABILITY ====================
@@ -5453,6 +5541,7 @@ export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
 
 export const leadsRelations = relations(leads, ({ one, many }) => ({
   contact: one(contacts, { fields: [leads.contactId], references: [contacts.id] }),
+  account: one(accounts, { fields: [leads.accountId], references: [accounts.id] }),
   campaign: one(campaigns, { fields: [leads.campaignId], references: [campaigns.id] }),
   callAttempt: one(dialerCallAttempts, { fields: [leads.callAttemptId], references: [dialerCallAttempts.id] }),
   agent: one(users, { fields: [leads.agentId], references: [users.id] }),
@@ -5599,6 +5688,15 @@ export const insertSenderProfileSchema = createInsertSchema(senderProfiles).omit
   id: true,
   createdAt: true,
   updatedAt: true,
+});
+
+export const insertCampaignEmailProviderSchema = createInsertSchema(campaignEmailProviders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  healthStatus: true,
+  lastHealthCheck: true,
+  lastHealthError: true,
 });
 
 export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
@@ -5914,6 +6012,10 @@ export type InsertCampaignAudienceSnapshot = typeof campaignAudienceSnapshots.$i
 
 export type SenderProfile = typeof senderProfiles.$inferSelect;
 export type InsertSenderProfile = typeof senderProfiles.$inferInsert;
+export type CampaignEmailProvider = typeof campaignEmailProviders.$inferSelect;
+export type InsertCampaignEmailProvider = typeof campaignEmailProviders.$inferInsert;
+export type CampaignEmailSenderBinding = typeof campaignEmailSenderBindings.$inferSelect;
+export type CampaignEmailDomainBinding = typeof campaignEmailDomainBindings.$inferSelect;
 
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type InsertEmailTemplate = typeof emailTemplates.$inferInsert;
@@ -14745,7 +14847,7 @@ export const qaConversationAnalysis = pgTable("qa_conversation_analysis", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   conversationId: varchar("conversation_id").notNull(),
   leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   conversationType: text("conversation_type").notNull(), // 'call', 'email', 'meeting'
   discoveryQuality: integer("discovery_quality").notNull(), // 0-10
   engagementQuality: integer("engagement_quality").notNull(), // 0-10
@@ -14771,7 +14873,7 @@ export const qaInteractionQuality = pgTable("qa_interaction_quality", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   interactionId: varchar("interaction_id").notNull(),
   leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   interactionType: text("interaction_type").notNull(), // 'call', 'email', 'meeting', 'network', 'content'
   timinessScore: integer("timeliness_score").notNull(), // 0-10
   relevanceScore: integer("relevance_score").notNull(), // 0-10
@@ -14795,7 +14897,7 @@ export const qaInteractionQuality = pgTable("qa_interaction_quality", {
 export const qaTouchpointSequenceQuality = pgTable("qa_touchpoint_sequence_quality", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   totalTouches: integer("total_touches").notNull(),
   touchpointSequence: jsonb("touchpoint_sequence").notNull(), // Array of { type, channel, timestamp, engagement }
   voiceTouchCount: integer("voice_touch_count").notNull(),
@@ -14823,7 +14925,7 @@ export const qaComplianceReview = pgTable("qa_compliance_review", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   conversationId: varchar("conversation_id"),
   interactionId: varchar("interaction_id"),
-  campaignId: varchar("campaign_id").references(() => campaigns.id),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   callerIdVerified: boolean("caller_id_verified"),
   purposeStatedClearlyly: boolean("purpose_stated_clearly"),
   consentObtained: boolean("consent_obtained"),

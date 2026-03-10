@@ -1,12 +1,32 @@
-import express from 'express';
 import { Router } from 'express';
 import CloudBuildManager from '../services/gcp/cloud-build-manager.js';
 import CloudRunDeploymentManager from '../services/gcp/cloud-run-deployment.js';
 import DomainMapper from '../services/gcp/domain-mapper.js';
 import CostTracker from '../services/gcp/cost-tracker.js';
+import CloudWorkstationsManager from '../services/gcp/cloud-workstations.js';
 import type { Request, Response } from 'express';
+import { requireAuth, requireRole } from '../auth';
+import {
+  getDeploymentLogs,
+  getDeploymentStatus,
+  getOpsOverview,
+  listWorkspaceDirectory,
+  readWorkspaceFile,
+  restartDeploymentService,
+  runDeployment,
+  runDeploymentBuild,
+  writeWorkspaceFile,
+  createWorkspaceFolder,
+  deleteWorkspaceEntry,
+  renameWorkspaceEntry,
+  writeMultipleWorkspaceFiles,
+} from '../services/ops/runtime';
+import { OpsAgentError } from '../services/ops/runtime';
+import { runOpsCodeAgent } from '../services/ops/code-agent';
 
 const router = Router();
+router.use(requireAuth);
+router.use(requireRole('admin', 'campaign_manager', 'manager'));
 
 // Initialize GCP managers
 const projectId = process.env.GCP_PROJECT_ID || '';
@@ -16,6 +36,199 @@ const buildManager = new CloudBuildManager(projectId);
 const deploymentManager = new CloudRunDeploymentManager(projectId, region);
 const domainMapper = new DomainMapper(projectId);
 const costTracker = new CostTracker(projectId);
+const workstationsManager = new CloudWorkstationsManager(projectId, region);
+
+function getOpsPermissionError(error: unknown): { status: number; message: string } | null {
+  const code = typeof (error as { code?: unknown })?.code === 'number'
+    ? (error as { code: number }).code
+    : null;
+  const message = error instanceof Error ? error.message : '';
+  const details = typeof (error as { details?: unknown })?.details === 'string'
+    ? (error as { details: string }).details
+    : '';
+  const combined = `${message} ${details}`;
+
+  if (
+    code === 7 ||
+    /PERMISSION_DENIED/i.test(combined) ||
+    /workstations\.workstations\.use/i.test(combined) ||
+    /User not authorized to perform this action/i.test(combined)
+  ) {
+    return {
+      status: 403,
+      message: "Google Cloud denied workstation access. Grant the active GCP credentials the Cloud Workstations User role, or the 'workstations.workstations.use' permission, on this workstation.",
+    };
+  }
+
+  return null;
+}
+
+function handleOpsError(res: Response, error: unknown, fallbackMessage: string): Response {
+  if (error instanceof OpsAgentError) {
+    return res.status(error.status).json({
+      success: false,
+      error: error.message,
+    });
+  }
+
+  const permissionError = getOpsPermissionError(error);
+  if (permissionError) {
+    return res.status(permissionError.status).json({
+      success: false,
+      error: permissionError.message,
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    error: error instanceof Error ? error.message : fallbackMessage,
+  });
+}
+
+// ===== OPS HUB OVERVIEW =====
+
+router.get('/overview', async (_req: Request, res: Response) => {
+  try {
+    const overview = await getOpsOverview();
+    res.json({
+      success: true,
+      overview,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to load Ops Hub overview');
+  }
+});
+
+// ===== WORKSPACE FILES =====
+
+router.get('/workspace', async (req: Request, res: Response) => {
+  try {
+    const directory = await listWorkspaceDirectory((req.query.path as string) || '');
+    res.json({
+      success: true,
+      directory,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workspace directory');
+  }
+});
+
+router.get('/workspace/file', async (req: Request, res: Response) => {
+  try {
+    const requestedPath = req.query.path as string;
+    if (!requestedPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'path is required',
+      });
+    }
+
+    const file = await readWorkspaceFile(requestedPath);
+    res.json({
+      success: true,
+      file,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to read workspace file');
+  }
+});
+
+router.put('/workspace/file', async (req: Request, res: Response) => {
+  try {
+    const { path: filePath, content } = req.body as {
+      path?: string;
+      content?: string;
+    };
+
+    if (!filePath || typeof content !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'path and content are required',
+      });
+    }
+
+    const file = await writeWorkspaceFile(filePath, content);
+    res.json({
+      success: true,
+      file,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to save workspace file');
+  }
+});
+
+// Create a new folder
+router.post('/workspace/folder', async (req: Request, res: Response) => {
+  try {
+    const { path: folderPath } = req.body as { path?: string };
+    if (!folderPath) {
+      return res.status(400).json({ success: false, error: 'path is required' });
+    }
+    const result = await createWorkspaceFolder(folderPath);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create folder');
+  }
+});
+
+// Delete a file or folder
+router.delete('/workspace/entry', async (req: Request, res: Response) => {
+  try {
+    const entryPath = req.query.path as string;
+    if (!entryPath) {
+      return res.status(400).json({ success: false, error: 'path is required' });
+    }
+    const result = await deleteWorkspaceEntry(entryPath);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete entry');
+  }
+});
+
+// Rename / move a file or folder
+router.post('/workspace/rename', async (req: Request, res: Response) => {
+  try {
+    const { oldPath, newPath } = req.body as { oldPath?: string; newPath?: string };
+    if (!oldPath || !newPath) {
+      return res.status(400).json({ success: false, error: 'oldPath and newPath are required' });
+    }
+    const result = await renameWorkspaceEntry(oldPath, newPath);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to rename entry');
+  }
+});
+
+// Upload multiple files (folder upload from browser)
+router.post('/workspace/upload', async (req: Request, res: Response) => {
+  try {
+    const { files } = req.body as { files?: Array<{ path: string; content: string }> };
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ success: false, error: 'files array is required' });
+    }
+    if (files.length > 500) {
+      return res.status(400).json({ success: false, error: 'Maximum 500 files per upload' });
+    }
+    const result = await writeMultipleWorkspaceFiles(files);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to upload files');
+  }
+});
+
+// ===== VM DEPLOYMENT STATUS =====
+
+router.get('/deployments/status', async (_req: Request, res: Response) => {
+  try {
+    const status = await getDeploymentStatus();
+    res.json({
+      success: true,
+      status,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to load deployment status');
+  }
+});
 
 // ===== CLOUD BUILD ENDPOINTS =====
 
@@ -25,6 +238,21 @@ const costTracker = new CostTracker(projectId);
  */
 router.post('/deployments/build', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
+    const overview = await getOpsOverview();
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
+      const job = await runDeploymentBuild({
+        service: req.body?.service,
+        rebuildMediaBridge: req.body?.rebuildMediaBridge,
+      });
+
+      return res.json({
+        success: true,
+        job,
+        message: 'VM build queued successfully',
+      });
+    }
+
     const { branch = 'main', projectName } = req.body;
 
     const buildConfig = {
@@ -56,11 +284,7 @@ router.post('/deployments/build', async (req: Request, res: Response) => {
       message: 'Build triggered successfully',
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error deploying service';
-    return res.status(500).json({
-      success: false,
-      error: errorMessage,
-    });
+    return handleOpsError(res, error, 'Unknown error deploying service');
   }
 });
 
@@ -92,6 +316,17 @@ router.get('/deployments/build/:buildId', async (req: Request, res: Response) =>
  */
 router.get('/deployments/builds', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.query.target as string | undefined;
+    const overview = await getOpsOverview();
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
+      const status = await getDeploymentStatus();
+      return res.json({
+        success: true,
+        builds: status.jobs,
+        count: status.jobs.length,
+      });
+    }
+
     const { limit = 10 } = req.query;
     const builds = await buildManager.listBuilds(parseInt(limit as string));
 
@@ -101,11 +336,7 @@ router.get('/deployments/builds', async (req: Request, res: Response) => {
       count: builds.length,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error listing builds';
-    res.status(500).json({
-      success: false,
-      error: errorMessage,
-    });
+    handleOpsError(res, error, 'Unknown error listing builds');
   }
 });
 
@@ -133,11 +364,27 @@ router.post('/deployments/build/:buildId/cancel', async (req: Request, res: Resp
 // ===== CLOUD RUN DEPLOYMENT ENDPOINTS =====
 
 /**
- * Deploy to Cloud Run
+ * Deploy to Cloud Run or VM
  * POST /api/ops/deployments/deploy
+ * Pass { target: 'cloud-run' } to force Cloud Run deployment even on a VM host
  */
 router.post('/deployments/deploy', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
+    const overview = await getOpsOverview();
+    const useVM = explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm';
+    if (useVM) {
+      const job = await runDeployment({
+        rebuildMediaBridge: req.body?.rebuildMediaBridge,
+      });
+
+      return res.status(202).json({
+        success: true,
+        job,
+        message: 'VM deploy queued successfully',
+      });
+    }
+
     const {
       serviceName,
       imageUrl,
@@ -178,19 +425,38 @@ router.post('/deployments/deploy', async (req: Request, res: Response) => {
       message: `Deployment to ${deploymentEnv} completed`,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    handleOpsError(res, error, 'Unknown error');
   }
 });
 
 /**
  * Get service status
- * GET /api/ops/deployments/service/:serviceName
+ * GET /api/ops/deployments/service/:serviceName?target=cloud-run
  */
 router.get('/deployments/service/:serviceName', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.query.target as string | undefined;
+    const overview = await getOpsOverview();
+    const useVM = explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm';
+    if (useVM) {
+      const status = await getDeploymentStatus();
+      const service = status.services.find(
+        (entry) => entry.serviceName === req.params.serviceName,
+      );
+
+      if (!service) {
+        return res.status(404).json({
+          success: false,
+          error: `Service ${req.params.serviceName} not found`,
+        });
+      }
+
+      return res.json({
+        success: true,
+        service,
+      });
+    }
+
     const { serviceName } = req.params;
     const status = await deploymentManager.getServiceStatus(serviceName);
 
@@ -199,10 +465,7 @@ router.get('/deployments/service/:serviceName', async (req: Request, res: Respon
       service: status,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    handleOpsError(res, error, 'Unknown error');
   }
 });
 
@@ -234,6 +497,15 @@ router.get('/deployments/service/:serviceName/revisions', async (req: Request, r
  */
 router.post('/deployments/service/:serviceName/rollback', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
+    const overview = await getOpsOverview();
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
+      return res.status(400).json({
+        success: false,
+        error: 'Rollback is not automated for VM deployments. Use the host deployment history or git checkout on the VM.',
+      });
+    }
+
     const { serviceName } = req.params;
     const { revisionName } = req.body;
 
@@ -251,10 +523,7 @@ router.post('/deployments/service/:serviceName/rollback', async (req: Request, r
       message: `Rolled back ${serviceName} to ${revisionName}`,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    handleOpsError(res, error, 'Unknown error');
   }
 });
 
@@ -264,6 +533,15 @@ router.post('/deployments/service/:serviceName/rollback', async (req: Request, r
  */
 router.post('/deployments/service/:serviceName/traffic', async (req: Request, res: Response) => {
   try {
+    const explicitTarget = req.body?.target as string | undefined;
+    const overview = await getOpsOverview();
+    if (explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm') {
+      return res.status(400).json({
+        success: false,
+        error: 'Traffic splitting is only available for Cloud Run deployments.',
+      });
+    }
+
     const { serviceName } = req.params;
     const { revisions } = req.body;
 
@@ -282,10 +560,55 @@ router.post('/deployments/service/:serviceName/traffic', async (req: Request, re
       revisions,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+    handleOpsError(res, error, 'Unknown error');
+  }
+});
+
+router.post('/deployments/restart', async (req: Request, res: Response) => {
+  try {
+    const { service } = req.body as { service?: string };
+    if (!service) {
+      return res.status(400).json({
+        success: false,
+        error: 'service is required',
+      });
+    }
+
+    const job = await restartDeploymentService(service);
+    res.status(202).json({
+      success: true,
+      job,
+      message: `Restart queued for ${service}`,
     });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to restart service');
+  }
+});
+
+// ===== CONTAINER LOGS ENDPOINT =====
+
+/**
+ * Fetch real-time logs from a docker container
+ * GET /api/ops/logs/:service?tail=200&since=5m&grep=pattern
+ */
+router.get('/logs/:service', async (req: Request, res: Response) => {
+  try {
+    const { service } = req.params;
+    const tail = parseInt(req.query.tail as string) || 200;
+    const since = (req.query.since as string) || '30m';
+    const grep = (req.query.grep as string) || '';
+    const logs = await getDeploymentLogs(service, {
+      tail,
+      since,
+      grep,
+    });
+
+    res.json({
+      success: true,
+      ...logs,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to fetch container logs');
   }
 });
 
@@ -555,11 +878,13 @@ router.get('/agents/status', async (_req: Request, res: Response) => {
     const orchestrator = getOrchestrator();
     const status = orchestrator.getStatus();
     const providers = orchestrator.listProviders();
+    const workflow = orchestrator.getCodingWorkflow();
 
     res.json({
       success: true,
       status,
       providers,
+      workflow,
     });
   } catch (error) {
     res.status(500).json({
@@ -575,7 +900,15 @@ router.get('/agents/status', async (_req: Request, res: Response) => {
  */
 router.post('/agents/test', async (req: Request, res: Response) => {
   try {
-    const { prompt, task = 'general', maxTokens, temperature } = req.body;
+    const {
+      prompt,
+      task = 'general',
+      maxTokens,
+      temperature,
+      providerMode,
+      preferredProvider,
+      optimizationProfile,
+    } = req.body;
 
     if (!prompt) {
       return res.status(400).json({ success: false, error: 'Prompt is required' });
@@ -588,6 +921,9 @@ router.post('/agents/test', async (req: Request, res: Response) => {
       task,
       maxTokens,
       temperature,
+      providerMode,
+      preferredProvider,
+      optimizationProfile,
     });
 
     res.json({
@@ -599,6 +935,38 @@ router.post('/agents/test', async (req: Request, res: Response) => {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
     });
+  }
+});
+
+router.post('/coding-agent', async (req: Request, res: Response) => {
+  try {
+    const { prompt } = req.body as { prompt?: string };
+
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Prompt is required',
+      });
+    }
+
+    const response = await runOpsCodeAgent({
+      prompt: prompt.trim(),
+      mode: req.body?.mode,
+      selectedFilePath: req.body?.selectedFilePath,
+      selectedFileContent: req.body?.selectedFileContent,
+      contextFilePaths: Array.isArray(req.body?.contextFilePaths) ? req.body.contextFilePaths : undefined,
+      applyChanges: Boolean(req.body?.applyChanges),
+      providerMode: req.body?.providerMode,
+      preferredProvider: req.body?.preferredProvider,
+      optimizationProfile: req.body?.optimizationProfile,
+    });
+
+    res.json({
+      success: true,
+      response,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to run coding agent');
   }
 });
 
@@ -727,6 +1095,365 @@ router.delete('/files', async (req: Request, res: Response) => {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to delete file',
     });
+  }
+});
+
+// ===== CLOUD WORKSTATIONS =====
+
+/**
+ * List all workstation clusters
+ * GET /api/ops/workstations/clusters
+ */
+router.get('/workstations/clusters', async (_req: Request, res: Response) => {
+  try {
+    const clusters = await workstationsManager.listClusters();
+    res.json({ success: true, clusters });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workstation clusters');
+  }
+});
+
+/**
+ * Create a workstation cluster
+ * POST /api/ops/workstations/clusters
+ */
+router.post('/workstations/clusters', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, displayName, network, subnetwork } = req.body;
+    if (!clusterId || !displayName) {
+      return res.status(400).json({ success: false, error: 'clusterId and displayName are required' });
+    }
+    const cluster = await workstationsManager.createCluster({ clusterId, displayName, network, subnetwork });
+    res.json({ success: true, cluster });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create workstation cluster');
+  }
+});
+
+/**
+ * Delete a workstation cluster
+ * DELETE /api/ops/workstations/clusters/:clusterId
+ */
+router.delete('/workstations/clusters/:clusterId', async (req: Request, res: Response) => {
+  try {
+    await workstationsManager.deleteCluster(req.params.clusterId);
+    res.json({ success: true, message: `Cluster ${req.params.clusterId} deleted` });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete workstation cluster');
+  }
+});
+
+/**
+ * List configs for a cluster
+ * GET /api/ops/workstations/clusters/:clusterId/configs
+ */
+router.get('/workstations/clusters/:clusterId/configs', async (req: Request, res: Response) => {
+  try {
+    const configs = await workstationsManager.listConfigs(req.params.clusterId);
+    res.json({ success: true, configs });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workstation configs');
+  }
+});
+
+/**
+ * Create a workstation config
+ * POST /api/ops/workstations/clusters/:clusterId/configs
+ */
+router.post('/workstations/clusters/:clusterId/configs', async (req: Request, res: Response) => {
+  try {
+    const { configId, displayName, machineType, bootDiskSizeGb, idleTimeout, runningTimeout, containerImage, containerEnv, persistentDiskSizeGb } = req.body;
+    if (!configId || !displayName) {
+      return res.status(400).json({ success: false, error: 'configId and displayName are required' });
+    }
+    const config = await workstationsManager.createConfig({
+      clusterId: req.params.clusterId,
+      configId,
+      displayName,
+      machineType,
+      bootDiskSizeGb,
+      idleTimeout,
+      runningTimeout,
+      containerImage,
+      containerEnv,
+      persistentDiskSizeGb,
+    });
+    res.json({ success: true, config });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create workstation config');
+  }
+});
+
+/**
+ * Delete a workstation config
+ * DELETE /api/ops/workstations/clusters/:clusterId/configs/:configId
+ */
+router.delete('/workstations/clusters/:clusterId/configs/:configId', async (req: Request, res: Response) => {
+  try {
+    await workstationsManager.deleteConfig(req.params.clusterId, req.params.configId);
+    res.json({ success: true, message: `Config ${req.params.configId} deleted` });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete workstation config');
+  }
+});
+
+/**
+ * List workstations for a config
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations', async (req: Request, res: Response) => {
+  try {
+    const workstations = await workstationsManager.listWorkstations(req.params.clusterId, req.params.configId);
+    res.json({ success: true, workstations });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list workstations');
+  }
+});
+
+/**
+ * List ALL workstations across all clusters and configs
+ * GET /api/ops/workstations/all
+ */
+router.get('/workstations/all', async (_req: Request, res: Response) => {
+  try {
+    const workstations = await workstationsManager.listAllWorkstations();
+    res.json({ success: true, workstations });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list all workstations');
+  }
+});
+
+/**
+ * Create a workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations', async (req: Request, res: Response) => {
+  try {
+    const { workstationId, displayName, env, labels } = req.body;
+    if (!workstationId || !displayName) {
+      return res.status(400).json({ success: false, error: 'workstationId and displayName are required' });
+    }
+    const workstation = await workstationsManager.createWorkstation({
+      clusterId: req.params.clusterId,
+      configId: req.params.configId,
+      workstationId,
+      displayName,
+      env,
+      labels,
+    });
+    res.json({ success: true, workstation });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to create workstation');
+  }
+});
+
+/**
+ * Start a workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/start
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/start', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const workstation = await workstationsManager.startWorkstation(clusterId, configId, workstationId);
+    res.json({ success: true, workstation });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to start workstation');
+  }
+});
+
+/**
+ * Stop a workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/stop
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/stop', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const workstation = await workstationsManager.stopWorkstation(clusterId, configId, workstationId);
+    res.json({ success: true, workstation });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to stop workstation');
+  }
+});
+
+/**
+ * Delete a workstation
+ * DELETE /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId
+ */
+router.delete('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    await workstationsManager.deleteWorkstation(clusterId, configId, workstationId);
+    res.json({ success: true, message: `Workstation ${workstationId} deleted` });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to delete workstation');
+  }
+});
+
+/**
+ * Generate access token for a workstation (opens IDE)
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/access-token
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/access-token', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    console.log('[Workstations] generateAccessToken request:', { clusterId, configId, workstationId });
+    const tokenInfo = await workstationsManager.generateAccessToken(clusterId, configId, workstationId);
+    console.log('[Workstations] generateAccessToken success, expireTime:', tokenInfo.expireTime);
+    res.json({ success: true, ...tokenInfo });
+  } catch (error: any) {
+    console.error('[Workstations] generateAccessToken error:', error?.message, error?.code, error?.details);
+    handleOpsError(res, error, 'Failed to generate access token');
+  }
+});
+
+/**
+ * Get IDE URL and, when permitted, a short-lived access token for direct auth
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-url
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-url', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const ideInfo = await workstationsManager.getIDEUrl(clusterId, configId, workstationId);
+    res.json({ success: true, ...ideInfo });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to get IDE URL');
+  }
+});
+
+/**
+ * Proxy auth redirect — opens workstation IDE in browser with access token cookie
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-redirect
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/ide-redirect', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const ideInfo = await workstationsManager.getIDEUrl(clusterId, configId, workstationId);
+    if (ideInfo.accessToken) {
+      const authUrl = `${ideInfo.url.replace(/\/$/, '')}/_workstation/authenticate?access_token=${encodeURIComponent(ideInfo.accessToken)}&redirect_url=${encodeURIComponent('/')}`;
+      return res.redirect(authUrl);
+    }
+    return res.redirect(ideInfo.url);
+  } catch (error) {
+    return handleOpsError(res, error, 'Failed to redirect to IDE');
+  }
+});
+
+/**
+ * Execute command on a running workstation
+ * POST /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/exec
+ */
+router.post('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/exec', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { command } = req.body;
+    if (!command || typeof command !== 'string') {
+      return res.status(400).json({ success: false, error: 'command is required' });
+    }
+    const result = await workstationsManager.execCommand(clusterId, configId, workstationId, command);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to execute command on workstation');
+  }
+});
+
+/**
+ * List files on a running workstation
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/files?path=/home/user
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/files', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const dirPath = (req.query.path as string) || '/home/user';
+    const escaped = dirPath.replace(/'/g, "'\\''");
+
+    const result = await workstationsManager.execCommand(
+      clusterId, configId, workstationId,
+      `ls -la --color=never '${escaped}' 2>/dev/null && echo '---STAT---' && stat -c '%Y' '${escaped}' 2>/dev/null`,
+    );
+
+    const lines = result.stdout.split('\n').filter(Boolean);
+    const entries: Array<{ name: string; path: string; type: 'file' | 'directory'; size: number; permissions: string }> = [];
+
+    for (const line of lines) {
+      if (line === '---STAT---' || line.startsWith('total ')) continue;
+      // Parse ls -la output: permissions links owner group size month day time name
+      const match = line.match(/^([drwxlst-]+)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\d+\s+[\d:]+\s+(.+)$/);
+      if (match) {
+        const [, perms, size, name] = match;
+        if (name === '.' || name === '..') continue;
+        const isDir = perms.startsWith('d');
+        const cleanPath = dirPath.endsWith('/') ? dirPath : dirPath + '/';
+        entries.push({
+          name,
+          path: cleanPath + name,
+          type: isDir ? 'directory' : 'file',
+          size: parseInt(size) || 0,
+          permissions: perms,
+        });
+      }
+    }
+
+    // Sort: directories first, then alphabetical
+    entries.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    res.json({ success: true, entries, cwd: dirPath });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list files on workstation');
+  }
+});
+
+/**
+ * Read file from a running workstation
+ * GET /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file?path=/home/user/file.ts
+ */
+router.get('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const filePath = req.query.path as string;
+    if (!filePath) return res.status(400).json({ success: false, error: 'path query parameter is required' });
+
+    const escaped = filePath.replace(/'/g, "'\\''");
+    const result = await workstationsManager.execCommand(clusterId, configId, workstationId, `cat '${escaped}'`);
+
+    if (result.exitCode !== 0) {
+      return res.status(404).json({ success: false, error: result.stderr || 'File not found' });
+    }
+
+    res.json({ success: true, content: result.stdout, path: filePath });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to read file from workstation');
+  }
+});
+
+/**
+ * Write file to a running workstation
+ * PUT /api/ops/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file
+ */
+router.put('/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/file', async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { path: filePath, content } = req.body;
+    if (!filePath || typeof content !== 'string') {
+      return res.status(400).json({ success: false, error: 'path and content are required' });
+    }
+
+    const b64 = Buffer.from(content).toString('base64');
+    const escaped = filePath.replace(/'/g, "'\\''");
+    const result = await workstationsManager.execCommand(
+      clusterId, configId, workstationId,
+      `echo '${b64}' | base64 -d > '${escaped}'`,
+    );
+
+    if (result.exitCode !== 0) {
+      return res.status(500).json({ success: false, error: result.stderr || 'Failed to write file' });
+    }
+
+    res.json({ success: true, path: filePath });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to write file to workstation');
   }
 });
 

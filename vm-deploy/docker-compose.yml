@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # Nginx reverse proxy — SSL termination, serves static + proxies API
   nginx:
@@ -30,6 +28,8 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - NODE_ENV=production
+      - OPS_HUB_DEPLOY_TARGET=vm
+      - VM_OPS_AGENT_URL=http://127.0.0.1:8383
       # Internal: media bridge is on the same host
       - MEDIA_BRIDGE_HOST=127.0.0.1
       - MEDIA_BRIDGE_PORT=8090
@@ -38,6 +38,9 @@ services:
       - DRACHTIO_HOST=127.0.0.1
       - DRACHTIO_PORT=9022
       - DRACHTIO_SECRET=cymru
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-service-account.json
+    volumes:
+      - ../gcp-service-account.json:/app/gcp-service-account.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 15s
@@ -45,7 +48,25 @@ services:
       start_period: 30s
       retries: 3
 
-  # Drachtio SIP server — handles SIP signaling
+  # Ops agent - host-side file editing and deployment control for Ops Hub
+  ops-agent:
+    build:
+      context: ..
+      dockerfile: vm-deploy/ops-agent.Dockerfile
+    container_name: dg_ops_agent
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - OPS_AGENT_HOST=127.0.0.1
+      - OPS_AGENT_PORT=8383
+      - OPS_AGENT_WORKSPACE_ROOT=/workspace
+    volumes:
+      - ..:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Drachtio SIP server - handles SIP signaling
   drachtio:
     image: drachtio/drachtio-server:latest
     container_name: dg_drachtio

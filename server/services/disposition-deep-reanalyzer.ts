@@ -1691,11 +1691,13 @@ export async function pushCallsToQA(
 
       const [ci] = await db
         .select({
+          accountId: contacts.accountId,
           fullName: contacts.fullName,
           firstName: contacts.firstName,
           lastName: contacts.lastName,
           email: contacts.email,
           companyName: accounts.name,
+          accountIndustry: accounts.industryStandardized,
         })
         .from(contacts)
         .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -1712,7 +1714,9 @@ export async function pushCallsToQA(
           callAttemptId: attempt.id,
           contactName,
           contactEmail: ci?.email || undefined,
+          accountId: ci?.accountId || undefined,
           accountName: ci?.companyName || undefined,
+          accountIndustry: ci?.accountIndustry || undefined,
           qaStatus: "under_review",
           qaDecision: "Pushed to QA via disposition reanalysis",
           dialedNumber: attempt.phoneDialed,
@@ -2354,11 +2358,13 @@ export async function pushCallsToDashboard(
 
       const [ci] = await db
         .select({
+          accountId: contacts.accountId,
           fullName: contacts.fullName,
           firstName: contacts.firstName,
           lastName: contacts.lastName,
           email: contacts.email,
           companyName: accounts.name,
+          accountIndustry: accounts.industryStandardized,
         })
         .from(contacts)
         .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -2375,7 +2381,9 @@ export async function pushCallsToDashboard(
           callAttemptId: attempt.id,
           contactName,
           contactEmail: ci?.email || undefined,
+          accountId: ci?.accountId || undefined,
           accountName: ci?.companyName || undefined,
+          accountIndustry: ci?.accountIndustry || undefined,
           qaStatus: "approved",
           qaDecision: notes || "Pushed to dashboard via disposition reanalysis",
           dialedNumber: attempt.phoneDialed,
@@ -2604,11 +2612,13 @@ async function applyDeepDispositionChange(
         if (!existingLeadId && attempt && session.campaignId && session.contactId) {
           const [ci] = await db
             .select({
+              accountId: contacts.accountId,
               fullName: contacts.fullName,
               firstName: contacts.firstName,
               lastName: contacts.lastName,
               email: contacts.email,
               companyName: accounts.name,
+              accountIndustry: accounts.industryStandardized,
             })
             .from(contacts)
             .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -2624,7 +2634,9 @@ async function applyDeepDispositionChange(
               callAttemptId: attempt.id,
               contactName,
               contactEmail: ci?.email || undefined,
+              accountId: ci?.accountId || undefined,
               accountName: ci?.companyName || undefined,
+              accountIndustry: ci?.accountIndustry || undefined,
               qaStatus: "under_review",
               qaDecision: "Deep reanalysis: reclassified as qualified lead",
               dialedNumber: attempt.phoneDialed,

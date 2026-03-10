@@ -605,8 +605,11 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
           productServiceInfo: campaigns.productServiceInfo,
           talkingPoints: campaigns.talkingPoints,
           targetAudienceDescription: campaigns.targetAudienceDescription,
+          campaignContextBrief: campaigns.campaignContextBrief,
           campaignObjections: campaigns.campaignObjections,
           successCriteria: campaigns.successCriteria,
+          callFlow: campaigns.callFlow,
+          type: campaigns.type,
         })
         .from(campaigns)
         .where(eq(campaigns.id, effectiveCampaignId))
@@ -620,6 +623,9 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
           targetAudience: campaign.targetAudienceDescription,
           objections: campaign.campaignObjections as Array<{ objection: string; response: string }> | null,
           successCriteria: campaign.successCriteria,
+          brief: campaign.campaignContextBrief,
+          campaignType: campaign.type,
+          callFlow: campaign.callFlow as any,
         });
       }
     }

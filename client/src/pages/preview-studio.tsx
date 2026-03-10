@@ -266,7 +266,7 @@ export default function PreviewStudioPage() {
     }
   };
 
-  // Intelligence status check — core intelligence (Account + Problem) required; Org + Solution optional enhancements
+  // Intelligence status check — account intelligence is required; problem/org/solution are optional enhancements
   const { data: intelligenceStatus, isLoading: intelligenceLoading, refetch: refetchIntelligence } = useQuery<{
     ready: boolean;
     fullyEnriched?: boolean;
@@ -295,13 +295,17 @@ export default function PreviewStudioPage() {
       const res = await apiRequest('POST', '/api/preview-studio/intelligence-generate', {
         campaignId: selectedCampaignId,
         accountId: selectedAccountId,
-      });
+      }, { timeout: 120000 });
       if (!res.ok) throw new Error('Failed to generate intelligence');
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       refetchIntelligence();
-      toast({ title: 'Intelligence Generated', description: 'Account intelligence has been generated. Check status for remaining components.' });
+      if (data?.success) {
+        toast({ title: 'Intelligence Generated', description: 'Account intelligence has been generated successfully.' });
+      } else {
+        toast({ variant: 'destructive', title: 'Generation Incomplete', description: 'Intelligence generation did not fully complete. Some required components may still be missing.' });
+      }
     },
     onError: (error: Error) => {
       toast({ variant: 'destructive', title: 'Generation Failed', description: error.message });
@@ -482,7 +486,7 @@ export default function PreviewStudioPage() {
                   <div className="mt-1.5 space-y-1">
                     {[
                       { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain, confidence: intelligenceStatus?.accountIntelligence?.confidence, required: true },
-                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: true },
+                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: false },
                       { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2, required: false },
                       { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target, required: false },
                     ].map(item => (
@@ -508,7 +512,7 @@ export default function PreviewStudioPage() {
                   <div className="mt-1.5 space-y-1">
                     {[
                       { key: 'Account Intelligence', available: intelligenceStatus?.accountIntelligence?.available, icon: Brain, required: true },
-                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, required: true },
+                      { key: 'Problem Intelligence', available: intelligenceStatus?.problemIntelligence?.available, icon: Zap, required: false },
                       { key: 'Org Intelligence', available: intelligenceStatus?.organizationIntelligence?.available, icon: Building2, required: false },
                       { key: 'Solution Mapping', available: intelligenceStatus?.solutionMapping?.available, icon: Target, required: false },
                     ].map(item => (
@@ -518,7 +522,7 @@ export default function PreviewStudioPage() {
                       </div>
                     ))}
                   </div>
-                  {(intelligenceStatus?.missingRequiredComponents?.length || intelligenceStatus?.missingComponents?.includes('Account Intelligence') || intelligenceStatus?.missingComponents?.includes('Problem Intelligence')) && (
+                  {(intelligenceStatus?.missingRequiredComponents?.length || intelligenceStatus?.missingComponents?.includes('Account Intelligence')) && (
                     <Button
                       size="sm"
                       onClick={() => generateIntelligenceMutation.mutate()}
@@ -533,7 +537,7 @@ export default function PreviewStudioPage() {
                     </Button>
                   )}
                   <p className="text-xs text-amber-200/50 mt-1.5">
-                    Account & Problem intelligence required. Org & Solution Mapping are optional enhancements.
+                    Account intelligence is required. Problem, Org, and Solution Mapping improve quality but do not block previews.
                   </p>
                 </div>
               )}

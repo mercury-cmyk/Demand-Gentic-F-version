@@ -16,6 +16,7 @@ import {
   Bot,
   Target
 } from "lucide-react";
+import { getEnabledCallFlowSteps, normalizeCampaignCallFlow } from "@shared/call-flow";
 
 interface Step5Props {
   data: any;
@@ -26,6 +27,9 @@ interface Step5Props {
 
 export function Step5Summary({ data, onNext, campaignType }: Step5Props) {
   const [isLaunching, setIsLaunching] = useState(false);
+  const enabledCallFlowSteps = getEnabledCallFlowSteps(
+    normalizeCampaignCallFlow(data.callFlow, data.type),
+  );
 
   const handleLaunch = () => {
     setIsLaunching(true);
@@ -251,6 +255,18 @@ export function Step5Summary({ data, onNext, campaignType }: Step5Props) {
               <div>
                 <span className="text-sm font-medium text-muted-foreground">Success Criteria</span>
                 <p className="text-sm mt-1">{data.successCriteria}</p>
+              </div>
+            )}
+            {enabledCallFlowSteps.length > 0 && (
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Call Flow</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {enabledCallFlowSteps.map((step, idx) => (
+                    <Badge key={`${step.id}-${idx}`} variant="outline" className="text-xs">
+                      {idx + 1}. {step.label}
+                    </Badge>
+                  ))}
+                </div>
               </div>
             )}
           </CardContent>

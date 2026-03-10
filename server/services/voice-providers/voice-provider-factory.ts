@@ -13,6 +13,7 @@ import {
 import { resolveVoiceProvider, resolveVoiceProviderSync, type ResolverParams, type ProviderResolution } from "./provider-resolver";
 import { OpenAIRealtimeProvider } from "./openai-realtime-provider";
 import { GeminiLiveProvider } from "./gemini-live-provider";
+import { KimiVoiceProvider } from "./kimi-voice-provider";
 import { FallbackHandler } from "./fallback-handler";
 
 const LOG_PREFIX = "[VoiceProviderFactory]";
@@ -74,6 +75,8 @@ export function createProvider(providerType: VoiceProviderType): IVoiceProvider 
       return new GeminiLiveProvider();
     case 'openai':
       return new OpenAIRealtimeProvider();
+    case 'kimi':
+      return new KimiVoiceProvider();
     default:
       throw new Error(`Unknown provider type: ${providerType}`);
   }
@@ -228,14 +231,16 @@ export async function checkProviderHealth(providerType: VoiceProviderType): Prom
  * Get health status of all providers
  */
 export async function checkAllProvidersHealth(): Promise<Record<VoiceProviderType, boolean>> {
-  const [googleHealth, openaiHealth] = await Promise.all([
+  const [googleHealth, openaiHealth, kimiHealth] = await Promise.all([
     checkProviderHealth('google'),
     checkProviderHealth('openai'),
+    checkProviderHealth('kimi'),
   ]);
 
   return {
     google: googleHealth,
     openai: openaiHealth,
+    kimi: kimiHealth,
   };
 }
 

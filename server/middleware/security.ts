@@ -245,8 +245,10 @@ export function sanitizeBody(req: Request, res: Response, next: NextFunction) {
  * Additional security headers to prevent common attacks
  */
 export function securityHeaders(req: Request, res: Response, next: NextFunction) {
+  const isDev = process.env.NODE_ENV === 'development';
+
   // Prevent clickjacking
-  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Frame-Options', isDev ? 'SAMEORIGIN' : 'DENY');
   
   // Prevent MIME type sniffing
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -259,13 +261,13 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   
   // Content Security Policy
   // Allow ws: and http://localhost for Vite HMR in development
-  const isDev = process.env.NODE_ENV === 'development';
   const scriptSrc = isDev
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     : "script-src 'self' 'unsafe-inline'"; // No unsafe-eval in production
+  const frameAncestors = isDev ? "frame-ancestors 'self'" : "frame-ancestors 'none'";
   res.setHeader(
     'Content-Security-Policy',
-    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob: https://s3.amazonaws.com https://*.s3.amazonaws.com https://storage.googleapis.com https://*.storage.googleapis.com; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'`
+    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob: https://s3.amazonaws.com https://*.s3.amazonaws.com https://storage.googleapis.com https://*.storage.googleapis.com; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; ${frameAncestors}`
   );
 
   // Strict Transport Security (enforce HTTPS for 1 year, include subdomains)

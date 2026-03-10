@@ -1016,11 +1016,13 @@ async function createLeadForReanalysis(
   // Get contact info
   const [contactInfo] = await db
     .select({
+      accountId: contacts.accountId,
       fullName: contacts.fullName,
       firstName: contacts.firstName,
       lastName: contacts.lastName,
       email: contacts.email,
       companyName: accounts.name,
+      accountIndustry: accounts.industryStandardized,
     })
     .from(contacts)
     .leftJoin(accounts, eq(contacts.accountId, accounts.id))
@@ -1040,7 +1042,9 @@ async function createLeadForReanalysis(
         callAttemptId: attempt.id,
         contactName,
         contactEmail: contactInfo?.email || undefined,
+        accountId: contactInfo?.accountId || undefined,
         accountName: contactInfo?.companyName || undefined,
+        accountIndustry: contactInfo?.accountIndustry || undefined,
         qaStatus: "new",
         qaDecision: "Created via disposition reanalysis override — pending QA review",
         dialedNumber: attempt.phoneDialed,

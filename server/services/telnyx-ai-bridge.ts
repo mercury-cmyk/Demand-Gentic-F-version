@@ -586,6 +586,10 @@ export class TelnyxAiBridge extends EventEmitter {
           if (!sipDialer.isReady()) {
             logger.warn('[TelnyxAiBridge] SIP dialer not ready, falling back to TeXML');
           } else {
+            const contactName = [context.contactFirstName, context.contactLastName].filter(Boolean).join(' ').trim() || 'there';
+            const contactJobTitle = context.contactJobTitle || context.contactTitle || 'Decision Maker';
+            const accountName = context.accountName || context.companyName || 'your company';
+
             const result = await sipDialer.initiateAiCall({
               toNumber: normalizedPhoneNumber,
               fromNumber: normalizedFromNumber,
@@ -593,16 +597,22 @@ export class TelnyxAiBridge extends EventEmitter {
               contactId: context.contactId!,
               queueItemId: context.queueItemId || '',
               voiceName: (settings as any).persona?.voice || 'Puck',
-              systemPrompt: (settings as any).systemPrompt,
-              contactName: [context.contactFirstName, context.contactLastName].filter(Boolean).join(' ').trim() || 'there',
+              systemPrompt: settings.scripts?.systemPrompt || (settings as any).systemPrompt,
+              contactName,
               contactFirstName: context.contactFirstName || 'there',
-              contactJobTitle: context.contactJobTitle || 'Decision Maker',
-              accountName: context.accountName || 'your company',
+              contactJobTitle,
+              accountName,
               organizationName: context.organizationName,
               campaignName: context.campaignName,
+              campaignType: context.campaignType || null,
               campaignObjective: context.campaignObjective,
+              successCriteria: context.successCriteria,
+              targetAudienceDescription: context.targetAudienceDescription,
               productServiceInfo: context.productServiceInfo,
               talkingPoints: context.talkingPoints,
+              campaignContextBrief: context.campaignContextBrief,
+              callFlow: context.callFlow,
+              firstMessage: settings.scripts?.opening,
               maxCallDurationSeconds: context.maxCallDurationSeconds,
               callerNumberId: context.callerNumberId ?? null,
               callerNumberDecisionId: context.callerNumberDecisionId ?? null,

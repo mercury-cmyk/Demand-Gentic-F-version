@@ -21,6 +21,14 @@ import {
 } from '@shared/schema';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
+import {
+  executeResearch,
+  executeCodeAssist,
+  researchConversation,
+  isDeepResearchAvailable,
+  type ResearchDomain,
+} from '../services/ai-deep-research';
+import { kimiChat, isKimiConfigured, type KimiMessage } from '../services/kimi-client';
 
 const router = Router();
 
@@ -299,18 +307,101 @@ router.post('/chat', async (req: Request, res: Response) => {
     const currentMessages = (conversation.messages as ChatMessage[]) || [];
     const updatedMessages = [...currentMessages, userMessage];
 
-    // For now, generate a simple response
-    // In production, this would call the AI model with the system prompt
+    // ─── Generate AI response via Kimi or fallback ───
+    let aiContent = '';
+    let thoughtProcess: string[] = [];
+
+    if (isKimiConfigured()) {
+      try {
+        // Detect research intent and code intent
+        const msgLower = data.message.toLowerCase();
+        const isResearchQuery = /\b(research|analyze|analysis|investigate|deep dive|market|competitive|industry|trends|account research)\b/.test(msgLower);
+        const isCodeQuery = /\b(code|debug|refactor|implement|function|class|component|api|endpoint|fix bug|write a)\b/.test(msgLower);
+
+        if (isResearchQuery && isDeepResearchAvailable()) {
+          // Route to deep research
+          const domain = detectResearchDomain(data.message);
+          const depth = msgLower.includes('deep') || msgLower.includes('comprehensive') ? 'deep' as const : 'standard' as const;
+
+          thoughtProcess = [
+            `Detected research query (domain: ${domain}, depth: ${depth})`,
+            'Routing to Kimi deep research engine (128k context)...',
+            'Analyzing with cross-validation...',
+          ];
+
+          const result = await executeResearch({
+            query: data.message,
+            depth,
+            domain,
+            additionalContext: data.context?.additionalContext,
+            organizationId: data.context?.organizationId,
+          });
+
+          aiContent = result.answer;
+          if (result.thinking) {
+            thoughtProcess.push('Deep reasoning completed');
+          }
+          if (result.provider === 'hybrid') {
+            thoughtProcess.push('Cross-validated with Vertex AI reasoning');
+          }
+          thoughtProcess.push(`Confidence: ${result.confidence}%`);
+
+        } else if (isCodeQuery && isDeepResearchAvailable()) {
+          // Route to code assist
+          thoughtProcess = [
+            'Detected code assistance request',
+            'Routing to Kimi code engine...',
+          ];
+
+          const result = await executeCodeAssist({
+            task: data.message,
+            codeContext: data.context?.codeContext,
+            language: data.context?.language,
+            framework: data.context?.framework,
+          });
+
+          aiContent = `**Code Solution:**\n\`\`\`\n${result.code}\n\`\`\`\n\n**Explanation:** ${result.explanation}`;
+          if (result.suggestions.length > 0) {
+            aiContent += `\n\n**Suggestions:**\n${result.suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+          }
+          thoughtProcess.push('Code generation complete');
+
+        } else {
+          // General chat via Kimi
+          thoughtProcess = [
+            'Processing with Kimi AI...',
+            'Building context from conversation history...',
+          ];
+
+          const kimiMessages: KimiMessage[] = currentMessages
+            .slice(-10)
+            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+          kimiMessages.push({ role: 'user', content: data.message });
+
+          aiContent = await kimiChat(
+            systemPrompt,
+            kimiMessages,
+            { model: 'standard', temperature: 0.7 }
+          );
+          thoughtProcess.push('Response generated');
+        }
+      } catch (kimiError: any) {
+        console.warn('[Agent Panel] Kimi AI error, using fallback:', kimiError.message);
+        aiContent = `I understand your request: "${data.message}". I'm analyzing what needs to be done.`;
+        thoughtProcess = ['AI provider temporarily unavailable', 'Using structured plan mode...'];
+      }
+    } else {
+      // Kimi not configured — use informative fallback
+      aiContent = `I understand your request: "${data.message}". I'm analyzing what needs to be done.`;
+      thoughtProcess = ['Analyzing user request...', 'Identifying required tools...', 'Preparing execution plan...'];
+    }
+
     const assistantMessage: ChatMessage = {
       id: uuidv4(),
       role: 'assistant',
-      content: `I understand your request: "${data.message}". I'm analyzing what needs to be done.`,
+      content: aiContent,
       timestamp: new Date().toISOString(),
-      thoughtProcess: [
-        'Analyzing user request...',
-        'Identifying required tools...',
-        'Preparing execution plan...'
-      ],
+      thoughtProcess,
     };
 
     // If plan mode is enabled, create an execution plan
@@ -700,5 +791,21 @@ router.delete('/conversation/:id', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to delete conversation' });
   }
 });
+
+// ==================== Helper: detect research domain from message ====================
+
+function detectResearchDomain(message: string): ResearchDomain {
+  const msg = message.toLowerCase();
+
+  if (/\b(market|market size|tam|sam|som|market trend|market analysis)\b/.test(msg)) return 'market_analysis';
+  if (/\b(compet|rival|battlecard|swot|positioning|differentiator)\b/.test(msg)) return 'competitive_intelligence';
+  if (/\b(account|company research|buying signal|stakeholder|org chart)\b/.test(msg)) return 'account_research';
+  if (/\b(campaign|strategy|channel|messaging|funnel|conversion)\b/.test(msg)) return 'campaign_strategy';
+  if (/\b(lead|qualification|scoring|intent|engagement pattern)\b/.test(msg)) return 'lead_analysis';
+  if (/\b(industry|trend|regulation|emerging|forecast)\b/.test(msg)) return 'industry_trends';
+  if (/\b(code|debug|refactor|implement|typescript|react|api|bug)\b/.test(msg)) return 'code_review';
+
+  return 'general';
+}
 
 export default router;

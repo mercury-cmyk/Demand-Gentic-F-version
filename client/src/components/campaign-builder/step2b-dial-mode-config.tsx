@@ -75,7 +75,7 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
   const [gatekeeperMaxAttempts, setGatekeeperMaxAttempts] = useState(data.aiAgentSettings?.gatekeeperLogic?.maxAttempts || 3);
 
   // AI Agent Concurrency Settings
-  const [maxConcurrentCalls, setMaxConcurrentCalls] = useState(data.aiAgentSettings?.maxConcurrentCalls || 50);
+  const [maxConcurrentCalls, setMaxConcurrentCalls] = useState(data.maxConcurrentWorkers || data.aiAgentSettings?.maxConcurrentCalls || 50);
 
   // Business Hours Settings
   const [businessHoursEnabled, setBusinessHoursEnabled] = useState(data.aiAgentSettings?.businessHours?.enabled ?? true);
@@ -184,6 +184,7 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
 
     onNext({
       dialMode,
+      maxConcurrentWorkers: maxConcurrentCalls,
       aiAgentSettings,
       // Campaign AI Context fields (Foundation + Campaign Layer Architecture)
       campaignObjective,

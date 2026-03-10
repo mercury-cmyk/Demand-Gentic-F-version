@@ -46,7 +46,7 @@
     }
   },
 
-  "forwardPorts": [5173, 8080, 3000, 5432, 6379, 5050],
+  "forwardPorts": [5000, 5173, 8080, 3000, 5432, 6379, 5050],
   "portsAttributes": {
     "5173": {
       "label": "Vite Frontend Dev Server",
@@ -62,7 +62,7 @@
     },
     "5000": {
       "label": "Application",
-      "onAutoForward": "notify"
+      "onAutoForward": "openBrowser"
     },
     "5432": {
       "label": "PostgreSQL"

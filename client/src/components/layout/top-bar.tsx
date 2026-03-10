@@ -126,9 +126,9 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
                   Infrastructure
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
-                  <DropdownMenuItem onClick={() => setLocation('/settings/smtp-providers')} data-testid="menu-sender-profiles">
+                  <DropdownMenuItem onClick={() => setLocation('/settings/email-management')} data-testid="menu-sender-profiles">
                     <Mail className="mr-2 h-4 w-4" />
-                    SMTP Providers
+                    Campaign Email
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setLocation('/settings/telephony')} data-testid="menu-sip-trunks">
                     <Phone className="mr-2 h-4 w-4" />

@@ -16,6 +16,7 @@ import {
   previewStudioSessions,
   previewSimulationTranscripts,
   callSessions,
+  agentDefaults,
 } from '@shared/schema';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
@@ -41,6 +42,7 @@ import {
   getVirtualAgentConfig,
   mergeAgentSettings,
 } from '../services/virtual-agent-settings';
+import { buildCampaignContextSection as buildRuntimeCampaignContextSection } from '../services/foundation-capabilities';
 import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from '../services/number-pool-integration';
 import {
   buildUnifiedCallContext,
@@ -107,12 +109,15 @@ const CAMPAIGN_SIMULATION_SELECT = {
   name: campaigns.name,
   aiAgentSettings: campaigns.aiAgentSettings,
   campaignObjective: campaigns.campaignObjective,
+  type: campaigns.type,
   productServiceInfo: campaigns.productServiceInfo,
   talkingPoints: campaigns.talkingPoints,
   targetAudienceDescription: campaigns.targetAudienceDescription,
+  campaignContextBrief: campaigns.campaignContextBrief,
   callScript: campaigns.callScript,
   campaignObjections: campaigns.campaignObjections,
   successCriteria: campaigns.successCriteria,
+  callFlow: campaigns.callFlow,
   qualificationQuestions: campaigns.qualificationQuestions,
 };
 
@@ -611,30 +616,19 @@ function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?
     parts.push(agentPersona);
   }
 
-  // Campaign objective
-  if (campaign.campaignObjective) {
-    parts.push(`\n## Campaign Objective`);
-    parts.push(campaign.campaignObjective);
-  }
-
-  // Product/Service info
-  if (campaign.productServiceInfo) {
-    parts.push(`\n## Product/Service Information`);
-    parts.push(campaign.productServiceInfo);
-  }
-
-  // Talking points
-  if (campaign.talkingPoints && Array.isArray(campaign.talkingPoints)) {
-    parts.push(`\n## Key Talking Points`);
-    campaign.talkingPoints.forEach((point: string) => {
-      parts.push(`- ${point}`);
-    });
-  }
-
-  // Target audience
-  if (campaign.targetAudienceDescription) {
-    parts.push(`\n## Target Audience`);
-    parts.push(campaign.targetAudienceDescription);
+  const runtimeAlignedCampaignSection = buildRuntimeCampaignContextSection({
+    objective: campaign.campaignObjective,
+    productInfo: campaign.productServiceInfo,
+    talkingPoints: Array.isArray(campaign.talkingPoints) ? campaign.talkingPoints : null,
+    targetAudience: campaign.targetAudienceDescription,
+    objections: Array.isArray(campaign.campaignObjections) ? campaign.campaignObjections : null,
+    successCriteria: campaign.successCriteria,
+    brief: campaign.campaignContextBrief,
+    campaignType: campaign.type || null,
+    callFlow: campaign.callFlow as any,
+  });
+  if (runtimeAlignedCampaignSection) {
+    parts.push(`\n${runtimeAlignedCampaignSection}`);
   }
 
   // Call script
@@ -663,21 +657,6 @@ function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?
       parts.push(`\n## Objection Handling`);
       parts.push(settings.scripts.objections);
     }
-  }
-
-  // Campaign objections
-  if (campaign.campaignObjections && Array.isArray(campaign.campaignObjections)) {
-    parts.push(`\n## Common Objections & Responses`);
-    campaign.campaignObjections.forEach((obj: { objection: string; response: string }) => {
-      parts.push(`- Objection: "${obj.objection}"`);
-      parts.push(`  Response: "${obj.response}"`);
-    });
-  }
-
-  // Success criteria
-  if (campaign.successCriteria) {
-    parts.push(`\n## Success Criteria`);
-    parts.push(campaign.successCriteria);
   }
 
   // Qualification questions
@@ -1406,6 +1385,14 @@ function buildTranscriptText(transcripts: Array<{ role: string; content: string 
     .join('\n');
 }
 
+function countTranscriptLines(transcriptText: string | null | undefined): number {
+  return String(transcriptText || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .length;
+}
+
 function inferDispositionFromTranscript(transcriptText: string, metadata: Record<string, unknown>): string {
   const lower = transcriptText.toLowerCase();
   const endReason = String(metadata.endReason || '').toLowerCase();
@@ -1447,8 +1434,8 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<ClientPostC
     .orderBy(previewSimulationTranscripts.timestampMs);
 
   const metadata = ((session.metadata as Record<string, unknown>) || {}) as Record<string, unknown>;
-  const transcriptText = buildTranscriptText(transcripts);
-  const turnCount = transcripts.length;
+  let transcriptText = buildTranscriptText(transcripts);
+  let turnCount = transcripts.length;
   const existingTurnCount = Number(metadata.postCallAnalysisTranscriptCount || 0);
 
   if (metadata.finalDisposition && metadata.postCallAnalysis && existingTurnCount === turnCount) {
@@ -1463,19 +1450,38 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<ClientPostC
   // This is more accurate than simple keyword inference.
   let voiceDialerDisposition: string | null = null;
   let voiceDialerAnalysis: Record<string, unknown> | null = null;
-  const callControlId = metadata.callControlId as string | undefined;
-  if (callControlId) {
+  const callSessionId = typeof metadata.callSessionId === 'string' ? metadata.callSessionId : undefined;
+  const callControlId = typeof metadata.callControlId === 'string' ? metadata.callControlId : undefined;
+  if (callSessionId || callControlId) {
     try {
-      const [csRecord] = await db
-        .select()
-        .from(callSessions)
-        .where(eq(callSessions.telnyxCallId, callControlId))
-        .orderBy(desc(callSessions.startedAt))
-        .limit(1);
+      let csRecord: typeof callSessions.$inferSelect | null = null;
+
+      if (callSessionId) {
+        const [byId] = await db
+          .select()
+          .from(callSessions)
+          .where(eq(callSessions.id, callSessionId))
+          .limit(1);
+        csRecord = byId || null;
+      } else if (callControlId) {
+        const [byCallControlId] = await db
+          .select()
+          .from(callSessions)
+          .where(eq(callSessions.telnyxCallId, callControlId))
+          .orderBy(desc(callSessions.startedAt))
+          .limit(1);
+        csRecord = byCallControlId || null;
+      }
 
       if (csRecord?.aiDisposition) {
         voiceDialerDisposition = csRecord.aiDisposition;
         voiceDialerAnalysis = (csRecord as any).aiAnalysis?.postCallAnalysis || null;
+        if (!transcriptText.trim() && csRecord.aiTranscript) {
+          transcriptText = csRecord.aiTranscript;
+        }
+        if (turnCount === 0 && csRecord.aiTranscript) {
+          turnCount = countTranscriptLines(csRecord.aiTranscript);
+        }
         console.log(`[Client Phone Test] Using voice-dialer disposition: ${voiceDialerDisposition} (from callSession ${csRecord.id})`);
       }
     } catch (lookupErr) {
@@ -1507,7 +1513,7 @@ async function finalizePhoneTestPostCall(sessionId: string): Promise<ClientPostC
     transcriptAvailable: transcriptText.trim().length > 0,
     summary:
       transcriptText.trim().length > 0
-        ? `Post-call analysis ready (${turnCount} turns captured).`
+        ? String(voiceDialerAnalysis?.summary || `Post-call analysis ready (${turnCount} turns captured).`)
         : 'Call ended. No transcript captured yet; showing provisional outcome.',
     conversationQuality,
     ...(voiceDialerAnalysis ? { voiceDialerAnalysis } : {}),
@@ -1555,20 +1561,12 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       return res.status(422).json(intelligenceGateErrorResponse(gateResult.status));
     }
 
-    // Environment check
-    const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
-
-    if (!telnyxApiKey || telnyxApiKey.startsWith('REPLACE_ME')) {
-      return res.status(500).json({ error: 'Telnyx not configured' });
-    }
-    if (!openaiApiKey) {
-      return res.status(500).json({ error: 'OpenAI API key not configured' });
-    }
-    if (!texmlAppId) {
-      return res.status(500).json({ error: 'Telnyx TeXML Application ID not configured' });
-    }
+    const [engineDefaults] = await db
+      .select({ defaultCallEngine: agentDefaults.defaultCallEngine })
+      .from(agentDefaults)
+      .limit(1);
+    const requestedCallEngine = engineDefaults?.defaultCallEngine || 'texml';
+    console.log(`[Client Phone Test] Call engine from DB: "${engineDefaults?.defaultCallEngine}" -> using: "${requestedCallEngine}"`);
 
     // Get campaign
     const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
@@ -1690,6 +1688,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
         testCallId,
         testPhoneNumber: normalizedPhone,
         voiceProvider,
+        requestedCallEngine,
         startedAt: new Date().toISOString(),
         accountName: account?.name || null,
         contactName: (contact as any)?.fullName || null,
@@ -1751,6 +1750,84 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
+    let sipFallbackReason: string | undefined;
+    if (requestedCallEngine === 'sip') {
+      if (voiceProvider !== 'google') {
+        sipFallbackReason = 'Preview Studio SIP currently supports Google/Gemini voices only';
+        console.warn(`[Client Phone Test] ${sipFallbackReason} - falling back to TeXML`);
+      } else {
+        const { isReady: isSipReady, initiateAiCall: initiateSipCall } = await import('../services/sip');
+
+        if (!isSipReady()) {
+          sipFallbackReason = 'SIP engine not ready';
+          console.warn('[Client Phone Test] SIP engine selected but not ready - falling back to TeXML');
+        } else {
+          const sipResult = await initiateSipCall({
+            toNumber: normalizedPhone,
+            fromNumber,
+            campaignId,
+            contactId: contactId || '',
+            queueItemId: '',
+            callAttemptId: unifiedContext.callAttemptId,
+            previewSessionId: session.id,
+            voiceName: unifiedContext.voice || 'Puck',
+            systemPrompt: unifiedContext.systemPrompt,
+            contactName: unifiedContext.contactName,
+            contactFirstName: unifiedContext.contactFirstName,
+            contactJobTitle: unifiedContext.contactJobTitle,
+            accountName: unifiedContext.accountName,
+            organizationName: unifiedContext.organizationName,
+            campaignName: campaign.name,
+            campaignType: unifiedContext.campaignType || null,
+            campaignObjective: unifiedContext.campaignObjective,
+            successCriteria: unifiedContext.successCriteria,
+            targetAudienceDescription: unifiedContext.targetAudienceDescription,
+            productServiceInfo: unifiedContext.productServiceInfo,
+            talkingPoints: unifiedContext.talkingPoints,
+            campaignContextBrief: unifiedContext.campaignContextBrief,
+            callFlow: unifiedContext.callFlow,
+            firstMessage: unifiedContext.firstMessage,
+            maxCallDurationSeconds: unifiedContext.maxCallDurationSeconds ?? 300,
+            callerNumberId,
+            callerNumberDecisionId,
+          });
+
+          if (sipResult.success) {
+            const sipCallControlId = sipResult.callControlId || sipResult.callId;
+            if (!sipCallControlId) {
+              throw new Error('SIP call started without a call ID');
+            }
+
+            await db.update(previewStudioSessions)
+              .set({
+                metadata: {
+                  ...(session.metadata as Record<string, unknown> || {}),
+                  callControlId: sipCallControlId,
+                  callEngine: 'sip',
+                  sipFallbackReason: null,
+                },
+              })
+              .where(eq(previewStudioSessions.id, session.id));
+
+            return res.json({
+              success: true,
+              message: 'Phone test initiated. Your phone will ring shortly.',
+              sessionId: session.id,
+              testCallId,
+              callControlId: sipCallControlId,
+              phoneNumber: normalizedPhone,
+              campaignName: campaign.name,
+              voiceProvider,
+              engine: 'sip',
+            });
+          }
+
+          sipFallbackReason = sipResult.error || 'SIP call failed';
+          console.warn(`[Client Phone Test] SIP initiation failed (${sipFallbackReason}) - falling back to TeXML`);
+        }
+      }
+    }
+
     // Webhook URL - match admin test call logic (campaign-test-calls.ts)
     let webhookHost = '';
     if (process.env.NODE_ENV !== 'production' && process.env.PUBLIC_WEBHOOK_HOST) {
@@ -1769,6 +1846,20 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
     webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
+
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
+
+    if (!telnyxApiKey || telnyxApiKey.startsWith('REPLACE_ME')) {
+      return res.status(500).json({ error: 'Telnyx not configured' });
+    }
+    if (voiceProvider === 'openai' && !openaiApiKey) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' });
+    }
+    if (!texmlAppId) {
+      return res.status(500).json({ error: 'Telnyx TeXML Application ID not configured' });
+    }
 
     console.log('[Client Phone Test] Initiating Telnyx call to:', normalizedPhone);
 
@@ -1807,7 +1898,12 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
         .set({
           status: 'error',
           endedAt: new Date(),
-          metadata: { ...(session.metadata as Record<string, unknown> || {}), error: friendlyMessage },
+          metadata: {
+            ...(session.metadata as Record<string, unknown> || {}),
+            error: friendlyMessage,
+            callEngine: 'texml',
+            sipFallbackReason: sipFallbackReason || null,
+          },
         })
         .where(eq(previewStudioSessions.id, session.id));
 
@@ -1820,7 +1916,12 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
     // Update session with call control ID
     await db.update(previewStudioSessions)
       .set({
-        metadata: { ...(session.metadata as Record<string, unknown> || {}), callControlId },
+        metadata: {
+          ...(session.metadata as Record<string, unknown> || {}),
+          callControlId,
+          callEngine: 'texml',
+          sipFallbackReason: sipFallbackReason || null,
+        },
       })
       .where(eq(previewStudioSessions.id, session.id));
 
@@ -1835,6 +1936,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       phoneNumber: normalizedPhone,
       campaignName: campaign.name,
       voiceProvider,
+      engine: 'texml',
     });
   } catch (error: any) {
     console.error('[Client Phone Test] Error:', error);
@@ -1910,6 +2012,7 @@ router.post('/phone-test/:sessionId/hangup', async (req: Request, res: Response)
 
     const metadata = session.metadata as any;
     const callControlId = metadata?.callControlId;
+    const callEngine = metadata?.callEngine;
 
     if (!callControlId) {
       await db.update(previewStudioSessions)
@@ -1923,34 +2026,45 @@ router.post('/phone-test/:sessionId/hangup', async (req: Request, res: Response)
       return res.json({ success: true, message: 'Session ended (no active call)' });
     }
 
-    // Hang up via Telnyx
-    const telnyxApiKey = process.env.TELNYX_API_KEY;
-    if (!telnyxApiKey) {
-      return res.status(500).json({ error: 'Telnyx API key not configured' });
-    }
-
-    console.log(`[Client Phone Test] Hanging up call: ${callControlId}`);
-
-    try {
-      const hangupResponse = await fetch(
-        `https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${telnyxApiKey}`,
-          },
-          body: JSON.stringify({}),
+    if (callEngine === 'sip') {
+      try {
+        const { endCall } = await import('../services/sip');
+        const ended = await endCall(callControlId, 'client_preview_studio_user_hangup');
+        if (!ended) {
+          console.warn(`[Client Phone Test] SIP hangup returned false for ${callControlId}`);
         }
-      );
-      if (!hangupResponse.ok) {
-        const errorText = await hangupResponse.text();
-        console.error(`[Client Phone Test] Telnyx hangup error: ${hangupResponse.status} - ${errorText}`);
-      } else {
-        console.log(`[Client Phone Test] Telnyx hangup successful for ${callControlId}`);
+      } catch (sipError) {
+        console.error('[Client Phone Test] SIP hangup request failed:', sipError);
       }
-    } catch (telnyxError) {
-      console.error('[Client Phone Test] Telnyx hangup request failed:', telnyxError);
+    } else {
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ error: 'Telnyx API key not configured' });
+      }
+
+      console.log(`[Client Phone Test] Hanging up call: ${callControlId}`);
+
+      try {
+        const hangupResponse = await fetch(
+          `https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${telnyxApiKey}`,
+            },
+            body: JSON.stringify({}),
+          }
+        );
+        if (!hangupResponse.ok) {
+          const errorText = await hangupResponse.text();
+          console.error(`[Client Phone Test] Telnyx hangup error: ${hangupResponse.status} - ${errorText}`);
+        } else {
+          console.log(`[Client Phone Test] Telnyx hangup successful for ${callControlId}`);
+        }
+      } catch (telnyxError) {
+        console.error('[Client Phone Test] Telnyx hangup request failed:', telnyxError);
+      }
     }
 
     await db.update(previewStudioSessions)

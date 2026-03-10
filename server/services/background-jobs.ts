@@ -10,6 +10,8 @@ import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';
 import { processMissingTranscripts, processLongCallMissingTranscripts } from './transcription-reliability';
 import { syncTelnyxRecordingsToDatabase } from './telnyx-sync-service';
 import { executeDueJourneyActions } from './client-journey-automation';
+import { executePipelineEmailActions } from './campaign-pipeline-orchestrator';
+import { monitorPipelineHealth } from './ai-pipeline-agent';
 import { mercuryEmailService } from './mercury/email-service';
 import { db } from '../db';
 import { agentQueue, campaignQueue } from '@shared/schema';
@@ -46,6 +48,7 @@ let analysisInterval: NodeJS.Timeout | null = null;
 let lockSweeperInterval: NodeJS.Timeout | null = null;
 let telnyxSyncInterval: NodeJS.Timeout | null = null;
 let journeyActionInterval: NodeJS.Timeout | null = null;
+let pipelineEmailInterval: NodeJS.Timeout | null = null;
 let mercuryOutboxInterval: NodeJS.Timeout | null = null;
 let longCallRecoveryInterval: NodeJS.Timeout | null = null;
 let batchTranscriptionSweepInterval: NodeJS.Timeout | null = null;
@@ -57,6 +60,7 @@ let isAnalysisRunning = false;
 let isLockSweeperRunning = false;
 let isTelnyxSyncRunning = false;
 let isJourneyActionRunning = false;
+let isPipelineEmailRunning = false;
 let isMercuryOutboxRunning = false;
 let isLongCallRecoveryRunning = false;
 let isBatchTranscriptionSweepRunning = false;
@@ -146,6 +150,8 @@ export function startBackgroundJobs() {
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   • Journey Automation: ${ENABLE_JOURNEY_AUTOMATION ? 'ENABLED (every 60s)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   • Pipeline Email Automation: ${ENABLE_JOURNEY_AUTOMATION ? 'ENABLED (every 90s)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   • Pipeline Agent Health Monitor: ${ENABLE_JOURNEY_AUTOMATION ? 'ENABLED (every 10min)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   • Mercury Outbox: ${ENABLE_MERCURY_OUTBOX ? 'ENABLED (every 60s)' : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] ON-DEMAND JOBS (Manual Trigger):');
@@ -251,6 +257,71 @@ export function startBackgroundJobs() {
         isAnalysisSweepRunning = false;
       }
     }, ANALYSIS_SWEEP_INTERVAL);
+  }
+
+  // Orphan recording session sweep — links orphan call_sessions (recordings without
+  // linked attempts) to their matching attempts, then transcribes + analyzes them.
+  // Critical for SIP calls where recording sync creates separate sessions.
+  if (ENABLE_TRANSCRIPTION) {
+    setInterval(async () => {
+      if (isBatchTranscriptionSweepRunning) return; // share guard with batch sweep
+      isBatchTranscriptionSweepRunning = true;
+      try {
+        await withJobTimeout('Orphan Recording Sweep', async () => {
+          const { sweepOrphanRecordingSessions } = await import('./batch-transcription-sweep');
+          const result = await sweepOrphanRecordingSessions();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Orphan recording sweep: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Orphan recording sweep error:', error);
+      } finally {
+        isBatchTranscriptionSweepRunning = false;
+      }
+    }, BATCH_TRANSCRIPTION_SWEEP_INTERVAL + 60000); // Offset by 1 min from batch sweep
+  }
+
+  // Direct call_sessions sweep — transcribes sessions that have recordings but no transcript
+  // and no linked dialer_call_attempts (e.g. bulk-imported calls).
+  if (ENABLE_TRANSCRIPTION) {
+    setInterval(async () => {
+      if (isBatchTranscriptionSweepRunning) return;
+      isBatchTranscriptionSweepRunning = true;
+      try {
+        await withJobTimeout('Direct Session Transcription Sweep', async () => {
+          const { sweepCallSessionsDirect } = await import('./batch-transcription-sweep');
+          const result = await sweepCallSessionsDirect();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Direct session sweep: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Direct session sweep error:', error);
+      } finally {
+        isBatchTranscriptionSweepRunning = false;
+      }
+    }, BATCH_TRANSCRIPTION_SWEEP_INTERVAL + 120000); // Offset by 2 min from batch sweep
+  }
+
+  // Ring-out cleanup sweep — marks stale NULL-disposition non-connected calls as no_answer.
+  // These are calls that rang but nobody picked up and the orchestrator didn't finalize.
+  if (ENABLE_LOCK_SWEEPER) {
+    setInterval(async () => {
+      try {
+        const { sweepStaleRingOuts } = await import('./batch-transcription-sweep');
+        const result = await sweepStaleRingOuts();
+        if (result.marked > 0) {
+          console.log(`[Background Jobs] Ring-out sweep: marked ${result.marked} stale calls as no_answer`);
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Ring-out sweep error:', error);
+      }
+    }, LOCK_SWEEPER_INTERVAL); // Every 10 minutes, same as lock sweeper
   }
 
   // AI analysis processing job (optional)
@@ -365,6 +436,48 @@ export function startBackgroundJobs() {
     }, JOURNEY_ACTION_INTERVAL);
   }
 
+  // Pipeline email automation — generates AI email content and sends via Mercury
+  // Runs alongside journey automation but handles email actions specifically
+  if (ENABLE_JOURNEY_AUTOMATION) {
+    const PIPELINE_EMAIL_INTERVAL = 90000; // Every 90 seconds
+    pipelineEmailInterval = setInterval(async () => {
+      if (isPipelineEmailRunning) {
+        return;
+      }
+
+      isPipelineEmailRunning = true;
+      try {
+        const result = await withJobTimeout('Pipeline Email', () => executePipelineEmailActions(10));
+        if (result.processed > 0) {
+          console.log(
+            `[Background Jobs] Pipeline email: processed=${result.processed}, sent=${result.sent}, failed=${result.failed}`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Pipeline email error:', error);
+      } finally {
+        isPipelineEmailRunning = false;
+      }
+    }, PIPELINE_EMAIL_INTERVAL);
+  }
+
+  // Pipeline Agent health monitor — scans for stale leads and takes action
+  if (ENABLE_JOURNEY_AUTOMATION) {
+    const PIPELINE_HEALTH_INTERVAL = 10 * 60 * 1000; // Every 10 minutes
+    setInterval(async () => {
+      try {
+        const result = await withJobTimeout('Pipeline Health', () => monitorPipelineHealth(10));
+        if (result.actioned > 0) {
+          console.log(
+            `[Background Jobs] Pipeline Agent health: scanned=${result.scanned}, actioned=${result.actioned}`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Pipeline Agent health error:', error);
+      }
+    }, PIPELINE_HEALTH_INTERVAL);
+  }
+
   // Email validation job (cron-based) - Only start if enabled
   if (ENABLE_EMAIL_VALIDATION) {
     startEmailValidationJob();
@@ -448,6 +561,11 @@ export function stopBackgroundJobs() {
   if (journeyActionInterval) {
     clearInterval(journeyActionInterval);
     journeyActionInterval = null;
+  }
+
+  if (pipelineEmailInterval) {
+    clearInterval(pipelineEmailInterval);
+    pipelineEmailInterval = null;
   }
 
   if (mercuryOutboxInterval) {

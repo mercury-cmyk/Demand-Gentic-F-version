@@ -215,6 +215,8 @@ async function handleMediaBridgeCallback(req: Request, res: Response) {
 
       if (callAttemptId && data?.disposition) {
         const { processDisposition } = await import("../services/disposition-engine");
+        const { processSIPPostCallAnalysis } = await import("../services/sip/sip-post-call-handler");
+        let durationToSet = data?.callDurationSeconds;
         if (data?.callDurationSeconds) {
           try {
             await db
@@ -226,13 +228,35 @@ async function handleMediaBridgeCallback(req: Request, res: Response) {
           }
         }
 
-        await processDisposition(callAttemptId, data.disposition, "media_bridge", {
+        const dispositionResult = await processDisposition(callAttemptId, data.disposition, "media_bridge", {
           transcript: data?.transcript || undefined,
           structuredTranscript: data?.structuredTranscript || undefined,
         });
+        try {
+          const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+          await processSIPPostCallAnalysis({
+            callAttemptId,
+            leadId: dispositionResult?.leadId,
+            campaignId: data?.context?.campaignId || "",
+            contactName: data?.context?.contactName || data?.context?.contactFirstName,
+            disposition: data.disposition,
+            turnTranscript: rawTurns
+              .map((turn: any) => ({
+                speaker: turn?.role === "agent" ? "agent" : "contact",
+                text: String(turn?.text || "").trim(),
+              }))
+              .filter((turn: { text: string }) => turn.text),
+            callDurationSeconds: durationToSet || 0,
+            agentNotes: "media_bridge end_call callback",
+          });
+        } catch (postCallErr) {
+          console.error("[UnifiedTelephony] SIP post-call handler failed on end_call (non-fatal):", postCallErr);
+        }
       }
     } else if (action === "submit_disposition" && callAttemptId) {
       const { processDisposition } = await import("../services/disposition-engine");
+      const { processSIPPostCallAnalysis } = await import("../services/sip/sip-post-call-handler");
+      let durationToSet = data?.callDurationSeconds;
       if (data?.callDurationSeconds) {
         try {
           await db
@@ -244,10 +268,30 @@ async function handleMediaBridgeCallback(req: Request, res: Response) {
         }
       }
 
-      await processDisposition(callAttemptId, data?.disposition || "no_answer", "media_bridge", {
+      const dispositionResult = await processDisposition(callAttemptId, data?.disposition || "no_answer", "media_bridge", {
         transcript: data?.transcript || undefined,
         structuredTranscript: data?.structuredTranscript || undefined,
       });
+      try {
+        const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+        await processSIPPostCallAnalysis({
+          callAttemptId,
+          leadId: dispositionResult?.leadId,
+          campaignId: data?.context?.campaignId || "",
+          contactName: data?.context?.contactName || data?.context?.contactFirstName,
+          disposition: data?.disposition || "no_answer",
+          turnTranscript: rawTurns
+            .map((turn: any) => ({
+              speaker: turn?.role === "agent" ? "agent" : "contact",
+              text: String(turn?.text || "").trim(),
+            }))
+            .filter((turn: { text: string }) => turn.text),
+          callDurationSeconds: durationToSet || 0,
+          agentNotes: "media_bridge submit_disposition callback",
+        });
+      } catch (postCallErr) {
+        console.error("[UnifiedTelephony] SIP post-call handler failed on submit_disposition (non-fatal):", postCallErr);
+      }
     }
 
     return res.json({ success: true });

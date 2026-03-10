@@ -46,6 +46,9 @@ import {
   Paintbrush,
   Trash2,
   Crown,
+  MapPin,
+  ExternalLink,
+  Link2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -337,6 +340,33 @@ export default function ClientPortalIntelligence() {
     staleTime: 0, // Always fetch fresh data to avoid sync issues
     refetchOnWindowFocus: true,
   });
+
+  // Fetch linked external events (upcoming events from Argyle etc.)
+  const { data: linkedEventsData } = useQuery({
+    queryKey: ['client-linked-events'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/settings/linked-events', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) return { events: [] };
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+  const linkedEvents: Array<{
+    id: string;
+    title: string;
+    community: string | null;
+    eventType: string | null;
+    location: string | null;
+    startAtIso: string | null;
+    startAtHuman: string | null;
+    sourceUrl: string;
+    sourceProvider: string;
+    overviewExcerpt: string | null;
+    draftStatus: string | null;
+    hasWorkOrder: boolean;
+  }> = linkedEventsData?.events || [];
 
   const updateMutation = useMutation({
     mutationFn: updateOrgIntelligence,
@@ -1223,8 +1253,87 @@ export default function ClientPortalIntelligence() {
 
               {/* Events & Forums Tab */}
               <TabsContent value="events" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
+                {/* Linked Upcoming Events from Event Intelligence */}
+                {linkedEvents.length > 0 && (
+                  <Card className="mb-6">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Link2 className="h-5 w-5 text-primary" />
+                        Linked Upcoming Events
+                      </CardTitle>
+                      <CardDescription>
+                        Events synced from your event intelligence — used as context for AI agents and outreach
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {linkedEvents.map((event) => {
+                          const dateStr = event.startAtHuman || (event.startAtIso ? new Date(event.startAtIso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null);
+                          return (
+                            <div
+                              key={event.id}
+                              className="relative rounded-lg border bg-card p-4 space-y-2 hover:shadow-md transition-shadow"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <h4 className="font-semibold text-sm leading-tight line-clamp-2">{event.title}</h4>
+                                {event.sourceUrl && (
+                                  <a href={event.sourceUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-muted-foreground hover:text-primary">
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </a>
+                                )}
+                              </div>
+
+                              <div className="flex flex-wrap gap-1.5">
+                                {event.eventType && (
+                                  <Badge variant="secondary" className="text-xs">{event.eventType}</Badge>
+                                )}
+                                {event.community && (
+                                  <Badge variant="outline" className="text-xs">{event.community}</Badge>
+                                )}
+                              </div>
+
+                              <div className="space-y-1 text-xs text-muted-foreground">
+                                {dateStr && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="h-3 w-3" />
+                                    <span>{dateStr}</span>
+                                  </div>
+                                )}
+                                {event.location && (
+                                  <div className="flex items-center gap-1.5">
+                                    <MapPin className="h-3 w-3" />
+                                    <span className="line-clamp-1">{event.location}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {event.overviewExcerpt && (
+                                <p className="text-xs text-muted-foreground line-clamp-2 pt-1 border-t">
+                                  {event.overviewExcerpt}
+                                </p>
+                              )}
+
+                              {/* Draft / Work Order status */}
+                              {event.draftStatus && (
+                                <div className="pt-1">
+                                  <Badge
+                                    variant={event.hasWorkOrder ? 'default' : event.draftStatus === 'submitted' ? 'default' : 'secondary'}
+                                    className="text-[10px]"
+                                  >
+                                    {event.hasWorkOrder ? 'Work Order Created' : event.draftStatus === 'submitted' ? 'Submitted' : 'Draft Ready'}
+                                  </Badge>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <div className="grid lg:grid-cols-2 gap-6">
-                  {/* Upcoming Events */}
+                  {/* Upcoming Events - Manual */}
                   <Card className="h-full">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
@@ -1232,7 +1341,9 @@ export default function ClientPortalIntelligence() {
                         Upcoming Events
                       </CardTitle>
                       <CardDescription>
-                        List upcoming events, webinars, or conferences for agent context
+                        {linkedEvents.length > 0
+                          ? 'Additional events or notes not covered by linked events above'
+                          : 'List upcoming events, webinars, or conferences for agent context'}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">

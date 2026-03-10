@@ -333,7 +333,7 @@ export default function ClientPortalPreviewStudioPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/client-portal/simulation/intelligence-status'] });
       if (data.success) {
         setIntelligencePhase('complete');
-        toast({ title: 'Intelligence Ready', description: 'All components researched. You can now start the preview.' });
+        toast({ title: 'Intelligence Ready', description: 'Core intelligence is ready. You can start the preview while optional research finishes.' });
       } else {
         setIntelligencePhase('idle');
         const missing = data.status?.missingComponents?.join(', ') || 'some components';
@@ -902,14 +902,14 @@ export default function ClientPortalPreviewStudioPage() {
                   const orgDone = intelligenceStatus?.organizationIntelligence?.available || false;
                   const solnDone = intelligenceStatus?.solutionMapping?.available || false;
                   const probDone = intelligenceStatus?.problemIntelligence?.available || false;
-                  // Core intelligence = auto-generatable (Account + Problem). These are required.
-                  // Org Intelligence + Solution Mapping are optional enhancements.
+                  // Preview unlocks once account intelligence is available.
+                  // Problem Intelligence, Org Intelligence, and Solution Mapping are quality enhancements.
                   const coreReady = intelligenceReady; // ready now means core components only
                   const allDone = acctDone && orgDone && solnDone && probDone;
 
                   const stepItems = [
                     { key: 'acct', label: 'Account Intelligence', description: 'Prospect company research', icon: Brain, done: acctDone, confidence: intelligenceStatus?.accountIntelligence?.confidence, required: true },
-                    { key: 'prob', label: 'Problem Intelligence', description: 'Problem detection & messaging', icon: Zap, done: probDone, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: true },
+                    { key: 'prob', label: 'Problem Intelligence', description: 'Problem detection & messaging (recommended)', icon: Zap, done: probDone, confidence: intelligenceStatus?.problemIntelligence?.confidence, required: false },
                     { key: 'org', label: 'Organization Intelligence', description: 'Your company profile (optional)', icon: Building2, done: orgDone, required: false },
                     { key: 'soln', label: 'Solution Mapping', description: 'Product-problem alignment (optional)', icon: Target, done: solnDone, required: false },
                   ];
@@ -1237,7 +1237,7 @@ function VoicePreviewSection({
               <p className="text-white/50 mb-4">Select a campaign and account to start testing</p>
               <div className="flex items-center justify-center gap-2 text-yellow-400 text-sm">
                 <AlertCircle className="h-4 w-4" />
-                <span>Campaign, Account & Intelligence required</span>
+                <span>Campaign, Account & Core Intelligence required</span>
               </div>
             </div>
           </div>
@@ -1597,7 +1597,7 @@ function EmailPreviewSection({
               <p className="text-white/50 mb-4">Select a campaign and account, then generate an email</p>
               <div className="flex items-center justify-center gap-2 text-yellow-400 text-sm">
                 <AlertCircle className="h-4 w-4" />
-                <span>Campaign, Account & Intelligence required</span>
+                <span>Campaign, Account & Core Intelligence required</span>
               </div>
             </div>
           </div>
@@ -1777,7 +1777,7 @@ function PhoneTestSection({
               <p className="text-white/50 mb-4">Select a campaign and account to test a real AI call</p>
               <div className="flex items-center justify-center gap-2 text-yellow-400 text-sm">
                 <AlertCircle className="h-4 w-4" />
-                <span>Campaign, Account & Intelligence required</span>
+                <span>Campaign, Account & Core Intelligence required</span>
               </div>
             </div>
           </div>

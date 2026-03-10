@@ -25,6 +25,7 @@ import { PhoneCampaignSuppressionManager } from "@/components/phone-campaign-sup
 import { CampaignKnowledgeConfig } from "@/components/campaigns/campaign-knowledge-config";
 import { CampaignAudienceSelector, type AudienceSelection } from "@/components/campaigns/CampaignAudienceSelector";
 import { CampaignContextEditor } from "@/components/campaigns/CampaignContextEditor";
+import { normalizeCampaignCallFlow, type CampaignCallFlow } from "@shared/call-flow";
 
 export default function PhoneCampaignEditPage() {
   const [, paramsA] = useRoute("/campaigns/phone/:id/edit");
@@ -54,6 +55,7 @@ export default function PhoneCampaignEditPage() {
   const [targetAudienceDescription, setTargetAudienceDescription] = useState("");
   const [successCriteria, setSuccessCriteria] = useState("");
   const [campaignObjections, setCampaignObjections] = useState<any[]>([]);
+  const [callFlow, setCallFlow] = useState<CampaignCallFlow | null>(null);
 
   // Account Cap state
   const [capEnabled, setCapEnabled] = useState(false);
@@ -137,6 +139,7 @@ export default function PhoneCampaignEditPage() {
       setTargetAudienceDescription(campaign.targetAudienceDescription || "");
       setSuccessCriteria(campaign.successCriteria || "");
       setCampaignObjections(campaign.campaignObjections || []);
+      setCallFlow(normalizeCampaignCallFlow(campaign.callFlow, campaign.type));
 
       // Initialize audience selections
       if (campaign.audienceRefs) {
@@ -183,7 +186,9 @@ export default function PhoneCampaignEditPage() {
       // setDialMode is not needed as it's always 'ai_agent'
 
       // Initialize AI Agent settings
-      if (campaign.aiAgentSettings?.maxConcurrentCalls) {
+      if (campaign.maxConcurrentWorkers) {
+        setMaxConcurrentCalls(campaign.maxConcurrentWorkers);
+      } else if (campaign.aiAgentSettings?.maxConcurrentCalls) {
         setMaxConcurrentCalls(campaign.aiAgentSettings.maxConcurrentCalls);
       }
 
@@ -319,6 +324,7 @@ export default function PhoneCampaignEditPage() {
       problemIntelligenceOrgId,
       // Dial mode
       dialMode,
+      maxConcurrentWorkers: maxConcurrentCalls,
       // AI Agent settings (includes concurrency)
       aiAgentSettings,
       // Campaign Context fields
@@ -328,6 +334,7 @@ export default function PhoneCampaignEditPage() {
       targetAudienceDescription,
       successCriteria,
       campaignObjections: campaignObjections.length > 0 ? campaignObjections : undefined,
+      callFlow,
     });
   };
 
@@ -494,6 +501,7 @@ export default function PhoneCampaignEditPage() {
               targetAudienceDescription,
               successCriteria,
               campaignObjections,
+              callFlow,
             }}
             onChange={(newData) => {
               setCampaignObjective(newData.campaignObjective);
@@ -502,7 +510,9 @@ export default function PhoneCampaignEditPage() {
               setTargetAudienceDescription(newData.targetAudienceDescription);
               setSuccessCriteria(newData.successCriteria);
               setCampaignObjections(newData.campaignObjections || []);
+              setCallFlow(newData.callFlow || null);
             }}
+            campaignType={campaign.type}
             headerAction={
               <CampaignContextRegenerate
                 currentContext={{

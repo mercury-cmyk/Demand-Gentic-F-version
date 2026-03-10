@@ -22,7 +22,7 @@ import { processSIPPostCallAnalysis } from './sip-post-call-handler';
 import * as sipClient from './sip-client';
 import { releaseProspectLock } from '../active-call-tracker';
 import { handleCallCompleted } from '../number-pool-integration';
-import { resolveGeminiPersonaProfile } from '../voice-providers/gemini-dynamic-persona';
+import { buildSipRuntimePrompt } from './sip-runtime-prompt';
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -133,15 +133,21 @@ interface TranscriptTurn {
 }
 
 interface CallContext {
+  systemPrompt?: string;
   contactName?: string;
   contactFirstName?: string;
   contactJobTitle?: string;
   accountName?: string;
   organizationName?: string;
   campaignName?: string;
+  campaignType?: string | null;
   campaignObjective?: string;
+  successCriteria?: string;
+  targetAudienceDescription?: string;
   productServiceInfo?: string;
   talkingPoints?: string[];
+  campaignContextBrief?: string | null;
+  callFlow?: unknown;
   queueItemId?: string;
   callAttemptId?: string;
   campaignId?: string;
@@ -149,6 +155,8 @@ interface CallContext {
   phoneNumber?: string;
   maxCallDurationSeconds?: number;
   callerNumberId?: string | null;
+  firstMessage?: string;
+  previewSessionId?: string | null;
 }
 
 interface AudioMetrics {
@@ -161,6 +169,10 @@ interface AudioMetrics {
 
 // Active bridge sessions
 const bridgeSessions: Map<string, BridgeSession> = new Map();
+
+function isSyntheticPreviewAttempt(callAttemptId: string | undefined): boolean {
+  return !!callAttemptId && callAttemptId.startsWith('preview-attempt-');
+}
 
 /**
  * Map AI disposition to canonical disposition
@@ -230,82 +242,25 @@ function buildPlainTranscript(turns: TranscriptTurn[]): string | undefined {
  * Build system prompt for Gemini
  */
 function buildSystemPrompt(context: CallContext, voiceName: string, sessionId: string): string {
-  const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
-  const personaProfile = resolveGeminiPersonaProfile({
-    voiceName,
+  return buildSipRuntimePrompt({
     sessionId,
+    voiceName,
+    systemPrompt: context.systemPrompt,
+    contactName: context.contactName,
+    contactFirstName: context.contactFirstName,
+    contactJobTitle: context.contactJobTitle,
+    accountName: context.accountName,
+    organizationName: context.organizationName,
+    campaignName: context.campaignName,
+    campaignType: context.campaignType,
+    campaignObjective: context.campaignObjective,
+    successCriteria: context.successCriteria,
+    targetAudienceDescription: context.targetAudienceDescription,
+    productServiceInfo: context.productServiceInfo,
+    talkingPoints: context.talkingPoints,
+    campaignContextBrief: context.campaignContextBrief,
+    callFlow: context.callFlow,
   });
-
-  let prompt = `${personaProfile.prompt}
-
-## YOUR IDENTITY
-
-You are an AI voice assistant from ${orgRef}.
-
-${context.contactName ? `**The person you are calling:** ${context.contactName}` : ''}
-${context.contactJobTitle ? `**Job Title:** ${context.contactJobTitle}` : ''}
-${context.accountName ? `**Company:** ${context.accountName}` : ''}
-
-**Opening:**
-"Hello, may I please speak with ${context.contactName || 'the contact'}?"
-
-${context.campaignObjective ? `## INTERNAL OBJECTIVE (DO NOT SAY TO PROSPECT)
-${context.campaignObjective}
-` : ''}
-
-${context.productServiceInfo ? `## WHAT TO SAY ABOUT YOUR OFFERING
-${context.productServiceInfo}
-` : ''}
-
-${context.talkingPoints?.length ? `## KEY TALKING POINTS
-${context.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
-` : ''}
-
-## CALL FLOW
-1. Confirm identity
-2. Introduce yourself and ${orgRef}
-3. Explain why you're calling (value to them)
-4. Ask questions to understand their needs
-5. Present relevant information
-6. Propose next steps
-7. Close professionally
-
-## VOICEMAIL / IVR FAST-EXIT (CRITICAL)
-If you hear ANY automation/mailbox cue, stop immediately.
-Examples:
-- "leave a message", "after the beep", "after the tone", "voicemail", "mailbox"
-- "the person you are trying to reach is not available"
-- menu prompts: "press 1", "press 2", "to disconnect", "main menu"
-- repeated prompts, beep loops, or long silence loops
-
-Action:
-1. Call \`submit_disposition\` with "voicemail"
-2. Immediately call \`end_call\`
-
-Do NOT leave a message. Do NOT continue script/discovery on automation.
-
-## SILENCE GUARD
-If connected but no meaningful human response after your opening (~8-10 seconds),
-end quickly with "no_answer" (unless voicemail cue exists, then use "voicemail").
-
-## RECORDING CALL OUTCOME
-
-BEFORE ending any call, you MUST call \`submit_disposition\` with the outcome:
-- "qualified_lead" - prospect interested
-- "not_interested" - prospect declined
-- "do_not_call" - requested removal
-- "voicemail" - reached voicemail
-- "no_answer" - no answer / callback requested
-- "invalid_data" - wrong number
-
-## ENDING THE CALL
-
-When conversation is over:
-1. Call \`submit_disposition\` with outcome
-2. Call \`end_call\` to hang up
-`;
-
-  return prompt;
 }
 
 /**
@@ -441,22 +396,22 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
       const functionDecls = [
         {
           name: 'submit_disposition',
-          description: 'Submit call outcome/disposition',
+          description: 'Submit the final call outcome ONLY after completing ALL required call flow stages. CRITICAL RULES: (1) You MUST complete every required stage in the call flow before calling this. If the prospect just agreed to something (e.g. receiving a document, attending an event), you still need to complete the closing and graceful_exit stages. (2) NEVER call submit_disposition and end_call in the same turn — wait for the response first, then say goodbye, then call end_call separately. (3) Only call this ONCE per call. (4) If the prospect wants to end the call early or asks to be removed, you may call this before completing all stages.',
           parameters: {
             type: 'object',
             properties: {
               disposition: {
                 type: 'string',
-                description: 'Call outcome: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data',
+                description: 'Call outcome: qualified_lead (ONLY after completing ALL required call flow stages including closing), not_interested (prospect explicitly declined), do_not_call (prospect requested removal), voicemail (automation detected), no_answer (pure silence), invalid_data (wrong number), callback_requested (prospect asked for callback), needs_review (ambiguous outcome)',
               },
-              notes: { type: 'string', description: 'Brief notes about the call' },
+              notes: { type: 'string', description: 'Brief notes about the call outcome and which stages were completed' },
             },
             required: ['disposition'],
           },
         },
         {
           name: 'end_call',
-          description: 'End the phone call gracefully',
+          description: 'End the phone call. RULES: (1) NEVER call this at the same time as submit_disposition — always wait for the disposition response first. (2) Before calling this, you MUST say a professional goodbye, thank the prospect, and confirm any next steps. (3) Only call this AFTER submit_disposition has been called and you have said goodbye.',
           parameters: {
             type: 'object',
             properties: {
@@ -483,6 +438,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         setupPayload.systemInstruction = {
           parts: [{ text: session.systemPrompt }],
         };
+        // Enable transcription so Gemini returns text versions of audio
+        setupPayload.outputAudioTranscription = {};
+        setupPayload.inputAudioTranscription = {};
       } else {
         // Google AI Studio (generativelanguage.googleapis.com) — snake_case
         setupPayload.tools = [{ function_declarations: functionDecls }];
@@ -497,6 +455,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         setupPayload.system_instruction = {
           parts: [{ text: session.systemPrompt }],
         };
+        // Enable transcription so Gemini returns text versions of audio
+        setupPayload.output_audio_transcription = {};
+        setupPayload.input_audio_transcription = {};
       }
 
       const setupMessage = { setup: setupPayload };
@@ -662,31 +623,38 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
         // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition.
         // Without this, the disposition engine sees duration=0 and downgrades qualified_lead → no_answer.
         const callDurationSec = Math.floor((Date.now() - session.metrics.startTime) / 1000);
-        await db.update(dialerCallAttempts)
-          .set({
-            callDurationSeconds: callDurationSec,
-            callEndedAt: new Date(),
-            disposition: canonicalDisposition,
-            connected: callDurationSec > 10,
-            updatedAt: new Date(),
-          })
-          .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
-        console.log(`[RTP Bridge] Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${canonicalDisposition}`);
+        const syntheticPreviewAttempt = isSyntheticPreviewAttempt(session.callContext.callAttemptId);
+        let dispositionResult: Awaited<ReturnType<typeof processDisposition>> | null = null;
 
-        const dispositionResult = await processDisposition(
-          session.callContext.callAttemptId,
-          canonicalDisposition,
-          'sip_gemini',
-          {
-            transcript,
-            structuredTranscript: { turns: session.transcriptTurns },
-          }
-        );
+        if (syntheticPreviewAttempt) {
+          console.log(`[RTP Bridge] Synthetic Preview Studio attempt ${session.callContext.callAttemptId} - skipping disposition engine`);
+        } else {
+          await db.update(dialerCallAttempts)
+            .set({
+              callDurationSeconds: callDurationSec,
+              callEndedAt: new Date(),
+              disposition: canonicalDisposition,
+              connected: callDurationSec > 10,
+              updatedAt: new Date(),
+            })
+            .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+          console.log(`[RTP Bridge] Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${canonicalDisposition}`);
+
+          dispositionResult = await processDisposition(
+            session.callContext.callAttemptId,
+            canonicalDisposition,
+            'sip_gemini',
+            {
+              transcript,
+              structuredTranscript: { turns: session.transcriptTurns },
+            }
+          );
+        }
         session.dispositionProcessed = true;
 
         console.log(
           `[RTP Bridge] Disposition processed for ${session.callContext.callAttemptId}` +
-          ` | leadId=${dispositionResult.leadId || 'none'}` +
+          ` | leadId=${dispositionResult?.leadId || 'none'}` +
           ` | transcriptChars=${transcript?.length || 0}`
         );
 
@@ -710,20 +678,28 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
           const durationSec = Math.round((Date.now() - session.metrics.startTime) / 1000);
           await processSIPPostCallAnalysis({
             callAttemptId: session.callContext.callAttemptId,
-            leadId: dispositionResult.leadId,
+            leadId: dispositionResult?.leadId,
             campaignId: session.callContext.campaignId || '',
             contactName: session.callContext.contactName || session.callContext.contactFirstName,
             disposition: canonicalDisposition,
             turnTranscript: session.transcriptTurns,
-            callDurationSeconds: durationSec,
+            callDurationSeconds: syntheticPreviewAttempt ? callDurationSec : durationSec,
             agentNotes: notes || '',
+            previewSessionId: session.callContext.previewSessionId,
+            providerCallId: session.callId,
           });
           console.log(`[RTP Bridge] 📝 SIP post-call analysis completed for ${session.callContext.callAttemptId}`);
         } catch (postCallErr) {
           console.error(`[RTP Bridge] SIP post-call analysis failed (non-fatal):`, postCallErr);
         }
 
-        response = { success: true, disposition: canonicalDisposition };
+        // Tell Gemini to complete the call professionally before ending
+        response = {
+          success: true,
+          disposition: canonicalDisposition,
+          instructions: 'Disposition recorded. You MUST now: 1) Confirm any next steps with the prospect (e.g. document delivery, meeting time), 2) Thank them professionally for their time, 3) Say a warm goodbye, 4) ONLY THEN call end_call. Do NOT skip these steps or rush to end the call.',
+        };
+        (session as any).dispositionSubmittedAt = Date.now();
       } catch (err) {
         console.error(`[RTP Bridge] Failed to process disposition:`, err);
         response = { success: false, error: 'Failed to save disposition' };
@@ -733,9 +709,18 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     const { reason } = call.args || {};
     console.log(`[RTP Bridge] End call requested: ${reason}`);
 
-    // Hang up the SIP call
-    sipClient.endCall(session.callId, reason);
-    response = { success: true, message: 'Call ended' };
+    // GUARD: If disposition was just submitted within 5 seconds, reject end_call
+    // and tell Gemini to say goodbye first. This prevents the agent from
+    // hanging up immediately after submitting disposition without a proper farewell.
+    const dispositionAge = Date.now() - ((session as any).dispositionSubmittedAt || 0);
+    if ((session as any).dispositionSubmittedAt && dispositionAge < 5000) {
+      console.log(`[RTP Bridge] [GUARD] Rejecting immediate end_call for ${session.callId} — disposition was submitted ${dispositionAge}ms ago. Agent must say goodbye first.`);
+      response = { success: false, error: 'You must say a professional goodbye to the prospect before ending the call. Thank them for their time, confirm next steps, and say farewell. Then call end_call again.' };
+    } else {
+      // Hang up the SIP call
+      sipClient.endCall(session.callId, reason);
+      response = { success: true, message: 'Call ended' };
+    }
   }
 
   // Send function response back to Gemini (camelCase for Vertex AI, snake_case for AI Studio)
@@ -764,7 +749,8 @@ function sendOpeningMessage(session: BridgeSession): void {
   }
 
   const contactName = session.callContext.contactName || session.callContext.contactFirstName || 'there';
-  const openingText = `Hello, may I please speak with ${contactName}?`;
+  const customFirstMessage = session.callContext.firstMessage?.trim();
+  const openingText = customFirstMessage || `Hello, may I please speak with ${contactName}?`;
 
   const openingMessage = `Say ONLY this exact message now: "${openingText}"
 
@@ -875,21 +861,28 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
       const callDurationSec = Math.floor(durationSec);
 
       // CRITICAL: Update call duration on dialerCallAttempts BEFORE processing disposition
-      await db.update(dialerCallAttempts)
-        .set({
-          callDurationSeconds: callDurationSec,
-          callEndedAt: new Date(),
-          disposition,
-          connected: callDurationSec > 10,
-          updatedAt: new Date(),
-        })
-        .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
-      console.log(`[RTP Bridge] Fallback: Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${disposition}`);
+      const syntheticPreviewAttempt = isSyntheticPreviewAttempt(session.callContext.callAttemptId);
+      let dispResult: Awaited<ReturnType<typeof processDisposition>> | null = null;
 
-      const dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
-        transcript,
-        structuredTranscript: { turns: session.transcriptTurns },
-      });
+      if (syntheticPreviewAttempt) {
+        console.log(`[RTP Bridge] Fallback: synthetic Preview Studio attempt ${session.callContext.callAttemptId} - skipping disposition engine`);
+      } else {
+        await db.update(dialerCallAttempts)
+          .set({
+            callDurationSeconds: callDurationSec,
+            callEndedAt: new Date(),
+            disposition,
+            connected: callDurationSec > 10,
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+        console.log(`[RTP Bridge] Fallback: Updated call attempt ${session.callContext.callAttemptId} duration=${callDurationSec}s disposition=${disposition}`);
+
+        dispResult = await processDisposition(session.callContext.callAttemptId, disposition, 'sip_gemini_fallback', {
+          transcript,
+          structuredTranscript: { turns: session.transcriptTurns },
+        });
+      }
       session.dispositionProcessed = true;
 
       if (session.callContext.queueItemId) {
@@ -907,13 +900,15 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
       try {
         await processSIPPostCallAnalysis({
           callAttemptId: session.callContext.callAttemptId,
-          leadId: dispResult.leadId,
+          leadId: dispResult?.leadId,
           campaignId: session.callContext.campaignId || '',
           contactName: session.callContext.contactName || session.callContext.contactFirstName,
           disposition,
           turnTranscript: session.transcriptTurns,
           callDurationSeconds: Math.round(durationSec),
           agentNotes: `Fallback: ${reason}`,
+          previewSessionId: session.callContext.previewSessionId,
+          providerCallId: session.callId,
         });
         console.log(`[RTP Bridge] 📝 Fallback post-call analysis completed`);
       } catch (postCallErr) {
@@ -954,22 +949,27 @@ export async function closeBridgeSession(callId: string): Promise<void> {
     console.log(`[RTP Bridge] closeBridgeSession fallback: ${disposition} for ${session.callContext.callAttemptId} (${callDurationSec}s, turns=${session.transcriptTurns.length})`);
 
     try {
-      // Update call attempt duration BEFORE processing disposition
-      await db.update(dialerCallAttempts)
-        .set({
-          callDurationSeconds: callDurationSec,
-          callEndedAt: new Date(),
-          disposition,
-          connected: callDurationSec > 10,
-          updatedAt: new Date(),
-        })
-        .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
-
       const transcript = buildPlainTranscript(session.transcriptTurns);
-      await processDisposition(session.callContext.callAttemptId, disposition, 'sip_session_close', {
-        transcript,
-        structuredTranscript: { turns: session.transcriptTurns },
-      });
+      const syntheticPreviewAttempt = isSyntheticPreviewAttempt(session.callContext.callAttemptId);
+
+      if (syntheticPreviewAttempt) {
+        console.log(`[RTP Bridge] closeBridgeSession: synthetic Preview Studio attempt ${session.callContext.callAttemptId} - skipping disposition engine`);
+      } else {
+        await db.update(dialerCallAttempts)
+          .set({
+            callDurationSeconds: callDurationSec,
+            callEndedAt: new Date(),
+            disposition,
+            connected: callDurationSec > 10,
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, session.callContext.callAttemptId));
+
+        await processDisposition(session.callContext.callAttemptId, disposition, 'sip_session_close', {
+          transcript,
+          structuredTranscript: { turns: session.transcriptTurns },
+        });
+      }
       session.dispositionProcessed = true;
 
       if (session.callContext.queueItemId) {
@@ -978,6 +978,18 @@ export async function closeBridgeSession(callId: string): Promise<void> {
           .set({ status: queueStatus, updatedAt: new Date(), enqueuedReason: reason })
           .where(eq(campaignQueue.id, session.callContext.queueItemId));
       }
+
+      await processSIPPostCallAnalysis({
+        callAttemptId: session.callContext.callAttemptId,
+        campaignId: session.callContext.campaignId || '',
+        contactName: session.callContext.contactName || session.callContext.contactFirstName,
+        disposition,
+        turnTranscript: session.transcriptTurns,
+        callDurationSeconds: callDurationSec,
+        agentNotes: `Fallback: ${reason}`,
+        previewSessionId: session.callContext.previewSessionId,
+        providerCallId: session.callId,
+      });
     } catch (err) {
       console.error(`[RTP Bridge] closeBridgeSession: Failed to process fallback disposition:`, err);
     }

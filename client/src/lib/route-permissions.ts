@@ -49,6 +49,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/voice-agent-training', roles: VOICE_TRAINING_ROLES, description: 'Voice Agent Training Dashboard' },
   { pattern: '/voice-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Voice Simulation' },
   { pattern: '/email-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Email Simulation' },
+  { pattern: '/ops-hub', roles: [...MANAGEMENT_ROLES, 'manager'], description: 'Operations Hub' },
   { pattern: '/virtual-agents', roles: MANAGEMENT_ROLES, description: 'Virtual Agents' },
   { pattern: /^\/virtual-agents\//, roles: MANAGEMENT_ROLES, description: 'Virtual Agent pages' },
   { pattern: '/create-ai-agent', roles: MANAGEMENT_ROLES, description: 'Create AI Agent' },
@@ -168,6 +169,7 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // SETTINGS - Admin only (except profile)
   // ============================================
   { pattern: '/settings/profile', roles: ALL_ROLES, description: 'Profile Settings' },
+  { pattern: /^\/settings\/email-management(?:\?.*)?$/, roles: MANAGEMENT_ROLES, description: 'Campaign Email Management' },
   { pattern: '/settings', roles: [USER_ROLES.ADMIN], description: 'Settings' },
   { pattern: /^\/settings\//, roles: [USER_ROLES.ADMIN], description: 'Settings pages' },
   { pattern: '/email-builder', roles: [USER_ROLES.ADMIN], description: 'Email Builder' },

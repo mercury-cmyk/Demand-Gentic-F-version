@@ -863,6 +863,7 @@ export class DatabaseStorage implements IStorage {
       account: row.accounts ? {
         id: row.accounts.id,
         name: row.accounts.name,
+        industryStandardized: row.accounts.industryStandardized,
         mainPhone: row.accounts.mainPhone,
         mainPhoneE164: row.accounts.mainPhoneE164,
         hqCountry: row.accounts.hqCountry,
@@ -3068,7 +3069,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getEmailEvents(sendId: string): Promise<EmailEvent[]> {
-    return await db.select().from(emailEvents).where(eq(emailSends.id, sendId)).orderBy(desc(emailEvents.createdAt));
+    return await db.select().from(emailEvents).where(eq(emailEvents.sendId, sendId)).orderBy(desc(emailEvents.createdAt));
   }
 
   // Call Scripts
@@ -3879,7 +3880,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createLead(insertLead: InsertLead): Promise<Lead> {
-    const [lead] = await db.insert(leads).values(insertLead).returning();
+    let leadValues: InsertLead = { ...insertLead };
+
+    if (leadValues.contactId && (!leadValues.accountId || !leadValues.accountName || !leadValues.accountIndustry)) {
+      const contact = await this.getContact(leadValues.contactId);
+      if (contact) {
+        const account = (contact as any).account as { id?: string | null; name?: string | null; industryStandardized?: string | null } | undefined;
+        leadValues = {
+          ...leadValues,
+          accountId: leadValues.accountId ?? contact.accountId ?? account?.id ?? undefined,
+          accountName: leadValues.accountName ?? account?.name ?? contact.companyNorm ?? undefined,
+          accountIndustry: leadValues.accountIndustry ?? account?.industryStandardized ?? undefined,
+        };
+      }
+    }
+
+    const [lead] = await db.insert(leads).values(leadValues).returning();
     return lead;
   }
 
@@ -3947,6 +3963,7 @@ export class DatabaseStorage implements IStorage {
     const contactName = contact.fullName || 
       (contact.firstName && contact.lastName ? `${contact.firstName} ${contact.lastName}` : 
        contact.firstName || contact.lastName || contact.email);
+    const account = (contact as any).account as { id?: string | null; name?: string | null; industryStandardized?: string | null } | undefined;
 
     // Check if lead already exists for this call attempt
     const existingLeads = await db
@@ -3967,6 +3984,9 @@ export class DatabaseStorage implements IStorage {
       contactEmail: contact.email || undefined,
       campaignId: attempt.campaignId,
       callAttemptId: callAttemptId,
+      accountId: contact.accountId || account?.id || undefined,
+      accountName: account?.name || contact.companyNorm || undefined,
+      accountIndustry: account?.industryStandardized || undefined,
       recordingUrl: attempt.recordingUrl || undefined,
       callDuration: attempt.duration || undefined,
       agentId: attempt.agentId,

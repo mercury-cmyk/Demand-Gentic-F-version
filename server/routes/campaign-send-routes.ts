@@ -10,7 +10,9 @@ import { db } from "../db";
 import { campaigns, contacts, senderProfiles, lists, segments } from "../../shared/schema";
 import { eq, and, inArray, or, isNull } from "drizzle-orm";
 import { sendBulkEmails, type BulkEmailRecipient } from "../services/bulk-email-service";
-import { buildFilterQuery, type FilterGroup } from "../filter-builder";
+import { buildFilterQuery } from "../filter-builder";
+import type { FilterGroup } from "@shared/filter-types";
+import { campaignEmailProviderService } from "../services/campaign-email-provider-service";
 
 const router = Router();
 
@@ -44,7 +46,7 @@ router.post("/:id/send", async (req: Request, res: Response) => {
       });
     }
 
-    // Get sender profile - use campaign's profile or default Mailgun profile
+    // Get sender profile - use campaign's profile or the default active profile
     let senderProfile;
 
     // @ts-ignore - senderProfileId may not exist on campaign
@@ -58,9 +60,9 @@ router.post("/:id/send", async (req: Request, res: Response) => {
         .limit(1);
     }
 
-    // If no sender profile specified, use default Mailgun profile
+    // If no sender profile specified, use the default active profile
     if (!senderProfile) {
-      console.log('[Campaign Send] No sender profile on campaign, using default Mailgun profile');
+      console.log('[Campaign Send] No sender profile on campaign, selecting default active sender profile');
 
       const profiles = await db
         .select()
@@ -74,7 +76,9 @@ router.post("/:id/send", async (req: Request, res: Response) => {
         isVerified: p.isVerified 
       })));
 
-      senderProfile = profiles.find(p => p.espAdapter === 'mailgun') || profiles[0];
+      senderProfile = profiles.find(p => p.isDefault && p.isActive !== false)
+        || profiles.find(p => p.isActive !== false)
+        || profiles[0];
     }
 
     if (!senderProfile) {
@@ -91,13 +95,15 @@ router.post("/:id/send", async (req: Request, res: Response) => {
       isVerified: senderProfile.isVerified
     });
 
-    // Skip verification check for all ESP profiles (mailgun, sendgrid, etc.)
-    // Domain verification is handled externally by the ESP provider
-    // Only require local verification for profiles without an ESP adapter
+    const campaignProvider = await campaignEmailProviderService.resolveCampaignEmailProviderForSenderProfile(senderProfile);
+
+    // Skip verification check when an external campaign email provider is bound or resolved.
+    // Domain verification is handled through the provider and domain management flow.
     const hasEspAdapter = !!senderProfile.espAdapter;
+    const hasCampaignProvider = !!campaignProvider;
     const isLocallyVerified = senderProfile.isVerified === true;
     
-    if (!isLocallyVerified && !hasEspAdapter) {
+    if (!isLocallyVerified && !hasEspAdapter && !hasCampaignProvider) {
       return res.status(400).json({
         error: "sender_not_verified",
         message: `Sender profile "${senderProfile.fromEmail}" is not verified`,
@@ -105,9 +111,14 @@ router.post("/:id/send", async (req: Request, res: Response) => {
     }
     
     // Log ESP profile usage
-    if (hasEspAdapter) {
-      console.log(`[Campaign Send] Using ${senderProfile.espAdapter} sender ${senderProfile.fromEmail} (domain verified in ESP)`);
+    if (hasEspAdapter || hasCampaignProvider) {
+      console.log(`[Campaign Send] Using ${campaignProvider?.providerKey || senderProfile.espAdapter} sender ${senderProfile.fromEmail} (domain verified with external provider)`);
     }
+    console.log('[Campaign Send] Resolved campaign email provider:', {
+      id: campaignProvider?.id || null,
+      providerKey: campaignProvider?.providerKey || senderProfile.espProvider || senderProfile.espAdapter || 'mailgun',
+      name: campaignProvider?.name || null,
+    });
 
     console.log(`[Campaign Send] Fetching audience for campaign ${campaignId}`);
 
@@ -277,6 +288,7 @@ router.post("/:id/send", async (req: Request, res: Response) => {
     // Send emails using bulk service
     const result = await sendBulkEmails({
       campaignId,
+      senderProfileId: senderProfile.id,
       from: senderProfile.fromEmail,
       fromName: senderProfile.fromName,
       replyTo: senderProfile.replyToEmail || senderProfile.fromEmail,
@@ -287,6 +299,8 @@ router.post("/:id/send", async (req: Request, res: Response) => {
       text: undefined, // campaigns table doesn't have text content field
       recipients,
       tags: ['campaign', `campaign-${campaignId}`],
+      providerId: campaignProvider?.id,
+      providerKey: campaignProvider?.providerKey || senderProfile.espProvider || senderProfile.espAdapter || 'mailgun',
       espAdapter: senderProfile.espAdapter || 'mailgun',
       batchSize: 100,
       delayBetweenBatches: 1000,

@@ -1,8 +1,23 @@
 import { readFileSync } from 'fs';
 import path from 'path';
 import pg from 'pg';
+import '../server/env';
 
 const { Pool } = pg;
+
+function resolveDatabaseUrl(): string {
+  const nodeEnv = (process.env.NODE_ENV || 'development').toLowerCase();
+
+  if (process.env.REPLIT_DEPLOYMENT === '1') {
+    return process.env.REPLIT_PRODUCTION_DATABASE_URL || '';
+  }
+
+  if (nodeEnv === 'production') {
+    return process.env.DATABASE_URL_PROD || process.env.DATABASE_URL || '';
+  }
+
+  return process.env.DATABASE_URL_DEV || process.env.DATABASE_URL || '';
+}
 
 async function main() {
   const file = process.argv[2];
@@ -11,9 +26,9 @@ async function main() {
     process.exit(1);
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = resolveDatabaseUrl();
   if (!databaseUrl) {
-    console.error('DATABASE_URL is not set. Aborting.');
+    console.error('Database URL is not set. Aborting.');
     process.exit(1);
   }
 

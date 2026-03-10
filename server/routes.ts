@@ -7,6 +7,7 @@ import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { enrichCampaignQADefaults, buildCampaignContextBrief, generateQAParametersFromContext } from "./lib/campaign-qa-defaults";
+import { buildCallFlowPromptSection } from "@shared/call-flow";
 import { storage } from "./storage";
 import { emailTrackingService } from "./lib/email-tracking-service";
 import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
@@ -65,6 +66,7 @@ import campaignSendRouter from './routes/campaign-send-routes';
 import transactionalTemplatesRouter from './routes/transactional-templates';
 import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } from './routes/mercury-bridge';
 import domainManagementRouter from './routes/domain-management';
+import emailManagementRouter from './routes/email-management';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
 import unifiedEmailSystemRouter from './routes/unified-email-system';
@@ -102,6 +104,7 @@ import agentDefaultsRouter from './routes/agent-defaults';
 import aiGovernanceRouter from './routes/ai-governance';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
 import adminEmailCampaignTemplateRouter from './routes/admin-email-campaign-template-routes';
+import deepResearchRouter from './routes/deep-research-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
@@ -129,6 +132,7 @@ import aiAudienceFilterRouter from './routes/ai-audience-filter-routes';
 import oiBatchRouter from './routes/oi-batch-routes';
 import previewStudioRouter from './routes/preview-studio';
 import clientPortalSimulationRouter from './routes/client-portal-simulation';
+import campaignPipelineRouter from './routes/campaign-pipeline-routes';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
@@ -141,6 +145,9 @@ import {
 } from "./middleware/security";
 import {
   loginSchema,
+  mfaConfirmSchema,
+  mfaDisableSchema,
+  mfaVerifySchema,
   createUserSchema,
   updateUserSchema,
   assignRoleSchema,
@@ -207,7 +214,8 @@ import { normalizePhoneE164 } from "./normalization"; // Import normalization ut
 import { encryptJson, decryptJson } from "./lib/encryption";
 import type { FilterValues } from "@shared/filterConfig";
 import type { FilterGroup, FilterCondition } from "@shared/filter-types";
-import { getOAuthStateStore, hasRedisConfigured as hasRedisForOAuth } from "./lib/oauth-state-store";
+import { getOAuthStateStore } from "./lib/oauth-state-store";
+import { decryptTotpSecret, encryptTotpSecret, generateTotpSecret, verifyBackupCode, verifyTotpToken } from "./totp-mfa";
 
 // Configure multer for memory storage (file uploads)
 const upload = multer({
@@ -217,10 +225,15 @@ const upload = multer({
   },
 });
 
-// Get Redis-backed OAuth state store if Redis is available (graceful degradation)
+// Initialize OAuth state storage for mailbox auth flows.
+// The helper already falls back to an in-memory store when Redis is unavailable,
+// so OAuth should remain usable in local/dev environments without REDIS_URL.
 let oauthStateStore: ReturnType<typeof getOAuthStateStore> | null = null;
-if (hasRedisForOAuth()) {
+try {
   oauthStateStore = getOAuthStateStore();
+} catch (error) {
+  console.error("[OAuth] Failed to initialize state store:", error);
+  oauthStateStore = null;
 }
 
 function base64URLEncode(buffer: Buffer) {
@@ -362,6 +375,43 @@ type MicrosoftTokenSet = {
 
 const MAILBOX_PROVIDER = "o365";
 const GOOGLE_MAILBOX_PROVIDER = "google";
+const REMEMBER_ME_TOKEN_TTL = "30d";
+
+function getRequestedAuthTokenTtl(rememberMe?: boolean): string | undefined {
+  return rememberMe ? REMEMBER_ME_TOKEN_TTL : undefined;
+}
+
+async function resolveInternalUserRolesForAuth(user: schema.User): Promise<string[]> {
+  let userRolesForAuth = await storage.getUserRoles(user.id);
+
+  if (userRolesForAuth.length === 0) {
+    const allUsersWithRoles = await storage.getAllUsersWithRoles();
+    const hasAdmin = allUsersWithRoles.some((candidate) => candidate.roles.includes('admin'));
+
+    if (!hasAdmin) {
+      await storage.assignUserRole(user.id, 'admin', user.id);
+      userRolesForAuth = ['admin'];
+    } else {
+      userRolesForAuth = [user.role || 'agent'];
+    }
+  }
+
+  return Array.isArray(userRolesForAuth) ? userRolesForAuth : [userRolesForAuth];
+}
+
+function sanitizeInternalUser(user: schema.User, roles: string[]) {
+  const { password: _password, ...userWithoutPassword } = user;
+  return { ...userWithoutPassword, roles };
+}
+
+async function buildInternalAuthSuccessPayload(user: schema.User, rememberMe?: boolean) {
+  const roles = await resolveInternalUserRolesForAuth(user);
+  const token = generateToken(user, roles, getRequestedAuthTokenTtl(rememberMe));
+  return {
+    token,
+    user: sanitizeInternalUser(user, roles),
+  };
+}
 
 function deriveOpportunityStatus(stage: string, requested?: string | null): "open" | "won" | "lost" | "on_hold" {
   const normalized = requested?.toLowerCase();
@@ -1279,7 +1329,7 @@ export function registerRoutes(app: Express) {
   // Apply strict rate limiting to login endpoint (5 attempts per 15 minutes)
   app.post("/api/auth/login", authLimiter, validate({ body: loginSchema }), async (req, res) => {
     try {
-      const { username, password } = req.body;
+      const { username, password, rememberMe } = req.body;
 
       const user = await storage.getUserByUsername(username);
 
@@ -1293,42 +1343,189 @@ export function registerRoutes(app: Express) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Fetch user roles (multi-role support)
-      let userRoles = await storage.getUserRoles(user.id);
-
-      // Bootstrap check: If user has no roles and no admin users exist in the system,
-      // automatically assign admin role to this user (first user setup)
-      if (userRoles.length === 0) {
-        const allUsersWithRoles = await storage.getAllUsersWithRoles();
-        const hasAdmin = allUsersWithRoles.some(u => u.roles.includes('admin'));
-
-        if (!hasAdmin) {
-          // This is the first user - give them admin role
-          await storage.assignUserRole(user.id, 'admin', user.id);
-          userRoles = ['admin'];
-        } else {
-          // Use legacy role as fallback - ensure it's always in an array
-          userRoles = [user.role || 'agent'];
+      if (user.mfaEnabled) {
+        if (!user.totpSecret) {
+          return res.status(500).json({ message: "2FA is configured incorrectly for this account" });
         }
+
+        return res.json({
+          requiresMFA: true,
+          mfaType: 'totp',
+          rememberMe: !!rememberMe,
+        });
       }
 
-      // Ensure userRoles is always an array
-      if (!Array.isArray(userRoles)) {
-        userRoles = [userRoles];
-      }
-
-      // Generate JWT token with roles
-      const token = generateToken(user, userRoles);
-
-      // Return token and user info without password, including roles
-      const { password: _, ...userWithoutPassword } = user;
-      res.json({
-        token,
-        user: { ...userWithoutPassword, roles: userRoles }
-      });
+      res.json(await buildInternalAuthSuccessPayload(user, rememberMe));
     } catch (error) {
       console.error('[LOGIN ERROR]', error);
       res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/mfa/verify", authLimiter, validate({ body: mfaVerifySchema }), async (req, res) => {
+    try {
+      const { username, password, token, useBackupCode, rememberMe } = req.body;
+
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isValidPassword = await comparePassword(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      if (!user.mfaEnabled) {
+        return res.status(400).json({ message: "Multi-factor authentication is not enabled for this account" });
+      }
+
+      if (!user.totpSecret) {
+        return res.status(500).json({ message: "2FA is configured incorrectly for this account" });
+      }
+
+      const backupCodes = Array.isArray(user.backupCodes)
+        ? user.backupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+      const usedBackupCodes = Array.isArray(user.usedBackupCodes)
+        ? user.usedBackupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+
+      if (useBackupCode) {
+        const normalizedBackupCode = token.toUpperCase().replace(/[^A-Z0-9]/g, "").trim();
+        const isValidBackupCode = verifyBackupCode(usedBackupCodes, backupCodes, normalizedBackupCode);
+
+        if (!isValidBackupCode) {
+          return res.status(401).json({ message: "Invalid backup code" });
+        }
+
+        await storage.updateUser(user.id, {
+          usedBackupCodes: [...new Set([...usedBackupCodes, normalizedBackupCode])],
+        });
+      } else {
+        const decryptedSecret = decryptTotpSecret(user.totpSecret);
+        const isValidTotp = verifyTotpToken(decryptedSecret, token);
+
+        if (!isValidTotp) {
+          return res.status(401).json({ message: "Invalid authentication code" });
+        }
+      }
+
+      res.json(await buildInternalAuthSuccessPayload(user, rememberMe));
+    } catch (error) {
+      console.error('[MFA VERIFY ERROR]', error);
+      res.status(500).json({ message: "MFA verification failed" });
+    }
+  });
+
+  app.get("/api/auth/mfa/status", requireAuth, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const backupCodes = Array.isArray(user.backupCodes)
+        ? user.backupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+      const usedBackupCodes = Array.isArray(user.usedBackupCodes)
+        ? user.usedBackupCodes.filter((code): code is string => typeof code === "string" && code.length > 0)
+        : [];
+
+      res.json({
+        mfaEnabled: user.mfaEnabled,
+        mfaEnrolledAt: user.mfaEnrolledAt ?? null,
+        hasBackupCodes: backupCodes.length > usedBackupCodes.length,
+      });
+    } catch (error) {
+      console.error('[MFA STATUS ERROR]', error);
+      res.status(500).json({ message: "Failed to load MFA status" });
+    }
+  });
+
+  app.post("/api/auth/mfa/enroll", requireAuth, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (user.mfaEnabled) {
+        return res.status(409).json({ message: "2FA is already enabled for this account" });
+      }
+
+      const enrollment = await generateTotpSecret(user.email || user.username);
+
+      await storage.updateUser(user.id, {
+        mfaEnabled: false,
+        totpSecret: encryptTotpSecret(enrollment.secret),
+        backupCodes: enrollment.backupCodes,
+        usedBackupCodes: [],
+        mfaEnrolledAt: null,
+      });
+
+      res.json(enrollment);
+    } catch (error) {
+      console.error('[MFA ENROLL ERROR]', error);
+      res.status(500).json({ message: "Failed to start MFA enrollment" });
+    }
+  });
+
+  app.post("/api/auth/mfa/confirm", requireAuth, validate({ body: mfaConfirmSchema }), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (!user.totpSecret) {
+        return res.status(400).json({ message: "2FA enrollment has not been started" });
+      }
+
+      const decryptedSecret = decryptTotpSecret(user.totpSecret);
+      const isValidTotp = verifyTotpToken(decryptedSecret, req.body.token);
+
+      if (!isValidTotp) {
+        return res.status(400).json({ message: "Invalid authentication code" });
+      }
+
+      await storage.updateUser(user.id, {
+        mfaEnabled: true,
+        mfaEnrolledAt: new Date(),
+        usedBackupCodes: Array.isArray(user.usedBackupCodes) ? user.usedBackupCodes : [],
+      });
+
+      res.json({ message: "2FA enabled" });
+    } catch (error) {
+      console.error('[MFA CONFIRM ERROR]', error);
+      res.status(500).json({ message: "Failed to confirm MFA enrollment" });
+    }
+  });
+
+  app.post("/api/auth/mfa/disable", requireAuth, validate({ body: mfaDisableSchema }), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const isValidPassword = await comparePassword(req.body.password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Password is incorrect" });
+      }
+
+      await storage.updateUser(user.id, {
+        mfaEnabled: false,
+        totpSecret: null,
+        backupCodes: null,
+        usedBackupCodes: [],
+        mfaEnrolledAt: null,
+      });
+
+      res.json({ message: "2FA disabled" });
+    } catch (error) {
+      console.error('[MFA DISABLE ERROR]', error);
+      res.status(500).json({ message: "Failed to disable MFA" });
     }
   });
 
@@ -5169,29 +5366,43 @@ export function registerRoutes(app: Express) {
   app.get("/api/campaigns/:id/email-metrics", requireAuth, async (req, res) => {
     try {
       const campaignId = req.params.id;
-      
-      // Get all email events for this campaign
-      const events = await db.select()
+      const [sendStats] = await db
+        .select({
+          totalRecipients: sql<number>`COUNT(*)::int`,
+          delivered: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'sent' THEN 1 END)::int`,
+          bounced: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'bounced' THEN 1 END)::int`,
+          failed: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'failed' THEN 1 END)::int`,
+        })
+        .from(schema.emailSends)
+        .where(eq(schema.emailSends.campaignId, campaignId));
+
+      const [eventStats] = await db
+        .select({
+          opened: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'opened' THEN 1 END)::int`,
+          clicked: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'clicked' THEN 1 END)::int`,
+          hardBounced: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'bounced' AND ${schema.emailEvents.bounceType} = 'hard' THEN 1 END)::int`,
+          softBounced: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'bounced' AND ${schema.emailEvents.bounceType} = 'soft' THEN 1 END)::int`,
+          complained: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'complained' THEN 1 END)::int`,
+          unsubscribed: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'unsubscribed' THEN 1 END)::int`,
+        })
         .from(schema.emailEvents)
         .where(eq(schema.emailEvents.campaignId, campaignId));
 
-      // Calculate metrics by grouping events
       const metrics = {
-        totalRecipients: new Set(events.map(e => e.recipient)).size,
-        sent: events.filter(e => e.type === 'accepted' || e.type === 'delivered').length,
-        delivered: events.filter(e => e.type === 'delivered').length,
-        opened: events.filter(e => e.type === 'opened').length,
-        clicked: events.filter(e => e.type === 'clicked').length,
-        bounced: events.filter(e => e.type === 'bounced').length,
-        hardBounced: events.filter(e => e.type === 'bounced' && e.bounceType === 'hard').length,
-        softBounced: events.filter(e => e.type === 'bounced' && e.bounceType === 'soft').length,
-        complained: events.filter(e => e.type === 'complained').length,
-        unsubscribed: events.filter(e => e.type === 'unsubscribed').length,
-        failed: events.filter(e => e.type === 'failed').length,
+        totalRecipients: Number(sendStats?.totalRecipients) || 0,
+        sent: Number(sendStats?.totalRecipients) || 0,
+        delivered: Number(sendStats?.delivered) || 0,
+        opened: Number(eventStats?.opened) || 0,
+        clicked: Number(eventStats?.clicked) || 0,
+        bounced: Number(sendStats?.bounced) || 0,
+        hardBounced: Number(eventStats?.hardBounced) || 0,
+        softBounced: Number(eventStats?.softBounced) || 0,
+        complained: Number(eventStats?.complained) || 0,
+        unsubscribed: Number(eventStats?.unsubscribed) || 0,
+        failed: Number(sendStats?.failed) || 0,
       };
 
-      // Calculate rates
-      const deliveredCount = metrics.delivered || 1; // Avoid division by zero
+      const deliveredCount = metrics.delivered || 1;
       const sentCount = metrics.sent || 1;
 
       const rates = {
@@ -5216,7 +5427,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Get call campaign snapshot stats
-  // Combines stats from both human agent calls (callAttempts) and AI calls (callSessions)
+  // Combines stats from both human agent calls (callAttempts) and AI dialer attempts.
   app.get("/api/campaigns/:id/call-stats", requireAuth, async (req, res) => {
     try {
       const campaignId = req.params.id;
@@ -5256,67 +5467,28 @@ export function registerRoutes(app: Express) {
         .from(callAttempts)
         .where(eq(callAttempts.campaignId, campaignId));
 
-      // Query AI agent calls from callSessions
-      // AI dispositions are stored in aiDisposition field with similar values
-      // UPDATED definition: 'Connected' means any Right Party Contact (RPC) or where a conversation occurred.
-      // Explicitly includes: Qualified, Not Interested, DNC, Wrong Number (often means answered).
-      // Explicitly excludes: No Answer, Voicemail, Busy, Failed.
-      
-      // Canonical dispositions that indicate the call connected (Right Party Contact)
-      const aiConnectedDispositions = [
-        'qualified_lead',
-        'callback_requested',
-        'not_interested',
-        'do_not_call',
-        'invalid_data',
-        'needs_review',
-      ];
-
-      // Canonical dispositions from disposition-normalizer.ts
-      const aiQualifiedDispositions = ['qualified_lead'];
-      const aiDncDispositions = ['do_not_call'];
-      const aiNotInterestedDispositions = ['not_interested'];
-      const aiNoAnswerDispositions = ['no_answer'];
-      const aiVoicemailDispositions = ['voicemail'];
-
-      const [aiCallStats] = await db
-        .select({
-          callsMade: sql<number>`COUNT(*)::int`,
-          callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiConnectedDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiQualifiedDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiDncDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiNotInterestedDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiNoAnswerDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) OR (${callSessions.aiDisposition} IS NULL AND ${callSessions.status} = 'no_answer') THEN 1 END)::int`,
-          voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
-            aiVoicemailDispositions.map((value) => sql`${value}`),
-            sql`, `
-          )}) THEN 1 END)::int`,
-          busy: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN ('busy') AND ${callSessions.aiDisposition} IS NULL THEN 1 END)::int`,
-          wrongNumber: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'invalid_data' THEN 1 END)::int`,
-          callbackRequested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'callback_requested' THEN 1 END)::int`,
-          noDisposition: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IS NULL AND ${callSessions.status} NOT IN ('no_answer', 'busy') THEN 1 END)::int`,
-        })
-        .from(callSessions)
-        .where(eq(callSessions.campaignId, campaignId));
+      const aiCallStatsResult = await db.execute(sql`
+        SELECT
+          COUNT(*)::int AS "callsMade",
+          COUNT(CASE WHEN dca.disposition IN ('qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review') THEN 1 END)::int AS "callsConnected",
+          COUNT(CASE WHEN dca.disposition = 'qualified_lead' THEN 1 END)::int AS "leadsQualified",
+          COUNT(CASE WHEN dca.disposition = 'do_not_call' THEN 1 END)::int AS "dncRequests",
+          COUNT(CASE WHEN dca.disposition = 'not_interested' THEN 1 END)::int AS "notInterested",
+          COUNT(CASE WHEN dca.disposition = 'no_answer' THEN 1 END)::int AS "noAnswer",
+          COUNT(CASE WHEN dca.disposition = 'voicemail' THEN 1 END)::int AS "voicemail",
+          COUNT(CASE WHEN cs.status = 'busy' AND dca.disposition IS NULL THEN 1 END)::int AS "busy",
+          COUNT(CASE WHEN dca.disposition = 'invalid_data' THEN 1 END)::int AS "wrongNumber",
+          COUNT(CASE WHEN dca.disposition = 'callback_requested' THEN 1 END)::int AS "callbackRequested",
+          COUNT(CASE WHEN dca.disposition IS NULL AND COALESCE(cs.status::text, '') NOT IN ('no_answer', 'busy') THEN 1 END)::int AS "noDisposition"
+        FROM dialer_call_attempts dca
+        LEFT JOIN call_sessions cs ON cs.id = dca.call_session_id
+        WHERE dca.campaign_id = ${campaignId}
+      `);
+      const aiCallStats = (aiCallStatsResult.rows[0] || {}) as Record<string, unknown>;
 
       // Combine human + AI stats
-      const callsMade = (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0);
-      const callsConnected = (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0);
+      const callsMade = (humanCallStats?.callsMade || 0) + (Number(aiCallStats.callsMade) || 0);
+      const callsConnected = (humanCallStats?.callsConnected || 0) + (Number(aiCallStats.callsConnected) || 0);
 
       // Leads Qualified: query the leads table directly so manual QA overrides are included.
       // callSessions.aiDisposition never changes when a reviewer manually approves a needs_review lead,
@@ -5330,14 +5502,14 @@ export function registerRoutes(app: Express) {
         ));
       const leadsQualified = leadsQualifiedResult?.count || 0;
 
-      const dncRequests = (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0);
-      const notInterested = (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0);
-      const noAnswer = (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0);
-      const voicemail = (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0);
-      const busy = (humanCallStats?.busy || 0) + (aiCallStats?.busy || 0);
-      const wrongNumber = (humanCallStats?.wrongNumber || 0) + (aiCallStats?.wrongNumber || 0);
-      const callbackRequested = (humanCallStats?.callbackRequested || 0) + (aiCallStats?.callbackRequested || 0);
-      const noDisposition = (humanCallStats?.noDisposition || 0) + (aiCallStats?.noDisposition || 0);
+      const dncRequests = (humanCallStats?.dncRequests || 0) + (Number(aiCallStats.dncRequests) || 0);
+      const notInterested = (humanCallStats?.notInterested || 0) + (Number(aiCallStats.notInterested) || 0);
+      const noAnswer = (humanCallStats?.noAnswer || 0) + (Number(aiCallStats.noAnswer) || 0);
+      const voicemail = (humanCallStats?.voicemail || 0) + (Number(aiCallStats.voicemail) || 0);
+      const busy = (humanCallStats?.busy || 0) + (Number(aiCallStats.busy) || 0);
+      const wrongNumber = (humanCallStats?.wrongNumber || 0) + (Number(aiCallStats.wrongNumber) || 0);
+      const callbackRequested = (humanCallStats?.callbackRequested || 0) + (Number(aiCallStats.callbackRequested) || 0);
+      const noDisposition = (humanCallStats?.noDisposition || 0) + (Number(aiCallStats.noDisposition) || 0);
 
       res.json({
         campaignId,
@@ -5378,11 +5550,53 @@ export function registerRoutes(app: Express) {
         .from(leads)
         .where(and(
           inArray(leads.campaignId, campaignIds),
-          inArray(leads.qaStatus, ['new', 'under_review', 'approved', 'pending_pm_review', 'published'])
+          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
         ))
         .groupBy(leads.campaignId);
       const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
         leadsQualifiedRows.map((r) => [r.campaignId, r.count])
+      );
+
+      const emailSendStatsRows = await db
+        .select({
+          campaignId: schema.emailSends.campaignId,
+          totalSent: sql<number>`COUNT(*)::int`,
+          delivered: sql<number>`COUNT(CASE WHEN ${schema.emailSends.status} = 'sent' THEN 1 END)::int`,
+        })
+        .from(schema.emailSends)
+        .where(inArray(schema.emailSends.campaignId, campaignIds))
+        .groupBy(schema.emailSends.campaignId);
+      const emailSendStatsByCampaign: Record<string, { totalSent: number; delivered: number }> = Object.fromEntries(
+        emailSendStatsRows.map((row) => [
+          row.campaignId,
+          {
+            totalSent: Number(row.totalSent) || 0,
+            delivered: Number(row.delivered) || 0,
+          },
+        ])
+      );
+
+      const emailEventStatsRows = await db
+        .select({
+          campaignId: schema.emailEvents.campaignId,
+          uniqueOpens: sql<number>`COUNT(DISTINCT CASE WHEN ${schema.emailEvents.type} = 'opened' THEN ${schema.emailEvents.recipient} END)::int`,
+          uniqueClicks: sql<number>`COUNT(DISTINCT CASE WHEN ${schema.emailEvents.type} = 'clicked' THEN ${schema.emailEvents.recipient} END)::int`,
+          unsubscribes: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'unsubscribed' THEN 1 END)::int`,
+          spamComplaints: sql<number>`COUNT(CASE WHEN ${schema.emailEvents.type} = 'complained' THEN 1 END)::int`,
+        })
+        .from(schema.emailEvents)
+        .where(inArray(schema.emailEvents.campaignId, campaignIds))
+        .groupBy(schema.emailEvents.campaignId);
+      const emailEventStatsByCampaign: Record<string, { uniqueOpens: number; uniqueClicks: number; unsubscribes: number; spamComplaints: number }> = Object.fromEntries(
+        emailEventStatsRows.map((row) => [
+          row.campaignId,
+          {
+            uniqueOpens: Number(row.uniqueOpens) || 0,
+            uniqueClicks: Number(row.uniqueClicks) || 0,
+            unsubscribes: Number(row.unsubscribes) || 0,
+            spamComplaints: Number(row.spamComplaints) || 0,
+          },
+        ])
       );
 
       // Process campaigns in parallel (server-side, single request from client)
@@ -5392,29 +5606,21 @@ export function registerRoutes(app: Express) {
 
         try {
           if (info.isEmail) {
-            const [sentResult] = await db
-              .select({ count: sql<number>`COUNT(*)::int` })
-              .from(campaignQueue)
-              .where(eq(campaignQueue.campaignId, campaignId));
-            const totalSent = sentResult?.count || 0;
-
-            const sendIdSubquery = sql`(SELECT id FROM email_sends WHERE campaign_id = ${campaignId})`;
-            const [opensResult] = await db.execute(sql`
-              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
-              FROM email_opens WHERE message_id IN ${sendIdSubquery}
-            `).then(r => r.rows as any[]);
-            const [clicksResult] = await db.execute(sql`
-              SELECT COUNT(*)::int as total, COUNT(DISTINCT recipient_email)::int as "unique"
-              FROM email_link_clicks WHERE message_id IN ${sendIdSubquery}
-            `).then(r => r.rows as any[]);
-
-            entry.email = {
-              totalRecipients: totalSent,
-              delivered: totalSent,
-              opens: opensResult?.unique || 0,
-              clicks: clicksResult?.unique || 0,
+            const sendStats = emailSendStatsByCampaign[campaignId] || { totalSent: 0, delivered: 0 };
+            const eventStats = emailEventStatsByCampaign[campaignId] || {
+              uniqueOpens: 0,
+              uniqueClicks: 0,
               unsubscribes: 0,
               spamComplaints: 0,
+            };
+
+            entry.email = {
+              totalRecipients: sendStats.totalSent,
+              delivered: sendStats.delivered,
+              opens: eventStats.uniqueOpens,
+              clicks: eventStats.uniqueClicks,
+              unsubscribes: eventStats.unsubscribes,
+              spamComplaints: eventStats.spamComplaints,
             };
           }
 
@@ -5442,37 +5648,38 @@ export function registerRoutes(app: Express) {
               .from(callAttempts)
               .where(eq(callAttempts.campaignId, campaignId));
 
-            const aiConnectedDispositions = ['qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review'];
-            const [aiCallStats] = await db
-              .select({
-                callsMade: sql<number>`COUNT(*)::int`,
-                callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(aiConnectedDispositions.map(v => sql`${v}`), sql`, `)}) THEN 1 END)::int`,
-                leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'qualified_lead' THEN 1 END)::int`,
-                dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'do_not_call' THEN 1 END)::int`,
-                notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
-                noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' OR (${callSessions.aiDisposition} IS NULL AND ${callSessions.status} = 'no_answer') THEN 1 END)::int`,
-                voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
-                busy: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN ('busy') AND ${callSessions.aiDisposition} IS NULL THEN 1 END)::int`,
-                wrongNumber: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'invalid_data' THEN 1 END)::int`,
-                callbackRequested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'callback_requested' THEN 1 END)::int`,
-                noDisposition: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IS NULL AND ${callSessions.status} NOT IN ('no_answer', 'busy') THEN 1 END)::int`,
-              })
-              .from(callSessions)
-              .where(eq(callSessions.campaignId, campaignId));
+            const aiCallStatsResult = await db.execute(sql`
+              SELECT
+                COUNT(*)::int AS "callsMade",
+                COUNT(CASE WHEN dca.disposition IN ('qualified_lead', 'callback_requested', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review') THEN 1 END)::int AS "callsConnected",
+                COUNT(CASE WHEN dca.disposition = 'qualified_lead' THEN 1 END)::int AS "leadsQualified",
+                COUNT(CASE WHEN dca.disposition = 'do_not_call' THEN 1 END)::int AS "dncRequests",
+                COUNT(CASE WHEN dca.disposition = 'not_interested' THEN 1 END)::int AS "notInterested",
+                COUNT(CASE WHEN dca.disposition = 'no_answer' THEN 1 END)::int AS "noAnswer",
+                COUNT(CASE WHEN dca.disposition = 'voicemail' THEN 1 END)::int AS "voicemail",
+                COUNT(CASE WHEN cs.status = 'busy' AND dca.disposition IS NULL THEN 1 END)::int AS "busy",
+                COUNT(CASE WHEN dca.disposition = 'invalid_data' THEN 1 END)::int AS "wrongNumber",
+                COUNT(CASE WHEN dca.disposition = 'callback_requested' THEN 1 END)::int AS "callbackRequested",
+                COUNT(CASE WHEN dca.disposition IS NULL AND COALESCE(cs.status::text, '') NOT IN ('no_answer', 'busy') THEN 1 END)::int AS "noDisposition"
+              FROM dialer_call_attempts dca
+              LEFT JOIN call_sessions cs ON cs.id = dca.call_session_id
+              WHERE dca.campaign_id = ${campaignId}
+            `);
+            const aiCallStats = (aiCallStatsResult.rows[0] || {}) as Record<string, unknown>;
 
             entry.call = {
               contactsInQueue: queueStats.queued,
-              callsMade: (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0),
-              callsConnected: (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0),
+              callsMade: (humanCallStats?.callsMade || 0) + (Number(aiCallStats.callsMade) || 0),
+              callsConnected: (humanCallStats?.callsConnected || 0) + (Number(aiCallStats.callsConnected) || 0),
               leadsQualified: leadsQualifiedByCampaign[campaignId] || 0,
-              dncRequests: (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0),
-              notInterested: (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0),
-              noAnswer: (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0),
-              voicemail: (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0),
-              busy: (humanCallStats?.busy || 0) + (aiCallStats?.busy || 0),
-              wrongNumber: (humanCallStats?.wrongNumber || 0) + (aiCallStats?.wrongNumber || 0),
-              callbackRequested: (humanCallStats?.callbackRequested || 0) + (aiCallStats?.callbackRequested || 0),
-              noDisposition: (humanCallStats?.noDisposition || 0) + (aiCallStats?.noDisposition || 0),
+              dncRequests: (humanCallStats?.dncRequests || 0) + (Number(aiCallStats.dncRequests) || 0),
+              notInterested: (humanCallStats?.notInterested || 0) + (Number(aiCallStats.notInterested) || 0),
+              noAnswer: (humanCallStats?.noAnswer || 0) + (Number(aiCallStats.noAnswer) || 0),
+              voicemail: (humanCallStats?.voicemail || 0) + (Number(aiCallStats.voicemail) || 0),
+              busy: (humanCallStats?.busy || 0) + (Number(aiCallStats.busy) || 0),
+              wrongNumber: (humanCallStats?.wrongNumber || 0) + (Number(aiCallStats.wrongNumber) || 0),
+              callbackRequested: (humanCallStats?.callbackRequested || 0) + (Number(aiCallStats.callbackRequested) || 0),
+              noDisposition: (humanCallStats?.noDisposition || 0) + (Number(aiCallStats.noDisposition) || 0),
             };
           }
         } catch (err) {
@@ -5537,9 +5744,15 @@ export function registerRoutes(app: Express) {
       const events = await query;
 
       // Get total count
+      const countWhere = eventType && typeof eventType === 'string'
+        ? and(
+            eq(schema.emailEvents.campaignId, campaignId),
+            eq(schema.emailEvents.type, eventType)
+          )
+        : eq(schema.emailEvents.campaignId, campaignId);
       const countResult = await db.select({ count: sql<number>`count(*)::int` })
         .from(schema.emailEvents)
-        .where(eq(schema.emailEvents.campaignId, campaignId));
+        .where(countWhere);
       
       const totalCount = countResult[0]?.count || 0;
 
@@ -5590,6 +5803,11 @@ export function registerRoutes(app: Express) {
       ].join("\n"));
     }
 
+    const callFlowSection = buildCallFlowPromptSection(data?.callFlow, data?.type || data?.campaignType);
+    if (callFlowSection) {
+      parts.push(callFlowSection.replace("### Campaign-Specific Call Flow (Highest Priority for Sequence)", "# Campaign Call Flow"));
+    }
+
     const scripts = data?.aiAgentSettings?.scripts;
     if (scripts) {
       parts.push([
@@ -5604,6 +5822,39 @@ export function registerRoutes(app: Express) {
 
     const result = parts.filter(Boolean).join("\n\n").trim();
     return result.length > 0 ? result : null;
+  };
+
+  const parsePositiveInteger = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null;
+    }
+    return Math.max(1, Math.floor(parsed));
+  };
+
+  const syncCampaignConcurrencySettings = (
+    payload: Record<string, any>,
+    options?: { existingAiSettings?: any; existingDialMode?: string | null }
+  ): void => {
+    const effectiveDialMode = payload.dialMode ?? options?.existingDialMode ?? null;
+    if (effectiveDialMode !== 'ai_agent') {
+      return;
+    }
+
+    const explicitWorkers = parsePositiveInteger(payload.maxConcurrentWorkers);
+    const aiSettingsMax = parsePositiveInteger(payload.aiAgentSettings?.maxConcurrentCalls);
+    const resolvedMax = explicitWorkers ?? aiSettingsMax;
+
+    if (!resolvedMax) {
+      return;
+    }
+
+    payload.maxConcurrentWorkers = resolvedMax;
+    payload.aiAgentSettings = {
+      ...(options?.existingAiSettings || {}),
+      ...(payload.aiAgentSettings || {}),
+      maxConcurrentCalls: resolvedMax,
+    };
   };
 
   app.post("/api/campaigns", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
@@ -5704,6 +5955,8 @@ export function registerRoutes(app: Express) {
         console.log(`[Campaign Create] Built aiAgentSettings with voice: ${campaignData.selectedVoice}`);
       }
 
+      syncCampaignConcurrencySettings(campaignData);
+
       const campaign = await storage.createCampaign(campaignData);
 
       // === AUTO-ASSIGN PHONE NUMBERS FROM POOL ===
@@ -5784,7 +6037,7 @@ export function registerRoutes(app: Express) {
           return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
         }
         // Restrict client updates to safe fields only
-        const allowedClientFields = ['aiAgentSettings', 'selectedVoice', 'openingScript', 'callScript', 'campaignObjective', 'productServiceInfo', 'talkingPoints', 'targetAudienceDescription', 'campaignObjections', 'successCriteria', 'qualificationQuestions'];
+        const allowedClientFields = ['aiAgentSettings', 'selectedVoice', 'openingScript', 'callScript', 'campaignObjective', 'productServiceInfo', 'talkingPoints', 'targetAudienceDescription', 'campaignObjections', 'successCriteria', 'qualificationQuestions', 'callFlow'];
         const requestedFields = Object.keys(updateData);
         const disallowedFields = requestedFields.filter(f => !allowedClientFields.includes(f));
         if (disallowedFields.length > 0) {
@@ -5909,6 +6162,11 @@ export function registerRoutes(app: Express) {
         };
         console.log(`[Campaign Update] Synced persona.voice to first assigned voice: "${firstVoice.id}" (${firstVoice.name}), total assigned: ${updateData.assignedVoices.length}`);
       }
+
+      syncCampaignConcurrencySettings(updateData, {
+        existingAiSettings: existingCampaign.aiAgentSettings,
+        existingDialMode: existingCampaign.dialMode,
+      });
       
       let campaign = await storage.updateCampaign(req.params.id, updateData);
       if (!campaign) {
@@ -6334,6 +6592,7 @@ export function registerRoutes(app: Express) {
         productServiceInfo: originalCampaign.productServiceInfo,
         campaignObjections: originalCampaign.campaignObjections,
         campaignContextBrief: originalCampaign.campaignContextBrief,
+        callFlow: originalCampaign.callFlow,
         callScript: originalCampaign.callScript,
         // Copy QA configuration
         qaParameters: originalCampaign.qaParameters,
@@ -6629,6 +6888,24 @@ export function registerRoutes(app: Express) {
           return res.status(400).json({
             message: sendErr instanceof Error ? sendErr.message : "Failed to send campaign",
           });
+        }
+      }
+
+      // === AUTO-CREATE JOURNEY PIPELINE FOR CLIENT ===
+      // The Pipeline Agent automatically creates a pipeline for each campaign
+      // so leads are captured and nurtured from the moment the campaign starts.
+      if (updated.clientAccountId) {
+        try {
+          const { autoCreatePipelineForCampaign } = await import("./services/ai-pipeline-agent");
+          const pipelineResult = await autoCreatePipelineForCampaign(req.params.id);
+          if (pipelineResult.created) {
+            console.log(`[LAUNCH CAMPAIGN] Pipeline Agent auto-created pipeline ${pipelineResult.pipelineId} for campaign ${req.params.id}`);
+          } else {
+            console.log(`[LAUNCH CAMPAIGN] Pipeline Agent skipped: ${pipelineResult.reason} (existing: ${pipelineResult.pipelineId || 'none'})`);
+          }
+        } catch (pipelineErr) {
+          // Non-fatal: campaign launches regardless of pipeline creation
+          console.error(`[LAUNCH CAMPAIGN] Pipeline auto-creation error (non-fatal):`, pipelineErr);
         }
       }
 
@@ -8326,7 +8603,9 @@ export function registerRoutes(app: Express) {
                   callAttemptId: callAttemptIdForProcessing || undefined,
                   contactName: contactName,
                   contactEmail: contact.email || undefined,
-                  accountName: contact.companyNorm || undefined,
+                  accountId: contact.accountId || (contact as any).account?.id || undefined,
+                  accountName: (contact as any).account?.name || contact.companyNorm || undefined,
+                  accountIndustry: (contact as any).account?.industryStandardized || undefined,
                   qaStatus: 'new',
                   qaDecision: null,
                   agentId: agentId,
@@ -9568,27 +9847,75 @@ export function registerRoutes(app: Express) {
       const recipient = eventData.recipient;
       const timestamp = new Date(eventData.timestamp * 1000);
       const campaignIdHeader = eventData.message?.headers?.['x-campaign-id'];
+      const userVariables = eventData['user-variables'] || {};
+      const sendIdHeader = userVariables.send_id || eventData.message?.headers?.['x-send-id'] || null;
       const bounceType = eventData.severity; // 'temporary' or 'permanent'
 
       console.log(`[Mailgun Webhook] ${eventType} - ${recipient} - Campaign: ${campaignIdHeader}`);
 
-      // Find contact by email
-      const contact = await db.select().from(schema.contacts)
-        .where(eq(schema.contacts.emailNormalized, recipient.toLowerCase()))
-        .limit(1);
-      const contactId = contact[0]?.id;
+      let resolvedSendId: string | null = null;
+      let resolvedCampaignId: string | null = campaignIdHeader || null;
+      let resolvedContactId: string | null = null;
+
+      if (sendIdHeader) {
+        const [send] = await db.select({
+          id: schema.emailSends.id,
+          campaignId: schema.emailSends.campaignId,
+          contactId: schema.emailSends.contactId,
+        })
+          .from(schema.emailSends)
+          .where(eq(schema.emailSends.id, sendIdHeader))
+          .limit(1);
+
+        if (send) {
+          resolvedSendId = send.id;
+          resolvedCampaignId = send.campaignId || resolvedCampaignId;
+          resolvedContactId = send.contactId || resolvedContactId;
+        }
+      }
+
+      if (!resolvedSendId && messageId) {
+        const [send] = await db.select({
+          id: schema.emailSends.id,
+          campaignId: schema.emailSends.campaignId,
+          contactId: schema.emailSends.contactId,
+        })
+          .from(schema.emailSends)
+          .where(eq(schema.emailSends.providerMessageId, messageId))
+          .limit(1);
+
+        if (send) {
+          resolvedSendId = send.id;
+          resolvedCampaignId = send.campaignId || resolvedCampaignId;
+          resolvedContactId = send.contactId || resolvedContactId;
+        }
+      }
+
+      if (!resolvedContactId && typeof recipient === 'string' && recipient.trim().length > 0) {
+        const [contact] = await db.select().from(schema.contacts)
+          .where(eq(schema.contacts.emailNormalized, recipient.toLowerCase()))
+          .limit(1);
+        resolvedContactId = contact?.id || null;
+      }
 
       // Store event in email_events table
       await db.insert(schema.emailEvents).values({
+        sendId: resolvedSendId,
         messageId,
-        campaignId: campaignIdHeader || null,
-        contactId: contactId || null,
+        campaignId: resolvedCampaignId,
+        contactId: resolvedContactId,
         recipient,
         type: eventType,
         bounceType: bounceType === 'permanent' ? 'hard' : bounceType === 'temporary' ? 'soft' : null,
         metadata: eventData,
         createdAt: timestamp,
       });
+
+      if (resolvedSendId && ['bounced', 'failed', 'complained'].includes(eventType)) {
+        await db.update(schema.emailSends)
+          .set({ status: 'bounced' })
+          .where(eq(schema.emailSends.id, resolvedSendId));
+      }
 
       // Handle automatic suppression for hard bounces, unsubscribes, and spam complaints
       const shouldSuppress = 
@@ -9613,15 +9940,15 @@ export function registerRoutes(app: Express) {
             email: recipient,
             emailNormalized: recipient.toLowerCase(),
             reason: suppressionReason,
-            campaignId: campaignIdHeader || null,
-            contactId: contactId || null,
+            campaignId: resolvedCampaignId,
+            contactId: resolvedContactId,
             metadata: { event: eventType, timestamp },
           });
 
           console.log(`[Mailgun Webhook] Added ${recipient} to suppression list (${suppressionReason})`);
 
           // Update contact record
-          if (contactId) {
+          if (resolvedContactId) {
             const updateData: any = {};
             if (eventType === 'bounced') {
               updateData.emailStatus = 'bounced';
@@ -9639,7 +9966,7 @@ export function registerRoutes(app: Express) {
 
             await db.update(schema.contacts)
               .set(updateData)
-              .where(eq(schema.contacts.id, contactId));
+              .where(eq(schema.contacts.id, resolvedContactId));
           }
         }
       }
@@ -15562,6 +15889,7 @@ Provide JSON response with:
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
   app.use("/api/agent-panel/orders", agentPanelOrdersRouter); // Mount order flow routes
+  app.use("/api/deep-research", deepResearchRouter);
   app.use("/api/agent-defaults", agentDefaultsRouter);
   app.use("/api/ai-governance", aiGovernanceRouter);
   app.use("/api/voice-engine", voiceEngineRouter);
@@ -15595,10 +15923,12 @@ Provide JSON response with:
         // If end_call includes disposition + transcript, process it
         if (callAttemptId && data?.disposition) {
           const { processDisposition } = await import('./services/disposition-engine');
+          const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
           console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}`, {
             hasTranscript: !!data?.transcript,
             callDurationSeconds: data?.callDurationSeconds,
           });
+          let durationToSet = data?.callDurationSeconds;
           if (data?.callDurationSeconds) {
             try {
               await db.update(dialerCallAttempts)
@@ -15608,14 +15938,47 @@ Provide JSON response with:
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
           }
-          await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
+          const dispositionResult = await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
             transcript: data?.transcript || undefined,
             structuredTranscript: data?.structuredTranscript || undefined,
           });
+          try {
+            // Parse turns from structuredTranscript OR fall back to plain transcript string
+            let rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            if (rawTurns.length === 0 && typeof data?.transcript === 'string' && data.transcript.trim()) {
+              // Parse "Agent: text\nContact: text" format into structured turns
+              rawTurns = data.transcript.split('\n')
+                .filter((line: string) => line.trim())
+                .map((line: string) => {
+                  const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+                  if (match) return { role: match[1].toLowerCase() === 'agent' ? 'agent' : 'contact', text: match[2].trim() };
+                  return null;
+                })
+                .filter(Boolean);
+            }
+            await processSIPPostCallAnalysis({
+              callAttemptId,
+              leadId: dispositionResult?.leadId,
+              campaignId: data?.context?.campaignId || '',
+              contactName: data?.context?.contactName || data?.context?.contactFirstName,
+              disposition: data.disposition,
+              turnTranscript: rawTurns
+                .map((turn: any) => ({
+                  speaker: turn?.role === 'agent' ? 'agent' : 'contact',
+                  text: String(turn?.text || '').trim(),
+                }))
+                .filter((turn: { text: string }) => turn.text),
+              callDurationSeconds: durationToSet || 0,
+              agentNotes: 'media_bridge end_call callback',
+            });
+          } catch (postCallErr) {
+            console.error(`[MediaBridge Callback] SIP post-call handler failed for ${callId} (non-fatal):`, postCallErr);
+          }
         }
       } else if (action === 'submit_disposition') {
         // Process disposition via the disposition engine
         const { processDisposition } = await import('./services/disposition-engine');
+        const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
         const disposition = data?.disposition || 'no_answer';
         console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`, {
           hasTranscript: !!data?.transcript,
@@ -15653,10 +16016,41 @@ Provide JSON response with:
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
           }
-          await processDisposition(callAttemptId, disposition, 'media_bridge', {
+          const dispositionResult = await processDisposition(callAttemptId, disposition, 'media_bridge', {
             transcript: data?.transcript || undefined,
             structuredTranscript: data?.structuredTranscript || undefined,
           });
+          try {
+            // Parse turns from structuredTranscript OR fall back to plain transcript string
+            let rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+            if (rawTurns.length === 0 && typeof data?.transcript === 'string' && data.transcript.trim()) {
+              rawTurns = data.transcript.split('\n')
+                .filter((line: string) => line.trim())
+                .map((line: string) => {
+                  const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+                  if (match) return { role: match[1].toLowerCase() === 'agent' ? 'agent' : 'contact', text: match[2].trim() };
+                  return null;
+                })
+                .filter(Boolean);
+            }
+            await processSIPPostCallAnalysis({
+              callAttemptId,
+              leadId: dispositionResult?.leadId,
+              campaignId: data?.context?.campaignId || '',
+              contactName: data?.context?.contactName || data?.context?.contactFirstName,
+              disposition,
+              turnTranscript: rawTurns
+                .map((turn: any) => ({
+                  speaker: turn?.role === 'agent' ? 'agent' : 'contact',
+                  text: String(turn?.text || '').trim(),
+                }))
+                .filter((turn: { text: string }) => turn.text),
+              callDurationSeconds: durationToSet || 0,
+              agentNotes: 'media_bridge submit_disposition callback',
+            });
+          } catch (postCallErr) {
+            console.error(`[MediaBridge Callback] SIP post-call handler failed for ${callId} (non-fatal):`, postCallErr);
+          }
         }
       }
 
@@ -16020,6 +16414,9 @@ Provide JSON response with:
   app.use('/api/client-portal/qualified-leads', clientPortalQualifiedLeadsRouter);
   app.use('/api', qaGatedContentRouter);
 
+  // ==================== CAMPAIGN-PIPELINE ORCHESTRATOR ====================
+  app.use('/api/campaign-pipeline', requireAuth, campaignPipelineRouter);
+
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);
   app.use('/api/campaigns', requireAuth, campaignEmailRouter);
@@ -16133,6 +16530,7 @@ Provide JSON response with:
   app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
 
   // ==================== EMAIL & DELIVERABILITY ====================
+  app.use('/api/email-management', requireAuth, emailManagementRouter);
   app.use('/api/domains', requireAuth, domainManagementRouter);
   app.use('/api/deliverability', requireAuth, deliverabilityRouter);
   app.use('/api/email', requireAuth, unifiedEmailRoutes);

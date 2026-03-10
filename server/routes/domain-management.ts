@@ -23,8 +23,30 @@ import {
 import { domainValidator } from '../services/domain-validator';
 import { blacklistMonitorService } from '../services/blacklist-monitor';
 import { deliverabilityScorer } from '../services/deliverability-scorer';
+import {
+  bindDomainToCampaignEmailProvider,
+  generateDnsRecordsForCampaignEmailProvider,
+  getCampaignEmailProvider,
+  getCampaignEmailProviderBindingForDomain,
+  getDomainValidationExpectations,
+  listCampaignEmailProviders,
+} from '../services/campaign-email-provider-service';
 
 const router = Router();
+
+async function resolveSelectedCampaignProvider(providerId?: string | null, providerKey?: string | null) {
+  if (providerId) {
+    return getCampaignEmailProvider(providerId);
+  }
+
+  const normalizedKey = (providerKey || '').trim().toLowerCase();
+  if (!normalizedKey) {
+    return null;
+  }
+
+  const providers = await listCampaignEmailProviders();
+  return providers.find((provider) => provider.providerKey === normalizedKey) || null;
+}
 
 // =============================================================================
 // Domain CRUD Operations
@@ -66,11 +88,15 @@ router.get('/', async (req: Request, res: Response) => {
           .orderBy(desc(domainHealthScores.scoredAt))
           .limit(1);
 
+        const campaignProvider = await getCampaignEmailProviderBindingForDomain(d.id);
+
         return {
           ...d,
           configuration: config[0] || null,
           healthScore: health[0]?.overallScore || null,
           warmupPhase: health[0]?.warmupPhase || 'not_started',
+          campaignProvider,
+          campaignProviderId: campaignProvider?.id || null,
         };
       })
     );
@@ -119,11 +145,15 @@ router.get('/:id', async (req: Request, res: Response) => {
       .where(eq(domainWarmupSchedule.domainAuthId, parseInt(id)))
       .orderBy(domainWarmupSchedule.day);
 
+    const campaignProvider = await getCampaignEmailProviderBindingForDomain(parseInt(id));
+
     res.json({
       domain: domain[0],
       configuration: config[0] || null,
       healthScore: health[0] || null,
       warmupSchedule,
+      campaignProvider,
+      campaignProviderId: campaignProvider?.id || null,
     });
   } catch (error: any) {
     console.error('Error fetching domain:', error);
@@ -141,7 +171,9 @@ router.post('/', async (req: Request, res: Response) => {
       domain: z.string().min(1),
       subdomain: z.string().optional(),
       purpose: z.enum(['marketing', 'transactional', 'both']).default('both'),
-      provider: z.enum(['mailgun', 'ses', 'sendgrid', 'custom']).default('mailgun'),
+      provider: z.enum(['mailgun', 'brevo', 'ses', 'sendgrid', 'custom']).default('mailgun'),
+      providerId: z.string().optional().nullable(),
+      providerKey: z.string().optional().nullable(),
       region: z.enum(['US', 'EU']).default('US'),
     });
 
@@ -174,14 +206,16 @@ router.post('/', async (req: Request, res: Response) => {
     const dkimSelector = generateDkimSelector(data.domain);
     const secureCode = generateSecureCode();
 
-    const dnsRecords = domainDnsGenerator.generateAllDnsRecords({
+    const selectedProvider = await resolveSelectedCampaignProvider(data.providerId, data.providerKey || data.provider);
+    const dnsRecords = await generateDnsRecordsForCampaignEmailProvider({
+      providerId: selectedProvider?.id || data.providerId || undefined,
+      providerKey: selectedProvider?.providerKey || data.providerKey || data.provider,
       domain: data.domain,
       subdomain: data.subdomain,
-      provider: data.provider,
       region: data.region,
       dkimSelector,
       includeTracking: true,
-      dmarcPolicy: 'none', // Start with monitoring
+      dmarcPolicy: 'none',
     });
 
     // Create configuration record
@@ -201,6 +235,8 @@ router.post('/', async (req: Request, res: Response) => {
       mailgunRegion: data.region,
     });
 
+    await bindDomainToCampaignEmailProvider(newDomain.id, selectedProvider?.id || data.providerId || null);
+
     // Initialize blacklist monitors
     await blacklistMonitorService.initializeDomainMonitors(newDomain.id, data.domain);
 
@@ -214,6 +250,8 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(201).json({
       domain: newDomain,
       dnsRecords: domainDnsGenerator.formatDnsRecordsForDisplay(dnsRecords),
+      campaignProvider: selectedProvider,
+      campaignProviderId: selectedProvider?.id || data.providerId || null,
     });
   } catch (error: any) {
     console.error('Error creating domain:', error);
@@ -264,7 +302,9 @@ router.post('/:id/generate-records', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const schema = z.object({
-      provider: z.enum(['mailgun', 'ses', 'sendgrid', 'custom']).optional(),
+      provider: z.enum(['mailgun', 'brevo', 'ses', 'sendgrid', 'custom']).optional(),
+      providerId: z.string().optional().nullable(),
+      providerKey: z.string().optional().nullable(),
       region: z.enum(['US', 'EU']).optional(),
       dmarcPolicy: z.enum(['none', 'quarantine', 'reject']).optional(),
       includeTracking: z.boolean().optional(),
@@ -290,10 +330,12 @@ router.post('/:id/generate-records', async (req: Request, res: Response) => {
 
     const dkimSelector = config[0]?.generatedDkimSelector || generateDkimSelector(domain[0].domain);
 
-    const dnsRecords = domainDnsGenerator.generateAllDnsRecords({
+    const selectedProvider = await resolveSelectedCampaignProvider(options.providerId, options.providerKey || options.provider);
+    const dnsRecords = await generateDnsRecordsForCampaignEmailProvider({
+      providerId: selectedProvider?.id || options.providerId || undefined,
+      providerKey: selectedProvider?.providerKey || options.providerKey || options.provider || 'mailgun',
       domain: domain[0].domain,
       subdomain: config[0]?.subdomain || undefined,
-      provider: options.provider || 'mailgun',
       region: options.region || (config[0]?.mailgunRegion as 'US' | 'EU') || 'US',
       dkimSelector,
       includeTracking: options.includeTracking ?? true,
@@ -313,6 +355,10 @@ router.post('/:id/generate-records', async (req: Request, res: Response) => {
           updatedAt: new Date(),
         })
         .where(eq(domainConfiguration.domainAuthId, parseInt(id)));
+    }
+
+    if (options.providerId !== undefined) {
+      await bindDomainToCampaignEmailProvider(parseInt(id), options.providerId || null);
     }
 
     res.json(domainDnsGenerator.formatDnsRecordsForDisplay(dnsRecords));
@@ -351,13 +397,20 @@ router.post('/:id/validate', async (req: Request, res: Response) => {
       .limit(1);
 
     const dkimSelector = config[0]?.generatedDkimSelector || 'default';
+    const boundProvider = await getCampaignEmailProviderBindingForDomain(parseInt(id));
+    const expectations = await getDomainValidationExpectations(
+      boundProvider?.id || null,
+      boundProvider?.providerKey || 'mailgun'
+    );
 
     // Run validation
     const validation = await domainValidator.validateDomain({
       domain: domain[0].domain,
       dkimSelector,
-      expectedSpfIncludes: ['mailgun.org'], // Could be dynamic based on provider
-      trackingSubdomain: 'email',
+      expectedSpfIncludes: expectations.expectedSpfIncludes,
+      expectedDkimTarget: expectations.expectedDkimTarget,
+      expectedDmarcPolicy: expectations.expectedDmarcPolicy,
+      trackingSubdomain: expectations.trackingSubdomain,
     });
 
     // Update domain status
@@ -391,6 +444,81 @@ router.post('/:id/validate', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error validating domain:', error);
     res.status(500).json({ error: 'Failed to validate domain' });
+  }
+});
+
+router.post('/:id/provider-binding', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const schema = z.object({
+      providerId: z.string().nullable().optional(),
+      providerKey: z.string().nullable().optional(),
+      regenerateRecords: z.boolean().default(true),
+    });
+
+    const data = schema.parse(req.body);
+    const domainId = parseInt(id);
+
+    const [domain] = await db
+      .select()
+      .from(domainAuth)
+      .where(eq(domainAuth.id, domainId))
+      .limit(1);
+
+    if (!domain) {
+      return res.status(404).json({ error: 'Domain not found' });
+    }
+
+    const [config] = await db
+      .select()
+      .from(domainConfiguration)
+      .where(eq(domainConfiguration.domainAuthId, domainId))
+      .limit(1);
+
+    const selectedProvider = await resolveSelectedCampaignProvider(data.providerId, data.providerKey);
+    await bindDomainToCampaignEmailProvider(domainId, selectedProvider?.id || data.providerId || null);
+
+    let dnsRecords = null;
+    if (data.regenerateRecords) {
+      const dkimSelector = config?.generatedDkimSelector || generateDkimSelector(domain.domain);
+      dnsRecords = await generateDnsRecordsForCampaignEmailProvider({
+        providerId: selectedProvider?.id || data.providerId || undefined,
+        providerKey: selectedProvider?.providerKey || data.providerKey || 'mailgun',
+        domain: domain.domain,
+        subdomain: config?.subdomain || undefined,
+        region: (config?.mailgunRegion as 'US' | 'EU') || 'US',
+        dkimSelector,
+        includeTracking: true,
+        dmarcPolicy: 'none',
+      });
+
+      if (config) {
+        await db
+          .update(domainConfiguration)
+          .set({
+            generatedSpfRecord: dnsRecords.spf.value,
+            generatedDkimSelector: dkimSelector,
+            generatedDkimRecord: dnsRecords.dkim.value,
+            generatedDmarcRecord: dnsRecords.dmarc.value,
+            generatedTrackingCname: dnsRecords.tracking?.value || null,
+            updatedAt: new Date(),
+          })
+          .where(eq(domainConfiguration.domainAuthId, domainId));
+      }
+    }
+
+    res.json({
+      success: true,
+      campaignProvider: selectedProvider,
+      campaignProviderId: selectedProvider?.id || data.providerId || null,
+      dnsRecords: dnsRecords ? domainDnsGenerator.formatDnsRecordsForDisplay(dnsRecords) : null,
+    });
+  } catch (error: any) {
+    console.error('Error updating domain provider binding:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to update domain provider binding' });
   }
 });
 

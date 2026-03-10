@@ -90,10 +90,11 @@ export function getEnforcedProvider(): VoiceProviderType {
 
 export function isEnforcedProvider(provider: string): boolean {
   const normalized = provider.toLowerCase().trim();
-  return ["google", "gemini", "gemini_live", "openai"].includes(normalized);
+  return ["google", "gemini", "gemini_live", "openai", "kimi", "moonshot"].includes(normalized);
 }
 
 export function getOppositeProvider(provider: VoiceProviderType): VoiceProviderType {
+  if (provider === "kimi") return "google"; // Kimi falls back to Google
   return provider === "google" ? "openai" : "google";
 }
 

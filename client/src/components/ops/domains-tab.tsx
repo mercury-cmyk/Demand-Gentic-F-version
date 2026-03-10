@@ -44,6 +44,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { apiJsonRequest } from '@/lib/queryClient';
 
 interface DomainMapping {
   id: string;
@@ -148,27 +149,19 @@ export default function DomainsTab() {
     }
 
     try {
-      const response = await fetch('/api/ops/domains', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newDomain),
+      await apiJsonRequest<Record<string, unknown>>('POST', '/api/ops/domains', newDomain);
+      setSelectedDomain({
+        id: Math.random().toString(),
+        ...newDomain,
+        httpStatus: 0,
+        sslStatus: 'PENDING',
+        sslExpiry: new Date(),
+        dnsStatus: 'PENDING',
+        createdAt: new Date(),
+        lastChecked: new Date(),
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSelectedDomain({
-          id: Math.random().toString(),
-          ...newDomain,
-          httpStatus: 0,
-          sslStatus: 'PENDING',
-          sslExpiry: new Date(),
-          dnsStatus: 'PENDING',
-          createdAt: new Date(),
-          lastChecked: new Date(),
-        });
-        setShowDNSDialog(true);
-        setNewDomain({ domain: '', cloudRunService: '', environment: 'prod' });
-      }
+      setShowDNSDialog(true);
+      setNewDomain({ domain: '', cloudRunService: '', environment: 'prod' });
     } catch (error) {
       console.error('Failed to add domain:', error);
     }
@@ -178,15 +171,10 @@ export default function DomainsTab() {
     if (!selectedDomain) return;
 
     try {
-      const response = await fetch(`/api/ops/domains/${selectedDomain.domain}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        await fetchDomains();
-        setShowDeleteDialog(false);
-        setSelectedDomain(null);
-      }
+      await apiJsonRequest<Record<string, unknown>>('DELETE', `/api/ops/domains/${selectedDomain.domain}`);
+      await fetchDomains();
+      setShowDeleteDialog(false);
+      setSelectedDomain(null);
     } catch (error) {
       console.error('Failed to delete domain:', error);
     }
@@ -194,13 +182,8 @@ export default function DomainsTab() {
 
   const handleRenewSSL = async (domain: DomainMapping) => {
     try {
-      const response = await fetch(`/api/ops/domains/${domain.domain}/ssl/renew`, {
-        method: 'POST',
-      });
-
-      if (response.ok) {
-        await fetchDomains();
-      }
+      await apiJsonRequest<Record<string, unknown>>('POST', `/api/ops/domains/${domain.domain}/ssl/renew`, {});
+      await fetchDomains();
     } catch (error) {
       console.error('Failed to renew SSL:', error);
     }

@@ -21,7 +21,7 @@ import {
   callSessions,
   leads,
 } from "@shared/schema";
-import { eq, and, sql, gte } from "drizzle-orm";
+import { eq, and, sql, gte, isNull } from "drizzle-orm";
 
 const LOG_PREFIX = "[BatchTranscriptionSweep]";
 const SWEEP_BATCH_SIZE = 20;
@@ -312,4 +312,301 @@ async function processOneCall(call: {
   }
 
   return { transcribed: true, analyzed, skipped: false };
+}
+
+/**
+ * Sweep for orphan call_sessions that have recordings but aren't linked to any
+ * dialer_call_attempt via call_session_id. This happens with SIP calls where
+ * the Telnyx recording sync creates a new session instead of updating the
+ * existing linked one.
+ *
+ * Strategy: Find orphan sessions with recordings, try to match them to attempts
+ * via campaign_id + contact_id + time window, then link them and queue for
+ * transcription.
+ */
+export async function sweepOrphanRecordingSessions(): Promise<SweepResult> {
+  const result: SweepResult = { processed: 0, transcribed: 0, analyzed: 0, failed: 0, skipped: 0 };
+
+  try {
+    const lookbackDate = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    const gracePeriod = new Date(Date.now() - 10 * 60 * 1000); // 10 min grace
+
+    // Find orphan sessions: have recording, >20s, not linked to any attempt
+    const orphanSessions = await db.execute(sql`
+      SELECT cs.id as session_id, cs.recording_url, cs.recording_s3_key,
+             cs.duration_sec, cs.campaign_id, cs.contact_id,
+             cs.to_number_e164, cs.started_at
+      FROM call_sessions cs
+      WHERE cs.recording_url IS NOT NULL
+        AND cs.duration_sec >= ${MIN_CALL_DURATION_SEC}
+        AND cs.created_at >= ${lookbackDate}
+        AND cs.created_at < ${gracePeriod}
+        AND (cs.ai_transcript IS NULL OR LENGTH(cs.ai_transcript) < 20)
+        AND NOT EXISTS (
+          SELECT 1 FROM dialer_call_attempts ca WHERE ca.call_session_id = cs.id
+        )
+      ORDER BY cs.created_at DESC
+      LIMIT ${SWEEP_BATCH_SIZE}
+    `);
+
+    const rows = (orphanSessions as any).rows || orphanSessions;
+    if (!rows || rows.length === 0) return result;
+
+    console.log(`${LOG_PREFIX} Found ${rows.length} orphan sessions with recordings to link`);
+
+    for (const orphan of rows) {
+      result.processed++;
+      try {
+        // Try to find matching attempt via campaign + contact + time window
+        let attemptId: string | null = null;
+        let attemptSessionId: string | null = null;
+
+        if (orphan.campaign_id && orphan.contact_id) {
+          const windowStart = new Date(new Date(orphan.started_at).getTime() - 120_000);
+          const windowEnd = new Date(new Date(orphan.started_at).getTime() + 120_000);
+
+          const [match] = await db
+            .select({
+              id: dialerCallAttempts.id,
+              callSessionId: dialerCallAttempts.callSessionId,
+              disposition: dialerCallAttempts.disposition,
+              fullTranscript: dialerCallAttempts.fullTranscript,
+            })
+            .from(dialerCallAttempts)
+            .where(
+              and(
+                eq(dialerCallAttempts.campaignId, orphan.campaign_id),
+                eq(dialerCallAttempts.contactId, orphan.contact_id),
+                sql`${dialerCallAttempts.createdAt} >= ${windowStart}`,
+                sql`${dialerCallAttempts.createdAt} <= ${windowEnd}`,
+              )
+            )
+            .limit(1);
+
+          if (match) {
+            attemptId = match.id;
+            attemptSessionId = match.callSessionId;
+
+            // Link the recording to the attempt's existing session if possible
+            if (attemptSessionId) {
+              // Copy recording URL to the linked session
+              await db
+                .update(callSessions)
+                .set({
+                  recordingUrl: orphan.recording_url,
+                  recordingS3Key: orphan.recording_s3_key,
+                  recordingDurationSec: orphan.duration_sec,
+                  recordingStatus: 'stored',
+                })
+                .where(eq(callSessions.id, attemptSessionId));
+
+              console.log(`${LOG_PREFIX} Linked orphan recording to existing session ${attemptSessionId} (attempt ${attemptId?.substring(0, 8)})`);
+            } else {
+              // Attempt has no session — link the orphan session directly
+              await db
+                .update(dialerCallAttempts)
+                .set({ callSessionId: orphan.session_id, updatedAt: new Date() })
+                .where(eq(dialerCallAttempts.id, attemptId));
+
+              attemptSessionId = orphan.session_id;
+              console.log(`${LOG_PREFIX} Linked orphan session ${orphan.session_id} to attempt ${attemptId?.substring(0, 8)}`);
+            }
+
+            // Now transcribe if missing
+            const sessionToTranscribe = attemptSessionId || orphan.session_id;
+            const recordingUrl = orphan.recording_url;
+
+            if (recordingUrl && (!match.fullTranscript || match.fullTranscript.length < 20)) {
+              try {
+                const { transcribeRecording } = await import("./telnyx-transcription");
+                const txResult = await transcribeRecording(recordingUrl);
+
+                if (txResult.success && txResult.text.trim()) {
+                  // Store on attempt
+                  await db
+                    .update(dialerCallAttempts)
+                    .set({ fullTranscript: txResult.text, updatedAt: new Date() })
+                    .where(eq(dialerCallAttempts.id, attemptId));
+
+                  // Store on session
+                  await db
+                    .update(callSessions)
+                    .set({ aiTranscript: txResult.text })
+                    .where(eq(callSessions.id, sessionToTranscribe));
+
+                  result.transcribed++;
+
+                  // Run analysis
+                  try {
+                    const { runPostCallAnalysis } = await import("./post-call-analyzer");
+                    const analysis = await runPostCallAnalysis(sessionToTranscribe, {
+                      callAttemptId: attemptId,
+                      campaignId: orphan.campaign_id || undefined,
+                      contactId: orphan.contact_id || undefined,
+                      callDurationSec: orphan.duration_sec || undefined,
+                      disposition: (match.disposition || undefined) as string | undefined,
+                      geminiTranscript: txResult.text,
+                    });
+                    if (analysis.success) result.analyzed++;
+                  } catch (analysisErr: any) {
+                    console.warn(`${LOG_PREFIX} Analysis error for orphan ${orphan.session_id}: ${analysisErr.message}`);
+                  }
+                }
+              } catch (txErr: any) {
+                console.warn(`${LOG_PREFIX} Transcription error for orphan ${orphan.session_id}: ${txErr.message}`);
+                result.failed++;
+              }
+            } else {
+              result.skipped++;
+            }
+          } else {
+            result.skipped++;
+          }
+        } else {
+          result.skipped++;
+        }
+      } catch (err: any) {
+        console.warn(`${LOG_PREFIX} Error processing orphan ${orphan.session_id}: ${err.message}`);
+        result.failed++;
+      }
+    }
+
+    if (result.transcribed > 0 || result.failed > 0) {
+      console.log(
+        `${LOG_PREFIX} Orphan sweep: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed, ${result.skipped} skipped out of ${result.processed}`
+      );
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Orphan sweep error:`, error);
+  }
+
+  return result;
+}
+
+/**
+ * Sweep call_sessions directly (without requiring dialer_call_attempts).
+ * This catches bulk-imported calls or sessions where no attempt record was linked.
+ */
+export async function sweepCallSessionsDirect(): Promise<SweepResult> {
+  const result: SweepResult = { processed: 0, transcribed: 0, analyzed: 0, failed: 0, skipped: 0 };
+
+  try {
+    const lookbackDate = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    const gracePeriod = new Date(Date.now() - 5 * 60 * 1000);
+
+    const untranscribedSessions = await db
+      .select({
+        id: callSessions.id,
+        campaignId: callSessions.campaignId,
+        contactId: callSessions.contactId,
+        durationSec: callSessions.durationSec,
+        aiDisposition: callSessions.aiDisposition,
+        recordingUrl: callSessions.recordingUrl,
+        recordingS3Key: callSessions.recordingS3Key,
+      })
+      .from(callSessions)
+      .where(
+        and(
+          sql`${callSessions.durationSec} >= ${MIN_CALL_DURATION_SEC}`,
+          sql`(${callSessions.aiTranscript} IS NULL OR LENGTH(${callSessions.aiTranscript}) < 20)`,
+          sql`(${callSessions.recordingUrl} IS NOT NULL OR ${callSessions.recordingS3Key} IS NOT NULL)`,
+          gte(callSessions.startedAt, lookbackDate),
+          sql`${callSessions.startedAt} < ${gracePeriod}`,
+        )
+      )
+      .orderBy(sql`${callSessions.startedAt} DESC`)
+      .limit(SWEEP_BATCH_SIZE);
+
+    if (untranscribedSessions.length === 0) {
+      return result;
+    }
+
+    console.log(`${LOG_PREFIX} [DirectSweep] Found ${untranscribedSessions.length} untranscribed call sessions to process`);
+
+    for (let i = 0; i < untranscribedSessions.length; i += SWEEP_CONCURRENCY) {
+      const batch = untranscribedSessions.slice(i, i + SWEEP_CONCURRENCY);
+
+      const batchResults = await Promise.allSettled(
+        batch.map(async (session) => {
+          try {
+            const { runPostCallAnalysis } = await import("./post-call-analyzer");
+            const analysisResult = await runPostCallAnalysis(session.id, {
+              campaignId: session.campaignId || undefined,
+              contactId: session.contactId || undefined,
+              callDurationSec: session.durationSec || undefined,
+              disposition: session.aiDisposition || undefined,
+            });
+            return { transcribed: analysisResult.success && !analysisResult.skipped, analyzed: analysisResult.success };
+          } catch (err: any) {
+            console.error(`${LOG_PREFIX} [DirectSweep] Error processing session ${session.id}: ${err.message}`);
+            return { transcribed: false, analyzed: false };
+          }
+        })
+      );
+
+      for (const batchResult of batchResults) {
+        result.processed++;
+        if (batchResult.status === "fulfilled") {
+          if (batchResult.value.transcribed) result.transcribed++;
+          if (batchResult.value.analyzed) result.analyzed++;
+          if (!batchResult.value.transcribed) result.failed++;
+        } else {
+          result.failed++;
+        }
+      }
+    }
+
+    if (result.transcribed > 0 || result.failed > 0) {
+      console.log(
+        `${LOG_PREFIX} [DirectSweep] Complete: ${result.transcribed} transcribed, ${result.analyzed} analyzed, ${result.failed} failed out of ${result.processed}`
+      );
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} [DirectSweep] Error:`, error);
+  }
+
+  return result;
+}
+
+/**
+ * Mark stale ring-out call attempts as 'no_answer'.
+ * These are calls where the phone rang but nobody picked up — they have
+ * NULL disposition, connected=false, 0 duration, and no call_ended_at.
+ * The orchestrator sometimes doesn't finalize these.
+ */
+export async function sweepStaleRingOuts(): Promise<{ marked: number }> {
+  try {
+    // Only process calls older than 30 minutes (give normal pipeline time to finalize)
+    const staleThreshold = new Date(Date.now() - 30 * 60 * 1000);
+    // Don't go back more than 3 days
+    const lookbackDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+    const updated = await db
+      .update(dialerCallAttempts)
+      .set({
+        disposition: 'no_answer',
+        dispositionProcessed: true,
+        callEndedAt: sql`created_at`, // Use created_at as approximate end time
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          isNull(dialerCallAttempts.disposition),
+          eq(dialerCallAttempts.connected, false),
+          sql`${dialerCallAttempts.callDurationSeconds} = 0 OR ${dialerCallAttempts.callDurationSeconds} IS NULL`,
+          sql`${dialerCallAttempts.createdAt} < ${staleThreshold}`,
+          gte(dialerCallAttempts.createdAt, lookbackDate),
+        )
+      )
+      .returning({ id: dialerCallAttempts.id });
+
+    if (updated.length > 0) {
+      console.log(`${LOG_PREFIX} Ring-out sweep: marked ${updated.length} stale ring-outs as no_answer`);
+    }
+
+    return { marked: updated.length };
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Ring-out sweep error:`, error);
+    return { marked: 0 };
+  }
 }

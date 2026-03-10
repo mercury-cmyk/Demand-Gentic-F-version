@@ -11,7 +11,8 @@
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --target=node20 --splitting --outdir=dist/server",
     "start": "cross-env NODE_ENV=production node dist/server/index.js",
     "check": "tsc",
-    "db:push": "drizzle-kit push",
+    "db:push": "tsx scripts/db-push.ts",
+    "db:run-sql": "tsx scripts/run-migration.ts",
     "db:clone:prod-to-dev": "tsx scripts/clone-prod-to-dev.ts --yes",
     "fix-audio": "tsx fix-audio-one-command.ts",
     "diagnose-audio": "tsx diagnose-audio.ts",
@@ -21,8 +22,8 @@
     "verify:unified-voice-readonly": "tsx scripts/verify-unified-voice-readonly.ts",
     "start:gemini-relay": "tsx server/gemini-relay.ts",
     "vector:backfill": "tsx scripts/backfill-vector-documents.ts",
-    "recordings:backfill:showcase": "tsx scripts/backfill-showcase-recordings.ts"
-    ,"queue:invalid-lrn": "tsx scripts/cleanup-invalid-lrn-queue.ts"
+    "recordings:backfill:showcase": "tsx scripts/backfill-showcase-recordings.ts",
+    "queue:invalid-lrn": "tsx scripts/cleanup-invalid-lrn-queue.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
@@ -42,6 +43,7 @@
     "@google-cloud/storage": "^7.18.0",
     "@google-cloud/text-to-speech": "^6.4.0",
     "@google-cloud/vertexai": "^1.10.0",
+    "@google-cloud/workstations": "^2.2.1",
     "@google/genai": "^1.29.0",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",

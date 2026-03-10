@@ -20,6 +20,8 @@ import {
   Building2,
   Rocket,
   Target,
+  Search,
+  Code2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -602,6 +604,18 @@ function WelcomeMessage({
             description="Lead quality check"
             onClick={() => dispatchQuickAction('Check the quality of leads generated today')}
           />
+          <WelcomeActionCard
+            icon={Search}
+            title="Deep Research"
+            description="Market & competitive intel"
+            onClick={() => dispatchQuickAction('Deep research: analyze the competitive landscape and market trends for our industry')}
+          />
+          <WelcomeActionCard
+            icon={Code2}
+            title="Code Assist"
+            description="AI code generation"
+            onClick={() => dispatchQuickAction('Help me write code for a new API endpoint')}
+          />
         </div>
       )}
 
@@ -619,6 +633,18 @@ function WelcomeMessage({
               title="Org Intel"
               description="Analyze accounts"
               onClick={() => dispatchQuickAction('Analyze recently active accounts for intent')}
+            />
+            <WelcomeActionCard
+              icon={Search}
+              title="Deep Research"
+              description="Market & competitive intel"
+              onClick={() => dispatchQuickAction('Deep research: comprehensive market analysis and industry trends')}
+            />
+            <WelcomeActionCard
+              icon={Code2}
+              title="Code Assist"
+              description="AI code generation"
+              onClick={() => dispatchQuickAction('Help me implement a new feature with code')}
             />
         </div>
       )}

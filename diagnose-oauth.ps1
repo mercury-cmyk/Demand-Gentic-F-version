@@ -33,12 +33,15 @@ try {
 }
 
 try {
-    $clientSecretSecret = gcloud secrets versions access latest --secret="GOOGLE_CLIENT_SECRET" --project=$projectId 2>&1
+    $clientSecretResult = gcloud secrets versions access latest --secret="GOOGLE_CLIENT_SECRET" --project=$projectId 2>&1
+    $clientSecretOutput = ($clientSecretResult | Out-String).Trim()
     if ($LASTEXITCODE -eq 0) {
+        $clientSecretSummary = if ($clientSecretOutput) { "[configured]" } else { "[empty response]" }
         Write-Host "   ✅ GOOGLE_CLIENT_SECRET exists" -ForegroundColor Green
-        Write-Host "      Length: $($clientSecretSecret.Length) chars"
+        Write-Host "      Value: $clientSecretSummary"
     } else {
         Write-Host "   ❌ GOOGLE_CLIENT_SECRET not found or access denied" -ForegroundColor Red
+        Write-Host "      Error: $clientSecretOutput"
     }
 } catch {
     Write-Host "   ❌ Error checking GOOGLE_CLIENT_SECRET: $_" -ForegroundColor Red

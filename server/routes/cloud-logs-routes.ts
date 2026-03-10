@@ -3,11 +3,23 @@
  * Endpoints for accessing Google Cloud Run logs in internal dashboard
  */
 
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { cloudLoggingService } from '../services/cloud-logging-service';
+import { getOpsOverview } from '../services/ops/runtime';
+import { vmLogService } from '../services/vm-log-service';
 import { requireAuth } from '../auth';
 
 const router = Router();
+
+async function useVmLogs(): Promise<boolean> {
+  const overview = await getOpsOverview();
+  return overview.deploymentTarget === 'vm';
+}
+
+function getRequestedService(req: Request): string | undefined {
+  const service = typeof req.query.service === 'string' ? req.query.service.trim() : '';
+  return service || undefined;
+}
 
 /**
  * GET /api/cloud-logs/recent
@@ -17,8 +29,11 @@ router.get('/recent', requireAuth, async (req, res) => {
   try {
     const minutes = parseInt(req.query.minutes as string) || 5;
     const limit = parseInt(req.query.limit as string) || 50;
-
-    const logs = await cloudLoggingService.getRecentLogs(minutes, limit);
+    const service = getRequestedService(req);
+    const vmLogs = await useVmLogs();
+    const logs = vmLogs
+      ? await vmLogService.getRecentLogs(minutes, limit, service)
+      : await cloudLoggingService.getRecentLogs(minutes, limit);
 
     res.json({
       logs,
@@ -38,8 +53,11 @@ router.get('/recent', requireAuth, async (req, res) => {
 router.get('/metrics', requireAuth, async (req, res) => {
   try {
     const hours = parseInt(req.query.hours as string) || 24;
-
-    const metrics = await cloudLoggingService.getLogMetrics(hours);
+    const service = getRequestedService(req);
+    const vmLogs = await useVmLogs();
+    const metrics = vmLogs
+      ? await vmLogService.getLogMetrics(hours, service)
+      : await cloudLoggingService.getLogMetrics(hours);
 
     res.json(metrics);
   } catch (error: any) {
@@ -55,8 +73,11 @@ router.get('/metrics', requireAuth, async (req, res) => {
 router.get('/errors', requireAuth, async (req, res) => {
   try {
     const hours = parseInt(req.query.hours as string) || 24;
-
-    const errorSummary = await cloudLoggingService.getErrorSummary(hours);
+    const service = getRequestedService(req);
+    const vmLogs = await useVmLogs();
+    const errorSummary = vmLogs
+      ? await vmLogService.getErrorSummary(hours, service)
+      : await cloudLoggingService.getErrorSummary(hours);
 
     res.json({
       errors: errorSummary,
@@ -82,8 +103,11 @@ router.get('/search', requireAuth, async (req, res) => {
 
     const hours = parseInt(req.query.hours as string) || 24;
     const limit = parseInt(req.query.limit as string) || 100;
-
-    const logs = await cloudLoggingService.searchLogs(query, hours, limit);
+    const service = getRequestedService(req);
+    const vmLogs = await useVmLogs();
+    const logs = vmLogs
+      ? await vmLogService.searchLogs(query, hours, limit, service)
+      : await cloudLoggingService.searchLogs(query, hours, limit);
 
     res.json({
       logs,
@@ -113,12 +137,20 @@ router.get('/severity/:level', requireAuth, async (req, res) => {
 
     const hours = parseInt(req.query.hours as string) || 24;
     const limit = parseInt(req.query.limit as string) || 100;
-
-    const logs = await cloudLoggingService.fetchLogs({ 
-      hours, 
-      severity: level,
-      limit 
-    });
+    const service = getRequestedService(req);
+    const vmLogs = await useVmLogs();
+    const logs = vmLogs
+      ? await vmLogService.getAdvancedLogs({
+          hours,
+          severities: [level],
+          limit,
+          service,
+        })
+      : await cloudLoggingService.fetchLogs({
+          hours,
+          severity: level,
+          limit,
+        });
 
     res.json({
       logs,
@@ -137,9 +169,13 @@ router.get('/severity/:level', requireAuth, async (req, res) => {
  */
 router.get('/health', requireAuth, async (req, res) => {
   try {
+    const service = getRequestedService(req);
     // Fetch last 5 minutes of logs as health indicator
-    const recentLogs = await cloudLoggingService.getRecentLogs(5, 10);
-    const recentErrors = recentLogs.filter(l => l.severity === 'ERROR');
+    const vmLogs = await useVmLogs();
+    const recentLogs = vmLogs
+      ? await vmLogService.getRecentLogs(5, 10, service)
+      : await cloudLoggingService.getRecentLogs(5, 10);
+    const recentErrors = recentLogs.filter(l => l.severity === 'ERROR' || l.severity === 'CRITICAL');
 
     const status = {
       healthy: recentErrors.length === 0,
@@ -168,14 +204,24 @@ router.post('/advanced', requireAuth, async (req, res) => {
       search,
       limit = 100
     } = req.body;
-
-    const logs = await cloudLoggingService.getAdvancedLogs({
-      hours: parseInt(hours as string),
-      severities,
-      resources,
-      search,
-      limit: parseInt(limit as string)
-    });
+    const service = typeof req.body?.service === 'string' ? req.body.service.trim() : undefined;
+    const vmLogs = await useVmLogs();
+    const logs = vmLogs
+      ? await vmLogService.getAdvancedLogs({
+          hours: parseInt(hours as string),
+          severities,
+          resources,
+          search,
+          limit: parseInt(limit as string),
+          service,
+        })
+      : await cloudLoggingService.getAdvancedLogs({
+          hours: parseInt(hours as string),
+          severities,
+          resources,
+          search,
+          limit: parseInt(limit as string)
+        });
 
     res.json({
       logs,
@@ -195,7 +241,11 @@ router.post('/advanced', requireAuth, async (req, res) => {
 router.get('/statistics', requireAuth, async (req, res) => {
   try {
     const hours = parseInt(req.query.hours as string) || 24;
-    const stats = await cloudLoggingService.getLogStatistics(hours);
+    const service = getRequestedService(req);
+    const vmLogs = await useVmLogs();
+    const stats = vmLogs
+      ? await vmLogService.getLogStatistics(hours, service)
+      : await cloudLoggingService.getLogStatistics(hours);
 
     res.json(stats);
   } catch (error: any) {

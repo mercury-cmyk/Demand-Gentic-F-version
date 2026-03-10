@@ -390,7 +390,6 @@ export async function processMissingTranscripts(): Promise<{
         callStartedAt: dialerCallAttempts.callStartedAt,
         callEndedAt: dialerCallAttempts.callEndedAt,
         callDurationSeconds: dialerCallAttempts.callDurationSeconds,
-        callSessionId: dialerCallAttempts.callSessionId,
         campaignId: dialerCallAttempts.campaignId,
         contactId: dialerCallAttempts.contactId,
         fullTranscript: dialerCallAttempts.fullTranscript,
@@ -457,8 +456,12 @@ export async function processMissingTranscripts(): Promise<{
     let skippedTooRecent = 0;
     let markedMissing = 0;
 
-    // Build batch of eligible calls for parallel processing
+    // Build batches for the right recovery strategy per audio source.
     const batchItems: BatchTranscriptionItem[] = [];
+    const telnyxOnlyItems: Array<{
+      callAttemptId: string;
+      telnyxCallId: string;
+    }> = [];
 
     for (const call of callsWithoutTranscripts) {
       // Skip calls whose recording is still being uploaded
@@ -479,13 +482,16 @@ export async function processMissingTranscripts(): Promise<{
         }
       }
 
-      // Calculate call duration — prefer explicit column, fallback to timestamp diff
-      let callDurationSec = call.callDurationSeconds || 0;
-      if (!callDurationSec && call.callStartedAt && call.callEndedAt) {
-        callDurationSec = (new Date(call.callEndedAt).getTime() - new Date(call.callStartedAt).getTime()) / 1000;
+      // Calculate call duration
+      let callDurationSec = call.callDurationSeconds ?? 0;
+      let hasReliableDuration = call.callDurationSeconds != null;
+      if (call.callStartedAt && call.callEndedAt) {
+        hasReliableDuration = true;
+        callDurationSec =
+          (new Date(call.callEndedAt).getTime() - new Date(call.callStartedAt).getTime()) / 1000;
       }
 
-      if (callDurationSec > 0 && callDurationSec < MIN_CALL_DURATION_FOR_TRANSCRIPT) {
+      if (hasReliableDuration && callDurationSec < MIN_CALL_DURATION_FOR_TRANSCRIPT) {
         skippedTooShort++;
         continue;
       }
@@ -501,11 +507,42 @@ export async function processMissingTranscripts(): Promise<{
         }
       }
 
-      batchItems.push({
-        callAttemptId: call.id,
-        recordingUrl: call.recordingUrl ?? null,
-        telnyxCallId: call.telnyxCallId ?? null,
-      });
+      if (call.recordingUrl) {
+        batchItems.push({
+          callAttemptId: call.id,
+          recordingUrl: call.recordingUrl,
+          telnyxCallId: call.telnyxCallId ?? null,
+        });
+        continue;
+      }
+
+      if (call.telnyxCallId) {
+        telnyxOnlyItems.push({
+          callAttemptId: call.id,
+          telnyxCallId: call.telnyxCallId,
+        });
+      }
+    }
+
+    if (telnyxOnlyItems.length > 0) {
+      console.log(
+        `${LOG_PREFIX} Processing ${telnyxOnlyItems.length} Telnyx-only calls through fallback transcription`
+      );
+
+      for (const item of telnyxOnlyItems) {
+        const result = await attemptFallbackTranscription(
+          item.callAttemptId,
+          null,
+          item.telnyxCallId
+        );
+
+        stats.processed++;
+        if (result.success) {
+          stats.succeeded++;
+        } else {
+          stats.failed++;
+        }
+      }
     }
 
     // Process eligible calls in parallel via multi-provider pool
@@ -546,6 +583,8 @@ export async function processMissingTranscripts(): Promise<{
           await triggerAnalysisAfterTranscript(result.callAttemptId, result.transcript);
         } else {
           stats.failed++;
+          /*
+ 
           // Permanently mark calls that will never succeed to stop infinite retries
           const failedCall = callsWithoutTranscripts.find(c => c.id === result.callAttemptId);
           const batchItem = batchItems.find(b => b.callAttemptId === result.callAttemptId);
@@ -575,6 +614,7 @@ export async function processMissingTranscripts(): Promise<{
               markedMissing++;
             }
           }
+          */
         }
       }
     }
