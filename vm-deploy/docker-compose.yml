@@ -38,6 +38,9 @@ services:
       - DRACHTIO_HOST=127.0.0.1
       - DRACHTIO_PORT=9022
       - DRACHTIO_SECRET=cymru
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-service-account.json
+    volumes:
+      - ../gcp-service-account.json:/app/gcp-service-account.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 15s
