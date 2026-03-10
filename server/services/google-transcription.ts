@@ -11,7 +11,7 @@
 
 import { db } from "../db";
 import { leads, activityLog, callSessions } from "@shared/schema";
-import { eq, and, isNotNull, lt, sql } from "drizzle-orm";
+import { eq, and, isNotNull, lt, gt, sql } from "drizzle-orm";
 import { SpeechClient, protos } from "@google-cloud/speech";
 import { getPresignedDownloadUrl, isS3Configured, s3ObjectExists, BUCKET } from "../lib/storage";
 
@@ -59,18 +59,6 @@ function decodeObjectPath(rawPath: string): string {
     .join('/');
 }
 
-// Rewrite legacy bucket references to the current primary bucket.
-// Old recordings may reference "demandgentic-storage" whose billing is closed.
-const LEGACY_BUCKET_ALIASES = ['demandgentic-storage'];
-function normalizeGcsUri(uri: string): string {
-  for (const alias of LEGACY_BUCKET_ALIASES) {
-    if (uri.startsWith(`gs://${alias}/`)) {
-      return uri.replace(`gs://${alias}/`, `gs://${BUCKET}/`);
-    }
-  }
-  return uri;
-}
-
 function toGcsUri(value: string | null | undefined): string | null {
   if (!value) return null;
 
@@ -78,7 +66,7 @@ function toGcsUri(value: string | null | undefined): string | null {
   if (!trimmed) return null;
 
   if (trimmed.startsWith('gs://')) {
-    return normalizeGcsUri(trimmed);
+    return trimmed;
   }
 
   if (trimmed.startsWith('gcs-internal://')) {
@@ -98,13 +86,13 @@ function toGcsUri(value: string | null | undefined): string | null {
         if (firstSlash <= 0) return null;
         const bucket = path.slice(0, firstSlash);
         const key = decodeObjectPath(path.slice(firstSlash + 1));
-        return key ? normalizeGcsUri(`gs://${bucket}/${key}`) : null;
+        return key ? `gs://${bucket}/${key}` : null;
       }
 
       if (host.endsWith('.storage.googleapis.com')) {
         const bucket = host.replace(/\.storage\.googleapis\.com$/, '');
         const key = decodeObjectPath(path);
-        return key ? normalizeGcsUri(`gs://${bucket}/${key}`) : null;
+        return key ? `gs://${bucket}/${key}` : null;
       }
     } catch {
       return null;
@@ -920,12 +908,14 @@ export async function processPendingTranscriptions(): Promise<void> {
       ))
       .limit(10);
 
-    // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
+    // Retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
+    // Skip recordings older than 7 days — S3 presigned URLs expire and will never succeed
     const failedLeads = await db.select()
       .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'failed'),
         lt(leads.updatedAt, sql`NOW() - INTERVAL '10 minutes'`),
+        gt(leads.createdAt, sql`NOW() - INTERVAL '7 days'`),
         isNotNull(leads.recordingS3Key)
       ))
       .limit(3);

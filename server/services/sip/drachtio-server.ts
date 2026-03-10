@@ -341,6 +341,12 @@ export class DrachtioSIPServer {
 
     // INVITE handler (inbound and outbound call requests)
     this.srf.invite(async (req: any, res: any) => {
+      // Guard against malformed SIP messages where uri/from/to may be undefined
+      if (!req.uri || !req.from || !req.to) {
+        log(`INVITE rejected: missing uri/from/to headers`);
+        try { res.send(400); } catch (_) {}
+        return;
+      }
       const callId = req.uri.user;
       const from = req.from.uri;
       const to = req.to.uri;
