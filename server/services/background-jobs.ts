@@ -31,6 +31,7 @@ const MERCURY_OUTBOX_INTERVAL = 60000; // Every 60 seconds — flush queued Merc
 const LONG_CALL_RECOVERY_INTERVAL = parseInt(process.env.LONG_CALL_RECOVERY_INTERVAL_MS || '300000', 10); // Every 5 min — parallel pool is much faster
 const BATCH_TRANSCRIPTION_SWEEP_INTERVAL = parseInt(process.env.BATCH_TRANSCRIPTION_SWEEP_INTERVAL_MS || '1800000', 10); // Every 30 min — catches orphaned calls with GCS recordings
 const ANALYSIS_SWEEP_INTERVAL = parseInt(process.env.ANALYSIS_SWEEP_INTERVAL_MS || '600000', 10); // Every 10 min — analyzes transcribed-but-unanalyzed calls
+const ANALYSIS_RECOVERY_INTERVAL = parseInt(process.env.ANALYSIS_RECOVERY_INTERVAL_MS || '900000', 10); // Every 15 min — retries permanently failed analyses
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -53,6 +54,7 @@ let mercuryOutboxInterval: NodeJS.Timeout | null = null;
 let longCallRecoveryInterval: NodeJS.Timeout | null = null;
 let batchTranscriptionSweepInterval: NodeJS.Timeout | null = null;
 let analysisSweepInterval: NodeJS.Timeout | null = null;
+let analysisRecoveryInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
@@ -65,6 +67,7 @@ let isMercuryOutboxRunning = false;
 let isLongCallRecoveryRunning = false;
 let isBatchTranscriptionSweepRunning = false;
 let isAnalysisSweepRunning = false;
+let isAnalysisRecoveryRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -257,6 +260,30 @@ export function startBackgroundJobs() {
         isAnalysisSweepRunning = false;
       }
     }, ANALYSIS_SWEEP_INTERVAL);
+  }
+
+  // Analysis recovery sweep — retries callSessions stuck in 'failed' analysisStatus
+  // and leads with transcriptionStatus='failed' older than 1 hour.
+  if (ENABLE_AI_ANALYSIS) {
+    analysisRecoveryInterval = setInterval(async () => {
+      if (isAnalysisRecoveryRunning) return;
+      isAnalysisRecoveryRunning = true;
+      try {
+        await withJobTimeout('Analysis Recovery', async () => {
+          const { recoverFailedAnalyses } = await import('./analysis-recovery-sweep');
+          const result = await recoverFailedAnalyses();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Analysis recovery: ${result.recovered} recovered, ${result.permanentlyFailed} permanently failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Analysis recovery error:', error);
+      } finally {
+        isAnalysisRecoveryRunning = false;
+      }
+    }, ANALYSIS_RECOVERY_INTERVAL);
   }
 
   // Orphan recording session sweep — links orphan call_sessions (recordings without
@@ -586,6 +613,11 @@ export function stopBackgroundJobs() {
   if (analysisSweepInterval) {
     clearInterval(analysisSweepInterval);
     analysisSweepInterval = null;
+  }
+
+  if (analysisRecoveryInterval) {
+    clearInterval(analysisRecoveryInterval);
+    analysisRecoveryInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');

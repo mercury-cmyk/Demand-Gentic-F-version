@@ -8894,15 +8894,24 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
         if (callSessionId) {
           // POST-CALL ANALYSIS: Schedule precision turn analysis from recording
-          schedulePostCallAnalysis(callSessionId, {
-            callAttemptId: session.callAttemptId,
-            campaignId: session.campaignId,
-            contactId: session.contactId,
-            disposition: disposition || 'completed',
-            callDurationSec: callDuration,
-            geminiTranscript: fullTranscript || undefined,
-          });
-          console.log(`${LOG_PREFIX} âœ… Post-call analysis scheduled for ${callSessionId}`);
+          try {
+            schedulePostCallAnalysis(callSessionId, {
+              callAttemptId: session.callAttemptId,
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              disposition: disposition || 'completed',
+              callDurationSec: callDuration,
+              geminiTranscript: fullTranscript || undefined,
+            });
+            console.log(`${LOG_PREFIX} Post-call analysis scheduled for ${callSessionId}`);
+          } catch (scheduleErr) {
+            console.error(`${LOG_PREFIX} Failed to schedule post-call analysis for ${callSessionId}:`, scheduleErr);
+            // Mark session so background recovery sweep can pick it up
+            db.update(callSessions)
+              .set({ analysisStatus: 'failed', analysisFailedAt: new Date() })
+              .where(eq(callSessions.id, callSessionId))
+              .catch((e: any) => console.error(`${LOG_PREFIX} Failed to mark analysis status:`, e));
+          }
         }
       }
     } catch (error) {

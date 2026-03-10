@@ -264,6 +264,14 @@ export const smtpVerificationStatusEnum = pgEnum('smtp_verification_status', [
   'failed'        // Verification failed
 ]);
 
+// Analysis Status Enum - For post-call analysis lifecycle
+export const analysisStatusEnum = pgEnum('analysis_status', [
+  'pending',      // Scheduled but not yet started
+  'processing',   // Currently being analyzed
+  'completed',    // Analysis finished successfully
+  'failed'        // All retries exhausted
+]);
+
 // Recording Status Enum - For call recording lifecycle
 export const recordingStatusEnum = pgEnum('recording_status', [
   'pending',    // Recording not yet started
@@ -3307,7 +3315,12 @@ export const callSessions = pgTable("call_sessions", {
   recordingStatus: recordingStatusEnum("recording_status").default('pending'), // Recording lifecycle
   recordingFormat: text("recording_format").default('mp3'), // Audio format (mp3/wav)
   recordingFileSizeBytes: integer("recording_file_size_bytes"), // File size in bytes
-  
+
+  // Post-call analysis lifecycle tracking
+  analysisStatus: analysisStatusEnum("analysis_status").default('pending'),
+  analysisFailedAt: timestamp("analysis_failed_at"),
+  analysisRetryCount: integer("analysis_retry_count").default(0),
+
   // Unified agent type tracking (human or AI)
   agentType: agentTypeEnum("agent_type").notNull().default('human'),
   agentUserId: varchar("agent_user_id").references(() => users.id, { onDelete: 'set null' }), // Human agent
@@ -3333,6 +3346,7 @@ export const callSessions = pgTable("call_sessions", {
   contactIdx: index("call_sessions_contact_idx").on(table.contactId),
   aiConversationIdx: index("call_sessions_ai_conversation_idx").on(table.aiConversationId),
   recordingStatusIdx: index("call_sessions_recording_status_idx").on(table.recordingStatus),
+  analysisStatusIdx: index("call_sessions_analysis_status_idx").on(table.analysisStatus),
 }));
 
 // Call Session Events - high-resolution runtime telemetry for voice QA

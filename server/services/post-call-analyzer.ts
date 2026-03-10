@@ -12,8 +12,8 @@
  */
 
 import { db } from "../db";
-import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, type CanonicalDisposition } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, leads, type CanonicalDisposition } from "@shared/schema";
+import { eq, and, isNull } from "drizzle-orm";
 import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./deepgram-postcall-transcription";
 import { type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
 import { logCallIntelligence } from "./call-intelligence-logger";
@@ -1305,6 +1305,35 @@ export function schedulePostCallAnalysis(
 ): void {
   const retryDelays = [30_000, 60_000, 120_000, 300_000, 600_000];
 
+  const markAnalysisFailed = async (errorMsg?: string) => {
+    try {
+      await db.update(callSessions)
+        .set({
+          analysisStatus: 'failed',
+          analysisFailedAt: new Date(),
+          analysisRetryCount: retryDelays.length,
+        })
+        .where(eq(callSessions.id, callSessionId));
+
+      // Also mark linked lead's transcriptionStatus as 'failed' if transcript is still missing
+      const [sess] = await db
+        .select({ telnyxCallId: callSessions.telnyxCallId, aiTranscript: callSessions.aiTranscript })
+        .from(callSessions)
+        .where(eq(callSessions.id, callSessionId))
+        .limit(1);
+
+      if (!sess?.aiTranscript && sess?.telnyxCallId) {
+        await db.update(leads)
+          .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+          .where(and(eq(leads.telnyxCallId, sess.telnyxCallId), isNull(leads.transcript)));
+      }
+
+      console.warn(`${LOG_PREFIX} Marked callSession ${callSessionId} analysisStatus=failed${errorMsg ? ': ' + errorMsg : ''}`);
+    } catch (markErr) {
+      console.error(`${LOG_PREFIX} Failed to mark analysis status for ${callSessionId}:`, markErr);
+    }
+  };
+
   const attemptAnalysis = async (attemptIndex: number) => {
     try {
       // Check if analysis already succeeded (from earlier retry or background job)
@@ -1317,7 +1346,18 @@ export function schedulePostCallAnalysis(
       const existingAnalysis = session?.aiAnalysis as Record<string, unknown> | null;
       if (existingAnalysis?.postCallAnalysis) {
         console.log(`${LOG_PREFIX} Analysis already exists for ${callSessionId} — skipping attempt ${attemptIndex + 1}`);
+        // Ensure status is marked completed
+        await db.update(callSessions)
+          .set({ analysisStatus: 'completed' })
+          .where(eq(callSessions.id, callSessionId));
         return;
+      }
+
+      // Mark as processing on first attempt
+      if (attemptIndex === 0) {
+        await db.update(callSessions)
+          .set({ analysisStatus: 'processing' })
+          .where(eq(callSessions.id, callSessionId));
       }
 
       console.log(`${LOG_PREFIX} 🔄 Post-call analysis attempt ${attemptIndex + 1}/${retryDelays.length} for ${callSessionId}`);
@@ -1325,6 +1365,9 @@ export function schedulePostCallAnalysis(
 
       if (result.success) {
         console.log(`${LOG_PREFIX} ✅ Post-call analysis succeeded on attempt ${attemptIndex + 1}`);
+        await db.update(callSessions)
+          .set({ analysisStatus: 'completed', analysisRetryCount: attemptIndex + 1 })
+          .where(eq(callSessions.id, callSessionId));
         return; // Done — no more retries
       }
 
@@ -1334,12 +1377,15 @@ export function schedulePostCallAnalysis(
         setTimeout(() => attemptAnalysis(attemptIndex + 1), retryDelays[attemptIndex + 1]);
       } else {
         console.warn(`${LOG_PREFIX} ⚠️ All ${retryDelays.length} post-call analysis attempts exhausted for ${callSessionId}: ${result.error}`);
+        await markAnalysisFailed(result.error);
       }
     } catch (err: any) {
       console.error(`${LOG_PREFIX} ❌ Post-call analysis attempt ${attemptIndex + 1} failed:`, err.message);
       // Schedule next retry on exception too
       if (attemptIndex + 1 < retryDelays.length) {
         setTimeout(() => attemptAnalysis(attemptIndex + 1), retryDelays[attemptIndex + 1]);
+      } else {
+        await markAnalysisFailed(err.message);
       }
     }
   };
