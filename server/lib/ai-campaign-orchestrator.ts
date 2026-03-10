@@ -1431,6 +1431,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       let prospectLockAcquired = false;
       let callInitiated = false;
       let callerIdResult: CallerIdResult | null = null;
+      let callAttemptId: string | null = null;
       let phoneNumber = '';
       try {
         // Use resolved phone from compliance check
@@ -1491,9 +1492,6 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // Agent name from unified resolution (same logic as test calls)
         const agentName = unifiedAgent?.agentName || virtualAgent?.name || (aiSettings.persona as any)?.agentName || aiSettings.persona?.name || "Alex";
         const agentFirstName = agentName.split(' ')[0]; // Extract first name
-        
-        // Create call attempt record for proper tracking
-        let callAttemptId: string | null = null;
         if (dialerRunId) {
           try {
             const [callAttempt] = await db
@@ -1536,8 +1534,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           callAttemptId: callAttemptId || undefined,
           // Campaign context for AI agent behavior
           campaignType: (campaign as any).type || (campaign as any).campaignType || undefined,
-          // Priority: campaign organization > persona companyName > fallback
-          organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+          // Priority: campaign organization > persona companyName > fallback (aligned with unified-call-context)
+          organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'our organization',
           campaignObjective: (campaign as any).campaignObjective || undefined,
           successCriteria: (campaign as any).successCriteria || undefined,
           targetAudienceDescription: (campaign as any).targetAudienceDescription || undefined,
