@@ -455,7 +455,7 @@ export class GmailSyncService {
       "Content-Type: text/html; charset=utf-8",
       "",
       trackedBody,
-    ].filter(Boolean);
+    ].filter((line): line is string => line !== null);
 
     const rawMessage = Buffer.from(lines.join("\r\n"))
       .toString("base64")

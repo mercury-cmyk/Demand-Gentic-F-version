@@ -2523,27 +2523,8 @@ export function registerRoutes(app: Express) {
       const toAddresses = Array.isArray(to) ? to.join(", ") : to;
       const ccAddresses = cc && Array.isArray(cc) ? cc.join(", ") : cc;
 
+      // Create deal conversation + message FIRST so we can use its ID for tracking
       let externalMessageId = crypto.randomUUID();
-
-      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
-        const { gmailSyncService } = await import('./services/gmail-sync-service');
-        const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
-          to: toAddresses,
-          cc: ccAddresses,
-          subject,
-          body,
-        });
-        externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId) as unknown as typeof externalMessageId;
-      } else {
-        const { m365SyncService } = await import('./services/m365-sync-service');
-        await m365SyncService.sendEmail(mailboxAccountId, {
-          to: toAddresses,
-          cc: ccAddresses,
-          subject,
-          body,
-        });
-      }
-
       const result = await dealConversationService.sendEmailFromOpportunity({
         opportunityId,
         mailboxAccountId,
@@ -2554,6 +2535,33 @@ export function registerRoutes(app: Express) {
         m365MessageId: externalMessageId,
         threadId: threadId || undefined
       });
+
+      // Apply tracking with the dealMessage ID so opens/clicks are queryable
+      const trackedBody = emailTrackingService.applyTracking(body, {
+        messageId: result.messageId,
+        recipientEmail: Array.isArray(to) ? to[0] : to,
+      });
+
+      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+        const { gmailSyncService } = await import('./services/gmail-sync-service');
+        const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
+          to: toAddresses,
+          cc: ccAddresses,
+          subject,
+          body: trackedBody,
+          skipTracking: true,
+        });
+        externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId) as unknown as typeof externalMessageId;
+      } else {
+        const { m365SyncService } = await import('./services/m365-sync-service');
+        await m365SyncService.sendEmail(mailboxAccountId, {
+          to: toAddresses,
+          cc: ccAddresses,
+          subject,
+          body: trackedBody,
+          skipTracking: true,
+        });
+      }
 
       res.json({ 
         message: "Email sent successfully",
