@@ -281,7 +281,7 @@ if (isMainModule) {
       if (!isCloudRun) {
         try {
           const { initializeSecrets } = await import("./services/secret-loader");
-          await initializeSecrets({ overwriteEnv: false });
+          await initializeSecrets({ overwriteEnv: true });
           console.log('[STARTUP] Ops Hub secrets loaded into env (local/dev mode)');
         } catch (err) {
           console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
