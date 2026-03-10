@@ -120,8 +120,6 @@ export const AI_MODEL_SUGGESTIONS: Record<
 > = {
   voice_realtime: {
     google: [
-      "gemini-2.5-flash-preview-native-audio-dialog",
-      "gemini-2.0-flash-live-001",
       "gemini-live-2.5-flash-native-audio",
     ],
     openai: [
@@ -208,11 +206,11 @@ export const DEFAULT_AI_MODEL_POLICIES: AiModelPolicyMap = {
   voice_realtime: {
     enabled: true,
     primaryProvider: "google",
-    primaryModel: "gemini-2.5-flash-preview-native-audio-dialog",
-    allowFallback: true,
-    fallbackProvider: "google",
-    fallbackModel: "gemini-2.0-flash-live-001",
-    notes: "Primary live calling path. Native audio model with fallback to stable live model.",
+    primaryModel: "gemini-live-2.5-flash-native-audio",
+    allowFallback: false,
+    fallbackProvider: null,
+    fallbackModel: null,
+    notes: "Primary live calling path.",
   },
   analysis_standard: {
     enabled: true,

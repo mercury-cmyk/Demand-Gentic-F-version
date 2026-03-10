@@ -324,11 +324,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     // Primary model exhausted retries — try known fallback model names
-    const FALLBACK_MODELS = [
-      'gemini-2.5-flash-preview-native-audio-dialog',
-      'gemini-2.0-flash-live-001',
-      'gemini-2.0-flash-live',
-    ].filter(m => m !== primaryModel);
+    // Note: As of 2026-03, only 'gemini-live-2.5-flash-native-audio' works via Vertex AI WebSocket.
+    // Other model names (dialog, flash-live, etc.) all return code=1008.
+    const FALLBACK_MODELS: string[] = [];
 
     for (const fallbackModel of FALLBACK_MODELS) {
       console.warn(`${LOG_PREFIX} ⚡ Primary model "${primaryModel}" failed. Trying fallback: "${fallbackModel}"...`);
