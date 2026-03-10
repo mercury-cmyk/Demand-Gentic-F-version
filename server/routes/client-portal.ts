@@ -1430,7 +1430,7 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
             callsMade: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL OR ${dialerCallAttempts.disposition} IS NOT NULL THEN 1 END)::int`,
             callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
             qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
-            dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} IN ('dnc-request', 'dnc_request', 'do_not_call', 'dnc_added') THEN 1 END)::int`,
+            dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'do_not_call' THEN 1 END)::int`,
             noAnswer: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'no_answer' THEN 1 END)::int`,
             voicemail: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'voicemail' THEN 1 END)::int`,
             notInterested: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'not_interested' THEN 1 END)::int`,

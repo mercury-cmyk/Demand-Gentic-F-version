@@ -159,9 +159,9 @@ export function CampaignDetailView({ campaign, onBack }: CampaignDetailViewProps
                     {campaign.deliveredCount?.toLocaleString()} / {campaign.totalContacts?.toLocaleString()}
                   </span>
                 </div>
-                <Progress value={(campaign.deliveredCount / campaign.totalContacts) * 100} />
+                <Progress value={campaign.totalContacts ? (campaign.deliveredCount / campaign.totalContacts) * 100 : 0} />
                 <p className="text-xs text-muted-foreground mt-2">
-                  {((campaign.deliveredCount / campaign.totalContacts) * 100).toFixed(1)}% of total contacts reached.
+                  {campaign.totalContacts ? ((campaign.deliveredCount / campaign.totalContacts) * 100).toFixed(1) : '0.0'}% of total contacts reached.
                 </p>
               </div>
 
@@ -172,9 +172,9 @@ export function CampaignDetailView({ campaign, onBack }: CampaignDetailViewProps
                     {campaign.verifiedCount?.toLocaleString()} / {campaign.totalContacts?.toLocaleString()}
                   </span>
                 </div>
-                <Progress value={(campaign.verifiedCount / campaign.totalContacts) * 100} className="[&>*]:bg-green-500" />
+                <Progress value={campaign.totalContacts ? (campaign.verifiedCount / campaign.totalContacts) * 100 : 0} className="[&>*]:bg-green-500" />
                  <p className="text-xs text-muted-foreground mt-2">
-                  {((campaign.verifiedCount / campaign.totalContacts) * 100).toFixed(1)}% of contacts have been verified.
+                  {campaign.totalContacts ? ((campaign.verifiedCount / campaign.totalContacts) * 100).toFixed(1) : '0.0'}% of contacts have been verified.
                 </p>
               </div>
             </CardContent>
