@@ -76,6 +76,8 @@ interface ChatMessage {
   model?: string;
   transport?: string;
   applied?: boolean;
+  isError?: boolean;
+  retryPrompt?: string;
 }
 
 interface OpsOverview {
@@ -962,7 +964,7 @@ export default function OpsHub() {
         prompt: `Rewrite the following coding prompt to be more precise, technical, and actionable for a coding agent. Return ONLY the improved prompt text, nothing else.\n\nOriginal prompt: ${rawPrompt}`,
         mode: 'general',
         preferredProvider: 'kimi',
-      });
+      }, { timeout: 60000 });
       if (data.success && data.response?.summary) {
         return data.response.summary;
       }
@@ -981,8 +983,8 @@ export default function OpsHub() {
     );
   }, []);
 
-  const handleChatSend = async () => {
-    const rawPrompt = chatInput.trim();
+  const handleChatSend = async (overridePrompt?: string) => {
+    const rawPrompt = overridePrompt || chatInput.trim();
     if (!rawPrompt) return;
     const requestMode = codingAgentMode === 'plan' ? 'plan' : modelSelector;
 
@@ -1030,6 +1032,7 @@ export default function OpsHub() {
           applyChanges: codingAgentMode === 'agent',
           preferredProvider: selectedProvider === 'agentx' ? undefined : selectedProvider,
         },
+        { timeout: 180000 },
       );
 
       advanceArchitectStep('plan', 'done', 'Changes planned');
@@ -1093,10 +1096,20 @@ export default function OpsHub() {
         toast({ title: 'Multi-file edit applied', description: `${fileEdits.length} files updated` });
       }
     } catch (error) {
-      advanceArchitectStep('apply', 'error', error instanceof Error ? error.message : 'Failed');
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const isTimeout = errMsg.includes('timed out') || errMsg.includes('AbortError');
+      advanceArchitectStep('apply', 'error', isTimeout ? 'Request timed out' : errMsg);
       setChatMessages((current) => [
         ...current,
-        { role: 'assistant', content: `Error: ${error instanceof Error ? error.message : String(error)}`, timestamp: new Date() },
+        {
+          role: 'assistant',
+          content: isTimeout
+            ? 'The AI service took too long to respond. This can happen with complex prompts or when the service is under heavy load. Click **Retry** to try again.'
+            : `Error: ${errMsg}`,
+          timestamp: new Date(),
+          isError: true,
+          retryPrompt: rawPrompt,
+        },
       ]);
     } finally {
       setChatSending(false);
@@ -1577,6 +1590,8 @@ export default function OpsHub() {
                       <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                         message.role === 'user'
                           ? 'bg-indigo-500 text-white shadow-sm'
+                          : message.isError
+                          ? 'border border-red-200 bg-red-50 text-red-700 shadow-sm'
                           : 'border border-slate-200 bg-white text-slate-700 shadow-sm'
                       }`}>
                         <p className="whitespace-pre-wrap">{message.content}</p>
@@ -1591,6 +1606,16 @@ export default function OpsHub() {
                             </span>
                           )}
                         </div>
+                        {message.isError && message.retryPrompt && (
+                          <button
+                            onClick={() => handleChatSend(message.retryPrompt!)}
+                            disabled={chatSending}
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[11px] font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            Retry
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
