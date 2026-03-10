@@ -777,7 +777,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
         },
       };
 
-      ws.send(JSON.stringify(setup));
+      const setupJson = JSON.stringify(setup);
+      log(`Gemini setup for ${session.callId} (${setupJson.length} bytes): ${setupJson.substring(0, 500)}...`);
+      ws.send(setupJson);
       log(`Gemini setup sent for ${session.callId}`);
     });
 
@@ -928,7 +930,7 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
     });
 
     ws.on('close', (code, reason) => {
-      log(`Gemini closed for ${session.callId} (code=${code})`);
+      log(`Gemini closed for ${session.callId} (code=${code}, reason=${reason?.toString() || 'none'})`);
       if (!session.setupComplete) {
         clearTimeout(timeout);
         reject(new Error(`Gemini closed before setup (code=${code})`));
