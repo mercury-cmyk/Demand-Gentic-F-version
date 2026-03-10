@@ -415,6 +415,25 @@ export default function UnifiedIntelligencePage() {
     analyzeMutation.mutate(sessionId);
   }, [analyzeMutation]);
 
+  // ===== TRANSCRIBE MUTATION =====
+  const transcribeMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const response = await apiRequest('POST', `/api/qa/transcribe/${sessionId}`, { analyze: true });
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Transcription Complete', description: 'Call transcribed and analyzed successfully' });
+      refetchConversations();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Transcription Failed', description: error.message || 'Could not transcribe call', variant: 'destructive' });
+    },
+  });
+
+  const handleTranscribe = useCallback((sessionId: string) => {
+    transcribeMutation.mutate(sessionId);
+  }, [transcribeMutation]);
+
   const handleSelectHistoryCall = useCallback((sessionId: string) => {
     setSelectedId(sessionId);
   }, []);
@@ -580,8 +599,10 @@ export default function UnifiedIntelligencePage() {
                 conversation={selectedConversation}
                 isLoading={conversationsLoading && !!selectedId}
                 onAnalyze={handleAnalyze}
+                onTranscribe={handleTranscribe}
                 onSelectHistoryCall={handleSelectHistoryCall}
                 isAnalyzing={analyzeMutation.isPending}
+                isTranscribing={transcribeMutation.isPending}
               />
             </div>
           </ResizablePanel>

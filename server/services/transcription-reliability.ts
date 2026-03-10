@@ -389,6 +389,8 @@ export async function processMissingTranscripts(): Promise<{
         telnyxCallId: dialerCallAttempts.telnyxCallId,
         callStartedAt: dialerCallAttempts.callStartedAt,
         callEndedAt: dialerCallAttempts.callEndedAt,
+        callDurationSeconds: dialerCallAttempts.callDurationSeconds,
+        callSessionId: dialerCallAttempts.callSessionId,
         campaignId: dialerCallAttempts.campaignId,
         contactId: dialerCallAttempts.contactId,
         fullTranscript: dialerCallAttempts.fullTranscript,
@@ -453,6 +455,7 @@ export async function processMissingTranscripts(): Promise<{
     let skippedTooShort = 0;
     let skippedUploading = 0;
     let skippedTooRecent = 0;
+    let markedMissing = 0;
 
     // Build batch of eligible calls for parallel processing
     const batchItems: BatchTranscriptionItem[] = [];
@@ -476,15 +479,15 @@ export async function processMissingTranscripts(): Promise<{
         }
       }
 
-      // Calculate call duration
-      let callDurationSec = 0;
-      if (call.callStartedAt && call.callEndedAt) {
+      // Calculate call duration — prefer explicit column, fallback to timestamp diff
+      let callDurationSec = call.callDurationSeconds || 0;
+      if (!callDurationSec && call.callStartedAt && call.callEndedAt) {
         callDurationSec = (new Date(call.callEndedAt).getTime() - new Date(call.callStartedAt).getTime()) / 1000;
+      }
 
-        if (callDurationSec < MIN_CALL_DURATION_FOR_TRANSCRIPT) {
-          skippedTooShort++;
-          continue;
-        }
+      if (callDurationSec > 0 && callDurationSec < MIN_CALL_DURATION_FOR_TRANSCRIPT) {
+        skippedTooShort++;
+        continue;
       }
 
       // Duration-aware delay: long calls need more time for recording upload
@@ -521,6 +524,18 @@ export async function processMissingTranscripts(): Promise<{
               updatedAt: new Date(),
             })
             .where(eq(dialerCallAttempts.id, result.callAttemptId));
+
+          // Propagate transcript to call_sessions.aiTranscript for Conversation Quality tab
+          const matchedCall = callsWithoutTranscripts.find(c => c.id === result.callAttemptId);
+          if (matchedCall?.callSessionId) {
+            try {
+              await db.update(callSessions)
+                .set({ aiTranscript: result.transcript })
+                .where(eq(callSessions.id, matchedCall.callSessionId));
+            } catch (syncErr: any) {
+              console.warn(`${LOG_PREFIX} Failed to sync transcript to call_sessions: ${syncErr.message}`);
+            }
+          }
 
           await logTranscriptionActivity(result.callAttemptId, 'fallback_completed', {
             source: result.provider || 'pool',

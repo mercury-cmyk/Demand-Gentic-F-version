@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { db } from '../db';
-import { leads, dialerCallAttempts, campaignTestCalls } from '@shared/schema';
+import { leads, dialerCallAttempts, campaignTestCalls, callSessions } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
@@ -467,6 +467,26 @@ export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJob
               updatedAt: new Date()
             })
             .where(eq(dialerCallAttempts.id, callAttemptId));
+        }
+      }
+
+      // Step 4: Propagate transcript to call_sessions.aiTranscript so Conversation Quality tab can display it
+      if (callAttemptId && transcriptionResult.transcript?.trim()) {
+        try {
+          const [attemptRow] = await db
+            .select({ callSessionId: dialerCallAttempts.callSessionId })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.id, callAttemptId))
+            .limit(1);
+
+          if (attemptRow?.callSessionId) {
+            await db.update(callSessions)
+              .set({ aiTranscript: transcriptWithSummary })
+              .where(eq(callSessions.id, attemptRow.callSessionId));
+            console.log(`[AutoRecordingSyncWorker] ✅ Synced transcript to call_sessions.aiTranscript for session ${attemptRow.callSessionId}`);
+          }
+        } catch (syncErr: any) {
+          console.warn(`[AutoRecordingSyncWorker] Failed to sync transcript to call_sessions: ${syncErr.message}`);
         }
       }
 
