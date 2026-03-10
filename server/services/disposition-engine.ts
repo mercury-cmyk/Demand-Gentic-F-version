@@ -691,6 +691,10 @@ async function processQualifiedLead(
     structuredTranscript: structuredTranscript,
     telnyxCallId: callAttempt.telnyxCallId, // This might be needed for recording lookups
     notes: agentSource, // Track agent type and ID for full auditability
+    // CRITICAL: Set initial transcription/recording status so downstream
+    // systems know this lead still needs processing
+    transcriptionStatus: transcript ? 'completed' : 'pending',
+    recordingStatus: recordingUrl ? 'pending' : 'none',
   };
 
   console.log('[DispositionEngine] Preparing to create lead with payload:', JSON.stringify(leadPayload, null, 2));
@@ -819,7 +823,7 @@ async function processQualifiedLead(
 
             if (s3Key) {
               await db.update(leads)
-                .set({ recordingS3Key: s3Key })
+                .set({ recordingS3Key: s3Key, recordingStatus: 'completed' })
                 .where(eq(leads.id, leadIdForAsync));
               console.log(`[DispositionEngine] ✅ Recording stored in GCS: ${s3Key}`);
             } else {
@@ -841,9 +845,16 @@ async function processQualifiedLead(
         try {
           if (!transcriptForAnalysis) {
               console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
+              await db.update(leads)
+                .set({ transcriptionStatus: 'processing', updatedAt: new Date() })
+                .where(eq(leads.id, leadIdForAsync));
+
               const transcribed = await transcribeLeadCall(leadIdForAsync);
 
               if (transcribed) {
+                  await db.update(leads)
+                    .set({ transcriptionStatus: 'completed', updatedAt: new Date() })
+                    .where(eq(leads.id, leadIdForAsync));
                   console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync}`);
                   await analyzeCall(leadIdForAsync);
                   console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${leadIdForAsync}`);

@@ -118,7 +118,8 @@ export async function recoverFailedAnalyses(): Promise<{
       }
     }
 
-    // ── Phase 2: Recover leads with failed transcription ──
+    // ── Phase 2: Recover leads with failed/stuck transcription ──
+    // Catches: 'failed' status, NULL status (legacy), 'pending' stuck > 1 hour
     const failedLeads = await db
       .select({
         id: leads.id,
@@ -128,11 +129,12 @@ export async function recoverFailedAnalyses(): Promise<{
       .from(leads)
       .where(
         and(
-          eq(leads.transcriptionStatus, 'failed'),
-          lt(leads.updatedAt, cooldownCutoff),
           isNull(leads.transcript),
+          lt(leads.updatedAt, cooldownCutoff),
           // Must have a recording source to retry
-          sql`(${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL)`
+          sql`(${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL)`,
+          // Pick up failed, null (legacy pre-fix), or stuck pending transcriptions
+          sql`(${leads.transcriptionStatus} IN ('failed', 'pending') OR ${leads.transcriptionStatus} IS NULL)`
         )
       )
       .orderBy(sql`${leads.updatedAt} ASC`)
@@ -156,8 +158,17 @@ export async function recoverFailedAnalyses(): Promise<{
           await db.update(leads)
             .set({ transcriptionStatus: 'completed', updatedAt: new Date() })
             .where(eq(leads.id, lead.id));
+
+          // Also run quality analysis now that transcript is available
+          try {
+            const { analyzeCall } = await import("./telnyx-transcription");
+            await analyzeCall(lead.id);
+            console.log(`${LOG_PREFIX} Recovered transcription + analysis for lead ${lead.id}`);
+          } catch (qaErr: any) {
+            console.warn(`${LOG_PREFIX} Transcription recovered but analysis failed for lead ${lead.id}: ${qaErr.message}`);
+          }
+
           result.recovered++;
-          console.log(`${LOG_PREFIX} Recovered transcription for lead ${lead.id}`);
         } else {
           // Reset to failed with updated timestamp for next cooldown window
           await db.update(leads)

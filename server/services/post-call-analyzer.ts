@@ -1371,7 +1371,11 @@ export function schedulePostCallAnalysis(
         return; // Done — no more retries
       }
 
-      // Failed — schedule next retry if available
+      // Failed — update retry count and schedule next retry if available
+      await db.update(callSessions)
+        .set({ analysisRetryCount: attemptIndex + 1 })
+        .where(eq(callSessions.id, callSessionId));
+
       if (attemptIndex + 1 < retryDelays.length) {
         console.log(`${LOG_PREFIX} ⏳ Scheduling retry ${attemptIndex + 2}/${retryDelays.length} in ${retryDelays[attemptIndex + 1] / 1000}s for ${callSessionId}: ${result.error}`);
         setTimeout(() => attemptAnalysis(attemptIndex + 1), retryDelays[attemptIndex + 1]);

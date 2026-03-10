@@ -1345,22 +1345,57 @@ router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager',
       return res.status(404).json({ error: "Call session not found" });
     }
 
+    // If no transcript exists but recording is available, attempt transcription first
     if (!callSession.aiTranscript) {
-      return res.status(400).json({ error: "Call has no transcript to analyze" });
+      if (callSession.recordingS3Key || callSession.recordingUrl) {
+        try {
+          console.log(`[CallIntelligence] No transcript for ${id} — attempting transcription from recording before analysis`);
+          const { runPostCallAnalysis } = await import("../services/post-call-analyzer");
+          const pca = await runPostCallAnalysis(id, {
+            campaignId: callSession.campaignId || undefined,
+            contactId: callSession.contactId || undefined,
+            callDurationSec: callSession.durationSec || undefined,
+            disposition: callSession.aiDisposition || undefined,
+          });
+
+          if (pca.success) {
+            // Reload session with the new transcript
+            const [refreshed] = await db.select().from(callSessions).where(eq(callSessions.id, id)).limit(1);
+            if (refreshed?.aiTranscript) {
+              Object.assign(callSession, refreshed);
+            }
+          }
+        } catch (txErr: any) {
+          console.error(`[CallIntelligence] Auto-transcription failed for ${id}:`, txErr.message);
+        }
+      }
+
+      // Still no transcript after retry
+      if (!callSession.aiTranscript) {
+        return res.status(400).json({ error: "Call has no transcript to analyze. Recording may still be processing — try again shortly." });
+      }
     }
 
-    // Check if analysis already exists
+    // Check if analysis already exists — allow re-analysis with force flag or query param
+    const forceReanalyze = req.body?.force === true || req.query.force === 'true';
     const [existingAnalysis] = await db
-      .select()
+      .select({ id: callQualityRecords.id })
       .from(callQualityRecords)
       .where(eq(callQualityRecords.callSessionId, id))
       .limit(1);
 
-    if (existingAnalysis) {
+    if (existingAnalysis && !forceReanalyze) {
       return res.status(400).json({
-        error: "Call already has quality analysis",
+        error: "Call already has quality analysis. Use force=true to re-analyze.",
         qualityRecordId: existingAnalysis.id,
       });
+    }
+
+    // Delete existing record if force re-analyzing
+    if (existingAnalysis && forceReanalyze) {
+      await db.delete(callQualityRecords)
+        .where(eq(callQualityRecords.callSessionId, id));
+      console.log(`[CallIntelligence] Force re-analysis: deleted existing quality record for ${id}`);
     }
 
     // Import and run the analyzer
@@ -1445,6 +1480,53 @@ router.post("/unified/:id/analyze", requireAuth, requireRole('admin', 'manager',
   } catch (error) {
     console.error("[CallIntelligence] Error analyzing call:", error);
     res.status(500).json({ error: "Failed to analyze call" });
+  }
+});
+
+/**
+ * POST /api/call-intelligence/unified/bulk-retry
+ * Retry analysis for all calls with missing transcripts or failed analysis.
+ * Triggers the recovery sweep immediately and returns counts.
+ */
+router.post("/unified/bulk-retry", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+  try {
+    const { recoverFailedAnalyses } = await import("../services/analysis-recovery-sweep");
+    const result = await recoverFailedAnalyses();
+
+    // Also count how many are still pending
+    const [pendingCount] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(callSessions)
+      .where(
+        and(
+          sql`${callSessions.analysisStatus} IN ('failed', 'pending', 'processing')`,
+          sql`${callSessions.durationSec} >= 20`
+        )
+      );
+
+    const [pendingLeadsCount] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(leads)
+      .where(
+        and(
+          isNull(leads.transcript),
+          sql`(${leads.transcriptionStatus} IN ('failed', 'pending') OR ${leads.transcriptionStatus} IS NULL)`,
+          sql`(${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL)`
+        )
+      );
+
+    res.json({
+      success: true,
+      processed: result.processed,
+      recovered: result.recovered,
+      permanentlyFailed: result.permanentlyFailed,
+      remainingPendingSessions: Number(pendingCount?.count || 0),
+      remainingPendingLeads: Number(pendingLeadsCount?.count || 0),
+      message: `Processed ${result.processed} items: ${result.recovered} recovered, ${result.permanentlyFailed} permanently failed`,
+    });
+  } catch (error: any) {
+    console.error("[CallIntelligence] Bulk retry error:", error);
+    res.status(500).json({ error: `Bulk retry failed: ${error.message}` });
   }
 });
 

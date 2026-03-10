@@ -298,7 +298,16 @@ export async function stopRecordingAndUpload(callId: string): Promise<string | n
     );
 
     if (s3Key) {
-      console.log(`${LOG_PREFIX} ✅ Recording uploaded for call ${callId}: ${s3Key}`);
+      // CRITICAL: Mark recording as stored and save S3 key — without this,
+      // post-call analyzer sees 'uploading' forever and skips transcription
+      await db.update(callSessions)
+        .set({
+          recordingStatus: 'stored',
+          recordingS3Key: s3Key,
+        })
+        .where(eq(callSessions.id, session.callSessionId));
+
+      console.log(`${LOG_PREFIX} ✅ Recording uploaded and stored for call ${callId}: ${s3Key}`);
       cleanupCheckpoint(session);
       return s3Key;
     } else {
@@ -590,7 +599,15 @@ export async function recoverAudioCheckpoints(): Promise<{ recovered: number; fa
       );
 
       if (s3Key) {
-        console.log(`${LOG_PREFIX} ✅ Recovered recording uploaded: ${s3Key}`);
+        // Update DB with stored status + S3 key so post-call analyzer can proceed
+        await db.update(callSessions)
+          .set({
+            recordingStatus: 'stored',
+            recordingS3Key: s3Key,
+          })
+          .where(eq(callSessions.id, metadata.callSessionId));
+
+        console.log(`${LOG_PREFIX} ✅ Recovered recording uploaded and stored: ${s3Key}`);
         stats.recovered++;
       } else {
         console.error(`${LOG_PREFIX} ❌ Failed to upload recovered recording for ${metadata.callSessionId}`);
