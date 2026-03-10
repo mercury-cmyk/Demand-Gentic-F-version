@@ -109,6 +109,7 @@ import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
 import adminProjectRequestsRouter from './routes/admin-project-requests';
+import adminClientNotificationsRouter from './routes/admin-client-notifications';
 import adminTasksRouter from './routes/admin-tasks';
 import dataManagementRouter from './routes/data-management-routes';
 import telephonyProvidersRouter from './routes/telephony-providers';
@@ -2362,7 +2363,7 @@ export function registerRoutes(app: Express) {
         bodyPreview: body.replace(/<[^>]*>/g, "").substring(0, 500) || null,
         bodyContent: body,
         direction: "outbound",
-        messageStatus: "sending",
+        messageStatus: "pending",
         sentAt: now,
         receivedAt: now,
         isFromCustomer: false,
@@ -16152,6 +16153,42 @@ Provide JSON response with:
     }
   });
 
+  // ==================== NO-CALL-LEFT-BEHIND (Admin) ====================
+
+  // Diagnose: count how many calls from last N days are missing transcription/disposition/analysis
+  app.get("/api/admin/call-gaps/diagnose", requireAuth, async (req, res) => {
+    try {
+      const lookbackDays = parseInt(req.query.days as string) || 3;
+      const { diagnoseCallGaps } = await import('./services/no-call-left-behind-sweep');
+      const gaps = await diagnoseCallGaps(lookbackDays);
+      res.json({ success: true, ...gaps });
+    } catch (err: any) {
+      console.error('[CallGapsDiagnose] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Trigger: manually run the no-call-left-behind sweep
+  app.post("/api/admin/no-call-left-behind/run", requireAuth, async (req, res) => {
+    try {
+      const lookbackDays = parseInt(req.body.lookbackDays) || 3;
+      const batchSize = Math.min(parseInt(req.body.batchSize) || 30, 100);
+      const dryRun = req.body.dryRun === true;
+
+      // Return immediately, run in background
+      res.json({
+        success: true,
+        message: `No-Call-Left-Behind sweep started (lookback=${lookbackDays}d, batch=${batchSize}, dryRun=${dryRun}). Check server logs for progress.`,
+      });
+
+      const { runNoCallLeftBehindSweep } = await import('./services/no-call-left-behind-sweep');
+      const result = await runNoCallLeftBehindSweep({ lookbackDays, batchSize, dryRun });
+      console.log(`[NoCallLeftBehind] Manual sweep result:`, JSON.stringify(result));
+    } catch (err: any) {
+      console.error('[NoCallLeftBehind] Manual sweep error:', err);
+    }
+  });
+
   // ==================== KNOWLEDGE BLOCKS ====================
 
   app.use("/api/knowledge-blocks", knowledgeBlocksRouter);
@@ -16396,6 +16433,9 @@ Provide JSON response with:
 
   // ==================== ADMIN PROJECT REQUESTS ====================
   app.use('/api/admin/project-requests', requireAuth, adminProjectRequestsRouter);
+
+  // ==================== ADMIN CLIENT NOTIFICATIONS ====================
+  app.use('/api/admin/client-notifications', adminClientNotificationsRouter);
 
   // ==================== ADMIN TO-DO TASK BOARD ====================
   app.use('/api/admin/tasks', adminTasksRouter);
