@@ -233,6 +233,18 @@ interface BridgeSession {
   // RTP pacing: queue outgoing audio packets to send at correct 20ms intervals
   rtpSendQueue: Buffer[];
   rtpPacingTimer: NodeJS.Timeout | null;
+
+  // Identity & state tracking (parity with TeXML voice-dialer)
+  identityConfirmed: boolean;
+  identityConfirmedAt: number | null;
+  currentState: string;
+  agentTurnCount: number;
+  contactTurnCount: number;
+
+  // State reinforcement (prevents Gemini from regressing mid-call)
+  contactTurnsSinceReinforcement: number;
+  lastStateReinforcementAt: number;
+  stateReinforcementCount: number;
 }
 
 const sessions = new Map<string, BridgeSession>();
@@ -297,6 +309,16 @@ async function createSession(params: {
 
     rtpSendQueue: [],
     rtpPacingTimer: null,
+
+    identityConfirmed: false,
+    identityConfirmedAt: null,
+    currentState: 'IDENTITY_CHECK',
+    agentTurnCount: 0,
+    contactTurnCount: 0,
+
+    contactTurnsSinceReinforcement: 0,
+    lastStateReinforcementAt: 0,
+    stateReinforcementCount: 0,
   };
 
   sessions.set(params.callId, session);
@@ -525,6 +547,135 @@ function startRtpPacing(session: BridgeSession): void {
   }, RTP_PACING_INTERVAL_MS);
 }
 
+// ==================== IDENTITY DETECTION & STATE REINFORCEMENT ====================
+
+/**
+ * Detect whether contact speech confirms their identity.
+ * Matches patterns like "this is John", "speaking", "yes it's me", etc.
+ * Excludes gatekeeper patterns like "he's not available", "who's calling".
+ */
+function detectIdentityConfirmation(text: string, expectedName?: string): boolean {
+  const normalized = text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  if (!normalized || normalized.length < 2) return false;
+
+  // Gatekeeper / rejection patterns — NOT a confirmation
+  const gatekeeperPatterns = [
+    /who('?s| is) (this|calling|speaking)/,
+    /not (here|available|in)/,
+    /can i (take|ask|help)/,
+    /what('?s| is) this (about|regarding|call)/,
+    /may i ask/,
+    /hold on/,
+    /let me (check|see|get|transfer)/,
+    /wrong number/,
+    /no one (here|by that)/,
+    /doesn'?t work here/,
+  ];
+  for (const pat of gatekeeperPatterns) {
+    if (pat.test(normalized)) return false;
+  }
+
+  // Direct confirmation patterns
+  const confirmPatterns = [
+    /^(yes|yeah|yep|yup|ya|correct|that'?s? (me|right|correct)|affirmative)/,
+    /^speaking$/,
+    /^this is (he|she|him|her|me|them)$/,
+    /^(hi|hello|hey)\s/,
+    /you('?re| are) (speaking|talking) (to|with) (him|her|them|me)/,
+    /^i am\b/,
+  ];
+  for (const pat of confirmPatterns) {
+    if (pat.test(normalized)) return true;
+  }
+
+  // Name match: "this is <name>", "my name is <name>", "<name> speaking"
+  if (expectedName) {
+    const nameNorm = expectedName.toLowerCase().replace(/[^\w\s]/g, '').trim();
+    const firstName = nameNorm.split(/\s+/)[0];
+    if (firstName && firstName.length >= 2) {
+      const namePatterns = [
+        new RegExp(`this is ${firstName}`),
+        new RegExp(`^${firstName}\\b`),
+        new RegExp(`my name is ${firstName}`),
+        new RegExp(`${firstName} (speaking|here)`),
+        new RegExp(`it'?s ${firstName}`),
+      ];
+      for (const pat of namePatterns) {
+        if (pat.test(normalized)) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Inject a text message to Gemini via clientContent (Vertex AI camelCase).
+ * Used for identity lock, state reinforcement, and other mid-call guidance.
+ */
+function injectTextMessage(session: BridgeSession, text: string): void {
+  if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN) return;
+
+  const msg = {
+    clientContent: {
+      turns: [{ role: 'user', parts: [{ text }] }],
+      turnComplete: true,
+    },
+  };
+  session.geminiWs.send(JSON.stringify(msg));
+}
+
+/**
+ * Inject identity confirmation lock — tells Gemini to advance past identity check.
+ */
+function injectIdentityLock(session: BridgeSession, contactText: string): void {
+  session.identityConfirmed = true;
+  session.identityConfirmedAt = Date.now();
+  session.currentState = 'HUMAN_MOMENT';
+
+  const name = session.contactName || 'the contact';
+  log(`[Identity] Confirmed for ${session.callId}: "${contactText}" → locked as ${name}`);
+
+  injectTextMessage(session,
+    `[SYSTEM: Identity confirmed — you are now speaking with ${name}. ` +
+    `Advance to HUMAN MOMENT state. Build brief rapport before delivering your purpose. ` +
+    `Do NOT re-ask "who am I speaking with?"]`
+  );
+}
+
+/**
+ * Inject state reinforcement — reminds Gemini of current call state every N contact turns.
+ * Prevents model regression (re-introducing itself, re-asking identity, etc.).
+ */
+function maybeInjectStateReinforcement(session: BridgeSession): void {
+  const TURNS_BETWEEN_REINFORCEMENT = 3;
+  const MIN_GAP_MS = 15000; // At least 15s between reinforcements
+  const MAX_REINFORCEMENTS = 10;
+
+  if (session.stateReinforcementCount >= MAX_REINFORCEMENTS) return;
+  if (session.contactTurnsSinceReinforcement < TURNS_BETWEEN_REINFORCEMENT) return;
+  if (Date.now() - session.lastStateReinforcementAt < MIN_GAP_MS) return;
+
+  session.contactTurnsSinceReinforcement = 0;
+  session.lastStateReinforcementAt = Date.now();
+  session.stateReinforcementCount++;
+
+  const state = session.currentState;
+  const identityStatus = session.identityConfirmed
+    ? `Identity CONFIRMED (${session.contactName || 'contact'})`
+    : 'Identity NOT yet confirmed';
+
+  log(`[StateReinforcement] ${session.callId}: state=${state}, identity=${identityStatus}, count=${session.stateReinforcementCount}`);
+
+  injectTextMessage(session,
+    `[STATE REMINDER #${session.stateReinforcementCount}] ` +
+    `Current state: ${state}. ${identityStatus}. ` +
+    `Agent turns: ${session.agentTurnCount}, Contact turns: ${session.contactTurnCount}. ` +
+    `Continue following the call flow. Do NOT re-introduce yourself or re-ask identity. ` +
+    `Do NOT repeat information already shared.`
+  );
+}
+
 // ==================== GEMINI CONNECTION ====================
 
 async function connectToGemini(session: BridgeSession): Promise<void> {
@@ -705,15 +856,15 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
             const last = session.transcript[session.transcript.length - 1];
             if (last && last.role === 'agent' && (Date.now() - last.ts) < 3000) {
               // Merge into previous agent entry if within 3s (same turn)
-              // Avoid duplicating if the new text is already contained
               if (!last.text.includes(agentText)) {
                 last.text = (last.text + ' ' + agentText).trim();
                 last.ts = Date.now();
               }
             } else {
-              // Check for exact duplicate of last agent entry
+              // New agent turn
               if (!last || last.role !== 'agent' || last.text !== agentText) {
                 session.transcript.push({ role: 'agent', text: agentText, ts: Date.now() });
+                session.agentTurnCount++;
               }
             }
           }
@@ -731,8 +882,24 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
                 last.ts = Date.now();
               }
             } else {
+              // New contact turn
               if (!last || last.role !== 'contact' || last.text !== contactText) {
                 session.transcript.push({ role: 'contact', text: contactText, ts: Date.now() });
+                session.contactTurnCount++;
+                session.contactTurnsSinceReinforcement++;
+
+                // Identity detection: check if contact confirmed who they are
+                if (!session.identityConfirmed && session.contactTurnCount <= 5) {
+                  const fullContactText = last && last.role === 'contact'
+                    ? last.text + ' ' + contactText
+                    : contactText;
+                  if (detectIdentityConfirmation(fullContactText, session.contactName)) {
+                    injectIdentityLock(session, fullContactText);
+                  }
+                }
+
+                // State reinforcement: prevent Gemini from regressing mid-call
+                maybeInjectStateReinforcement(session);
               }
             }
           }
@@ -783,11 +950,15 @@ function scheduleOpeningFallback(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
   if (session.openingFallbackTimer) return;
 
-  const OPENING_FALLBACK_DELAY_MS = 1500;
+  // Match TeXML Gemini Live opening pattern:
+  // Wait 4.5s for contact to speak first (natural flow — Gemini hears their "Hello?"
+  // and responds naturally). Only send explicit greeting if contact is silent.
+  // TeXML uses 4.5s; previous SIP value was 1.5s which was too fast.
+  const OPENING_FALLBACK_DELAY_MS = 4500;
   session.openingFallbackTimer = setTimeout(() => {
     session.openingFallbackTimer = null;
     if (!session.openingMessageSent) {
-      log(`Opening fallback fired for ${session.callId} after ${OPENING_FALLBACK_DELAY_MS}ms without inbound RTP`);
+      log(`Opening fallback fired for ${session.callId} after ${OPENING_FALLBACK_DELAY_MS}ms without contact speech`);
       trySendOpeningMessage(session);
     }
   }, OPENING_FALLBACK_DELAY_MS);
@@ -1048,6 +1219,11 @@ app.get('/bridge/:callId', (req, res) => {
     agentTurns: session.transcript.filter(t => t.role === 'agent').length,
     contactTurns: session.transcript.filter(t => t.role === 'contact').length,
     lastDisposition: session.lastDisposition,
+    identityConfirmed: session.identityConfirmed,
+    currentState: session.currentState,
+    agentTurnCount: session.agentTurnCount,
+    contactTurnCount: session.contactTurnCount,
+    stateReinforcementCount: session.stateReinforcementCount,
     durationSec: Math.round((Date.now() - session.startTime) / 1000),
   });
 });

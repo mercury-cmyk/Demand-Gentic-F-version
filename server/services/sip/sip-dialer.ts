@@ -16,7 +16,6 @@
  * campaign orchestrator. This module only handles SIP signaling and audio.
  */
 
-import * as rtpBridge from './rtp-gemini-bridge';
 import * as mediaBridgeClient from './media-bridge-client';
 import { drachtioServer } from './drachtio-server';
 import { v4 as uuidv4 } from 'uuid';
@@ -195,8 +194,6 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
         console.log(`[SIP Dialer] Call ${callId} ended: ${reason}`);
         // Destroy media bridge on VM
         await mediaBridgeClient.destroyMediaBridge(sipResult.callId || callId);
-        // Also close any legacy bridge session
-        await rtpBridge.closeBridgeSession(callId);
       },
     });
 
@@ -276,9 +273,6 @@ export async function endCall(callId: string, reason?: string): Promise<boolean>
   // Destroy media bridge on VM
   mediaBridgeClient.destroyMediaBridge(callId).catch(() => {});
 
-  // Close legacy bridge session
-  rtpBridge.closeBridgeSession(callId);
-
   // End SIP call via Drachtio
   try {
     await drachtioServer.endCall(callId);
@@ -304,10 +298,15 @@ export function getActiveCalls() {
 }
 
 /**
- * Get active bridge sessions
+ * Get active media bridge sessions (via VM HTTP API)
  */
-export function getActiveSessions() {
-  return rtpBridge.getActiveSessions();
+export async function getActiveSessions() {
+  try {
+    const health = await mediaBridgeClient.getMediaBridgeHealth();
+    return { activeSessions: health.activeSessions || 0 };
+  } catch {
+    return { activeSessions: 0 };
+  }
 }
 
 /**
@@ -315,14 +314,6 @@ export function getActiveSessions() {
  */
 export async function shutdown(): Promise<void> {
   console.log('[SIP Dialer] Shutting down...');
-
-  // Close all bridge sessions
-  const sessions = rtpBridge.getActiveSessions();
-  const callIds = Array.from(sessions.keys());
-  for (const callId of callIds) {
-    rtpBridge.closeBridgeSession(callId);
-  }
-
   console.log('[SIP Dialer] Shutdown complete');
 }
 

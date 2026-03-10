@@ -29,7 +29,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 // Media bridging imports
 import { getAudioEndpoint } from './sdp-parser';
-import { GeminiLiveSIPProvider, type GeminiLiveSIPProviderConfig } from '../gemini-live-sip-provider';
+// GeminiLiveSIPProvider removed — outbound calls use VM media-bridge for audio
 import * as mediaBridgeClient from './media-bridge-client';
 
 // Configuration
@@ -176,17 +176,17 @@ class CallTracker extends EventEmitter {
 const callTracker = new CallTracker();
 
 /**
- * Media provider tracking for cleanup
+ * Media provider tracking for cleanup (inbound calls only — not used for outbound)
  */
 class MediaProviderTracker {
-  private providers: Map<string, GeminiLiveSIPProvider> = new Map();
+  private providers: Map<string, any> = new Map();
 
-  set(callId: string, provider: GeminiLiveSIPProvider): void {
+  set(callId: string, provider: any): void {
     this.providers.set(callId, provider);
     log(`Media provider registered for call ${callId}`);
   }
 
-  get(callId: string): GeminiLiveSIPProvider | undefined {
+  get(callId: string): any | undefined {
     return this.providers.get(callId);
   }
 
@@ -194,7 +194,7 @@ class MediaProviderTracker {
     const provider = this.providers.get(callId);
     if (provider) {
       try {
-        await provider.stop();
+        if (typeof provider.stop === 'function') await provider.stop();
         this.providers.delete(callId);
         log(`Media provider stopped and removed for call ${callId}`);
       } catch (error) {
@@ -491,74 +491,14 @@ export class DrachtioSIPServer {
    * - Receives Gemini responses and transcodes back to G.711
    * - Sends response audio back to the caller as RTP packets
    */
+  /**
+   * Setup media handlers for inbound calls.
+   * For outbound calls, media is handled by the VM media-bridge (via media-bridge-client.ts).
+   * Inbound call support is currently a stub — can be implemented when needed.
+   */
   private async setupMediaHandlers(call: DrachtioCall, rtpPort: number): Promise<void> {
-    try {
-      log(`Setting up media handlers for call ${call.callId} on port ${rtpPort}`);
-
-      // Extract remote RTP endpoint from SDP
-      const remoteEndpoint = getAudioEndpoint(call.req.body);
-      if (!remoteEndpoint) {
-        throw new Error(`Could not parse audio endpoint from remote SDP for call ${call.callId}`);
-      }
-
-      log(`Remote RTP endpoint: ${remoteEndpoint.address}:${remoteEndpoint.port}`);
-
-      // Get Gemini API configuration
-      const geminiApiKey = process.env.GEMINI_API_KEY;
-      if (!geminiApiKey) {
-        throw new Error('GEMINI_API_KEY environment variable not set');
-      }
-
-      // Build provider configuration
-      const providerConfig: GeminiLiveSIPProviderConfig = {
-        geminiApiKey,
-        model: process.env.GEMINI_MODEL || 'models/gemini-2.5-flash-native-audio-preview',
-        voiceName: process.env.GEMINI_VOICE_NAME || 'Puck',
-        systemPrompt: process.env.GEMINI_SYSTEM_PROMPT || 
-          'You are a helpful sales representative. ' +
-          'Be concise, professional, and focus on understanding the caller\'s needs. ' +
-          'Ask clarifying questions when needed. ' +
-          'Maintain a friendly, conversational tone.',
-      };
-
-      // Extract phone number from destination (if available)
-      // Used to detect G.711 format (mulaw vs alaw)
-      let toPhoneNumber: string | undefined;
-      try {
-        const toUri = call.to;
-        const match = toUri.match(/sip:([^@]+)[@:]/);
-        if (match) {
-          toPhoneNumber = match[1];
-        }
-      } catch (e) {
-        // Continue without phone number
-      }
-
-      // Create Gemini Live SIP provider
-      const provider = new GeminiLiveSIPProvider(
-        call.callId,
-        rtpPort,
-        remoteEndpoint.address,
-        remoteEndpoint.port,
-        providerConfig,
-        toPhoneNumber
-      );
-
-      // Start the provider
-      const started = await provider.start();
-      if (!started) {
-        throw new Error('Failed to start Gemini Live SIP provider');
-      }
-
-      // Track provider for cleanup
-      mediaProviderTracker.set(call.callId, provider);
-
-      log(`✓ Media handlers initialized for call ${call.callId}`);
-    } catch (error) {
-      logError(`Error setting up media handlers for call ${call.callId}`, error);
-      // Don't throw - call already has SDP response sent
-      // Provider will simply not be active for this call
-    }
+    log(`Inbound media handlers not yet implemented for call ${call.callId} on port ${rtpPort}`);
+    // Outbound calls use: mediaBridgeClient.createMediaBridge() → VM media-bridge/server.ts
   }
 
   /**
