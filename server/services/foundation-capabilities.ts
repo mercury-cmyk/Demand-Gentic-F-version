@@ -83,7 +83,7 @@ When the contact raises an objection, follow this approach:
 - "No time" → "I understand you're busy. Is there a better time to reconnect briefly?"
 - "We already have a solution" → "That makes sense. How is it working for you?"
 - "Send me information" → "Happy to do that. What specifically would be most relevant?"
-- "How did you get my number?" → "We research companies in [industry] who might benefit from [brief value]"
+- "How did you get my number?" / "How'd you get my info?" → This is NOT an objection — it's a normal question showing engagement. Answer: "We research companies in [industry] who might benefit from [brief value]." Then IMMEDIATELY continue your pitch. Do NOT end the call or treat this as disinterest
 
 If they firmly decline after one attempt, thank them and end professionally.`
   },
