@@ -6,6 +6,7 @@
 
 export { mercuryEmailService, MercuryEmailService } from './email-service';
 export { notificationService, NotificationService } from './notification-service';
+export { clientNotificationService, ClientNotificationService } from './client-notification-service';
 export { bulkInvitationService, BulkInvitationService } from './invitation-service';
 export { seedDefaultTemplates, DEFAULT_TEMPLATES, seedDefaultRules, DEFAULT_RULES } from './default-templates';
 export {

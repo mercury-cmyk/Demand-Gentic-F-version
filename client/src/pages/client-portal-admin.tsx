@@ -48,6 +48,7 @@ import {
   Play,
 } from 'lucide-react';
 import type { ClientAccount, VerificationCampaign } from '@shared/schema';
+import { ClientNotificationCenter } from '@/components/admin/client-notification-center';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1749,6 +1750,7 @@ export default function ClientPortalAdmin() {
                       <TabsTrigger value="settings" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Settings</TabsTrigger>
                       <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Users & Access</TabsTrigger>
                       <TabsTrigger value="projects" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Projects</TabsTrigger>
+                      <TabsTrigger value="notifications" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Notifications</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="profile">
@@ -2142,6 +2144,27 @@ export default function ClientPortalAdmin() {
                         )}
                       </div>
                     </div>
+                  </TabsContent>
+
+                  <TabsContent value="notifications">
+                    <ClientNotificationCenter
+                      clientAccountId={selectedClient.id}
+                      clientName={selectedClient.companyName || selectedClient.name}
+                      campaigns={[
+                        ...(clientDetail.regularCampaigns || []).map((a: any) => ({
+                          id: a.campaign?.id,
+                          name: a.campaign?.name,
+                          status: a.campaign?.status,
+                          type: a.campaign?.type || 'regular',
+                        })),
+                        ...(clientDetail.campaigns || []).map((a: any) => ({
+                          id: a.campaign?.id,
+                          name: a.campaign?.name || a.campaign?.campaignName,
+                          status: a.campaign?.status,
+                          type: a.type || 'verification',
+                        })),
+                      ].filter((c: any) => c.id)}
+                    />
                   </TabsContent>
                   </Tabs>
                 ) : (

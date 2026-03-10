@@ -32,6 +32,7 @@ const LONG_CALL_RECOVERY_INTERVAL = parseInt(process.env.LONG_CALL_RECOVERY_INTE
 const BATCH_TRANSCRIPTION_SWEEP_INTERVAL = parseInt(process.env.BATCH_TRANSCRIPTION_SWEEP_INTERVAL_MS || '1800000', 10); // Every 30 min — catches orphaned calls with GCS recordings
 const ANALYSIS_SWEEP_INTERVAL = parseInt(process.env.ANALYSIS_SWEEP_INTERVAL_MS || '600000', 10); // Every 10 min — analyzes transcribed-but-unanalyzed calls
 const ANALYSIS_RECOVERY_INTERVAL = parseInt(process.env.ANALYSIS_RECOVERY_INTERVAL_MS || '900000', 10); // Every 15 min — retries permanently failed analyses
+const NO_CALL_LEFT_BEHIND_INTERVAL = parseInt(process.env.NO_CALL_LEFT_BEHIND_INTERVAL_MS || '3600000', 10); // Every 60 min — catch-all for missed calls
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -68,6 +69,7 @@ let isLongCallRecoveryRunning = false;
 let isBatchTranscriptionSweepRunning = false;
 let isAnalysisSweepRunning = false;
 let isAnalysisRecoveryRunning = false;
+let isNoCallLeftBehindRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -149,6 +151,7 @@ export function startBackgroundJobs() {
   console.log(`[Background Jobs]   ✓ AI Analysis: ${ENABLE_AI_ANALYSIS ? 'ENABLED (every 120s)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ Telnyx Recording Sync: ${ENABLE_TELNYX_RECORDING_SYNC ? 'ENABLED (every 5min, last 10min window)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ Batch Transcription Sweep: ${ENABLE_TRANSCRIPTION ? `ENABLED (every ${BATCH_TRANSCRIPTION_SWEEP_INTERVAL / 60000}min, up to ${20} calls)` : 'DISABLED'}`);
+  console.log(`[Background Jobs]   ✓ No-Call-Left-Behind: ${ENABLE_TRANSCRIPTION && ENABLE_AI_ANALYSIS ? `ENABLED (every ${NO_CALL_LEFT_BEHIND_INTERVAL / 60000}min, 3-day lookback)` : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
@@ -284,6 +287,35 @@ export function startBackgroundJobs() {
         isAnalysisRecoveryRunning = false;
       }
     }, ANALYSIS_RECOVERY_INTERVAL);
+  }
+
+  // No-Call-Left-Behind sweep — comprehensive catch-all that ensures EVERY call
+  // from the last 3 days has been fully processed (transcription + disposition + analysis).
+  // This is the final safety net — runs after all other recovery jobs.
+  if (ENABLE_TRANSCRIPTION && ENABLE_AI_ANALYSIS) {
+    // Delay first run by 5 minutes to let other sweeps run first
+    setTimeout(() => {
+      setInterval(async () => {
+        if (isNoCallLeftBehindRunning) return;
+        isNoCallLeftBehindRunning = true;
+        try {
+          await withJobTimeout('No-Call-Left-Behind', async () => {
+            const { runNoCallLeftBehindSweep } = await import('./no-call-left-behind-sweep');
+            const result = await runNoCallLeftBehindSweep();
+            if (result.totalProcessed > 0) {
+              console.log(
+                `[Background Jobs] No-Call-Left-Behind: recovered ${result.totalRecovered}/${result.totalProcessed} ` +
+                `(P1:${result.phase1_untranscribed.transcribed}, P2:${result.phase2_undispositioned.dispositioned}, P3:${result.phase3_unanalyzed.analyzed})`
+              );
+            }
+          });
+        } catch (error) {
+          console.error('[Background Jobs] No-Call-Left-Behind error:', error);
+        } finally {
+          isNoCallLeftBehindRunning = false;
+        }
+      }, NO_CALL_LEFT_BEHIND_INTERVAL);
+    }, 5 * 60 * 1000); // Delay first run by 5 minutes
   }
 
   // Orphan recording session sweep — links orphan call_sessions (recordings without

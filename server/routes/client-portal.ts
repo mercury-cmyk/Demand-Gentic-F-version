@@ -1427,7 +1427,7 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
       : await db
           .select({
             campaignId: dialerCallAttempts.campaignId,
-            callsMade: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL THEN 1 END)::int`,
+            callsMade: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL OR ${dialerCallAttempts.disposition} IS NOT NULL THEN 1 END)::int`,
             callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
             qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
             dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} IN ('dnc-request', 'dnc_request', 'do_not_call', 'dnc_added') THEN 1 END)::int`,

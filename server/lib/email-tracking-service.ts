@@ -1,6 +1,6 @@
 import { db } from '../db';
 import { emailOpens, emailLinkClicks } from '@shared/schema';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, inArray } from 'drizzle-orm';
 import crypto from 'crypto';
 
 export interface TrackingOptions {
@@ -381,6 +381,62 @@ export class EmailTrackingService {
         lastOpenedAt: null,
         lastClickedAt: null,
       };
+    }
+  }
+
+  /**
+   * Get tracking stats for multiple messages in a single query (batch)
+   */
+  async getBatchTrackingStats(messageIds: string[]): Promise<Record<string, {
+    opens: number;
+    uniqueOpens: number;
+    clicks: number;
+    uniqueClicks: number;
+    lastOpenedAt: Date | null;
+    lastClickedAt: Date | null;
+  }>> {
+    if (!messageIds.length) return {};
+    
+    try {
+      const opensData = await db.select({
+        messageId: emailOpens.messageId,
+        totalOpens: sql<number>`COUNT(*)::int`,
+        uniqueOpens: sql<number>`COUNT(DISTINCT ${emailOpens.recipientEmail})::int`,
+        lastOpened: sql<Date | null>`MAX(${emailOpens.openedAt})`,
+      })
+        .from(emailOpens)
+        .where(inArray(emailOpens.messageId, messageIds))
+        .groupBy(emailOpens.messageId);
+
+      const clicksData = await db.select({
+        messageId: emailLinkClicks.messageId,
+        totalClicks: sql<number>`COUNT(*)::int`,
+        uniqueClicks: sql<number>`COUNT(DISTINCT ${emailLinkClicks.recipientEmail})::int`,
+        lastClicked: sql<Date | null>`MAX(${emailLinkClicks.clickedAt})`,
+      })
+        .from(emailLinkClicks)
+        .where(inArray(emailLinkClicks.messageId, messageIds))
+        .groupBy(emailLinkClicks.messageId);
+
+      const result: Record<string, any> = {};
+      
+      for (const id of messageIds) {
+        const openRow = opensData.find(o => o.messageId === id);
+        const clickRow = clicksData.find(c => c.messageId === id);
+        result[id] = {
+          opens: openRow?.totalOpens || 0,
+          uniqueOpens: openRow?.uniqueOpens || 0,
+          clicks: clickRow?.totalClicks || 0,
+          uniqueClicks: clickRow?.uniqueClicks || 0,
+          lastOpenedAt: openRow?.lastOpened || null,
+          lastClickedAt: clickRow?.lastClicked || null,
+        };
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('[EMAIL-TRACKING] Error getting batch tracking stats:', error);
+      return {};
     }
   }
 }

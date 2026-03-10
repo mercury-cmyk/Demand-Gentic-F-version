@@ -8601,6 +8601,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         let existingAttempt:
           | {
               id: string;
+              callStartedAt: Date | null;
               telephonyProviderId: string | null;
               telephonyProviderType: string | null;
               telephonyProviderName: string | null;
@@ -8620,6 +8621,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           const [attempt] = await db
             .select({
               id: dialerCallAttempts.id,
+              callStartedAt: dialerCallAttempts.callStartedAt,
               telephonyProviderId: dialerCallAttempts.telephonyProviderId,
               telephonyProviderType: dialerCallAttempts.telephonyProviderType,
               telephonyProviderName: dialerCallAttempts.telephonyProviderName,
@@ -8750,7 +8752,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           const wasHumanDetected = session.audioDetection?.humanDetected === true;
           const wasVoicemail = disposition === 'voicemail' || outcome === 'voicemail';
 
+          // Ensure callStartedAt is always set so batch-stats counts this call.
+          // The orchestrator sets it at call-initiation time; if it was missed
+          // (e.g. race condition or code-path gap), backfill from session.startTime.
+          const callStartedAtBackfill = existingAttempt?.callStartedAt
+            ? undefined          // already set — don't overwrite
+            : (session.startTime || new Date(Date.now() - callDuration * 1000));
+
           await db.update(dialerCallAttempts).set({
+            ...(callStartedAtBackfill ? { callStartedAt: callStartedAtBackfill } : {}),
             callEndedAt: new Date(),
             callDurationSeconds: callDuration,
             disposition: disposition,

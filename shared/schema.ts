@@ -15580,3 +15580,58 @@ export type InsertFileUpload = z.infer<typeof insertFileUploadSchema>;
 
 // ========== END TEAM MESSAGING & CALLS TYPES ==========
 
+// ============================================================
+// CLIENT NOTIFICATION CENTER (Mercury Bridge)
+// ============================================================
+
+export const clientNotificationStatusEnum = pgEnum('client_notification_status', [
+  'draft',
+  'queued',
+  'sent',
+  'failed',
+]);
+
+export const clientNotificationTypeEnum = pgEnum('client_notification_type', [
+  'pipeline_update',
+  'campaign_launch',
+  'leads_delivered',
+  'weekly_report',
+  'milestone',
+  'custom',
+]);
+
+export const clientNotifications = pgTable("client_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  notificationType: clientNotificationTypeEnum("notification_type").notNull(),
+  subject: text("subject").notNull(),
+  htmlContent: text("html_content").notNull(),
+  textContent: text("text_content"),
+  recipientEmails: jsonb("recipient_emails").$type<string[]>().notNull().default([]),
+  status: clientNotificationStatusEnum("status").notNull().default('draft'),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  sentBy: varchar("sent_by").references(() => users.id, { onDelete: 'set null' }),
+  outboxId: varchar("outbox_id"),
+  errorMessage: text("error_message"),
+  metadata: jsonb("metadata").$type<Record<string, any>>(),
+  aiGenerated: boolean("ai_generated").default(false),
+  aiPrompt: text("ai_prompt"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_notifications_client_idx").on(table.clientAccountId),
+  campaignIdx: index("client_notifications_campaign_idx").on(table.campaignId),
+  statusIdx: index("client_notifications_status_idx").on(table.status),
+  typeIdx: index("client_notifications_type_idx").on(table.notificationType),
+  createdIdx: index("client_notifications_created_idx").on(table.createdAt),
+}));
+
+export const insertClientNotificationSchema = createInsertSchema(clientNotifications).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ClientNotification = typeof clientNotifications.$inferSelect;
+export type InsertClientNotification = z.infer<typeof insertClientNotificationSchema>;
+

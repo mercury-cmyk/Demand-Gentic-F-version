@@ -470,10 +470,10 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
     }
 
     if (startDate) {
-      dialerConditions.push(gte(dialerCallAttempts.callStartedAt, new Date(startDate as string)));
+      dialerConditions.push(sql`COALESCE(${dialerCallAttempts.callStartedAt}, ${dialerCallAttempts.createdAt}) >= ${new Date(startDate as string)}`);
     }
     if (endDate) {
-      dialerConditions.push(lte(dialerCallAttempts.callStartedAt, new Date(endDate as string)));
+      dialerConditions.push(sql`COALESCE(${dialerCallAttempts.callStartedAt}, ${dialerCallAttempts.createdAt}) <= ${new Date(endDate as string)}`);
     }
 
     if (minDuration) {
