@@ -17,6 +17,8 @@ import {
   accounts,
   accountCallBriefs,
   callSessionEvents,
+  users,
+  userRoles,
 } from "@shared/schema";
 import { eq, and, desc, asc, sql, gte, lte, isNotNull, inArray, count as drizzleCount } from "drizzle-orm";
 import { requireAuth } from "../auth";
@@ -25,6 +27,7 @@ import { overrideSingleDisposition } from "../services/bulk-disposition-reanalyz
 import { getDispositionCache } from "../services/disposition-analysis-cache";
 import { buildDispositionPhraseInsights, type DetectionSignal } from "../services/disposition-phrase-insights";
 import { buildPromptGuardrailExport } from "../services/disposition-prompt-guardrails";
+import { MercuryEmailService } from "../services/mercury/email-service";
 import type { CanonicalDisposition } from "@shared/schema";
 
 const router = Router();
@@ -1244,7 +1247,7 @@ router.post("/generate-coaching", requireAuth, async (req: Request, res: Respons
 router.post("/override/:callSessionId", requireAuth, async (req: Request, res: Response) => {
   try {
     const { callSessionId } = req.params;
-    const { newDisposition, reason } = req.body;
+    const { newDisposition, reason, source } = req.body;
 
     if (!callSessionId) {
       return res.status(400).json({ error: "callSessionId is required" });
@@ -1275,6 +1278,13 @@ router.post("/override/:callSessionId", requireAuth, async (req: Request, res: R
       await cache.invalidateCall(callSessionId);
     } catch (cacheErr: any) {
       console.warn("[DispositionIntelligence] Cache invalidation warning:", cacheErr.message);
+    }
+
+    // Notify quality analysts when override is from potential leads
+    if (source === 'potential_leads') {
+      notifyQualityAnalysts(callSessionId, newDisposition, reason, userId).catch(err => {
+        console.warn("[DispositionIntelligence] QA notification failed (non-blocking):", err.message);
+      });
     }
 
     res.json({
@@ -1358,5 +1368,112 @@ router.post("/bulk-override", requireAuth, async (req: Request, res: Response) =
     res.status(500).json({ error: `Bulk override failed: ${error.message}` });
   }
 });
+
+// ============================================================================
+// HELPERS — Quality Analyst Notification
+// ============================================================================
+
+/**
+ * Notify quality analysts (e.g. Sami) when a disposition is overridden
+ * from the Potential Leads page. Fire-and-forget — failures are logged
+ * but never block the override response.
+ */
+async function notifyQualityAnalysts(
+  callSessionId: string,
+  newDisposition: string,
+  reason: string | undefined,
+  overriddenByUserId: string,
+) {
+  try {
+    // 1. Look up quality analysts via user_roles
+    const qaUsers = await db
+      .select({ userId: userRoles.userId, email: users.email, firstName: users.firstName, lastName: users.lastName })
+      .from(userRoles)
+      .innerJoin(users, eq(users.id, userRoles.userId))
+      .where(eq(userRoles.role, 'quality_analyst'));
+
+    const recipients = qaUsers.filter(u => u.email && !u.email.endsWith('.local'));
+    if (recipients.length === 0) {
+      console.log('[DispositionIntelligence] No quality analysts with valid email found — skipping notification');
+      return;
+    }
+
+    // 2. Fetch call context for a useful notification
+    const [session] = await db
+      .select({
+        contactName: contacts.firstName,
+        contactLastName: contacts.lastName,
+        contactCompany: contacts.company,
+        campaignName: campaigns.name,
+        oldDisposition: callSessions.disposition,
+        duration: callSessions.duration,
+      })
+      .from(callSessions)
+      .leftJoin(contacts, eq(contacts.id, callSessions.contactId))
+      .leftJoin(campaigns, eq(campaigns.id, callSessions.campaignId))
+      .where(eq(callSessions.id, callSessionId))
+      .limit(1);
+
+    const contactDisplay = session
+      ? `${session.contactName || ''} ${session.contactLastName || ''}`.trim() || 'Unknown'
+      : 'Unknown';
+    const companyDisplay = session?.contactCompany || 'N/A';
+    const campaignDisplay = session?.campaignName || 'N/A';
+    const oldDisp = session?.oldDisposition || 'unknown';
+    const durationMin = session?.duration ? Math.round(session.duration / 60) : 0;
+
+    // 3. Look up who did the override
+    const [overrider] = await db
+      .select({ firstName: users.firstName, lastName: users.lastName, username: users.username })
+      .from(users)
+      .where(eq(users.id, overriddenByUserId))
+      .limit(1);
+    const overriderName = overrider
+      ? `${overrider.firstName || ''} ${overrider.lastName || ''}`.trim() || overrider.username
+      : 'System';
+
+    // 4. Send via Mercury
+    const emailService = new MercuryEmailService();
+    const subject = `Potential Lead Override: ${contactDisplay} — ${newDisposition.replace(/_/g, ' ')}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1a56db;">Potential Lead Disposition Override</h2>
+        <p>A disposition was overridden from the <strong>Potential Leads</strong> review page.</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+          <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Contact</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: 600;">${contactDisplay}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Company</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${companyDisplay}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Campaign</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${campaignDisplay}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Call Duration</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${durationMin} min</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Previous Disposition</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${oldDisp.replace(/_/g, ' ')}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">New Disposition</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #059669;">${newDisposition.replace(/_/g, ' ')}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Overridden By</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${overriderName}</td></tr>
+          ${reason ? `<tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Reason</td>
+              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${reason}</td></tr>` : ''}
+        </table>
+        <p style="color: #6b7280; font-size: 12px;">Call Session ID: ${callSessionId}</p>
+      </div>
+    `;
+
+    for (const recipient of recipients) {
+      await emailService.sendDirect({
+        to: recipient.email!,
+        subject,
+        html,
+        text: `Potential Lead Override: ${contactDisplay} (${companyDisplay}) on "${campaignDisplay}" — ${oldDisp} → ${newDisposition}. Overridden by ${overriderName}.`,
+      });
+    }
+
+    console.log(`[DispositionIntelligence] Notified ${recipients.length} quality analyst(s) about potential lead override`);
+  } catch (err: any) {
+    console.error('[DispositionIntelligence] Quality analyst notification error:', err.message);
+  }
+}
 
 export default router;

@@ -35,7 +35,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   RefreshCw, Brain, Search, ArrowLeft, Phone, Building, Clock, FileText,
   Mic, BarChart3, AlertTriangle, Target, TrendingUp, ChevronLeft, ChevronRight,
-  Sparkles, Crosshair, Zap,
+  Sparkles, Crosshair, Zap, CheckCircle2, ShieldCheck,
 } from 'lucide-react';
 import {
   ResizablePanelGroup,
@@ -354,6 +354,29 @@ export default function PotentialLeadsPage() {
     },
   });
 
+  // Disposition override mutation
+  const overrideDispositionMutation = useMutation({
+    mutationFn: async ({ callSessionId, newDisposition, reason }: { callSessionId: string; newDisposition: string; reason?: string }) => {
+      const response = await apiRequest('POST', `/api/disposition-intelligence/override/${callSessionId}`, {
+        newDisposition,
+        reason: reason || 'Override from Potential Leads review',
+        source: 'potential_leads',
+      });
+      return response.json();
+    },
+    onSuccess: (_data: any, variables: { callSessionId: string; newDisposition: string }) => {
+      toast({
+        title: 'Disposition Updated',
+        description: `Changed to ${variables.newDisposition.replace(/_/g, ' ')}`,
+      });
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ['/api/qa/conversations'] });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Override Failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
   const handleBack = () => setLocation('/disposition-intelligence?tab=conversation-quality');
 
   const updateFilter = <K extends keyof PotentialLeadsFilters>(key: K, value: PotentialLeadsFilters[K]) => {
@@ -465,7 +488,7 @@ export default function PotentialLeadsPage() {
                     </div>
 
                     {/* Disposition */}
-                    <div className="w-[130px]">
+                    <div className="w-[150px]">
                       <Label className="text-xs">Disposition</Label>
                       <Select value={filters.disposition} onValueChange={(v) => updateFilter('disposition', v)}>
                         <SelectTrigger className="h-8 text-sm">
@@ -473,10 +496,14 @@ export default function PotentialLeadsPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="qualified_lead">Qualified Lead</SelectItem>
                           <SelectItem value="not_interested">Not Interested</SelectItem>
-                          <SelectItem value="callback">Callback</SelectItem>
+                          <SelectItem value="callback_requested">Callback Requested</SelectItem>
+                          <SelectItem value="needs_review">Needs Review</SelectItem>
                           <SelectItem value="voicemail">Voicemail</SelectItem>
                           <SelectItem value="no_answer">No Answer</SelectItem>
+                          <SelectItem value="do_not_call">Do Not Call</SelectItem>
+                          <SelectItem value="invalid_data">Invalid Data</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -724,6 +751,60 @@ export default function PotentialLeadsPage() {
                 isAnalyzing={analyzeMutation.isPending}
                 isTranscribing={transcribeMutation.isPending}
               />
+
+              {/* Disposition Override Section */}
+              {selectedDetail && (
+                <Card className="mt-4 border-amber-200 bg-amber-50/30">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-amber-600" />
+                      Override Disposition
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Change the call disposition if the AI assessment is incorrect
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {[
+                        { value: 'qualified_lead', label: 'Qualified Lead', color: 'bg-green-600 hover:bg-green-700' },
+                        { value: 'callback_requested', label: 'Callback', color: 'bg-blue-600 hover:bg-blue-700' },
+                        { value: 'needs_review', label: 'Needs Review', color: 'bg-yellow-600 hover:bg-yellow-700' },
+                        { value: 'not_interested', label: 'Not Interested', color: 'bg-gray-600 hover:bg-gray-700' },
+                        { value: 'do_not_call', label: 'DNC', color: 'bg-red-600 hover:bg-red-700' },
+                      ].map((opt) => {
+                        const isCurrentDisposition = selectedDetail.disposition === opt.value;
+                        return (
+                          <Button
+                            key={opt.value}
+                            size="sm"
+                            variant={isCurrentDisposition ? 'outline' : 'default'}
+                            className={cn(
+                              'text-xs h-7',
+                              isCurrentDisposition
+                                ? 'border-2 border-primary cursor-default'
+                                : `${opt.color} text-white`
+                            )}
+                            disabled={
+                              isCurrentDisposition ||
+                              overrideDispositionMutation.isPending
+                            }
+                            onClick={() => {
+                              overrideDispositionMutation.mutate({
+                                callSessionId: selectedDetail.id,
+                                newDisposition: opt.value,
+                              });
+                            }}
+                          >
+                            {isCurrentDisposition && <CheckCircle2 className="h-3 w-3 mr-1" />}
+                            {opt.label}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

@@ -18281,6 +18281,9 @@ Provide JSON response with:
           else if (session.lqaIntentStrength === 'moderate') confidence += 8;
           if (session.lqaShouldCreateLead === true) confidence += 10;
           if (session.lqaProspectInterested === true) confidence += 10;
+          // Boost for job title / pain point alignment
+          if (session.lqaJobTitleAlignment === true) confidence += 8;
+          if (session.lqaPainPointAlignment === true) confidence += 8;
           const negOutcomes = ['voicemail', 'invalid', 'not_a_fit', 'dnc'];
           if (session.lqaOutcomeCategory && negOutcomes.includes(session.lqaOutcomeCategory)) confidence -= 20;
           return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'lead_quality_ai' };
@@ -18290,11 +18293,16 @@ Provide JSON response with:
         if (session.cqrCampaignAlignmentScore != null || session.cqrQualificationScore != null) {
           const alignment = session.cqrCampaignAlignmentScore || 0;
           const qualification = session.cqrQualificationScore || 0;
-          confidence = Math.round((alignment + qualification) / 2);
+          // Weight qualification higher (60%) vs alignment (40%) for stronger success criteria emphasis
+          confidence = Math.round(qualification * 0.6 + alignment * 0.4);
           if (session.cqrQualificationMet === true) confidence += 20;
           if (session.cqrDispositionAccurate === false) confidence += 15;
           if (session.cqrEngagementLevel === 'high') confidence += 10;
+          else if (session.cqrEngagementLevel === 'medium') confidence += 5;
           if (session.cqrSentiment === 'positive') confidence += 5;
+          // Boost for high talking points coverage (shows campaign success criteria addressed)
+          if ((session.cqrTalkingPointsCoverage || 0) >= 70) confidence += 10;
+          else if ((session.cqrTalkingPointsCoverage || 0) >= 50) confidence += 5;
           return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'call_quality_ai' };
         }
 
@@ -18313,6 +18321,14 @@ Provide JSON response with:
           session.campaignTalkingPoints, session.successCriteria, session.qaParameters,
         );
         if (hasSignals) confidence += 20 + Math.min(15, signals.length * 3);
+        // Extra boost if success criteria keywords are directly matched
+        if (session.successCriteria && session.transcript) {
+          const critWords = session.successCriteria.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+          const transcriptLower = session.transcript.toLowerCase();
+          const matchedCrit = critWords.filter((w: string) => transcriptLower.includes(w));
+          if (matchedCrit.length >= 2) confidence += 15;
+          else if (matchedCrit.length >= 1) confidence += 8;
+        }
         if (!isVoicemailOrIVR(session.transcript, session.disposition, null)) confidence += 10;
 
         const dispLower = (session.disposition || '').toLowerCase();
