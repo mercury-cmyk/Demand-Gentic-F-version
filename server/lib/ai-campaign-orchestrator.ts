@@ -61,8 +61,8 @@ import {
 } from '../services/active-call-tracker';
 
 const ORCHESTRATOR_INTERVAL_MS = 10000; // Check every 10 seconds (increased frequency)
-const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '100', 10);
-const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10);
+const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '10', 10);
+const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '10', 10);
 const DELAY_BETWEEN_CALLS_MS = 1000; // 1s delay between call batches (prevents burst overload)
 const PARALLEL_CALL_BATCH_SIZE = 3; // Small batches to prevent event loop saturation from concurrent Gemini WebSocket connections
 const STUCK_ITEM_TIMEOUT_MS = 180000; // 3 minutes - allows normal call lifecycle (~90s) + buffer; watchdog is the single recovery mechanism

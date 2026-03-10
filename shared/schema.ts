@@ -2458,8 +2458,8 @@ export const agentDefaults = pgTable("agent_defaults", {
   defaultVoiceProvider: text("default_voice_provider").notNull().default('google'),
   defaultVoice: text("default_voice").notNull().default('Fenrir'),
   // Global concurrent call limits
-  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(100), // Per-campaign default
-  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(100),   // System-wide cap
+  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(10), // Per-campaign default (Gemini Live supports ~10 concurrent sessions)
+  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(10),   // System-wide cap (must stay within Gemini Live quota)
   // Call engine: 'texml' (Telnyx TeXML + Gemini WebSocket) or 'sip' (Direct SIP via Drachtio)
   defaultCallEngine: text("default_call_engine").notNull().default('texml'),
   updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
