@@ -15924,7 +15924,16 @@ Provide JSON response with:
         if (callAttemptId && data?.disposition) {
           const { processDisposition } = await import('./services/disposition-engine');
           const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
-          console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}`, {
+          // Normalize non-canonical dispositions
+          const END_CALL_DISP_MAP: Record<string, string> = {
+            'ivl_detected': 'voicemail', 'ivr_detected': 'voicemail', 'ivr': 'voicemail',
+            'busy': 'no_answer', 'failed': 'no_answer', 'hangup': 'no_answer',
+            'connected': 'needs_review', 'answered': 'needs_review',
+            'callback': 'callback_requested', 'callback-requested': 'callback_requested',
+            'wrong_number': 'invalid_data', 'disconnected': 'no_answer',
+          };
+          const normalizedDisposition = END_CALL_DISP_MAP[data.disposition] || data.disposition;
+          console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}${normalizedDisposition !== data.disposition ? ` → ${normalizedDisposition}` : ''}`, {
             hasTranscript: !!data?.transcript,
             callDurationSeconds: data?.callDurationSeconds,
           });
@@ -15938,7 +15947,7 @@ Provide JSON response with:
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
           }
-          const dispositionResult = await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
+          const dispositionResult = await processDisposition(callAttemptId, normalizedDisposition as any, 'media_bridge', {
             transcript: data?.transcript || undefined,
             structuredTranscript: data?.structuredTranscript || undefined,
           });
@@ -15961,7 +15970,7 @@ Provide JSON response with:
               leadId: dispositionResult?.leadId,
               campaignId: data?.context?.campaignId || '',
               contactName: data?.context?.contactName || data?.context?.contactFirstName,
-              disposition: data.disposition,
+              disposition: normalizedDisposition,
               turnTranscript: rawTurns
                 .map((turn: any) => ({
                   speaker: turn?.role === 'agent' ? 'agent' : 'contact',
@@ -15979,7 +15988,16 @@ Provide JSON response with:
         // Process disposition via the disposition engine
         const { processDisposition } = await import('./services/disposition-engine');
         const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
-        const disposition = data?.disposition || 'no_answer';
+        // Normalize non-canonical dispositions from media bridge to canonical values
+        const DISPOSITION_MAP: Record<string, string> = {
+          'ivl_detected': 'voicemail', 'ivr_detected': 'voicemail', 'ivr': 'voicemail',
+          'busy': 'no_answer', 'failed': 'no_answer', 'hangup': 'no_answer',
+          'connected': 'needs_review', 'answered': 'needs_review',
+          'callback': 'callback_requested', 'callback-requested': 'callback_requested',
+          'wrong_number': 'invalid_data', 'disconnected': 'no_answer',
+        };
+        const rawDisposition = data?.disposition || 'no_answer';
+        const disposition = DISPOSITION_MAP[rawDisposition] || rawDisposition;
         console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`, {
           hasTranscript: !!data?.transcript,
           callDurationSeconds: data?.callDurationSeconds,

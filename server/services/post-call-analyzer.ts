@@ -829,7 +829,7 @@ export async function runPostCallAnalysis(
     // We still prefer recording-based post-call transcription when available.
     let structuredTranscript: StructuredTranscript | null = null;
     let geminiFallbackTranscript: StructuredTranscript | null = null;
-    if (options?.geminiTranscript && options.geminiTranscript.trim().length > 50) {
+    if (options?.geminiTranscript && options.geminiTranscript.trim().length > 20) {
       console.log(`${LOG_PREFIX} Native Gemini live transcript captured (${options.geminiTranscript.length} chars) - using as fallback only if recording transcription is unavailable`);
       // Parse Gemini transcript format: "Agent: text\nContact: text\n..."
       const lines = options.geminiTranscript.split('\n').filter(l => l.trim().length > 0);
