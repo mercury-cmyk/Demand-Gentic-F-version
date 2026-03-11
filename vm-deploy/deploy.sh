@@ -24,6 +24,13 @@ echo "========================================="
 echo "  DemandGentic AI — Deploying"
 echo "========================================="
 
+# 0. Pre-build cleanup — remove dangling images and build cache to prevent disk full
+echo "[0/5] Cleaning up old Docker images and build cache..."
+docker image prune -af --filter "until=24h" 2>/dev/null || true
+docker builder prune -af --filter "until=24h" 2>/dev/null || true
+DISK_AVAIL=$(df --output=avail / | tail -1)
+echo "  Disk available: $((DISK_AVAIL / 1024))MB"
+
 # 1. Pull latest code
 echo "[1/5] Pulling latest code..."
 git pull origin main

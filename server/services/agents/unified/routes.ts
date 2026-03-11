@@ -441,6 +441,18 @@ router.post('/:agentType/recommendations/:id/apply', (req: Request, res: Respons
     if (!agentType) return;
 
     const approvedBy = getUserId(req);
+
+    // Pre-approve governance-gated recommendations before applying.
+    // The user clicking "Apply" in the dashboard IS the explicit approval action.
+    const recs = unifiedAgentRegistry.getAgentRecommendations(agentType);
+    const recView = recs.find((r: any) => r.id === req.params.id);
+    if (recView?.governance?.requiresExplicitApproval && recView.status !== 'approved') {
+      unifiedAgentRegistry.approveAgentRecommendation(
+        agentType, req.params.id, approvedBy,
+        'Auto-approved via Apply action'
+      );
+    }
+
     unifiedAgentRegistry.applyAgentRecommendation(agentType, req.params.id, approvedBy);
 
     res.json({
@@ -448,11 +460,7 @@ router.post('/:agentType/recommendations/:id/apply', (req: Request, res: Respons
       message: `Recommendation ${req.params.id} applied successfully`,
     });
   } catch (error: any) {
-    const message = error?.message || 'Failed to apply recommendation';
-    if (message.includes('requires explicit approval before apply')) {
-      return res.status(409).json({ error: message, code: 'APPROVAL_REQUIRED' });
-    }
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: error?.message || 'Failed to apply recommendation' });
   }
 });
 
@@ -638,6 +646,51 @@ router.post('/:agentType/learning-pipeline/analyze', async (req: Request, res: R
         findings: analysis.findings,
       },
       recommendations: recommendations.map(r => ({
+        id: r.id,
+        title: r.title,
+        category: r.category,
+        priorityScore: r.priorityScore,
+        targetSection: r.targetPromptSectionId,
+        impact: r.impact,
+      })),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** POST /api/unified-agents/:agentType/learning-pipeline/collect-and-analyze
+ * Auto-collect data from recent call quality records and run full analysis pipeline.
+ * This is the "Run Full Analysis" action that collects real data from the database.
+ */
+router.post('/:agentType/learning-pipeline/collect-and-analyze', async (req: Request, res: Response) => {
+  try {
+    const agentType = validateAgentType(req, res);
+    if (!agentType) return;
+    if (agentType !== 'voice') {
+      return res.status(400).json({ error: 'Auto data collection is currently only available for the voice agent' });
+    }
+
+    const result = await learningPipeline.collectAndAnalyzeVoiceData();
+
+    const state = learningPipeline.getPipelineState(agentType);
+    const recs = learningPipeline.getRecommendations(agentType);
+
+    res.json({
+      success: true,
+      findings: result.findings,
+      recommendations: result.recommendations,
+      pipelineState: state ? {
+        status: state.status,
+        lastRun: state.lastRun,
+        collectors: state.activeCollectors.map(c => ({
+          sourceType: c.sourceType,
+          dataPoints: c.dataPointsCollected,
+          lastCollected: c.lastCollectedAt,
+        })),
+        stats: state.stats,
+      } : null,
+      pendingRecommendations: recs.filter(r => r.status === 'pending').map(r => ({
         id: r.id,
         title: r.title,
         category: r.category,

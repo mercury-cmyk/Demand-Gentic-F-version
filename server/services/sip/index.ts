@@ -1,7 +1,10 @@
 /**
  * SIP Services Module
  *
- * Exports all SIP-related functionality for direct SIP trunk calling.
+ * Unified SIP calling interface.
+ * Architecture:
+ *   sip-dialer → drachtio-server (SIP signaling) → media-bridge-client (VM HTTP)
+ *   VM media-bridge/server.ts handles RTP ↔ Gemini Live audio bridging
  */
 
 // Main dialer interface
@@ -18,21 +21,3 @@ export {
   type InitiateCallParams,
   type CallResult,
 } from './sip-dialer';
-
-// SIP client (lower level)
-export {
-  initializeSipClient,
-  isReady as isSipClientReady,
-  sendAudio,
-  type SipCall,
-} from './sip-client';
-
-// RTP Bridge (lower level)
-export {
-  createBridgeSession,
-  handleSipAudio,
-  closeBridgeSession,
-  getBridgeSession,
-  type BridgeSession,
-  type CallContext,
-} from './rtp-gemini-bridge';

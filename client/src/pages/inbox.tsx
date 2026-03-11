@@ -11,15 +11,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/rich-text-editor";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Progress } from "@/components/ui/progress";
 import {
   Mail, Inbox as InboxIcon, Send, Archive, Star, StarOff,
   RefreshCw, Reply, Forward, Trash2, Paperclip,
   Search, Building2, User, Target, ChevronRight, Loader2, X, Plus,
   Sparkles, CheckCircle2, AlertCircle, Zap, Eye, MousePointer,
-  Link2, Unlink
+  Link2, Unlink, Bell, BellDot, BarChart3, Clock, TrendingUp,
+  ExternalLink, Activity, Globe, Smartphone, Monitor, MailOpen,
+  MousePointerClick, ArrowUpRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -96,6 +100,10 @@ interface TrackingStats {
   uniqueClicks: number;
   lastOpenedAt: string | null;
   lastClickedAt: string | null;
+}
+
+interface BatchTrackingStats {
+  stats: Record<string, TrackingStats>;
 }
 
 export default function InboxPage() {
@@ -308,9 +316,10 @@ export default function InboxPage() {
     },
   });
 
-  // Fetch inbox statistics
+  // Fetch inbox statistics (poll every 30s for new email notifications)
   const { data: statsResponse } = useQuery<{ stats: InboxStats[] }>({
     queryKey: ['/api/inbox/stats'],
+    refetchInterval: 30000,
   });
 
   const stats = statsResponse?.stats || [];
@@ -451,6 +460,47 @@ export default function InboxPage() {
     },
     enabled: !!selectedEmail?.id,
   });
+
+  // Fetch batch tracking stats for sent emails in list view
+  const sentMessageIds = (selectedCategory === 'sent' ? messages : []).map(m => m.id);
+  const { data: batchTrackingData } = useQuery<BatchTrackingStats>({
+    queryKey: ['/api/track/stats/batch', sentMessageIds.join(',')],
+    queryFn: async () => {
+      const token = localStorage.getItem('authToken');
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      const response = await fetch('/api/track/stats/batch', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ messageIds: sentMessageIds }),
+      });
+      
+      if (!response.ok) throw new Error('Failed to fetch batch tracking stats');
+      return response.json();
+    },
+    enabled: selectedCategory === 'sent' && sentMessageIds.length > 0,
+    refetchInterval: 30000, // Refresh every 30 seconds for live tracking
+  });
+  const batchStats = batchTrackingData?.stats || {};
+
+  // Notification polling: track previous unread count for new email detection
+  const prevUnreadRef = useRef<number | null>(null);
+  const [showNotificationBell, setShowNotificationBell] = useState(false);
+  const totalUnread = (primaryStats.unreadCount || 0) + (otherStats.unreadCount || 0);
+  
+  useEffect(() => {
+    if (prevUnreadRef.current !== null && totalUnread > prevUnreadRef.current) {
+      // New email arrived
+      setShowNotificationBell(true);
+      toast({
+        title: "New email received",
+        description: `You have ${totalUnread} unread email${totalUnread !== 1 ? 's' : ''} in your inbox`,
+      });
+    }
+    prevUnreadRef.current = totalUnread;
+  }, [totalUnread]);
 
   // Mark as read mutation
   const markReadMutation = useMutation({
@@ -809,15 +859,52 @@ export default function InboxPage() {
 
   return (
     <PageShell
-      title="Inbox"
-      description="Enterprise email communication hub with dual inbox categorization"
+      title="Revenue Inbox"
+      description="Enterprise email communication hub — send, receive, and track engagement"
       breadcrumbs={[
         { label: "Home", href: "/" },
-        { label: "Communications" },
-        { label: "Inbox" },
+        { label: "Revenue & Pipeline" },
+        { label: "Revenue Inbox" },
       ]}
       actions={
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Notification Bell */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="relative"
+                  onClick={() => {
+                    setShowNotificationBell(false);
+                    setSelectedCategory('primary');
+                    refetch();
+                  }}
+                  data-testid="button-notifications"
+                >
+                  {showNotificationBell || totalUnread > 0 ? (
+                    <>
+                      <BellDot className="h-4 w-4 text-primary" />
+                      {totalUnread > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
+                          {totalUnread > 99 ? '99+' : totalUnread}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <Bell className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {totalUnread > 0 ? `${totalUnread} unread email${totalUnread !== 1 ? 's' : ''}` : 'No new emails'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <Separator orientation="vertical" className="h-6" />
+
           {/* Gmail connection status indicator */}
           {gmailStatus?.connected && (
             <div className="flex items-center gap-1 mr-1">
@@ -1526,21 +1613,24 @@ export default function InboxPage() {
                   </div>
                 ) : (
                   <div className="divide-y">
-                    {messages.map((email) => (
+                    {messages.map((email) => {
+                      const emailStats = selectedCategory === 'sent' ? batchStats[email.id] : null;
+                      return (
                       <div
                         key={email.id}
                         className={cn(
-                          "p-4 cursor-pointer transition-all hover-elevate active-elevate-2",
-                          selectedEmail?.id === email.id && "bg-primary/5 border-l-2 border-l-primary",
-                          !email.isRead && selectedEmail?.id !== email.id && "bg-muted/30"
+                          "p-4 cursor-pointer transition-all hover:bg-muted/50 group",
+                          selectedEmail?.id === email.id && "bg-primary/5 border-l-2 border-l-primary shadow-sm",
+                          !email.isRead && selectedEmail?.id !== email.id && "bg-muted/20 border-l-2 border-l-blue-400/50"
                         )}
                         onClick={() => handleEmailClick(email)}
                         data-testid={`email-item-${email.id}`}
                       >
                         <div className="flex items-start gap-3">
-                          <Avatar className="h-10 w-10 flex-shrink-0 ring-2 ring-background">
+                          <Avatar className="h-10 w-10 flex-shrink-0 ring-2 ring-background shadow-sm">
                             <AvatarFallback className={cn(
-                              !email.isRead && "bg-primary/10 text-primary font-semibold"
+                              "text-xs font-medium",
+                              !email.isRead ? "bg-primary/10 text-primary font-semibold" : "bg-muted"
                             )}>
                               {getInitials(email.fromName || email.from)}
                             </AvatarFallback>
@@ -1554,18 +1644,18 @@ export default function InboxPage() {
                                 {email.fromName || email.from}
                               </h4>
                               <div className="flex items-center gap-1 flex-shrink-0">
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-xs text-muted-foreground whitespace-nowrap">
                                   {formatDistanceToNow(new Date(email.receivedDateTime), { addSuffix: true })}
                                 </span>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-6 w-6"
+                                  className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                                   onClick={(e) => handleToggleStar(e, email.id)}
                                   data-testid={`button-star-${email.id}`}
                                 >
                                   {email.isStarred ? (
-                                    <Star className="h-3.5 w-3.5 fill-primary text-primary" />
+                                    <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                                   ) : (
                                     <StarOff className="h-3.5 w-3.5 text-muted-foreground" />
                                   )}
@@ -1583,35 +1673,83 @@ export default function InboxPage() {
                                 {email.bodyPreview}
                               </p>
                             )}
-                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                              {/* Always show star if starred */}
+                              {email.isStarred && (
+                                <Star className="h-3 w-3 fill-amber-400 text-amber-400 flex-shrink-0" />
+                              )}
                               {!email.isRead && (
-                                <Badge variant="default" className="text-xs h-5 px-2">
-                                  Unread
+                                <Badge className="text-[10px] h-[18px] px-1.5 bg-blue-500/10 text-blue-600 border-blue-200 hover:bg-blue-500/10">
+                                  New
                                 </Badge>
                               )}
                               {email.hasAttachments && (
-                                <Badge variant="outline" className="text-xs h-5 px-2">
-                                  <Paperclip className="h-3 w-3 mr-1" />
+                                <Badge variant="outline" className="text-[10px] h-[18px] px-1.5">
+                                  <Paperclip className="h-2.5 w-2.5 mr-0.5" />
                                   Files
                                 </Badge>
                               )}
                               {email.accountName && (
-                                <Badge variant="secondary" className="text-xs h-5 px-2">
-                                  <Building2 className="h-3 w-3 mr-1" />
+                                <Badge variant="secondary" className="text-[10px] h-[18px] px-1.5">
+                                  <Building2 className="h-2.5 w-2.5 mr-0.5" />
                                   {email.accountName}
                                 </Badge>
                               )}
                               {email.contactName && (
-                                <Badge variant="secondary" className="text-xs h-5 px-2">
-                                  <User className="h-3 w-3 mr-1" />
+                                <Badge variant="secondary" className="text-[10px] h-[18px] px-1.5">
+                                  <User className="h-2.5 w-2.5 mr-0.5" />
                                   {email.contactName}
+                                </Badge>
+                              )}
+                              {/* Tracking badges for sent emails */}
+                              {emailStats && emailStats.opens > 0 && (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Badge className="text-[10px] h-[18px] px-1.5 bg-emerald-500/10 text-emerald-600 border-emerald-200 hover:bg-emerald-500/10 cursor-default">
+                                        <Eye className="h-2.5 w-2.5 mr-0.5" />
+                                        {emailStats.uniqueOpens}
+                                      </Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom">
+                                      <p className="text-xs">{emailStats.opens} opens ({emailStats.uniqueOpens} unique)</p>
+                                      {emailStats.lastOpenedAt && (
+                                        <p className="text-xs text-muted-foreground">Last: {formatDistanceToNow(new Date(emailStats.lastOpenedAt), { addSuffix: true })}</p>
+                                      )}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )}
+                              {emailStats && emailStats.clicks > 0 && (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Badge className="text-[10px] h-[18px] px-1.5 bg-violet-500/10 text-violet-600 border-violet-200 hover:bg-violet-500/10 cursor-default">
+                                        <MousePointerClick className="h-2.5 w-2.5 mr-0.5" />
+                                        {emailStats.uniqueClicks}
+                                      </Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom">
+                                      <p className="text-xs">{emailStats.clicks} clicks ({emailStats.uniqueClicks} unique)</p>
+                                      {emailStats.lastClickedAt && (
+                                        <p className="text-xs text-muted-foreground">Last: {formatDistanceToNow(new Date(emailStats.lastClickedAt), { addSuffix: true })}</p>
+                                      )}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )}
+                              {selectedCategory === 'sent' && emailStats && emailStats.opens === 0 && emailStats.clicks === 0 && (
+                                <Badge variant="outline" className="text-[10px] h-[18px] px-1.5 text-muted-foreground">
+                                  <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                  Awaiting
                                 </Badge>
                               )}
                             </div>
                           </div>
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
               </ScrollArea>
@@ -1693,16 +1831,19 @@ export default function InboxPage() {
 
                   {/* Sender Info */}
                   <div className="flex items-center gap-4 mb-4">
-                    <Avatar className="h-12 w-12">
-                      <AvatarFallback className="text-lg">
+                    <Avatar className="h-12 w-12 shadow-sm ring-2 ring-background">
+                      <AvatarFallback className="text-lg bg-primary/10 text-primary font-semibold">
                         {getInitials(selectedEmail.fromName || selectedEmail.from)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
-                      <div className="font-medium">{selectedEmail.fromName || selectedEmail.from}</div>
-                      <div className="text-sm text-muted-foreground">{selectedEmail.from}</div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {new Date(selectedEmail.receivedDateTime).toLocaleString()}
+                      <div className="font-semibold text-base">{selectedEmail.fromName || selectedEmail.from}</div>
+                      <div className="text-sm text-muted-foreground font-mono">{selectedEmail.from}</div>
+                      <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+                        <Clock className="h-3 w-3" />
+                        {format(new Date(selectedEmail.receivedDateTime), 'MMM d, yyyy · h:mm a')}
+                        <span className="text-muted-foreground/50">·</span>
+                        <span>{formatDistanceToNow(new Date(selectedEmail.receivedDateTime), { addSuffix: true })}</span>
                       </div>
                     </div>
                   </div>
@@ -1724,58 +1865,127 @@ export default function InboxPage() {
 
                 <Separator />
 
-                {/* Tracking Stats */}
-                {trackingStats && (trackingStats.opens > 0 || trackingStats.clicks > 0) && (
+                {/* Email Engagement Tracking Panel */}
+                {trackingStats && (
                   <>
-                    <div className="px-6 py-4 bg-muted/30">
-                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <Eye className="h-4 w-4" />
-                        Email Engagement
-                      </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="space-y-1">
-                          <div className="text-2xl font-bold text-primary">
+                    <div className="px-6 py-4 bg-gradient-to-r from-muted/40 to-muted/20 border-b">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-semibold flex items-center gap-2">
+                          <BarChart3 className="h-4 w-4 text-primary" />
+                          Email Engagement Tracking
+                        </h3>
+                        {(trackingStats.opens > 0 || trackingStats.clicks > 0) && (
+                          <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-200 text-[10px]">
+                            <Activity className="h-3 w-3 mr-1" />
+                            Active
+                          </Badge>
+                        )}
+                        {trackingStats.opens === 0 && trackingStats.clicks === 0 && (
+                          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                            <Clock className="h-3 w-3 mr-1" />
+                            No engagement yet
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {/* Opens Card */}
+                        <div className="rounded-lg border bg-card p-3 shadow-sm">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="h-7 w-7 rounded-md bg-emerald-500/10 flex items-center justify-center">
+                              <MailOpen className="h-3.5 w-3.5 text-emerald-600" />
+                            </div>
+                            <span className="text-xs text-muted-foreground font-medium">Opens</span>
+                          </div>
+                          <div className="text-xl font-bold text-foreground">
                             {trackingStats.opens}
                           </div>
-                          <div className="text-xs text-muted-foreground">Total Opens</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            {trackingStats.uniqueOpens} unique
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <div className="text-2xl font-bold text-primary">
+                        
+                        {/* Unique Opens Card */}
+                        <div className="rounded-lg border bg-card p-3 shadow-sm">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="h-7 w-7 rounded-md bg-blue-500/10 flex items-center justify-center">
+                              <Eye className="h-3.5 w-3.5 text-blue-600" />
+                            </div>
+                            <span className="text-xs text-muted-foreground font-medium">Unique Views</span>
+                          </div>
+                          <div className="text-xl font-bold text-foreground">
                             {trackingStats.uniqueOpens}
                           </div>
-                          <div className="text-xs text-muted-foreground">Unique Opens</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            recipients
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <div className="text-2xl font-bold text-accent">
+                        
+                        {/* Clicks Card */}
+                        <div className="rounded-lg border bg-card p-3 shadow-sm">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="h-7 w-7 rounded-md bg-violet-500/10 flex items-center justify-center">
+                              <MousePointerClick className="h-3.5 w-3.5 text-violet-600" />
+                            </div>
+                            <span className="text-xs text-muted-foreground font-medium">Clicks</span>
+                          </div>
+                          <div className="text-xl font-bold text-foreground">
                             {trackingStats.clicks}
                           </div>
-                          <div className="text-xs text-muted-foreground">Total Clicks</div>
-                        </div>
-                        <div className="space-y-1">
-                          <div className="text-2xl font-bold text-accent">
-                            {trackingStats.uniqueClicks}
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            {trackingStats.uniqueClicks} unique
                           </div>
-                          <div className="text-xs text-muted-foreground">Unique Clicks</div>
+                        </div>
+                        
+                        {/* Click-to-Open Rate */}
+                        <div className="rounded-lg border bg-card p-3 shadow-sm">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="h-7 w-7 rounded-md bg-amber-500/10 flex items-center justify-center">
+                              <TrendingUp className="h-3.5 w-3.5 text-amber-600" />
+                            </div>
+                            <span className="text-xs text-muted-foreground font-medium">CTO Rate</span>
+                          </div>
+                          <div className="text-xl font-bold text-foreground">
+                            {trackingStats.uniqueOpens > 0 
+                              ? `${Math.round((trackingStats.uniqueClicks / trackingStats.uniqueOpens) * 100)}%`
+                              : '—'}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            click-to-open
+                          </div>
                         </div>
                       </div>
+                      
+                      {/* Timeline of engagement activity */}
                       {(trackingStats.lastOpenedAt || trackingStats.lastClickedAt) && (
-                        <div className="mt-3 pt-3 border-t flex flex-col gap-1.5 text-xs text-muted-foreground">
+                        <div className="mt-3 pt-3 border-t border-border/50 space-y-1.5">
                           {trackingStats.lastOpenedAt && (
-                            <div className="flex items-center gap-2">
-                              <Eye className="h-3 w-3" />
-                              Last opened {formatDistanceToNow(new Date(trackingStats.lastOpenedAt), { addSuffix: true })}
+                            <div className="flex items-center gap-2 text-xs">
+                              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              <span className="text-muted-foreground">Last opened</span>
+                              <span className="font-medium">
+                                {formatDistanceToNow(new Date(trackingStats.lastOpenedAt), { addSuffix: true })}
+                              </span>
+                              <span className="text-muted-foreground/60 text-[10px]">
+                                ({format(new Date(trackingStats.lastOpenedAt), 'MMM d, h:mm a')})
+                              </span>
                             </div>
                           )}
                           {trackingStats.lastClickedAt && (
-                            <div className="flex items-center gap-2">
-                              <MousePointer className="h-3 w-3" />
-                              Last clicked {formatDistanceToNow(new Date(trackingStats.lastClickedAt), { addSuffix: true })}
+                            <div className="flex items-center gap-2 text-xs">
+                              <div className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                              <span className="text-muted-foreground">Last clicked</span>
+                              <span className="font-medium">
+                                {formatDistanceToNow(new Date(trackingStats.lastClickedAt), { addSuffix: true })}
+                              </span>
+                              <span className="text-muted-foreground/60 text-[10px]">
+                                ({format(new Date(trackingStats.lastClickedAt), 'MMM d, h:mm a')})
+                              </span>
                             </div>
                           )}
                         </div>
                       )}
                     </div>
-                    <Separator />
                   </>
                 )}
 
@@ -1795,14 +2005,28 @@ export default function InboxPage() {
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-full bg-muted">
-                    <Mail className="h-10 w-10 text-muted-foreground" />
+                <div className="text-center max-w-md">
+                  <div className="mb-6 inline-flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary/10 to-primary/5 shadow-inner">
+                    <Mail className="h-12 w-12 text-primary/60" />
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">No Email Selected</h3>
-                  <p className="text-muted-foreground text-sm">
-                    Select an email from the list to view its content
+                  <h3 className="text-xl font-semibold mb-2">Select an Email</h3>
+                  <p className="text-muted-foreground text-sm mb-6 leading-relaxed">
+                    Choose an email from the list to view its content, track engagement, and manage your communications.
                   </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
+                      <MailOpen className="h-3 w-3 text-emerald-500" />
+                      Open tracking
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
+                      <MousePointerClick className="h-3 w-3 text-violet-500" />
+                      Click tracking
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
+                      <Sparkles className="h-3 w-3 text-amber-500" />
+                      AI analysis
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

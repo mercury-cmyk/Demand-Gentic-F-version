@@ -431,6 +431,15 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         ],
       },
       {
+        id: 'finance-program',
+        title: 'Finance & Programs',
+        url: '/finance-program',
+        icon: 'Briefcase',
+        roles: [USER_ROLES.ADMIN],
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
+        description: 'Accelerator readiness, funding goals, budget tracking, and milestone management',
+      },
+      {
         id: 'administration',
         title: 'Administration',
         icon: 'Building',
@@ -638,10 +647,10 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           },
           {
             id: 'settings-cloud-logs',
-            title: 'Cloud Logs',
+            title: 'System Logs',
             url: '/cloud-logs',
             roles: [USER_ROLES.ADMIN],
-            description: 'Monitor cloud logs and system health',
+            description: 'Monitor API, media bridge, and SIP server logs',
           },
         ],
       },

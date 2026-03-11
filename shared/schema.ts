@@ -264,6 +264,14 @@ export const smtpVerificationStatusEnum = pgEnum('smtp_verification_status', [
   'failed'        // Verification failed
 ]);
 
+// Analysis Status Enum - For post-call analysis lifecycle
+export const analysisStatusEnum = pgEnum('analysis_status', [
+  'pending',      // Scheduled but not yet started
+  'processing',   // Currently being analyzed
+  'completed',    // Analysis finished successfully
+  'failed'        // All retries exhausted
+]);
+
 // Recording Status Enum - For call recording lifecycle
 export const recordingStatusEnum = pgEnum('recording_status', [
   'pending',    // Recording not yet started
@@ -2450,8 +2458,8 @@ export const agentDefaults = pgTable("agent_defaults", {
   defaultVoiceProvider: text("default_voice_provider").notNull().default('google'),
   defaultVoice: text("default_voice").notNull().default('Fenrir'),
   // Global concurrent call limits
-  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(100), // Per-campaign default
-  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(100),   // System-wide cap
+  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(10), // Per-campaign default (Gemini Live supports ~10 concurrent sessions)
+  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(10),   // System-wide cap (must stay within Gemini Live quota)
   // Call engine: 'texml' (Telnyx TeXML + Gemini WebSocket) or 'sip' (Direct SIP via Drachtio)
   defaultCallEngine: text("default_call_engine").notNull().default('texml'),
   updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
@@ -3307,7 +3315,12 @@ export const callSessions = pgTable("call_sessions", {
   recordingStatus: recordingStatusEnum("recording_status").default('pending'), // Recording lifecycle
   recordingFormat: text("recording_format").default('mp3'), // Audio format (mp3/wav)
   recordingFileSizeBytes: integer("recording_file_size_bytes"), // File size in bytes
-  
+
+  // Post-call analysis lifecycle tracking
+  analysisStatus: analysisStatusEnum("analysis_status").default('pending'),
+  analysisFailedAt: timestamp("analysis_failed_at"),
+  analysisRetryCount: integer("analysis_retry_count").default(0),
+
   // Unified agent type tracking (human or AI)
   agentType: agentTypeEnum("agent_type").notNull().default('human'),
   agentUserId: varchar("agent_user_id").references(() => users.id, { onDelete: 'set null' }), // Human agent
@@ -3333,6 +3346,7 @@ export const callSessions = pgTable("call_sessions", {
   contactIdx: index("call_sessions_contact_idx").on(table.contactId),
   aiConversationIdx: index("call_sessions_ai_conversation_idx").on(table.aiConversationId),
   recordingStatusIdx: index("call_sessions_recording_status_idx").on(table.recordingStatus),
+  analysisStatusIdx: index("call_sessions_analysis_status_idx").on(table.analysisStatus),
 }));
 
 // Call Session Events - high-resolution runtime telemetry for voice QA
@@ -15565,4 +15579,330 @@ export type FileUpload = typeof fileUploads.$inferSelect;
 export type InsertFileUpload = z.infer<typeof insertFileUploadSchema>;
 
 // ========== END TEAM MESSAGING & CALLS TYPES ==========
+
+// ============================================================
+// CLIENT NOTIFICATION CENTER (Mercury Bridge)
+// ============================================================
+
+export const clientNotificationStatusEnum = pgEnum('client_notification_status', [
+  'draft',
+  'queued',
+  'sent',
+  'failed',
+]);
+
+export const clientNotificationTypeEnum = pgEnum('client_notification_type', [
+  'pipeline_update',
+  'campaign_launch',
+  'leads_delivered',
+  'weekly_report',
+  'milestone',
+  'custom',
+]);
+
+export const clientNotifications = pgTable("client_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  notificationType: clientNotificationTypeEnum("notification_type").notNull(),
+  subject: text("subject").notNull(),
+  htmlContent: text("html_content").notNull(),
+  textContent: text("text_content"),
+  recipientEmails: jsonb("recipient_emails").$type<string[]>().notNull().default([]),
+  status: clientNotificationStatusEnum("status").notNull().default('draft'),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  sentBy: varchar("sent_by").references(() => users.id, { onDelete: 'set null' }),
+  outboxId: varchar("outbox_id"),
+  errorMessage: text("error_message"),
+  metadata: jsonb("metadata").$type<Record<string, any>>(),
+  aiGenerated: boolean("ai_generated").default(false),
+  aiPrompt: text("ai_prompt"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_notifications_client_idx").on(table.clientAccountId),
+  campaignIdx: index("client_notifications_campaign_idx").on(table.campaignId),
+  statusIdx: index("client_notifications_status_idx").on(table.status),
+  typeIdx: index("client_notifications_type_idx").on(table.notificationType),
+  createdIdx: index("client_notifications_created_idx").on(table.createdAt),
+}));
+
+export const insertClientNotificationSchema = createInsertSchema(clientNotifications).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ClientNotification = typeof clientNotifications.$inferSelect;
+export type InsertClientNotification = z.infer<typeof insertClientNotificationSchema>;
+
+// ═══════════════════════════════════════════════════════════
+// Precision Lead Analyses — Dual-model (Kimi + DeepSeek)
+// AI consensus engine for high-accuracy potential lead detection
+// ═══════════════════════════════════════════════════════════
+
+export const precisionLeadVerdictEnum = pgEnum("precision_lead_verdict", [
+  "high_potential",     // Both models agree: strong lead
+  "likely_potential",   // One model strong + one moderate
+  "review",            // Disagreement or ambiguous signals
+  "not_potential",     // Both models agree: not a lead
+]);
+
+export const precisionLeadAnalyses = pgTable("precision_lead_analyses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  callSessionId: varchar("call_session_id").notNull().references(() => callSessions.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+
+  // ── Deduplication key: one precision analysis per contact per campaign ──
+  dedupKey: varchar("dedup_key", { length: 128 }).notNull(),
+
+  // ── Kimi Analysis (128k deep research) ──
+  kimiVerdict: varchar("kimi_verdict", { length: 30 }),
+  kimiConfidence: integer("kimi_confidence"),           // 0-100
+  kimiIntentScore: integer("kimi_intent_score"),         // 0-100
+  kimiCampaignFitScore: integer("kimi_campaign_fit_score"), // 0-100
+  kimiReasoning: text("kimi_reasoning"),
+  kimiSignals: jsonb("kimi_signals").$type<string[]>(),
+  kimiMissingDataImpact: varchar("kimi_missing_data_impact", { length: 20 }), // none, low, medium, high
+  kimiModel: varchar("kimi_model", { length: 50 }),
+
+  // ── DeepSeek Analysis (reasoning model) ──
+  deepseekVerdict: varchar("deepseek_verdict", { length: 30 }),
+  deepseekConfidence: integer("deepseek_confidence"),     // 0-100
+  deepseekIntentScore: integer("deepseek_intent_score"),   // 0-100
+  deepseekCampaignFitScore: integer("deepseek_campaign_fit_score"), // 0-100
+  deepseekReasoning: text("deepseek_reasoning"),
+  deepseekSignals: jsonb("deepseek_signals").$type<string[]>(),
+  deepseekMissingDataImpact: varchar("deepseek_missing_data_impact", { length: 20 }),
+  deepseekModel: varchar("deepseek_model", { length: 50 }),
+
+  // ── Consensus Verdict ──
+  verdict: precisionLeadVerdictEnum("verdict").notNull(),
+  consensusConfidence: integer("consensus_confidence").notNull(), // 0-100
+  consensusIntentScore: integer("consensus_intent_score").notNull(), // 0-100
+  consensusCampaignFit: integer("consensus_campaign_fit").notNull(), // 0-100
+  consensusReasoning: text("consensus_reasoning"),
+
+  // ── Intent-aware fields (even with incomplete data) ──
+  intentSignals: jsonb("intent_signals").$type<Array<{ signal: string; strength: string; source: string }>>(),
+  engagementIndicators: jsonb("engagement_indicators").$type<Array<{ indicator: string; positive: boolean }>>(),
+  missingFields: jsonb("missing_fields").$type<string[]>(),         // e.g. ["email", "company"]
+  dataCompleteness: integer("data_completeness"),                    // 0-100
+  overrideDisposition: boolean("override_disposition").default(false),
+  suggestedDisposition: varchar("suggested_disposition", { length: 50 }),
+  originalDisposition: varchar("original_disposition", { length: 50 }),
+
+  // ── Campaign context snapshot ──
+  campaignObjective: text("campaign_objective"),
+  campaignSuccessCriteria: text("campaign_success_criteria"),
+
+  // ── Actionability ──
+  recommendedAction: varchar("recommended_action", { length: 50 }),  // engage, nurture, review, skip
+  actionReason: text("action_reason"),
+  priorityRank: integer("priority_rank"),                            // 1 = highest
+
+  // ── Processing metadata ──
+  processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
+  processingDurationMs: integer("processing_duration_ms"),
+  autopilotRun: boolean("autopilot_run").default(false),
+  runBatchId: varchar("run_batch_id", { length: 64 }),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  callSessionIdx: index("precision_lead_call_session_idx").on(table.callSessionId),
+  campaignIdx: index("precision_lead_campaign_idx").on(table.campaignId),
+  contactIdx: index("precision_lead_contact_idx").on(table.contactId),
+  verdictIdx: index("precision_lead_verdict_idx").on(table.verdict),
+  consensusIdx: index("precision_lead_consensus_idx").on(table.consensusConfidence),
+  dedupIdx: index("precision_lead_dedup_idx").on(table.dedupKey),
+  priorityIdx: index("precision_lead_priority_idx").on(table.priorityRank),
+  processedIdx: index("precision_lead_processed_idx").on(table.processedAt),
+  dedupUnique: sql`CREATE UNIQUE INDEX IF NOT EXISTS "precision_lead_dedup_unique" ON "precision_lead_analyses" ("dedup_key")`,
+}));
+
+export const insertPrecisionLeadAnalysisSchema = createInsertSchema(precisionLeadAnalyses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type PrecisionLeadAnalysis = typeof precisionLeadAnalyses.$inferSelect;
+export type InsertPrecisionLeadAnalysis = z.infer<typeof insertPrecisionLeadAnalysisSchema>;
+
+// ============================================
+// FINANCE PROGRAM MANAGEMENT
+// Accelerator readiness & funding goal tracker
+// ============================================
+
+export const financeProgramStatusEnum = pgEnum("finance_program_status", [
+  "planning",
+  "active",
+  "on_track",
+  "at_risk",
+  "completed",
+  "paused",
+]);
+
+export const financeMilestoneStatusEnum = pgEnum("finance_milestone_status", [
+  "not_started",
+  "in_progress",
+  "completed",
+  "overdue",
+  "blocked",
+]);
+
+export const financeExpenseCategoryEnum = pgEnum("finance_expense_category", [
+  "infrastructure",
+  "legal",
+  "marketing",
+  "hiring",
+  "tools",
+  "travel",
+  "advisory",
+  "other",
+]);
+
+// Top-level program (e.g., "YC S26 Application", "Techstars '26")
+export const financePrograms = pgTable("finance_programs", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  targetAccelerator: varchar("target_accelerator", { length: 100 }), // YC, Techstars, a16z, etc.
+  status: financeProgramStatusEnum("status").default("planning").notNull(),
+  startDate: timestamp("start_date", { withTimezone: true }),
+  targetDate: timestamp("target_date", { withTimezone: true }),
+  totalBudget: integer("total_budget").default(0),       // cents
+  spentBudget: integer("spent_budget").default(0),       // cents
+  overallProgress: integer("overall_progress").default(0), // 0-100
+  readinessScore: integer("readiness_score").default(0),   // 0-100 accelerator readiness
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  tenantIdx: index("finance_program_tenant_idx").on(table.tenantId),
+  statusIdx: index("finance_program_status_idx").on(table.status),
+}));
+
+export const insertFinanceProgramSchema = createInsertSchema(financePrograms).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgram = typeof financePrograms.$inferSelect;
+export type InsertFinanceProgram = z.infer<typeof insertFinanceProgramSchema>;
+
+// Goals within a program (e.g., "Get 5 paying clients", "File provisional patent")
+export const financeProgramGoals = pgTable("finance_program_goals", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 50 }).notNull(), // revenue, product, legal, team, metrics, pitch
+  targetValue: varchar("target_value", { length: 100 }),    // "5 clients", "$10K MRR", "Filed"
+  currentValue: varchar("current_value", { length: 100 }),
+  progress: integer("progress").default(0),    // 0-100
+  priority: integer("priority").default(1),    // 1=highest
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_goal_program_idx").on(table.programId),
+  tenantIdx: index("finance_goal_tenant_idx").on(table.tenantId),
+  categoryIdx: index("finance_goal_category_idx").on(table.category),
+}));
+
+export const insertFinanceProgramGoalSchema = createInsertSchema(financeProgramGoals).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgramGoal = typeof financeProgramGoals.$inferSelect;
+export type InsertFinanceProgramGoal = z.infer<typeof insertFinanceProgramGoalSchema>;
+
+// Milestones (weekly targets within the 30-day plan)
+export const financeProgramMilestones = pgTable("finance_program_milestones", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  weekNumber: integer("week_number").notNull(), // 1-4
+  status: financeMilestoneStatusEnum("status").default("not_started").notNull(),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  deliverables: jsonb("deliverables").$type<string[]>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_milestone_program_idx").on(table.programId),
+  tenantIdx: index("finance_milestone_tenant_idx").on(table.tenantId),
+  weekIdx: index("finance_milestone_week_idx").on(table.weekNumber),
+}));
+
+export const insertFinanceProgramMilestoneSchema = createInsertSchema(financeProgramMilestones).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgramMilestone = typeof financeProgramMilestones.$inferSelect;
+export type InsertFinanceProgramMilestone = z.infer<typeof insertFinanceProgramMilestoneSchema>;
+
+// Expenses tracking
+export const financeProgramExpenses = pgTable("finance_program_expenses", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  description: varchar("description", { length: 255 }).notNull(),
+  amount: integer("amount").notNull(),  // cents
+  category: financeExpenseCategoryEnum("category").notNull(),
+  date: timestamp("date", { withTimezone: true }).notNull().defaultNow(),
+  receipt: varchar("receipt", { length: 500 }),  // optional file URL
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_expense_program_idx").on(table.programId),
+  tenantIdx: index("finance_expense_tenant_idx").on(table.tenantId),
+  categoryIdx: index("finance_expense_category_idx").on(table.category),
+}));
+
+export const insertFinanceProgramExpenseSchema = createInsertSchema(financeProgramExpenses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgramExpense = typeof financeProgramExpenses.$inferSelect;
+export type InsertFinanceProgramExpense = z.infer<typeof insertFinanceProgramExpenseSchema>;
+
+// Accelerator readiness checklist items
+export const financeAcceleratorChecklist = pgTable("finance_accelerator_checklist", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  accelerator: varchar("accelerator", { length: 100 }).notNull(), // YC, Techstars
+  checklistItem: varchar("checklist_item", { length: 255 }).notNull(),
+  category: varchar("category", { length: 50 }).notNull(), // product, traction, team, legal, pitch, financials
+  isCompleted: boolean("is_completed").default(false),
+  evidence: text("evidence"),        // proof / notes
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_checklist_program_idx").on(table.programId),
+  tenantIdx: index("finance_checklist_tenant_idx").on(table.tenantId),
+  acceleratorIdx: index("finance_checklist_accelerator_idx").on(table.accelerator),
+}));
+
+export const insertFinanceAcceleratorChecklistSchema = createInsertSchema(financeAcceleratorChecklist).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceAcceleratorChecklist = typeof financeAcceleratorChecklist.$inferSelect;
+export type InsertFinanceAcceleratorChecklist = z.infer<typeof insertFinanceAcceleratorChecklistSchema>;
 

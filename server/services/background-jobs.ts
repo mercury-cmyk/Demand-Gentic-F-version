@@ -31,6 +31,8 @@ const MERCURY_OUTBOX_INTERVAL = 60000; // Every 60 seconds — flush queued Merc
 const LONG_CALL_RECOVERY_INTERVAL = parseInt(process.env.LONG_CALL_RECOVERY_INTERVAL_MS || '300000', 10); // Every 5 min — parallel pool is much faster
 const BATCH_TRANSCRIPTION_SWEEP_INTERVAL = parseInt(process.env.BATCH_TRANSCRIPTION_SWEEP_INTERVAL_MS || '1800000', 10); // Every 30 min — catches orphaned calls with GCS recordings
 const ANALYSIS_SWEEP_INTERVAL = parseInt(process.env.ANALYSIS_SWEEP_INTERVAL_MS || '600000', 10); // Every 10 min — analyzes transcribed-but-unanalyzed calls
+const ANALYSIS_RECOVERY_INTERVAL = parseInt(process.env.ANALYSIS_RECOVERY_INTERVAL_MS || '900000', 10); // Every 15 min — retries permanently failed analyses
+const NO_CALL_LEFT_BEHIND_INTERVAL = parseInt(process.env.NO_CALL_LEFT_BEHIND_INTERVAL_MS || '3600000', 10); // Every 60 min — catch-all for missed calls
 const JOB_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute safety timeout per job run
 
 /** Run a job with a safety timeout to prevent permanent guard flag deadlock */
@@ -53,6 +55,7 @@ let mercuryOutboxInterval: NodeJS.Timeout | null = null;
 let longCallRecoveryInterval: NodeJS.Timeout | null = null;
 let batchTranscriptionSweepInterval: NodeJS.Timeout | null = null;
 let analysisSweepInterval: NodeJS.Timeout | null = null;
+let analysisRecoveryInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
@@ -65,6 +68,12 @@ let isMercuryOutboxRunning = false;
 let isLongCallRecoveryRunning = false;
 let isBatchTranscriptionSweepRunning = false;
 let isAnalysisSweepRunning = false;
+let isAnalysisRecoveryRunning = false;
+let isNoCallLeftBehindRunning = false;
+let isPrecisionLeadAutopilotRunning = false;
+let precisionLeadAutopilotInterval: NodeJS.Timeout | null = null;
+let isQualificationBridgeRunning = false;
+let qualificationBridgeInterval: NodeJS.Timeout | null = null;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -134,6 +143,10 @@ async function sweepExpiredLocks() {
 const ENABLE_EMAIL_VALIDATION = process.env.ENABLE_EMAIL_VALIDATION === 'true'; // DISABLED by default
 const ENABLE_AI_ENRICHMENT = process.env.ENABLE_AI_ENRICHMENT === 'true'; // DISABLED by default
 const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true'; // DISABLED by default
+const ENABLE_PRECISION_LEAD_AUTOPILOT = process.env.ENABLE_PRECISION_LEAD_AUTOPILOT !== 'false'; // ENABLED by default
+const PRECISION_LEAD_AUTOPILOT_INTERVAL = parseInt(process.env.PRECISION_LEAD_AUTOPILOT_INTERVAL_MS || '600000', 10); // Every 10 min
+const ENABLE_QUALIFICATION_BRIDGE = process.env.ENABLE_QUALIFICATION_BRIDGE !== 'false'; // ENABLED by default
+const QUALIFICATION_BRIDGE_INTERVAL = parseInt(process.env.QUALIFICATION_BRIDGE_INTERVAL_MS || '300000', 10); // Every 5 min
 
 /**
  * Start all background jobs
@@ -146,6 +159,7 @@ export function startBackgroundJobs() {
   console.log(`[Background Jobs]   ✓ AI Analysis: ${ENABLE_AI_ANALYSIS ? 'ENABLED (every 120s)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ Telnyx Recording Sync: ${ENABLE_TELNYX_RECORDING_SYNC ? 'ENABLED (every 5min, last 10min window)' : 'DISABLED'}`);
   console.log(`[Background Jobs]   ✓ Batch Transcription Sweep: ${ENABLE_TRANSCRIPTION ? `ENABLED (every ${BATCH_TRANSCRIPTION_SWEEP_INTERVAL / 60000}min, up to ${20} calls)` : 'DISABLED'}`);
+  console.log(`[Background Jobs]   ✓ No-Call-Left-Behind: ${ENABLE_TRANSCRIPTION && ENABLE_AI_ANALYSIS ? `ENABLED (every ${NO_CALL_LEFT_BEHIND_INTERVAL / 60000}min, 3-day lookback)` : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
@@ -257,6 +271,59 @@ export function startBackgroundJobs() {
         isAnalysisSweepRunning = false;
       }
     }, ANALYSIS_SWEEP_INTERVAL);
+  }
+
+  // Analysis recovery sweep — retries callSessions stuck in 'failed' analysisStatus
+  // and leads with transcriptionStatus='failed' older than 1 hour.
+  if (ENABLE_AI_ANALYSIS) {
+    analysisRecoveryInterval = setInterval(async () => {
+      if (isAnalysisRecoveryRunning) return;
+      isAnalysisRecoveryRunning = true;
+      try {
+        await withJobTimeout('Analysis Recovery', async () => {
+          const { recoverFailedAnalyses } = await import('./analysis-recovery-sweep');
+          const result = await recoverFailedAnalyses();
+          if (result.processed > 0) {
+            console.log(
+              `[Background Jobs] Analysis recovery: ${result.recovered} recovered, ${result.permanentlyFailed} permanently failed out of ${result.processed}`
+            );
+          }
+        });
+      } catch (error) {
+        console.error('[Background Jobs] Analysis recovery error:', error);
+      } finally {
+        isAnalysisRecoveryRunning = false;
+      }
+    }, ANALYSIS_RECOVERY_INTERVAL);
+  }
+
+  // No-Call-Left-Behind sweep — comprehensive catch-all that ensures EVERY call
+  // from the last 3 days has been fully processed (transcription + disposition + analysis).
+  // This is the final safety net — runs after all other recovery jobs.
+  if (ENABLE_TRANSCRIPTION && ENABLE_AI_ANALYSIS) {
+    // Delay first run by 5 minutes to let other sweeps run first
+    setTimeout(() => {
+      setInterval(async () => {
+        if (isNoCallLeftBehindRunning) return;
+        isNoCallLeftBehindRunning = true;
+        try {
+          await withJobTimeout('No-Call-Left-Behind', async () => {
+            const { runNoCallLeftBehindSweep } = await import('./no-call-left-behind-sweep');
+            const result = await runNoCallLeftBehindSweep();
+            if (result.totalProcessed > 0) {
+              console.log(
+                `[Background Jobs] No-Call-Left-Behind: recovered ${result.totalRecovered}/${result.totalProcessed} ` +
+                `(P1:${result.phase1_untranscribed.transcribed}, P2:${result.phase2_undispositioned.dispositioned}, P3:${result.phase3_unanalyzed.analyzed})`
+              );
+            }
+          });
+        } catch (error) {
+          console.error('[Background Jobs] No-Call-Left-Behind error:', error);
+        } finally {
+          isNoCallLeftBehindRunning = false;
+        }
+      }, NO_CALL_LEFT_BEHIND_INTERVAL);
+    }, 5 * 60 * 1000); // Delay first run by 5 minutes
   }
 
   // Orphan recording session sweep — links orphan call_sessions (recordings without
@@ -518,6 +585,59 @@ export function startBackgroundJobs() {
     }, MERCURY_OUTBOX_INTERVAL);
   }
 
+  // Precision Lead Autopilot — Dual-model (Kimi + DeepSeek) consensus analysis
+  if (ENABLE_PRECISION_LEAD_AUTOPILOT) {
+    console.log(`[Background Jobs]   ✓ Precision Lead Autopilot: ENABLED (every ${PRECISION_LEAD_AUTOPILOT_INTERVAL / 60000}min)`);
+    precisionLeadAutopilotInterval = setInterval(async () => {
+      if (isPrecisionLeadAutopilotRunning) return;
+      isPrecisionLeadAutopilotRunning = true;
+      try {
+        const { runPrecisionAutopilot } = await import('./ai-precision-lead-analyzer');
+        const result = await withJobTimeout('Precision Lead Autopilot', () =>
+          runPrecisionAutopilot({ batchSize: 15, maxDurationMs: 4 * 60 * 1000 })
+        );
+        if (result.processed > 0) {
+          console.log(
+            `[Background Jobs] Precision Lead Autopilot: ${result.processed} analyzed — ` +
+            `high=${result.highPotential}, likely=${result.likelyPotential}, review=${result.review}, ` +
+            `not=${result.notPotential}, errors=${result.errors}`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Precision Lead Autopilot error:', error);
+      } finally {
+        isPrecisionLeadAutopilotRunning = false;
+      }
+    }, PRECISION_LEAD_AUTOPILOT_INTERVAL);
+  }
+
+  // Qualification Bridge — Auto-creates leads from precision analyses + LQA signals
+  if (ENABLE_QUALIFICATION_BRIDGE) {
+    console.log(`[Background Jobs]   ✓ Qualification Bridge: ENABLED (every ${QUALIFICATION_BRIDGE_INTERVAL / 60000}min)`);
+    qualificationBridgeInterval = setInterval(async () => {
+      if (isQualificationBridgeRunning) return;
+      isQualificationBridgeRunning = true;
+      try {
+        const { runQualificationBridge } = await import('./precision-lead-qualification-bridge');
+        const result = await withJobTimeout('Qualification Bridge', () =>
+          runQualificationBridge({ batchSize: 30, maxDurationMs: 3 * 60 * 1000 })
+        );
+        if (result.processed > 0) {
+          console.log(
+            `[Background Jobs] Qualification Bridge: ${result.processed} evaluated — ` +
+            `qualified=${result.qualified}, review=${result.underReview}, ` +
+            `skipped=${result.skipped}, existing=${result.alreadyExist}, errors=${result.errors} ` +
+            `(learned from ${result.learnedCampaigns} campaigns)`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Qualification Bridge error:', error);
+      } finally {
+        isQualificationBridgeRunning = false;
+      }
+    }, QUALIFICATION_BRIDGE_INTERVAL);
+  }
+
   // Email Sequence Processor - Schedule emails ready to send
   setInterval(async () => {
     try {
@@ -586,6 +706,21 @@ export function stopBackgroundJobs() {
   if (analysisSweepInterval) {
     clearInterval(analysisSweepInterval);
     analysisSweepInterval = null;
+  }
+
+  if (analysisRecoveryInterval) {
+    clearInterval(analysisRecoveryInterval);
+    analysisRecoveryInterval = null;
+  }
+
+  if (precisionLeadAutopilotInterval) {
+    clearInterval(precisionLeadAutopilotInterval);
+    precisionLeadAutopilotInterval = null;
+  }
+
+  if (qualificationBridgeInterval) {
+    clearInterval(qualificationBridgeInterval);
+    qualificationBridgeInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');

@@ -14,7 +14,7 @@
  */
 
 import { db } from "../../db";
-import { eq, and, or, gt, desc, sql } from "drizzle-orm";
+import { eq, and, or, gt, desc, sql, isNull } from "drizzle-orm";
 import {
   telnyxNumbers,
   numberAssignments,
@@ -163,9 +163,10 @@ export async function selectNumber(
     const pool = await getEligiblePool(request);
     
     if (pool.length === 0) {
-      console.warn('[NumberRouter] No numbers in eligible pool');
-      // When pool is enabled, never fall back to legacy — throw so caller can re-queue
-      throw new NoAvailableNumberError('No numbers in eligible pool');
+      const connId = await resolveConnectionIdForEngine(request.callEngine);
+      console.warn(`[NumberRouter] No numbers in eligible pool! connectionId=${connId}, engine=${request.callEngine || 'auto'}. ` +
+        `Check that numbers in telnyx_numbers table have matching telnyx_connection_id or use /api/voice-engine/numbers/move to reassign.`);
+      throw new NoAvailableNumberError(`No numbers in eligible pool for engine=${request.callEngine || 'auto'} (connectionId=${connId})`);
     }
 
     // Step 2: Filter numbers
@@ -381,10 +382,17 @@ async function getEligiblePool(request: NumberSelectionRequest): Promise<Eligibl
   // Build WHERE conditions
   const whereConditions = [eq(telnyxNumbers.status, 'active')];
 
-  // Connection filter DISABLED — all active numbers are eligible regardless of connection.
-  // This ensures numbers provisioned on any Telnyx connection (TeXML, SIP, etc.) can be used.
+  // Filter by Telnyx connection ID so SIP calls only pick SIP-provisioned numbers
+  // and TeXML calls only pick TeXML-provisioned numbers.
+  // Numbers with NULL connectionId are included (they may work on any connection).
   if (connectionId) {
-    console.log(`[NumberRouter] Connection ${connectionId} detected (engine: ${request.callEngine || 'auto'}) — filter DISABLED, using all active numbers`);
+    whereConditions.push(
+      or(
+        eq(telnyxNumbers.telnyxConnectionId, connectionId),
+        isNull(telnyxNumbers.telnyxConnectionId)
+      )!
+    );
+    console.log(`[NumberRouter] Filtering pool by connectionId=${connectionId} or NULL (engine: ${request.callEngine || 'auto'})`);
   }
 
   // Get all active numbers with their reputation and assignments
@@ -435,6 +443,10 @@ async function getEligiblePool(request: NumberSelectionRequest): Promise<Eligibl
   }
 
   const pool = Array.from(numberMap.values());
+  console.log(
+    `[NumberRouter] Pool loaded: ${pool.length} numbers (connId=${connectionId || 'any'}, campaign=${request.campaignId.slice(0, 8)}). ` +
+    `Numbers: ${pool.map(n => n.phoneNumberE164).join(', ')}`
+  );
   // Cache for subsequent calls
   _poolCache = { key: cacheKey, pool, cachedAt: Date.now() };
 

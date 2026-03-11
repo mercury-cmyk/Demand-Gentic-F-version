@@ -67,6 +67,7 @@ import transactionalTemplatesRouter from './routes/transactional-templates';
 import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } from './routes/mercury-bridge';
 import domainManagementRouter from './routes/domain-management';
 import emailManagementRouter from './routes/email-management';
+import brevoWebhookRouter from './routes/brevo-webhook';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
 import unifiedEmailSystemRouter from './routes/unified-email-system';
@@ -109,6 +110,7 @@ import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
 import adminProjectRequestsRouter from './routes/admin-project-requests';
+import adminClientNotificationsRouter from './routes/admin-client-notifications';
 import adminTasksRouter from './routes/admin-tasks';
 import dataManagementRouter from './routes/data-management-routes';
 import telephonyProvidersRouter from './routes/telephony-providers';
@@ -133,6 +135,9 @@ import oiBatchRouter from './routes/oi-batch-routes';
 import previewStudioRouter from './routes/preview-studio';
 import clientPortalSimulationRouter from './routes/client-portal-simulation';
 import campaignPipelineRouter from './routes/campaign-pipeline-routes';
+import precisionLeadsRouter from './routes/precision-leads-routes';
+import financeProgramRouter from './routes/finance-program-routes';
+import { autoEnrollJourneyLeadFromDisposition } from './services/client-journey-automation';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
@@ -153,7 +158,10 @@ import {
   assignRoleSchema,
   uuidParamSchema,
   userIdSchema,
-  leadIntakeSchema
+  leadIntakeSchema,
+  changePasswordSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
 } from "./validation/schemas";
 import { db, pool } from "./db";
 import { normalizeName } from "./normalization";
@@ -1105,9 +1113,15 @@ export function registerRoutes(app: Express) {
 
   // ==================== USERS (Admin Only) ====================
 
-  // Get all users or find by email
+  // Get all users or find by email (admin only)
   app.get("/api/users", requireAuth, async (req, res) => {
     try {
+      // All user lookups require admin role
+      const userRoles = req.user?.roles || [req.user?.role];
+      if (!userRoles.includes('admin')) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
       const { email } = req.query;
 
       if (email) {
@@ -1118,12 +1132,6 @@ export function registerRoutes(app: Express) {
         }
         const { password, ...userWithoutPassword } = user[0];
         return res.json(userWithoutPassword);
-      }
-
-      // Admin only for listing all users
-      const userRoles = req.user?.roles || [req.user?.role]; // Support both new and legacy format
-      if (!userRoles.includes('admin')) {
-        return res.status(403).json({ message: "Forbidden" });
       }
 
       const allUsers = await storage.getUsers();
@@ -1548,18 +1556,10 @@ export function registerRoutes(app: Express) {
     });
   });
 
-  app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+  app.post("/api/auth/change-password", requireAuth, validate(changePasswordSchema), async (req, res) => {
     try {
       const userId = req.user!.userId;
       const { currentPassword, newPassword } = req.body;
-
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ message: "Current and new password required" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "New password must be at least 6 characters" });
-      }
 
       // Get user from database
       const user = await storage.getUser(userId);
@@ -1585,13 +1585,9 @@ export function registerRoutes(app: Express) {
 
   // ==================== PASSWORD RESET ====================
 
-  app.post("/api/auth/forgot-password", authLimiter, async (req, res) => {
+  app.post("/api/auth/forgot-password", authLimiter, validate(forgotPasswordSchema), async (req, res) => {
     try {
       const { email, userType } = req.body;
-
-      if (!email) {
-        return res.status(400).json({ message: "Email is required" });
-      }
 
       const type = userType === 'client' ? 'client' : 'internal';
 
@@ -1649,17 +1645,9 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.post("/api/auth/reset-password", authLimiter, async (req, res) => {
+  app.post("/api/auth/reset-password", authLimiter, validate(resetPasswordSchema), async (req, res) => {
     try {
       const { token, newPassword } = req.body;
-
-      if (!token || !newPassword) {
-        return res.status(400).json({ message: "Token and new password are required" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Password must be at least 6 characters" });
-      }
 
       // Look up token
       const [resetToken] = await db
@@ -2362,7 +2350,7 @@ export function registerRoutes(app: Express) {
         bodyPreview: body.replace(/<[^>]*>/g, "").substring(0, 500) || null,
         bodyContent: body,
         direction: "outbound",
-        messageStatus: "sending",
+        messageStatus: "pending",
         sentAt: now,
         receivedAt: now,
         isFromCustomer: false,
@@ -2413,9 +2401,15 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "Missing mailboxAccountId" });
       }
 
+      // SECURITY: Verify mailbox belongs to authenticated user
+      const mailbox = await storage.getMailboxAccountById(mailboxAccountId);
+      if (!mailbox || mailbox.userId !== req.user!.userId) {
+        return res.status(403).json({ message: "Access denied: mailbox does not belong to you" });
+      }
+
       // Import M365 sync service
       const { m365SyncService } = await import('./services/m365-sync-service');
-      
+
       const result = await m365SyncService.syncEmails(mailboxAccountId, { limit: 50 });
 
       res.json({ 
@@ -2435,6 +2429,12 @@ export function registerRoutes(app: Express) {
 
       if (!mailboxAccountId) {
         return res.status(400).json({ message: "Missing mailboxAccountId" });
+      }
+
+      // SECURITY: Verify mailbox belongs to authenticated user
+      const mailbox = await storage.getMailboxAccountById(mailboxAccountId);
+      if (!mailbox || mailbox.userId !== req.user!.userId) {
+        return res.status(403).json({ message: "Access denied: mailbox does not belong to you" });
       }
 
       const { gmailSyncService } = await import('./services/gmail-sync-service');
@@ -2459,8 +2459,14 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "Missing mailboxAccountId" });
       }
 
+      // SECURITY: Verify mailbox belongs to authenticated user
+      const mailbox = await storage.getMailboxAccountById(mailboxAccountId);
+      if (!mailbox || mailbox.userId !== req.user!.userId) {
+        return res.status(403).json({ message: "Access denied: mailbox does not belong to you" });
+      }
+
       const { m365SyncService } = await import('./services/m365-sync-service');
-      
+
       const result = await m365SyncService.backfillInboxFromActivities(mailboxAccountId);
 
       res.json({ 
@@ -2504,27 +2510,8 @@ export function registerRoutes(app: Express) {
       const toAddresses = Array.isArray(to) ? to.join(", ") : to;
       const ccAddresses = cc && Array.isArray(cc) ? cc.join(", ") : cc;
 
+      // Create deal conversation + message FIRST so we can use its ID for tracking
       let externalMessageId = crypto.randomUUID();
-
-      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
-        const { gmailSyncService } = await import('./services/gmail-sync-service');
-        const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
-          to: toAddresses,
-          cc: ccAddresses,
-          subject,
-          body,
-        });
-        externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId) as unknown as typeof externalMessageId;
-      } else {
-        const { m365SyncService } = await import('./services/m365-sync-service');
-        await m365SyncService.sendEmail(mailboxAccountId, {
-          to: toAddresses,
-          cc: ccAddresses,
-          subject,
-          body,
-        });
-      }
-
       const result = await dealConversationService.sendEmailFromOpportunity({
         opportunityId,
         mailboxAccountId,
@@ -2535,6 +2522,33 @@ export function registerRoutes(app: Express) {
         m365MessageId: externalMessageId,
         threadId: threadId || undefined
       });
+
+      // Apply tracking with the dealMessage ID so opens/clicks are queryable
+      const trackedBody = emailTrackingService.applyTracking(body, {
+        messageId: result.messageId,
+        recipientEmail: Array.isArray(to) ? to[0] : to,
+      });
+
+      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+        const { gmailSyncService } = await import('./services/gmail-sync-service');
+        const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
+          to: toAddresses,
+          cc: ccAddresses,
+          subject,
+          body: trackedBody,
+          skipTracking: true,
+        });
+        externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId) as unknown as typeof externalMessageId;
+      } else {
+        const { m365SyncService } = await import('./services/m365-sync-service');
+        await m365SyncService.sendEmail(mailboxAccountId, {
+          to: toAddresses,
+          cc: ccAddresses,
+          subject,
+          body: trackedBody,
+          skipTracking: true,
+        });
+      }
 
       res.json({ 
         message: "Email sent successfully",
@@ -9832,6 +9846,9 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // Brevo webhook endpoint (no auth required - Brevo sends events directly)
+  app.use('/api/brevo/webhooks', brevoWebhookRouter);
+
   // Mailgun webhook endpoint (no auth required - verified by signature)
   app.post("/api/mailgun/webhooks", async (req, res) => {
     try {
@@ -15924,7 +15941,16 @@ Provide JSON response with:
         if (callAttemptId && data?.disposition) {
           const { processDisposition } = await import('./services/disposition-engine');
           const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
-          console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}`, {
+          // Normalize non-canonical dispositions
+          const END_CALL_DISP_MAP: Record<string, string> = {
+            'ivl_detected': 'voicemail', 'ivr_detected': 'voicemail', 'ivr': 'voicemail',
+            'busy': 'no_answer', 'failed': 'no_answer', 'hangup': 'no_answer',
+            'connected': 'needs_review', 'answered': 'needs_review',
+            'callback': 'callback_requested', 'callback-requested': 'callback_requested',
+            'wrong_number': 'invalid_data', 'disconnected': 'no_answer',
+          };
+          const normalizedDisposition = END_CALL_DISP_MAP[data.disposition] || data.disposition;
+          console.log(`[MediaBridge Callback] Processing end_call disposition for ${callId}: ${data.disposition}${normalizedDisposition !== data.disposition ? ` → ${normalizedDisposition}` : ''}`, {
             hasTranscript: !!data?.transcript,
             callDurationSeconds: data?.callDurationSeconds,
           });
@@ -15938,7 +15964,7 @@ Provide JSON response with:
               console.error(`[MediaBridge Callback] Failed to update call duration:`, durErr);
             }
           }
-          const dispositionResult = await processDisposition(callAttemptId, data.disposition, 'media_bridge', {
+          const dispositionResult = await processDisposition(callAttemptId, normalizedDisposition as any, 'media_bridge', {
             transcript: data?.transcript || undefined,
             structuredTranscript: data?.structuredTranscript || undefined,
           });
@@ -15961,7 +15987,7 @@ Provide JSON response with:
               leadId: dispositionResult?.leadId,
               campaignId: data?.context?.campaignId || '',
               contactName: data?.context?.contactName || data?.context?.contactFirstName,
-              disposition: data.disposition,
+              disposition: normalizedDisposition,
               turnTranscript: rawTurns
                 .map((turn: any) => ({
                   speaker: turn?.role === 'agent' ? 'agent' : 'contact',
@@ -15979,7 +16005,16 @@ Provide JSON response with:
         // Process disposition via the disposition engine
         const { processDisposition } = await import('./services/disposition-engine');
         const { processSIPPostCallAnalysis } = await import('./services/sip/sip-post-call-handler');
-        const disposition = data?.disposition || 'no_answer';
+        // Normalize non-canonical dispositions from media bridge to canonical values
+        const DISPOSITION_MAP: Record<string, string> = {
+          'ivl_detected': 'voicemail', 'ivr_detected': 'voicemail', 'ivr': 'voicemail',
+          'busy': 'no_answer', 'failed': 'no_answer', 'hangup': 'no_answer',
+          'connected': 'needs_review', 'answered': 'needs_review',
+          'callback': 'callback_requested', 'callback-requested': 'callback_requested',
+          'wrong_number': 'invalid_data', 'disconnected': 'no_answer',
+        };
+        const rawDisposition = data?.disposition || 'no_answer';
+        const disposition = DISPOSITION_MAP[rawDisposition] || rawDisposition;
         console.log(`[MediaBridge Callback] Disposition for ${callId}: ${disposition}`, {
           hasTranscript: !!data?.transcript,
           callDurationSeconds: data?.callDurationSeconds,
@@ -16113,6 +16148,42 @@ Provide JSON response with:
     } catch (err: any) {
       console.error('[BatchReanalyze] Error:', err);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==================== NO-CALL-LEFT-BEHIND (Admin) ====================
+
+  // Diagnose: count how many calls from last N days are missing transcription/disposition/analysis
+  app.get("/api/admin/call-gaps/diagnose", requireAuth, async (req, res) => {
+    try {
+      const lookbackDays = parseInt(req.query.days as string) || 3;
+      const { diagnoseCallGaps } = await import('./services/no-call-left-behind-sweep');
+      const gaps = await diagnoseCallGaps(lookbackDays);
+      res.json({ success: true, ...gaps });
+    } catch (err: any) {
+      console.error('[CallGapsDiagnose] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Trigger: manually run the no-call-left-behind sweep
+  app.post("/api/admin/no-call-left-behind/run", requireAuth, async (req, res) => {
+    try {
+      const lookbackDays = parseInt(req.body.lookbackDays) || 3;
+      const batchSize = Math.min(parseInt(req.body.batchSize) || 30, 100);
+      const dryRun = req.body.dryRun === true;
+
+      // Return immediately, run in background
+      res.json({
+        success: true,
+        message: `No-Call-Left-Behind sweep started (lookback=${lookbackDays}d, batch=${batchSize}, dryRun=${dryRun}). Check server logs for progress.`,
+      });
+
+      const { runNoCallLeftBehindSweep } = await import('./services/no-call-left-behind-sweep');
+      const result = await runNoCallLeftBehindSweep({ lookbackDays, batchSize, dryRun });
+      console.log(`[NoCallLeftBehind] Manual sweep result:`, JSON.stringify(result));
+    } catch (err: any) {
+      console.error('[NoCallLeftBehind] Manual sweep error:', err);
     }
   });
 
@@ -16361,6 +16432,9 @@ Provide JSON response with:
   // ==================== ADMIN PROJECT REQUESTS ====================
   app.use('/api/admin/project-requests', requireAuth, adminProjectRequestsRouter);
 
+  // ==================== ADMIN CLIENT NOTIFICATIONS ====================
+  app.use('/api/admin/client-notifications', adminClientNotificationsRouter);
+
   // ==================== ADMIN TO-DO TASK BOARD ====================
   app.use('/api/admin/tasks', adminTasksRouter);
   app.use('/api/admin/todo-board', adminTasksRouter);
@@ -16417,6 +16491,12 @@ Provide JSON response with:
   // ==================== CAMPAIGN-PIPELINE ORCHESTRATOR ====================
   app.use('/api/campaign-pipeline', requireAuth, campaignPipelineRouter);
 
+  // ==================== PRECISION LEADS (Kimi + DeepSeek dual-model) ====================
+  app.use(precisionLeadsRouter);
+
+  // ==================== FINANCE PROGRAM MANAGEMENT ====================
+  app.use('/api/finance-programs', requireAuth, financeProgramRouter);
+
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);
   app.use('/api/campaigns', requireAuth, campaignEmailRouter);
@@ -16429,7 +16509,7 @@ Provide JSON response with:
   app.use(verificationUploadRouter);
   app.use(verificationUploadJobsRouter);
   app.use(verificationEnrichmentRouter);
-  app.use('/api', requireAuth, enrichmentJobsRouter);
+  app.use('/api', enrichmentJobsRouter);
   app.use(verificationJobRecoveryRouter);
   app.use(verificationAccountCapsRouter);
   app.use(verificationPriorityConfigRouter);
@@ -16633,6 +16713,99 @@ Provide JSON response with:
   });
 
   // ==================== ADMIN DATA MANAGEMENT ====================
+
+  // ==================== ADMIN BREVO WEBHOOK MANAGEMENT ====================
+
+  // Get current Brevo webhook configuration
+  app.get("/api/admin/brevo/webhooks", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      // Brevo webhooks are configured in Brevo dashboard or via API
+      // Check if env-based Brevo key is available or if there's a DB provider
+      const providers = await import('./services/campaign-email-provider-service');
+      const allProviders = await providers.listCampaignEmailProviders();
+      const brevoProvider = allProviders.find(p => p.providerKey === 'brevo');
+
+      const baseUrl = process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000';
+      const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/brevo/webhooks`;
+
+      res.json({
+        providerConfigured: !!brevoProvider,
+        providerId: brevoProvider?.id || null,
+        providerName: brevoProvider?.name || null,
+        webhookUrl,
+        instructions: 'Configure this webhook URL in your Brevo account under Settings > Webhooks. Enable all transactional email events: delivered, opened, click, hard_bounce, soft_bounce, spam, unsubscribed, blocked, invalid.',
+      });
+    } catch (error: any) {
+      console.error("[Brevo Admin] Failed to fetch webhook config:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch Brevo webhook configuration" });
+    }
+  });
+
+  // Register Brevo webhooks via Brevo API
+  app.post("/api/admin/brevo/register-webhooks", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const providers = await import('./services/campaign-email-provider-service');
+      const allProviders = await providers.listCampaignEmailProviders();
+      const brevoProvider = allProviders.find(p => p.providerKey === 'brevo');
+
+      if (!brevoProvider?.apiKeyConfigured) {
+        return res.status(400).json({ message: "No Brevo provider with API key configured. Add a Brevo provider in Email Management first." });
+      }
+
+      // Resolve the full provider to get the API key
+      const fullProvider = await providers.getCampaignEmailProvider(brevoProvider.id);
+      if (!fullProvider?.apiKey) {
+        return res.status(400).json({ message: "Brevo API key not found." });
+      }
+
+      const baseUrl = process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000';
+      const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/brevo/webhooks`;
+      const apiBase = process.env.BREVO_API_BASE || 'https://api.brevo.com/v3';
+
+      // Brevo uses a single webhook URL for all transactional events
+      const brevoEventTypes = [
+        'delivered', 'hardBounce', 'softBounce', 'blocked', 'spam',
+        'invalid', 'deferred', 'click', 'opened', 'uniqueOpened', 'unsubscribed',
+      ];
+
+      const response = await fetch(`${apiBase}/webhooks`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'api-key': fullProvider.apiKey,
+        },
+        body: JSON.stringify({
+          url: webhookUrl,
+          description: 'DemandGentic CRM email event tracking',
+          events: brevoEventTypes,
+          type: 'transactional',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({
+          message: `Brevo API error: ${errorText}`,
+          webhookUrl,
+        });
+      }
+
+      const result = await response.json();
+      console.log(`[Brevo Admin] Registered webhook: ${webhookUrl}`, result);
+
+      res.json({
+        success: true,
+        webhookUrl,
+        webhookId: (result as any).id,
+        events: brevoEventTypes,
+        message: `Brevo webhook registered successfully at ${webhookUrl}`,
+      });
+    } catch (error: any) {
+      console.error("[Brevo Admin] Failed to register webhooks:", error);
+      res.status(500).json({ message: error.message || "Failed to register Brevo webhooks" });
+    }
+  });
 
   // Delete verification campaigns
   app.delete("/api/admin/data/verification_campaigns", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
@@ -18197,6 +18370,9 @@ Provide JSON response with:
           else if (session.lqaIntentStrength === 'moderate') confidence += 8;
           if (session.lqaShouldCreateLead === true) confidence += 10;
           if (session.lqaProspectInterested === true) confidence += 10;
+          // Boost for job title / pain point alignment
+          if (session.lqaJobTitleAlignment === true) confidence += 8;
+          if (session.lqaPainPointAlignment === true) confidence += 8;
           const negOutcomes = ['voicemail', 'invalid', 'not_a_fit', 'dnc'];
           if (session.lqaOutcomeCategory && negOutcomes.includes(session.lqaOutcomeCategory)) confidence -= 20;
           return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'lead_quality_ai' };
@@ -18206,11 +18382,16 @@ Provide JSON response with:
         if (session.cqrCampaignAlignmentScore != null || session.cqrQualificationScore != null) {
           const alignment = session.cqrCampaignAlignmentScore || 0;
           const qualification = session.cqrQualificationScore || 0;
-          confidence = Math.round((alignment + qualification) / 2);
+          // Weight qualification higher (60%) vs alignment (40%) for stronger success criteria emphasis
+          confidence = Math.round(qualification * 0.6 + alignment * 0.4);
           if (session.cqrQualificationMet === true) confidence += 20;
           if (session.cqrDispositionAccurate === false) confidence += 15;
           if (session.cqrEngagementLevel === 'high') confidence += 10;
+          else if (session.cqrEngagementLevel === 'medium') confidence += 5;
           if (session.cqrSentiment === 'positive') confidence += 5;
+          // Boost for high talking points coverage (shows campaign success criteria addressed)
+          if ((session.cqrTalkingPointsCoverage || 0) >= 70) confidence += 10;
+          else if ((session.cqrTalkingPointsCoverage || 0) >= 50) confidence += 5;
           return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'call_quality_ai' };
         }
 
@@ -18229,6 +18410,14 @@ Provide JSON response with:
           session.campaignTalkingPoints, session.successCriteria, session.qaParameters,
         );
         if (hasSignals) confidence += 20 + Math.min(15, signals.length * 3);
+        // Extra boost if success criteria keywords are directly matched
+        if (session.successCriteria && session.transcript) {
+          const critWords = session.successCriteria.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+          const transcriptLower = session.transcript.toLowerCase();
+          const matchedCrit = critWords.filter((w: string) => transcriptLower.includes(w));
+          if (matchedCrit.length >= 2) confidence += 15;
+          else if (matchedCrit.length >= 1) confidence += 8;
+        }
         if (!isVoicemailOrIVR(session.transcript, session.disposition, null)) confidence += 10;
 
         const dispLower = (session.disposition || '').toLowerCase();
@@ -18281,9 +18470,14 @@ Provide JSON response with:
         const { confidence: derivedConfidence, scoringSource } = getDerivedConfidence(session);
         const derivedOutcome = getDerivedOutcome(session);
 
-        // Filter: transcript quality
-        if (transcriptQuality && transcriptQuality !== 'all') {
+        // Filter: transcript quality — default to two-sided for higher accuracy
+        if (transcriptQuality === 'all') {
+          // show all qualities when explicitly requested
+        } else if (transcriptQuality && transcriptQuality !== 'all') {
           if (transcriptQualityValue !== transcriptQuality) continue;
+        } else {
+          // Default: only show two-sided transcripts (real conversations)
+          if (transcriptQualityValue !== 'two-sided') continue;
         }
 
         // Filter: minimum confidence

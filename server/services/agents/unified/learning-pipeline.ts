@@ -512,34 +512,26 @@ ${currentContent}
   }
 
   /**
-   * Helper to simulate calling a generative AI model.
-   * In a real implementation, this would use a service like the Google AI SDK.
+   * Call a generative AI model to rewrite prompt sections.
+   * Uses the multi-provider AI analysis router (DeepSeek primary, Vertex/Claude/OpenAI fallbacks).
    */
   private async invokeGenerativeAI(prompt: string): Promise<string> {
-    console.log(`[AI] Simulating call to generative AI model for prompt optimization...`);
-    
-    // In a real implementation, you would use the Google AI SDK or a similar library
-    // to call a model like Gemini.
-    // e.g., const result = await getGenerativeModel().generateContent(prompt);
-    // const text = result.response.text();
-    
-    // Simulate network latency
-    await new Promise(resolve => setTimeout(resolve, 200));
-
-    // For demonstration, we return a modified version of the input prompt.
-    const exampleRewrite = `
-/*
-  AI-Rewritten Content:
-  This is a placeholder for what the generative AI model would produce.
-  It would analyze the finding and the original content to create an
-  optimized version of the prompt section. For example, if the finding
-  was "Low mql to sql conversion rate", the AI might add more specific
-  instructions to the 'Pipeline Analysis' prompt section to focus on
-  identifying high-intent leads earlier.
-*/
-    `;
-    
-    return exampleRewrite;
+    try {
+      const { analyzeJSON } = await import('../../ai-analysis-router');
+      const result = await analyzeJSON<{ content: string }>(
+        prompt + '\n\nRespond with a JSON object: { "content": "<your rewritten prompt section>" }. Output ONLY valid JSON.',
+        { label: 'learning-pipeline-prompt-rewrite', temperature: 0.4, maxTokens: 4096, deep: false }
+      );
+      if (result && typeof result.content === 'string' && result.content.trim().length > 0) {
+        console.log(`[LearningPipeline] AI prompt rewrite generated (${result.content.length} chars)`);
+        return result.content;
+      }
+      console.warn('[LearningPipeline] AI returned empty content, using current content as fallback');
+      return '(AI generation returned empty — review manually)';
+    } catch (error: any) {
+      console.error(`[LearningPipeline] AI prompt rewrite failed: ${error.message}`);
+      return '(AI generation failed — review manually)';
+    }
   }
   // ==================== QUERY METHODS ====================
 
@@ -644,6 +636,389 @@ ${currentContent}
     }
 
     return summary;
+  }
+
+  // ==================== AUTO DATA COLLECTION ====================
+
+  /** Track completed calls since last analysis */
+  private callsSinceLastAnalysis = 0;
+  private autoAnalysisThreshold = 25; // Run analysis every N completed calls
+  private isAutoAnalysisRunning = false;
+  private schedulerInterval: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Record a completed call for incremental data collection.
+   * Called from the post-call analysis pipeline after each call completes.
+   * Accumulates data and triggers automatic analysis when threshold is reached.
+   */
+  async recordCompletedCall(data: {
+    overallQualityScore?: number | null;
+    engagementScore?: number | null;
+    objectionHandlingScore?: number | null;
+    qualificationScore?: number | null;
+    closingScore?: number | null;
+    flowComplianceScore?: number | null;
+    campaignAlignmentScore?: number | null;
+    sentiment?: string | null;
+    engagementLevel?: string | null;
+    dispositionAccurate?: boolean | null;
+    assignedDisposition?: string | null;
+    issues?: any[];
+    recommendations?: any[];
+  }): Promise<void> {
+    this.callsSinceLastAnalysis++;
+
+    // Ingest individual collector metrics
+    const metrics: Record<string, number> = {};
+    const insights: string[] = [];
+
+    if (data.overallQualityScore != null) metrics.overall_quality_score = data.overallQualityScore;
+    if (data.engagementScore != null) metrics.engagement_score = data.engagementScore;
+    if (data.objectionHandlingScore != null) metrics.objection_handling_score = data.objectionHandlingScore;
+    if (data.qualificationScore != null) metrics.qualification_score = data.qualificationScore;
+    if (data.closingScore != null) metrics.closing_score = data.closingScore;
+    if (data.flowComplianceScore != null) metrics.flow_compliance_score = data.flowComplianceScore;
+    if (data.campaignAlignmentScore != null) metrics.campaign_alignment_score = data.campaignAlignmentScore;
+
+    // Derive rates from booleans
+    if (data.dispositionAccurate != null) {
+      metrics.disposition_accuracy_rate = data.dispositionAccurate ? 1.0 : 0.0;
+    }
+
+    // Convert sentiment to numeric
+    if (data.sentiment) {
+      metrics.sentiment_score = data.sentiment === 'positive' ? 85 : data.sentiment === 'neutral' ? 50 : 25;
+    }
+
+    // Extract text insights from issues and recommendations
+    if (Array.isArray(data.issues)) {
+      for (const issue of data.issues.slice(0, 3)) {
+        if (typeof issue === 'object' && issue?.description) {
+          insights.push(issue.description);
+        }
+      }
+    }
+    if (Array.isArray(data.recommendations)) {
+      for (const rec of data.recommendations.slice(0, 3)) {
+        if (typeof rec === 'object' && rec?.suggestedChange) {
+          insights.push(rec.suggestedChange);
+        }
+      }
+    }
+
+    // Map scores to relevant collector source types
+    const collectorData: { sourceType: LearningSourceType; metrics: Record<string, number>; insights: string[] }[] = [];
+
+    if (metrics.overall_quality_score != null || metrics.engagement_score != null) {
+      collectorData.push({
+        sourceType: 'call_transcript_analysis',
+        metrics: { overall_quality_score: metrics.overall_quality_score ?? 0, engagement_score: metrics.engagement_score ?? 0 },
+        insights: insights.slice(0, 2),
+      });
+    }
+    if (metrics.objection_handling_score != null) {
+      collectorData.push({
+        sourceType: 'objection_frequency_analytics',
+        metrics: { objection_handling_score: metrics.objection_handling_score },
+        insights: insights.filter(i => i.toLowerCase().includes('objection') || i.toLowerCase().includes('resistance')),
+      });
+    }
+    if (metrics.qualification_score != null || metrics.closing_score != null) {
+      collectorData.push({
+        sourceType: 'conversion_rate_analysis',
+        metrics: {
+          qualification_score: metrics.qualification_score ?? 0,
+          closing_score: metrics.closing_score ?? 0,
+          conversion_rate: ((metrics.qualification_score ?? 50) + (metrics.closing_score ?? 50)) / 200,
+        },
+        insights: insights.filter(i => i.toLowerCase().includes('conversion') || i.toLowerCase().includes('closing') || i.toLowerCase().includes('qualification')),
+      });
+    }
+    if (metrics.sentiment_score != null) {
+      collectorData.push({
+        sourceType: 'sentiment_scoring',
+        metrics: { sentiment_score: metrics.sentiment_score },
+        insights: [],
+      });
+    }
+    if (metrics.disposition_accuracy_rate != null) {
+      collectorData.push({
+        sourceType: 'disposition_analytics',
+        metrics: { disposition_accuracy_rate: metrics.disposition_accuracy_rate },
+        insights: data.assignedDisposition ? [`Disposition: ${data.assignedDisposition}`] : [],
+      });
+    }
+    if (metrics.flow_compliance_score != null) {
+      collectorData.push({
+        sourceType: 'behavioral_deviation_detection',
+        metrics: { flow_compliance_score: metrics.flow_compliance_score },
+        insights: [],
+      });
+    }
+
+    // Ingest each collector's data
+    for (const cd of collectorData) {
+      await this.ingestPerformanceData('voice', {
+        sourceType: cd.sourceType,
+        metrics: cd.metrics,
+        insights: cd.insights,
+        sampleSize: 1,
+        timeRange: { start: new Date(Date.now() - 3600_000), end: new Date() },
+      });
+    }
+
+    // Check if we should run automatic analysis
+    if (this.callsSinceLastAnalysis >= this.autoAnalysisThreshold && !this.isAutoAnalysisRunning) {
+      this.triggerAutoAnalysis().catch(err =>
+        console.error(`[LearningPipeline] Auto-analysis failed: ${err.message}`)
+      );
+    }
+  }
+
+  /**
+   * Collect aggregate data from recent call quality records in the database
+   * and run a full analysis pipeline for the voice agent.
+   */
+  async collectAndAnalyzeVoiceData(): Promise<{ findings: number; recommendations: number }> {
+    if (this.isAutoAnalysisRunning) {
+      console.log('[LearningPipeline] Analysis already running, skipping');
+      return { findings: 0, recommendations: 0 };
+    }
+
+    this.isAutoAnalysisRunning = true;
+    try {
+      console.log('[LearningPipeline] Starting auto data collection from call quality records...');
+
+      const { db } = await import('../../../db');
+      const { callQualityRecords } = await import('@shared/schema');
+      const { desc, gte } = await import('drizzle-orm');
+
+      // Query recent call quality records (last 24 hours, max 200)
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentRecords = await db
+        .select({
+          overallQualityScore: callQualityRecords.overallQualityScore,
+          engagementScore: callQualityRecords.engagementScore,
+          objectionHandlingScore: callQualityRecords.objectionHandlingScore,
+          qualificationScore: callQualityRecords.qualificationScore,
+          closingScore: callQualityRecords.closingScore,
+          flowComplianceScore: callQualityRecords.flowComplianceScore,
+          campaignAlignmentScore: callQualityRecords.campaignAlignmentScore,
+          sentiment: callQualityRecords.sentiment,
+          engagementLevel: callQualityRecords.engagementLevel,
+          dispositionAccurate: callQualityRecords.dispositionAccurate,
+          assignedDisposition: callQualityRecords.assignedDisposition,
+          issues: callQualityRecords.issues,
+          recommendations: callQualityRecords.recommendations,
+        })
+        .from(callQualityRecords)
+        .where(gte(callQualityRecords.createdAt, since))
+        .orderBy(desc(callQualityRecords.createdAt))
+        .limit(200);
+
+      if (recentRecords.length === 0) {
+        console.log('[LearningPipeline] No recent call quality records found');
+        return { findings: 0, recommendations: 0 };
+      }
+
+      console.log(`[LearningPipeline] Found ${recentRecords.length} call quality records for analysis`);
+
+      // Aggregate metrics across all records
+      const aggregatePerformanceData = this.aggregateCallQualityMetrics(recentRecords);
+
+      // Get the voice agent for its capabilities and mappings
+      const { unifiedAgentRegistry } = await import('./unified-agent-registry');
+      const agent = unifiedAgentRegistry.getAgent('voice');
+      if (!agent) {
+        console.error('[LearningPipeline] Voice agent not found in registry');
+        return { findings: 0, recommendations: 0 };
+      }
+
+      // Run analysis
+      const analysis = await this.analyzePerformanceData(
+        'voice',
+        agent.capabilities,
+        agent.capabilityMappings,
+        aggregatePerformanceData
+      );
+
+      // Generate recommendations
+      const currentSections = Object.fromEntries(
+        agent.promptSections.map(s => [s.id, s.content])
+      );
+      const recommendations = await this.generateRecommendations(
+        'voice',
+        analysis,
+        agent.capabilities,
+        agent.capabilityMappings,
+        currentSections
+      );
+
+      this.callsSinceLastAnalysis = 0;
+      console.log(`[LearningPipeline] Auto-analysis complete: ${analysis.findings.length} findings, ${recommendations.length} recommendations`);
+      return { findings: analysis.findings.length, recommendations: recommendations.length };
+    } finally {
+      this.isAutoAnalysisRunning = false;
+    }
+  }
+
+  /**
+   * Aggregate call quality records into PerformanceDataInput arrays
+   * suitable for the analysis pipeline.
+   */
+  private aggregateCallQualityMetrics(records: {
+    overallQualityScore?: number | null;
+    engagementScore?: number | null;
+    objectionHandlingScore?: number | null;
+    qualificationScore?: number | null;
+    closingScore?: number | null;
+    flowComplianceScore?: number | null;
+    campaignAlignmentScore?: number | null;
+    sentiment?: string | null;
+    engagementLevel?: string | null;
+    dispositionAccurate?: boolean | null;
+    assignedDisposition?: string | null;
+    issues?: any;
+    recommendations?: any;
+  }[]): PerformanceDataInput[] {
+    const sampleSize = records.length;
+    const timeRange = { start: new Date(Date.now() - 24 * 60 * 60 * 1000), end: new Date() };
+
+    // Calculate averages
+    const avg = (values: (number | null | undefined)[]) => {
+      const valid = values.filter((v): v is number => v != null);
+      return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : 0;
+    };
+
+    const avgQuality = avg(records.map(r => r.overallQualityScore));
+    const avgEngagement = avg(records.map(r => r.engagementScore));
+    const avgObjection = avg(records.map(r => r.objectionHandlingScore));
+    const avgQualification = avg(records.map(r => r.qualificationScore));
+    const avgClosing = avg(records.map(r => r.closingScore));
+    const avgCompliance = avg(records.map(r => r.flowComplianceScore));
+    const avgAlignment = avg(records.map(r => r.campaignAlignmentScore));
+
+    // Sentiment distribution
+    const sentiments = records.map(r => r.sentiment).filter(Boolean);
+    const posRate = sentiments.filter(s => s === 'positive').length / Math.max(sentiments.length, 1);
+    const negRate = sentiments.filter(s => s === 'negative').length / Math.max(sentiments.length, 1);
+
+    // Disposition accuracy
+    const dispositionChecks = records.filter(r => r.dispositionAccurate != null);
+    const dispositionAccuracy = dispositionChecks.length > 0
+      ? dispositionChecks.filter(r => r.dispositionAccurate).length / dispositionChecks.length
+      : 0.5;
+
+    // Collect text insights from issues and recommendations
+    const insights: string[] = [];
+    for (const r of records) {
+      if (Array.isArray(r.issues)) {
+        for (const issue of r.issues.slice(0, 2)) {
+          if (typeof issue === 'object' && issue?.description && insights.length < 10) {
+            insights.push(issue.description);
+          }
+        }
+      }
+      if (Array.isArray(r.recommendations)) {
+        for (const rec of r.recommendations.slice(0, 1)) {
+          if (typeof rec === 'object' && rec?.suggestedChange && insights.length < 10) {
+            insights.push(rec.suggestedChange);
+          }
+        }
+      }
+    }
+
+    return [
+      {
+        sourceType: 'call_transcript_analysis' as LearningSourceType,
+        metrics: { overall_quality_score: avgQuality, engagement_score: avgEngagement },
+        insights: insights.slice(0, 3),
+        sampleSize,
+        timeRange,
+      },
+      {
+        sourceType: 'objection_frequency_analytics' as LearningSourceType,
+        metrics: { objection_handling_score: avgObjection },
+        insights: insights.filter(i => i.toLowerCase().includes('objection')).slice(0, 2),
+        sampleSize,
+        timeRange,
+      },
+      {
+        sourceType: 'conversion_rate_analysis' as LearningSourceType,
+        metrics: {
+          qualification_score: avgQualification,
+          closing_score: avgClosing,
+          conversion_rate: (avgQualification + avgClosing) / 200,
+        },
+        insights: insights.filter(i => i.toLowerCase().includes('closing') || i.toLowerCase().includes('conversion')).slice(0, 2),
+        sampleSize,
+        timeRange,
+      },
+      {
+        sourceType: 'sentiment_scoring' as LearningSourceType,
+        metrics: { sentiment_score: posRate * 100, negative_sentiment_rate: negRate },
+        insights: [],
+        sampleSize: sentiments.length,
+        timeRange,
+      },
+      {
+        sourceType: 'disposition_analytics' as LearningSourceType,
+        metrics: { disposition_accuracy_rate: dispositionAccuracy },
+        insights: [],
+        sampleSize: dispositionChecks.length || 1,
+        timeRange,
+      },
+      {
+        sourceType: 'behavioral_deviation_detection' as LearningSourceType,
+        metrics: { flow_compliance_score: avgCompliance, campaign_alignment_score: avgAlignment },
+        insights: [],
+        sampleSize,
+        timeRange,
+      },
+    ];
+  }
+
+  /**
+   * Trigger automatic analysis when call threshold is reached.
+   */
+  private async triggerAutoAnalysis(): Promise<void> {
+    console.log(`[LearningPipeline] Auto-analysis triggered after ${this.callsSinceLastAnalysis} calls`);
+    await this.collectAndAnalyzeVoiceData();
+  }
+
+  /**
+   * Start periodic data collection scheduler.
+   * Runs every 4 hours — collects recent call data and runs analysis.
+   */
+  startScheduler(): void {
+    if (this.schedulerInterval) return;
+
+    const FOUR_HOURS = 4 * 60 * 60 * 1000;
+    console.log('[LearningPipeline] Starting periodic data collection scheduler (every 4 hours)');
+
+    this.schedulerInterval = setInterval(() => {
+      this.collectAndAnalyzeVoiceData().catch(err =>
+        console.error(`[LearningPipeline] Scheduled analysis failed: ${err.message}`)
+      );
+    }, FOUR_HOURS);
+
+    // Run initial collection 60s after startup (let DB connections settle)
+    setTimeout(() => {
+      this.collectAndAnalyzeVoiceData().catch(err =>
+        console.error(`[LearningPipeline] Initial analysis failed: ${err.message}`)
+      );
+    }, 60_000);
+  }
+
+  /**
+   * Stop the periodic scheduler.
+   */
+  stopScheduler(): void {
+    if (this.schedulerInterval) {
+      clearInterval(this.schedulerInterval);
+      this.schedulerInterval = null;
+      console.log('[LearningPipeline] Scheduler stopped');
+    }
   }
 }
 

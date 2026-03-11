@@ -15,8 +15,13 @@ import {
   clientJourneyPipelines,
   clientJourneyLeads,
   clientJourneyActions,
+  emailSends,
+  emailEvents,
+  contacts,
+  activityLog,
+  mercuryEmailOutbox,
 } from "@shared/schema";
-import { eq, and, desc, asc, sql, count } from "drizzle-orm";
+import { eq, and, or, desc, asc, sql, count, inArray } from "drizzle-orm";
 import {
   generateFollowUpContext,
   generateFollowUpEmail,
@@ -446,6 +451,150 @@ router.get("/leads/:id", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("[JourneyPipeline] Failed to fetch lead:", error);
     res.status(500).json({ success: false, message: "Failed to fetch lead" });
+  }
+});
+
+// ─── GET /leads/:id/communications — Email & activity history for a lead ───
+
+router.get("/leads/:id/communications", async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: "Unauthorized" });
+
+    const [lead] = await db
+      .select()
+      .from(clientJourneyLeads)
+      .where(eq(clientJourneyLeads.id, req.params.id))
+      .limit(1);
+
+    if (!lead) return res.status(404).json({ message: "Lead not found" });
+
+    // Verify ownership through pipeline
+    const [pipeline] = await db
+      .select({ id: clientJourneyPipelines.id, clientAccountId: clientJourneyPipelines.clientAccountId })
+      .from(clientJourneyPipelines)
+      .where(eq(clientJourneyPipelines.id, lead.pipelineId))
+      .limit(1);
+
+    if (!pipeline || pipeline.clientAccountId !== clientAccountId) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Fetch email actions from journey system (type = 'email', status = 'completed' or 'sent')
+    const emailActions = await db
+      .select({
+        id: clientJourneyActions.id,
+        actionType: clientJourneyActions.actionType,
+        status: clientJourneyActions.status,
+        title: clientJourneyActions.title,
+        description: clientJourneyActions.description,
+        scheduledAt: clientJourneyActions.scheduledAt,
+        completedAt: clientJourneyActions.completedAt,
+        outcome: clientJourneyActions.outcome,
+        aiGeneratedContext: clientJourneyActions.aiGeneratedContext,
+        createdAt: clientJourneyActions.createdAt,
+      })
+      .from(clientJourneyActions)
+      .where(
+        and(
+          eq(clientJourneyActions.journeyLeadId, lead.id),
+          eq(clientJourneyActions.actionType, "email")
+        )
+      )
+      .orderBy(desc(clientJourneyActions.createdAt))
+      .limit(50);
+
+    // Fetch campaign email sends for this contact (if contactId exists)
+    let campaignEmails: Array<{
+      id: string;
+      campaignId: string;
+      status: string;
+      sentAt: Date | null;
+      createdAt: Date;
+    }> = [];
+
+    let emailTrackingEvents: Array<{
+      id: string;
+      type: string;
+      recipient: string;
+      createdAt: Date;
+    }> = [];
+
+    if (lead.contactId) {
+      campaignEmails = await db
+        .select({
+          id: emailSends.id,
+          campaignId: emailSends.campaignId,
+          status: emailSends.status,
+          sentAt: emailSends.sentAt,
+          createdAt: emailSends.createdAt,
+        })
+        .from(emailSends)
+        .where(eq(emailSends.contactId, lead.contactId))
+        .orderBy(desc(emailSends.createdAt))
+        .limit(20);
+
+      // Get email events (opens, clicks, bounces) for this contact
+      emailTrackingEvents = await db
+        .select({
+          id: emailEvents.id,
+          type: emailEvents.type,
+          recipient: emailEvents.recipient,
+          createdAt: emailEvents.createdAt,
+        })
+        .from(emailEvents)
+        .where(eq(emailEvents.contactId, lead.contactId))
+        .orderBy(desc(emailEvents.createdAt))
+        .limit(50);
+    }
+
+    // Fetch activity log entries for this contact
+    let activityHistory: Array<{
+      id: string;
+      eventType: string;
+      payload: unknown;
+      createdAt: Date;
+    }> = [];
+
+    if (lead.contactId) {
+      activityHistory = await db
+        .select({
+          id: activityLog.id,
+          eventType: activityLog.eventType,
+          payload: activityLog.payload,
+          createdAt: activityLog.createdAt,
+        })
+        .from(activityLog)
+        .where(
+          and(
+            eq(activityLog.entityType, "contact"),
+            eq(activityLog.entityId, lead.contactId)
+          )
+        )
+        .orderBy(desc(activityLog.createdAt))
+        .limit(30);
+    }
+
+    res.json({
+      success: true,
+      communications: {
+        emailActions,
+        campaignEmails,
+        emailTrackingEvents,
+        activityHistory,
+        summary: {
+          totalEmails: emailActions.length + campaignEmails.length,
+          emailsSent: emailActions.filter(a => a.status === "completed").length + campaignEmails.filter(e => e.status === "sent").length,
+          emailsOpened: emailTrackingEvents.filter(e => e.type === "opened").length,
+          emailsClicked: emailTrackingEvents.filter(e => e.type === "clicked").length,
+          emailsBounced: emailTrackingEvents.filter(e => e.type === "bounced").length,
+          totalActivities: activityHistory.length,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[JourneyPipeline] Failed to fetch communications:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch communications" });
   }
 });
 
@@ -939,6 +1088,47 @@ router.get("/pipelines/:id/analytics", async (req: Request, res: Response) => {
         )
       );
 
+    // Avg time in current stage (hours) for active leads
+    const [avgTimeInStage] = await db
+      .select({
+        avgHours: sql<number>`COALESCE(AVG(EXTRACT(EPOCH FROM (NOW() - ${clientJourneyLeads.currentStageEnteredAt})) / 3600), 0)`,
+      })
+      .from(clientJourneyLeads)
+      .where(
+        and(
+          eq(clientJourneyLeads.pipelineId, pipeline.id),
+          eq(clientJourneyLeads.status, "active")
+        )
+      );
+
+    // Conversion funnel: count leads that have reached each stage (ever)
+    const stages = Array.isArray(pipeline.stages) ? (pipeline.stages as Array<Record<string, unknown>>) : [];
+    const stageOrder = new Map(stages.map((s, i) => [String(s.id), i]));
+    
+    // Get all leads with their current stage to compute funnel
+    const allLeads = await db
+      .select({
+        currentStageId: clientJourneyLeads.currentStageId,
+        status: clientJourneyLeads.status,
+      })
+      .from(clientJourneyLeads)
+      .where(eq(clientJourneyLeads.pipelineId, pipeline.id));
+
+    // Build funnel — a lead in stage N has passed through stages 0..N
+    const funnelCounts: Record<string, number> = {};
+    for (const stage of stages) {
+      funnelCounts[String(stage.id)] = 0;
+    }
+    for (const lead of allLeads) {
+      const leadStageOrder = stageOrder.get(lead.currentStageId) ?? 0;
+      for (const stage of stages) {
+        const order = stageOrder.get(String(stage.id)) ?? 0;
+        if (order <= leadStageOrder) {
+          funnelCounts[String(stage.id)]++;
+        }
+      }
+    }
+
     res.json({
       success: true,
       analytics: {
@@ -957,6 +1147,15 @@ router.get("/pipelines/:id/analytics", async (req: Request, res: Response) => {
         })),
         overdueActions: Number(overdueResult?.count || 0),
         totalLeads: pipeline.leadCount,
+        avgHoursInStage: Math.round(Number(avgTimeInStage?.avgHours || 0)),
+        funnel: stages.map((s) => ({
+          stageId: String(s.id),
+          stageName: String(s.name),
+          reached: funnelCounts[String(s.id)] || 0,
+          conversionRate: allLeads.length > 0
+            ? Math.round(((funnelCounts[String(s.id)] || 0) / allLeads.length) * 100)
+            : 0,
+        })),
       },
     });
   } catch (error) {

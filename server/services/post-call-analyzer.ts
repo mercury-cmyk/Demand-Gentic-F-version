@@ -12,8 +12,8 @@
  */
 
 import { db } from "../db";
-import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, type CanonicalDisposition } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, leads, type CanonicalDisposition } from "@shared/schema";
+import { eq, and, isNull } from "drizzle-orm";
 import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./deepgram-postcall-transcription";
 import { type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
 import { logCallIntelligence } from "./call-intelligence-logger";
@@ -829,7 +829,7 @@ export async function runPostCallAnalysis(
     // We still prefer recording-based post-call transcription when available.
     let structuredTranscript: StructuredTranscript | null = null;
     let geminiFallbackTranscript: StructuredTranscript | null = null;
-    if (options?.geminiTranscript && options.geminiTranscript.trim().length > 50) {
+    if (options?.geminiTranscript && options.geminiTranscript.trim().length > 20) {
       console.log(`${LOG_PREFIX} Native Gemini live transcript captured (${options.geminiTranscript.length} chars) - using as fallback only if recording transcription is unavailable`);
       // Parse Gemini transcript format: "Agent: text\nContact: text\n..."
       const lines = options.geminiTranscript.split('\n').filter(l => l.trim().length > 0);
@@ -1281,6 +1281,34 @@ export async function runPostCallAnalysis(
     }
 
     result.success = true;
+
+    // 12. Feed data into the Voice Agent Learning Pipeline (non-blocking)
+    if (result.qualityAnalysis) {
+      try {
+        const { learningPipeline } = await import('./agents/unified/learning-pipeline');
+        const qa = result.qualityAnalysis;
+        learningPipeline.recordCompletedCall({
+          overallQualityScore: qa.overallScore,
+          engagementScore: qa.qualityDimensions?.engagement ?? null,
+          objectionHandlingScore: qa.qualityDimensions?.objectionHandling ?? null,
+          qualificationScore: qa.qualityDimensions?.qualification ?? null,
+          closingScore: qa.qualityDimensions?.closing ?? null,
+          flowComplianceScore: qa.flowCompliance?.score ?? null,
+          campaignAlignmentScore: qa.campaignAlignment?.objectiveAdherence ?? null,
+          sentiment: qa.learningSignals?.sentiment ?? null,
+          engagementLevel: qa.learningSignals?.engagementLevel ?? null,
+          dispositionAccurate: qa.dispositionReview?.isAccurate ?? null,
+          assignedDisposition: qa.dispositionReview?.assignedDisposition ?? null,
+          issues: qa.issues as any[] ?? [],
+          recommendations: qa.recommendations as any[] ?? [],
+        }).catch((lpErr: any) => {
+          console.error(`${LOG_PREFIX} Learning pipeline ingestion failed (non-blocking): ${lpErr.message}`);
+        });
+      } catch (lpImportErr: any) {
+        // Learning pipeline import failure is non-blocking
+      }
+    }
+
     const elapsedMs = Date.now() - startTime;
     console.log(`${LOG_PREFIX} ✅ Post-call analysis complete for ${callSessionId} in ${elapsedMs}ms — ${result.metrics.totalTurns} turns, quality=${result.qualityAnalysis?.overallScore ?? "N/A"}, campaign alignment=${result.campaignOutcome?.alignmentScore ?? "N/A"}`);
     return result;
@@ -1305,6 +1333,35 @@ export function schedulePostCallAnalysis(
 ): void {
   const retryDelays = [30_000, 60_000, 120_000, 300_000, 600_000];
 
+  const markAnalysisFailed = async (errorMsg?: string) => {
+    try {
+      await db.update(callSessions)
+        .set({
+          analysisStatus: 'failed',
+          analysisFailedAt: new Date(),
+          analysisRetryCount: retryDelays.length,
+        })
+        .where(eq(callSessions.id, callSessionId));
+
+      // Also mark linked lead's transcriptionStatus as 'failed' if transcript is still missing
+      const [sess] = await db
+        .select({ telnyxCallId: callSessions.telnyxCallId, aiTranscript: callSessions.aiTranscript })
+        .from(callSessions)
+        .where(eq(callSessions.id, callSessionId))
+        .limit(1);
+
+      if (!sess?.aiTranscript && sess?.telnyxCallId) {
+        await db.update(leads)
+          .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+          .where(and(eq(leads.telnyxCallId, sess.telnyxCallId), isNull(leads.transcript)));
+      }
+
+      console.warn(`${LOG_PREFIX} Marked callSession ${callSessionId} analysisStatus=failed${errorMsg ? ': ' + errorMsg : ''}`);
+    } catch (markErr) {
+      console.error(`${LOG_PREFIX} Failed to mark analysis status for ${callSessionId}:`, markErr);
+    }
+  };
+
   const attemptAnalysis = async (attemptIndex: number) => {
     try {
       // Check if analysis already succeeded (from earlier retry or background job)
@@ -1317,7 +1374,18 @@ export function schedulePostCallAnalysis(
       const existingAnalysis = session?.aiAnalysis as Record<string, unknown> | null;
       if (existingAnalysis?.postCallAnalysis) {
         console.log(`${LOG_PREFIX} Analysis already exists for ${callSessionId} — skipping attempt ${attemptIndex + 1}`);
+        // Ensure status is marked completed
+        await db.update(callSessions)
+          .set({ analysisStatus: 'completed' })
+          .where(eq(callSessions.id, callSessionId));
         return;
+      }
+
+      // Mark as processing on first attempt
+      if (attemptIndex === 0) {
+        await db.update(callSessions)
+          .set({ analysisStatus: 'processing' })
+          .where(eq(callSessions.id, callSessionId));
       }
 
       console.log(`${LOG_PREFIX} 🔄 Post-call analysis attempt ${attemptIndex + 1}/${retryDelays.length} for ${callSessionId}`);
@@ -1325,21 +1393,31 @@ export function schedulePostCallAnalysis(
 
       if (result.success) {
         console.log(`${LOG_PREFIX} ✅ Post-call analysis succeeded on attempt ${attemptIndex + 1}`);
+        await db.update(callSessions)
+          .set({ analysisStatus: 'completed', analysisRetryCount: attemptIndex + 1 })
+          .where(eq(callSessions.id, callSessionId));
         return; // Done — no more retries
       }
 
-      // Failed — schedule next retry if available
+      // Failed — update retry count and schedule next retry if available
+      await db.update(callSessions)
+        .set({ analysisRetryCount: attemptIndex + 1 })
+        .where(eq(callSessions.id, callSessionId));
+
       if (attemptIndex + 1 < retryDelays.length) {
         console.log(`${LOG_PREFIX} ⏳ Scheduling retry ${attemptIndex + 2}/${retryDelays.length} in ${retryDelays[attemptIndex + 1] / 1000}s for ${callSessionId}: ${result.error}`);
         setTimeout(() => attemptAnalysis(attemptIndex + 1), retryDelays[attemptIndex + 1]);
       } else {
         console.warn(`${LOG_PREFIX} ⚠️ All ${retryDelays.length} post-call analysis attempts exhausted for ${callSessionId}: ${result.error}`);
+        await markAnalysisFailed(result.error);
       }
     } catch (err: any) {
       console.error(`${LOG_PREFIX} ❌ Post-call analysis attempt ${attemptIndex + 1} failed:`, err.message);
       // Schedule next retry on exception too
       if (attemptIndex + 1 < retryDelays.length) {
         setTimeout(() => attemptAnalysis(attemptIndex + 1), retryDelays[attemptIndex + 1]);
+      } else {
+        await markAnalysisFailed(err.message);
       }
     }
   };

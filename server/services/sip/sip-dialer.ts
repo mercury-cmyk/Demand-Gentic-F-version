@@ -16,7 +16,6 @@
  * campaign orchestrator. This module only handles SIP signaling and audio.
  */
 
-import * as rtpBridge from './rtp-gemini-bridge';
 import * as mediaBridgeClient from './media-bridge-client';
 import { drachtioServer } from './drachtio-server';
 import { v4 as uuidv4 } from 'uuid';
@@ -24,6 +23,12 @@ import { buildSipRuntimePrompt } from './sip-runtime-prompt';
 
 // Feature flag for SIP calling
 const USE_SIP_CALLING = process.env.USE_SIP_CALLING === 'true';
+
+// Hard ceiling: no SIP call can ever exceed this duration (seconds)
+const SIP_MAX_CALL_DURATION_SECONDS = 240;
+
+// Track active hard-stop timers so we can clear them on normal hang-up
+const sipHardStopTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * Call initiation parameters
@@ -193,10 +198,11 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
       },
       onCallEnded: async (reason: string) => {
         console.log(`[SIP Dialer] Call ${callId} ended: ${reason}`);
+        // Clear hard-stop timer on natural hang-up
+        const t = sipHardStopTimers.get(sipResult?.callId || callId);
+        if (t) { clearTimeout(t); sipHardStopTimers.delete(sipResult?.callId || callId); }
         // Destroy media bridge on VM
         await mediaBridgeClient.destroyMediaBridge(sipResult.callId || callId);
-        // Also close any legacy bridge session
-        await rtpBridge.closeBridgeSession(callId);
       },
     });
 
@@ -248,6 +254,31 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
 
     console.log(`[SIP Dialer] Call ${callId} initiated successfully`);
 
+    // Schedule server-side hard-stop timer for SIP calls
+    // This is critical: the VM media bridge may not enforce duration, and
+    // without this the SIP call can stay connected indefinitely.
+    const effectiveMaxDuration = Math.min(
+      params.maxCallDurationSeconds && params.maxCallDurationSeconds > 0
+        ? params.maxCallDurationSeconds
+        : SIP_MAX_CALL_DURATION_SECONDS,
+      SIP_MAX_CALL_DURATION_SECONDS
+    );
+    const effectiveCallId = sipResult.callId;
+    const hardStopTimer = setTimeout(async () => {
+      sipHardStopTimers.delete(effectiveCallId);
+      const callState = drachtioServer.getCallState(effectiveCallId);
+      if (!callState || callState.state === 'ended') return;
+
+      console.error(`[SIP Dialer] HARD STOP: Forcing SIP hangup for ${effectiveCallId} after ${effectiveMaxDuration}s`);
+      try {
+        await endCall(effectiveCallId, 'max_duration_exceeded');
+      } catch (err) {
+        console.error(`[SIP Dialer] HARD STOP hangup failed for ${effectiveCallId}:`, err);
+      }
+    }, effectiveMaxDuration * 1000);
+    hardStopTimer.unref?.();
+    sipHardStopTimers.set(effectiveCallId, hardStopTimer);
+
     return {
       success: true,
       callId: sipResult.callId,
@@ -273,11 +304,15 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
 export async function endCall(callId: string, reason?: string): Promise<boolean> {
   console.log(`[SIP Dialer] Ending call ${callId}: ${reason}`);
 
+  // Clear the hard-stop timer if one exists (call ended normally)
+  const timer = sipHardStopTimers.get(callId);
+  if (timer) {
+    clearTimeout(timer);
+    sipHardStopTimers.delete(callId);
+  }
+
   // Destroy media bridge on VM
   mediaBridgeClient.destroyMediaBridge(callId).catch(() => {});
-
-  // Close legacy bridge session
-  rtpBridge.closeBridgeSession(callId);
 
   // End SIP call via Drachtio
   try {
@@ -304,10 +339,15 @@ export function getActiveCalls() {
 }
 
 /**
- * Get active bridge sessions
+ * Get active media bridge sessions (via VM HTTP API)
  */
-export function getActiveSessions() {
-  return rtpBridge.getActiveSessions();
+export async function getActiveSessions() {
+  try {
+    const health = await mediaBridgeClient.getMediaBridgeHealth();
+    return { activeSessions: health.activeSessions || 0 };
+  } catch {
+    return { activeSessions: 0 };
+  }
 }
 
 /**
@@ -315,14 +355,6 @@ export function getActiveSessions() {
  */
 export async function shutdown(): Promise<void> {
   console.log('[SIP Dialer] Shutting down...');
-
-  // Close all bridge sessions
-  const sessions = rtpBridge.getActiveSessions();
-  const callIds = Array.from(sessions.keys());
-  for (const callId of callIds) {
-    rtpBridge.closeBridgeSession(callId);
-  }
-
   console.log('[SIP Dialer] Shutdown complete');
 }
 

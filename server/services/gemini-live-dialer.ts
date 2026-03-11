@@ -1220,12 +1220,12 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   function parseMaxCallDurationSeconds(value: unknown): number | null {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
-    return Math.min(Math.floor(parsed), 300);
+    return Math.min(Math.floor(parsed), 240);
   }
 
-  // Always enforce a max call duration — default 300s (5 min) if not explicitly set
+  // Always enforce a max call duration — default 240s (4 min) if not explicitly set
   function getEffectiveMaxCallDurationSeconds(): number {
-    return parseMaxCallDurationSeconds(callContext.maxCallDurationSeconds) ?? 300;
+    return parseMaxCallDurationSeconds(callContext.maxCallDurationSeconds) ?? 240;
   }
 
   function startMaxCallDurationTimer(): void {
@@ -1700,7 +1700,7 @@ Instructions:
                 maxCallDurationSeconds: (() => {
                   const raw = Number(config.max_call_duration_seconds || config.maxCallDurationSeconds);
                   if (!Number.isFinite(raw) || raw <= 0) return undefined;
-                  return Math.min(raw, 300);
+                  return Math.min(raw, 240);
                 })(),
                 // IDs for disposition processing and call tracking
                 queueItemId: config.queue_item_id || config.queueItemId,

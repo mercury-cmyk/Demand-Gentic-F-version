@@ -343,6 +343,14 @@ export function resolveVoiceGovernanceSync(
 export async function getVoiceModelForProvider(
   provider: VoiceProviderType,
 ): Promise<string> {
+  // GEMINI_LIVE_MODEL env var takes priority when set (allows quick model changes without DB)
+  if (provider === 'google') {
+    const envModel = process.env.GEMINI_LIVE_MODEL;
+    if (envModel) {
+      return envModel;
+    }
+  }
+
   const snapshot = await getAiModelGovernanceSnapshot();
   const policy = snapshot.policies.voice_realtime.enabled
     ? snapshot.policies.voice_realtime

@@ -68,7 +68,7 @@ router.post('/teams',
   async (req: Request, res: Response) => {
     try {
       const data = createTeamSchema.parse(req.body);
-      const userId = (req as any).userId;
+      const userId = req.user!.userId;
       
       const id = await iamService.createTeam({
         ...data,
@@ -97,7 +97,7 @@ router.post('/teams/:id/members',
   async (req: Request, res: Response) => {
     try {
       const data = addTeamMemberSchema.parse(req.body);
-      const addedBy = (req as any).userId;
+      const addedBy = req.user!.userId;
       
       const id = await iamService.addTeamMember(
         req.params.id,
@@ -143,7 +143,7 @@ router.post('/roles',
   async (req: Request, res: Response) => {
     try {
       const data = createRoleSchema.parse(req.body);
-      const userId = (req as any).userId;
+      const userId = req.user!.userId;
       
       const id = await iamService.createRole({
         name: data.name,
@@ -203,7 +203,7 @@ router.post('/policies',
   async (req: Request, res: Response) => {
     try {
       const data = createPolicySchema.parse(req.body);
-      const userId = (req as any).userId;
+      const userId = req.user!.userId;
       
       const id = await iamService.createPolicy({
         ...data,
@@ -269,7 +269,7 @@ router.post('/grants',
   async (req: Request, res: Response) => {
     try {
       const data = createGrantSchema.parse(req.body);
-      const grantedBy = (req as any).userId;
+      const grantedBy = req.user!.userId;
       
       const id = await iamService.createGrant({
         ...data,
@@ -313,7 +313,7 @@ router.post('/assignments',
   async (req: Request, res: Response) => {
     try {
       const data = assignEntitySchema.parse(req.body);
-      const assignedBy = (req as any).userId;
+      const assignedBy = req.user!.userId;
       
       const id = await iamService.assignEntity({
         ...data,
@@ -354,12 +354,12 @@ const createAccessRequestSchema = z.object({
 
 router.get('/requests', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).userId;
-    const userRole = (req as any).userRole;
+    const userId = req.user!.userId;
+    const userRoles = req.user!.roles || [req.user!.role];
     
     // Non-admins can only see their own requests
     const filters: any = {};
-    if (userRole !== 'admin') {
+    if (!userRoles.includes('admin')) {
       filters.requesterId = userId;
     } else if (req.query.status) {
       filters.status = req.query.status;
@@ -378,7 +378,7 @@ router.post('/requests',
   async (req: Request, res: Response) => {
     try {
       const data = createAccessRequestSchema.parse(req.body);
-      const requesterId = (req as any).userId;
+      const requesterId = req.user!.userId;
       
       const id = await iamService.createAccessRequest({
         ...data,
@@ -407,7 +407,7 @@ router.post('/requests/:id/review',
   async (req: Request, res: Response) => {
     try {
       const { action, reviewNotes } = reviewRequestSchema.parse(req.body);
-      const reviewerId = (req as any).userId;
+      const reviewerId = req.user!.userId;
       
       if (action === 'approve') {
         const grantId = await iamService.approveAccessRequest(req.params.id, reviewerId, reviewNotes);
@@ -454,12 +454,12 @@ router.get('/audit',
 
 router.get('/users/:userId/permissions', async (req: Request, res: Response) => {
   try {
-    const requestingUserId = (req as any).userId;
+    const requestingUserId = req.user!.userId;
     const targetUserId = req.params.userId;
-    const userRole = (req as any).userRole;
+    const userRoles = req.user!.roles || [req.user!.role];
     
     // Users can only view their own permissions unless admin
-    if (targetUserId !== requestingUserId && userRole !== 'admin') {
+    if (targetUserId !== requestingUserId && !userRoles.includes('admin')) {
       return res.status(403).json({ error: 'Cannot view other users\' permissions' });
     }
     
@@ -474,7 +474,7 @@ router.get('/users/:userId/permissions', async (req: Request, res: Response) => 
 // My permissions (convenience endpoint)
 router.get('/me/permissions', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.user!.userId;
     const permissions = await iamService.getEffectivePermissions(userId);
     res.json(permissions);
   } catch (error) {
@@ -486,7 +486,7 @@ router.get('/me/permissions', async (req: Request, res: Response) => {
 // Permission check endpoint
 router.get('/check', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.user!.userId;
     const entityType = req.query.entityType as iamService.IamEntityType;
     const action = req.query.action as iamService.IamAction;
     const resourceId = req.query.resourceId as string;
@@ -523,7 +523,7 @@ router.post('/users/:userId/roles',
     try {
       const { userId } = req.params;
       const data = assignUserRoleSchema.parse(req.body);
-      const assignedBy = (req as any).userId;
+      const assignedBy = req.user!.userId;
       
       const result = await iamService.assignUserToRole(
         userId,
@@ -564,13 +564,13 @@ router.delete('/users/:userId/roles/:roleId',
 router.get('/users/:userId/roles',
   async (req: Request, res: Response) => {
     try {
-      const requestingUserId = (req as any).userId;
+      const requestingUserId = req.user!.userId;
       const targetUserId = req.params.userId;
-      const userRole = (req as any).userRole;
+      const userRoles = req.user!.roles || [req.user!.role];
       const organizationId = req.query.organizationId as string | undefined;
 
       // Users can only view their own roles unless admin
-      if (targetUserId !== requestingUserId && userRole !== 'admin') {
+      if (targetUserId !== requestingUserId && !userRoles.includes('admin')) {
         return res.status(403).json({ error: 'Cannot view other users\' roles' });
       }
 
@@ -590,7 +590,7 @@ router.post('/seed-policies',
   requireRole('admin'),
   async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = req.user!.userId;
       await iamService.seedSystemPolicies(userId);
       res.json({ success: true, message: 'System policies seeded' });
     } catch (error) {

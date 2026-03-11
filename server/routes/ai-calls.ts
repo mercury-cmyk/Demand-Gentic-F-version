@@ -17,6 +17,7 @@ import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, Conta
 import { checkSuppressionBulk, getSuppressionReason } from "../lib/suppression.service";
 import { getBestPhoneForContact } from "../lib/phone-utils";
 import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
+import { resolveAgentAssignment } from "../services/unified-call-context";
 
 const GEMINI_VOICE_PREFERENCES = [
   "Juniper",
@@ -384,12 +385,19 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
       let usedEngine: 'sip' | 'texml' = 'texml';
       let sipFallbackReason: string | undefined;
 
+      // UNIFIED AGENT RESOLUTION: Use the same resolveAgentAssignment() that test calls use
+      // This ensures systemPrompt, voice (with rotation), firstMessage, and agentName
+      // are identical between test calls and production calls.
+      const unifiedAgent = await resolveAgentAssignment(campaignId);
+
       if (callEngine === 'sip') {
         if (!sipDialer.isReady()) {
           sipFallbackReason = 'SIP engine not ready';
           console.warn(`[AI Calls] SIP engine selected but not ready - falling back to TeXML`);
         } else {
           // Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live
+          // CRITICAL: Use unified agent resolution (same as test calls) for systemPrompt,
+          // voice (with rotation), and firstMessage to ensure zero drift.
           console.log(`[AI Calls] Using Direct SIP engine for call to ${phoneNumber}`);
           const result = await sipDialer.initiateAiCall({
             toNumber: phoneNumber,
@@ -397,8 +405,8 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
             campaignId,
             contactId: contactId!,
             queueItemId: queueItemId || '',
-            voiceName: aiSettings.persona?.voice || 'Puck',
-            systemPrompt: aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
+            voiceName: unifiedAgent?.voice || aiSettings.persona?.voice || 'Puck',
+            systemPrompt: unifiedAgent?.systemPrompt || aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
             contactName: [context.contactFirstName, context.contactLastName].filter(Boolean).join(' ').trim() || 'there',
             contactFirstName: context.contactFirstName || 'there',
             contactJobTitle: context.contactJobTitle || context.contactTitle || 'Decision Maker',
@@ -413,6 +421,7 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
             talkingPoints: context.talkingPoints,
             campaignContextBrief: context.campaignContextBrief,
             callFlow: context.callFlow,
+            firstMessage: unifiedAgent?.firstMessage || undefined,
             maxCallDurationSeconds: context.maxCallDurationSeconds ?? undefined,
             callerNumberId,
             callerNumberDecisionId,

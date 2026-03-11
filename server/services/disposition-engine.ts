@@ -691,6 +691,10 @@ async function processQualifiedLead(
     structuredTranscript: structuredTranscript,
     telnyxCallId: callAttempt.telnyxCallId, // This might be needed for recording lookups
     notes: agentSource, // Track agent type and ID for full auditability
+    // CRITICAL: Set initial transcription/recording status so downstream
+    // systems know this lead still needs processing
+    transcriptionStatus: transcript ? 'completed' : 'pending',
+    recordingStatus: recordingUrl ? 'pending' : 'none',
   };
 
   console.log('[DispositionEngine] Preparing to create lead with payload:', JSON.stringify(leadPayload, null, 2));
@@ -813,46 +817,67 @@ async function processQualifiedLead(
         // Step 1: Download recording to GCS IMMEDIATELY to prevent URL expiration
         // Telnyx presigned URLs expire in ~10 minutes
         if (isRecordingStorageEnabled() && recordingUrlForAsync) {
-          console.log(`[DispositionEngine] 📥 Downloading recording to GCS for lead ${leadIdForAsync}...`);
-          const s3Key = await downloadAndStoreRecording(recordingUrlForAsync, leadIdForAsync);
+          try {
+            console.log(`[DispositionEngine] 📥 Downloading recording to GCS for lead ${leadIdForAsync}...`);
+            const s3Key = await downloadAndStoreRecording(recordingUrlForAsync, leadIdForAsync);
 
-          if (s3Key) {
+            if (s3Key) {
+              await db.update(leads)
+                .set({ recordingS3Key: s3Key, recordingStatus: 'completed' })
+                .where(eq(leads.id, leadIdForAsync));
+              console.log(`[DispositionEngine] ✅ Recording stored in GCS: ${s3Key}`);
+            } else {
+              console.log(`[DispositionEngine] ⚠️ Failed to store recording in GCS for lead ${leadIdForAsync}`);
+              await db.update(leads)
+                .set({ recordingStatus: 'failed', updatedAt: new Date() })
+                .where(eq(leads.id, leadIdForAsync));
+            }
+          } catch (recErr) {
+            console.error(`[DispositionEngine] Recording download failed for lead ${leadIdForAsync}:`, recErr);
             await db.update(leads)
-              .set({ recordingS3Key: s3Key })
+              .set({ recordingStatus: 'failed', updatedAt: new Date() })
               .where(eq(leads.id, leadIdForAsync));
-            console.log(`[DispositionEngine] ✅ Recording stored in GCS: ${s3Key}`);
-          } else {
-            console.log(`[DispositionEngine] ⚠️ Failed to store recording in GCS for lead ${leadIdForAsync}`);
+            // Continue — transcription may still work from a different source
           }
         }
 
         // Step 2: Transcribe the call IF NOT PROVIDED
-        // If we already have the transcript from the live session, we might want to skip this
-        // or regenerate it for higher quality?
-        // Let's rely on the live transcript if available, otherwise transcribe
-        if (!transcriptForAnalysis) {
-            console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
-            const transcribed = await transcribeLeadCall(leadIdForAsync);
-            
-            if (transcribed) {
-                console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync}`);
-                await analyzeCall(leadIdForAsync);
-                console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${leadIdForAsync}`);
-            }
-        } else {
-            // If we have transcript, we can still run analysis
-          console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync} (using in-session transcript)`);
-            // We need to ensure analyzeCall can work with existing transcript
-            // calling analyzeCall will likely re-read the lead and find the transcript
-            await analyzeCall(leadIdForAsync);
+        try {
+          if (!transcriptForAnalysis) {
+              console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
+              await db.update(leads)
+                .set({ transcriptionStatus: 'processing', updatedAt: new Date() })
+                .where(eq(leads.id, leadIdForAsync));
+
+              const transcribed = await transcribeLeadCall(leadIdForAsync);
+
+              if (transcribed) {
+                  await db.update(leads)
+                    .set({ transcriptionStatus: 'completed', updatedAt: new Date() })
+                    .where(eq(leads.id, leadIdForAsync));
+                  console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync}`);
+                  await analyzeCall(leadIdForAsync);
+                  console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${leadIdForAsync}`);
+              } else {
+                  console.log(`[DispositionEngine] ⚠️ Transcription failed for lead ${leadIdForAsync} — marking status`);
+                  await db.update(leads)
+                    .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+                    .where(eq(leads.id, leadIdForAsync));
+              }
+          } else {
+              console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync} (using in-session transcript)`);
+              await analyzeCall(leadIdForAsync);
+          }
+        } catch (txErr) {
+          console.error(`[DispositionEngine] Transcription/analysis failed for lead ${leadIdForAsync}:`, txErr);
+          await db.update(leads)
+            .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+            .where(eq(leads.id, leadIdForAsync));
+          // Continue to Step 3 — quality analysis might still work if transcript exists
         }
 
-        // Step 3: Run AI-powered lead quality analysis (same as agent console "Run AI Analysis")
-        // This evaluates: ICP fit, content interest, permission, compliance, qualification answers,
-        // data accuracy, email deliverability — using campaign QA parameters and Gemini AI.
-        // Ensures AI leads get the SAME lead quality analysis as agent console leads.
+        // Step 3: Run AI-powered lead quality analysis
         try {
-          // Re-check if transcript is now available (may have been transcribed in Step 2)
           const [updatedLead] = await db
             .select({ transcript: leads.transcript, aiScore: leads.aiScore })
             .from(leads)
@@ -873,6 +898,12 @@ async function processQualifiedLead(
         }
       } catch (err) {
         console.error(`[DispositionEngine] Failed to auto-process lead ${leadIdForAsync}:`, err);
+        // Mark lead so background sweep can recover it
+        try {
+          await db.update(leads)
+            .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+            .where(eq(leads.id, leadIdForAsync));
+        } catch (_) { /* best-effort */ }
       }
     });
     result.actions.push('Queued automatic GCS storage, transcription and quality analysis');

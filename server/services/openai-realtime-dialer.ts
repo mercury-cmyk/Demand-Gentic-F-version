@@ -122,7 +122,7 @@ const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
     eagerness: 'high',  // OPTIMIZED: 'high' for faster turn-taking, reduces latency
     takeTurnAfterSilenceSeconds: 2,  // OPTIMIZED: reduced from 4s for faster responses
     endConversationAfterSilenceSeconds: 60,
-    maxConversationDurationSeconds: 300,  // 5 minutes max call duration
+    maxConversationDurationSeconds: 240,  // 4 minutes max call duration
   },
   softTimeout: {
     responseTimeoutSeconds: -1,
@@ -968,6 +968,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
       };
 
       openaiWs.send(JSON.stringify(configMessage));
+      // Store the resolved system prompt for mid-call updates (identity lock, etc.)
+      (session as any)._resolvedSystemPrompt = systemPrompt;
       console.log(`${LOG_PREFIX} OpenAI session configured with g711_ulaw audio format`);
       console.log(`${LOG_PREFIX} Cost settings: maxTokens=${maxResponseTokens}, transcription=${transcriptionEnabled}, condensedPrompt=${costSettings.useCondensedPrompt}`);
       
@@ -1552,6 +1554,27 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
       session.currentResponseText = "";
       console.log(`${LOG_PREFIX} Response complete for call: ${session.callId}`);
       clearSoftTimeout(session);
+
+      // WATCHDOG: If agent has spoken 3+ turns but identity is still not confirmed,
+      // the contact likely confirmed and we missed it, or the agent is stuck.
+      // Force-advance past identity check to prevent looping.
+      if (!session.conversationState.identityConfirmed) {
+        const agentTurns = session.transcripts.filter(t => t.role === 'assistant').length;
+        const userTurns = session.transcripts.filter(t => t.role === 'user').length;
+        if (agentTurns >= 3 && userTurns >= 2) {
+          console.log(`${LOG_PREFIX} ⚠️ WATCHDOG: Identity still unconfirmed after ${agentTurns} agent turns + ${userTurns} user turns — force-advancing past identity check for call: ${session.callId}`);
+          session.conversationState.identityConfirmed = true;
+          session.conversationState.identityConfirmedAt = new Date();
+          session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
+          session.conversationState.stateHistory.push('WATCHDOG_FORCE_ADVANCE', 'RIGHT_PARTY_INTRO');
+          setImmediate(() => {
+            injectIdentityLockReminder(session).catch(err => {
+              console.error(`${LOG_PREFIX} Watchdog identity lock error:`, err);
+            });
+          });
+        }
+      }
+
       break;
 
     case "response.cancelled":
@@ -1877,36 +1900,49 @@ function createOutOfBandResponse(
  * This matches common affirmative responses to identity questions.
  */
 function detectIdentityConfirmation(transcript: string): boolean {
-  const normalizedText = transcript.toLowerCase().trim();
+  // Normalize: lowercase, strip punctuation/filler, collapse whitespace
+  const normalizedText = transcript
+    .toLowerCase()
+    .replace(/[.,!?;:\/\\]+/g, ' ')  // Strip punctuation that breaks regex anchors
+    .replace(/\b(um|uh|ah|oh|hmm|like|well|so)\b/g, '')  // Strip filler words
+    .replace(/\s+/g, ' ')
+    .trim();
 
   // Short affirmatives that confirm identity
   const identityConfirmPatterns = [
-    /^yes$/,
-    /^yeah$/,
-    /^yep$/,
-    /^yup$/,
-    /^speaking$/,
-    /^this is (me|him|her|they|them)$/,
-    /^that'?s me$/,
-    /^it'?s me$/,
-    /^i am$/,
-    /^i am \w+/,              // "I am Jordan", "I am John Smith"
+    /^yes\b/,                 // "yes", "yes sure", "yes that's me"
+    /^yeah\b/,                // "yeah", "yeah sure", "yeah this is me"
+    /^yep\b/,
+    /^yup\b/,
+    /^sure\b/,                // "sure", "sure that's me"
+    /^absolutely\b/,
+    /^definitely\b/,
+    /^speaking\b/,
+    /^this is (me|him|her|they|them)\b/,
+    /^that'?s me\b/,
+    /^it'?s me\b/,
+    /^i am\b/,
     /^i'?m \w+/,              // "I'm Jordan"
-    /\bi am \w+/,             // "Yes I am Jordan", "I said I am Jordan"
+    /\bi am \w+/,             // "Yes I am Jordan"
     /\bi'?m \w+/,             // "Yes I'm Jordan"
-    /^that'?s correct$/,
-    /^correct$/,
-    /^right$/,
-    /^yes[,.]?\s*(this is|speaking|that'?s me|i am|i'm)/,
-    /^hi[,.]?\s*(yes|this is|speaking|i am|i'm)/,
+    /^that'?s correct\b/,
+    /^correct\b/,
+    /^right\b/,
+    /\byes\b.*\b(this is|speaking|that'?s me|i am|i'm)\b/,
+    /\bhi\b.*\b(yes|this is|speaking|i am|i'm)\b/,
+    /\bhello\b.*\b(yes|speaking|this is)\b/,
     /speaking$/,
-    /this is \w+(\s+\w+)?/,   // "This is John" or "This is John Smith" anywhere in text
+    /this is \w+(\s+\w+)?/,   // "This is John" or "This is John Smith" anywhere
     /\w+ speaking$/,          // "John speaking"
-    /\w+ here$/,              // "Jordan here"
-    /^you('ve)?\s*(got|reached|found)\s*(me|him|her)/,
-    /you('re)?\s*(talking|speaking)\s*(to|with)\s*(me|him|her|\w+)/,  // "You're talking to Jordan"
-    /why\s+(are\s+)?you\s+ask/,  // "Why are you asking" implies frustration at re-asking = already confirmed
-    /i\s+(said|told|already)/,   // "I said...", "I told you...", "I already..." = frustration at repeating
+    /\w+ here\b/,             // "Jordan here"
+    /^you('ve)?\s*(got|reached|found)\s*(me|him|her)\b/,
+    /you('re)?\s*(talking|speaking)\s*(to|with)\s*(me|him|her|\w+)/,
+    /why\s+(are\s+)?you\s+ask/,  // Frustration at re-asking = already confirmed
+    /i\s+(said|told|already)\b/,
+    /^go ahead\b/,            // "go ahead" implies they're ready
+    /^what('?s| is)\s+(this|it|up)\b/,  // "what's this about?" implies they ARE the person
+    /^how can i help\b/,      // "how can I help you?" implies right party
+    /^what do you (need|want)\b/,
   ];
 
   for (const pattern of identityConfirmPatterns) {
@@ -1914,16 +1950,6 @@ function detectIdentityConfirmation(transcript: string): boolean {
       return true;
     }
   }
-
-  // NOTE: We explicitly DO NOT treat bare "hello", "hi", or greetings as identity confirmation.
-  // The contact saying "Hello?" when answering the phone is NOT confirming their identity.
-  // Identity confirmation only happens AFTER the agent asks "Am I speaking with [Name]?"
-  // and the contact responds with an affirmative like "yes", "speaking", "this is me", etc.
-  //
-  // The patterns above already cover cases like:
-  // - "Yes, this is John" (matches: /this is \w+/)
-  // - "Hi, yes speaking" (matches: /^hi[,.]?\s*(yes|this is|speaking|i am|i'm)/)
-  // - "Hello, John speaking" (matches: /\w+ speaking$/)
 
   return false;
 }
@@ -1938,7 +1964,38 @@ async function injectIdentityLockReminder(session: OpenAIRealtimeSession): Promi
   }
 
   try {
-    // Add a system message to reinforce identity lock
+    // METHOD 1: Use session.update to MODIFY the system instructions
+    // This is the strongest enforcement — it changes the model's foundational behavior
+    // We prepend the identity lock directive to the existing instructions
+    const identityLockPrefix = `[CRITICAL OVERRIDE - IDENTITY PERMANENTLY CONFIRMED]
+The contact's identity has been verified. You are now in STATE 2 (THE HUMAN MOMENT).
+
+ABSOLUTE RULES:
+- NEVER ask "Am I speaking with...", "Is this...", "Can I confirm..." or ANY identity question. Identity is DONE.
+- If the contact asks "who is this?" or "what's this about?", answer them — do NOT re-verify THEIR identity.
+- Proceed IMMEDIATELY with your introduction: greet them warmly, introduce yourself, and transition to the purpose of the call.
+- Follow your campaign objective. Do NOT loop back to identity under any circumstances.
+- Any hesitation or "I don't know" from the contact is about the TOPIC, never about identity.
+
+YOUR NEXT ACTION: Introduce yourself warmly and move to the purpose of the call.
+
+---
+
+`;
+
+    // Get the current system prompt and prepend the identity lock
+    // We stored the original prompt during session setup
+    const currentInstructions = (session as any)._resolvedSystemPrompt || '';
+    const updatedInstructions = identityLockPrefix + currentInstructions;
+
+    session.openaiWs.send(JSON.stringify({
+      type: "session.update",
+      session: {
+        instructions: updatedInstructions,
+      },
+    }));
+
+    // METHOD 2: Also add a conversation item for reinforcement
     session.openaiWs.send(JSON.stringify({
       type: "conversation.item.create",
       item: {
@@ -1947,22 +2004,13 @@ async function injectIdentityLockReminder(session: OpenAIRealtimeSession): Promi
         content: [
           {
             type: "input_text",
-            text: `[SYSTEM STATE UPDATE] Identity has been CONFIRMED. The person on the line is the intended contact.
-
-CRITICAL RULES NOW IN EFFECT:
-1. NEVER ask "Am I speaking with..." or any identity verification question again
-2. NEVER return to identity confirmation - this is PERMANENTLY LOCKED
-3. If the contact says "I don't know" or hesitates, treat it as uncertainty about the TOPIC, not about WHO they are
-4. Proceed with the conversation naturally - move to introduction and context framing
-5. Any ambiguity in responses is about the subject matter, not identity
-
-Current state: RIGHT_PARTY_INTRO - proceed with acknowledging their time and explaining the call purpose.`
+            text: `Identity is CONFIRMED. Move to STATE 2 NOW. Introduce yourself and explain the call purpose. Do NOT ask any identity questions.`
           }
         ]
       }
     }));
 
-    console.log(`${LOG_PREFIX} Injected identity lock reminder for call: ${session.callId}`);
+    console.log(`${LOG_PREFIX} ✅ Identity lock: updated session instructions + injected reminder for call: ${session.callId}`);
   } catch (error) {
     console.error(`${LOG_PREFIX} Error injecting identity lock reminder for call ${session.callId}:`, error);
   }
@@ -2952,8 +3000,8 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       : 120; // Default: 2 minutes of user silence ends call
       
     const maxDurationSeconds = Number.isFinite(maxDurationRaw) && maxDurationRaw > 0
-      ? Math.min(maxDurationRaw, 300)
-      : 300; // Default: 300 seconds hard limit
+      ? Math.min(maxDurationRaw, 240)
+      : 240; // Default: 240 seconds hard limit
 
     const timeSinceUserSpeech = session.lastUserSpeechTime
       ? Math.round((now.getTime() - session.lastUserSpeechTime.getTime()) / 1000)

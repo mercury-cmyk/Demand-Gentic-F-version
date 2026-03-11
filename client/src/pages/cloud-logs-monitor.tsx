@@ -78,10 +78,20 @@ interface ActivityEvent {
   severity?: string;
 }
 
+const VM_SERVICES = [
+  { value: 'api', label: 'API Server' },
+  { value: 'media-bridge', label: 'Media Bridge' },
+  { value: 'drachtio', label: 'Drachtio SIP' },
+  { value: 'ops-agent', label: 'Ops Agent' },
+  { value: 'nginx', label: 'Nginx' },
+  { value: 'all', label: 'All Services' },
+] as const;
+
 export default function CloudLogsMonitor() {
   const isDevMode = import.meta.env.DEV;
   const [searchQuery, setSearchQuery] = useState("");
   const [timeWindow, setTimeWindow] = useState<24 | 48 | 168>(24);
+  const [selectedService, setSelectedService] = useState("api");
   const [autoRefresh, setAutoRefresh] = useState(!isDevMode);
   const [selectedSeverity, setSelectedSeverity] = useState<string[]>(['ERROR', 'WARNING', 'INFO', 'DEBUG', 'DEFAULT']);
   const [expandedLog, setExpandedLog] = useState<number | null>(null);
@@ -228,9 +238,9 @@ export default function CloudLogsMonitor() {
 
   // Fetch recent logs (Historical)
   const { data: recentLogsData, refetch: refetchRecent } = useQuery<{ logs: LogEntry[]; count: number }>({
-    queryKey: ['/api/cloud-logs/recent', { minutes: 5 }],
+    queryKey: ['/api/cloud-logs/recent', { minutes: 5, service: selectedService }],
     queryFn: async () => {
-      const response = await apiRequest('GET', '/api/cloud-logs/recent?minutes=5&limit=100');
+      const response = await apiRequest('GET', `/api/cloud-logs/recent?minutes=5&limit=100&service=${selectedService}`);
       return await (response as any).json();
     },
     refetchInterval: !isWebSocketConnected && canAutoPoll ? 30000 : false,
@@ -252,9 +262,9 @@ export default function CloudLogsMonitor() {
 
   // Fetch metrics
   const { data: metrics, refetch: refetchMetrics } = useQuery<LogMetrics>({
-    queryKey: ['/api/cloud-logs/metrics', { hours: timeWindow }],
+    queryKey: ['/api/cloud-logs/metrics', { hours: timeWindow, service: selectedService }],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/cloud-logs/metrics?hours=${timeWindow}`);
+      const response = await apiRequest('GET', `/api/cloud-logs/metrics?hours=${timeWindow}&service=${selectedService}`);
       return await (response as any).json();
     },
     refetchInterval: canAutoPoll ? 60000 : false,
@@ -263,9 +273,9 @@ export default function CloudLogsMonitor() {
 
   // Fetch error summary
   const { data: errorSummary, refetch: refetchErrors } = useQuery<{ errors: ErrorSummary[]; totalTypes: number; totalErrors: number }>({
-    queryKey: ['/api/cloud-logs/errors', { hours: timeWindow }],
+    queryKey: ['/api/cloud-logs/errors', { hours: timeWindow, service: selectedService }],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/cloud-logs/errors?hours=${timeWindow}`);
+      const response = await apiRequest('GET', `/api/cloud-logs/errors?hours=${timeWindow}&service=${selectedService}`);
       return await (response as any).json();
     },
     refetchInterval: canAutoPoll ? 60000 : false,
@@ -274,9 +284,9 @@ export default function CloudLogsMonitor() {
 
   // Search logs
   const { data: searchResults, refetch: refetchSearch } = useQuery<{ logs: LogEntry[]; count: number }>({
-    queryKey: ['/api/cloud-logs/search', { q: searchQuery, hours: timeWindow }],
+    queryKey: ['/api/cloud-logs/search', { q: searchQuery, hours: timeWindow, service: selectedService }],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/cloud-logs/search?q=${encodeURIComponent(searchQuery)}&hours=${timeWindow}&limit=200`);
+      const response = await apiRequest('GET', `/api/cloud-logs/search?q=${encodeURIComponent(searchQuery)}&hours=${timeWindow}&limit=200&service=${selectedService}`);
       return await (response as any).json();
     },
     enabled: canAutoPoll && searchQuery.length > 2,
@@ -567,7 +577,7 @@ export default function CloudLogsMonitor() {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                Cloud Run Logs
+                System Logs
                 <Badge className={`${
                   isWebSocketConnected
                     ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
@@ -579,11 +589,7 @@ export default function CloudLogsMonitor() {
               <p className="text-slate-400 mt-1 flex items-center gap-4">
                 <span className="flex items-center gap-1.5">
                   <Server className="h-4 w-4" />
-                  demandgentic-api
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Globe className="h-4 w-4" />
-                  us-central1
+                  {VM_SERVICES.find(s => s.value === selectedService)?.label || selectedService}
                 </span>
                 {isWebSocketConnected && (
                   <span className="flex items-center gap-1.5 text-emerald-400">
@@ -621,6 +627,16 @@ export default function CloudLogsMonitor() {
                 Activity
               </Label>
             </div>
+
+            <select
+              value={selectedService}
+              onChange={(e) => setSelectedService(e.target.value)}
+              className="border border-slate-700 rounded-xl px-4 py-2 text-sm bg-slate-800/50 text-slate-300 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500"
+            >
+              {VM_SERVICES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
 
             <select
               value={timeWindow}

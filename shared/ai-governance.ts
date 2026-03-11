@@ -121,7 +121,6 @@ export const AI_MODEL_SUGGESTIONS: Record<
   voice_realtime: {
     google: [
       "gemini-live-2.5-flash-native-audio",
-      "gemini-live-2.0-flash-live-001",
     ],
     openai: [
       "gpt-realtime",

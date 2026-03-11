@@ -206,7 +206,28 @@ export async function getInboxMessages(
 ): Promise<InboxMessage[]> {
   const { limit = 50, offset = 0, unreadOnly = false, searchQuery } = options;
 
-  // Fetch all inbound messages with CRM data
+  // SECURITY: Get the user's connected mailbox emails to filter messages
+  const userMailboxes = await db
+    .select({ mailboxEmail: mailboxAccounts.mailboxEmail })
+    .from(mailboxAccounts)
+    .where(eq(mailboxAccounts.userId, userId));
+
+  const userEmails = userMailboxes
+    .map(m => m.mailboxEmail?.toLowerCase())
+    .filter(Boolean) as string[];
+
+  if (userEmails.length === 0) {
+    // User has no connected mailbox — return empty inbox
+    return [];
+  }
+
+  // Build user-ownership filter: inbound messages where user's email is in toEmails or ccEmails
+  const userEmailFilter = or(
+    ...userEmails.map(email => sql`${email} = ANY(${dealMessages.toEmails})`),
+    ...userEmails.map(email => sql`${email} = ANY(${dealMessages.ccEmails})`)
+  );
+
+  // Fetch ONLY messages addressed to this user's mailbox(es)
   const results = await db
     .select({
       message: dealMessages,
@@ -231,6 +252,7 @@ export async function getInboxMessages(
     .where(
       and(
         eq(dealMessages.direction, 'inbound'),
+        userEmailFilter,
         searchQuery
           ? or(
               sql`${dealMessages.subject} ILIKE ${`%${searchQuery}%`}`,
@@ -322,9 +344,11 @@ export async function getInboxMessages(
 }
 
 /**
- * Fetch sent messages from scheduled_emails table
- * 
- * Returns emails that have been successfully sent
+ * Fetch sent messages from both scheduled_emails AND dealMessages (outbound)
+ *
+ * Returns emails that have been successfully sent from either:
+ * 1. Campaign scheduled emails (scheduledEmails table)
+ * 2. Inbox compose sends (dealMessages table with direction='outbound')
  */
 export async function getSentMessages(
   userId: string,
@@ -338,18 +362,21 @@ export async function getSentMessages(
 
   // Fetch user's mailbox accounts
   const userMailboxes = await db
-    .select({ id: mailboxAccounts.id })
+    .select({ id: mailboxAccounts.id, mailboxEmail: mailboxAccounts.mailboxEmail })
     .from(mailboxAccounts)
     .where(eq(mailboxAccounts.userId, userId));
 
   const mailboxIds = userMailboxes.map(m => m.id);
-  
-  if (mailboxIds.length === 0) {
+  const userEmails = userMailboxes
+    .map(m => m.mailboxEmail?.toLowerCase())
+    .filter(Boolean) as string[];
+
+  if (mailboxIds.length === 0 && userEmails.length === 0) {
     return [];
   }
 
-  // Fetch sent emails with CRM data
-  const results = await db
+  // 1. Fetch sent emails from scheduledEmails (campaign sends)
+  const scheduledResults = mailboxIds.length > 0 ? await db
     .select({
       email: scheduledEmails,
       account: accounts,
@@ -373,11 +400,47 @@ export async function getSentMessages(
     )
     .orderBy(desc(scheduledEmails.sentAt))
     .limit(limit)
+    .offset(offset) : [];
+
+  // 2. Fetch outbound dealMessages (inbox compose sends)
+  const userEmailFilter = userEmails.length > 0
+    ? or(...userEmails.map(email => sql`LOWER(${dealMessages.fromEmail}) = ${email}`))
+    : sql`false`;
+
+  const dealResults = await db
+    .select({
+      message: dealMessages,
+      conversation: dealConversations,
+      opportunity: pipelineOpportunities,
+      account: accounts,
+      contact: contacts
+    })
+    .from(dealMessages)
+    .leftJoin(dealConversations, eq(dealConversations.id, dealMessages.conversationId))
+    .leftJoin(pipelineOpportunities, eq(pipelineOpportunities.id, dealConversations.opportunityId))
+    .leftJoin(accounts, eq(accounts.id, pipelineOpportunities.accountId))
+    .leftJoin(contacts, eq(contacts.id, pipelineOpportunities.contactId))
+    .where(
+      and(
+        eq(dealMessages.direction, 'outbound'),
+        userEmailFilter,
+        searchQuery
+          ? or(
+              sql`${dealMessages.subject} ILIKE ${`%${searchQuery}%`}`,
+              sql`${dealMessages.bodyPreview} ILIKE ${`%${searchQuery}%`}`,
+              sql`${dealMessages.fromEmail} ILIKE ${`%${searchQuery}%`}`
+            )
+          : undefined
+      )
+    )
+    .orderBy(desc(dealMessages.sentAt))
+    .limit(limit)
     .offset(offset);
 
-  return results.map(({ email, account, contact }) => ({
+  // Merge both sources into unified InboxMessage format
+  const fromScheduled: InboxMessage[] = scheduledResults.map(({ email, account, contact }) => ({
     id: email.id,
-    conversationId: email.id, // Use email ID as conversation ID for sent emails
+    conversationId: email.id,
     subject: email.subject || '(No Subject)',
     bodyPreview: email.bodyPlain?.substring(0, 200) || '',
     bodyHtml: email.bodyHtml,
@@ -388,15 +451,51 @@ export async function getSentMessages(
     receivedDateTime: email.sentAt || email.createdAt,
     hasAttachments: (email.attachments as any[])?.length > 0 || false,
     importance: 'normal',
-    isRead: true, // Sent emails are always "read"
+    isRead: true,
     isStarred: false,
-    category: 'primary' as const, // Sent emails default to primary
+    category: 'primary' as const,
     accountId: email.accountId,
     accountName: account?.name ?? null,
     contactId: email.contactId,
     contactName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
     opportunityId: email.opportunityId
   }));
+
+  const fromDeal: InboxMessage[] = dealResults.map(({ message, conversation, opportunity, account, contact }) => ({
+    id: message.id,
+    conversationId: message.conversationId,
+    subject: message.subject || '(No Subject)',
+    bodyPreview: message.bodyPreview || '',
+    bodyHtml: message.bodyContent,
+    from: message.fromEmail,
+    fromName: null,
+    to: message.toEmails,
+    cc: message.ccEmails || [],
+    receivedDateTime: message.sentAt || message.receivedAt || new Date(),
+    hasAttachments: message.hasAttachments || false,
+    importance: message.importance || 'normal',
+    isRead: true,
+    isStarred: false,
+    category: 'primary' as const,
+    accountId: opportunity?.accountId ?? null,
+    accountName: account?.name ?? null,
+    contactId: opportunity?.contactId ?? null,
+    contactName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
+    opportunityId: message.opportunityId || conversation?.opportunityId || null
+  }));
+
+  // Combine, deduplicate by ID, sort by date descending, apply limit
+  const seen = new Set<string>();
+  const combined = [...fromScheduled, ...fromDeal]
+    .filter(msg => {
+      if (seen.has(msg.id)) return false;
+      seen.add(msg.id);
+      return true;
+    })
+    .sort((a, b) => new Date(b.receivedDateTime).getTime() - new Date(a.receivedDateTime).getTime())
+    .slice(0, limit);
+
+  return combined;
 }
 
 /**

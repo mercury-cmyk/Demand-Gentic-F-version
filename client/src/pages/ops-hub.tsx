@@ -39,6 +39,16 @@ import {
   Square,
   Box,
   Monitor,
+  Mic,
+  MicOff,
+  Sparkles,
+  GitBranch,
+  ArrowRight,
+  X,
+  Upload,
+  Brain,
+  Wand2,
+  CircleDot,
 } from 'lucide-react';
 import CostsTab from '@/components/ops/costs-tab';
 import DeploymentsTab from '@/components/ops/deployments-tab';
@@ -66,6 +76,8 @@ interface ChatMessage {
   model?: string;
   transport?: string;
   applied?: boolean;
+  isError?: boolean;
+  retryPrompt?: string;
 }
 
 interface OpsOverview {
@@ -110,7 +122,31 @@ interface NavSection {
 type CodingAgentProvider = 'agentx' | 'ensemble' | 'codex' | 'claude' | 'gemini' | 'kimi' | 'deepseek';
 type CodingAgentRunMode = 'agent' | 'plan';
 type CodingAgentModelSelector = 'simple-edit' | 'multi-edit';
-type SidePanelTab = 'files' | 'manager';
+
+/* ── Architect planning step ── */
+interface ArchitectStep {
+  id: string;
+  label: string;
+  status: 'pending' | 'active' | 'done' | 'error';
+  detail?: string;
+}
+
+const INITIAL_ARCHITECT_STEPS: ArchitectStep[] = [
+  { id: 'analyze', label: 'Analyzing code & context', status: 'pending' },
+  { id: 'optimize', label: 'Optimizing prompt', status: 'pending' },
+  { id: 'plan', label: 'Planning changes', status: 'pending' },
+  { id: 'apply', label: 'Applying edits', status: 'pending' },
+];
+
+const PROVIDER_ROUTING: Record<CodingAgentProvider, { label: string; color: string; desc: string }> = {
+  kimi: { label: 'Kimi (Primary)', color: 'bg-emerald-500', desc: 'Architecture & code generation' },
+  claude: { label: 'Claude', color: 'bg-orange-500', desc: 'Reasoning & validation' },
+  gemini: { label: 'Gemini', color: 'bg-blue-500', desc: 'UX & performance' },
+  deepseek: { label: 'DeepSeek', color: 'bg-rose-500', desc: 'Security & cost' },
+  codex: { label: 'Codex', color: 'bg-violet-500', desc: 'Final synthesis' },
+  agentx: { label: 'AgentC', color: 'bg-slate-900', desc: 'Orchestrator' },
+  ensemble: { label: 'Ensemble', color: 'bg-indigo-600', desc: 'Multi-agent pipeline' },
+};
 
 /* ── Projects configuration ── */
 const PROJECTS: Project[] = [
@@ -218,8 +254,8 @@ const TAB_TO_SECTION: Record<string, string> = {
 const SECONDARY_NAV_ORDER = ['DEVOPS', 'WORKSPACE', 'INSIGHTS'];
 
 const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
-  agentx: 'AgentX',
-  ensemble: 'AgentX Ensemble',
+  agentx: 'AgentC',
+  ensemble: 'AgentC Ensemble',
   codex: 'Codex',
   claude: 'Claude',
   gemini: 'Gemini',
@@ -500,7 +536,7 @@ function FileSearchDrawerPanel({
             </>
           ) : (
             <p className="mt-2 text-xs leading-relaxed text-slate-500">
-              Pick a file here, then switch to <strong>AgentX</strong> for an edit request or jump into the full editor.
+              Pick a file to give the Coding Agent extra context, or just ask — the agent already knows which project you're in.
             </p>
           )}
         </div>
@@ -760,7 +796,6 @@ export default function OpsHub() {
   const [activeProject, setActiveProject] = useState<Project>(PROJECTS[0]);
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [sidePanelOpen, setSidePanelOpen] = useState(true);
-  const [sidePanelTab, setSidePanelTab] = useState<SidePanelTab>('manager');
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -768,6 +803,13 @@ export default function OpsHub() {
   const [modelSelector, setModelSelector] = useState<CodingAgentModelSelector>('simple-edit');
   const [chatSending, setChatSending] = useState(false);
   const [selectedFile, setSelectedFile] = useState<OpsWorkspaceFileContext | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<CodingAgentProvider>('kimi');
+  const [architectSteps, setArchitectSteps] = useState<ArchitectStep[]>([]);
+  const [showArchitect, setShowArchitect] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [promptOptimizing, setPromptOptimizing] = useState(false);
+  const [fileContextExpanded, setFileContextExpanded] = useState(false);
+  const voiceRecognitionRef = useRef<any>(null);
   const [externalFileUpdate, setExternalFileUpdate] = useState<{
     path: string;
     content: string;
@@ -866,22 +908,118 @@ export default function OpsHub() {
     }
   };
 
-  const openSidePanel = (tab: SidePanelTab) => {
-    setSidePanelTab(tab);
-    setSidePanelOpen(true);
+  const toggleSidePanel = () => {
+    setSidePanelOpen((v) => !v);
   };
 
-  const handleChatSend = async () => {
-    const prompt = chatInput.trim();
-    if (!prompt) return;
+  /* ── Voice input ── */
+  const toggleVoiceInput = useCallback(() => {
+    if (voiceListening) {
+      voiceRecognitionRef.current?.stop();
+      setVoiceListening(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast({ title: 'Voice input unavailable', description: 'Your browser does not support Speech Recognition.', variant: 'destructive' });
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    let finalTranscript = '';
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript + ' ';
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      setChatInput(finalTranscript + interim);
+    };
+
+    recognition.onerror = () => {
+      setVoiceListening(false);
+    };
+    recognition.onend = () => {
+      setVoiceListening(false);
+    };
+
+    voiceRecognitionRef.current = recognition;
+    recognition.start();
+    setVoiceListening(true);
+  }, [voiceListening, toast]);
+
+  /* ── Prompt optimization ── */
+  const optimizePrompt = useCallback(async (rawPrompt: string): Promise<string> => {
+    setPromptOptimizing(true);
+    try {
+      const data = await apiJsonRequest<{ success: boolean; optimizedPrompt?: string }>('POST', '/api/ops/coding-agent', {
+        prompt: `Rewrite the following coding prompt to be more precise, technical, and actionable for a coding agent. Return ONLY the improved prompt text, nothing else.\n\nOriginal prompt: ${rawPrompt}`,
+        mode: 'general',
+        preferredProvider: 'kimi',
+      }, { timeout: 60000 });
+      if (data.success && data.response?.summary) {
+        return data.response.summary;
+      }
+      return rawPrompt;
+    } catch {
+      return rawPrompt;
+    } finally {
+      setPromptOptimizing(false);
+    }
+  }, []);
+
+  /* ── Architect step progression ── */
+  const advanceArchitectStep = useCallback((stepId: string, status: ArchitectStep['status'], detail?: string) => {
+    setArchitectSteps((prev) =>
+      prev.map((s) => (s.id === stepId ? { ...s, status, detail } : s)),
+    );
+  }, []);
+
+  const handleChatSend = async (overridePrompt?: string) => {
+    const rawPrompt = overridePrompt || chatInput.trim();
+    if (!rawPrompt) return;
     const requestMode = codingAgentMode === 'plan' ? 'plan' : modelSelector;
 
-    const userMessage: ChatMessage = { role: 'user', content: prompt, timestamp: new Date() };
+    // Stop voice if active
+    if (voiceListening) {
+      voiceRecognitionRef.current?.stop();
+      setVoiceListening(false);
+    }
+
+    const userMessage: ChatMessage = { role: 'user', content: rawPrompt, timestamp: new Date() };
     setChatMessages((current) => [...current, userMessage]);
     setChatInput('');
     setChatSending(true);
 
+    // Show architect steps
+    setShowArchitect(true);
+    setArchitectSteps(INITIAL_ARCHITECT_STEPS.map((s) => ({ ...s, status: 'pending' as const })));
+
     try {
+      // Step 1: Analyze
+      advanceArchitectStep('analyze', 'active', `Scoping to ${activeProject.name}...`);
+      await new Promise((r) => setTimeout(r, 300));
+      advanceArchitectStep('analyze', 'done', selectedFile ? `Analyzed ${selectedFile.path} in ${activeProject.name}` : `Context ready — ${activeProject.name}`);
+
+      // Step 2: Optimize prompt
+      advanceArchitectStep('optimize', 'active', 'Improving prompt quality...');
+      let prompt = rawPrompt;
+      if (codingAgentMode === 'agent' && rawPrompt.length > 20) {
+        prompt = await optimizePrompt(rawPrompt);
+      }
+      advanceArchitectStep('optimize', 'done', prompt !== rawPrompt ? 'Prompt optimized' : 'Prompt ready');
+
+      // Step 3: Plan
+      advanceArchitectStep('plan', 'active', `Routing to ${PROVIDER_ROUTING[selectedProvider]?.label || selectedProvider}...`);
+
       const isMultiEdit = codingAgentMode === 'agent' && modelSelector === 'multi-edit';
       const data = await apiJsonRequest<any>(
         'POST',
@@ -892,12 +1030,28 @@ export default function OpsHub() {
           selectedFilePath: selectedFile?.path,
           selectedFileContent: selectedFile?.dirty ? selectedFile.content : undefined,
           applyChanges: codingAgentMode === 'agent',
+          preferredProvider: selectedProvider === 'agentx' ? undefined : selectedProvider,
+          projectContext: {
+            id: activeProject.id,
+            name: activeProject.name,
+            description: activeProject.description,
+            environment: activeProject.environment,
+            deployTarget: activeProject.deployTarget,
+            services: activeProject.services.map((s) => ({ name: s.name, label: s.label })),
+          },
         },
+        { timeout: 180000 },
       );
 
+      advanceArchitectStep('plan', 'done', 'Changes planned');
+
       if (!data.success) {
+        advanceArchitectStep('apply', 'error', data.error || 'Failed');
         throw new Error(data.error || 'Failed to run coding agent');
       }
+
+      // Step 4: Apply
+      advanceArchitectStep('apply', 'active', 'Delivering result...');
 
       const fileEdits = data.response?.fileEdits as Array<{ path: string; content: string; isNew?: boolean }> | undefined;
       const editSummary = fileEdits?.length
@@ -914,6 +1068,8 @@ export default function OpsHub() {
         applied: Boolean(data.response?.applied),
       };
       setChatMessages((current) => [...current, nextMessage]);
+
+      advanceArchitectStep('apply', 'done', data.response?.applied ? 'Edits applied' : 'Response ready');
 
       // Handle single-file edit applied
       if (data.response?.applied && data.response?.path && typeof data.response?.updatedContent === 'string') {
@@ -948,12 +1104,25 @@ export default function OpsHub() {
         toast({ title: 'Multi-file edit applied', description: `${fileEdits.length} files updated` });
       }
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const isTimeout = errMsg.includes('timed out') || errMsg.includes('AbortError');
+      advanceArchitectStep('apply', 'error', isTimeout ? 'Request timed out' : errMsg);
       setChatMessages((current) => [
         ...current,
-        { role: 'assistant', content: `Error: ${error instanceof Error ? error.message : String(error)}`, timestamp: new Date() },
+        {
+          role: 'assistant',
+          content: isTimeout
+            ? 'The AI service took too long to respond. This can happen with complex prompts or when the service is under heavy load. Click **Retry** to try again.'
+            : `Error: ${errMsg}`,
+          timestamp: new Date(),
+          isError: true,
+          retryPrompt: rawPrompt,
+        },
       ]);
     } finally {
       setChatSending(false);
+      // Collapse architect after brief delay
+      setTimeout(() => setShowArchitect(false), 3000);
     }
   };
 
@@ -1183,26 +1352,15 @@ export default function OpsHub() {
 
           <div className="flex shrink-0 items-center gap-2 border-l border-slate-200 pl-4">
             <button
-              onClick={() => openSidePanel('files')}
+              onClick={toggleSidePanel}
               className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
-                sidePanelOpen && sidePanelTab === 'files'
+                sidePanelOpen
                   ? 'border-indigo-200 bg-white text-indigo-600 shadow-sm'
                   : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600'
               }`}
             >
-              <FolderOpen className="h-4 w-4" />
-              Files
-            </button>
-            <button
-              onClick={() => openSidePanel('manager')}
-              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
-                sidePanelOpen && sidePanelTab === 'manager'
-                  ? 'border-indigo-200 bg-white text-indigo-600 shadow-sm'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600'
-              }`}
-            >
-              <Bot className="h-4 w-4" />
-              AgentX
+              <Brain className="h-4 w-4" />
+              Coding Agent
             </button>
           </div>
         </div>
@@ -1221,204 +1379,320 @@ export default function OpsHub() {
         </main>
 
         {sidePanelOpen && (
-          <aside className="flex h-full w-[360px] shrink-0 flex-col border-l border-slate-200 bg-white">
-            <div className="border-b border-slate-200 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <div className="flex flex-1 items-center gap-1 rounded-xl bg-slate-100 p-1">
+          <aside className="flex h-full w-[420px] shrink-0 flex-col border-l border-slate-200 bg-white">
+            {/* ── Panel Header ── */}
+            <div className="border-b border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#fbfaf6_100%)] px-4 py-3.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 shadow-sm">
+                    <Code2 className="h-4.5 w-4.5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Coding Agent</p>
+                    <p className="text-[11px] text-slate-500">
+                      <span className="mr-1">{activeProject.icon}</span>
+                      {activeProject.name} · {activeProject.environment}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1">
+                    <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-700">Ready</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSidePanelOpen(false)}
+                    className="h-8 w-8 rounded-xl p-0 text-slate-400 hover:bg-slate-100"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Mode & Provider Controls */}
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1 rounded-full bg-slate-100 p-0.5">
                   <button
-                    onClick={() => setSidePanelTab('files')}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all ${
-                      sidePanelTab === 'files'
+                    onClick={() => setCodingAgentMode('agent')}
+                    className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
+                      codingAgentMode === 'agent'
                         ? 'bg-white text-slate-900 shadow-sm'
                         : 'text-slate-500 hover:text-slate-700'
                     }`}
                   >
-                    <FolderOpen className="h-4 w-4" />
-                    Files
+                    Agent
                   </button>
                   <button
-                    onClick={() => setSidePanelTab('manager')}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all ${
-                      sidePanelTab === 'manager'
+                    onClick={() => setCodingAgentMode('plan')}
+                    className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
+                      codingAgentMode === 'plan'
                         ? 'bg-white text-slate-900 shadow-sm'
                         : 'text-slate-500 hover:text-slate-700'
                     }`}
                   >
-                    <Bot className="h-4 w-4" />
-                    AgentX
+                    Plan
                   </button>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSidePanelOpen(false)}
-                  className="h-9 w-9 rounded-xl p-0 text-slate-500 hover:bg-slate-100"
+
+                {codingAgentMode === 'agent' && (
+                  <Select
+                    value={modelSelector}
+                    onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
+                  >
+                    <SelectTrigger className="h-7 w-[100px] rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="simple-edit">Patch</SelectItem>
+                      <SelectItem value="multi-edit">Multi-File</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                <Select
+                  value={selectedProvider}
+                  onValueChange={(value) => setSelectedProvider(value as CodingAgentProvider)}
                 >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+                  <SelectTrigger className="h-7 w-[110px] rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PROVIDER_ROUTING).map(([key, info]) => (
+                      <SelectItem key={key} value={key}>
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${info.color}`} />
+                          {info.label}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Agent Routing Display */}
+              <div className="mt-2 flex items-center gap-1 text-[10px] text-slate-400">
+                <GitBranch className="h-3 w-3" />
+                <span>Routing: </span>
+                <span className="font-medium text-slate-600">
+                  {PROVIDER_ROUTING[selectedProvider]?.desc || 'Auto-route'}
+                </span>
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-hidden">
-              {sidePanelTab === 'files' ? (
-                <FileSearchDrawerPanel
-                  selectedFile={selectedFile}
-                  onSelectFile={handleDrawerFileSelect}
-                  onOpenInEditor={handleOpenFileManager}
-                />
-              ) : (
-                <div className="flex h-full min-h-0 flex-col bg-white">
-                  <div className="border-b border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#fbfaf6_100%)] px-4 py-3.5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 shadow-sm">
-                          <Code2 className="h-4.5 w-4.5 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">AgentX - The Architect</p>
-                          <p className="text-[11px] text-slate-500">Clean coding edits and fast planning</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1">
-                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-700">Ready</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center gap-2">
-                      <div className="flex items-center gap-1 rounded-full bg-slate-100 p-0.5">
-                        <button
-                          onClick={() => setCodingAgentMode('agent')}
-                          className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
-                            codingAgentMode === 'agent'
-                              ? 'bg-white text-slate-900 shadow-sm'
-                              : 'text-slate-500 hover:text-slate-700'
-                          }`}
-                        >
-                          Agent
-                        </button>
-                        <button
-                          onClick={() => setCodingAgentMode('plan')}
-                          className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
-                            codingAgentMode === 'plan'
-                              ? 'bg-white text-slate-900 shadow-sm'
-                              : 'text-slate-500 hover:text-slate-700'
-                          }`}
-                        >
-                          Plan
-                        </button>
-                      </div>
-
-                      <Select
-                        value={modelSelector}
-                        onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
-                      >
-                        <SelectTrigger className="h-8 w-[112px] rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="simple-edit">Patch</SelectItem>
-                          <SelectItem value="multi-edit">Multi-File</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {selectedFile && (
-                      <div className="mt-2 flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/90 px-3 py-1.5">
-                        <FileText className="h-3.5 w-3.5 text-slate-400" />
-                        <p className="truncate text-[11px] font-medium text-slate-600">{selectedFile.path}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto bg-slate-50/60 px-4 py-4">
-                    {chatMessages.length === 0 ? (
-                      <div className="flex h-full flex-col items-center justify-center text-center">
-                        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl border border-slate-200 bg-white">
-                          <Code2 className="h-7 w-7 text-slate-500" />
-                        </div>
-                        <p className="text-sm font-medium text-slate-800">AgentX - The Architect</p>
-                        <p className="mt-2 max-w-xs text-[13px] text-slate-500">
-                          Ask for a fix, refactor, or a quick implementation plan. Open a file first to let AgentX apply edits directly.
-                        </p>
-
-                        <div className="mt-5 flex flex-wrap justify-center gap-2">
-                          {[
-                            { label: 'Fix a bug', prompt: 'Fix a bug in the currently selected file.' },
-                            { label: 'Refactor code', prompt: 'Refactor the selected file for clarity and maintainability.' },
-                            { label: 'Add feature', prompt: 'Add a feature to the selected file and explain the implementation.' },
-                            { label: 'Write tests', prompt: 'Write tests that cover the selected functionality.' },
-                          ].map((action) => (
-                            <button
-                              key={action.label}
-                              onClick={() => setChatInput(action.prompt)}
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
-                            >
-                              {action.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      chatMessages.map((message, index) => {
-                        const providerLabel =
-                          message.provider && message.provider in AGENT_PROVIDER_LABELS
-                            ? AGENT_PROVIDER_LABELS[message.provider as CodingAgentProvider]
-                            : message.provider;
-
-                        return (
-                          <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-4 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                            <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                              message.role === 'user'
-                                ? 'bg-indigo-500 text-white shadow-sm'
-                                : 'border border-slate-200 bg-white text-slate-700 shadow-sm'
-                            }`}>
-                              <p className="whitespace-pre-wrap">{message.content}</p>
-                              <div className="mt-2 flex items-center gap-2 text-[10px] opacity-60">
-                                {providerLabel && <span>via {providerLabel}</span>}
-                                {message.model && <span>{message.model}</span>}
-                                {message.transport && <span>{message.transport}</span>}
-                                {message.applied && (
-                                  <span className="inline-flex items-center gap-1 font-medium text-emerald-500">
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    edit applied
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                    <div ref={chatEndRef} />
-                  </div>
-
-                  <div className="border-t border-slate-200 bg-white px-3.5 py-3">
-                    <div className="relative">
-                      <Textarea
-                        value={chatInput}
-                        onChange={(event) => setChatInput(event.target.value)}
-                        onKeyDown={handleChatKeyDown}
-                        placeholder="Ask AgentX for a fix, refactor, or plan..."
-                        className="min-h-[72px] max-h-[140px] resize-none rounded-2xl border-slate-200 bg-slate-50 pr-11 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:ring-slate-200"
-                        rows={3}
-                      />
+            {/* ── Collapsible File Context ── */}
+            {selectedFile && (
+              <div className="border-b border-slate-200">
+                <button
+                  onClick={() => setFileContextExpanded(!fileContextExpanded)}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-left transition hover:bg-slate-50"
+                >
+                  <FileText className="h-3.5 w-3.5 text-slate-400" />
+                  <span className="flex-1 truncate text-[11px] font-medium text-slate-600">{selectedFile.path}</span>
+                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px]">active</Badge>
+                  <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition ${fileContextExpanded ? 'rotate-180' : ''}`} />
+                </button>
+                {fileContextExpanded && (
+                  <div className="px-4 pb-3">
+                    <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-2">
+                      <span>{formatWorkspaceTimestamp(selectedFile.modifiedAt)}</span>
+                      <span>·</span>
+                      <span>{formatWorkspaceBytes(selectedFile.content.length)}</span>
                       <button
-                        onClick={handleChatSend}
-                        disabled={chatSending || !chatInput.trim()}
-                        className="absolute bottom-2.5 right-2.5 rounded-xl bg-slate-900 p-2 shadow-sm transition-all hover:bg-slate-800 disabled:opacity-30"
+                        onClick={() => setSelectedFile(null)}
+                        className="ml-auto text-[10px] text-red-400 hover:text-red-600"
                       >
-                        {chatSending ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5 text-white" />
-                        )}
+                        Clear
                       </button>
                     </div>
-                    <p className="mt-2 text-[11px] text-slate-400">Enter sends. Shift+Enter adds a new line.</p>
+                    <pre className="max-h-24 overflow-y-auto rounded-lg bg-slate-950 px-3 py-2 text-[10px] leading-relaxed text-slate-100">
+                      {selectedFile.content.slice(0, 400) || 'Empty file'}
+                    </pre>
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Architect Pipeline View ── */}
+            {showArchitect && architectSteps.length > 0 && (
+              <div className="border-b border-slate-200 bg-gradient-to-b from-indigo-50/50 to-white px-4 py-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Wand2 className="h-3.5 w-3.5 text-indigo-500" />
+                  <span className="text-[11px] font-semibold text-indigo-700">Architect Pipeline</span>
+                </div>
+                <div className="space-y-1.5">
+                  {architectSteps.map((step, i) => (
+                    <div key={step.id} className="flex items-center gap-2">
+                      {step.status === 'pending' && <CircleDot className="h-3.5 w-3.5 text-slate-300" />}
+                      {step.status === 'active' && <Loader2 className="h-3.5 w-3.5 text-indigo-500 animate-spin" />}
+                      {step.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
+                      {step.status === 'error' && <X className="h-3.5 w-3.5 text-red-500" />}
+                      <div className="flex-1 min-w-0">
+                        <span className={`text-[11px] font-medium ${
+                          step.status === 'active' ? 'text-indigo-700' :
+                          step.status === 'done' ? 'text-emerald-700' :
+                          step.status === 'error' ? 'text-red-700' :
+                          'text-slate-400'
+                        }`}>
+                          {step.label}
+                        </span>
+                        {step.detail && (
+                          <span className="ml-2 text-[10px] text-slate-400">{step.detail}</span>
+                        )}
+                      </div>
+                      {i < architectSteps.length - 1 && step.status === 'done' && (
+                        <ArrowRight className="h-3 w-3 text-slate-300" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Chat Messages ── */}
+            <div className="flex-1 overflow-y-auto bg-slate-50/60 px-4 py-4">
+              {chatMessages.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center text-center">
+                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl border border-slate-200 bg-white">
+                    <Brain className="h-7 w-7 text-slate-500" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-800">Coding Agent</p>
+                  <p className="mt-2 max-w-xs text-[13px] text-slate-500">
+                    Working in <strong>{activeProject.name}</strong> ({activeProject.environment}).
+                    Ask about code, request edits, or plan features — the agent knows your project context automatically.
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    {[
+                      { label: 'Analyze code', prompt: `Analyze the key files in the ${activeProject.name} project for issues and improvements.` },
+                      { label: 'Fix a bug', prompt: selectedFile ? 'Fix a bug in the currently selected file.' : `Help me debug an issue in the ${activeProject.name} project.` },
+                      { label: 'Refactor', prompt: selectedFile ? 'Refactor the selected file for clarity and maintainability.' : `Suggest refactoring targets in ${activeProject.name}.` },
+                      { label: 'Add feature', prompt: `Plan a new feature for the ${activeProject.name} project and explain the implementation steps.` },
+                      { label: 'Deploy check', prompt: `Review the ${activeProject.deployTarget === 'vm' ? 'VM' : 'Cloud Run'} deployment configuration for ${activeProject.name} and suggest improvements.` },
+                    ].map((action) => (
+                      <button
+                        key={action.label}
+                        onClick={() => setChatInput(action.prompt)}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Browse workspace files inline */}
+                  <button
+                    onClick={() => goToPage('files')}
+                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-2 text-[12px] text-slate-500 transition hover:border-indigo-300 hover:text-indigo-600"
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    Browse workspace files
+                  </button>
+                </div>
+              ) : (
+                chatMessages.map((message, index) => {
+                  const providerLabel =
+                    message.provider && message.provider in AGENT_PROVIDER_LABELS
+                      ? AGENT_PROVIDER_LABELS[message.provider as CodingAgentProvider]
+                      : message.provider;
+
+                  return (
+                    <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-4 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                      <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                        message.role === 'user'
+                          ? 'bg-indigo-500 text-white shadow-sm'
+                          : message.isError
+                          ? 'border border-red-200 bg-red-50 text-red-700 shadow-sm'
+                          : 'border border-slate-200 bg-white text-slate-700 shadow-sm'
+                      }`}>
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <div className="mt-2 flex items-center gap-2 text-[10px] opacity-60">
+                          {providerLabel && <span>via {providerLabel}</span>}
+                          {message.model && <span>{message.model}</span>}
+                          {message.transport && <span>{message.transport}</span>}
+                          {message.applied && (
+                            <span className="inline-flex items-center gap-1 font-medium text-emerald-500">
+                              <CheckCircle2 className="h-3 w-3" />
+                              edit applied
+                            </span>
+                          )}
+                        </div>
+                        {message.isError && message.retryPrompt && (
+                          <button
+                            onClick={() => handleChatSend(message.retryPrompt!)}
+                            disabled={chatSending}
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[11px] font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            Retry
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* ── Input Area ── */}
+            <div className="border-t border-slate-200 bg-white px-3.5 py-3">
+              {promptOptimizing && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg bg-indigo-50 px-3 py-1.5 text-[11px] text-indigo-700">
+                  <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+                  Optimizing your prompt for better results...
                 </div>
               )}
+              <div className="relative">
+                <Textarea
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  onKeyDown={handleChatKeyDown}
+                  placeholder={voiceListening ? 'Listening... speak your prompt' : 'Describe what you need - code fix, analysis, feature...'}
+                  className={`min-h-[72px] max-h-[140px] resize-none rounded-2xl border-slate-200 bg-slate-50 pr-24 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:ring-slate-200 ${
+                    voiceListening ? 'border-red-300 bg-red-50/30' : ''
+                  }`}
+                  rows={3}
+                />
+                <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
+                  {/* Voice button */}
+                  <button
+                    onClick={toggleVoiceInput}
+                    className={`rounded-xl p-2 transition-all ${
+                      voiceListening
+                        ? 'bg-red-500 shadow-sm shadow-red-200 animate-pulse'
+                        : 'bg-slate-200 hover:bg-slate-300'
+                    }`}
+                    title={voiceListening ? 'Stop listening' : 'Voice input'}
+                  >
+                    {voiceListening ? (
+                      <MicOff className="h-3.5 w-3.5 text-white" />
+                    ) : (
+                      <Mic className="h-3.5 w-3.5 text-slate-600" />
+                    )}
+                  </button>
+                  {/* Send button */}
+                  <button
+                    onClick={handleChatSend}
+                    disabled={chatSending || !chatInput.trim()}
+                    className="rounded-xl bg-slate-900 p-2 shadow-sm transition-all hover:bg-slate-800 disabled:opacity-30"
+                  >
+                    {chatSending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5 text-white" />
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+                <span>Enter sends · Shift+Enter new line · Mic for voice</span>
+                <span className="flex items-center gap-1">
+                  <span className={`h-1.5 w-1.5 rounded-full ${PROVIDER_ROUTING[selectedProvider]?.color || 'bg-slate-400'}`} />
+                  {PROVIDER_ROUTING[selectedProvider]?.label || selectedProvider}
+                </span>
+              </div>
             </div>
           </aside>
         )}

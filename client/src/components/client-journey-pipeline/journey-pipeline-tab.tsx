@@ -106,6 +106,8 @@ interface PipelineAnalytics {
   actionStats: { actionType: string; status: string; count: number }[];
   overdueActions: number;
   totalLeads: number;
+  avgHoursInStage?: number;
+  funnel?: { stageId: string; stageName: string; reached: number; conversionRate: number }[];
 }
 
 export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
@@ -477,7 +479,7 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
 
       {/* ─── Analytics View ─── */}
       {view === "analytics" && analytics && activePipeline && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -524,6 +526,69 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
               </div>
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Avg. Time in Stage
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {analytics.avgHoursInStage != null
+                  ? analytics.avgHoursInStage < 24
+                    ? `${analytics.avgHoursInStage}h`
+                    : `${Math.round(analytics.avgHoursInStage / 24)}d`
+                  : "—"}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Conversion Funnel */}
+          {analytics.funnel && analytics.funnel.length > 0 && (
+            <Card className="md:col-span-2 lg:col-span-3">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Conversion Funnel</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {analytics.funnel.map((step, i) => {
+                    const maxReached = analytics.funnel![0]?.reached || 1;
+                    const barWidth = Math.max((step.reached / maxReached) * 100, 4);
+                    const stage = ((activePipeline.stages as PipelineStage[]) || []).find(
+                      (s) => s.id === step.stageId
+                    );
+                    return (
+                      <div key={step.stageId} className="flex items-center gap-3">
+                        <div className="w-32 text-sm truncate">{step.stageName}</div>
+                        <div className="flex-1 relative">
+                          <div
+                            className="h-7 rounded transition-all flex items-center px-2"
+                            style={{
+                              width: `${barWidth}%`,
+                              backgroundColor: stage?.color || "#6b7280",
+                              opacity: 0.85,
+                            }}
+                          >
+                            <span className="text-xs font-medium text-white drop-shadow">
+                              {step.reached}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-14 text-right text-sm font-medium">
+                          {step.conversionRate}%
+                        </div>
+                        {i > 0 && analytics.funnel![i - 1].reached > 0 && (
+                          <div className="w-14 text-right text-xs text-muted-foreground">
+                            {Math.round((step.reached / analytics.funnel![i - 1].reached) * 100)}% &darr;
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Stage distribution */}
           <Card className="md:col-span-2">
@@ -562,7 +627,7 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
           </Card>
 
           {/* Action breakdown */}
-          <Card className="md:col-span-2">
+          <Card className="md:col-span-2 lg:col-span-3">
             <CardHeader>
               <CardTitle className="text-sm font-medium">Actions Summary</CardTitle>
             </CardHeader>

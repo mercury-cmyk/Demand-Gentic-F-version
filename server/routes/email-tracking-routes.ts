@@ -139,4 +139,29 @@ router.get('/stats/:messageId', requireAuth, async (req: Request, res: Response)
   }
 });
 
+/**
+ * Get tracking stats for multiple messages (batch)
+ * POST /api/track/stats/batch
+ */
+router.post('/stats/batch', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { messageIds } = req.body;
+    
+    if (!Array.isArray(messageIds) || messageIds.length === 0) {
+      return res.status(400).json({ error: 'messageIds must be a non-empty array' });
+    }
+    
+    // Limit batch size to prevent abuse
+    if (messageIds.length > 100) {
+      return res.status(400).json({ error: 'Maximum 100 message IDs per batch request' });
+    }
+    
+    const stats = await emailTrackingService.getBatchTrackingStats(messageIds);
+    res.json({ stats });
+  } catch (error) {
+    console.error('[TRACKING-BATCH] Error:', error);
+    res.status(500).json({ error: 'Failed to get batch tracking stats' });
+  }
+});
+
 export default router;

@@ -1744,7 +1744,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
       max_call_duration_seconds: (() => {
         const raw = Number(unifiedContext.maxCallDurationSeconds);
         if (!Number.isFinite(raw) || raw <= 0) return undefined;
-        return Math.min(raw, 300);
+        return Math.min(raw, 240);
       })(),
     });
 
@@ -1787,7 +1787,7 @@ router.post('/phone-test/start', async (req: Request, res: Response) => {
             campaignContextBrief: unifiedContext.campaignContextBrief,
             callFlow: unifiedContext.callFlow,
             firstMessage: unifiedContext.firstMessage,
-            maxCallDurationSeconds: unifiedContext.maxCallDurationSeconds ?? 300,
+            maxCallDurationSeconds: unifiedContext.maxCallDurationSeconds ?? 240,
             callerNumberId,
             callerNumberDecisionId,
           });

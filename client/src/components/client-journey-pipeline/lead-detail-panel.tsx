@@ -32,6 +32,10 @@ import {
   CalendarDays,
   FileText,
   Loader2,
+  Send,
+  Eye,
+  MousePointerClick,
+  Activity,
 } from "lucide-react";
 import { PriorityBadge, type PipelineStage, type JourneyLead, type JourneyAction } from "./journey-pipeline-tab";
 import { ScheduleActionDialog } from "./schedule-action-dialog";
@@ -87,6 +91,37 @@ export function LeadDetailPanel({
   if (lead && !notesEdited && notes !== (lead.notes || "")) {
     setNotes(lead.notes || "");
   }
+
+  // ─── Fetch communications history ───
+  const { data: commsData } = useQuery<{
+    communications: {
+      emailActions: any[];
+      campaignEmails: any[];
+      emailTrackingEvents: any[];
+      activityHistory: any[];
+      summary: {
+        totalEmails: number;
+        emailsSent: number;
+        emailsOpened: number;
+        emailsClicked: number;
+        emailsBounced: number;
+        totalActivities: number;
+      };
+    };
+  }>({
+    queryKey: ["journey-lead-comms", leadId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/leads/${leadId}/communications`,
+        authHeaders
+      );
+      if (!res.ok) throw new Error("Failed to fetch communications");
+      return res.json();
+    },
+    enabled: !!leadId && activeTab === "comms",
+  });
+
+  const comms = commsData?.communications;
 
   // ─── AI Follow-up Generation ───
   const generateFollowUp = useMutation({
@@ -360,6 +395,9 @@ export function LeadDetailPanel({
                 <TabsTrigger value="timeline" className="flex-1">
                   Timeline
                 </TabsTrigger>
+                <TabsTrigger value="comms" className="flex-1">
+                  Communications
+                </TabsTrigger>
                 <TabsTrigger value="context" className="flex-1">
                   Source Context
                 </TabsTrigger>
@@ -385,6 +423,186 @@ export function LeadDetailPanel({
                       onSkip={() => skipAction.mutate(action.id)}
                     />
                   ))
+                )}
+              </TabsContent>
+
+              {/* ─── Communications Tab ─── */}
+              <TabsContent value="comms" className="space-y-3 mt-3">
+                {!comms ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                  </div>
+                ) : (
+                  <>
+                    {/* Email engagement summary */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="flex items-center gap-2 p-2 rounded-md bg-muted/50">
+                        <Send className="h-3.5 w-3.5 text-blue-500" />
+                        <div>
+                          <div className="text-sm font-medium">{comms.summary.emailsSent}</div>
+                          <div className="text-xs text-muted-foreground">Sent</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 p-2 rounded-md bg-muted/50">
+                        <Eye className="h-3.5 w-3.5 text-green-500" />
+                        <div>
+                          <div className="text-sm font-medium">{comms.summary.emailsOpened}</div>
+                          <div className="text-xs text-muted-foreground">Opened</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 p-2 rounded-md bg-muted/50">
+                        <MousePointerClick className="h-3.5 w-3.5 text-purple-500" />
+                        <div>
+                          <div className="text-sm font-medium">{comms.summary.emailsClicked}</div>
+                          <div className="text-xs text-muted-foreground">Clicked</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 p-2 rounded-md bg-muted/50">
+                        <Activity className="h-3.5 w-3.5 text-orange-500" />
+                        <div>
+                          <div className="text-sm font-medium">{comms.summary.totalActivities}</div>
+                          <div className="text-xs text-muted-foreground">Activities</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Email actions from journey pipeline */}
+                    {comms.emailActions.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-muted-foreground mb-2">
+                          Pipeline Emails
+                        </div>
+                        <div className="space-y-2">
+                          {comms.emailActions.map((action: any) => (
+                            <Card key={action.id}>
+                              <CardContent className="p-3">
+                                <div className="flex items-start gap-2">
+                                  <Mail className="h-3.5 w-3.5 mt-0.5 text-blue-500" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm font-medium">
+                                        {action.title || "Email"}
+                                      </span>
+                                      <Badge
+                                        variant={action.status === "completed" ? "default" : "outline"}
+                                        className="text-xs"
+                                      >
+                                        {action.status}
+                                      </Badge>
+                                    </div>
+                                    {action.description && (
+                                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                        {action.description}
+                                      </p>
+                                    )}
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                      {action.completedAt
+                                        ? new Date(action.completedAt).toLocaleString()
+                                        : action.scheduledAt
+                                          ? `Scheduled: ${new Date(action.scheduledAt).toLocaleString()}`
+                                          : new Date(action.createdAt).toLocaleString()}
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Campaign email sends */}
+                    {comms.campaignEmails.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-muted-foreground mb-2">
+                          Campaign Emails
+                        </div>
+                        <div className="space-y-2">
+                          {comms.campaignEmails.map((email: any) => (
+                            <Card key={email.id}>
+                              <CardContent className="p-3">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Send className="h-3.5 w-3.5 text-cyan-500" />
+                                    <span className="text-sm">Campaign Email</span>
+                                  </div>
+                                  <Badge
+                                    variant={email.status === "sent" ? "default" : "outline"}
+                                    className="text-xs"
+                                  >
+                                    {email.status}
+                                  </Badge>
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {email.sentAt
+                                    ? new Date(email.sentAt).toLocaleString()
+                                    : new Date(email.createdAt).toLocaleString()}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Email tracking events */}
+                    {comms.emailTrackingEvents.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-muted-foreground mb-2">
+                          Engagement Events
+                        </div>
+                        <div className="space-y-1">
+                          {comms.emailTrackingEvents.map((event: any) => {
+                            const iconMap: Record<string, typeof Eye> = {
+                              opened: Eye,
+                              clicked: MousePointerClick,
+                              delivered: CheckCircle2,
+                              bounced: XCircle,
+                            };
+                            const EventIcon = iconMap[event.type] || Activity;
+                            return (
+                              <div key={event.id} className="flex items-center gap-2 text-sm py-1">
+                                <EventIcon className="h-3 w-3 text-muted-foreground" />
+                                <span className="capitalize">{event.type}</span>
+                                <span className="text-xs text-muted-foreground ml-auto">
+                                  {new Date(event.createdAt).toLocaleString()}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Activity history */}
+                    {comms.activityHistory.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-muted-foreground mb-2">
+                          Activity History
+                        </div>
+                        <div className="space-y-1">
+                          {comms.activityHistory.map((activity: any) => (
+                            <div key={activity.id} className="flex items-center gap-2 text-sm py-1 border-b border-muted/30 last:border-0">
+                              <Clock className="h-3 w-3 text-muted-foreground" />
+                              <span className="capitalize">
+                                {activity.eventType.replace(/_/g, " ")}
+                              </span>
+                              <span className="text-xs text-muted-foreground ml-auto">
+                                {new Date(activity.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {comms.summary.totalEmails === 0 && comms.summary.totalActivities === 0 && (
+                      <div className="text-center py-8 text-sm text-muted-foreground">
+                        No communications recorded yet.
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
 

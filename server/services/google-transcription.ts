@@ -11,7 +11,7 @@
 
 import { db } from "../db";
 import { leads, activityLog, callSessions } from "@shared/schema";
-import { eq, and, isNotNull, lt, sql } from "drizzle-orm";
+import { eq, and, isNotNull, lt, gt, sql } from "drizzle-orm";
 import { SpeechClient, protos } from "@google-cloud/speech";
 import { getPresignedDownloadUrl, isS3Configured, s3ObjectExists, BUCKET } from "../lib/storage";
 
@@ -908,12 +908,19 @@ export async function processPendingTranscriptions(): Promise<void> {
       ))
       .limit(10);
 
+<<<<<<< HEAD
     // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
     const failedLeads = await db.select({ id: leads.id })
+=======
+    // Retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
+    // Skip recordings older than 7 days — S3 presigned URLs expire and will never succeed
+    const failedLeads = await db.select()
+>>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
       .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'failed'),
         lt(leads.updatedAt, sql`NOW() - INTERVAL '10 minutes'`),
+        gt(leads.createdAt, sql`NOW() - INTERVAL '7 days'`),
         isNotNull(leads.recordingS3Key)
       ))
       .limit(3);

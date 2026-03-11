@@ -42,6 +42,7 @@ import {
   COUNTRY_DIAL_PREFIX,
 } from '../utils/country-utils';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
+import { resolveAgentAssignment } from '../services/unified-call-context';
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
 import { formatPhoneWithCountryCode } from '../lib/phone-formatter';
 import {
@@ -60,8 +61,8 @@ import {
 } from '../services/active-call-tracker';
 
 const ORCHESTRATOR_INTERVAL_MS = 10000; // Check every 10 seconds (increased frequency)
-const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '100', 10);
-const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10);
+const ENV_DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '10', 10);
+const ENV_GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '10', 10);
 const DELAY_BETWEEN_CALLS_MS = 1000; // 1s delay between call batches (prevents burst overload)
 const PARALLEL_CALL_BATCH_SIZE = 3; // Small batches to prevent event loop saturation from concurrent Gemini WebSocket connections
 const STUCK_ITEM_TIMEOUT_MS = 180000; // 3 minutes - allows normal call lifecycle (~90s) + buffer; watchdog is the single recovery mechanism
@@ -1430,6 +1431,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
       let prospectLockAcquired = false;
       let callInitiated = false;
       let callerIdResult: CallerIdResult | null = null;
+      let callAttemptId: string | null = null;
       let phoneNumber = '';
       try {
         // Use resolved phone from compliance check
@@ -1481,15 +1483,15 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // Use normalized phone going forward
         phoneNumber = normalizedPhone;
 
+        // UNIFIED AGENT RESOLUTION: Use the same resolveAgentAssignment() that test calls use
+        // This ensures systemPrompt, voice (with rotation), firstMessage, and agentName
+        // are identical between test calls and production queue calls.
+        const unifiedAgent = await resolveAgentAssignment(campaignId);
+
         // Contact data comes from the SQL query (snake_case)
-        // Use virtual agent name if available, fall back to aiSettings persona
-        // NOTE: Default must be a real name, not "your representative" which is in PLACEHOLDER_VALUES blocklist
-        // Check both agentName and name since wizard stores in agentName field
-        const agentName = virtualAgent?.name || (aiSettings.persona as any)?.agentName || aiSettings.persona?.name || "Alex";
+        // Agent name from unified resolution (same logic as test calls)
+        const agentName = unifiedAgent?.agentName || virtualAgent?.name || (aiSettings.persona as any)?.agentName || aiSettings.persona?.name || "Alex";
         const agentFirstName = agentName.split(' ')[0]; // Extract first name
-        
-        // Create call attempt record for proper tracking
-        let callAttemptId: string | null = null;
         if (dialerRunId) {
           try {
             const [callAttempt] = await db
@@ -1532,8 +1534,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           callAttemptId: callAttemptId || undefined,
           // Campaign context for AI agent behavior
           campaignType: (campaign as any).type || (campaign as any).campaignType || undefined,
-          // Priority: campaign organization > persona companyName > fallback
-          organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+          // Priority: campaign organization > persona companyName > fallback (aligned with unified-call-context)
+          organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'our organization',
           campaignObjective: (campaign as any).campaignObjective || undefined,
           successCriteria: (campaign as any).successCriteria || undefined,
           targetAudienceDescription: (campaign as any).targetAudienceDescription || undefined,
@@ -1548,7 +1550,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           maxCallDurationSeconds: (() => {
             const raw = Number((campaign as any).maxCallDurationSeconds);
             if (!Number.isFinite(raw) || raw <= 0) return undefined;
-            return Math.min(raw, 300);
+            return Math.min(raw, 240);
           })(),
         };
 
@@ -1579,6 +1581,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             prospectRegion: item._country || undefined,
             prospectTimezone: item._timezone || undefined,
             callType: 'ai_campaign_orchestrator',
+            callEngine: useSip ? 'sip' : 'texml',
             numberPoolConfig: numberPoolConfig ? {
               enabled: numberPoolConfig.enabled ?? true,
               maxCallsPerNumber: numberPoolConfig.maxCallsPerNumber,
@@ -1752,6 +1755,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
         if (useSip) {
           // Direct SIP path: Drachtio SIP trunk → RTP → Gemini Live
+          // CRITICAL: Use unified agent resolution (same as test calls) for systemPrompt,
+          // voice (with rotation), and firstMessage to ensure zero drift.
           console.log(`[AI Orchestrator] Using Direct SIP engine for call to ${phoneNumber}`);
           const sipResult = await sipDialer.initiateAiCall({
             toNumber: phoneNumber,
@@ -1759,13 +1764,13 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             campaignId,
             contactId: contactId || '',
             queueItemId: item.id,
-            voiceName: aiSettings.persona?.voice || 'Puck',
-            systemPrompt: aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
+            voiceName: unifiedAgent?.voice || aiSettings.persona?.voice || 'Puck',
+            systemPrompt: unifiedAgent?.systemPrompt || aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
             contactName: `${item.contact_first_name || ''} ${item.contact_last_name || ''}`.trim() || 'there',
             contactFirstName: item.contact_first_name || 'there',
             contactJobTitle: item.contact_job_title || 'Decision Maker',
             accountName: item.account_name || 'your company',
-            organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+            organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'our organization',
             campaignName: campaign.name,
             campaignType: (campaign as any).type || (campaign as any).campaignType || null,
             campaignObjective: (campaign as any).campaignObjective || undefined,
@@ -1775,10 +1780,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             talkingPoints: (campaign as any).talkingPoints || undefined,
             campaignContextBrief: (campaign as any).campaignContextBrief || undefined,
             callFlow: (campaign as any).callFlow || null,
+            firstMessage: unifiedAgent?.firstMessage || undefined,
             maxCallDurationSeconds: (() => {
               const raw = Number((campaign as any).maxCallDurationSeconds);
               if (!Number.isFinite(raw) || raw <= 0) return undefined;
-              return Math.min(raw, 300);
+              return Math.min(raw, 240);
             })(),
             callerNumberId: callerIdResult.numberId,
             callerNumberDecisionId: callerIdResult.decisionId,
