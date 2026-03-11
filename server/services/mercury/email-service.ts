@@ -182,7 +182,7 @@ export class MercuryEmailService {
       .where(
         and(
           eq(mercuryEmailOutbox.status, 'sending'),
-          lt(mercuryEmailOutbox.updatedAt, stuckCutoff),
+          sql`${mercuryEmailOutbox.createdAt} < ${stuckCutoff}`,
         )
       );
 

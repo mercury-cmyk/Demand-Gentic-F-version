@@ -900,7 +900,7 @@ export async function transcribeLeadCall(leadId: string): Promise<boolean> {
 export async function processPendingTranscriptions(): Promise<void> {
   try {
     // Only process leads that actually have a recording URL or S3 key
-    const pendingLeads = await db.select()
+    const pendingLeads = await db.select({ id: leads.id })
       .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'pending'),
@@ -909,7 +909,7 @@ export async function processPendingTranscriptions(): Promise<void> {
       .limit(10);
 
     // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
-    const failedLeads = await db.select()
+    const failedLeads = await db.select({ id: leads.id })
       .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'failed'),

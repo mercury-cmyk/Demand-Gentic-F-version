@@ -46,8 +46,14 @@ import {
   Trash2,
   LogIn,
   Play,
+  Pencil,
 } from 'lucide-react';
 import type { ClientAccount, VerificationCampaign } from '@shared/schema';
+import { InvoiceEditor } from '@/components/invoicing/InvoiceEditor';
+import { InvoicePreviewDialog } from '@/components/invoicing/InvoicePreviewDialog';
+import { SendInvoiceDialog } from '@/components/invoicing/SendInvoiceDialog';
+import { downloadInvoicePDF } from '@/lib/invoice-pdf';
+import type { InvoiceData, InvoiceLineItem } from '@/components/invoicing/InvoiceDocument';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1091,6 +1097,18 @@ export default function ClientPortalAdmin() {
   const [projectToUnassign, setProjectToUnassign] = useState<any | null>(null);
   const [selectedAssignProjectId, setSelectedAssignProjectId] = useState<string>('');
 
+  // Invoicing state
+  const [showManualInvoice, setShowManualInvoice] = useState(false);
+  const [previewInvoice, setPreviewInvoice] = useState<InvoiceData | null>(null);
+  const [showInvoicePreview, setShowInvoicePreview] = useState(false);
+  const [sendInvoiceTarget, setSendInvoiceTarget] = useState<{ invoiceId: string; invoiceNumber: string; clientEmail: string; clientName: string } | null>(null);
+  const [showSendInvoice, setShowSendInvoice] = useState(false);
+  const [generateInvoiceNumber, setGenerateInvoiceNumber] = useState('');
+  const [generateProjectId, setGenerateProjectId] = useState('');
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+  const [editingInvoiceData, setEditingInvoiceData] = useState<any | null>(null);
+  const [deleteInvoiceTarget, setDeleteInvoiceTarget] = useState<{ id: string; invoiceNumber: string } | null>(null);
+
   // Queries
   const { data: clients, isLoading: clientsLoading } = useQuery<ClientAccount[]>({
     queryKey: ['/api/client-portal/admin/clients'],
@@ -1119,6 +1137,31 @@ export default function ClientPortalAdmin() {
 
   const { data: invoices, isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery<Invoice[]>({
     queryKey: ['/api/client-portal/admin/invoices'],
+  });
+
+  // Client-specific invoices for the invoicing sub-tab
+  const { data: clientInvoicesList, isLoading: clientInvoicesLoading, refetch: refetchClientInvoices } = useQuery<Invoice[]>({
+    queryKey: ['/api/client-portal/admin/invoices', { clientId: selectedClient?.id }],
+    queryFn: async () => {
+      const response = await fetch(`/api/client-portal/admin/invoices?clientId=${selectedClient!.id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!response.ok) throw new Error('Failed to fetch client invoices');
+      return response.json();
+    },
+    enabled: !!selectedClient,
+  });
+
+  // Next invoice number suggestion
+  const { data: nextInvoiceNumberData } = useQuery<{ nextNumber: string; lastNumber: string | null }>({
+    queryKey: ['/api/client-portal/admin/next-invoice-number'],
+    queryFn: async () => {
+      const response = await fetch('/api/client-portal/admin/next-invoice-number', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!response.ok) throw new Error('Failed');
+      return response.json();
+    },
   });
 
   // Available projects for assignment (excludes current client's projects)
@@ -1216,21 +1259,151 @@ export default function ClientPortalAdmin() {
   });
 
   const generateInvoiceMutation = useMutation({
-    mutationFn: async (data: { clientId: string; periodStart: string; periodEnd: string }) => {
+    mutationFn: async (data: { clientId: string; periodStart: string; periodEnd: string; invoiceNumber?: string; projectId?: string }) => {
       return apiRequest('POST', `/api/client-portal/admin/clients/${data.clientId}/generate-invoice`, {
         periodStart: data.periodStart,
         periodEnd: data.periodEnd,
+        invoiceNumber: data.invoiceNumber,
+        projectId: data.projectId,
       });
     },
     onSuccess: () => {
       refetchInvoices();
+      refetchClientInvoices();
       setShowCreateInvoice(false);
+      setGenerateInvoiceNumber('');
+      setGenerateProjectId('');
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/next-invoice-number'] });
       toast({ title: 'Invoice generated successfully' });
     },
     onError: (error: any) => {
       toast({ title: error.message || 'Failed to generate invoice', variant: 'destructive' });
     },
   });
+
+  const createManualInvoiceMutation = useMutation({
+    mutationFn: async (data: {
+      clientAccountId: string;
+      billingPeriodStart: string;
+      billingPeriodEnd: string;
+      invoiceNumber?: string;
+      projectId?: string;
+      items: Array<{ description: string; itemType: string; quantity: number; unitPrice: number; projectId?: string; campaignId?: string }>;
+      notes?: string;
+      discountAmount?: number;
+    }) => {
+      return apiRequest('POST', '/api/client-portal/admin/invoices', data);
+    },
+    onSuccess: () => {
+      refetchInvoices();
+      refetchClientInvoices();
+      setShowManualInvoice(false);
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/next-invoice-number'] });
+      toast({ title: 'Invoice created successfully' });
+    },
+    onError: (error: any) => {
+      toast({ title: error.message || 'Failed to create invoice', variant: 'destructive' });
+    },
+  });
+
+  const sendInvoiceMutation = useMutation({
+    mutationFn: async ({ invoiceId, recipientEmail, message }: { invoiceId: string; recipientEmail: string; message?: string }) => {
+      return apiRequest('POST', `/api/client-portal/admin/invoices/${invoiceId}/send`, { recipientEmail, message });
+    },
+    onSuccess: () => {
+      refetchInvoices();
+      refetchClientInvoices();
+      setShowSendInvoice(false);
+      setSendInvoiceTarget(null);
+      toast({ title: 'Invoice sent successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to send invoice', variant: 'destructive' });
+    },
+  });
+
+  const deleteInvoiceMutation = useMutation({
+    mutationFn: async (invoiceId: string) => {
+      return apiRequest('DELETE', `/api/client-portal/admin/invoices/${invoiceId}`);
+    },
+    onSuccess: () => {
+      refetchInvoices();
+      refetchClientInvoices();
+      setDeleteInvoiceTarget(null);
+      toast({ title: 'Invoice deleted' });
+    },
+    onError: (error: any) => {
+      toast({ title: error.message || 'Failed to delete invoice', variant: 'destructive' });
+    },
+  });
+
+  const updateInvoiceMutation = useMutation({
+    mutationFn: async ({ invoiceId, data }: { invoiceId: string; data: any }) => {
+      return apiRequest('PATCH', `/api/client-portal/admin/invoices/${invoiceId}`, data);
+    },
+    onSuccess: () => {
+      refetchInvoices();
+      refetchClientInvoices();
+      setEditingInvoiceId(null);
+      setEditingInvoiceData(null);
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/next-invoice-number'] });
+      toast({ title: 'Invoice updated successfully' });
+    },
+    onError: (error: any) => {
+      toast({ title: error.message || 'Failed to update invoice', variant: 'destructive' });
+    },
+  });
+
+  // Helper: fetch full invoice detail for editing
+  const fetchInvoiceForEdit = async (invoiceId: string) => {
+    const response = await fetch(`/api/client-portal/admin/invoices/${invoiceId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+    });
+    if (!response.ok) throw new Error('Failed to fetch invoice');
+    const data = await response.json();
+    setEditingInvoiceData(data);
+    setEditingInvoiceId(invoiceId);
+  };
+
+  // Helper: fetch full invoice detail for preview
+  const fetchInvoiceForPreview = async (invoiceId: string) => {
+    const response = await fetch(`/api/client-portal/admin/invoices/${invoiceId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+    });
+    if (!response.ok) throw new Error('Failed to fetch invoice');
+    const data = await response.json();
+    const invoiceData: InvoiceData = {
+      id: data.id,
+      invoiceNumber: data.invoiceNumber,
+      status: data.status,
+      issueDate: data.issueDate,
+      dueDate: data.dueDate,
+      billingPeriodStart: data.billingPeriodStart,
+      billingPeriodEnd: data.billingPeriodEnd,
+      clientName: data.clientName || selectedClient?.name || '',
+      clientCompany: data.clientCompany || selectedClient?.companyName || '',
+      clientEmail: data.clientEmail || selectedClient?.contactEmail || '',
+      clientPhone: data.clientPhone || selectedClient?.contactPhone || '',
+      billingAddress: data.clientAddress || '',
+      items: (data.items || []).map((item: any) => ({
+        id: item.id,
+        description: item.description,
+        itemType: item.itemType,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        amount: item.amount,
+      })),
+      subtotal: data.subtotal,
+      taxAmount: data.taxAmount,
+      discountAmount: data.discountAmount,
+      totalAmount: data.totalAmount,
+      amountPaid: data.amountPaid,
+      currency: data.currency || 'USD',
+      notes: data.notes,
+    };
+    setPreviewInvoice(invoiceData);
+    setShowInvoicePreview(true);
+  };
 
   const deleteClientMutation = useMutation({
     mutationFn: async (clientId: string) => apiRequest('DELETE', `/api/client-portal/admin/clients/${clientId}`),
@@ -1521,6 +1694,8 @@ export default function ClientPortalAdmin() {
       clientId: formData.get('clientId') as string,
       periodStart: formData.get('periodStart') as string,
       periodEnd: formData.get('periodEnd') as string,
+      invoiceNumber: generateInvoiceNumber || undefined,
+      projectId: generateProjectId && generateProjectId !== '__all' ? generateProjectId : undefined,
     });
   };
 
@@ -1749,6 +1924,7 @@ export default function ClientPortalAdmin() {
                       <TabsTrigger value="settings" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Settings</TabsTrigger>
                       <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Users & Access</TabsTrigger>
                       <TabsTrigger value="projects" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Projects</TabsTrigger>
+                      <TabsTrigger value="invoicing" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Invoicing</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="profile">
@@ -2143,6 +2319,231 @@ export default function ClientPortalAdmin() {
                       </div>
                     </div>
                   </TabsContent>
+
+                  {/* ===== INVOICING SUB-TAB ===== */}
+                  <TabsContent value="invoicing">
+                    <div className="pt-4 space-y-6">
+                      {/* Section 1: Project Invoices (Auto-Generated) */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-semibold flex items-center gap-2">
+                            <CreditCard className="h-4 w-4" />
+                            Project Invoices
+                          </h3>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => refetchClientInvoices()}>
+                              <RefreshCw className="h-4 w-4 mr-1" /> Refresh
+                            </Button>
+                            <Button size="sm" onClick={() => {
+                              setShowCreateInvoice(true);
+                            }}>
+                              <Plus className="h-4 w-4 mr-1" /> Generate from Costs
+                            </Button>
+                          </div>
+                        </div>
+
+                        {clientInvoicesLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-6 w-6 animate-spin" />
+                          </div>
+                        ) : clientInvoicesList && clientInvoicesList.length > 0 ? (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Invoice #</TableHead>
+                                <TableHead>Period</TableHead>
+                                <TableHead className="text-right">Amount</TableHead>
+                                <TableHead className="text-right">Paid</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Due Date</TableHead>
+                                <TableHead>Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {clientInvoicesList.map((invoice) => (
+                                <TableRow key={invoice.id}>
+                                  <TableCell className="font-mono text-sm">{invoice.invoiceNumber}</TableCell>
+                                  <TableCell className="text-sm">
+                                    {new Date(invoice.billingPeriodStart).toLocaleDateString()} –{' '}
+                                    {new Date(invoice.billingPeriodEnd).toLocaleDateString()}
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium">
+                                    {formatCurrency(invoice.totalAmount)}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {formatCurrency(invoice.amountPaid)}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge className={statusColors[invoice.status]}>{invoice.status}</Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '—'}
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex gap-1">
+                                      <Button variant="ghost" size="sm" onClick={() => fetchInvoiceForPreview(invoice.id)} title="Preview">
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                      <Button variant="ghost" size="sm" onClick={() => {
+                                        fetchInvoiceForPreview(invoice.id).then(async () => {
+                                          if (previewInvoice) await downloadInvoicePDF(previewInvoice);
+                                        });
+                                      }} title="Download PDF">
+                                        <Download className="h-4 w-4" />
+                                      </Button>
+                                      {(invoice.status === 'draft' || invoice.status === 'pending') && (
+                                        <Button variant="ghost" size="sm" onClick={() => {
+                                          setSendInvoiceTarget({
+                                            invoiceId: invoice.id,
+                                            invoiceNumber: invoice.invoiceNumber,
+                                            clientEmail: selectedClient?.contactEmail || '',
+                                            clientName: selectedClient?.name || '',
+                                          });
+                                          setShowSendInvoice(true);
+                                        }} title="Send to Client">
+                                          <Send className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                      {(invoice.status === 'draft' || invoice.status === 'pending') && (
+                                        <Button variant="ghost" size="sm" onClick={() => fetchInvoiceForEdit(invoice.id)} title="Edit Invoice">
+                                          <Pencil className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                      {(invoice.status === 'draft' || invoice.status === 'pending') && (
+                                        <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() =>
+                                          setDeleteInvoiceTarget({ id: invoice.id, invoiceNumber: invoice.invoiceNumber })
+                                        } title="Delete Invoice">
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                      {invoice.status === 'sent' && (
+                                        <Button variant="ghost" size="sm" onClick={() =>
+                                          updateInvoiceStatusMutation.mutate({ invoiceId: invoice.id, status: 'paid' })
+                                        } title="Mark Paid">
+                                          <CheckCircle className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        ) : (
+                          <div className="text-center py-8 border rounded-lg">
+                            <FileText className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                            <p className="text-muted-foreground text-sm">No invoices for this client yet</p>
+                            <Button className="mt-3" variant="outline" size="sm" onClick={() => setShowCreateInvoice(true)}>
+                              Generate First Invoice
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Section 2: Manual Invoice Creation */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-semibold flex items-center gap-2">
+                            <FileText className="h-4 w-4" />
+                            Manual Invoice
+                          </h3>
+                          {!showManualInvoice && (
+                            <Button size="sm" variant="outline" onClick={() => setShowManualInvoice(true)}>
+                              <Plus className="h-4 w-4 mr-1" /> Create Manual Invoice
+                            </Button>
+                          )}
+                        </div>
+
+                        {showManualInvoice && selectedClient && (
+                          <InvoiceEditor
+                            clientId={selectedClient.id}
+                            clientName={selectedClient.name}
+                            projects={clientDetail?.projects || []}
+                            suggestedInvoiceNumber={nextInvoiceNumberData?.nextNumber || ''}
+                            isLoading={createManualInvoiceMutation.isPending}
+                            onSave={(data) => createManualInvoiceMutation.mutate(data)}
+                            onCancel={() => setShowManualInvoice(false)}
+                          />
+                        )}
+                      </div>
+
+                      {/* Section 3: Edit Invoice */}
+                      {editingInvoiceId && editingInvoiceData && selectedClient && (
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-semibold flex items-center gap-2">
+                              <Pencil className="h-4 w-4" />
+                              Edit Invoice {editingInvoiceData.invoiceNumber}
+                            </h3>
+                          </div>
+                          <InvoiceEditor
+                            clientId={selectedClient.id}
+                            clientName={selectedClient.name}
+                            projects={clientDetail?.projects || []}
+                            suggestedInvoiceNumber={editingInvoiceData.invoiceNumber || ''}
+                            initialItems={editingInvoiceData.items?.map((item: any) => ({
+                              description: item.description,
+                              itemType: item.itemType,
+                              quantity: parseFloat(item.quantity),
+                              unitPrice: parseFloat(item.unitPrice),
+                              amount: parseFloat(item.amount),
+                              projectId: item.projectId,
+                              campaignId: item.campaignId,
+                            })) || []}
+                            initialPeriodStart={editingInvoiceData.billingPeriodStart || ''}
+                            initialPeriodEnd={editingInvoiceData.billingPeriodEnd || ''}
+                            initialDueDate={editingInvoiceData.dueDate || ''}
+                            initialNotes={editingInvoiceData.notes || ''}
+                            initialDiscount={parseFloat(editingInvoiceData.discountAmount || '0')}
+                            initialProjectId={editingInvoiceData.items?.[0]?.projectId || ''}
+                            isLoading={updateInvoiceMutation.isPending}
+                            onSave={(data) => {
+                              updateInvoiceMutation.mutate({
+                                invoiceId: editingInvoiceId,
+                                data: {
+                                  billingPeriodStart: data.billingPeriodStart,
+                                  billingPeriodEnd: data.billingPeriodEnd,
+                                  dueDate: data.dueDate,
+                                  invoiceNumber: data.invoiceNumber,
+                                  items: data.items,
+                                  notes: data.notes,
+                                  discountAmount: data.discountAmount,
+                                },
+                              });
+                            }}
+                            onCancel={() => { setEditingInvoiceId(null); setEditingInvoiceData(null); }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Delete Invoice Confirmation */}
+                      <AlertDialog open={!!deleteInvoiceTarget} onOpenChange={(open) => { if (!open) setDeleteInvoiceTarget(null); }}>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Invoice</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Are you sure you want to delete invoice <strong>{deleteInvoiceTarget?.invoiceNumber}</strong>? This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-red-600 hover:bg-red-700"
+                              onClick={() => {
+                                if (deleteInvoiceTarget) {
+                                  deleteInvoiceMutation.mutate(deleteInvoiceTarget.id);
+                                }
+                              }}
+                            >
+                              {deleteInvoiceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </TabsContent>
+
                   </Tabs>
                 ) : (
                   <p className="text-muted-foreground text-center py-12">
@@ -2962,7 +3363,13 @@ export default function ClientPortalAdmin() {
       </Dialog>
 
       {/* Generate Invoice Dialog */}
-      <Dialog open={showCreateInvoice} onOpenChange={setShowCreateInvoice}>
+      <Dialog open={showCreateInvoice} onOpenChange={(open) => {
+        setShowCreateInvoice(open);
+        if (!open) {
+          setGenerateInvoiceNumber('');
+          setGenerateProjectId('');
+        }
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Generate Invoice</DialogTitle>
@@ -2974,7 +3381,7 @@ export default function ClientPortalAdmin() {
             <div className="space-y-4">
               <div>
                 <Label htmlFor="clientId">Client</Label>
-                <Select name="clientId" required>
+                <Select name="clientId" required defaultValue={selectedClient?.id || ''}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select a client" />
                   </SelectTrigger>
@@ -2986,6 +3393,36 @@ export default function ClientPortalAdmin() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label>Project (optional)</Label>
+                <Select value={generateProjectId} onValueChange={setGenerateProjectId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All projects" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all">All projects</SelectItem>
+                    {clientDetail?.projects?.map((project: any) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Invoice Number</Label>
+                <Input
+                  value={generateInvoiceNumber}
+                  onChange={(e) => setGenerateInvoiceNumber(e.target.value)}
+                  placeholder={nextInvoiceNumberData?.nextNumber || 'Auto-generated'}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave empty to auto-generate. Enter 0 to hide number on invoice.
+                  {nextInvoiceNumberData?.lastNumber && (
+                    <> Last: <span className="font-mono">{nextInvoiceNumberData.lastNumber}</span></>
+                  )}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -3124,6 +3561,45 @@ export default function ClientPortalAdmin() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Invoice Preview Dialog */}
+      <InvoicePreviewDialog
+        open={showInvoicePreview}
+        onOpenChange={setShowInvoicePreview}
+        invoice={previewInvoice}
+        onSend={(inv) => {
+          setShowInvoicePreview(false);
+          setSendInvoiceTarget({
+            invoiceId: inv.id || '',
+            invoiceNumber: inv.invoiceNumber,
+            clientEmail: inv.clientEmail || selectedClient?.contactEmail || '',
+            clientName: inv.clientName || selectedClient?.name || '',
+          });
+          setShowSendInvoice(true);
+        }}
+      />
+
+      {/* Send Invoice Dialog */}
+      {sendInvoiceTarget && (
+        <SendInvoiceDialog
+          open={showSendInvoice}
+          onOpenChange={(open) => {
+            setShowSendInvoice(open);
+            if (!open) setSendInvoiceTarget(null);
+          }}
+          invoiceNumber={sendInvoiceTarget.invoiceNumber}
+          clientEmail={sendInvoiceTarget.clientEmail}
+          clientName={sendInvoiceTarget.clientName}
+          isLoading={sendInvoiceMutation.isPending}
+          onSend={(data) =>
+            sendInvoiceMutation.mutate({
+              invoiceId: sendInvoiceTarget.invoiceId,
+              recipientEmail: data.recipientEmail,
+              message: data.message,
+            })
+          }
+        />
+      )}
     </div>
   );
 }

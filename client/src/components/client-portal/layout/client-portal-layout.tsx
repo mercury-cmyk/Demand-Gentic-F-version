@@ -162,6 +162,13 @@ const baseNavigationGroups: NavGroup[] = [
     ],
   },
   {
+    id: 'billing',
+    label: 'Billing',
+    items: [
+      { name: 'Billing & Invoices', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
+    ],
+  },
+  {
     id: 'resources',
     label: 'How it Works',
     items: [
@@ -263,7 +270,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   });
 
   // Check client features for feature-gated nav items
-  const { data: featuresData } = useQuery<{ enabledFeatures: string[] }>({
+  const { data: featuresData } = useQuery<{ enabledFeatures: string[]; visibilitySettings?: Record<string, unknown> }>({
     queryKey: ['client-portal-features', clientAccountId],
     queryFn: async () => {
       const token = getToken();
@@ -283,10 +290,16 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   });
 
   const enabledFeatures = featuresData?.enabledFeatures || [];
+  const visibilitySettings = featuresData?.visibilitySettings || {};
 
   // Build navigation dynamically based on feature availability
   const navigationGroups = React.useMemo(() => {
-    const groups = baseNavigationGroups.map(group => ({ ...group, items: [...group.items] }));
+    let groups = baseNavigationGroups.map(group => ({ ...group, items: [...group.items] }));
+
+    // Hide billing group if showBilling is explicitly false
+    if (visibilitySettings.showBilling === false) {
+      groups = groups.filter(g => g.id !== 'billing');
+    }
 
     // Rename AI & Intelligence group to [Client Name] AI Studio
     const aiGroup = groups.find(g => g.id === 'ai-intelligence');
@@ -311,7 +324,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     }
 
     return groups;
-  }, [argyleFeatureStatus?.enabled, user?.clientAccountName]);
+  }, [argyleFeatureStatus?.enabled, user?.clientAccountName, visibilitySettings.showBilling]);
 
   // Show suggestions bubble after a delay if user hasn't interacted
   useEffect(() => {

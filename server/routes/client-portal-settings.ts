@@ -236,9 +236,15 @@ router.get('/features', async (req: Request, res: Response) => {
       config: featureMap[feature]?.config || null,
     }));
 
+    // Fetch visibility settings alongside features
+    const [clientAccount] = await db.select({ visibilitySettings: clientAccounts.visibilitySettings })
+      .from(clientAccounts).where(eq(clientAccounts.id, clientAccountId)).limit(1);
+    const visibilitySettings = (clientAccount?.visibilitySettings || {}) as Record<string, unknown>;
+
     res.json({
       features: featureStatus,
       enabledFeatures: featureStatus.filter((f) => f.enabled).map((f) => f.feature),
+      visibilitySettings,
     });
   } catch (error) {
     console.error('[CLIENT SETTINGS] Get features error:', error);
