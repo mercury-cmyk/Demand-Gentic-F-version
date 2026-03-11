@@ -89,6 +89,7 @@ const PROVIDER_SECRET =
   '';
 
 const MAILGUN_ENV_PROVIDER_ID = 'env-mailgun';
+const BREVO_ENV_PROVIDER_ID = 'env-brevo';
 
 const MAILGUN_DEFAULT_DNS: CampaignEmailDnsProfile = {
   spfInclude: 'mailgun.org',
@@ -297,6 +298,44 @@ function buildEnvironmentMailgunProvider(): ResolvedCampaignEmailProvider | null
     replyToEmail: process.env.DEFAULT_REPLY_TO_EMAIL || process.env.DEFAULT_FROM_EMAIL || `noreply@${apiDomain}`,
     dnsProfile: normalizeDnsProfile('mailgun'),
     sendingProfile: normalizeSendingProfile('mailgun', 'mailgun_api'),
+    healthStatus: 'healthy',
+    lastHealthCheck: null,
+    lastHealthError: null,
+    createdBy: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    apiKeyConfigured: true,
+    smtpPasswordConfigured: false,
+    source: 'environment',
+    apiKey,
+  };
+}
+
+function buildEnvironmentBrevoProvider(): ResolvedCampaignEmailProvider | null {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) return null;
+
+  return {
+    id: BREVO_ENV_PROVIDER_ID,
+    providerKey: 'brevo',
+    name: 'Brevo (Environment)',
+    description: 'Environment-backed Brevo provider fallback',
+    transport: 'brevo_api',
+    isEnabled: true,
+    isDefault: false,
+    priority: 998,
+    apiBaseUrl: getBrevoApiBase(),
+    apiDomain: null,
+    apiRegion: null,
+    smtpHost: null,
+    smtpPort: null,
+    smtpSecure: null,
+    smtpUsername: null,
+    defaultFromEmail: process.env.BREVO_FROM_EMAIL || process.env.DEFAULT_FROM_EMAIL || null,
+    defaultFromName: process.env.BREVO_FROM_NAME || process.env.DEFAULT_FROM_NAME || 'DemandGentic',
+    replyToEmail: process.env.BREVO_REPLY_TO_EMAIL || process.env.DEFAULT_REPLY_TO_EMAIL || null,
+    dnsProfile: normalizeDnsProfile('brevo'),
+    sendingProfile: normalizeSendingProfile('brevo', 'brevo_api'),
     healthStatus: 'healthy',
     lastHealthCheck: null,
     lastHealthError: null,
@@ -731,9 +770,14 @@ export async function listCampaignEmailProviders(): Promise<SanitizedCampaignEma
 
   const providers = rows.map((row) => sanitizeProvider(row));
   const hasMailgunDbProvider = providers.some((provider) => provider.providerKey === 'mailgun');
+  const hasBrevoDbProvider = providers.some((provider) => provider.providerKey === 'brevo');
   const envMailgun = !hasMailgunDbProvider ? buildEnvironmentMailgunProvider() : null;
+  const envBrevo = !hasBrevoDbProvider ? buildEnvironmentBrevoProvider() : null;
 
-  return envMailgun ? [...providers, envMailgun] : providers;
+  const all = [...providers];
+  if (envMailgun) all.push(envMailgun);
+  if (envBrevo) all.push(envBrevo);
+  return all;
 }
 
 export async function getCampaignEmailProvider(providerId: string): Promise<ResolvedCampaignEmailProvider | null> {
@@ -741,6 +785,10 @@ export async function getCampaignEmailProvider(providerId: string): Promise<Reso
 
   if (providerId === MAILGUN_ENV_PROVIDER_ID) {
     return buildEnvironmentMailgunProvider();
+  }
+
+  if (providerId === BREVO_ENV_PROVIDER_ID) {
+    return buildEnvironmentBrevoProvider();
   }
 
   const [row] = await db
@@ -786,6 +834,10 @@ async function resolveProviderByKey(providerKey: string): Promise<ResolvedCampai
 
   if (normalized === 'mailgun') {
     return buildEnvironmentMailgunProvider();
+  }
+
+  if (normalized === 'brevo') {
+    return buildEnvironmentBrevoProvider();
   }
 
   return null;

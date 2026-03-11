@@ -431,6 +431,15 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         ],
       },
       {
+        id: 'finance-program',
+        title: 'Finance & Programs',
+        url: '/finance-program',
+        icon: 'Briefcase',
+        roles: [USER_ROLES.ADMIN],
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
+        description: 'Accelerator readiness, funding goals, budget tracking, and milestone management',
+      },
+      {
         id: 'administration',
         title: 'Administration',
         icon: 'Building',

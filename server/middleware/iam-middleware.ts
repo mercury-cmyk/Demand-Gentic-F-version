@@ -43,7 +43,7 @@ export function requirePermission(
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Get user ID from request (assumes requireAuth middleware ran first)
-      const userId = (req as any).userId;
+      const userId = req.user?.userId;
       
       if (!userId) {
         return res.status(401).json({ 
@@ -119,7 +119,7 @@ export function requireAnyPermission(
 ) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = (req as any).userId;
+      const userId = req.user?.userId;
       
       if (!userId) {
         return res.status(401).json({ 
@@ -187,7 +187,7 @@ export function requireAllPermissions(
 ) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = (req as any).userId;
+      const userId = req.user?.userId;
       
       if (!userId) {
         return res.status(401).json({ 
@@ -259,7 +259,7 @@ export function checkPermissionSoft(
 ) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = (req as any).userId;
+      const userId = req.user?.userId;
       
       if (!userId) {
         req.permissionResult = { allowed: false, reason: 'Not authenticated' };
@@ -300,7 +300,7 @@ export function auditLog(
   action: string
 ) {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const userId = (req as any).userId;
+    const userId = req.user?.userId;
     const startTime = Date.now();
     
     // Capture original end function

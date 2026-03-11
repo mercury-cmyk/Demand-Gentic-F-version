@@ -15635,3 +15635,274 @@ export const insertClientNotificationSchema = createInsertSchema(clientNotificat
 export type ClientNotification = typeof clientNotifications.$inferSelect;
 export type InsertClientNotification = z.infer<typeof insertClientNotificationSchema>;
 
+// ═══════════════════════════════════════════════════════════
+// Precision Lead Analyses — Dual-model (Kimi + DeepSeek)
+// AI consensus engine for high-accuracy potential lead detection
+// ═══════════════════════════════════════════════════════════
+
+export const precisionLeadVerdictEnum = pgEnum("precision_lead_verdict", [
+  "high_potential",     // Both models agree: strong lead
+  "likely_potential",   // One model strong + one moderate
+  "review",            // Disagreement or ambiguous signals
+  "not_potential",     // Both models agree: not a lead
+]);
+
+export const precisionLeadAnalyses = pgTable("precision_lead_analyses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  callSessionId: varchar("call_session_id").notNull().references(() => callSessions.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+
+  // ── Deduplication key: one precision analysis per contact per campaign ──
+  dedupKey: varchar("dedup_key", { length: 128 }).notNull(),
+
+  // ── Kimi Analysis (128k deep research) ──
+  kimiVerdict: varchar("kimi_verdict", { length: 30 }),
+  kimiConfidence: integer("kimi_confidence"),           // 0-100
+  kimiIntentScore: integer("kimi_intent_score"),         // 0-100
+  kimiCampaignFitScore: integer("kimi_campaign_fit_score"), // 0-100
+  kimiReasoning: text("kimi_reasoning"),
+  kimiSignals: jsonb("kimi_signals").$type<string[]>(),
+  kimiMissingDataImpact: varchar("kimi_missing_data_impact", { length: 20 }), // none, low, medium, high
+  kimiModel: varchar("kimi_model", { length: 50 }),
+
+  // ── DeepSeek Analysis (reasoning model) ──
+  deepseekVerdict: varchar("deepseek_verdict", { length: 30 }),
+  deepseekConfidence: integer("deepseek_confidence"),     // 0-100
+  deepseekIntentScore: integer("deepseek_intent_score"),   // 0-100
+  deepseekCampaignFitScore: integer("deepseek_campaign_fit_score"), // 0-100
+  deepseekReasoning: text("deepseek_reasoning"),
+  deepseekSignals: jsonb("deepseek_signals").$type<string[]>(),
+  deepseekMissingDataImpact: varchar("deepseek_missing_data_impact", { length: 20 }),
+  deepseekModel: varchar("deepseek_model", { length: 50 }),
+
+  // ── Consensus Verdict ──
+  verdict: precisionLeadVerdictEnum("verdict").notNull(),
+  consensusConfidence: integer("consensus_confidence").notNull(), // 0-100
+  consensusIntentScore: integer("consensus_intent_score").notNull(), // 0-100
+  consensusCampaignFit: integer("consensus_campaign_fit").notNull(), // 0-100
+  consensusReasoning: text("consensus_reasoning"),
+
+  // ── Intent-aware fields (even with incomplete data) ──
+  intentSignals: jsonb("intent_signals").$type<Array<{ signal: string; strength: string; source: string }>>(),
+  engagementIndicators: jsonb("engagement_indicators").$type<Array<{ indicator: string; positive: boolean }>>(),
+  missingFields: jsonb("missing_fields").$type<string[]>(),         // e.g. ["email", "company"]
+  dataCompleteness: integer("data_completeness"),                    // 0-100
+  overrideDisposition: boolean("override_disposition").default(false),
+  suggestedDisposition: varchar("suggested_disposition", { length: 50 }),
+  originalDisposition: varchar("original_disposition", { length: 50 }),
+
+  // ── Campaign context snapshot ──
+  campaignObjective: text("campaign_objective"),
+  campaignSuccessCriteria: text("campaign_success_criteria"),
+
+  // ── Actionability ──
+  recommendedAction: varchar("recommended_action", { length: 50 }),  // engage, nurture, review, skip
+  actionReason: text("action_reason"),
+  priorityRank: integer("priority_rank"),                            // 1 = highest
+
+  // ── Processing metadata ──
+  processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
+  processingDurationMs: integer("processing_duration_ms"),
+  autopilotRun: boolean("autopilot_run").default(false),
+  runBatchId: varchar("run_batch_id", { length: 64 }),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  callSessionIdx: index("precision_lead_call_session_idx").on(table.callSessionId),
+  campaignIdx: index("precision_lead_campaign_idx").on(table.campaignId),
+  contactIdx: index("precision_lead_contact_idx").on(table.contactId),
+  verdictIdx: index("precision_lead_verdict_idx").on(table.verdict),
+  consensusIdx: index("precision_lead_consensus_idx").on(table.consensusConfidence),
+  dedupIdx: index("precision_lead_dedup_idx").on(table.dedupKey),
+  priorityIdx: index("precision_lead_priority_idx").on(table.priorityRank),
+  processedIdx: index("precision_lead_processed_idx").on(table.processedAt),
+  dedupUnique: sql`CREATE UNIQUE INDEX IF NOT EXISTS "precision_lead_dedup_unique" ON "precision_lead_analyses" ("dedup_key")`,
+}));
+
+export const insertPrecisionLeadAnalysisSchema = createInsertSchema(precisionLeadAnalyses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type PrecisionLeadAnalysis = typeof precisionLeadAnalyses.$inferSelect;
+export type InsertPrecisionLeadAnalysis = z.infer<typeof insertPrecisionLeadAnalysisSchema>;
+
+// ============================================
+// FINANCE PROGRAM MANAGEMENT
+// Accelerator readiness & funding goal tracker
+// ============================================
+
+export const financeProgramStatusEnum = pgEnum("finance_program_status", [
+  "planning",
+  "active",
+  "on_track",
+  "at_risk",
+  "completed",
+  "paused",
+]);
+
+export const financeMilestoneStatusEnum = pgEnum("finance_milestone_status", [
+  "not_started",
+  "in_progress",
+  "completed",
+  "overdue",
+  "blocked",
+]);
+
+export const financeExpenseCategoryEnum = pgEnum("finance_expense_category", [
+  "infrastructure",
+  "legal",
+  "marketing",
+  "hiring",
+  "tools",
+  "travel",
+  "advisory",
+  "other",
+]);
+
+// Top-level program (e.g., "YC S26 Application", "Techstars '26")
+export const financePrograms = pgTable("finance_programs", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  targetAccelerator: varchar("target_accelerator", { length: 100 }), // YC, Techstars, a16z, etc.
+  status: financeProgramStatusEnum("status").default("planning").notNull(),
+  startDate: timestamp("start_date", { withTimezone: true }),
+  targetDate: timestamp("target_date", { withTimezone: true }),
+  totalBudget: integer("total_budget").default(0),       // cents
+  spentBudget: integer("spent_budget").default(0),       // cents
+  overallProgress: integer("overall_progress").default(0), // 0-100
+  readinessScore: integer("readiness_score").default(0),   // 0-100 accelerator readiness
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  tenantIdx: index("finance_program_tenant_idx").on(table.tenantId),
+  statusIdx: index("finance_program_status_idx").on(table.status),
+}));
+
+export const insertFinanceProgramSchema = createInsertSchema(financePrograms).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgram = typeof financePrograms.$inferSelect;
+export type InsertFinanceProgram = z.infer<typeof insertFinanceProgramSchema>;
+
+// Goals within a program (e.g., "Get 5 paying clients", "File provisional patent")
+export const financeProgramGoals = pgTable("finance_program_goals", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 50 }).notNull(), // revenue, product, legal, team, metrics, pitch
+  targetValue: varchar("target_value", { length: 100 }),    // "5 clients", "$10K MRR", "Filed"
+  currentValue: varchar("current_value", { length: 100 }),
+  progress: integer("progress").default(0),    // 0-100
+  priority: integer("priority").default(1),    // 1=highest
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_goal_program_idx").on(table.programId),
+  tenantIdx: index("finance_goal_tenant_idx").on(table.tenantId),
+  categoryIdx: index("finance_goal_category_idx").on(table.category),
+}));
+
+export const insertFinanceProgramGoalSchema = createInsertSchema(financeProgramGoals).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgramGoal = typeof financeProgramGoals.$inferSelect;
+export type InsertFinanceProgramGoal = z.infer<typeof insertFinanceProgramGoalSchema>;
+
+// Milestones (weekly targets within the 30-day plan)
+export const financeProgramMilestones = pgTable("finance_program_milestones", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  weekNumber: integer("week_number").notNull(), // 1-4
+  status: financeMilestoneStatusEnum("status").default("not_started").notNull(),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  deliverables: jsonb("deliverables").$type<string[]>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_milestone_program_idx").on(table.programId),
+  tenantIdx: index("finance_milestone_tenant_idx").on(table.tenantId),
+  weekIdx: index("finance_milestone_week_idx").on(table.weekNumber),
+}));
+
+export const insertFinanceProgramMilestoneSchema = createInsertSchema(financeProgramMilestones).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgramMilestone = typeof financeProgramMilestones.$inferSelect;
+export type InsertFinanceProgramMilestone = z.infer<typeof insertFinanceProgramMilestoneSchema>;
+
+// Expenses tracking
+export const financeProgramExpenses = pgTable("finance_program_expenses", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  description: varchar("description", { length: 255 }).notNull(),
+  amount: integer("amount").notNull(),  // cents
+  category: financeExpenseCategoryEnum("category").notNull(),
+  date: timestamp("date", { withTimezone: true }).notNull().defaultNow(),
+  receipt: varchar("receipt", { length: 500 }),  // optional file URL
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_expense_program_idx").on(table.programId),
+  tenantIdx: index("finance_expense_tenant_idx").on(table.tenantId),
+  categoryIdx: index("finance_expense_category_idx").on(table.category),
+}));
+
+export const insertFinanceProgramExpenseSchema = createInsertSchema(financeProgramExpenses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceProgramExpense = typeof financeProgramExpenses.$inferSelect;
+export type InsertFinanceProgramExpense = z.infer<typeof insertFinanceProgramExpenseSchema>;
+
+// Accelerator readiness checklist items
+export const financeAcceleratorChecklist = pgTable("finance_accelerator_checklist", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+  programId: varchar("program_id", { length: 36 }).notNull().references(() => financePrograms.id, { onDelete: "cascade" }),
+  accelerator: varchar("accelerator", { length: 100 }).notNull(), // YC, Techstars
+  checklistItem: varchar("checklist_item", { length: 255 }).notNull(),
+  category: varchar("category", { length: 50 }).notNull(), // product, traction, team, legal, pitch, financials
+  isCompleted: boolean("is_completed").default(false),
+  evidence: text("evidence"),        // proof / notes
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  programIdx: index("finance_checklist_program_idx").on(table.programId),
+  tenantIdx: index("finance_checklist_tenant_idx").on(table.tenantId),
+  acceleratorIdx: index("finance_checklist_accelerator_idx").on(table.accelerator),
+}));
+
+export const insertFinanceAcceleratorChecklistSchema = createInsertSchema(financeAcceleratorChecklist).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type FinanceAcceleratorChecklist = typeof financeAcceleratorChecklist.$inferSelect;
+export type InsertFinanceAcceleratorChecklist = z.infer<typeof insertFinanceAcceleratorChecklistSchema>;
+

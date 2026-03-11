@@ -959,6 +959,7 @@ router.post('/coding-agent', async (req: Request, res: Response) => {
       providerMode: req.body?.providerMode,
       preferredProvider: req.body?.preferredProvider,
       optimizationProfile: req.body?.optimizationProfile,
+      projectContext: req.body?.projectContext ?? null,
     });
 
     res.json({

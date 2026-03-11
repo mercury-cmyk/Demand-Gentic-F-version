@@ -422,7 +422,7 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
 }
 
 /**
- * Send test email(s) - directly via Mailgun without database records
+ * Send test email(s) - uses the campaign email provider system (supports Mailgun, Brevo, SMTP)
  */
 export async function sendTestEmail(options: {
   to: string | string[];
@@ -432,24 +432,8 @@ export async function sendTestEmail(options: {
   fromName?: string;
   replyTo?: string;
 }): Promise<{ success: boolean; messageId?: string; sent: number; error?: string }> {
-  const apiKey = process.env.MAILGUN_API_KEY;
-  const domain = process.env.MAILGUN_DOMAIN;
-  const apiBase = process.env.MAILGUN_API_BASE || 'https://api.mailgun.net/v3';
-
-  if (!apiKey || !domain) {
-    console.error('[Test Email] Mailgun not configured');
-    return {
-      success: false,
-      sent: 0,
-      error: 'Mailgun not configured. Set MAILGUN_API_KEY and MAILGUN_DOMAIN environment variables.'
-    };
-  }
-
   const toEmails = Array.isArray(options.to) ? options.to : [options.to];
-  const fromEmail = options.from || process.env.DEFAULT_FROM_EMAIL || `noreply@${domain}`;
-  const from = options.fromName 
-    ? `${options.fromName} <${fromEmail}>`
-    : fromEmail;
+  const fromEmail = options.from || process.env.DEFAULT_FROM_EMAIL || 'noreply@example.com';
 
   let sent = 0;
   let lastMessageId: string | undefined;
@@ -457,51 +441,23 @@ export async function sendTestEmail(options: {
 
   for (const toEmail of toEmails) {
     try {
-      // Build form data for Mailgun API using FormData
-      const formData = new FormData();
-      formData.append('from', from);
-      formData.append('to', toEmail);
-      formData.append('subject', options.subject);
-      formData.append('html', options.html);
-      
-      if (options.replyTo) {
-        formData.append('h:Reply-To', options.replyTo);
-      }
-      
-      // Add test tag
-      formData.append('o:tag', 'test-email');
-      
-      // Enable tracking
-      formData.append('o:tracking', 'yes');
-      formData.append('o:tracking-clicks', 'yes');
-      formData.append('o:tracking-opens', 'yes');
+      console.log(`[Test Email] Sending to ${toEmail} via campaign provider system...`);
 
-      const auth = Buffer.from(`api:${apiKey}`).toString('base64');
-      
-      console.log(`[Test Email] Sending to ${toEmail} via Mailgun...`);
-      console.log(`[Test Email] HTML content length: ${options.html.length} chars`);
-      console.log(`[Test Email] Has DOCTYPE: ${options.html.includes('<!DOCTYPE')}`);
-      console.log(`[Test Email] First 200 chars (escaped):`, JSON.stringify(options.html.substring(0, 200)));
-      
-      const response = await fetch(`${apiBase}/${domain}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${auth}`,
+      const result = await campaignEmailProviderService.sendCampaignEmail({
+        options: {
+          to: toEmail,
+          from: fromEmail,
+          fromName: options.fromName,
+          replyTo: options.replyTo,
+          subject: options.subject,
+          html: options.html,
+          tags: ['test-email'],
         },
-        body: formData,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[Test Email] Mailgun API error for ${toEmail}:`, response.status, errorText);
-        lastError = `Mailgun error (${response.status}): ${errorText}`;
-        continue;
-      }
-
-      const result = await response.json();
-      lastMessageId = result.id || result.message;
+      lastMessageId = result.messageId;
       sent++;
-      console.log(`[Test Email] Successfully sent to ${toEmail}, messageId: ${lastMessageId}`);
+      console.log(`[Test Email] Successfully sent to ${toEmail} via ${result.providerKey}, messageId: ${lastMessageId}`);
     } catch (error: any) {
       console.error(`[Test Email] Failed to send to ${toEmail}:`, error);
       lastError = error.message || 'Unknown error';

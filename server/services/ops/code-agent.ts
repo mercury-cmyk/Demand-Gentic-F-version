@@ -13,6 +13,15 @@ import {
 import { formatOpsAgentErrorMessage } from "./format-agent-error";
 import { readWorkspaceFile, writeWorkspaceFile, writeMultipleWorkspaceFiles } from "./runtime";
 
+export interface OpsProjectContext {
+  id: string;
+  name: string;
+  description: string;
+  environment: string;
+  deployTarget: string;
+  services: Array<{ name: string; label: string }>;
+}
+
 export interface OpsCodeAgentRequest {
   prompt: string;
   mode?: "simple-edit" | "multi-edit" | "debug" | "deploy" | "general" | "plan";
@@ -24,6 +33,8 @@ export interface OpsCodeAgentRequest {
   providerMode?: ProviderMode;
   preferredProvider?: LLMProvider | null;
   optimizationProfile?: AgentOptimizationProfile;
+  /** Active project context — the agent auto-scopes to this project */
+  projectContext?: OpsProjectContext | null;
 }
 
 export interface OpsCodeAgentFileEdit {
@@ -64,7 +75,7 @@ type OpsCodeAgentMode = NonNullable<OpsCodeAgentRequest["mode"]>;
 type AgentTask = "code" | "analysis" | "reasoning" | "general";
 
 const AGENTX_SHARED_BASE_PROMPT = [
-  "You are AgentX - The Architect, the primary coding and planning agent inside Ops Hub.",
+  "You are AgentC - The Architect, the primary coding and planning agent inside Ops Hub.",
   "",
   "Mission:",
   "- deliver correct, minimal, defensible engineering outcomes",
@@ -223,6 +234,26 @@ function buildSelectedFileContext(
   ].join("\n\n");
 }
 
+function buildProjectContext(
+  projectContext?: OpsProjectContext | null,
+): string {
+  if (!projectContext) return "";
+  return [
+    "Active project context:",
+    `  Project: ${projectContext.name} (${projectContext.id})`,
+    `  Description: ${projectContext.description}`,
+    `  Environment: ${projectContext.environment}`,
+    `  Deploy target: ${projectContext.deployTarget}`,
+    projectContext.services.length > 0
+      ? `  Services: ${projectContext.services.map((s) => s.label).join(", ")}`
+      : "",
+    "",
+    "Scope all responses to this project. When referencing files, services, or deployment targets, stay within the boundaries of this project.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildPlanFocus(mode?: OpsCodeAgentRequest["mode"]): string {
   const resolvedMode = resolveMode(mode);
 
@@ -256,16 +287,21 @@ function buildAgentFileEditPrompt(
   request: OpsCodeAgentRequest,
   file: { path: string; content: string },
 ): string {
-  return [
+  const parts = [
     AGENTX_SHARED_BASE_PROMPT,
     "",
     AGENTX_AGENT_MODE_PROMPT,
     "",
+  ];
+  const projectCtx = buildProjectContext(request.projectContext);
+  if (projectCtx) parts.push(projectCtx, "");
+  parts.push(
     "Context:",
     buildSelectedFileContext(file.path, file.content),
     "",
     `User request:\n${request.prompt}`,
-  ].join("\n");
+  );
+  return parts.join("\n");
 }
 
 function buildMultiFileContext(
@@ -281,26 +317,35 @@ function buildMultiEditPrompt(
   request: OpsCodeAgentRequest,
   files: Array<{ path: string; content: string }>,
 ): string {
-  return [
+  const parts = [
     AGENTX_SHARED_BASE_PROMPT,
     "",
     AGENTX_MULTI_EDIT_MODE_PROMPT,
     "",
+  ];
+  const projectCtx = buildProjectContext(request.projectContext);
+  if (projectCtx) parts.push(projectCtx, "");
+  parts.push(
     "Workspace files:",
     buildMultiFileContext(files),
     "",
     `User request:\n${request.prompt}`,
-  ].join("\n");
+  );
+  return parts.join("\n");
 }
 
 function buildPlanResponsePrompt(request: OpsCodeAgentRequest): string {
-  return [
+  const parts = [
     AGENTX_SHARED_BASE_PROMPT,
     "",
     AGENTX_PLAN_MODE_PROMPT,
     "",
     buildPlanFocus(request.mode),
     "",
+  ];
+  const projectCtx = buildProjectContext(request.projectContext);
+  if (projectCtx) parts.push(projectCtx, "");
+  parts.push(
     "Context:",
     buildSelectedFileContext(
       request.selectedFilePath,
@@ -308,7 +353,8 @@ function buildPlanResponsePrompt(request: OpsCodeAgentRequest): string {
     ),
     "",
     `User request:\n${request.prompt}`,
-  ].join("\n");
+  );
+  return parts.join("\n");
 }
 
 async function requestAgentResponse(
@@ -360,7 +406,7 @@ function formatAgentXErrorMessage(
         normalized.includes("vertex ai") ||
         normalized.includes("vertexai")))
   ) {
-    return "AgentX could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.";
+    return "AgentC could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.";
   }
 
   return formatOpsAgentErrorMessage(error, fallbackMessage);
@@ -602,7 +648,7 @@ async function runSingleFileEdit(
   } catch (agentXError) {
     agentXFailure = formatAgentXErrorMessage(
       agentXError,
-      "AgentX failed to generate an edit.",
+      "AgentC failed to generate an edit.",
     );
 
     let providerResponse;
@@ -926,30 +972,36 @@ export async function runOpsCodeAgent(
   } catch (error) {
     agentXFailure = formatAgentXErrorMessage(
       error,
-      "AgentX failed to generate a response.",
+      "AgentC failed to generate a response.",
     );
   }
 
   try {
+    const projectCtx = buildProjectContext(request.projectContext);
+    const systemParts = [
+      AGENTX_SHARED_BASE_PROMPT,
+      "",
+      AGENTX_PLAN_MODE_PROMPT,
+      "",
+      buildPlanFocus(request.mode),
+    ];
+    if (projectCtx) systemParts.push("", projectCtx);
+
+    const contextParts = [
+      "Context:",
+      buildSelectedFileContext(
+        request.selectedFilePath,
+        request.selectedFileContent,
+      ),
+      "",
+      `User request:\n${request.prompt}`,
+    ];
+
     const response = await requestAgentResponse(
       {
-        systemPrompt: [
-          AGENTX_SHARED_BASE_PROMPT,
-          "",
-          AGENTX_PLAN_MODE_PROMPT,
-          "",
-          buildPlanFocus(request.mode),
-        ].join("\n"),
+        systemPrompt: systemParts.join("\n"),
       },
-      [
-        "Context:",
-        buildSelectedFileContext(
-          request.selectedFilePath,
-          request.selectedFileContent,
-        ),
-        "",
-        `User request:\n${request.prompt}`,
-      ].join("\n"),
+      contextParts.join("\n"),
       request.mode,
       request,
       request.selectedFilePath

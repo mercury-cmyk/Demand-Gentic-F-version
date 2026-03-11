@@ -10,7 +10,7 @@ import { Router } from 'express';
 import { db } from '../db';
 import { telephonyProviders, telephonyProviderHealthHistory, users } from '../../shared/schema';
 import { eq, desc, sql } from 'drizzle-orm';
-import { requireSuperAdmin } from '../middleware/auth';
+import { requireAuth, requireSuperAdmin } from '../middleware/auth';
 import {
   getTelephonyProviderRegistry,
   TelephonyProviderFactory,
@@ -20,7 +20,8 @@ import { invalidateTelephonyProviderCache } from '../services/telephony-provider
 
 const router = Router();
 
-// All routes require super admin
+// All routes require authentication + super admin
+router.use(requireAuth);
 router.use(requireSuperAdmin);
 
 /**

@@ -184,10 +184,16 @@ function LeadCard({
   };
   const NextActionIcon = lead.nextActionType ? actionIcon[lead.nextActionType] || Clock : Clock;
 
+  // Compute time since last activity
+  const lastActivityAge = lead.lastActivityAt
+    ? Math.round((Date.now() - new Date(lead.lastActivityAt).getTime()) / (1000 * 60 * 60))
+    : null;
+  const isStale = lastActivityAge !== null && lastActivityAge > 72;
+
   return (
     <Card
       className={`cursor-pointer hover:shadow-md transition-shadow ${
-        isOverdue ? "border-destructive/50 bg-destructive/5" : ""
+        isOverdue ? "border-destructive/50 bg-destructive/5" : isStale ? "border-amber-300/50 bg-amber-50/30 dark:bg-amber-950/10" : ""
       }`}
       onClick={onClick}
     >
@@ -226,6 +232,25 @@ function LeadCard({
             <span>{new Date(lead.nextActionAt).toLocaleDateString()}</span>
           </div>
         )}
+
+        {/* Activity indicators */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {lead.totalActions > 0 && (
+            <span className="flex items-center gap-0.5" title={`${lead.totalActions} total actions`}>
+              <UserPlus className="h-3 w-3" />
+              {lead.totalActions}
+            </span>
+          )}
+          {lastActivityAge !== null && (
+            <span className={`flex items-center gap-0.5 ${isStale ? "text-amber-600" : ""}`}
+              title={`Last activity ${lastActivityAge}h ago`}>
+              <Clock className="h-3 w-3" />
+              {lastActivityAge < 24
+                ? `${lastActivityAge}h ago`
+                : `${Math.round(lastActivityAge / 24)}d ago`}
+            </span>
+          )}
+        </div>
 
         {/* Quick actions */}
         {nextStage && (

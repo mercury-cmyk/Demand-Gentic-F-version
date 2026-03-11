@@ -144,7 +144,7 @@ const PROVIDER_ROUTING: Record<CodingAgentProvider, { label: string; color: stri
   gemini: { label: 'Gemini', color: 'bg-blue-500', desc: 'UX & performance' },
   deepseek: { label: 'DeepSeek', color: 'bg-rose-500', desc: 'Security & cost' },
   codex: { label: 'Codex', color: 'bg-violet-500', desc: 'Final synthesis' },
-  agentx: { label: 'AgentX', color: 'bg-slate-900', desc: 'Orchestrator' },
+  agentx: { label: 'AgentC', color: 'bg-slate-900', desc: 'Orchestrator' },
   ensemble: { label: 'Ensemble', color: 'bg-indigo-600', desc: 'Multi-agent pipeline' },
 };
 
@@ -254,8 +254,8 @@ const TAB_TO_SECTION: Record<string, string> = {
 const SECONDARY_NAV_ORDER = ['DEVOPS', 'WORKSPACE', 'INSIGHTS'];
 
 const AGENT_PROVIDER_LABELS: Record<CodingAgentProvider, string> = {
-  agentx: 'AgentX',
-  ensemble: 'AgentX Ensemble',
+  agentx: 'AgentC',
+  ensemble: 'AgentC Ensemble',
   codex: 'Codex',
   claude: 'Claude',
   gemini: 'Gemini',
@@ -536,7 +536,7 @@ function FileSearchDrawerPanel({
             </>
           ) : (
             <p className="mt-2 text-xs leading-relaxed text-slate-500">
-              Pick a file here, then switch to <strong>AgentX</strong> for an edit request or jump into the full editor.
+              Pick a file to give the Coding Agent extra context, or just ask — the agent already knows which project you're in.
             </p>
           )}
         </div>
@@ -1005,9 +1005,9 @@ export default function OpsHub() {
 
     try {
       // Step 1: Analyze
-      advanceArchitectStep('analyze', 'active', 'Reading code context...');
+      advanceArchitectStep('analyze', 'active', `Scoping to ${activeProject.name}...`);
       await new Promise((r) => setTimeout(r, 300));
-      advanceArchitectStep('analyze', 'done', selectedFile ? `Analyzed ${selectedFile.path}` : 'Context ready');
+      advanceArchitectStep('analyze', 'done', selectedFile ? `Analyzed ${selectedFile.path} in ${activeProject.name}` : `Context ready — ${activeProject.name}`);
 
       // Step 2: Optimize prompt
       advanceArchitectStep('optimize', 'active', 'Improving prompt quality...');
@@ -1031,6 +1031,14 @@ export default function OpsHub() {
           selectedFileContent: selectedFile?.dirty ? selectedFile.content : undefined,
           applyChanges: codingAgentMode === 'agent',
           preferredProvider: selectedProvider === 'agentx' ? undefined : selectedProvider,
+          projectContext: {
+            id: activeProject.id,
+            name: activeProject.name,
+            description: activeProject.description,
+            environment: activeProject.environment,
+            deployTarget: activeProject.deployTarget,
+            services: activeProject.services.map((s) => ({ name: s.name, label: s.label })),
+          },
         },
         { timeout: 180000 },
       );
@@ -1381,7 +1389,10 @@ export default function OpsHub() {
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Coding Agent</p>
-                    <p className="text-[11px] text-slate-500">Kimi-powered code analysis & editing</p>
+                    <p className="text-[11px] text-slate-500">
+                      <span className="mr-1">{activeProject.icon}</span>
+                      {activeProject.name} · {activeProject.environment}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1548,16 +1559,17 @@ export default function OpsHub() {
                   </div>
                   <p className="text-sm font-medium text-slate-800">Coding Agent</p>
                   <p className="mt-2 max-w-xs text-[13px] text-slate-500">
-                    Upload files, select a workspace file, then ask for code analysis, fixes, or new features. Voice input supported.
+                    Working in <strong>{activeProject.name}</strong> ({activeProject.environment}).
+                    Ask about code, request edits, or plan features — the agent knows your project context automatically.
                   </p>
 
                   <div className="mt-5 flex flex-wrap justify-center gap-2">
                     {[
-                      { label: 'Analyze code', prompt: 'Analyze the selected file for issues and improvements.' },
-                      { label: 'Fix a bug', prompt: 'Fix a bug in the currently selected file.' },
-                      { label: 'Refactor', prompt: 'Refactor the selected file for clarity and maintainability.' },
-                      { label: 'Add feature', prompt: 'Add a feature to the selected file and explain the implementation.' },
-                      { label: 'Deploy check', prompt: 'Review the deployment configuration and suggest improvements.' },
+                      { label: 'Analyze code', prompt: `Analyze the key files in the ${activeProject.name} project for issues and improvements.` },
+                      { label: 'Fix a bug', prompt: selectedFile ? 'Fix a bug in the currently selected file.' : `Help me debug an issue in the ${activeProject.name} project.` },
+                      { label: 'Refactor', prompt: selectedFile ? 'Refactor the selected file for clarity and maintainability.' : `Suggest refactoring targets in ${activeProject.name}.` },
+                      { label: 'Add feature', prompt: `Plan a new feature for the ${activeProject.name} project and explain the implementation steps.` },
+                      { label: 'Deploy check', prompt: `Review the ${activeProject.deployTarget === 'vm' ? 'VM' : 'Cloud Run'} deployment configuration for ${activeProject.name} and suggest improvements.` },
                     ].map((action) => (
                       <button
                         key={action.label}

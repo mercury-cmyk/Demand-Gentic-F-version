@@ -103,6 +103,7 @@ import OpportunityDetailPage from "@/pages/opportunity-detail";
 import EmailSequencesPage from "@/pages/email-sequences";
 import InboxPage from "@/pages/inbox";
 const AgentReportsDashboard = lazy(() => import("@/pages/agent-reports-dashboard"));
+const FinanceProgramPage = lazy(() => import("@/pages/finance-program"));
 import LeadFormsPage from "@/pages/lead-forms";
 import LeadFormPublicPage from "@/pages/lead-form-public";
 import AIProjectCreatorPage from "@/pages/ai-project-creator";
@@ -696,6 +697,7 @@ function AuthenticatedApp() {
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
               <Route path="/admin/project-requests" component={AdminProjectRequests} />
               <Route path="/admin/todo-board" component={AdminTodoBoardPage} />
+              <Route path="/finance-program" component={FinanceProgramPage} />
               <Route path="/data-management" component={DataManagementPage} />
               <Route path="/admin/bookings" component={AdminBookingsPage} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />

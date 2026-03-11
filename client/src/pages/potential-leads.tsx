@@ -35,8 +35,9 @@ import { useToast } from '@/hooks/use-toast';
 import {
   RefreshCw, Brain, Search, ArrowLeft, Phone, Building, Clock, FileText,
   Mic, BarChart3, AlertTriangle, Target, TrendingUp, ChevronLeft, ChevronRight,
-  Sparkles, Crosshair, Zap, CheckCircle2, ShieldCheck,
+  Sparkles, Crosshair, Zap, CheckCircle2, ShieldCheck, Radar,
 } from 'lucide-react';
+import PrecisionLeadsPanel from '@/components/precision-leads-panel';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -227,6 +228,7 @@ export default function PotentialLeadsPage() {
     };
   }, []);
 
+  const [activeView, setActiveView] = useState<'standard' | 'precision'>('precision');
   const [filters, setFilters] = useState<PotentialLeadsFilters>(parseUrlParams);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -292,18 +294,18 @@ export default function PotentialLeadsPage() {
 
   // Fetch full conversation detail when selected
   const { data: selectedDetail, isLoading: detailLoading } = useQuery<UnifiedConversationDetail | null>({
-    queryKey: ['/api/qa/conversations', selectedId],
+    queryKey: ['/api/qa/conversations', selectedId, potentialLeads.length],
     queryFn: async () => {
       if (!selectedId) return null;
       const response = await apiRequest('GET', `/api/qa/conversations?id=${selectedId}&limit=1`);
       const data = await response.json();
       const conv = data.conversations?.find((c: any) => c.id === selectedId);
-      if (!conv) return null;
+      // If conversation not found in API, still try to build detail from lead data alone
       const lead = potentialLeads.find(l => l.id === selectedId);
       if (!lead) return null;
-      return adaptPotentialLeadToDetail(lead, conv);
+      return adaptPotentialLeadToDetail(lead, conv || {});
     },
-    enabled: !!selectedId,
+    enabled: !!selectedId && potentialLeads.length > 0,
   });
 
   // Analyze mutation
@@ -436,9 +438,45 @@ export default function PotentialLeadsPage() {
             </Button>
           </div>
         </div>
+
+        {/* Tab Bar */}
+        <div className="flex items-center gap-1 px-4 pb-2">
+          <Button
+            variant={activeView === 'precision' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setActiveView('precision')}
+            className={cn(
+              'gap-2',
+              activeView === 'precision' && 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700'
+            )}
+          >
+            <Radar className="h-4 w-4" />
+            Precision Engine
+            <Badge variant="outline" className={cn('text-[10px] ml-1', activeView === 'precision' ? 'border-white/40 text-white' : '')}>
+              Kimi + DeepSeek
+            </Badge>
+          </Button>
+          <Button
+            variant={activeView === 'standard' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setActiveView('standard')}
+            className="gap-2"
+          >
+            <Target className="h-4 w-4" />
+            Standard Analysis
+          </Button>
+        </div>
       </div>
 
-      {/* Main Content */}
+      {/* Precision Leads View */}
+      {activeView === 'precision' && (
+        <div className="flex-1 overflow-hidden">
+          <PrecisionLeadsPanel />
+        </div>
+      )}
+
+      {/* Standard Main Content */}
+      {activeView === 'standard' && (
       <div className="flex-1 overflow-hidden p-4 pt-3">
         <ResizablePanelGroup direction="horizontal" className="h-full rounded-xl border bg-background shadow-sm">
           {/* Left Panel - Filters + List */}
@@ -809,6 +847,7 @@ export default function PotentialLeadsPage() {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+      )}
     </div>
   );
 }

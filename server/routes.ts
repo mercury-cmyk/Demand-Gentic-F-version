@@ -67,6 +67,7 @@ import transactionalTemplatesRouter from './routes/transactional-templates';
 import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } from './routes/mercury-bridge';
 import domainManagementRouter from './routes/domain-management';
 import emailManagementRouter from './routes/email-management';
+import brevoWebhookRouter from './routes/brevo-webhook';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
 import unifiedEmailSystemRouter from './routes/unified-email-system';
@@ -134,6 +135,8 @@ import oiBatchRouter from './routes/oi-batch-routes';
 import previewStudioRouter from './routes/preview-studio';
 import clientPortalSimulationRouter from './routes/client-portal-simulation';
 import campaignPipelineRouter from './routes/campaign-pipeline-routes';
+import precisionLeadsRouter from './routes/precision-leads-routes';
+import financeProgramRouter from './routes/finance-program-routes';
 import { autoEnrollJourneyLeadFromDisposition } from './services/client-journey-automation';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
@@ -155,7 +158,10 @@ import {
   assignRoleSchema,
   uuidParamSchema,
   userIdSchema,
-  leadIntakeSchema
+  leadIntakeSchema,
+  changePasswordSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
 } from "./validation/schemas";
 import { db, pool } from "./db";
 import { normalizeName } from "./normalization";
@@ -1107,9 +1113,15 @@ export function registerRoutes(app: Express) {
 
   // ==================== USERS (Admin Only) ====================
 
-  // Get all users or find by email
+  // Get all users or find by email (admin only)
   app.get("/api/users", requireAuth, async (req, res) => {
     try {
+      // All user lookups require admin role
+      const userRoles = req.user?.roles || [req.user?.role];
+      if (!userRoles.includes('admin')) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
       const { email } = req.query;
 
       if (email) {
@@ -1120,12 +1132,6 @@ export function registerRoutes(app: Express) {
         }
         const { password, ...userWithoutPassword } = user[0];
         return res.json(userWithoutPassword);
-      }
-
-      // Admin only for listing all users
-      const userRoles = req.user?.roles || [req.user?.role]; // Support both new and legacy format
-      if (!userRoles.includes('admin')) {
-        return res.status(403).json({ message: "Forbidden" });
       }
 
       const allUsers = await storage.getUsers();
@@ -1550,18 +1556,10 @@ export function registerRoutes(app: Express) {
     });
   });
 
-  app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+  app.post("/api/auth/change-password", requireAuth, validate(changePasswordSchema), async (req, res) => {
     try {
       const userId = req.user!.userId;
       const { currentPassword, newPassword } = req.body;
-
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ message: "Current and new password required" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "New password must be at least 6 characters" });
-      }
 
       // Get user from database
       const user = await storage.getUser(userId);
@@ -1587,13 +1585,9 @@ export function registerRoutes(app: Express) {
 
   // ==================== PASSWORD RESET ====================
 
-  app.post("/api/auth/forgot-password", authLimiter, async (req, res) => {
+  app.post("/api/auth/forgot-password", authLimiter, validate(forgotPasswordSchema), async (req, res) => {
     try {
       const { email, userType } = req.body;
-
-      if (!email) {
-        return res.status(400).json({ message: "Email is required" });
-      }
 
       const type = userType === 'client' ? 'client' : 'internal';
 
@@ -1651,17 +1645,9 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.post("/api/auth/reset-password", authLimiter, async (req, res) => {
+  app.post("/api/auth/reset-password", authLimiter, validate(resetPasswordSchema), async (req, res) => {
     try {
       const { token, newPassword } = req.body;
-
-      if (!token || !newPassword) {
-        return res.status(400).json({ message: "Token and new password are required" });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Password must be at least 6 characters" });
-      }
 
       // Look up token
       const [resetToken] = await db
@@ -9860,6 +9846,9 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // Brevo webhook endpoint (no auth required - Brevo sends events directly)
+  app.use('/api/brevo/webhooks', brevoWebhookRouter);
+
   // Mailgun webhook endpoint (no auth required - verified by signature)
   app.post("/api/mailgun/webhooks", async (req, res) => {
     try {
@@ -16502,6 +16491,12 @@ Provide JSON response with:
   // ==================== CAMPAIGN-PIPELINE ORCHESTRATOR ====================
   app.use('/api/campaign-pipeline', requireAuth, campaignPipelineRouter);
 
+  // ==================== PRECISION LEADS (Kimi + DeepSeek dual-model) ====================
+  app.use(precisionLeadsRouter);
+
+  // ==================== FINANCE PROGRAM MANAGEMENT ====================
+  app.use('/api/finance-programs', requireAuth, financeProgramRouter);
+
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);
   app.use('/api/campaigns', requireAuth, campaignEmailRouter);
@@ -16718,6 +16713,99 @@ Provide JSON response with:
   });
 
   // ==================== ADMIN DATA MANAGEMENT ====================
+
+  // ==================== ADMIN BREVO WEBHOOK MANAGEMENT ====================
+
+  // Get current Brevo webhook configuration
+  app.get("/api/admin/brevo/webhooks", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      // Brevo webhooks are configured in Brevo dashboard or via API
+      // Check if env-based Brevo key is available or if there's a DB provider
+      const providers = await import('./services/campaign-email-provider-service');
+      const allProviders = await providers.listCampaignEmailProviders();
+      const brevoProvider = allProviders.find(p => p.providerKey === 'brevo');
+
+      const baseUrl = process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000';
+      const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/brevo/webhooks`;
+
+      res.json({
+        providerConfigured: !!brevoProvider,
+        providerId: brevoProvider?.id || null,
+        providerName: brevoProvider?.name || null,
+        webhookUrl,
+        instructions: 'Configure this webhook URL in your Brevo account under Settings > Webhooks. Enable all transactional email events: delivered, opened, click, hard_bounce, soft_bounce, spam, unsubscribed, blocked, invalid.',
+      });
+    } catch (error: any) {
+      console.error("[Brevo Admin] Failed to fetch webhook config:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch Brevo webhook configuration" });
+    }
+  });
+
+  // Register Brevo webhooks via Brevo API
+  app.post("/api/admin/brevo/register-webhooks", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const providers = await import('./services/campaign-email-provider-service');
+      const allProviders = await providers.listCampaignEmailProviders();
+      const brevoProvider = allProviders.find(p => p.providerKey === 'brevo');
+
+      if (!brevoProvider?.apiKeyConfigured) {
+        return res.status(400).json({ message: "No Brevo provider with API key configured. Add a Brevo provider in Email Management first." });
+      }
+
+      // Resolve the full provider to get the API key
+      const fullProvider = await providers.getCampaignEmailProvider(brevoProvider.id);
+      if (!fullProvider?.apiKey) {
+        return res.status(400).json({ message: "Brevo API key not found." });
+      }
+
+      const baseUrl = process.env.APP_BASE_URL || process.env.BASE_URL || 'http://localhost:5000';
+      const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/brevo/webhooks`;
+      const apiBase = process.env.BREVO_API_BASE || 'https://api.brevo.com/v3';
+
+      // Brevo uses a single webhook URL for all transactional events
+      const brevoEventTypes = [
+        'delivered', 'hardBounce', 'softBounce', 'blocked', 'spam',
+        'invalid', 'deferred', 'click', 'opened', 'uniqueOpened', 'unsubscribed',
+      ];
+
+      const response = await fetch(`${apiBase}/webhooks`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'api-key': fullProvider.apiKey,
+        },
+        body: JSON.stringify({
+          url: webhookUrl,
+          description: 'DemandGentic CRM email event tracking',
+          events: brevoEventTypes,
+          type: 'transactional',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({
+          message: `Brevo API error: ${errorText}`,
+          webhookUrl,
+        });
+      }
+
+      const result = await response.json();
+      console.log(`[Brevo Admin] Registered webhook: ${webhookUrl}`, result);
+
+      res.json({
+        success: true,
+        webhookUrl,
+        webhookId: (result as any).id,
+        events: brevoEventTypes,
+        message: `Brevo webhook registered successfully at ${webhookUrl}`,
+      });
+    } catch (error: any) {
+      console.error("[Brevo Admin] Failed to register webhooks:", error);
+      res.status(500).json({ message: error.message || "Failed to register Brevo webhooks" });
+    }
+  });
 
   // Delete verification campaigns
   app.delete("/api/admin/data/verification_campaigns", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {

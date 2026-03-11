@@ -31,6 +31,7 @@ import {
   Loader2,
   History,
   AlertTriangle,
+  ExternalLink,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -245,15 +246,33 @@ export function UnifiedDetailPanel({
                 </div>
               )}
 
-              {/* Recording access deactivated */}
+              {/* Recording */}
               <div className="rounded-lg border bg-background/70 p-3">
                 <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                  <Phone className="h-4 w-4" />
+                  <Mic className="h-4 w-4" />
                   Recording
                 </h3>
-                <p className="text-sm text-muted-foreground">
-                  Call recording playback is deactivated and removed from dashboard access.
-                </p>
+                {conversation.recording.url ? (
+                  <div className="space-y-2">
+                    <audio controls className="w-full h-8" preload="metadata">
+                      <source src={conversation.recording.url} />
+                      Your browser does not support audio playback.
+                    </audio>
+                    <a
+                      href={conversation.recording.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Open Recording URL
+                    </a>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {conversation.recording.available ? 'Recording stored but URL not available' : 'No recording available for this call'}
+                  </p>
+                )}
               </div>
 
               {/* Quick Summary */}
@@ -390,6 +409,12 @@ function HeaderSection({
               </>
             )}
           </div>
+          {conversation.contact.phone && (
+            <div className="flex items-center gap-1.5 mt-1.5 bg-primary/10 text-primary font-medium px-2.5 py-1 rounded-md text-sm w-fit">
+              <Phone className="h-3.5 w-3.5" />
+              {conversation.contact.phone}
+            </div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1">
           <Badge variant={isTest ? 'outline' : 'default'} className={isTest ? 'bg-yellow-50 text-yellow-700 border-yellow-300' : ''}>

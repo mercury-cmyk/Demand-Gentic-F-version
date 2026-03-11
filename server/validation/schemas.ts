@@ -61,6 +61,22 @@ export const assignRoleSchema = z.object({
   role: z.enum(['admin', 'agent', 'quality_analyst', 'content_creator', 'campaign_manager', 'data_ops', 'voice_trainer']),
 });
 
+// Password change/reset schemas
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email('Valid email is required'),
+  userType: z.enum(['internal', 'client']).optional(),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Reset token is required').max(128),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
 // Contact schemas
 export const createContactSchema = z.object({
   accountId: z.string().uuid().optional(),

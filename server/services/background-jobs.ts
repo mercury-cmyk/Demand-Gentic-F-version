@@ -70,6 +70,10 @@ let isBatchTranscriptionSweepRunning = false;
 let isAnalysisSweepRunning = false;
 let isAnalysisRecoveryRunning = false;
 let isNoCallLeftBehindRunning = false;
+let isPrecisionLeadAutopilotRunning = false;
+let precisionLeadAutopilotInterval: NodeJS.Timeout | null = null;
+let isQualificationBridgeRunning = false;
+let qualificationBridgeInterval: NodeJS.Timeout | null = null;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
@@ -139,6 +143,10 @@ async function sweepExpiredLocks() {
 const ENABLE_EMAIL_VALIDATION = process.env.ENABLE_EMAIL_VALIDATION === 'true'; // DISABLED by default
 const ENABLE_AI_ENRICHMENT = process.env.ENABLE_AI_ENRICHMENT === 'true'; // DISABLED by default
 const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true'; // DISABLED by default
+const ENABLE_PRECISION_LEAD_AUTOPILOT = process.env.ENABLE_PRECISION_LEAD_AUTOPILOT !== 'false'; // ENABLED by default
+const PRECISION_LEAD_AUTOPILOT_INTERVAL = parseInt(process.env.PRECISION_LEAD_AUTOPILOT_INTERVAL_MS || '600000', 10); // Every 10 min
+const ENABLE_QUALIFICATION_BRIDGE = process.env.ENABLE_QUALIFICATION_BRIDGE !== 'false'; // ENABLED by default
+const QUALIFICATION_BRIDGE_INTERVAL = parseInt(process.env.QUALIFICATION_BRIDGE_INTERVAL_MS || '300000', 10); // Every 5 min
 
 /**
  * Start all background jobs
@@ -577,6 +585,59 @@ export function startBackgroundJobs() {
     }, MERCURY_OUTBOX_INTERVAL);
   }
 
+  // Precision Lead Autopilot — Dual-model (Kimi + DeepSeek) consensus analysis
+  if (ENABLE_PRECISION_LEAD_AUTOPILOT) {
+    console.log(`[Background Jobs]   ✓ Precision Lead Autopilot: ENABLED (every ${PRECISION_LEAD_AUTOPILOT_INTERVAL / 60000}min)`);
+    precisionLeadAutopilotInterval = setInterval(async () => {
+      if (isPrecisionLeadAutopilotRunning) return;
+      isPrecisionLeadAutopilotRunning = true;
+      try {
+        const { runPrecisionAutopilot } = await import('./ai-precision-lead-analyzer');
+        const result = await withJobTimeout('Precision Lead Autopilot', () =>
+          runPrecisionAutopilot({ batchSize: 15, maxDurationMs: 4 * 60 * 1000 })
+        );
+        if (result.processed > 0) {
+          console.log(
+            `[Background Jobs] Precision Lead Autopilot: ${result.processed} analyzed — ` +
+            `high=${result.highPotential}, likely=${result.likelyPotential}, review=${result.review}, ` +
+            `not=${result.notPotential}, errors=${result.errors}`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Precision Lead Autopilot error:', error);
+      } finally {
+        isPrecisionLeadAutopilotRunning = false;
+      }
+    }, PRECISION_LEAD_AUTOPILOT_INTERVAL);
+  }
+
+  // Qualification Bridge — Auto-creates leads from precision analyses + LQA signals
+  if (ENABLE_QUALIFICATION_BRIDGE) {
+    console.log(`[Background Jobs]   ✓ Qualification Bridge: ENABLED (every ${QUALIFICATION_BRIDGE_INTERVAL / 60000}min)`);
+    qualificationBridgeInterval = setInterval(async () => {
+      if (isQualificationBridgeRunning) return;
+      isQualificationBridgeRunning = true;
+      try {
+        const { runQualificationBridge } = await import('./precision-lead-qualification-bridge');
+        const result = await withJobTimeout('Qualification Bridge', () =>
+          runQualificationBridge({ batchSize: 30, maxDurationMs: 3 * 60 * 1000 })
+        );
+        if (result.processed > 0) {
+          console.log(
+            `[Background Jobs] Qualification Bridge: ${result.processed} evaluated — ` +
+            `qualified=${result.qualified}, review=${result.underReview}, ` +
+            `skipped=${result.skipped}, existing=${result.alreadyExist}, errors=${result.errors} ` +
+            `(learned from ${result.learnedCampaigns} campaigns)`
+          );
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Qualification Bridge error:', error);
+      } finally {
+        isQualificationBridgeRunning = false;
+      }
+    }, QUALIFICATION_BRIDGE_INTERVAL);
+  }
+
   // Email Sequence Processor - Schedule emails ready to send
   setInterval(async () => {
     try {
@@ -650,6 +711,16 @@ export function stopBackgroundJobs() {
   if (analysisRecoveryInterval) {
     clearInterval(analysisRecoveryInterval);
     analysisRecoveryInterval = null;
+  }
+
+  if (precisionLeadAutopilotInterval) {
+    clearInterval(precisionLeadAutopilotInterval);
+    precisionLeadAutopilotInterval = null;
+  }
+
+  if (qualificationBridgeInterval) {
+    clearInterval(qualificationBridgeInterval);
+    qualificationBridgeInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');
