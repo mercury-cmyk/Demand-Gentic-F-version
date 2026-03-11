@@ -442,18 +442,18 @@ router.post('/:agentType/recommendations/:id/apply', (req: Request, res: Respons
 
     const approvedBy = getUserId(req);
 
-    // Auto-approve if the recommendation requires approval and hasn't been approved yet.
-    // The user clicking "Apply" in the dashboard is the explicit approval action.
-    try {
-      unifiedAgentRegistry.applyAgentRecommendation(agentType, req.params.id, approvedBy);
-    } catch (applyErr: any) {
-      if (applyErr?.message?.includes('requires explicit approval before apply')) {
-        unifiedAgentRegistry.approveAgentRecommendation(agentType, req.params.id, approvedBy, 'Auto-approved via Apply action');
-        unifiedAgentRegistry.applyAgentRecommendation(agentType, req.params.id, approvedBy);
-      } else {
-        throw applyErr;
-      }
+    // Pre-approve governance-gated recommendations before applying.
+    // The user clicking "Apply" in the dashboard IS the explicit approval action.
+    const recs = unifiedAgentRegistry.getAgentRecommendations(agentType);
+    const recView = recs.find((r: any) => r.id === req.params.id);
+    if (recView?.governance?.requiresExplicitApproval && recView.status !== 'approved') {
+      unifiedAgentRegistry.approveAgentRecommendation(
+        agentType, req.params.id, approvedBy,
+        'Auto-approved via Apply action'
+      );
     }
+
+    unifiedAgentRegistry.applyAgentRecommendation(agentType, req.params.id, approvedBy);
 
     res.json({
       success: true,

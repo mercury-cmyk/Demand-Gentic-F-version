@@ -122,7 +122,16 @@ async function postJson(url: string, body?: any) {
     credentials: "include",
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const errorText = await res.text();
+    try {
+      const errorJson = JSON.parse(errorText);
+      throw new Error(errorJson.message || errorJson.error || `HTTP ${res.status}: ${errorText}`);
+    } catch (parseErr) {
+      if (parseErr instanceof SyntaxError) throw new Error(`HTTP ${res.status}: ${errorText}`);
+      throw parseErr;
+    }
+  }
   return res.json();
 }
 
@@ -1149,6 +1158,12 @@ function RecommendationsTab({ agentType }: { agentType: string }) {
                     </div>
                   )}
 
+                  {rec.governance?.requiresExplicitApproval && (
+                    <div className="text-xs text-amber-400/80 bg-amber-500/10 rounded px-2 py-1">
+                      Requires approval: {rec.governance.approvalReasons?.join(', ')}
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
@@ -1160,7 +1175,7 @@ function RecommendationsTab({ agentType }: { agentType: string }) {
                       ) : (
                         <CheckCircle2 className="h-3 w-3 mr-1" />
                       )}
-                      Apply
+                      {rec.governance?.requiresExplicitApproval ? 'Approve & Apply' : 'Apply'}
                     </Button>
 
                     {rejectingId === rec.id ? (
