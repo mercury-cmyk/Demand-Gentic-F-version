@@ -9,20 +9,24 @@ export interface TrackingOptions {
 }
 
 export class EmailTrackingService {
-  private trackingBaseUrl: string;
-  private secret: string;
+  private _fallbackSecret: string | null = null;
 
-  constructor() {
-    this.trackingBaseUrl = process.env.APP_BASE_URL
+  private get trackingBaseUrl(): string {
+    return process.env.APP_BASE_URL
       || (process.env.REPLIT_DEPLOYMENT === '1' ? 'https://demandgentic.ai' : null)
       || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5000');
-    
-    // Use environment secret or generate one (should be set in production)
-    this.secret = process.env.EMAIL_TRACKING_SECRET || crypto.randomBytes(32).toString('hex');
-    
-    if (!process.env.EMAIL_TRACKING_SECRET) {
+  }
+
+  private get secret(): string {
+    if (process.env.EMAIL_TRACKING_SECRET) {
+      return process.env.EMAIL_TRACKING_SECRET;
+    }
+    // Generate a fallback only once (will break on restart, but consistent within a process)
+    if (!this._fallbackSecret) {
+      this._fallbackSecret = crypto.randomBytes(32).toString('hex');
       console.warn('[EMAIL-TRACKING] WARNING: No EMAIL_TRACKING_SECRET set, using random secret (will break on restart)');
     }
+    return this._fallbackSecret;
   }
 
   /**
