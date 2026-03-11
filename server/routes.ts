@@ -134,6 +134,7 @@ import oiBatchRouter from './routes/oi-batch-routes';
 import previewStudioRouter from './routes/preview-studio';
 import clientPortalSimulationRouter from './routes/client-portal-simulation';
 import campaignPipelineRouter from './routes/campaign-pipeline-routes';
+import { autoEnrollJourneyLeadFromDisposition } from './services/client-journey-automation';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
@@ -16513,7 +16514,7 @@ Provide JSON response with:
   app.use(verificationUploadRouter);
   app.use(verificationUploadJobsRouter);
   app.use(verificationEnrichmentRouter);
-  app.use('/api', requireAuth, enrichmentJobsRouter);
+  app.use('/api', enrichmentJobsRouter);
   app.use(verificationJobRecoveryRouter);
   app.use(verificationAccountCapsRouter);
   app.use(verificationPriorityConfigRouter);
@@ -18381,9 +18382,14 @@ Provide JSON response with:
         const { confidence: derivedConfidence, scoringSource } = getDerivedConfidence(session);
         const derivedOutcome = getDerivedOutcome(session);
 
-        // Filter: transcript quality
-        if (transcriptQuality && transcriptQuality !== 'all') {
+        // Filter: transcript quality — default to two-sided for higher accuracy
+        if (transcriptQuality === 'all') {
+          // show all qualities when explicitly requested
+        } else if (transcriptQuality && transcriptQuality !== 'all') {
           if (transcriptQualityValue !== transcriptQuality) continue;
+        } else {
+          // Default: only show two-sided transcripts (real conversations)
+          if (transcriptQualityValue !== 'two-sided') continue;
         }
 
         // Filter: minimum confidence
