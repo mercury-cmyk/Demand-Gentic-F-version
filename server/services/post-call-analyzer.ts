@@ -1281,6 +1281,34 @@ export async function runPostCallAnalysis(
     }
 
     result.success = true;
+
+    // 12. Feed data into the Voice Agent Learning Pipeline (non-blocking)
+    if (result.qualityAnalysis) {
+      try {
+        const { learningPipeline } = await import('./agents/unified/learning-pipeline');
+        const qa = result.qualityAnalysis;
+        learningPipeline.recordCompletedCall({
+          overallQualityScore: qa.overallScore,
+          engagementScore: qa.qualityDimensions?.engagement ?? null,
+          objectionHandlingScore: qa.qualityDimensions?.objectionHandling ?? null,
+          qualificationScore: qa.qualityDimensions?.qualification ?? null,
+          closingScore: qa.qualityDimensions?.closing ?? null,
+          flowComplianceScore: qa.flowCompliance?.score ?? null,
+          campaignAlignmentScore: qa.campaignAlignment?.objectiveAdherence ?? null,
+          sentiment: qa.learningSignals?.sentiment ?? null,
+          engagementLevel: qa.learningSignals?.engagementLevel ?? null,
+          dispositionAccurate: qa.dispositionReview?.isAccurate ?? null,
+          assignedDisposition: qa.dispositionReview?.assignedDisposition ?? null,
+          issues: qa.issues as any[] ?? [],
+          recommendations: qa.recommendations as any[] ?? [],
+        }).catch((lpErr: any) => {
+          console.error(`${LOG_PREFIX} Learning pipeline ingestion failed (non-blocking): ${lpErr.message}`);
+        });
+      } catch (lpImportErr: any) {
+        // Learning pipeline import failure is non-blocking
+      }
+    }
+
     const elapsedMs = Date.now() - startTime;
     console.log(`${LOG_PREFIX} ✅ Post-call analysis complete for ${callSessionId} in ${elapsedMs}ms — ${result.metrics.totalTurns} turns, quality=${result.qualityAnalysis?.overallScore ?? "N/A"}, campaign alignment=${result.campaignOutcome?.alignmentScore ?? "N/A"}`);
     return result;

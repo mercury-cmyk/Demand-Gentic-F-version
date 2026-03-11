@@ -651,6 +651,51 @@ router.post('/:agentType/learning-pipeline/analyze', async (req: Request, res: R
   }
 });
 
+/** POST /api/unified-agents/:agentType/learning-pipeline/collect-and-analyze
+ * Auto-collect data from recent call quality records and run full analysis pipeline.
+ * This is the "Run Full Analysis" action that collects real data from the database.
+ */
+router.post('/:agentType/learning-pipeline/collect-and-analyze', async (req: Request, res: Response) => {
+  try {
+    const agentType = validateAgentType(req, res);
+    if (!agentType) return;
+    if (agentType !== 'voice') {
+      return res.status(400).json({ error: 'Auto data collection is currently only available for the voice agent' });
+    }
+
+    const result = await learningPipeline.collectAndAnalyzeVoiceData();
+
+    const state = learningPipeline.getPipelineState(agentType);
+    const recs = learningPipeline.getRecommendations(agentType);
+
+    res.json({
+      success: true,
+      findings: result.findings,
+      recommendations: result.recommendations,
+      pipelineState: state ? {
+        status: state.status,
+        lastRun: state.lastRun,
+        collectors: state.activeCollectors.map(c => ({
+          sourceType: c.sourceType,
+          dataPoints: c.dataPointsCollected,
+          lastCollected: c.lastCollectedAt,
+        })),
+        stats: state.stats,
+      } : null,
+      pendingRecommendations: recs.filter(r => r.status === 'pending').map(r => ({
+        id: r.id,
+        title: r.title,
+        category: r.category,
+        priorityScore: r.priorityScore,
+        targetSection: r.targetPromptSectionId,
+        impact: r.impact,
+      })),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== ASSEMBLED PROMPT ====================
 
 /** GET /api/unified-agents/:agentType/assembled-prompt — Get the full assembled prompt (sections only) */

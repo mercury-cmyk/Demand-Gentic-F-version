@@ -43,6 +43,7 @@ export {
 // ==================== INITIALIZATION ====================
 
 import { unifiedAgentRegistry } from './unified-agent-registry';
+import { learningPipeline } from './learning-pipeline';
 
 /**
  * Initialize the unified agent architecture.
@@ -51,7 +52,8 @@ import { unifiedAgentRegistry } from './unified-agent-registry';
 export function initializeUnifiedAgentArchitecture(): void {
   console.log('[UnifiedAgentArchitecture] Initializing...');
   unifiedAgentRegistry.initialize();
-  console.log('[UnifiedAgentArchitecture] Ready — One Agent Per Type. Fully Self-Contained.');
+  learningPipeline.startScheduler();
+  console.log('[UnifiedAgentArchitecture] Ready — One Agent Per Type. Fully Self-Contained. Learning Pipeline Active.');
 }
 
 /**
