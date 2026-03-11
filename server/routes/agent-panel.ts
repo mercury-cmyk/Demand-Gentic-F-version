@@ -29,6 +29,7 @@ import {
   type ResearchDomain,
 } from '../services/ai-deep-research';
 import { kimiChat, isKimiConfigured, type KimiMessage } from '../services/kimi-client';
+import { buildAgentXInstructionPrompt } from '../lib/agentx-instructions';
 
 const router = Router();
 
@@ -190,6 +191,16 @@ function buildSystemPrompt(prompts: AgentPrompt[]): string {
 }
 
 /**
+ * Build system prompt with AgentX operating instructions injected.
+ * Combines: role-based DB prompts + context-aware operating instructions.
+ */
+function buildSystemPromptWithInstructions(prompts: AgentPrompt[], userMessage: string): string {
+  const basePrompt = buildSystemPrompt(prompts);
+  const instructions = buildAgentXInstructionPrompt(userMessage);
+  return basePrompt + '\n' + instructions;
+}
+
+/**
  * Get allowed tools from prompts
  */
 function getAllowedTools(prompts: AgentPrompt[]): string[] {
@@ -259,9 +270,9 @@ router.post('/chat', async (req: Request, res: Response) => {
     const userRole = req.user!.role || 'agent';
     const isClientPortal = req.query.clientPortal === 'true';
 
-    // Get prompts and build system prompt
+    // Get prompts and build system prompt with context-aware instructions
     const prompts = await getPromptsForUser(userId, userRole, isClientPortal);
-    const systemPrompt = buildSystemPrompt(prompts);
+    const systemPrompt = buildSystemPromptWithInstructions(prompts, data.message);
     const allowedTools = getAllowedTools(prompts);
 
     // Get or create conversation
@@ -807,5 +818,25 @@ function detectResearchDomain(message: string): ResearchDomain {
 
   return 'general';
 }
+
+// ==================== AgentX Instructions & Model Catalog ====================
+
+router.get('/instructions', requireDualAuth, async (_req: Request, res: Response) => {
+  try {
+    const { getModelCatalog, getAgentXInstructions, MODEL_SELECTION_STRATEGY } = await import('../lib/agentx-instructions');
+    res.json({
+      modelCatalog: getModelCatalog(),
+      modelStrategy: MODEL_SELECTION_STRATEGY,
+      instructions: {
+        coding: getAgentXInstructions('coding'),
+        security: getAgentXInstructions('security'),
+        ui: getAgentXInstructions('ui'),
+      },
+    });
+  } catch (error) {
+    console.error('[Agent Panel] Error getting instructions:', error);
+    res.status(500).json({ error: 'Failed to get instructions' });
+  }
+});
 
 export default router;

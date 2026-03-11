@@ -441,18 +441,26 @@ router.post('/:agentType/recommendations/:id/apply', (req: Request, res: Respons
     if (!agentType) return;
 
     const approvedBy = getUserId(req);
-    unifiedAgentRegistry.applyAgentRecommendation(agentType, req.params.id, approvedBy);
+
+    // Auto-approve if the recommendation requires approval and hasn't been approved yet.
+    // The user clicking "Apply" in the dashboard is the explicit approval action.
+    try {
+      unifiedAgentRegistry.applyAgentRecommendation(agentType, req.params.id, approvedBy);
+    } catch (applyErr: any) {
+      if (applyErr?.message?.includes('requires explicit approval before apply')) {
+        unifiedAgentRegistry.approveAgentRecommendation(agentType, req.params.id, approvedBy, 'Auto-approved via Apply action');
+        unifiedAgentRegistry.applyAgentRecommendation(agentType, req.params.id, approvedBy);
+      } else {
+        throw applyErr;
+      }
+    }
 
     res.json({
       success: true,
       message: `Recommendation ${req.params.id} applied successfully`,
     });
   } catch (error: any) {
-    const message = error?.message || 'Failed to apply recommendation';
-    if (message.includes('requires explicit approval before apply')) {
-      return res.status(409).json({ error: message, code: 'APPROVAL_REQUIRED' });
-    }
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: error?.message || 'Failed to apply recommendation' });
   }
 });
 

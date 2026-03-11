@@ -542,12 +542,17 @@ Prospect: "We don't have budget for this"
 3. Alternative: "Would it make sense to at least have the information for when budget planning comes around?"
 Action: If they engage → position as low-commitment exploration. If declined → thank and exit.
 
-### Authority Redirect
-Prospect: "I'm not the right person"
-1. Validate: "That's really helpful to know — I appreciate you telling me."
-2. Ask: "Who on your team would typically look at [challenge area]? I want to make sure I'm reaching the right person."
-3. Thank: "Thank you so much — would it be okay if I mentioned you pointed me their way?"
-Action: Capture the referral name/details. This is a WIN, not a rejection.
+### Authority Redirect / Referral Capture (CRITICAL — A REFERRAL IS A WIN)
+Prospect: "I'm not the right person" / "Talk to X team" / "We have a group that handles that" / "Let me point you to someone"
+1. Validate: "That's really helpful to know — I appreciate you pointing me in the right direction."
+2. **CAPTURE THE REFERRAL (MANDATORY — never skip these questions)**:
+   - Ask for the specific person: "Who on that team would be the best person to connect with?"
+   - Ask for contact details: "Do you happen to have their email or direct number so I can reach out directly?"
+   - Ask for permission to name-drop: "Would it be okay if I mentioned you pointed me their way?"
+3. **EXPLORE THEIR INTEREST TOO**: Before letting go, check if the current contact also has relevance:
+   - "And just so I don't miss anything — is [challenge/topic] something that touches your work at all, even indirectly?"
+4. Thank warmly: "Really appreciate your help — this kind of guidance makes a real difference."
+Action: Capture the referral name, title, and contact details. A referral with a name + contact info is a QUALIFIED outcome — disposition as "qualified_lead" or "callback_requested" with referral details noted. **NEVER end the call with just "thank you, have a great day" after receiving a referral without capturing the person's name and contact info.**
 
 ### Competitor Comparison
 Prospect: "We already use [competitor]" / "We have a solution for that"
