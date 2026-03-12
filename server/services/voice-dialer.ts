@@ -210,7 +210,7 @@ const HARD_MAX_CALL_DURATION_SECONDS = 240;
 // resolution, TCP handshake, TLS negotiation, OAuth token fetch, and the
 // WebSocket upgrade — all of which compete for the event loop. Opening 10+
 // connections at once (e.g. after a container restart) can freeze the process.
-const MAX_CONCURRENT_GEMINI_CONNECTIONS = 3;
+const MAX_CONCURRENT_GEMINI_CONNECTIONS = 10;
 let _activeGeminiConnections = 0;
 const _geminiConnectionQueue: Array<{ resolve: () => void }> = [];
 
