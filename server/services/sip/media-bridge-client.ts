@@ -38,6 +38,10 @@ export async function createMediaBridge(params: {
   firstMessage?: string;
   context?: any;
   maxDurationSeconds?: number;
+  provider?: 'gemini' | 'openai';
+  openaiApiKey?: string;
+  openaiModel?: string;
+  openaiVoice?: string;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const url = `${getBaseUrl()}/bridge`;

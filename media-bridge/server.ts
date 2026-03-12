@@ -26,6 +26,8 @@ const GCP_LOCATION = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 const CLOUD_RUN_API = process.env.CLOUD_RUN_API_URL || '';
 const BRIDGE_SECRET = process.env.MEDIA_BRIDGE_SECRET || 'bridge-secret';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY || '';
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-realtime-preview-2024-12-17';
 
 // Google Auth for Vertex AI
 const googleAuth = new GoogleAuth({
@@ -199,12 +201,21 @@ interface BridgeSession {
   rtpTimestamp: number;
   rtpSsrc: number;
 
-  // Gemini
+  // Provider selection
+  provider: 'gemini' | 'openai';
+  openaiApiKey?: string;
+  openaiModel?: string;
+  openaiVoice?: string;
+
+  // AI WebSocket (Gemini or OpenAI)
   geminiWs: WebSocket | null;
+  openaiWs: WebSocket | null;
   setupComplete: boolean;
   callAnswered: boolean;
   openingMessageSent: boolean;
   openingFallbackTimer: NodeJS.Timeout | null;
+  // OpenAI: buffer incoming audio until session is ready
+  openaiAudioBuffer: Buffer[];
 
   // Context
   systemPrompt: string;
@@ -263,6 +274,10 @@ async function createSession(params: {
   firstMessage?: string;
   context?: any;
   maxDurationSeconds?: number;
+  provider?: 'gemini' | 'openai';
+  openaiApiKey?: string;
+  openaiModel?: string;
+  openaiVoice?: string;
 }): Promise<{ success: boolean; error?: string }> {
   if (sessions.has(params.callId)) {
     return { success: false, error: 'Session already exists' };
@@ -280,7 +295,13 @@ async function createSession(params: {
     rtpTimestamp: Math.floor(Math.random() * 0xffffffff),
     rtpSsrc: Math.floor(Math.random() * 0xffffffff),
 
+    provider: params.provider || 'gemini',
+    openaiApiKey: params.openaiApiKey || OPENAI_API_KEY,
+    openaiModel: params.openaiModel || OPENAI_REALTIME_MODEL,
+    openaiVoice: params.openaiVoice || 'shimmer',
+
     geminiWs: null,
+    openaiWs: null,
     setupComplete: false,
     // The SIP dialer creates the media bridge only after the outbound call is answered.
     // Waiting for inbound RTP here creates a deadlock on endpoints that do not send
@@ -288,6 +309,7 @@ async function createSession(params: {
     callAnswered: true,
     openingMessageSent: false,
     openingFallbackTimer: null,
+    openaiAudioBuffer: [],
 
     systemPrompt: params.systemPrompt,
     voiceName: params.voiceName || 'Puck',
@@ -331,12 +353,16 @@ async function createSession(params: {
     return { success: false, error: `RTP bind failed: ${err.message}` };
   }
 
-  // Connect to Gemini
+  // Connect to AI provider
   try {
-    await connectToGemini(session);
+    if (session.provider === 'openai') {
+      await connectToOpenAI(session);
+    } else {
+      await connectToGemini(session);
+    }
   } catch (err: any) {
     destroySession(params.callId);
-    return { success: false, error: `Gemini connection failed: ${err.message}` };
+    return { success: false, error: `${session.provider} connection failed: ${err.message}` };
   }
 
   // Max duration timer (default 5 min)
@@ -391,6 +417,10 @@ function destroySession(callId: string): void {
   if (session.geminiWs) {
     try { session.geminiWs.close(); } catch (_) {}
     session.geminiWs = null;
+  }
+  if (session.openaiWs) {
+    try { session.openaiWs.close(); } catch (_) {}
+    session.openaiWs = null;
   }
 
   sessions.delete(callId);
@@ -484,15 +514,29 @@ function handleIncomingRtp(session: BridgeSession, buf: Buffer): void {
     const pcm16k = g711ToPcm16k(g711Payload, session.g711Format);
     if (pcm16k.length === 0 || pcm16k.length % 2 !== 0) return;
 
-    const audioMsg = {
-      realtimeInput: {
-        mediaChunks: [{
-          data: pcm16k.toString('base64'),
-          mimeType: 'audio/pcm;rate=16000',
-        }],
-      },
-    };
-    session.geminiWs.send(JSON.stringify(audioMsg));
+    if (session.provider === 'openai') {
+      // OpenAI Realtime: buffer if not ready yet, else send input_audio_buffer.append
+      if (!session.setupComplete) {
+        session.openaiAudioBuffer.push(pcm16k);
+        return;
+      }
+      if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) return;
+      session.openaiWs.send(JSON.stringify({
+        type: 'input_audio_buffer.append',
+        audio: pcm16k.toString('base64'),
+      }));
+    } else {
+      // Gemini
+      if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN || !session.setupComplete) return;
+      session.geminiWs.send(JSON.stringify({
+        realtimeInput: {
+          mediaChunks: [{
+            data: pcm16k.toString('base64'),
+            mimeType: 'audio/pcm;rate=16000',
+          }],
+        },
+      }));
+    }
   } catch (err) {
     // Don't spam logs for every packet
     if (session.packetsReceived % 500 === 0) {
@@ -613,19 +657,26 @@ function detectIdentityConfirmation(text: string, expectedName?: string): boolea
 }
 
 /**
- * Inject a text message to Gemini via clientContent (Vertex AI camelCase).
+ * Inject a text message to the active AI provider.
  * Used for identity lock, state reinforcement, and other mid-call guidance.
  */
 function injectTextMessage(session: BridgeSession, text: string): void {
-  if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN) return;
-
-  const msg = {
-    clientContent: {
-      turns: [{ role: 'user', parts: [{ text }] }],
-      turnComplete: true,
-    },
-  };
-  session.geminiWs.send(JSON.stringify(msg));
+  if (session.provider === 'openai') {
+    if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) return;
+    session.openaiWs.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+    }));
+    session.openaiWs.send(JSON.stringify({ type: 'response.create' }));
+  } else {
+    if (!session.geminiWs || session.geminiWs.readyState !== WebSocket.OPEN) return;
+    session.geminiWs.send(JSON.stringify({
+      clientContent: {
+        turns: [{ role: 'user', parts: [{ text }] }],
+        turnComplete: true,
+      },
+    }));
+  }
 }
 
 /**
@@ -960,6 +1011,242 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
   });
 }
 
+// ==================== OPENAI REALTIME CONNECTION ====================
+
+/** PCM 24kHz → G.711 8kHz reuse (OpenAI outputs PCM 24kHz, same as Gemini) */
+async function connectToOpenAI(session: BridgeSession): Promise<void> {
+  const apiKey = session.openaiApiKey || OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY not set');
+
+  const model = session.openaiModel || OPENAI_REALTIME_MODEL;
+  const wsUrl = `wss://api.openai.com/v1/realtime?model=${model}`;
+
+  log(`Connecting to OpenAI Realtime for ${session.callId}: model=${model}`);
+
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'OpenAI-Beta': 'realtime=v1',
+      },
+    });
+    session.openaiWs = ws;
+
+    const timeout = setTimeout(() => {
+      if (!session.setupComplete) {
+        ws.close();
+        reject(new Error('OpenAI Realtime connection timeout'));
+      }
+    }, 15000);
+
+    ws.on('open', () => {
+      log(`OpenAI Realtime WebSocket open for ${session.callId}`);
+
+      // Send session.update to configure the session
+      const sessionUpdate = {
+        type: 'session.update',
+        session: {
+          modalities: ['text', 'audio'],
+          instructions: session.systemPrompt,
+          voice: session.openaiVoice || 'shimmer',
+          input_audio_format: 'pcm16',
+          output_audio_format: 'pcm16',
+          input_audio_transcription: { model: 'whisper-1' },
+          turn_detection: {
+            type: 'server_vad',
+            threshold: 0.5,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 500,
+          },
+          tools: [
+            {
+              type: 'function',
+              name: 'submit_disposition',
+              description: `Submit the final call outcome ONLY after completing ALL required call flow stages. CRITICAL RULES:
+- You MUST complete every required stage before calling this.
+- For "qualified_lead": confirm all next-step details AND say a professional goodbye BEFORE calling this.
+- NEVER call submit_disposition and end_call in the same turn.
+- Only call this ONCE per call.`,
+              parameters: {
+                type: 'object',
+                properties: {
+                  disposition: {
+                    type: 'string',
+                    enum: ['qualified_lead', 'not_interested', 'callback_requested', 'voicemail', 'no_answer', 'do_not_call', 'wrong_number'],
+                    description: 'The final call outcome',
+                  },
+                  notes: { type: 'string', description: 'Brief notes about the call outcome' },
+                  callbackDateTime: { type: 'string', description: 'ISO datetime for callback if disposition is callback_requested' },
+                  emailAddress: { type: 'string', description: 'Email address confirmed during call' },
+                },
+                required: ['disposition'],
+              },
+            },
+            {
+              type: 'function',
+              name: 'end_call',
+              description: 'End the call after completing all required stages and saying goodbye.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  reason: { type: 'string', description: 'Reason for ending' },
+                },
+                required: ['reason'],
+              },
+            },
+          ],
+          tool_choice: 'auto',
+        },
+      };
+      ws.send(JSON.stringify(sessionUpdate));
+      log(`OpenAI session.update sent for ${session.callId}`);
+    });
+
+    ws.on('message', (data: Buffer) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        const type = msg.type;
+
+        // Session ready
+        if (type === 'session.created' || type === 'session.updated') {
+          if (!session.setupComplete) {
+            clearTimeout(timeout);
+            session.setupComplete = true;
+            log(`OpenAI session ready for ${session.callId}`);
+            resolve();
+            // Flush buffered audio
+            if (session.openaiAudioBuffer.length > 0) {
+              log(`Flushing ${session.openaiAudioBuffer.length} buffered audio chunks for ${session.callId}`);
+              for (const chunk of session.openaiAudioBuffer) {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({
+                    type: 'input_audio_buffer.append',
+                    audio: chunk.toString('base64'),
+                  }));
+                }
+              }
+              session.openaiAudioBuffer.length = 0;
+            }
+            scheduleOpeningFallback(session);
+          }
+          return;
+        }
+
+        // Agent audio delta — PCM 16kHz from OpenAI → convert to G.711 → RTP
+        if (type === 'response.audio.delta' && msg.delta) {
+          const pcm16k = Buffer.from(msg.delta, 'base64');
+          // Resample PCM 16kHz → PCM 8kHz → G.711
+          const pcm8k = resample(pcm16k, 16000, 8000);
+          const g711 = pcm8kToG711(pcm8k, session.g711Format);
+          const PACKET_SIZE = 160;
+          for (let i = 0; i < g711.length; i += PACKET_SIZE) {
+            const chunk = g711.slice(i, Math.min(i + PACKET_SIZE, g711.length));
+            if (chunk.length > 0) session.rtpSendQueue.push(chunk);
+          }
+          startRtpPacing(session);
+          // Cancel opening protection once agent audio starts
+          if (session.openingProtectionUntil > 0) {
+            const remaining = session.openingProtectionUntil - Date.now();
+            if (remaining > 500) session.openingProtectionUntil = Date.now() + 500;
+          }
+          return;
+        }
+
+        // Agent audio done for this turn
+        if (type === 'response.audio.done') {
+          session.openingMessageSent = true;
+          return;
+        }
+
+        // Agent speech transcription
+        if (type === 'response.audio_transcript.delta' && msg.delta) {
+          const last = session.transcript[session.transcript.length - 1];
+          if (last && last.role === 'agent' && (Date.now() - last.ts) < 3000) {
+            last.text = (last.text + msg.delta).trim();
+            last.ts = Date.now();
+          } else {
+            session.transcript.push({ role: 'agent', text: msg.delta, ts: Date.now() });
+            session.agentTurnCount++;
+          }
+          return;
+        }
+
+        // Contact speech transcription
+        if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
+          const contactText = msg.transcript.trim();
+          if (contactText) {
+            const last = session.transcript[session.transcript.length - 1];
+            if (!last || last.role !== 'contact' || last.text !== contactText) {
+              session.transcript.push({ role: 'contact', text: contactText, ts: Date.now() });
+              session.contactTurnCount++;
+              session.contactTurnsSinceReinforcement++;
+              // Identity detection
+              if (!session.identityConfirmed && session.contactTurnCount <= 5) {
+                if (detectIdentityConfirmation(contactText, session.contactName)) {
+                  injectIdentityLock(session, contactText);
+                }
+              }
+              maybeInjectStateReinforcement(session);
+            }
+          }
+          return;
+        }
+
+        // User interrupted — flush queued RTP audio
+        if (type === 'input_audio_buffer.speech_started') {
+          const flushed = session.rtpSendQueue.length;
+          session.rtpSendQueue.length = 0;
+          if (session.rtpPacingTimer) {
+            clearInterval(session.rtpPacingTimer);
+            session.rtpPacingTimer = null;
+          }
+          if (flushed > 0) log(`OpenAI VAD interrupt — flushed ${flushed} queued packets for ${session.callId}`);
+          return;
+        }
+
+        // Tool/function call
+        if (type === 'response.function_call_arguments.done') {
+          const call = {
+            name: msg.name,
+            call_id: msg.call_id,
+            args: (() => { try { return JSON.parse(msg.arguments || '{}'); } catch { return {}; } })(),
+          };
+          log(`OpenAI tool call for ${session.callId}: ${call.name}`, call.args);
+          handleToolCall(session, call);
+          return;
+        }
+
+        // Error
+        if (type === 'error') {
+          logError(`OpenAI Realtime error for ${session.callId}`, msg.error);
+          return;
+        }
+
+      } catch (err) {
+        logError(`Error handling OpenAI message for ${session.callId}`, err);
+      }
+    });
+
+    ws.on('close', (code, reason) => {
+      log(`OpenAI closed for ${session.callId} (code=${code}, reason=${reason?.toString() || 'none'})`);
+      if (!session.setupComplete) {
+        clearTimeout(timeout);
+        reject(new Error(`OpenAI closed before setup (code=${code})`));
+      }
+    });
+
+    ws.on('error', (err: Error) => {
+      logError(`OpenAI WebSocket error for ${session.callId}`, err);
+      if (!session.setupComplete) {
+        clearTimeout(timeout);
+        reject(err);
+      }
+    });
+  });
+}
+
+// ==================== OPENING FALLBACK ====================
+
 function scheduleOpeningFallback(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
   if (session.openingFallbackTimer) return;
@@ -993,17 +1280,21 @@ function trySendOpeningMessage(session: BridgeSession): void {
 
 Then STOP and WAIT for their response.`;
 
-  if (session.geminiWs?.readyState === WebSocket.OPEN) {
-    const msg = {
+  if (session.provider === 'openai' && session.openaiWs?.readyState === WebSocket.OPEN) {
+    session.openaiWs.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+    }));
+    session.openaiWs.send(JSON.stringify({ type: 'response.create' }));
+    log(`Opening message sent for ${session.callId} via OpenAI (fallback — contact was silent)`);
+  } else if (session.geminiWs?.readyState === WebSocket.OPEN) {
+    session.geminiWs.send(JSON.stringify({
       clientContent: {
         turns: [{ role: 'user', parts: [{ text }] }],
         turnComplete: true,
       },
-    };
-    session.geminiWs.send(JSON.stringify(msg));
-    log(`Opening message sent for ${session.callId} (fallback — contact was silent)`);
-    // LISTEN-FIRST: No opening protection. Audio continues flowing to Gemini
-    // so it can hear the contact's response without any delay.
+    }));
+    log(`Opening message sent for ${session.callId} via Gemini (fallback — contact was silent)`);
   }
 }
 
@@ -1100,14 +1391,23 @@ async function handleToolCall(session: BridgeSession, call: any): Promise<void> 
     setTimeout(() => destroySession(session.callId), 2000);
   }
 
-  // Send response back to Gemini (Vertex AI = camelCase)
-  if (session.geminiWs?.readyState === WebSocket.OPEN) {
-    const toolResponse = {
+  // Send tool response back to the active provider
+  if (session.provider === 'openai' && session.openaiWs?.readyState === WebSocket.OPEN) {
+    session.openaiWs.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: call.call_id || call.id,
+        output: JSON.stringify(response),
+      },
+    }));
+    session.openaiWs.send(JSON.stringify({ type: 'response.create' }));
+  } else if (session.geminiWs?.readyState === WebSocket.OPEN) {
+    session.geminiWs.send(JSON.stringify({
       toolResponse: {
         functionResponses: [{ name: call.name, id: call.id, response }],
       },
-    };
-    session.geminiWs.send(JSON.stringify(toolResponse));
+    }));
   }
 }
 
@@ -1172,7 +1472,8 @@ app.use((req, res, next) => {
 app.post('/bridge', async (req, res) => {
   try {
     const { callId, rtpPort, remoteAddress, remotePort, systemPrompt, voiceName,
-      toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds } = req.body;
+      toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds,
+      provider, openaiApiKey, openaiModel, openaiVoice } = req.body;
 
     if (!callId || !rtpPort || !remoteAddress || !remotePort) {
       res.status(400).json({ error: 'Missing required fields: callId, rtpPort, remoteAddress, remotePort' });
@@ -1183,6 +1484,8 @@ app.post('/bridge', async (req, res) => {
       callId, rtpPort, remoteAddress, remotePort,
       systemPrompt: systemPrompt || 'You are a helpful AI voice assistant.',
       voiceName, toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds,
+      provider: provider || 'gemini',
+      openaiApiKey, openaiModel, openaiVoice,
     });
 
     if (result.success) {
